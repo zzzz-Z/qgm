@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "path": "src/interceptor.cjs",
+      "type": "modified",
+      "afterLines": 258
+    }
+  ],
+  "createdAt": 1789573352277
+}

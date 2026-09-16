@@ -35,6 +35,11 @@ const orig = {
   renameSync: fs.renameSync,
   copyFileSync: fs.copyFileSync,
   appendFileSync: fs.appendFileSync,
+  openSync: fs.openSync,
+  writeSync: fs.writeSync,
+  closeSync: fs.closeSync,
+  fstatSync: fs.fstatSync,
+  fsyncSync: fs.fsyncSync,
 }
 
 function logTool(op, p, size) {
@@ -168,6 +173,73 @@ if (P) {
   P.access = async (p) => fs.accessSync(p)
   P.readdir = async (p, o) => fs.readdirSync(p, o)
 }
+
+// --- fd-level write interception (auto) ---
+const __fdMap = new Map()
+let __fdSeq = -1000
+const __WRITE_FLAGS = /[wa+]/i
+function __isWriteFlags(flags) {
+  if (typeof flags === 'number') return true // O_WRONLY / O_RDWR 一律按写处理
+  return __WRITE_FLAGS.test(String(flags || 'r'))
+}
+fs.openSync = function (p, flags, mode) {
+  if (!__isWriteFlags(flags)) return orig.openSync(p, flags, mode)
+  const fd = __fdSeq--
+  __fdMap.set(fd, norm(p))
+  logTool('open-write', p, 0)
+  return fd
+}
+fs.writeSync = function (fd, ...rest) {
+  const abs = __fdMap.get(fd)
+  if (abs === undefined) {
+    // 未知 fd：可能是真实读 fd 上的 write，交回原实现
+    return orig.writeSync(fd, ...rest)
+  }
+  // 兼容 writeSync(fd, buffer, offset?, length?, position?)
+  // 与   writeSync(fd, string, position?, encoding?)
+  let data
+  if (Buffer.isBuffer(rest[0])) {
+    const buf = rest[0]
+    const offset = typeof rest[1] === 'number' ? rest[1] : 0
+    const length = typeof rest[2] === 'number' ? rest[2] : (buf.length - offset)
+    data = buf.subarray(offset, offset + length)
+  } else {
+    const str = String(rest[0])
+    const enc = typeof rest[2] === 'string' ? rest[2] : (typeof rest[1] === 'string' ? rest[1] : 'utf8')
+    data = Buffer.from(str, enc)
+  }
+  const prev = overlay.get(abs)
+  const prevBuf = prev && prev.op === 'write' && prev.data
+    ? prev.data
+    : (orig.existsSync(abs) ? orig.readFileSync(abs) : Buffer.alloc(0))
+  const merged = Buffer.concat([prevBuf, data])
+  overlay.set(abs, { op: 'write', data: merged })
+  logTool('write', abs, data.length)
+  return data.length
+}
+fs.closeSync = function (fd) {
+  if (__fdMap.has(fd)) { __fdMap.delete(fd); return }
+  return orig.closeSync(fd)
+}
+fs.fstatSync = function (fd, opts) {
+  const abs = __fdMap.get(fd)
+  if (abs === undefined) return orig.fstatSync(fd, opts)
+  const entry = overlay.get(abs)
+  const size = entry && entry.data ? entry.data.length : 0
+  return {
+    size,
+    isFile: () => true,
+    isDirectory: () => false,
+    isSymbolicLink: () => false,
+    mtimeMs: Date.now(),
+    mode: 0o100644,
+  }
+}
+fs.fsyncSync = function (fd) {
+  if (__fdMap.has(fd)) return
+  return orig.fsyncSync(fd)
+}
+// --- end fd-level write interception ---
 
 let dumped = false
 function dump() {
