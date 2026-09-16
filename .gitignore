@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.ai/runs/
+.ai/logs/
+.ai/tmp/
+.ai/backup/
+.ai/scripts/
+.DS_Store
+*.log
