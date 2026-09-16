@@ -342,7 +342,7 @@ import { useSessionManager } from '../composables/useSessionManager'
 import type { Change } from '../types'
 import { basicSetup } from 'codemirror'
 import { EditorView, keymap, placeholder } from '@codemirror/view'
-import { EditorState } from '@codemirror/state'
+import { EditorState, Prec } from '@codemirror/state'
 import { javascript as cmJavascript } from '@codemirror/lang-javascript'
 import { oneDark } from '@codemirror/theme-one-dark'
 import * as hljsNs from 'highlight.js/lib/core'
@@ -979,7 +979,7 @@ function createEditor() {
         '.cm-content': { caretColor: '#528bff' },
         '&.cm-focused': { outline: 'none' },
       }),
-      keymap.of([
+      Prec.highest(keymap.of([
         { key: 'Mod-Enter', preventDefault: true, run: () => { runSmart(); return true } },
         { key: 'Ctrl-Enter', preventDefault: true, run: () => { runSmart(); return true } },
         { key: 'Cmd-Enter', preventDefault: true, run: () => { runSmart(); return true } },
@@ -995,7 +995,7 @@ function createEditor() {
           }
           return false
         } },
-      ]),
+      ])),
       EditorView.updateListener.of((u) => {
         if (u.docChanged) script.value = u.state.doc.toString()
       }),
