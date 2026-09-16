@@ -242,6 +242,8 @@ tampermonkey-session-id.user.js  # 可选：AI 站点会话 ID / token 回传油
 | 请求限制 | HTTP body 上限 5MB；读文件单文件 ≤ 200KB，含 NUL 字节判为二进制拒绝 |
 | 快照范围 | 跳过 `node_modules` / `.git` / `dist` / `.vite` 等、点开头目录、>500KB 文件与二进制后缀 |
 | API key | 推荐走服务端环境变量 / 本地 config，`/ask` 在 Node 侧代理，不暴露给浏览器 |
+| shell 沙盒外 | `!命令` 与首行非 `#!/usr/bin/env node` 的脚本走 shell，**不经过 overlay、无快照、无回滚**，直接对真实磁盘操作 |
+| fd 级写盘 | `openSync`（写模式）/ `writeSync` / `closeSync` / `fstatSync` / `fsyncSync` 已重定向到 overlay；`createWriteStream` 与底层 libuv 写仍不拦截 |
 
 ---
 
@@ -253,6 +255,9 @@ tampermonkey-session-id.user.js  # 可选：AI 站点会话 ID / token 回传油
 - LCS diff 在超大文件（N×M > 4M 格）退化为全删全增展示
 - Git 保护默认关闭，需界面手动勾选
 - `@` 提及只匹配文件路径，不做符号检索
+- `!命令` 与 shell 分流脚本在沙盒外执行，无 overlay / 快照 / 回滚保护
+- `fs.createWriteStream` / 底层 fd 流写不拦截；仅同步 `openSync`（写模式）+ `writeSync` 走 overlay
+- `enforceBudget` 目前按字符数（200KB）判断，非 token 数；中文场景实际 token 远超预算口径
 
 ---
 
