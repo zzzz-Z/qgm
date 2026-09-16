@@ -64,7 +64,13 @@
           </button>
         </div>
         <div class="editor-body">
-          <div ref="cmHost" class="cm-host" />
+          <div
+            ref="cmHost"
+            class="cm-host"
+            tabindex="0"
+            @keydown.ctrl.enter.prevent="runSmart"
+            @keydown.meta.enter.prevent="runSmart"
+          />
         </div><footer class="editor-foot">
           <span v-if="persistWarning" v-tooltip="persistWarning" class="persist-warning">⚠ 会话存储已满</span>
           <div class="foot-spacer" />
