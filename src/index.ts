@@ -680,6 +680,44 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const script = String(body?.script || '').trim()
     const gitCommit = Boolean(body?.gitCommit)
     if (!script) return sendJSON(res, { error: '脚本为空' }, 400)
+    // === shebang 分流：非 node shebang 走 shell ===
+    const firstLine = script.split('\n', 1)[0].trim()
+    const isNodeScript = /^#!\s*\/usr\/bin\/(env\s+)?node\b/.test(firstLine)
+    if (!isNodeScript) {
+      res.writeHead(200, {
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',
+      })
+      const writeS = (obj) => { try { res.write(JSON.stringify(obj) + '\n') } catch {} }
+      let shellOut = ''
+      let shellErr = ''
+      const child = spawn(script, { cwd: ROOT, shell: true, env: process.env })
+      child.stdout?.on('data', (d) => { const s = d.toString(); shellOut += s; writeS({ type: 'chunk', stream: 'stdout', data: s }) })
+      child.stderr?.on('data', (d) => { const s = d.toString(); shellErr += s; writeS({ type: 'chunk', stream: 'stderr', data: s }) })
+      child.on('error', (e) => {
+        const msg = String(e?.message || e)
+        writeS({ type: 'chunk', stream: 'stderr', data: msg })
+        writeS({
+          type: 'summary', runId: '', code: -1, ok: false,
+          stdout: shellOut, stderr: shellErr + msg, changes: [],
+          shell: true,
+        })
+        res.end()
+      })
+      child.on('close', (code) => {
+        const cc = code ?? -1
+        writeS({
+          type: 'summary', runId: '', code: cc, ok: cc === 0,
+          stdout: shellOut, stderr: shellErr, changes: [],
+          shell: true,
+        })
+        res.end()
+      })
+      req.on('aborted', () => { try { child.kill('SIGKILL') } catch {} })
+      return
+    }
+    // === 以下原有 node 沙盒逻辑 ===
 
     const runId = String(Date.now())
     const overlayPath = path.join(ROOT, '.ai-runner/tmp', `${runId}-overlay.json`)

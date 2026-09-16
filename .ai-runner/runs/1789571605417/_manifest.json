@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "path": "src/index.ts",
+      "type": "modified",
+      "afterLines": 1205
+    }
+  ],
+  "createdAt": 1789571605715
+}
