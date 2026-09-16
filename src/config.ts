@@ -8,14 +8,14 @@ export function setRoot(r: string): void {
 export function getRoot(): string {
   return ROOT
 }
-export const RUNS_DIR = path.join(ROOT, '.ai/runs')
-export const SCRIPTS_DIR = path.join(ROOT, '.ai/scripts')
-export const LOGS_DIR = path.join(ROOT, '.ai/logs')
-export const BACKUP_DIR = path.join(ROOT, '.ai/backup')
+export const RUNS_DIR = path.join(ROOT, '.ai-runner/runs')
+export const SCRIPTS_DIR = path.join(ROOT, '.ai-runner/scripts')
+export const LOGS_DIR = path.join(ROOT, '.ai-runner/logs')
+export const BACKUP_DIR = path.join(ROOT, '.ai-runner/backup')
 export const PREFIX = '/__ai'
 
 export const EXCLUDE_DIRS = new Set(['node_modules', '.git', 'dist', '.vite', '.turbo', '.cache'])
-export const EXCLUDE_PREFIX = ['.ai']
+export const EXCLUDE_PREFIX = ['.ai-runner']
 export const BINARY_EXT = new Set([
   '.png',
   '.jpg',

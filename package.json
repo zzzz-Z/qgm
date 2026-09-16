@@ -16,7 +16,7 @@
   },
   "files": [
     "dist",
-    "web",
+    "client",
     "skills",
     "bin",
     "README.md"
@@ -65,12 +65,12 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "web:dev": "vite --config web/vite.config.ts",
-    "web:build": "vite build --config web/vite.config.ts",
+    "web:dev": "vite --config client/vite.config.ts",
+    "web:build": "vite build --config client/vite.config.ts",
     "lint": "eslint .",
     "tsc": "tsc -p tsconfig.json --noEmit",
-    "test:unit": "node --test web/*.node-test.ts",
-    "test:e2e": "playwright test --config web/playwright.config.ts",
+    "test:unit": "node --test client/*.node-test.ts",
+    "test:e2e": "playwright test --config client/playwright.config.ts",
     "run-all": "node bin/run-all.cjs",
     "recover": "node bin/recover.cjs"
   },

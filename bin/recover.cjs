@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 'use strict'
 // AI Runner 快照恢复工具
-// 从 .ai/runs/<runId>/_manifest.json 恢复被修改/新增的文件
+// 从 .ai-runner/runs/<runId>/_manifest.json 恢复被修改/新增的文件
 const fs = require('node:fs')
 const path = require('node:path')
 const readline = require('node:readline')
 
 const ROOT = process.cwd()
-const RUNS_DIR = path.join(ROOT, '.ai/runs')
+const RUNS_DIR = path.join(ROOT, '.ai-runner/runs')
 
 const TTY = process.stdout.isTTY && process.stdin.isTTY
 const c = (n, s) => (TTY ? `\x1b[${n}m${s}\x1b[0m` : s)

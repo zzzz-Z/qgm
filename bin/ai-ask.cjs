@@ -4,7 +4,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-const CONFIG = path.join(ROOT, '.ai/config.json')
+const CONFIG = path.join(ROOT, '.ai-runner/config.json')
 const TTY = Boolean(process.stdout.isTTY)
 const c = (n, s) => (TTY ? `\u001B[${n}m${s}\u001B[0m` : s)
 const err = s => console.error(c(31, '✗'), s)
@@ -44,7 +44,7 @@ async function main() {
 
   const cfg = loadConfig()
   if (!cfg) {
-    err('未找到 API key。设置环境变量 DEEPSEEK_API_KEY=sk-... 或写入 .ai/config.json:')
+    err('未找到 API key。设置环境变量 DEEPSEEK_API_KEY=sk-... 或写入 .ai-runner/config.json:')
     err('  { "deepseek": { "apiKey": "sk-...", "baseUrl": "https://api.deepseek.com", "model": "deepseek-chat" } }')
     process.exit(3)
   }

@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "path": "client/components/ScriptPanel.vue",
+      "type": "modified",
+      "afterLines": 2228
+    }
+  ],
+  "createdAt": 1789571309258
+}

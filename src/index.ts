@@ -374,7 +374,7 @@ function runCmd(cmd: string, args: string[], timeoutMs = 60_000): Promise<{ code
 const TSC_EXTS = new Set(['.ts', '.tsx', '.vue', '.mts', '.cts'])
 
 // pickTscTargets 排除测试文件：e2e/spec/test 归 playwright / node:test 管，不走根 tsconfig
-const TSC_SKIP_DIRS = ['web/e2e/', 'e2e/', 'test/', 'tests/']
+const TSC_SKIP_DIRS = ['client/e2e/', 'e2e/', 'test/', 'tests/']
 const TSC_SKIP_RE = /\.(spec|test)\.(ts|tsx|mts|cts|vue)$/
 function pickTscTargets(changes: Change[]): string[] {
   return changes
@@ -410,7 +410,7 @@ async function runTsc(
     },
     files: [],
     include: targets.map(p => `./${p}`),
-    exclude: ['node_modules', 'dist', '.ai', '.vite'],
+    exclude: ['node_modules', 'dist', '.ai-runner', '.vite'],
   }
   const r = await (async () => {
     try {
@@ -531,7 +531,7 @@ function parseJSON<T = any>(raw: string): T | null {
 // ============================================================================
 
 const __pkgDir = path.dirname(fileURLToPath(import.meta.url))
-const WEB_MAIN_URL = '/@fs/' + path.resolve(__pkgDir, '../web/main.ts').replace(/\\/g, '/')
+const WEB_MAIN_URL = '/@fs/' + path.resolve(__pkgDir, '../client/main.ts').replace(/\\/g, '/')
 const PAGE = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -607,7 +607,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     let model = body?.model || 'deepseek-chat'
     if (!apiKey) {
       try {
-        const cfgPath = path.join(ROOT, '.ai/config.json')
+        const cfgPath = path.join(ROOT, '.ai-runner/config.json')
         if (fs.existsSync(cfgPath)) {
           const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'))
           const d = cfg.deepseek || {}
@@ -617,7 +617,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         }
       } catch { }
     }
-    if (!apiKey) return sendJSON(res, { error: '未配置 DeepSeek API key（env DEEPSEEK_API_KEY 或 .ai/config.json）' }, 400)
+    if (!apiKey) return sendJSON(res, { error: '未配置 DeepSeek API key（env DEEPSEEK_API_KEY 或 .ai-runner/config.json）' }, 400)
     let upstream: Response
     try {
       upstream = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
@@ -674,7 +674,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
   if (req.method === 'POST' && pathname === '/run') {
     ensureDirs()
-    fs.mkdirSync(path.join(ROOT, '.ai/tmp'), { recursive: true })
+    fs.mkdirSync(path.join(ROOT, '.ai-runner/tmp'), { recursive: true })
     const startedAt = Date.now()
     const body = parseJSON<{ script?: string, gitCommit?: boolean }>(await readBody(req))
     const script = String(body?.script || '').trim()
@@ -682,8 +682,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if (!script) return sendJSON(res, { error: '脚本为空' }, 400)
 
     const runId = String(Date.now())
-    const overlayPath = path.join(ROOT, '.ai/tmp', `${runId}-overlay.json`)
-    const toolLogPath = path.join(ROOT, '.ai/tmp', `${runId}-tools.jsonl`)
+    const overlayPath = path.join(ROOT, '.ai-runner/tmp', `${runId}-overlay.json`)
+    const toolLogPath = path.join(ROOT, '.ai-runner/tmp', `${runId}-tools.jsonl`)
     try { fs.unlinkSync(overlayPath) } catch { }
     try { fs.unlinkSync(toolLogPath) } catch { }
     let gitInfo: { commit?: string, changed: number, ok: boolean, reason?: string } = { ok: false, changed: 0, reason: '未启用' }
@@ -916,7 +916,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
   }
 
-  // POST /script/save { script } → 把编辑器内容落盘到 .ai/scripts/draft-*.cjs
+  // POST /script/save { script } → 把编辑器内容落盘到 .ai-runner/scripts/draft-*.cjs
   if (req.method === 'POST' && pathname === '/diff-from-baseline') {
     const body = parseJSON<{ baselineRunId?: string }>(await readBody(req))
     const baselineRunId = String(body?.baselineRunId || '')
@@ -976,7 +976,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   // ---------- Skills ----------
   if (req.method === 'GET' && pathname === '/skills') {
     const baseDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../skills')
-    const userDir = path.join(ROOT, '.ai/skills')
+    const userDir = path.join(ROOT, '.ai-runner/skills')
     const collect = (dir: string, source: string) => {
       if (!fs.existsSync(dir)) return [] as Array<{ name: string, content: string, source: string }>
       return fs.readdirSync(dir).filter(f => f.endsWith('.md')).map(f => ({
@@ -1000,7 +1000,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if (!name || !/^[\w.-]+$/.test(name) || name.includes('..') || name.length > 64) {
       return sendJSON(res, { error: '名字只允许字母数字 _ . -，1-64 字符' }, 400)
     }
-    const dir = path.join(ROOT, '.ai/skills')
+    const dir = path.join(ROOT, '.ai-runner/skills')
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, `${name}.md`), content, 'utf8')
     return sendJSON(res, { ok: true })
@@ -1011,7 +1011,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if (!name || !/^[\w.-]+$/.test(name) || name.includes('..')) {
       return sendJSON(res, { error: '名字非法' }, 400)
     }
-    const file = path.join(ROOT, '.ai/skills', `${name}.md`)
+    const file = path.join(ROOT, '.ai-runner/skills', `${name}.md`)
     if (fs.existsSync(file)) fs.unlinkSync(file)
     return sendJSON(res, { ok: true })
   }

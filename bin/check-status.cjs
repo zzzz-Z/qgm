@@ -57,8 +57,8 @@ function pkg() {
 }
 function signals() {
   head('观察期')
-  if (!exists('.ai/signals.md')) { info('无 .ai/signals.md'); return }
-  const lines = read('.ai/signals.md').split('\n').filter(l => /^- \d{4}-\d{2}-\d{2} \[/.test(l))
+  if (!exists('.ai-runner/signals.md')) { info('无 .ai-runner/signals.md'); return }
+  const lines = read('.ai-runner/signals.md').split('\n').filter(l => /^- \d{4}-\d{2}-\d{2} \[/.test(l))
   const recent = lines.filter(l => Date.now() - new Date(l.slice(2, 12)).getTime() < 14 * 86400000)
   info(`总 ${lines.length} 条 / 近 14 天 ${recent.length} 条`)
   const cats = {}
