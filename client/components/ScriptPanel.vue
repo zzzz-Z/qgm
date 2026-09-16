@@ -981,6 +981,8 @@ function createEditor() {
       }),
       keymap.of([
         { key: 'Mod-Enter', preventDefault: true, run: () => { runSmart(); return true } },
+        { key: 'Ctrl-Enter', preventDefault: true, run: () => { runSmart(); return true } },
+        { key: 'Cmd-Enter', preventDefault: true, run: () => { runSmart(); return true } },
         { key: 'Alt-r', preventDefault: true, run: () => { runSmart(); return true } },
         { key: 'Alt-ArrowUp', preventDefault: true, run: () => { cmdHistoryPrev(); return true } },
         { key: 'Alt-ArrowDown', preventDefault: true, run: () => { cmdHistoryNext(); return true } },
