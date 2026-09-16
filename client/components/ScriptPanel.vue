@@ -771,6 +771,23 @@ function runSmart() {
     run()
   }
 }
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (!(e.ctrlKey || e.metaKey)) return
+  if (e.key !== 'Enter') return
+  // 避开浏览器地址栏、DevTools 等
+  if (e.isComposing) return
+  // 若焦点在 CodeMirror 编辑器内，CodeMirror 的 keymap 已处理，避免双触发
+  const target = e.target as HTMLElement | null
+  if (target && target.closest('.cm-editor')) return
+  // 若焦点在输入框 / textarea / contenteditable，不抢
+  if (target) {
+    const tag = target.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return
+  }
+  e.preventDefault()
+  runSmart()
+}
 async function execCmd(text: string) {
   const raw = text.trim()
   if (!raw || running.value) return
@@ -1042,6 +1059,7 @@ watch(previewFile, (v) => {
 })
 
 onMounted(() => {
+  window.addEventListener('keydown', onGlobalKeydown)
   try {
     const savedW = localStorage.getItem(SIDE_WIDTH_KEY)
     if (savedW) {
@@ -1057,6 +1075,7 @@ onMounted(() => {
   window.addEventListener('keydown', onGlobalKey) })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
   window.removeEventListener('pointermove', onSideMove)
   window.removeEventListener('pointerup', onSideUp)
   if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
