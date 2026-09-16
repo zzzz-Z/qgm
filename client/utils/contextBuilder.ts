@@ -1,6 +1,7 @@
 import { cleanCode } from '../codeCleaner'
+import { fallbackEstimate } from './tokenEstimator'
 
-export const PROMPT_BUDGET = 200 * 1024
+export const PROMPT_BUDGET = 32000
 export const ERROR_WINDOW = 10
 export const ERROR_HEAD = 20
 export interface ContextFile {
@@ -83,5 +84,6 @@ export function buildErrorContext(
   return out.join('\n')
 }
 export function enforceBudget(text: string): { ok: boolean, size: number, budget: number } {
-  return { ok: text.length <= PROMPT_BUDGET, size: text.length, budget: PROMPT_BUDGET }
+  const size = fallbackEstimate(text)
+  return { ok: size <= PROMPT_BUDGET, size, budget: PROMPT_BUDGET }
 }

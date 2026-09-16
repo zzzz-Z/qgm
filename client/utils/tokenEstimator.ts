@@ -33,7 +33,7 @@ export function estimateTokens(text: string): number {
   return fallbackEstimate(text)
 }
 
-function fallbackEstimate(text: string): number {
+export function fallbackEstimate(text: string): number {
   const cjk = (text.match(/[\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/g) || []).length
   const rest = text.replace(/[\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/g, ' ')
   const parts = rest.match(/[A-Z]+|\d+|[^\sA-Z0-9]/gi) || []
