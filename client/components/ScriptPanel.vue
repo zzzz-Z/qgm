@@ -1161,6 +1161,10 @@ watch(running, (v) => {
     } else {
       statusText.value = result.value.ok ? '✅ 成功' : '❌ 失败'
       statusClass.value = result.value.ok ? 'ok' : 'err'
+      if (result.value.ok) {
+        // 清空编辑器（脚本已成功运行）
+        script.value = ''
+      }
       const r = result.value
       // 兼容旧脚本只写 // @desc；新脚本可能 // 或 #，从 result.value.scriptDesc/scriptWhy 拿（server 已解析）
       const descMatch = script.value.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
