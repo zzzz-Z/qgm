@@ -8,13 +8,16 @@ import type { InboxItem } from './useScriptInbox'
 import {
   LOOP_MAX_ROUNDS,
   LOOP_ROUND_TIMEOUT_MS,
+  LOOP_ROUND_TIMEOUT_BASH_MS,
   LOOP_TOKEN_BUDGET,
+  LOOP_TOKEN_HARD_LIMIT,
   LOOP_TOLERANCE_BUDGET,
   buildFeedback,
   buildInitialPrompt,
   buildRetryPrompt,
   checkRoundBreak,
   decideTolerance,
+  isStrictDone,
 } from './loopLogic'
 
 // ============================================================================
@@ -48,6 +51,8 @@ export interface AiReply {
   item?: InboxItem
   /** kind=multi 时：新代码块数量 */
   count?: number
+  /** kind=done 时可选携带原 text，用于服务端二次校验 isStrictDone */
+  text?: string
 }
 
 // —— 熔断参数集中在 loopLogic.ts（带单测），此处仅持久化 key ——
@@ -67,8 +72,20 @@ const stopReason = ref('')
 const lastHash = ref('')
 /** 最近一次执行摘要，供 UI/反馈使用 */
 const lastExec = ref<{ lang: string, exit: number, changes: number, durationMs: number } | null>(null)
+/** 当前轮等待起始时间戳（用于 UI 倒计时进度反馈） */
+const waitingStartedAt = ref(0)
+/** 已等待秒数（每秒更新，UI 读取展示） */
+const waitingElapsed = ref(0)
+/** 当前轮超时毫秒（根据上一轮 lang 决定，bash=180s / cjs=90s） */
+const roundTimeoutMs = ref(LOOP_ROUND_TIMEOUT_MS)
+/** 当前循环绑定的 AI 会话 ID（多窗口隔离用；startLoop 时从 App.vue 取） */
+const loopSessionId = ref('')
+
+// 由 App.vue 注入的 activeSessionId 读取器：循环启动时把当前活动会话 id 绑定到 loopSessionId
+let getActiveSessionId: () => string = () => ''
 
 let roundTimer: ReturnType<typeof setTimeout> | null = null
+let waitingTicker: ReturnType<typeof setInterval> | null = null
 let keyboardBound = false
 let originalTitle = ''
 
@@ -171,6 +188,8 @@ async function initLoop(
   stopReason.value = ''
   lastHash.value = ''
   lastExec.value = null
+  // 绑定当前循环所在 AI 会话 id（多窗口隔离用）
+  loopSessionId.value = getActiveSessionId() || ''
   originalTitle = typeof document !== 'undefined' ? document.title : ''
   addTrace({
     kind: 'loop',
@@ -227,13 +246,27 @@ function enterWaiting() {
   loopState.value = 'waiting'
   persist()
   if (roundTimer) clearTimeout(roundTimer)
+  // bash 任务通常更复杂、AI 思考更久，给 180s；cjs / 首轮（无 lastExec）默认 90s
+  const lastLang = lastExec.value?.lang
+  const timeoutMs = lastLang === 'bash' ? LOOP_ROUND_TIMEOUT_BASH_MS : LOOP_ROUND_TIMEOUT_MS
+  roundTimeoutMs.value = timeoutMs
+  // UI 倒计时进度反馈：每秒更新已等待秒数
+  waitingStartedAt.value = Date.now()
+  waitingElapsed.value = 0
+  if (waitingTicker) clearInterval(waitingTicker)
+  waitingTicker = setInterval(() => {
+    waitingElapsed.value = Math.floor((Date.now() - waitingStartedAt.value) / 1000)
+  }, 1000)
+  const round = loopRound.value
   roundTimer = setTimeout(() => {
-    void finish('round-timeout', `第 ${loopRound.value} 轮等待 AI 回复超过 ${Math.round(LOOP_ROUND_TIMEOUT_MS / 1000)}s`)
-  }, LOOP_ROUND_TIMEOUT_MS)
+    void finish('round-timeout', `第 ${round} 轮等待 AI 回复超过 ${Math.round(timeoutMs / 1000)}s`)
+  }, timeoutMs)
 }
 
 function disarmTimer() {
   if (roundTimer) { clearTimeout(roundTimer); roundTimer = null }
+  if (waitingTicker) { clearInterval(waitingTicker); waitingTicker = null }
+  waitingElapsed.value = 0
 }
 
 // ============================================================================
@@ -265,11 +298,37 @@ export async function onNonScriptReply(reply: AiReply): Promise<void> {
   if (stopRequest.value !== 'none') { await handleStopAfterRound(); return }
 
   if (reply.kind === 'done') {
+    // 防御性二次校验：油猴可能误把含解释/标点的回复判为 done
+    // 当 reply.text 存在时必须严格匹配 isStrictDone，否则降级走 plain 容错
+    if (reply.text !== undefined && !isStrictDone(reply.text)) {
+      addTrace({
+        kind: 'loop',
+        summary: `⚠ 油猴标记 done 但 text 非严格 DONE，降级为 plain`,
+        payload: { loopId: loopId.value, loopRound: loopRound.value, text: String(reply.text).slice(0, 200) },
+      })
+      await toleranceFail(`回复非严格 DONE（含其他字符）：${String(reply.text).slice(0, 60)}`)
+      return
+    }
     await finish('done', 'AI 回复 DONE')
     return
   }
   if (reply.kind === 'multi') {
-    await toleranceFail(`回复含 ${reply.count ?? '多个'} 个代码块（契约要求仅一个）`)
+    // multi 不消耗宽容预算：直接要求重发单一代码块
+    // （仍受 90s 单轮超时与 8 轮上限兜底，不会无限循环）
+    // plain 才走 toleranceFail 消耗预算
+    const count = reply.count ?? 0
+    addTrace({
+      kind: 'loop',
+      summary: `⚠ 回复含 ${count || '多个'} 个代码块，要求重发（不消耗宽容预算）`,
+      payload: { loopId: loopId.value, loopRound: loopRound.value, count },
+    })
+    const okSent = sendFill({ prompt: buildRetryPrompt(`回复含 ${count || '多个'} 个代码块（契约要求仅一个）`) })
+    if (!okSent) {
+      await finish('window-lost', 'multi 重试时 AI 窗口已关闭或发送失败')
+      return
+    }
+    toast(`回复含多个代码块，要求 AI 重发（不消耗宽容预算）`, 'warn', 4000)
+    enterWaiting()
     return
   }
   // plain
@@ -418,6 +477,17 @@ interface BashExecResult {
 
 async function runBash(cmd: string): Promise<BashExecResult> {
   const out: BashExecResult = { code: -1, stdout: '', stderr: '', dirtyFiles: [] }
+  // 自动模式 git 写操作强制拒绝（防 git reset --hard 变形绕过 bash 黑名单）：
+  // 服务端 bash-guard 黑名单按子串匹配，AI 可用 `git reset --hard origin/main`、
+  // `git push --force-with-lease`、`git checkout -- .`、`git clean -fd` 等变形绕过。
+  // 这里在客户端再拦一次：循环自动模式下任何 git 写操作一律拒绝，
+  // AI 若需 git 操作必须改用 cjs 或请求人工审批（on-request 流程）。
+  const GIT_WRITE_RE = /\bgit\s+(?:push|reset|checkout|clean|stash|rm|branch|merge|rebase|cherry-pick|revert|commit|add|mv|update-ref|reflog|filter-branch|gc|prune)\b/
+  if (GIT_WRITE_RE.test(cmd)) {
+    out.blacklistHit = 'git write (auto-loop guard)'
+    out.stderr = '自动循环模式下禁止 git 写操作（防止变形绕过黑名单）。请改用 cjs 或请求人工审批。'
+    return out
+  }
   try {
     const res = await fetch('/__ai/exec', {
       method: 'POST',
@@ -463,17 +533,17 @@ const pendingRound = ref<RoundOutcome | null>(null)
 function budgetLimited(o: RoundOutcome, tokenDelta: number): void {
   disarmTimer()
   pendingRound.value = o
-  stopReason.value = `循环内 token 增量约 ${(tokenDelta / 1000).toFixed(1)}k，达到 ${LOOP_TOKEN_BUDGET / 1000}k 上限`
+  stopReason.value = `循环内 token 增量约 ${(tokenDelta / 1000).toFixed(1)}k，达到 ${(LOOP_TOKEN_HARD_LIMIT / 1000).toFixed(1)}k 熔断线`
   loopState.value = 'budget-limited'
   persist()
   sendStop()
   unbindKeyboard()
   addTrace({
     kind: 'loop',
-    summary: `⏸ 循环暂停（预算用尽）· ${stopReason.value}`,
+    summary: `⏸ 循环暂停（预算熔断）· ${stopReason.value}`,
     payload: { loopId: loopId.value, loopRound: loopRound.value },
   })
-  toast('预算已用尽，点击「继续」恢复', 'warn', 6000)
+  toast('预算已熔断，点击「继续」恢复', 'warn', 6000)
 }
 export async function resumeLoop(): Promise<void> {
   if (loopState.value !== 'budget-limited') { toast('当前不在 budget-limited 状态', 'warn'); return }
@@ -483,6 +553,9 @@ export async function resumeLoop(): Promise<void> {
   if (!win || win.closed) { toast('AI 窗口已关闭，无法续跑', 'error'); return }
   loopStartTokens.value = latestTokens.value
   pendingRound.value = null
+  // 清空上轮 lastHash：budget 恢复后 AI 重发同一脚本是合理的（它没收到结果），
+  // 避免被误判为「连续两轮重复」而熔断
+  lastHash.value = ''
   const feedback = buildFeedback(o, { nextRound: loopRound.value + 1, tokenDelta: 0 })
   const okSent = sendFill({ prompt: feedback })
   if (!okSent) { await finish('window-lost', '续跑时窗口发送失败'); return }
@@ -540,6 +613,15 @@ async function afterRound(o: RoundOutcome): Promise<void> {
   if (breakReason === 'token-budget') {
     budgetLimited(o, tokenDelta)
     return
+  }
+  if (breakReason === 'token-warn') {
+    // 警告档：UI 提示 + trace，但不停止，给 tokenEstimator 估算误差留缓冲
+    addTrace({
+      kind: 'loop',
+      summary: `⚠ token 增量约 ${(tokenDelta / 1000).toFixed(1)}k，已达预算警告线（熔断线 ${(LOOP_TOKEN_HARD_LIMIT / 1000).toFixed(1)}k）`,
+      payload: { loopId: loopId.value, loopRound: loopRound.value, tokenDelta },
+    })
+    toast(`token 已用约 ${(tokenDelta / 1000).toFixed(1)}k（警告），到 ${(LOOP_TOKEN_HARD_LIMIT / 1000).toFixed(1)}k 将熔断`, 'warn', 5000)
   }
   if (breakReason === 'round-limit') {
     await finish('round-limit', `已达 ${LOOP_MAX_ROUNDS} 轮上限`)
@@ -655,7 +737,17 @@ async function finish(reason: string, detail?: string): Promise<void> {
   addTrace({
     kind: 'loop',
     summary: `${interrupted ? '⏹' : '■'} 循环结束 · ${stopReason.value}`,
-    payload: { loopId: loopId.value, loopRound: loopRound.value },
+    payload: {
+      loopId: loopId.value,
+      loopRound: loopRound.value,
+      reason,
+      // 失败链路 trace ref：把终止时的关键状态打包，便于事后复盘
+      lastExec: lastExec.value,
+      lastHash: lastHash.value,
+      toleranceLeft: toleranceLeft.value,
+      tokenDelta: Math.max(0, latestTokens.value - loopStartTokens.value),
+      loopSessionId: loopSessionId.value,
+    },
   })
 
   // 回滚场景不再提交（改动已 reset）；其余终止一次性 commit
@@ -754,6 +846,29 @@ function unbindKeyboard() {
 export function currentLoopContext(): { loopId?: string, loopRound?: number } {
   if (!isLoopActive.value) return {}
   return { loopId: loopId.value, loopRound: loopRound.value }
+}
+
+/**
+ * 注入 activeSessionId 读取器（App.vue 在 onMounted 调用一次）。
+ * 用于循环启动时把当前活动会话 id 绑定到 loopSessionId，
+ * 配合 isFromCurrentLoop 做多 AI 窗口隔离。
+ */
+export function setActiveSessionIdGetter(fn: () => string): void {
+  getActiveSessionId = fn
+}
+
+/**
+ * 多 AI 窗口 session 隔离：
+ * - 非循环模式：始终 true（无隔离需求）
+ * - 循环模式 + 油猴未传 sessionId：true（兼容旧版油猴）
+ * - 循环模式 + 油猴传 sessionId：必须与 loopSessionId 一致才接受
+ *   （同 origin 多窗口情况下 source 比对可能失效，靠 sessionId 兜底）
+ */
+export function isFromCurrentLoop(sessionId: string): boolean {
+  if (!isLoopActive.value) return true
+  const sid = String(sessionId || '')
+  if (!sid) return true
+  return sid === loopSessionId.value
 }
 
 const SUMMARY_INSTRUCTION = [
@@ -858,6 +973,9 @@ export function useAutoLoop() {
     isLoopActive,
     maxRounds: LOOP_MAX_ROUNDS,
     tokenBudget: LOOP_TOKEN_BUDGET,
+    tokenHardLimit: LOOP_TOKEN_HARD_LIMIT,
+    roundTimeoutMs,
+    waitingElapsed,
     startLoop, startTakeover, killCurrent, stopAndRollback, requestPause,
     onScriptArrival, onNonScriptReply, setTokenEstimate, currentLoopContext,
     startHandoff, onSummary, onNewSessionCreated, autoRotateSession, resumeLoop,

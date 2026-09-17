@@ -28,6 +28,10 @@
             · tok {{ (tokenDelta / 1000).toFixed(1) }}k/{{ tokenBudget / 1000 }}k
             · 宽容 {{ toleranceLeft }}
           </span>
+          <span v-if="loopState === 'waiting'" class="loop-waiting-progress" :title="`等待 AI 回复（已等 ${waitingElapsed}s / 总 ${Math.round(roundTimeoutMs / 1000)}s，超时即熔断）`">
+            <span class="loop-waiting-text">⏱ {{ waitingElapsed }}s / {{ Math.round(roundTimeoutMs / 1000) }}s</span>
+            <span class="loop-waiting-bar"><span class="loop-waiting-fill" :style="{ width: waitingPct + '%' }" /></span>
+          </span>
           <span class="loop-goal-text" :title="loopGoal">{{ loopGoal.slice(0, 40) }}</span>
           <div class="loop-actions">
             <button v-tooltip="'立即终止当前执行（不等本轮完成）'" class="loop-btn kill" @click="killCurrent">■ 停当前</button>
@@ -454,9 +458,15 @@ function takeLatestFromInbox() {
 // —— 自动化循环（P2 useAutoLoop）——
 const {
   loopState, loopRound, loopGoal, stopReason, toleranceLeft,
-  tokenDelta, maxRounds, tokenBudget, isLoopActive,
+  tokenDelta, maxRounds, tokenBudget,
+  roundTimeoutMs, waitingElapsed, isLoopActive,
   startTakeover, killCurrent, stopAndRollback, startHandoff, resumeLoop,
 } = useAutoLoop()
+// 倒计时进度百分比：waitingElapsed / roundTimeoutMs
+const waitingPct = computed(() => {
+  if (loopState.value !== 'waiting' || !roundTimeoutMs.value) return 0
+  return Math.min(100, Math.round((waitingElapsed.value * 1000 / roundTimeoutMs.value) * 100))
+})
 async function runAndTakeover() {
   if (!script.value.trim()) { toast('脚本为空', 'warn'); return }
   runningCommand.value = ''
@@ -2634,6 +2644,29 @@ function onHtmlDrop(e: DragEvent) {
 .loop-bar.is-interrupted { border-left-color: var(--danger); }
 .loop-bar.is-stopped { border-left-color: var(--text-3); }
 .loop-bar.is-budget-limited { border-left-color: #e6a23c; }
+/* 倒计时进度条（waiting 状态） */
+.loop-waiting-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.loop-waiting-bar {
+  display: inline-block;
+  width: 80px;
+  height: 4px;
+  background: var(--border-color, #dcdfe6);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.loop-waiting-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #67c23a 0%, #e6a23c 70%, var(--danger) 100%);
+  transition: width 0.9s linear;
+}
 .loop-goal-input {
   flex: 1 1 320px;
   min-width: 200px;

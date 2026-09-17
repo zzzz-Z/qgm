@@ -7,31 +7,41 @@
 
 /** 循环最大轮数（v6 §6.9 第 3 条） */
 export const LOOP_MAX_ROUNDS = 8
-/** 循环内 token 增量上限（v6 §6.9 第 4 条），独立于会话累计 */
+/** 循环内 token 增量警告阈值（v6 §6.9 第 4 条），独立于会话累计 */
 export const LOOP_TOKEN_BUDGET = 30_000
+/** 循环内 token 增量熔断阈值：在警告基础上加 10% 缓冲，
+ *  容忍 tokenEstimator 的启发式估算误差，避免误熔断 */
+export const LOOP_TOKEN_HARD_LIMIT = 33_000
 /** 宽容预算：格式错误 OR 纯文本 OR 重复脚本共享（v6 §6.9 第 2 条） */
 export const LOOP_TOLERANCE_BUDGET = 1
-/** 单轮等待 AI 回复超时（v6 §6.9 第 7 条） */
+/** 单轮等待 AI 回复超时（v6 §6.9 第 7 条）—— cjs 默认 90s */
 export const LOOP_ROUND_TIMEOUT_MS = 90_000
+/** bash 任务单轮超时：bash 通常更复杂，给 180s */
+export const LOOP_ROUND_TIMEOUT_BASH_MS = 180_000
 /** 回填给 AI 的输出尾部截断长度（v6 §6.5） */
 export const LOOP_FEEDBACK_TAIL = 3000
 
 // ----------------------------------------------------------------------------
 // DONE 严格识别（v6 §6.9 第 1 条）
-// 必须整段 trim 后恰为 DONE；防止「this task is done」「DONE！」误判终止
+// 必须整段 trim 后恰为 DONE；防止「this task is done」「DONE！」误判终止。
+// 关键：DONE 必须独占一行，前后不允许出现其他可打印字符；
+// 仅允许前后空白/换行（^\s* 与 \s*$）。多行文本中夹带 DONE 不算终止信号。
 // ----------------------------------------------------------------------------
 export function isStrictDone(text: string): boolean {
+  // 默认模式 ^/$ 不跨行，'DONE\nDONE' 不匹配；'DONE\n' 仍可匹配（\n 属 \s）
   return /^\s*DONE\s*$/.test(String(text ?? ''))
 }
 
 // ----------------------------------------------------------------------------
 // 轮后熔断判定：在「一轮已成功执行完、准备进入下一轮」前调用
-// 优先级与历史实现保持一致：token 预算先于轮数上限
+// 优先级与历史实现保持一致：token 熔断 > token 警告 > 轮数上限
+// 区分 token-warn（30k，UI 提示继续）与 token-budget（33k，熔断暂停）
 // ----------------------------------------------------------------------------
-export type RoundBreak = 'round-limit' | 'token-budget' | 'continue'
+export type RoundBreak = 'round-limit' | 'token-budget' | 'token-warn' | 'continue'
 
 export function checkRoundBreak(round: number, tokenDelta: number): RoundBreak {
-  if (Math.max(0, tokenDelta) >= LOOP_TOKEN_BUDGET) return 'token-budget'
+  if (Math.max(0, tokenDelta) >= LOOP_TOKEN_HARD_LIMIT) return 'token-budget'
+  if (Math.max(0, tokenDelta) >= LOOP_TOKEN_BUDGET) return 'token-warn'
   if (round >= LOOP_MAX_ROUNDS) return 'round-limit'
   return 'continue'
 }
@@ -117,7 +127,7 @@ export function buildFeedback(o: FeedbackOutcome, ctx: FeedbackContext): string 
     o.stdout ? `输出(尾 ${LOOP_FEEDBACK_TAIL} 字):\n${tailClip(o.stdout)}` : '',
     o.stderr ? `错误(尾 ${LOOP_FEEDBACK_TAIL} 字):\n${tailClip(o.stderr)}` : '',
     '',
-    `请继续（第 ${ctx.nextRound}/${LOOP_MAX_ROUNDS} 轮，循环内 token 已用约 ${(Math.max(0, ctx.tokenDelta) / 1000).toFixed(1)}k/${LOOP_TOKEN_BUDGET / 1000}k）。`,
+    `请继续（第 ${ctx.nextRound}/${LOOP_MAX_ROUNDS} 轮，循环内 token 已用约 ${(Math.max(0, ctx.tokenDelta) / 1000).toFixed(1)}k/${LOOP_TOKEN_BUDGET / 1000}k，熔断线 ${LOOP_TOKEN_HARD_LIMIT / 1000}k）。`,
     '若任务已完成，只回复 DONE；否则输出且仅输出一个 cjs/bash 代码块，必须推进，勿重复上轮脚本。',
   ]
   return lines.join('\n')

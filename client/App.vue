@@ -3,17 +3,20 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ScriptPanel from './components/ScriptPanel.vue'
 import GeneratePanel from './components/GeneratePanel.vue'
 import TracePanel from './components/TracePanel.vue'
-import { DEFAULT_URL, MODELS, getActiveWin, openDeepseek, useDeepseekUrl } from './composables/useDeepseekUrl'
+import { DEFAULT_URL, MODELS, getActiveWin, openDeepseek, setActiveWin, useDeepseekUrl } from './composables/useDeepseekUrl'
 import { useScriptInbox } from './composables/useScriptInbox'
 import {
     currentLoopContext,
     isLoopActive,
+    isFromCurrentLoop,
     onNonScriptReply,
     onScriptArrival,
+    setActiveSessionIdGetter,
     setTokenEstimate,
     onSummary,
     onNewSessionCreated,
   autoRotateSession,
+  startTakeover,
 } from './composables/useAutoLoop'
 import { useSessionManager } from './composables/useSessionManager'
 import { useToast } from './composables/useToast'
@@ -251,6 +254,13 @@ function onSessionIdMessage(e: MessageEvent) {
     if (!isFromActiveAiSite(e)) return
     // 收到 AI 回复，清除「发送给 AI」按钮的 loading 状态
     stopAiWaiting()
+    // 多 AI 窗口 session 隔离：循环模式下若油猴传了 sessionId，
+    // 必须与当前循环绑定的 loopSessionId 一致，否则丢弃
+    const sid = String(d.sessionId || '')
+    if (sid && !isFromCurrentLoop(sid)) {
+      console.warn('[ai-runner] sessionId 非当前循环，已忽略', sid)
+      return
+    }
     const kind = String(d.kind || '')
     if (kind === 'script') {
       const code = String(d.code || '')
@@ -290,6 +300,8 @@ function onSessionIdMessage(e: MessageEvent) {
       void onNonScriptReply({
         kind: kind as 'done' | 'plain' | 'multi',
         count: Number(d.count) || 0,
+        // 油猴可能未传 text；传了则用于二次校验 isStrictDone
+        text: d.text !== undefined ? String(d.text) : undefined,
       })
     }
     return
@@ -405,10 +417,23 @@ function onEscClose(e: KeyboardEvent) {
 onMounted(() => {
   window.addEventListener('message', onSessionIdMessage)
   window.addEventListener('keydown', onEscClose)
+  // 注入 activeSessionId 读取器：循环启动时取当前活动会话 id 绑定到 loopSessionId
+  setActiveSessionIdGetter(() => activeSessionId.value)
   // —— mock 通道（v6 §13.2 ?mock=1）—— 不打开真实 AI 站点，注入合成 message 自检整条链路
   // 注意：必须放在 activeSessionId 早退之前，否则无会话时无法触发
   if (MOCK_MODE) {
     toast('mock 模式已启用：将注入合成脚本，无需打开 AI 站点', 'warn', 6000)
+    // mock 自检：把自身设为活动窗口 + 暴露循环驱动钩子，方便 browser_evaluate 触发循环
+    setActiveWin(window)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(window as any).__aiRunnerMock = {
+      startTakeover,
+      dispatchReply: (over: Record<string, unknown>) => window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'ai-runner:reply', site: 'https://chat.deepseek.com', ...over },
+        origin: 'https://chat.deepseek.com',
+        source: window,
+      })),
+    }
     const fakeScript = [
       '#!/usr/bin/env node',
       '// @desc: 给所有 .vue 文件补 defineOptions({ name })',

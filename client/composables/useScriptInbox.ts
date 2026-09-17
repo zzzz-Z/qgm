@@ -11,7 +11,7 @@ export interface InboxItem {
   lang: 'js' | 'cjs' | 'bash'
   /** 来源站点 origin（用于回溯） */
   site: string
-  /** SHA-256 前 8 位（去重） */
+  /** 归一化后的 hash（去 shebang/注释/空白），用于重复判定 */
   hash: string
   /** 解析自 AI 回复的 @desc（可能为空） */
   desc: string
@@ -19,6 +19,30 @@ export interface InboxItem {
   why: string
   /** 到达时间戳 */
   ts: number
+}
+
+/**
+ * 归一化脚本用于 hash 计算：
+ * 去除 shebang 行、注释行（// 与 #）、所有空白字符。
+ * 这样「等价变形」（仅注释/空白差异）能识别为同一脚本，
+ * 避免通过改注释绕过「连续两轮相同」的重复判定。
+ */
+function normalizeForHash(code: string): string {
+  return String(code ?? '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => {
+      if (!l) return false
+      // shebang 行
+      if (l.startsWith('#!')) return false
+      // cjs/js 注释
+      if (l.startsWith('//')) return false
+      // bash 注释（也覆盖 #!）
+      if (l.startsWith('#')) return false
+      return true
+    })
+    .map(l => l.replace(/\s+/g, ''))
+    .join('')
 }
 
 const inbox = ref<InboxItem[]>([])
@@ -46,18 +70,22 @@ export interface PushOptions {
   code: string
   lang: 'js' | 'cjs' | 'bash'
   site: string
-  /** 显式 hash（油猴已算好时传入），否则本函数算 */
+  /** 油猴传入的原始 hash（保留为元数据），重复判定始终用归一化 hash */
   hash?: string
 }
 
 /**
  * 油猴抓到 AI 脚本后调用此方法入队。
- * 同 hash 在本会话已入队 → 跳过（不 toast、不入队），避免重复刷屏。
+ * 同归一化 hash 在本会话已入队 → 跳过（不 toast、不入队），避免重复刷屏。
+ *
+ * hash 始终基于「去 shebang + 去注释 + 去空白」的归一化内容计算，
+ * 防止 AI 仅改注释或空白绕过「连续两轮相同」的重复判定。
  */
 export function push(opts: PushOptions): InboxItem | null {
   const code = opts.code
   if (!code.trim()) return null
-  const hash = opts.hash || fnv1a8(code)
+  // 归一化 hash：忽略油猴传入的 hash，确保等价变形能识别为同一脚本
+  const hash = fnv1a8(normalizeForHash(code))
   if (inbox.value.some(it => it.hash === hash)) {
     return null
   }

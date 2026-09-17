@@ -4,6 +4,7 @@ import {
   LOOP_FEEDBACK_TAIL,
   LOOP_MAX_ROUNDS,
   LOOP_TOKEN_BUDGET,
+  LOOP_TOKEN_HARD_LIMIT,
   buildFeedback,
   buildInitialPrompt,
   buildRetryPrompt,
@@ -31,11 +32,13 @@ it('DONE 严格匹配：含解释 / 小写 / 标点 均不算', () => {
   assert.equal(isStrictDone('this task is done'), false)
   assert.equal(isStrictDone('not done'), false)
   assert.equal(isStrictDone('DONE\nDONE'), false)
+  assert.equal(isStrictDone('好的，DONE'), false)
+  assert.equal(isStrictDone('DONE\n（任务完成）'), false)
   assert.equal(isStrictDone(''), false)
 })
 
 // ---------------------------------------------------------------------------
-// checkRoundBreak：轮数 / token 熔断，token 优先于轮数
+// checkRoundBreak：轮数 / token 熔断（警告+熔断两档），token 优先于轮数
 // ---------------------------------------------------------------------------
 it('轮次熔断：1-7 轮继续，第 8 轮停止', () => {
   assert.equal(checkRoundBreak(1, 0), 'continue')
@@ -44,18 +47,23 @@ it('轮次熔断：1-7 轮继续，第 8 轮停止', () => {
   assert.equal(checkRoundBreak(LOOP_MAX_ROUNDS + 1, 0), 'round-limit')
 })
 
-it('token 熔断：达到 30k 增量即停（边界值）', () => {
+it('token 警告档：达到 30k 增量返回 token-warn（不熔断）', () => {
   assert.equal(checkRoundBreak(1, LOOP_TOKEN_BUDGET - 1), 'continue')
-  assert.equal(checkRoundBreak(1, LOOP_TOKEN_BUDGET), 'token-budget')
-  assert.equal(checkRoundBreak(1, LOOP_TOKEN_BUDGET + 5000), 'token-budget')
+  assert.equal(checkRoundBreak(1, LOOP_TOKEN_BUDGET), 'token-warn')
+})
+
+it('token 熔断档：达到 33k 增量即停（10% 缓冲）', () => {
+  assert.equal(checkRoundBreak(1, LOOP_TOKEN_HARD_LIMIT - 1), 'token-warn')
+  assert.equal(checkRoundBreak(1, LOOP_TOKEN_HARD_LIMIT), 'token-budget')
+  assert.equal(checkRoundBreak(1, LOOP_TOKEN_HARD_LIMIT + 5000), 'token-budget')
 })
 
 it('token 熔断：负值（估算回退）被钳为 0，不误熔断', () => {
   assert.equal(checkRoundBreak(1, -99999), 'continue')
 })
 
-it('熔断优先级：第 8 轮且 token 同时超限 → token-budget', () => {
-  assert.equal(checkRoundBreak(LOOP_MAX_ROUNDS, LOOP_TOKEN_BUDGET), 'token-budget')
+it('熔断优先级：第 8 轮且 token 同时超 hard limit → token-budget', () => {
+  assert.equal(checkRoundBreak(LOOP_MAX_ROUNDS, LOOP_TOKEN_HARD_LIMIT), 'token-budget')
 })
 
 // ---------------------------------------------------------------------------
@@ -144,6 +152,7 @@ it('回填：cjs 成功包含类型/退出码/成功/变更文件', () => {
   assert.ok(f.includes('变更: 1 个文件：a.vue'))
   assert.ok(f.includes('第 2/8 轮'))
   assert.ok(f.includes('0.0k/30k'))
+  assert.ok(f.includes('熔断线 33k'))
 })
 
 it('回填：bash 结果不输出「变更」行', () => {
