@@ -39,9 +39,6 @@
             <span class="dot d-red" /><span class="dot d-yellow" /><span class="dot d-green" />
           </div>
           <span class="file-badge term-title">终端输出</span>
-          <span v-if="result" class="exit-badge" :class="result.ok ? 'ok' : 'err'">exit {{ result.code }}</span>
-          <span v-if="running && runningElapsed" class="meta meta-running">{{ runningElapsed }}</span>
-          <span v-else-if="lastDuration" class="meta">{{ lastDuration }}</span>
           <div class="bar-actions">
             <button
               v-tooltip="copied ? '已发送' : `把本次运行的完整上下文（脚本 / 输出 / 变更 / 错误源码）拼成 prompt 复制并发给 AI`"
@@ -242,7 +239,7 @@
             </button>
             <!-- status-moved -->
             <span v-if="statusText" class="status head-status" :class="statusClass">
-              <span class="s-dot" />{{ statusText }}
+              <span class="s-dot" />{{ statusText }}<template v-if="result"> · exit {{ result.code }}</template>
             </span>
             <span v-if="lastDuration" class="meta head-meta">{{ lastDuration }}</span>
           </div>
@@ -288,9 +285,6 @@
           </span>
           <span v-if="result?.git?.after?.commit" v-tooltip="`已提交：${result.git.after.commit}`" class="git-after">
             ⎇ {{ result.git.after.commit }}
-          </span>
-          <span v-if="statusText" class="status" :class="statusClass">
-            <span class="s-dot" />{{ statusText }}
           </span>
         </footer>
       </section>
@@ -1190,10 +1184,8 @@ watch(running, (v) => {
       if (!result.value.ok && result.value.error !== '已取消') {
         void copyOutput()
       }
-      if (result.value.ok) {
-        // 清空编辑器（脚本已成功运行）
-        script.value = ''
-      }
+      // 清空编辑器（成功 / 失败均清空）
+      script.value = ''
       const r = result.value
       // 兼容旧脚本只写 // @desc；新脚本可能 // 或 #，从 result.value.scriptDesc/scriptWhy 拿（server 已解析）
       const descMatch = script.value.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
