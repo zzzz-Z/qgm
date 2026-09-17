@@ -1,5 +1,6 @@
 <script setup lang="ts">
 defineOptions({ name: 'GeneratePanel' })
+const emit = defineEmits<{ sent: [] }>()
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FileTree from './FileTree.vue'
 import { copyAndFill } from '../composables/useDeepseekUrl'
@@ -619,6 +620,7 @@ async function copyPrompt() {
     }
     trackMessage('user', text)
     if (r === 'failed') toast('发送失败，已复制到剪贴板', 'warn', 4000)
+    else emit('sent')
   } catch {  }
 }
 
@@ -744,9 +746,11 @@ onBeforeUnmount(() => {
           class="editor-content"
           contenteditable="true"
           spellcheck="false"
-          data-placeholder="描述你想问 AI 的问题… 支持 @ 呼出检索，或拖入文件"
+          data-placeholder="描述你想问 AI 的问题… 支持 @ 呼出检索，或拖入文件 · ⌘/Ctrl + ↵ 发送"
           @input="onEditorInput"
           @keydown="onEditorKeydown"
+          @keydown.meta.enter.prevent="copyPrompt"
+          @keydown.ctrl.enter.prevent="copyPrompt"
           @compositionstart="onCompositionStart"
           @compositionend="onCompositionEnd"
           @paste.prevent="onPaste"

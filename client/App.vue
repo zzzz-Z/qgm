@@ -671,7 +671,7 @@ const { addTrace } = useTraceLog()
             <button v-tooltip="'关闭（Esc）'" class="ask-modal-close" @click="askOpen = false">×</button>
           </div>
           <div class="ask-modal-body">
-            <GeneratePanel v-if="askOpen" />
+            <GeneratePanel v-if="askOpen" @sent="askOpen = false" />
           </div>
         </div>
       </div>
