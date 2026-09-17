@@ -50,7 +50,6 @@
           <div class="dots">
             <span class="dot d-red" /><span class="dot d-yellow" /><span class="dot d-green" />
           </div>
-          <span class="file-badge term-title">终端输出</span>
           <div class="bar-actions">
             <button
               v-tooltip="aiWaiting ? '等待 AI 回复…' : copied ? '已发送' : `把本次运行的完整上下文（脚本 / 输出 / 变更 / 错误源码）拼成 prompt 复制并发给 AI`"
@@ -141,7 +140,6 @@
             <div class="term-section term-status" :class="result.ok ? 'ok' : 'err'">
               <div class="term-label">
                 <span class="prompt-char" :class="{ err: !result.ok }">{{ result.ok ? '✓' : '✗' }}</span>
-                <span class="label-text" :class="{ err: !result.ok }">执行状态</span>
                 <span class="term-status-detail">
                   {{ result.ok ? '执行成功' : '执行失败' }} · 退出码 {{ result.code }}<template v-if="lastDuration"> · 耗时 {{ lastDuration }}</template><template v-if="changes.length"> · {{ changes.length }} 个文件已变更</template>
                 </span>
@@ -214,7 +212,6 @@
           <div class="dots">
             <span class="dot d-red" /><span class="dot d-yellow" /><span class="dot d-green" />
           </div>
-          <span class="file-badge">script.cjs</span>
           <div class="bar-actions">
             <span v-tooltip="'运行 / 保存'" class="kbd-hint">
               <kbd>⌘</kbd><span class="slash">/</span><kbd>Ctrl</kbd><span class="plus">+</span><kbd>↵</kbd>
@@ -261,7 +258,6 @@
         </header>
 
         <div class="tpl-bar">
-          <span class="tpl-label">模板</span>
           <button
             v-for="t in TEMPLATES"
             :key="t.id"
@@ -1873,6 +1869,15 @@ function onHtmlDrop(e: DragEvent) {
   color: #059669;
   border-color: rgb(5 150 105 / 50%);
   background: rgb(5 150 105 / 12%);
+}
+.term-btn.copy.loading {
+  color: #60a5fa;
+  border-color: rgb(96 165 250 / 50%);
+  background: rgb(96 165 250 / 10%);
+  cursor: progress;
+}
+.term-ico.spin {
+  animation: loop-spin 0.9s linear infinite;
 }
 
 .term-btn.ask {
