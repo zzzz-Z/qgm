@@ -2686,22 +2686,79 @@ function onHtmlDrop(e: DragEvent) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.loop-actions { display: flex; gap: 6px; }
-.loop-btn {
-  padding: 4px 10px;
-  border: 1px solid var(--border-color, #dcdfe6);
-  border-radius: 6px;
-  background: var(--btn-bg, #fff);
-  font-size: 12px;
-  cursor: pointer;
-  color: inherit;
-  white-space: nowrap;
+.loop-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
-.loop-btn:hover:not(:disabled) { border-color: #409eff; }
-.loop-btn:disabled { opacity: .5; cursor: default; }
-.loop-btn.primary { background: #409eff; border-color: #409eff; color: #fff; }
-.loop-btn.kill { border-color: #f56c6c; color: #f56c6c; }
-.loop-btn.rollback { border-color: #f56c6c; color: #f56c6c; }
+.loop-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: 500 12px/1 inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 1px 1px rgb(15 30 60 / 4%);
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.08s ease;
+}
+.loop-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-bg);
+}
+.loop-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+.loop-btn:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 18%);
+}
+.loop-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: var(--surface-2);
+  color: var(--text-3);
+  box-shadow: none;
+}
+.loop-btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  box-shadow: 0 1px 2px rgb(37 99 235 / 28%);
+}
+.loop-btn.primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+  color: #fff;
+  box-shadow: 0 3px 8px rgb(37 99 235 / 24%);
+}
+.loop-btn.kill,
+.loop-btn.rollback {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  box-shadow: 0 1px 2px rgb(239 68 68 / 28%);
+}
+.loop-btn.kill:hover:not(:disabled),
+.loop-btn.rollback:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+  box-shadow: 0 3px 8px rgb(239 68 68 / 32%);
+}
 .loop-end-status { flex: 1; font-size: 12px; }
 .loop-end-status em { opacity: .65; font-style: normal; }
 .loop-spin { display: inline-block; animation: loop-spin 1.6s linear infinite; }
