@@ -214,9 +214,8 @@ function selectSession(s: SessionEntry) {
   if (s.url) setDeepseekUrl(s.url)
 }
 
-type Tab = 'run' | 'trace'
-const tab = ref<Tab>('run')
 const askOpen = ref(false)
+const traceOpen = ref(false)
 const isEmbedded = typeof window !== 'undefined' && window.parent !== window
 function collapsePanel() {
   if (!isEmbedded) return
@@ -411,7 +410,9 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
   return true
 }
 function onEscClose(e: KeyboardEvent) {
-  if (e.key === 'Escape' && askOpen.value) askOpen.value = false
+  if (e.key !== 'Escape') return
+  if (askOpen.value) askOpen.value = false
+  if (traceOpen.value) traceOpen.value = false
 }
 onMounted(() => {
   window.addEventListener('message', onSessionIdMessage)
@@ -454,6 +455,12 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
       >
         <span v-if="theme === 'dark'">☀</span>
         <span v-else>☾</span>
+      </button>
+      <button v-tooltip="traceOpen ? '关闭会话记录' : '打开会话记录'" class="trace-toggle" @click="traceOpen = !traceOpen">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </svg>
       </button>
       <button v-tooltip="settingsOpen ? '关闭设置' : '打开设置（去注释 / 去空行）'" class="settings-toggle" @click="settingsOpen = !settingsOpen">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -688,16 +695,9 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
             <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
-        <button v-tooltip="'写脚本 -> 运行 -> 看 diff / 回滚'" :class="{ active: tab === 'run' }" @click="tab = 'run'">
-          运行脚本
-        </button>
-        <button v-tooltip="'查看运行脚本 / 问 AI 的历史记录'" :class="{ active: tab === 'trace' }" @click="tab = 'trace'">
-          会话记录
-        </button>
       </nav>
       <main class="main">
-        <ScriptPanel v-if="tab === 'run'" @open-ask="askOpen = true" />
-        <TracePanel v-if="tab === 'trace'" />
+        <ScriptPanel @open-ask="askOpen = true" />
       </main>
     </div>
   </div>
@@ -711,6 +711,21 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
           </div>
           <div class="ask-modal-body">
             <GeneratePanel v-if="askOpen" @sent="askOpen = false" />
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+  <Teleport to="body">
+    <Transition name="ask-modal">
+      <div v-if="traceOpen" class="ask-modal-mask" @click.self="traceOpen = false">
+        <div class="ask-modal-card">
+          <div class="ask-modal-head">
+            <span class="ask-modal-title">会话记录</span>
+            <button v-tooltip="'关闭（Esc）'" class="ask-modal-close" @click="traceOpen = false">×</button>
+          </div>
+          <div class="ask-modal-body trace-modal-body">
+            <TracePanel v-if="traceOpen" />
           </div>
         </div>
       </div>
@@ -757,6 +772,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
 }
 
 .tabs {
+  display: none;
   flex-shrink: 0;
   /* tighten-spacing */
   padding: 0 18px;
@@ -764,26 +780,6 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   border-bottom: 1px solid var(--border);
   display: flex;
   gap: 4px;
-}
-.tabs button {
-  /* tighten-spacing */
-  padding: 9px 4px;
-  margin-right: 16px;
-  background: none;
-  border: 0;
-  cursor: pointer;
-  color: var(--text-2);
-  font-size: 13px;
-  font-weight: 500;
-  border-bottom: 2px solid transparent;
-  transition: 0.15s;
-}
-.tabs button:hover {
-  color: var(--text);
-}
-.tabs button.active {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
 }
 
 .main {
@@ -1061,6 +1057,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   border-color: var(--primary);
   background: var(--primary-bg);
 }
+.trace-toggle,
 .settings-toggle {
   width: 26px;
   height: 26px;
@@ -1075,6 +1072,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   cursor: pointer;
   transition: 0.15s;
 }
+.trace-toggle:hover,
 .settings-toggle:hover {
   color: var(--primary);
   border-color: var(--primary);
@@ -1704,6 +1702,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   }
 }
 @media (max-width: 1024px) {
+  .tabs { display: flex; }
   .tabs-burger {
     display: inline-flex;
   }
@@ -1744,11 +1743,6 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   }
   .tabs {
     padding: 0 10px;
-  }
-  .tabs button:not(.tabs-burger) {
-    margin-right: 12px;
-    font-size: 12px;
-    padding: 10px 4px;
   }
   .session-card,
   .ns-card {
@@ -1864,6 +1858,11 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
 .ask-modal-body > * {
   flex: 1;
   min-width: 0;
+}
+
+.trace-modal-body {
+  padding: 0;
+  gap: 0;
 }
 .ask-modal-enter-active,
 .ask-modal-leave-active {
