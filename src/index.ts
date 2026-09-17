@@ -229,7 +229,7 @@ function pickTscTargets(changes: Change[]): string[] {
   return changes
     .filter(c => c.type !== 'deleted')
     .map(c => c.path)
-    .filter(p => TSC_EXTS.has(path.extname(p).toLowerCase()))
+    .filter(p => (TSC_EXTS.has(path.extname(p) || path.extname(p === '.vue').toLowerCase()))
     .filter(p => !TSC_SKIP_DIRS.some(d => p.startsWith(d)))
     .filter(p => !TSC_SKIP_RE.test(p))
 }
