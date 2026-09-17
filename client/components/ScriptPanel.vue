@@ -32,160 +32,7 @@
           <button class="loop-btn" @click="loopState = 'idle'">收起</button>
         </template>
       </section>
-      <!-- 编辑器 (上方) -->
-      <section class="editor card" :class="{ 'is-running': running }">
-        <header class="bar editor-bar">
-          <div class="dots">
-            <span class="dot d-red" /><span class="dot d-yellow" /><span class="dot d-green" />
-          </div>
-          <span class="file-badge">script.cjs</span>
-          <div class="bar-actions">
-            <span v-tooltip="'运行 / 保存'" class="kbd-hint">
-              <kbd>⌘</kbd><span class="slash">/</span><kbd>Ctrl</kbd><span class="plus">+</span><kbd>↵</kbd>
-            </span>
-            <button v-tooltip="'清空编辑器内容（不落盘）'" class="ghost-btn" :disabled="running || !script" @click="script = ''">
-              清空
-            </button>
-            <button
-              v-if="pendingCount > 0"
-              v-tooltip="`收件箱有 ${pendingCount} 条待取用脚本，点击覆盖当前编辑器`"
-              class="ghost-btn inbox-badge"
-              :disabled="running"
-              @click="takeLatestFromInbox"
-            >
-              📥 {{ pendingCount }}
-            </button>
-            <button
-              v-if="!running"
-              v-tooltip="script.trim().startsWith('!') ? '运行 shell 命令（以 ! 开头）' : '运行脚本（Ctrl\/Cmd + ↵）'"
-              class="primary-btn run head-run"
-              :disabled="!script.trim()"
-              @click="runSmart"
-            >
-              <span class="ico">▶</span><span>运行</span><kbd class="btn-kbd">{{ runKbd }}</kbd>
-            </button>
-            <button
-              v-if="!running && !isLoopActive"
-              v-tooltip="'先运行当前脚本；成功后进入自动化接管：AI 回传脚本自动执行'"
-              class="primary-btn takeover head-run"
-              :disabled="!script.trim()"
-              @click="runAndTakeover"
-            >
-              <span class="ico">⟳</span><span>运行并接管</span>
-            </button>
-            <button v-else v-tooltip="'停止当前运行'" class="primary-btn stop head-run" @click="stop">
-              <span class="ico">■</span><span>停止</span>
-            </button>
-            <!-- status-moved -->
-            <span v-if="statusText" class="status head-status" :class="statusClass">
-              <span class="s-dot" />{{ statusText }}
-            </span>
-            <span v-if="lastDuration" class="meta head-meta">{{ lastDuration }}</span>
-          </div>
-        </header>
-
-        <div class="tpl-bar">
-          <span class="tpl-label">模板</span>
-          <button
-            v-for="t in TEMPLATES"
-            :key="t.id"
-            v-tooltip="`模板：${t.label} — ${t.title}`"
-            class="tpl-chip"
-            @click="applyTemplate(t.code)"
-          >
-            {{ t.label }}
-          </button>
-        </div>
-        <div class="editor-body">
-          <div
-            ref="cmHost"
-            class="cm-host"
-            tabindex="0"
-            @keydown.ctrl.enter.prevent="runSmart"
-            @keydown.meta.enter.prevent="runSmart"
-          />
-        </div><footer class="editor-foot">
-          <span v-if="persistWarning" v-tooltip="persistWarning" class="persist-warning">⚠ 会话存储已满</span>
-          <div class="foot-spacer" />
-
-          <span
-            v-if="result?.error"
-            v-tooltip="result.error"
-            class="req-err-badge"
-          >
-            ⛔ 请求失败
-          </span>
-          <span
-            v-if="result?.dryRunFailed"
-            v-tooltip="result.dryRunReason || '预检未通过，磁盘零改动'"
-            class="dry-badge"
-          >
-            ⚠ 预检失败 · 未改动文件（本想改 {{ result.dryRunChangeCount ?? 0 }}）
-          </span>
-          <span v-if="result?.git?.after?.commit" v-tooltip="`已提交：${result.git.after.commit}`" class="git-after">
-            ⎇ {{ result.git.after.commit }}
-          </span>
-          <span v-if="statusText" class="status" :class="statusClass">
-            <span class="s-dot" />{{ statusText }}
-          </span>
-        </footer>
-      </section>
-
-      <!-- 拖拽浮层 -->
-      <div v-if="fileDragging" class="overlay drop">
-        <div class="overlay-card drop">
-          <div class="overlay-icon">
-            📥
-          </div>
-          <div class="overlay-text">
-            松开插入路径
-          </div>
-        </div>
-      </div>
-      <div v-if="fileSuccess" class="overlay success">
-        <div class="overlay-card success">
-          <div class="overlay-icon">
-            ✓
-          </div>
-          <div class="overlay-text">
-            已插入
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 拖拽条：调整右侧面板宽度 -->
-    <div
-      v-tooltip="'拖拽调整右侧面板宽度'"
-      class="side-resize-handle"
-      :class="{ active: resizingSide }"
-      @pointerdown="onSideDown"
-    />
-
-    <!-- 右侧：变更列表 & Diff -->
-    <aside class="pane-side" :style="{ width: `${sideWidth}px` }">
-      <!-- 空占位：无变更且未运行时，位于终端上方 -->
-      <div v-if="!result && !changes.length" class="side-empty">
-        <div class="side-empty-icon">
-          📋
-        </div>
-        <div class="side-empty-text">
-          运行后显示变更
-        </div>
-      </div>
-      <!-- 变更列表 -->
-      <FileList
-        v-if="changes.length"
-        :changes="changes"
-        :rolling="rolling"
-        :busy-all="busyAll"
-        :active-file="previewFile!"
-        @rollback="onRollback"
-        @rollback-all="onRollbackAll"
-        @save="save"
-        @preview="onPreviewFile"
-      />
-      <!-- 终端 (下方) -->
+      <!-- 终端 (上方) -->
       <section class="terminal card">
         <header class="bar term-bar">
           <div class="dots">
@@ -339,7 +186,160 @@
           </section>
         </div>
       </section>
-    </aside>
+      <!-- 编辑器 (下方) -->
+      <section class="editor card" :class="{ 'is-running': running }">
+        <header class="bar editor-bar">
+          <div class="dots">
+            <span class="dot d-red" /><span class="dot d-yellow" /><span class="dot d-green" />
+          </div>
+          <span class="file-badge">script.cjs</span>
+          <div class="bar-actions">
+            <span v-tooltip="'运行 / 保存'" class="kbd-hint">
+              <kbd>⌘</kbd><span class="slash">/</span><kbd>Ctrl</kbd><span class="plus">+</span><kbd>↵</kbd>
+            </span>
+            <button v-tooltip="'清空编辑器内容（不落盘）'" class="ghost-btn" :disabled="running || !script" @click="script = ''">
+              清空
+            </button>
+            <button
+              v-if="pendingCount > 0"
+              v-tooltip="`收件箱有 ${pendingCount} 条待取用脚本，点击覆盖当前编辑器`"
+              class="ghost-btn inbox-badge"
+              :disabled="running"
+              @click="takeLatestFromInbox"
+            >
+              📥 {{ pendingCount }}
+            </button>
+            <button
+              v-if="!running"
+              v-tooltip="script.trim().startsWith('!') ? '运行 shell 命令（以 ! 开头）' : '运行脚本（Ctrl\/Cmd + ↵）'"
+              class="primary-btn run head-run"
+              :disabled="!script.trim()"
+              @click="runSmart"
+            >
+              <span class="ico">▶</span><span>运行</span><kbd class="btn-kbd">{{ runKbd }}</kbd>
+            </button>
+            <button
+              v-if="!running && !isLoopActive"
+              v-tooltip="'先运行当前脚本；成功后进入自动化接管：AI 回传脚本自动执行'"
+              class="primary-btn takeover head-run"
+              :disabled="!script.trim()"
+              @click="runAndTakeover"
+            >
+              <span class="ico">⟳</span><span>运行并接管</span>
+            </button>
+            <button v-else v-tooltip="'停止当前运行'" class="primary-btn stop head-run" @click="stop">
+              <span class="ico">■</span><span>停止</span>
+            </button>
+            <!-- status-moved -->
+            <span v-if="statusText" class="status head-status" :class="statusClass">
+              <span class="s-dot" />{{ statusText }}
+            </span>
+            <span v-if="lastDuration" class="meta head-meta">{{ lastDuration }}</span>
+          </div>
+        </header>
+
+        <div class="tpl-bar">
+          <span class="tpl-label">模板</span>
+          <button
+            v-for="t in TEMPLATES"
+            :key="t.id"
+            v-tooltip="`模板：${t.label} — ${t.title}`"
+            class="tpl-chip"
+            @click="applyTemplate(t.code)"
+          >
+            {{ t.label }}
+          </button>
+        </div>
+        <div class="editor-body">
+          <div
+            ref="cmHost"
+            class="cm-host"
+            tabindex="0"
+            @keydown.ctrl.enter.prevent="runSmart"
+            @keydown.meta.enter.prevent="runSmart"
+          />
+        </div><footer class="editor-foot">
+          <span v-if="persistWarning" v-tooltip="persistWarning" class="persist-warning">⚠ 会话存储已满</span>
+          <div class="foot-spacer" />
+
+          <span
+            v-if="result?.error"
+            v-tooltip="result.error"
+            class="req-err-badge"
+          >
+            ⛔ 请求失败
+          </span>
+          <span
+            v-if="result?.dryRunFailed"
+            v-tooltip="result.dryRunReason || '预检未通过，磁盘零改动'"
+            class="dry-badge"
+          >
+            ⚠ 预检失败 · 未改动文件（本想改 {{ result.dryRunChangeCount ?? 0 }}）
+          </span>
+          <span v-if="result?.git?.after?.commit" v-tooltip="`已提交：${result.git.after.commit}`" class="git-after">
+            ⎇ {{ result.git.after.commit }}
+          </span>
+          <span v-if="statusText" class="status" :class="statusClass">
+            <span class="s-dot" />{{ statusText }}
+          </span>
+        </footer>
+      </section>
+
+      <!-- 拖拽浮层 -->
+      <div v-if="fileDragging" class="overlay drop">
+        <div class="overlay-card drop">
+          <div class="overlay-icon">
+            📥
+          </div>
+          <div class="overlay-text">
+            松开插入路径
+          </div>
+        </div>
+      </div>
+      <div v-if="fileSuccess" class="overlay success">
+        <div class="overlay-card success">
+          <div class="overlay-icon">
+            ✓
+          </div>
+          <div class="overlay-text">
+            已插入
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 拖拽条：调整右侧面板宽度 -->
+    <div
+      v-tooltip="'拖拽调整右侧面板宽度'"
+      class="side-resize-handle"
+      :class="{ active: resizingSide }"
+      @pointerdown="onSideDown"
+    />
+
+    <!-- 右侧：变更列表 & Diff -->
+    <aside class="pane-side" :style="{ width: `${sideWidth}px` }">
+      <!-- 空占位：无变更且未运行时，位于终端上方 -->
+      <div v-if="!result && !changes.length" class="side-empty">
+        <div class="side-empty-icon">
+          📋
+        </div>
+        <div class="side-empty-text">
+          运行后显示变更
+        </div>
+      </div>
+      <!-- 变更列表 -->
+      <FileList
+        v-if="changes.length"
+        :changes="changes"
+        :rolling="rolling"
+        :busy-all="busyAll"
+        :active-file="previewFile!"
+        @rollback="onRollback"
+        @rollback-all="onRollbackAll"
+        @save="save"
+        @preview="onPreviewFile"
+      />
+</aside>
     <div
       v-if="changes.length && previewFile && previewBefore !== null"
       class="diff-overlay"
@@ -1310,8 +1310,7 @@ function onHtmlDrop(e: DragEvent) {
 }
 /* 变更列表：按内容伸缩，最多占 45% */
 .pane-side :deep(.changes) {
-  flex: 0 0 auto;
-  max-height: 40%;
+  flex: 1 1 auto;
   min-height: 100px;
 }
 /* Diff 查看器：撑满剩余空间 */
@@ -1393,7 +1392,7 @@ function onHtmlDrop(e: DragEvent) {
 
 /* ============ 编辑器 ============ */
 .editor {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 100px;
   transition:
     border-color 0.15s,
@@ -1765,8 +1764,8 @@ function onHtmlDrop(e: DragEvent) {
 
 /* ============ 终端 ============ */
 .terminal {
-  flex: 1 1 50%;
-  min-height: 160px;
+  flex: 3 1 0;
+  min-height: 240px;
   background: #1e1e1e;
   border-color: #2a2a2a;
 }
