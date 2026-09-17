@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { fnv1a8 } from '../utils/hash'
 import { useRunner } from './useRunner'
 import { toast } from './useToast'
 
@@ -23,16 +24,6 @@ export interface InboxItem {
 const inbox = ref<InboxItem[]>([])
 /** 上次自动填入编辑器的内容；用于覆盖保护策略判断 */
 let lastAutoFilled = ''
-
-function sha256Short(text: string): string {
-  // 同步、稳定的 32-bit FNV-1a 变种，截 8 hex 位。仅用于去重，不要求强抗碰撞。
-  let h = 0x811c9dc5
-  for (let i = 0; i < text.length; i++) {
-    const c = text.charCodeAt(i)
-    h = Math.imul(h ^ c, 0x1000193) >>> 0
-  }
-  return (h >>> 0).toString(16).padStart(8, '0')
-}
 
 /**
  * 解析 AI 回复中首部的 @desc / @why 元注释（与 src/index.ts parseScriptMeta 对齐）。
@@ -66,7 +57,7 @@ export interface PushOptions {
 export function push(opts: PushOptions): InboxItem | null {
   const code = opts.code
   if (!code.trim()) return null
-  const hash = opts.hash || sha256Short(code)
+  const hash = opts.hash || fnv1a8(code)
   if (inbox.value.some(it => it.hash === hash)) {
     return null
   }

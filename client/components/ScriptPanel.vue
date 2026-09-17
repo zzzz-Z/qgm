@@ -418,6 +418,7 @@ import { copyAndFill } from '../composables/useDeepseekUrl'
 import { useAiWaiting } from '../composables/useAiWaiting'
 import { useCodeCleaner } from '../composables/useCodeCleaner'
 import { buildErrorContext, enforceBudget, parseErrorLocations } from '../utils/contextBuilder'
+import { fnv1a8 } from '../utils/hash'
 import { useToast } from '../composables/useToast'
 import { useTraceLog } from '../composables/useTraceLog'
 import { useSessionManager } from '../composables/useSessionManager'
@@ -1399,14 +1400,7 @@ watch(running, (v) => {
       const why = r.scriptWhy || (whyMatch ? whyMatch[1].trim() : '')
       const lang: 'js' | 'bash' = /^\s*#\s*(@desc|@why)/m.test(scriptSnapshot) ? 'bash' : 'js'
       // 计算 hash（与油猴 / useScriptInbox 一致：FNV-1a 8 hex）
-      let hash = ''
-      try {
-        let h = 0x811c9dc5
-        for (let i = 0; i < scriptSnapshot.length; i++) {
-          h = Math.imul(h ^ scriptSnapshot.charCodeAt(i), 0x1000193) >>> 0
-        }
-        hash = (h >>> 0).toString(16).padStart(8, '0')
-      } catch { /* ignore */ }
+      const hash = fnv1a8(scriptSnapshot)
       addTrace({
         kind: 'run',
         summary: desc
