@@ -709,6 +709,22 @@ async function buildAiPrompt() {
     p.push('```')
     p.push('')
   }
+  if (result.value.lint?.ran && !result.value.lint.ok) {
+    p.push('# 代码格式化 (eslint)')
+    p.push('✗ 存在 lint 错误')
+    p.push('```')
+    p.push((result.value.lint.stdout || '') + (result.value.lint.stderr ? `\n${result.value.lint.stderr}` : ''))
+    p.push('```')
+    p.push('')
+  }
+  if (result.value.test?.ran && !result.value.test.ok) {
+    p.push('# 单元测试')
+    p.push('✗ 存在测试失败')
+    p.push('```')
+    p.push((result.value.test.stdout || '') + (result.value.test.stderr ? `\n${result.value.test.stderr}` : ''))
+    p.push('```')
+    p.push('')
+  }
   const baseline = result.value.baselineRunId
   if (baseline && baseline !== result.value.runId) {
     try {
@@ -1377,12 +1393,18 @@ watch(running, (v) => {
         'warn',
         5000,
       )
+      setTimeout(() => { void copyOutput() }, 3000)
     } else {
       statusText.value = result.value.ok ? '✅ 成功' : '❌ 失败'
       statusClass.value = result.value.ok ? 'ok' : 'err'
       // autoAskOnFailure: 失败时延迟 3s 再自动复制并发给 AI（主动停止除外）
       const FAIL_ASK_DELAY_MS = 3000
-      if (!result.value.ok && result.value.error !== '已取消') {
+      const preflightFailed =
+        !result.value.ok ||
+        result.value.tsc?.ok === false ||
+        result.value.lint?.ok === false ||
+        result.value.test?.ok === false
+      if (preflightFailed && result.value.error !== '已取消') {
         setTimeout(() => { void copyOutput() }, FAIL_ASK_DELAY_MS)
       }
       // 清空编辑器（成功 / 失败均清空）
