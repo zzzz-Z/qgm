@@ -594,7 +594,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       req.on('aborted', () => ac.abort())
       const r = await runProcess(script, {
         cwd: ROOT,
-        env: process.env,
+        env: buildEnvWhitelist(ROOT),
         shell: true,
         timeoutMs: BASH_TIMEOUT_MS,
         timeoutLabel: 'shell 脚本超时',
