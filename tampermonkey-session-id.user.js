@@ -316,6 +316,13 @@
     return null
   }
 
+  function sendEnter(box) {
+    const opts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }
+    box.dispatchEvent(new KeyboardEvent('keydown', opts))
+    box.dispatchEvent(new KeyboardEvent('keypress', opts))
+    box.dispatchEvent(new KeyboardEvent('keyup', opts))
+  }
+
   function fillInput(box, text) {
     if (box.tagName === 'TEXTAREA' || box.tagName === 'INPUT') {
       // 受控组件：用原生 setter + dispatch input event
@@ -343,12 +350,16 @@
         return
       }
       fillInput(box, prompt)
-      // 短延迟后尝试点发送
+      // 短延迟后尝试点发送；找不到按钮则 Enter 兜底
       setTimeout(() => {
         const btn = findSendButton(box)
-        if (btn) btn.click()
-        else console.warn('[ai-runner] 未找到发送按钮，请手按 Enter')
-      }, 100)
+        if (btn) {
+          btn.click()
+        } else {
+          console.warn('[ai-runner] 未找到发送按钮，尝试 Enter 兜底')
+          sendEnter(box)
+        }
+      }, 250)
       return
     }
     if (d.type === 'ai-runner:stop') {
