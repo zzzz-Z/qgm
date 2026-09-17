@@ -261,8 +261,10 @@ function onSessionIdMessage(e: MessageEvent) {
           // 循环模式：状态机接管（不经编辑器覆盖策略）
           void onScriptArrival(item)
         } else {
-          // 手动模式：覆盖保护后填入编辑器
+          // 手动模式：覆盖保护后填入编辑器，并自动运行
           scriptInbox.applyToEditor(item)
+          runner.script.value = item.code
+          void runner.run()
         }
       }
       return
@@ -285,8 +287,13 @@ function onSessionIdMessage(e: MessageEvent) {
     const site = String(d.site || e.origin || '')
     const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined })
     if (item) {
-      if (isLoopActive.value) void onScriptArrival(item)
-      else scriptInbox.applyToEditor(item)
+      if (isLoopActive.value) {
+        void onScriptArrival(item)
+      } else {
+        scriptInbox.applyToEditor(item)
+        runner.script.value = item.code
+        void runner.run()
+      }
     }
     return
   }
@@ -405,6 +412,7 @@ const { toast } = useToast()
 const { stripComments, stripBlankLines, toggleStripComments, toggleStripBlankLines } = useCodeCleaner()
 const { smokeEnabled, gitCommit } = useRunner()
 const scriptInbox = useScriptInbox()
+const runner = useRunner()
 const { addTrace } = useTraceLog()
 // 注意：getActiveWin 是 useDeepseekUrl 模块级导出，已在 import 中带入；这里无需再解构
 </script>
