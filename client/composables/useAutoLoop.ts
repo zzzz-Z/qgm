@@ -183,6 +183,22 @@ export async function startLoop(goal: string): Promise<void> {
   loopState.value = 'running'
   persist()
 
+  const bfHook = await runHook('BeforeFill', {
+    loopId: loopId.value,
+    goal: g,
+    prompt: buildInitialPrompt(g),
+  })
+  if (bfHook.action === 'reject') {
+    await finish('hook-reject-before-fill', bfHook.reason || 'BeforeFill hook rejected')
+    return
+  }
+  if (bfHook.hooksRun > 0) {
+    addTrace({
+      kind: 'loop',
+      summary: `🪝 BeforeFill · ${bfHook.hooksRun} 个 hook 通过`,
+      payload: { loopId: loopId.value, loopRound: 0 },
+    })
+  }
   const ok = sendFill({ prompt: buildInitialPrompt(g) })
   if (!ok) {
     await finish('window-lost', 'AI 窗口已关闭或跨域发送失败')
@@ -525,6 +541,28 @@ async function afterRound(o: RoundOutcome): Promise<void> {
     return
   }
 
+  const asHook = await runHook('AfterScript', {
+    loopId: loopId.value,
+    round: loopRound.value,
+    lang: o.lang,
+    desc: o.desc,
+    exit: o.exit,
+    ok: o.ok,
+    stdout: o.stdout.slice(-2000),
+    stderr: o.stderr.slice(-2000),
+    changeCount: o.changeCount,
+  })
+  if (asHook.action === 'reject') {
+    await finish('hook-reject-after-script', asHook.reason || 'AfterScript hook rejected')
+    return
+  }
+  if (asHook.hooksRun > 0) {
+    addTrace({
+      kind: 'loop',
+      summary: `🪝 AfterScript · ${asHook.hooksRun} 个 hook 通过`,
+      payload: { loopId: loopId.value, loopRound: loopRound.value },
+    })
+  }
   loopState.value = 'feedback'
   persist()
 
@@ -540,6 +578,26 @@ async function afterRound(o: RoundOutcome): Promise<void> {
     return
   }
 
+  const arHook = await runHook('AfterResult', {
+    loopId: loopId.value,
+    round: loopRound.value,
+    lang: o.lang,
+    exit: o.exit,
+    ok: o.ok,
+    changeCount: o.changeCount,
+    tokenDelta,
+  })
+  if (arHook.action === 'reject') {
+    await finish('hook-reject-after-result', arHook.reason || 'AfterResult hook rejected')
+    return
+  }
+  if (arHook.hooksRun > 0) {
+    addTrace({
+      kind: 'loop',
+      summary: `🪝 AfterResult · ${arHook.hooksRun} 个 hook 通过`,
+      payload: { loopId: loopId.value, loopRound: loopRound.value },
+    })
+  }
   const feedback = buildFeedback(o, { nextRound: loopRound.value + 1, tokenDelta })
   const ok = sendFill({ prompt: feedback })
   if (!ok) { await finish('window-lost', '回填结果时 AI 窗口已关闭'); return }
