@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { useRunner } from './useRunner'
-import { getActiveWin, sendFill, sendStop } from './useDeepseekUrl'
+import { getActiveWin, sendFill, sendStop, sendRotate, sendNewSession } from './useDeepseekUrl'
 import { toast } from './useToast'
 import { useTraceLog } from './useTraceLog'
 import type { InboxItem } from './useScriptInbox'
@@ -36,6 +36,7 @@ export type LoopState =
   | 'feedback'     // 回填结果给 AI
   | 'stopped'      // 自然终止（done / 熔断）
   | 'interrupted'  // 用户中断（暂停/急停/回滚）
+  | 'handoff'
 
 export type StopRequest = 'none' | 'pause' | 'kill' | 'rollback'
 
@@ -610,6 +611,98 @@ export function currentLoopContext(): { loopId?: string, loopRound?: number } {
   return { loopId: loopId.value, loopRound: loopRound.value }
 }
 
+const SUMMARY_INSTRUCTION = [
+  '请将本次会话总结为以下格式，供新会话继续工作：',
+  '',
+  '# 任务',
+  '<当前任务目标>',
+  '',
+  '# 已完成',
+  '<已完成的工作要点>',
+  '',
+  '# 当前状态',
+  '<最后的工作状态 / 最近的执行结果>',
+  '',
+  '# 下一步',
+  '<待完成的工作>',
+  '',
+  '# 关键文件',
+  '<涉及的路径列表>',
+  '',
+  '只输出上述结构，不加其他文字、不加代码块。',
+].join('\n')
+export async function startHandoff(): Promise<void> {
+  if (!isLoopActive.value) { toast('没有进行中的循环', 'warn'); return }
+  if (loopState.value === 'handoff') { toast('已在轮转中', 'warn'); return }
+  loopState.value = 'handoff'
+  persist()
+  addTrace({ kind: 'loop', summary: '🔄 开始轮转 · 请求 AI 总结当前会话', payload: { loopId: loopId.value, loopRound: loopRound.value } })
+  const okSent = sendRotate({ instruction: SUMMARY_INSTRUCTION })
+  if (!okSent) { handoffFail('发送 rotate 失败（窗口已关？）'); return }
+  handoffArm('总结请求超时（30s）')
+}
+export async function onSummary(text: string, sessionId: string, degraded: boolean): Promise<void> {
+  if (loopState.value !== 'handoff') return
+  handoffDisarm()
+  const t = String(text || '').trim()
+  const finalSummary = t || localFallbackSummary()
+  const wasDegraded = degraded || !t
+  addTrace({
+    kind: 'loop',
+    summary: wasDegraded ? '⚠ 摘要降级为本地拼' : `✓ 已收到 AI 总结（${t.length} 字）`,
+    payload: { loopId: loopId.value, loopRound: loopRound.value, summary: finalSummary.slice(0, 2000) },
+  })
+  const okSent = sendNewSession({ summary: finalSummary })
+  if (!okSent) { handoffFail('发送 new-session 失败'); return }
+  handoffArm('新会话创建超时（30s）')
+}
+export async function onNewSessionCreated(url: string, id: string): Promise<void> {
+  if (loopState.value !== 'handoff') return
+  handoffDisarm()
+  addTrace({
+    kind: 'loop',
+    summary: `✓ 已切到新会话 · ${id || url}`,
+    payload: { loopId: loopId.value, loopRound: loopRound.value },
+  })
+  stopRequest.value = 'none'
+  loopState.value = 'waiting'
+  persist()
+  enterWaiting()
+  toast(`✓ 已切到新会话 · ${id || url}`, 'success', 5000)
+}
+function localFallbackSummary(): string {
+  const lines = [
+    '# 任务',
+    loopGoal.value || '（无）',
+    '',
+    '# 当前状态',
+    `已完成 ${loopRound.value} 轮；最后执行：${lastExec.value ? JSON.stringify(lastExec.value) : '无'}`,
+    '',
+    '# 下一步',
+    '继续推进目标',
+  ]
+  return lines.join('\n')
+}
+let handoffTimer: ReturnType<typeof setTimeout> | null = null
+function handoffArm(msg: string) {
+  handoffDisarm()
+  handoffTimer = setTimeout(() => { handoffFail(msg) }, 30_000)
+}
+function handoffDisarm() {
+  if (handoffTimer) { clearTimeout(handoffTimer); handoffTimer = null }
+}
+function handoffFail(reason: string) {
+  handoffDisarm()
+  stopReason.value = reason
+  loopState.value = 'stopped'
+  persist()
+  sendStop()
+  unbindKeyboard()
+  addTrace({ kind: 'loop', summary: `✗ 轮转失败 · ${reason}`, payload: { loopId: loopId.value, loopRound: loopRound.value } })
+  toast(`✗ 轮转失败：${reason}`, 'error', 6000)
+}
+
+
 export function useAutoLoop() {
   return {
     loopState, loopId, loopRound, loopGoal, loopStartCommit,
@@ -621,5 +714,6 @@ export function useAutoLoop() {
     tokenBudget: LOOP_TOKEN_BUDGET,
     startLoop, startTakeover, killCurrent, stopAndRollback, requestPause,
     onScriptArrival, onNonScriptReply, setTokenEstimate, currentLoopContext,
+    startHandoff, onSummary, onNewSessionCreated,
   }
 }

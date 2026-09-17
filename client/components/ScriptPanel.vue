@@ -22,6 +22,7 @@
             <button v-tooltip="'立即终止当前执行（不等本轮完成）'" class="loop-btn kill" @click="killCurrent">■ 停当前</button>
             <button v-tooltip="'Esc：当前轮跑完即停，不再发下一轮'" class="loop-btn" disabled>⏸ 暂停(Esc)</button>
             <button v-tooltip="'Ctrl+Esc：急停并 git reset 到循环起点'" class="loop-btn rollback" @click="stopAndRollback">⏹ 停止并回滚</button>
+            <button v-tooltip="'请求 AI 总结当前会话，切到新会话继续循环'" class="loop-btn" @click="startHandoff">🔄 轮转</button>
           </div>
         </template>
         <template v-else>
@@ -441,7 +442,7 @@ function takeLatestFromInbox() {
 const {
   loopState, loopRound, loopGoal, stopReason, toleranceLeft,
   tokenDelta, maxRounds, tokenBudget, isLoopActive,
-  startTakeover, killCurrent, stopAndRollback,
+  startTakeover, killCurrent, stopAndRollback, startHandoff,
 } = useAutoLoop()
 async function runAndTakeover() {
   if (!script.value.trim()) { toast('脚本为空', 'warn'); return }

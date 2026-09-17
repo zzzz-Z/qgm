@@ -9,7 +9,9 @@ import {
   currentLoopContext,
   isLoopActive,
   onNonScriptReply,
-  onScriptArrival
+  onScriptArrival,
+  onSummary,
+  onNewSessionCreated,
 } from './composables/useAutoLoop'
 import { useSessionManager } from './composables/useSessionManager'
 import { useToast } from './composables/useToast'
@@ -318,6 +320,19 @@ function onSessionIdMessage(e: MessageEvent) {
     return
   }
 
+  if (d.type === 'ai-runner:summary') {
+    const text = String(d.text || '')
+    const sid = String(d.sessionId || '')
+    const degraded = Boolean(d.degraded)
+    void onSummary(text, sid, degraded)
+    return
+  }
+  if (d.type === 'ai-runner:new-session-created') {
+    const url = String(d.url || '')
+    const id = String(d.id || '')
+    void onNewSessionCreated(url, id)
+    return
+  }
   if (d.type !== 'ai-runner:session-id' || !d.id) return
   if (!activeSessionId.value) return
   const idx = sessionHistory.value.findIndex(x => x.id === activeSessionId.value)

@@ -237,6 +237,17 @@
       replyDebounce = null
       try {
         if (!window.opener || window.opener.closed) return
+        if (handoffMode === 'waiting-summary') {
+          const replyText = extractLatestReplyText()
+          if (replyText && replyText.length > 30 && replyText === handoffReplyText) {
+            handoffMode = 'off'
+            handoffReplyText = ''
+            window.opener.postMessage({ type: 'ai-runner:summary', text: replyText, sessionId: extractId(), degraded: false }, '*')
+          } else if (replyText && replyText.length > 30) {
+            handoffReplyText = replyText
+          }
+          return
+        }
         const s = extractLatestScript()
         if (s && !seenHashes.has(s.hash)) {
           seenHashes.add(s.hash)
@@ -296,6 +307,22 @@
         return true
       }
     } catch (e) { /* ignore */ }
+    return false
+  }
+  let handoffMode = 'off'
+  let handoffReplyText = ''
+  function findNewChatButton() {
+    const all = Array.from(document.querySelectorAll('button, a'))
+    return all.find(el => {
+      const lbl = (el.getAttribute('aria-label') || '') + ' ' + (el.textContent || '') + ' ' + (el.getAttribute('title') || '')
+      return /新建对话|新对话|新建聊天|new\s*chat|new\s*conversation/i.test(lbl)
+    }) || null
+  }
+  function clickNewSession() {
+    const btn = findNewChatButton()
+    if (btn && !btn.disabled) {
+      try { btn.click(); return true } catch { /* fallthrough */ }
+    }
     return false
   }
   function findInputBox() {
@@ -374,6 +401,45 @@
           sendEnter(box)
         }
       }, 250)
+      return
+    }
+    if (d.type === 'ai-runner:rotate') {
+      const instruction = String(d.instruction || '')
+      if (!instruction) return
+      const box = findInputBox()
+      if (!box) { console.warn('[ai-runner] rotate: 未找到输入框'); return }
+      handoffReplyText = ''
+      handoffMode = 'waiting-summary'
+      fillInput(box, instruction)
+      setTimeout(() => {
+        const btn = findSendButton(box)
+        if (btn) btn.click()
+        else sendEnter(box)
+      }, 250)
+      return
+    }
+    if (d.type === 'ai-runner:new-session') {
+      const summary = String(d.summary || '')
+      const clicked = clickNewSession()
+      if (clicked) {
+        setTimeout(() => {
+          const box = findInputBox()
+          if (!box) {
+            window.opener.postMessage({ type: 'ai-runner:new-session-created', url: location.href, id: extractId() }, '*')
+            return
+          }
+          const prefix = '这是上一个会话的上下文总结，请基于此继续工作：\n'
+          fillInput(box, prefix + summary)
+          setTimeout(() => {
+            const btn = findSendButton(box)
+            if (btn) btn.click()
+            else sendEnter(box)
+          }, 250)
+          window.opener.postMessage({ type: 'ai-runner:new-session-created', url: location.href, id: extractId() }, '*')
+        }, 1500)
+      } else {
+        window.opener.postMessage({ type: 'ai-runner:new-session-created', url: '', id: '', degraded: true }, '*')
+      }
       return
     }
     if (d.type === 'ai-runner:stop') {

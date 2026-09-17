@@ -177,6 +177,29 @@ export function sendStop(): boolean {
   }
 }
 
+export interface RotatePayload { instruction: string }
+export function sendRotate(payload: RotatePayload): boolean {
+  const win = activeWin
+  if (!win || win.closed) { activeWin = null; return false }
+  const origin = targetOrigin()
+  if (!origin) return false
+  try {
+    win.postMessage({ type: 'ai-runner:rotate', ...payload }, origin)
+    return true
+  } catch { return false }
+}
+export interface NewSessionPayload { summary: string }
+export function sendNewSession(payload: NewSessionPayload): boolean {
+  const win = activeWin
+  if (!win || win.closed) { activeWin = null; return false }
+  const origin = targetOrigin()
+  if (!origin) return false
+  try {
+    win.postMessage({ type: 'ai-runner:new-session', ...payload }, origin)
+    return true
+  } catch { return false }
+}
+
 export type FillResult = 'sent' | 'opened' | 'failed'
 
 export async function copyAndFill(prompt: string): Promise<FillResult> {
