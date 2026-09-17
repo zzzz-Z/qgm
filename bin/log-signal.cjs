@@ -4,7 +4,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-const SIGNALS = path.join(ROOT, '.ai/signals.md')
+const SIGNALS = path.join(ROOT, '.ai-runner/signals.md')
 const TTY = Boolean(process.stdout.isTTY)
 const c = (n, s) => (TTY ? `\u001B[${n}m${s}\u001B[0m` : s)
 const ok = s => console.log(c(32, '✓'), s)
