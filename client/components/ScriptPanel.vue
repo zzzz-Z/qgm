@@ -1392,7 +1392,7 @@ function onHtmlDrop(e: DragEvent) {
 
 /* ============ 编辑器 ============ */
 .editor {
-  flex: 1 1 0;
+  flex: 4 1 0;
   min-height: 100px;
   transition:
     border-color 0.15s,
@@ -1562,11 +1562,14 @@ function onHtmlDrop(e: DragEvent) {
   font-weight: 600;
 }
 .primary-btn.takeover {
-  background: #d97706;
-  box-shadow: 0 1px 2px rgb(217 119 6 / 30%);
+  background: var(--surface);
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  box-shadow: none;
 }
 .primary-btn.takeover:hover:not(:disabled) {
-  background: #b45309;
+  background: var(--primary-bg);
+  color: var(--primary);
 }
 .primary-btn.run:hover:not(:disabled) {
   background: var(--primary-hover, #1d4ed8);
@@ -1764,8 +1767,8 @@ function onHtmlDrop(e: DragEvent) {
 
 /* ============ 终端 ============ */
 .terminal {
-  flex: 3 1 0;
-  min-height: 240px;
+  flex: 6 1 0;
+  min-height: 200px;
   background: #1e1e1e;
   border-color: #2a2a2a;
 }
@@ -2349,6 +2352,12 @@ function onHtmlDrop(e: DragEvent) {
   min-height: 0;
   max-height: 44px;
   overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-left-style: solid;
+  border-left-color: var(--border-2);
+  border-radius: 8px;
 }
 .loop-bar .loop-status {
   flex-shrink: 0;
@@ -2362,10 +2371,10 @@ function onHtmlDrop(e: DragEvent) {
   flex-shrink: 0;
   margin-left: auto;
 }
-.loop-bar.is-waiting, .loop-bar.is-running { border-left: 3px solid #409eff; }
-.loop-bar.is-executing, .loop-bar.is-parsing, .loop-bar.is-feedback { border-left: 3px solid #e6a23c; }
-.loop-bar.is-interrupted { border-left: 3px solid #f56c6c; }
-.loop-bar.is-stopped { border-left: 3px solid #909399; }
+.loop-bar.is-waiting, .loop-bar.is-running { border-left-color: #409eff; }
+.loop-bar.is-executing, .loop-bar.is-parsing, .loop-bar.is-feedback { border-left-color: #e6a23c; }
+.loop-bar.is-interrupted { border-left-color: var(--danger); }
+.loop-bar.is-stopped { border-left-color: var(--text-3); }
 .loop-goal-input {
   flex: 1 1 320px;
   min-width: 200px;
