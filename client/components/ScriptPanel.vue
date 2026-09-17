@@ -51,14 +51,6 @@
           <span class="file-badge">script.cjs</span>
           <span class="meta">{{ lineCount }} 行 · {{ script.length }} 字符</span>
           <div class="bar-actions">
-            <label v-tooltip="'脚本成功后无头开 / 和 /__ai/ 抓 pageerror / console.error / 4xx-5xx'" class="git-toggle">
-              <input v-model="smokeEnabled" type="checkbox">
-              <span>冒烟</span>
-            </label>
-            <label v-tooltip="'运行前自动 git add -A + commit（仅 git 仓库生效）'" class="git-toggle">
-              <input v-model="gitCommit" type="checkbox">
-              <span>Git 保护</span>
-            </label>
             <span v-tooltip="'运行 / 保存'" class="kbd-hint">
               <kbd>⌘</kbd><span class="slash">/</span><kbd>Ctrl</kbd><span class="plus">+</span><kbd>↵</kbd>
             </span>
@@ -401,7 +393,7 @@ const typescript: any = (typescriptNs as any).default ?? typescriptNs
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('typescript', typescript)
 
-const { script, running, result, changes, rolling, busyAll, persistWarning, gitCommit, smokeEnabled, baselineRunId, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save } = useRunner()
+const { script, running, result, changes, rolling, busyAll, persistWarning, baselineRunId, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save } = useRunner()
 const { inbox, consume: consumeInbox } = useScriptInbox()
 /** 当前 inbox 待取用条数（仅展示用，避免在模板里直接 inbox.value.length 触发响应式开销） */
 const pendingCount = computed(() => inbox.value.length)

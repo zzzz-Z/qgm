@@ -15,6 +15,7 @@ import { useSessionManager } from './composables/useSessionManager'
 import { useToast } from './composables/useToast'
 import { useTraceLog } from './composables/useTraceLog'
 import { useCodeCleaner } from './composables/useCodeCleaner'
+import { useRunner } from './composables/useRunner'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
 
@@ -402,6 +403,7 @@ onBeforeUnmount(() => {
 const { sessionId, resetSession, generateHandoffSummary } = useSessionManager()
 const { toast } = useToast()
 const { stripComments, stripBlankLines, toggleStripComments, toggleStripBlankLines } = useCodeCleaner()
+const { smokeEnabled, gitCommit } = useRunner()
 const scriptInbox = useScriptInbox()
 const { addTrace } = useTraceLog()
 // 注意：getActiveWin 是 useDeepseekUrl 模块级导出，已在 import 中带入；这里无需再解构
@@ -473,6 +475,14 @@ const { addTrace } = useTraceLog()
         <label v-tooltip="'发送前去掉空行'" class="settings-row">
           <span class="settings-label">去空行</span>
           <input type="checkbox" :checked="stripBlankLines" @change="toggleStripBlankLines(($event.target as HTMLInputElement).checked)">
+        </label>
+        <label v-tooltip="'脚本运行成功后无头访问 / 和 /__ai/，收集 pageerror / console.error / HTTP 4xx-5xx'" class="settings-row">
+          <span class="settings-label">运行脚本冒烟</span>
+          <input v-model="smokeEnabled" type="checkbox">
+        </label>
+        <label v-tooltip="'脚本运行前自动 git add -A && commit（仅 git 仓库生效）'" class="settings-row">
+          <span class="settings-label">Git 保护</span>
+          <input v-model="gitCommit" type="checkbox">
         </label>
       </div>
     </div>
