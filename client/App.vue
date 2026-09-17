@@ -11,6 +11,7 @@ import {
     isFromCurrentLoop,
     onNonScriptReply,
     onScriptArrival,
+    resumeLoop,
     setActiveSessionIdGetter,
     setTokenEstimate,
     onSummary,
@@ -428,6 +429,8 @@ onMounted(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(window as any).__aiRunnerMock = {
       startTakeover,
+      resumeLoop,
+      setTokenEstimate,
       dispatchReply: (over: Record<string, unknown>) => window.dispatchEvent(new MessageEvent('message', {
         data: { type: 'ai-runner:reply', site: 'https://chat.deepseek.com', ...over },
         origin: 'https://chat.deepseek.com',
