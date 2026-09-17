@@ -8,3 +8,4 @@ dist/
 .ai-runner/config.json
 .DS_Store
 *.log
+.trae/
