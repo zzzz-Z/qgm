@@ -240,7 +240,7 @@ function onSessionIdMessage(e: MessageEvent) {
     const kind = String(d.kind || '')
     if (kind === 'script') {
       const code = String(d.code || '')
-      const lang = (d.lang === 'bash' ? 'bash' : 'cjs') as 'cjs' | 'bash'
+      const lang = (d.lang === 'bash' ? 'bash' : d.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
       const site = String(d.site || e.origin || '')
       const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined })
       if (item) {
@@ -285,7 +285,7 @@ function onSessionIdMessage(e: MessageEvent) {
   if (d.type === 'ai-runner:script') {
     if (!isFromActiveAiSite(e)) return
     const code = String(d.code || '')
-    const lang = (d.lang === 'bash' ? 'bash' : 'cjs') as 'cjs' | 'bash'
+    const lang = (d.lang === 'bash' ? 'bash' : d.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
     const site = String(d.site || e.origin || '')
     const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined })
     if (item) {

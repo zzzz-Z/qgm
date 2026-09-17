@@ -158,7 +158,7 @@
     const t = String(s || '').trim().toLowerCase()
     if (!t || t.length > 24) return null
     if (/^(bash|sh|shell|zsh)\b/.test(t)) return 'bash'
-    if (/^(cjs|commonjs|node|nodejs)\b/.test(t)) return 'cjs'
+    if (/^(js|javascript|cjs|commonjs|node|nodejs)\b/.test(t)) return 'js'
     return null
   }
   function guessLangFromDom(pre) {
@@ -180,10 +180,10 @@
   function guessLangFromContent(text) {
     const head = text.slice(0, 300)
     if (/^#!\s*\/usr\/bin\/env\s+bash/.test(head) || /^#!\s*\/bin\/bash/.test(head)) return 'bash'
-    if (/^#!\s*\/usr\/bin\/env\s+node/.test(head)) return 'cjs'
-    if (/\brequire\s*\(/.test(head)) return 'cjs'
-    if (/\bmodule\.exports\b/.test(head)) return 'cjs'
-    if (/\bprocess\.(exit|argv|env)\b/.test(head)) return 'cjs'
+    if (/^#!\s*\/usr\/bin\/env\s+node/.test(head)) return 'js'
+    if (/\brequire\s*\(/.test(head)) return 'js'
+    if (/\bmodule\.exports\b/.test(head)) return 'js'
+    if (/\bprocess\.(exit|argv|env)\b/.test(head)) return 'js'
     if (/^\s*(echo|cd\s|ls\s|mkdir|git\s|pnpm\s|npm\s|yarn\s|rm\s)/m.test(head)) return 'bash'
     if (/\bif\s+\[\s/.test(head) || /\bfi\b/.test(head) || /\$\(/.test(head)) return 'bash'
     return null

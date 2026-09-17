@@ -23,7 +23,7 @@ export interface TraceEntry {
     /** 解析自脚本首部 @why */
     why?: string
     /** 脚本语言 cjs/bash（manual 模式 run 时填） */
-    lang?: 'cjs' | 'bash'
+    lang?: 'js' | 'cjs' | 'bash'
     /** 脚本内容 hash 前 8 位（用于去重 / 跨轮对比） */
     hash?: string
     /** 归属循环 ID（P2 useAutoLoop 写入；P1 manual 模式留空） */

@@ -7,7 +7,7 @@ export interface InboxItem {
   /** 脚本内容（不含 ```fence```） */
   code: string
   /** cjs | bash */
-  lang: 'cjs' | 'bash'
+  lang: 'js' | 'cjs' | 'bash'
   /** 来源站点 origin（用于回溯） */
   site: string
   /** SHA-256 前 8 位（去重） */
@@ -38,9 +38,9 @@ function sha256Short(text: string): string {
  * 解析 AI 回复中首部的 @desc / @why 元注释（与 src/index.ts parseScriptMeta 对齐）。
  * cjs 用 //，bash 用 #。
  */
-function parseMeta(code: string, lang: 'cjs' | 'bash'): { desc: string, why: string } {
+function parseMeta(code: string, lang: 'js' | 'cjs' | 'bash'): { desc: string, why: string } {
   const out = { desc: '', why: '' }
-  const re = lang === 'cjs'
+  const re = (lang === 'cjs' || lang === 'js')
     ? /^\s*\/\/\s*@(desc|why)\s*:\s*(.+)$/gm
     : /^\s*#\s*@(desc|why)\s*:\s*(.+)$/gm
   let m: RegExpExecArray | null
@@ -53,7 +53,7 @@ function parseMeta(code: string, lang: 'cjs' | 'bash'): { desc: string, why: str
 
 export interface PushOptions {
   code: string
-  lang: 'cjs' | 'bash'
+  lang: 'js' | 'cjs' | 'bash'
   site: string
   /** 显式 hash（油猴已算好时传入），否则本函数算 */
   hash?: string

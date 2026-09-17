@@ -65,8 +65,8 @@ export function buildInitialPrompt(goal: string): string {
   return String(goal).trim() + '\n' + [
     '',
     '【输出契约（必须严格遵守）】',
-    '1. 每次只回复一个代码块，语言标签只能是 cjs 或 bash',
-    '2. 首行 shebang：cjs 用 #!/usr/bin/env node，bash 用 #!/usr/bin/env bash；紧接 //（或 #）@desc 与 @why 注释',
+    '1. 每次只回复一个代码块，语言标签只能是 js 或 bash（cjs 兼容，等价 js）',
+    '2. 首行 shebang：js 用 #!/usr/bin/env node，bash 用 #!/usr/bin/env bash；紧接 //（或 #）@desc 与 @why 注释',
     '3. 脚本内禁止出现三个反引号；bash 禁止 rm -rf/sudo/curl|sh/git push -f/git reset --hard 等破坏性命令',
     '4. 每轮必须推进，禁止重复上一轮脚本',
     `5. 最多 ${LOOP_MAX_ROUNDS} 轮；任务完成时只回复 DONE（严格大写、无其他字符）`,
@@ -79,7 +79,7 @@ export function buildInitialPrompt(goal: string): string {
 export function buildRetryPrompt(detail: string): string {
   return [
     `【格式不符，重试一次】${detail}。`,
-    '请重新输出：且仅输出一个 ```cjs 或 ```bash 代码块，首行 shebang，紧接 @desc/@why 注释。',
+    '请重新输出：且仅输出一个 ```js 或 ```bash 代码块，首行 shebang，紧接 @desc/@why 注释。',
     '若任务实际已完成，请只回复 DONE。',
   ].join('\n')
 }
@@ -88,7 +88,7 @@ export function buildRetryPrompt(detail: string): string {
 // 轮后回填：把执行结果结构化回喂给 AI（v6 §6.5）
 // ----------------------------------------------------------------------------
 export interface FeedbackOutcome {
-  lang: 'cjs' | 'bash'
+  lang: 'js' | 'cjs' | 'bash'
   desc: string
   exit: number
   ok: boolean
@@ -111,7 +111,7 @@ export function buildFeedback(o: FeedbackOutcome, ctx: FeedbackContext): string 
     `类型: ${o.lang}`,
     o.desc ? `说明: ${o.desc}` : '',
     `退出码: ${o.exit}（${o.ok ? '成功' : '失败'}）`,
-    o.lang === 'cjs'
+    o.lang !== 'bash'
       ? `变更: ${o.changeCount} 个文件${o.changedFiles.length ? '：' + o.changedFiles.slice(0, 10).join(', ') : ''}`
       : '',
     o.stdout ? `输出(尾 ${LOOP_FEEDBACK_TAIL} 字):\n${tailClip(o.stdout)}` : '',

@@ -306,7 +306,7 @@ async function executeItem(item: InboxItem): Promise<void> {
   const startedAt = Date.now()
   const runner = useRunner()
 
-  if (item.lang === 'cjs') {
+  if (item.lang !== 'bash') {
     runner.script.value = item.code
     await runner.run()
     const r = runner.result.value
@@ -319,19 +319,19 @@ async function executeItem(item: InboxItem): Promise<void> {
       return
     }
     const changeCount = runner.changes.value.length
-    lastExec.value = { lang: 'cjs', exit: r.code, changes: changeCount, durationMs: Date.now() - startedAt }
+    lastExec.value = { lang: item.lang, exit: r.code, changes: changeCount, durationMs: Date.now() - startedAt }
     addTrace({
       kind: 'loop',
       summary: `第 ${loopRound.value} 轮执行 · cjs · exit ${r.code} · ${changeCount} 文件变更`,
       payload: {
         loopId: loopId.value, loopRound: loopRound.value,
-        desc: item.desc, why: item.why, lang: 'cjs', hash: item.hash,
+        desc: item.desc, why: item.why, lang: item.lang, hash: item.hash,
         exit: r.code, ok: r.ok,
         changes: runner.changes.value.map(c => ({ path: c.path, type: c.type })),
       },
     })
     await afterRound({
-      lang: 'cjs', desc: item.desc, exit: r.code, ok: r.ok,
+      lang: item.lang, desc: item.desc, exit: r.code, ok: r.ok,
       stdout: r.stdout || '', stderr: r.stderr || '',
       changeCount,
       changedFiles: runner.changes.value.map(c => c.path),
@@ -423,7 +423,7 @@ async function runBash(cmd: string): Promise<BashExecResult> {
 // 轮后：反馈 → 熔断检查 → 下一轮
 // ============================================================================
 interface RoundOutcome {
-  lang: 'cjs' | 'bash', desc: string, exit: number, ok: boolean
+  lang: 'js' | 'cjs' | 'bash', desc: string, exit: number, ok: boolean
   stdout: string, stderr: string, changeCount: number, changedFiles: string[]
 }
 

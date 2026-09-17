@@ -55,7 +55,7 @@
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
               </svg>
-              <span>{{ copied ? '已发送' : `复制并提问` }}</span>
+              <span>{{ copied ? '已发送' : `发送给 AI` }}</span>
             </button>
             <button
               v-tooltip="asking ? '正在请求 API' : '直接调用 API 询问（不打开网页）'"
@@ -1358,7 +1358,7 @@ watch(running, (v) => {
       const desc = r.scriptDesc || (descMatch ? descMatch[1].trim() : '')
       const whyMatch = script.value.match(/^\s*(?:\/\/|#)\s*@why\s*:\s*(.+)$/m)
       const why = r.scriptWhy || (whyMatch ? whyMatch[1].trim() : '')
-      const lang: 'cjs' | 'bash' = /^\s*#\s*(@desc|@why)/m.test(script.value) ? 'bash' : 'cjs'
+      const lang: 'js' | 'bash' = /^\s*#\s*(@desc|@why)/m.test(script.value) ? 'bash' : 'js'
       // 计算 hash（与油猴 / useScriptInbox 一致：FNV-1a 8 hex）
       let hash = ''
       try {
@@ -2174,8 +2174,6 @@ function onHtmlDrop(e: DragEvent) {
 .term-live-err {
   color: #f48771;
   background: rgb(248 81 73 / 8%);
-  max-height: 360px;
-  overflow: auto;
 }
 .run-ico {
   display: inline-block;
@@ -2296,10 +2294,6 @@ function onHtmlDrop(e: DragEvent) {
 }
 .term-content.err {
   color: #f48771;
-  max-height: 400px;
-  /* no-h-scroll */
-  overflow-x: hidden;
-  overflow-y: auto;
 }
 .term-content :deep(.hljs-keyword),
 .term-content :deep(.hljs-literal) {
@@ -2339,13 +2333,6 @@ function onHtmlDrop(e: DragEvent) {
 }
 .term-content .hl-info {
   color: #60a5fa;
-}
-.term-content::-webkit-scrollbar {
-  width: 8px;
-}
-.term-content::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 12%);
-  border-radius: 4px;
 }
 
 /* ============ Side ============ */
