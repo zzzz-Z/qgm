@@ -339,8 +339,9 @@ export async function handleFilesRoutes(req: IncomingMessage, res: ServerRespons
     if (mode === 'ast') {
       const astMax = Math.min(Number(body?.max) || 100, 500)
       const ar = await runAstGrep(pattern, lang, body?.glob || null, astMax)
-      if (ar.error) return sendJSON(res, { error: ar.error }, 400)
-      return sendJSON(res, { results: ar.results, truncated: ar.results.length >= astMax })
+      if (ar.error) { sendJSON(res, { error: ar.error }, 400); return true }
+      sendJSON(res, { results: ar.results, truncated: ar.results.length >= astMax })
+      return true
     }
     let re: RegExp
     try { re = new RegExp(pattern) } catch (e) { sendJSON(res, { error: String(e) }, 400); return true }
