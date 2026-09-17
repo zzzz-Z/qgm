@@ -1649,6 +1649,16 @@ function onHtmlDrop(e: DragEvent) {
   border-color: rgb(255 255 255 / 26%);
   color: #e0e5eb;
 }
+.term-btn.ask-panel {
+  color: var(--primary, #2563eb);
+  border-color: var(--primary, #2563eb);
+  background: var(--primary-bg, #eaf2ff);
+}
+.term-btn.ask-panel:hover:not(:disabled) {
+  background: var(--primary, #2563eb);
+  border-color: var(--primary, #2563eb);
+  color: #fff;
+}
 
 .ghost-btn.apply-ask {
   margin-left: auto;

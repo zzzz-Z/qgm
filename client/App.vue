@@ -415,44 +415,6 @@ const { addTrace } = useTraceLog()
       <span class="logo">⚡</span>
       <h1>AI Runner</h1>
       <span class="env">dev</span>
-      <button
-        v-if="isEmbedded"
-        v-tooltip="'收起 AI Runner 面板（内嵌模式）'"
-        class="collapse-btn"
-        @click="collapsePanel"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="11 17 6 12 11 7" />
-          <polyline points="18 17 13 12 18 7" />
-        </svg>
-        <span>收起</span>
-      </button>
-    </div>
-    <div class="hdr-right">
-      <button
-        v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
-        class="theme-toggle"
-        @click="theme = theme === 'dark' ? 'light' : 'dark'"
-      >
-        <span v-if="theme === 'dark'">☀</span>
-        <span v-else>☾</span>
-      </button>
-      <button v-tooltip="settingsOpen ? '关闭设置' : '打开设置（去注释 / 去空行）'" class="settings-toggle" @click="settingsOpen = !settingsOpen">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-        </svg>
-      </button>
-      <button
-        v-tooltip="'打开「问 AI」面板（拖文件 + 写问题 → 拼 prompt）'"
-        class="ask-open-btn"
-        @click="askOpen = true"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
-        <span>问 AI</span>
-      </button>
       <div class="ds-url">
         <span v-tooltip="headerUrl || '（未选中会话）'" class="ds-value-static">{{ headerUrl || '（未选中会话）' }}</span>
       </div>
@@ -1724,25 +1686,6 @@ const { addTrace } = useTraceLog()
 }
 
 
-.ask-open-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 12px;
-  border: 1px solid var(--primary);
-  border-radius: 6px;
-  background: var(--primary-bg);
-  color: var(--primary);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: 0.12s;
-  font-family: inherit;
-}
-.ask-open-btn:hover {
-  background: var(--primary);
-  color: #fff;
-}
 .ask-modal-mask {
   position: fixed;
   inset: 0;
