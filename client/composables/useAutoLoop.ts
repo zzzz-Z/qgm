@@ -423,7 +423,12 @@ async function runBash(cmd: string): Promise<BashExecResult> {
     const res = await fetch('/__ai/exec', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cmd }),
+      body: JSON.stringify({ cmd, bashPolicy: (() => {
+        try {
+          const p = localStorage.getItem('__ai_bash_policy') || 'on-request'
+          return p === 'on-request' ? 'never' : p
+        } catch { return 'never' }
+      })() }),
     })
     if (!res.ok) {
       let detail: any = {}

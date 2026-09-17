@@ -38,7 +38,7 @@ interface ClaimMismatch {
   extra: string[]
 }
 
-async function runScript(scriptPath: string, timeoutMs = 60_000, signal?: AbortSignal, overlayPath?: string, toolLogPath?: string, onChunk?: (stream: 'stdout' | 'stderr', data: string) => void): Promise<RunResult> {
+async function runScript(scriptPath: string, timeoutMs = 60_000, signal?: AbortSignal, overlayPath?: string, toolLogPath?: string, onChunk?: (stream: 'stdout' | 'stderr', data: string) => void, sandbox?: string): Promise<RunResult> {
   // 全局错误捕获 wrapper（console 走原生输出，拦截器负责文件 API，无需包裹）
   const wrapperCode = `
     process.on('uncaughtException', (e) => {
@@ -60,6 +60,7 @@ async function runScript(scriptPath: string, timeoutMs = 60_000, signal?: AbortS
       ...process.env,
       AI_RUNNER_OVERLAY: overlayPath || '',
       AI_RUNNER_TOOL_LOG: toolLogPath || '',
+      AI_RUNNER_SANDBOX: sandbox || 'read-only',
     },
     timeoutMs,
     signal,
@@ -409,14 +410,21 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   //   3. 120s 超时 + SIGTERM→SIGKILL
   //   4. 跑前 git status 检查：干净 → 记录 rollbackRef；脏 → 400 + { dirty, files } 让用户决策
   if (req.method === 'POST' && pathname === '/exec') {
-    const body = parseJSON<{ cmd?: string, allowDirty?: boolean }>(await readBody(req))
+    const body = parseJSON<{ cmd?: string, allowDirty?: boolean, bashPolicy?: string }>(await readBody(req))
     const cmd = String(body?.cmd || '').trim()
     if (!cmd) return sendJSON(res, { error: 'cmd 为空' }, 400)
 
     // 1. 黑名单
     const hit = checkBashBlacklist(cmd)
     if (hit) {
-      return sendJSON(res, { error: `命中黑名单：${hit}`, blacklistHit: hit }, 400)
+      const policy = String(body?.bashPolicy || 'always')
+      if (policy === 'never') {
+        return sendJSON(res, { error: `命中黑名单（never 策略）：${hit}`, blacklistHit: hit }, 400)
+      }
+      if (policy === 'on-request') {
+        return sendJSON(res, { error: '需要确认', needsApproval: true, blacklistHit: hit, cmd }, 400)
+      }
+    }
     }
 
     // 2. git 跑前检查
@@ -558,7 +566,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     ensureDirs()
     fs.mkdirSync(path.join(ROOT, '.ai-runner/tmp'), { recursive: true })
     const startedAt = Date.now()
-    const body = parseJSON<{ script?: string, gitCommit?: boolean, gitVerify?: boolean }>(await readBody(req))
+    const body = parseJSON<{ script?: string, gitCommit?: boolean, gitVerify?: boolean, sandbox?: string }>(await readBody(req))
+    const sandboxRaw = String(body?.sandbox || 'read-only')
+    const sandbox = ['read-only', 'workspace-write', 'full'].includes(sandboxRaw) ? sandboxRaw : 'read-only'
     const script = String(body?.script || '').trim()
     const gitCommit = Boolean(body?.gitCommit)
     const gitVerify = Boolean(body?.gitVerify)
@@ -622,7 +632,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const ac = new AbortController()
     req.on('aborted', () => ac.abort())
     const result = await runScript(scriptPath, 60_000, ac.signal, overlayPath, toolLogPath, (stream, data) => {
-      writeFrame({ type: 'chunk', stream, data })
+      writeFrame({ type: 'chunk', stream, data }, sandbox)
     })
     const scriptOk = result.code === 0
     const tools = await readToolLogWithRetry(toolLogPath)

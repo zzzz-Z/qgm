@@ -20,6 +20,25 @@ const norm = (p) => {
 }
 const b64 = (b) => b.toString('base64')
 
+const SANDBOX = process.env.AI_RUNNER_SANDBOX || 'read-only'
+const __SANDBOX_ROOT = process.cwd()
+function inSandboxRoot(p) {
+  try {
+    const rel = path.relative(__SANDBOX_ROOT, norm(p))
+    return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel)
+  } catch { return false }
+}
+function sandboxBypass(p) {
+  if (SANDBOX === 'full') return true
+  if (SANDBOX === 'workspace-write' && inSandboxRoot(p)) return true
+  return false
+}
+function sandboxReject(p) {
+  if (SANDBOX === 'read-only') return false
+  if (SANDBOX === 'workspace-write' && !inSandboxRoot(p)) return true
+  return false
+}
+
 const orig = {
   writeFileSync: fs.writeFileSync,
   readFileSync: fs.readFileSync,
@@ -97,11 +116,23 @@ function readPrev(abs) {
 }
 
 function recordWrite(p, data) {
+  if (sandboxReject(p)) throw eacces(p)
+  if (sandboxBypass(p)) {
+    const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
+    return orig.writeFileSync(p, buf)
+  }
   const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
   overlay.set(norm(p), { op: 'write', data: buf, dir: false })
   logTool('write', p, buf.length)
 }
 function recordDelete(p, opts = {}) {
+  if (sandboxReject(p)) throw eacces(p)
+  if (sandboxBypass(p)) {
+    const absPath = norm(p)
+    const dirFlag = Boolean(opts.dir) || (orig.existsSync(absPath) && orig.statSync(absPath).isDirectory())
+    if (dirFlag) return orig.rmSync(absPath, { recursive: true, force: true })
+    return orig.unlinkSync(absPath)
+  }
   const abs = norm(p)
   let isDir = Boolean(opts.dir)
   if (!isDir) {
@@ -130,8 +161,15 @@ fs.appendFileSync = function (p, data) {
 fs.unlinkSync = function (p) { recordDelete(p) }
 fs.rmSync = function (p, opts) { recordDelete(p, { dir: Boolean(opts && opts.recursive) }) }
 fs.rmdirSync = function (p) { recordDelete(p, { dir: true }) }
-fs.mkdirSync = function () {}
+fs.mkdirSync = function (p, opts) {
+  if (SANDBOX === 'read-only') return
+  if (sandboxReject(p)) throw eacces(p)
+  return orig.mkdirSync(p, opts)
+}
 fs.renameSync = function (from, to) {
+  if (sandboxReject(from)) throw eacces(from)
+  if (sandboxReject(to)) throw eacces(to)
+  if (sandboxBypass(from) && sandboxBypass(to)) return orig.renameSync(from, to)
   const src = norm(from)
   const entry = overlay.get(src)
   if (entry) {
@@ -146,6 +184,9 @@ fs.renameSync = function (from, to) {
   }
 }
 fs.copyFileSync = function (from, to) {
+  if (sandboxReject(from)) throw eacces(from)
+  if (sandboxReject(to)) throw eacces(to)
+  if (sandboxBypass(to)) return orig.copyFileSync(from, to)
   const src = norm(from)
   const entry = overlay.get(src)
   if (entry && entry.op === 'write' && entry.data) {
@@ -160,6 +201,9 @@ fs.copyFileSync = function (from, to) {
   }
 }
 fs.cpSync = function (from, to, opts) {
+  if (sandboxReject(from)) throw eacces(from)
+  if (sandboxReject(to)) throw eacces(to)
+  if (sandboxBypass(to)) return orig.cpSync(from, to, opts)
   const src = norm(from)
   const dst = norm(to)
   let st
@@ -256,6 +300,8 @@ const fakeFds = new Map()
 fs.openSync = function (p, flags, mode) {
   const abs = norm(p)
   if (isWriteFlags(flags)) {
+    if (sandboxReject(p)) throw eacces(p)
+    if (sandboxBypass(p)) return orig.openSync(p, flags, mode)
     const f = String(flags || 'w')
     const append = f.includes('a')
     const trunc = f[0] === 'w'
@@ -342,6 +388,8 @@ fs.readSync = function (fd, buffer, offset, length, position) {
 // ----------------------------------------------------------------------------
 
 fs.createWriteStream = function (p, opts) {
+  if (sandboxReject(p)) throw eacces(p)
+  if (sandboxBypass(p)) return orig.createWriteStream(p, opts)
   const abs = norm(p)
   const flags = (typeof opts === 'string' ? opts : opts && opts.flags) || 'w'
   const enc = (opts && typeof opts === 'object' && opts.encoding) || undefined

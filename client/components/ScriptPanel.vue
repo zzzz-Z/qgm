@@ -763,7 +763,7 @@ async function buildAiPrompt() {
 // URL 从全局 composable 读，在 App.vue 的 header 里配置
 /* __ai_removed: deepseekUrl ref */
 const { stripComments, stripBlankLines } = useCodeCleaner()
-const { toast } = useToast()
+const { toast, confirmDialog } = useToast()
 const { addTrace } = useTraceLog()
 const { trackMessage } = useSessionManager()
 
@@ -900,6 +900,15 @@ ${question}`
   startAiWaiting()
   setTimeout(() => { statusText.value = ''; statusClass.value = '' }, 1500)
 }
+let execPolicyOverride: string | null = null
+async function execCmdInternal(cmd: string, policy: string, cmdText: string): Promise<void> {
+  execPolicyOverride = policy
+  try {
+    await execCmd(cmdText)
+  } finally {
+    execPolicyOverride = null
+  }
+}
 async function execCmd(text: string) {
   const raw = text.trim()
   if (!raw || running.value) return
@@ -918,9 +927,20 @@ async function execCmd(text: string) {
     const res = await fetch('/__ai/exec', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cmd }),
+      body: JSON.stringify({ cmd, bashPolicy: execPolicyOverride || (() => { try { return localStorage.getItem('__ai_bash_policy') || 'on-request' } catch { return 'on-request' } })() }),
     })
     if (!res.ok || !res.body) {
+      let approval = null
+      try { approval = await res.clone().json() } catch { }
+      if (approval && approval.needsApproval) {
+        const go = await confirmDialog(`bash 命中黑名单：${approval.blacklistHit}\n\n${cmd}\n\n是否继续执行？`, { type: 'danger', okText: '继续执行', cancelText: '取消' })
+        if (!go) {
+          result.value = { runId: '', code: -1, ok: false, stdout: '', stderr: '用户拒绝执行', changes: [], error: '用户拒绝执行' }
+          running.value = false
+          return
+        }
+        return execCmdInternal(cmd, 'always', runningCommand.value)
+      }
       let detail = ''
       try { detail = await res.text() } catch { }
       throw new Error(`HTTP ${res.status} ${res.statusText}${detail ? `\n${detail}` : ''}`)

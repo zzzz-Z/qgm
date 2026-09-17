@@ -97,7 +97,12 @@ async function run() {
     const res = await fetch('/__ai/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script: code, gitCommit: gitCommit.value, smoke: smokeEnabled.value }),
+      body: JSON.stringify({
+        script: code,
+        gitCommit: gitCommit.value,
+        smoke: smokeEnabled.value,
+        sandbox: (() => { try { return localStorage.getItem('__ai_sandbox') || 'read-only' } catch { return 'read-only' } })(),
+      }),
       signal: abortController.signal,
     })
     if (!res.ok || !res.body) {

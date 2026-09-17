@@ -6,19 +6,20 @@ import TracePanel from './components/TracePanel.vue'
 import { DEFAULT_URL, MODELS, getActiveWin, openDeepseek, useDeepseekUrl } from './composables/useDeepseekUrl'
 import { useScriptInbox } from './composables/useScriptInbox'
 import {
-  currentLoopContext,
-  isLoopActive,
-  onNonScriptReply,
-  onScriptArrival,
-  setTokenEstimate,
-  onSummary,
-  onNewSessionCreated,
+    currentLoopContext,
+    isLoopActive,
+    onNonScriptReply,
+    onScriptArrival,
+    setTokenEstimate,
+    onSummary,
+    onNewSessionCreated,
 } from './composables/useAutoLoop'
 import { useSessionManager } from './composables/useSessionManager'
 import { useToast } from './composables/useToast'
 import { useTraceLog } from './composables/useTraceLog'
 import { useCodeCleaner } from './composables/useCodeCleaner'
 import { useRunner } from './composables/useRunner'
+import { useAiWaiting } from './composables/useAiWaiting'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
 
@@ -46,6 +47,15 @@ watch(activeSessionId, (v) => {
 })
 const sidebarOpen = ref(false)
 const settingsOpen = ref(false)
+const KEY_SANDBOX = '__ai_sandbox'
+const KEY_BASH_POLICY = '__ai_bash_policy'
+function loadStr(key: string, fallback: string): string {
+  try { return localStorage.getItem(key) || fallback } catch { return fallback }
+}
+const sandboxMode = ref(loadStr(KEY_SANDBOX, 'read-only'))
+const bashPolicy = ref(loadStr(KEY_BASH_POLICY, 'on-request'))
+watch(sandboxMode, (v) => { try { localStorage.setItem(KEY_SANDBOX, v) } catch { } })
+watch(bashPolicy, (v) => { try { localStorage.setItem(KEY_BASH_POLICY, v) } catch { } })
 function addSessionToHistory(id: string, url: string, title: string) {
   const entry: SessionEntry = { id, url, title, createdAt: Date.now() }
   sessionHistory.value = [entry, ...sessionHistory.value.filter(s => s.id !== id)].slice(0, 50)
@@ -238,6 +248,8 @@ function onSessionIdMessage(e: MessageEvent) {
   // ============================================================================
   if (d.type === 'ai-runner:reply') {
     if (!isFromActiveAiSite(e)) return
+    // 收到 AI 回复，清除「发送给 AI」按钮的 loading 状态
+    stopAiWaiting()
     const kind = String(d.kind || '')
     if (kind === 'script') {
       const code = String(d.code || '')
@@ -285,6 +297,8 @@ function onSessionIdMessage(e: MessageEvent) {
   // 兼容旧版油猴（v1.2）的 ai-runner:script 单脚本消息
   if (d.type === 'ai-runner:script') {
     if (!isFromActiveAiSite(e)) return
+    // 收到 AI 回复（v1.2 通道），清除「发送给 AI」按钮的 loading 状态
+    stopAiWaiting()
     const code = String(d.code || '')
     const lang = (d.lang === 'bash' ? 'bash' : d.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
     const site = String(d.site || e.origin || '')
@@ -430,6 +444,7 @@ const { smokeEnabled, gitCommit } = useRunner()
 const scriptInbox = useScriptInbox()
 const runner = useRunner()
 const { addTrace } = useTraceLog()
+const { stopWaiting: stopAiWaiting } = useAiWaiting()
 // 注意：getActiveWin 是 useDeepseekUrl 模块级导出，已在 import 中带入；这里无需再解构
 </script>
 
@@ -485,6 +500,22 @@ const { addTrace } = useTraceLog()
         <label v-tooltip="'脚本运行前自动 git add -A && commit（仅 git 仓库生效）'" class="settings-row">
           <span class="settings-label">Git 保护</span>
           <input v-model="gitCommit" type="checkbox">
+        </label>
+        <label v-tooltip="'cjs 沙箱：read-only 只读（写走 overlay）/ workspace-write 允许写工作区 / full 无限制'" class="settings-row">
+          <span class="settings-label">cjs 沙箱</span>
+          <select v-model="sandboxMode" class="settings-select">
+            <option value="read-only">read-only</option>
+            <option value="workspace-write">workspace-write</option>
+            <option value="full">full</option>
+          </select>
+        </label>
+        <label v-tooltip="'bash 审批：never 拒绝黑名单 / on-request 命中弹窗 / always 全放行'" class="settings-row">
+          <span class="settings-label">bash 审批</span>
+          <select v-model="bashPolicy" class="settings-select">
+            <option value="never">never</option>
+            <option value="on-request">on-request</option>
+            <option value="always">always</option>
+          </select>
         </label>
       </div>
     </div>
@@ -1118,6 +1149,20 @@ const { addTrace } = useTraceLog()
 .settings-label {
   font-size: 13px;
   color: var(--text);
+}
+
+.settings-select {
+  padding: 3px 8px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: 12px/1.4 var(--mono);
+  outline: 0;
+  cursor: pointer;
+}
+.settings-select:focus {
+  border-color: var(--primary);
 }
 .settings-row input {
   margin: 0;
