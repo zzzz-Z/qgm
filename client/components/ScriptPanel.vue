@@ -218,7 +218,7 @@
             </button>
             <button
               v-if="!running"
-              v-tooltip="script.trim().startsWith('!') ? '运行 shell 命令（以 ! 开头）' : '运行脚本（Ctrl\/Cmd + ↵）'"
+              v-tooltip="script.trim().startsWith('!') ? '运行 shell 命令（以 ! 开头）' : script.trim().startsWith('@') ? '把 @ 后文本作为问题发给 AI' : '运行脚本（Ctrl\/Cmd + ↵）'"
               class="primary-btn run head-run"
               :disabled="!script.trim()"
               @click="runSmart"
@@ -840,12 +840,26 @@ function runSmart() {
   if (!text) return
   if (text.startsWith('!')) {
     execCmd(text)
+  } else if (text.startsWith('@')) {
+    void askAi(text.slice(1).trim())
   } else {
     runningCommand.value = ''
     run()
   }
 }
 
+async function askAi(question: string) {
+  if (!question) { toast('@ 后没有内容', 'warn'); return }
+  const r = await copyAndFill(question)
+  if (r === 'failed') {
+    toast('发送失败，已复制到剪贴板', 'warn', 4000)
+    return
+  }
+  statusText.value = '✅ 已发送'
+  statusClass.value = 'ok'
+  script.value = ''
+  setTimeout(() => { statusText.value = ''; statusClass.value = '' }, 1500)
+}
 async function execCmd(text: string) {
   const raw = text.trim()
   if (!raw || running.value) return
@@ -1044,7 +1058,7 @@ function createEditor() {
       /* editor-no-h-scroll */
       EditorView.lineWrapping,
       editableComp.of(EditorView.editable.of(!isLoopActive.value)),
-      placeholder('// 输入 CommonJS 脚本，或 !命令 走 shell（如 !ls -la）· ⌘/Ctrl + ↵ 运行 · Alt+↑↓ 翻历史'),
+      placeholder('// CommonJS 脚本 · !命令 走 shell · @问题 发给 AI · ⌘/Ctrl + ↵ 运行 · Alt+↑↓ 翻历史'),
       EditorView.theme({
         '&': { height: '100%', fontSize: '12px' },
         '.cm-scroller': { fontFamily: 'var(--mono, monospace)', lineHeight: '20px', overflowX: 'hidden', overflowY: 'auto' },
