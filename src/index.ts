@@ -425,7 +425,6 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         return sendJSON(res, { error: '需要确认', needsApproval: true, blacklistHit: hit, cmd }, 400)
       }
     }
-    }
 
     // 2. git 跑前检查
     const gitCheck = await gitPreExecCheck()
