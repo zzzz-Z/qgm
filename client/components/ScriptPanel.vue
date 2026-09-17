@@ -737,6 +737,12 @@ const TEMPLATES = [
     title: 'Bash 脚本（#!/usr/bin/env bash）',
     code: '#!/usr/bin/env bash\n',
   },
+  {
+    id: 'ask',
+    label: '问',
+    title: '提问题给 AI（@ 开头）',
+    code: '@',
+  },
 ]
 
 function applyTemplate(code: string) {
