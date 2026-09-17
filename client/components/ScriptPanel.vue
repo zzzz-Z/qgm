@@ -1389,20 +1389,21 @@ watch(running, (v) => {
         setTimeout(() => { void copyOutput() }, FAIL_ASK_DELAY_MS)
       }
       // 清空编辑器（成功 / 失败均清空）
+      const scriptSnapshot = script.value
       script.value = ''
       const r = result.value
       // 兼容旧脚本只写 // @desc；新脚本可能 // 或 #，从 result.value.scriptDesc/scriptWhy 拿（server 已解析）
-      const descMatch = script.value.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
+      const descMatch = scriptSnapshot.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
       const desc = r.scriptDesc || (descMatch ? descMatch[1].trim() : '')
-      const whyMatch = script.value.match(/^\s*(?:\/\/|#)\s*@why\s*:\s*(.+)$/m)
+      const whyMatch = scriptSnapshot.match(/^\s*(?:\/\/|#)\s*@why\s*:\s*(.+)$/m)
       const why = r.scriptWhy || (whyMatch ? whyMatch[1].trim() : '')
-      const lang: 'js' | 'bash' = /^\s*#\s*(@desc|@why)/m.test(script.value) ? 'bash' : 'js'
+      const lang: 'js' | 'bash' = /^\s*#\s*(@desc|@why)/m.test(scriptSnapshot) ? 'bash' : 'js'
       // 计算 hash（与油猴 / useScriptInbox 一致：FNV-1a 8 hex）
       let hash = ''
       try {
         let h = 0x811c9dc5
-        for (let i = 0; i < script.value.length; i++) {
-          h = Math.imul(h ^ script.value.charCodeAt(i), 0x1000193) >>> 0
+        for (let i = 0; i < scriptSnapshot.length; i++) {
+          h = Math.imul(h ^ scriptSnapshot.charCodeAt(i), 0x1000193) >>> 0
         }
         hash = (h >>> 0).toString(16).padStart(8, '0')
       } catch { /* ignore */ }
@@ -1412,7 +1413,7 @@ watch(running, (v) => {
           ? `${desc} · ${r.ok ? '成功' : '失败'} exit ${r.code} · ${changes.value.length} 文件变更`
           : `运行脚本 · ${r.ok ? '成功' : '失败'} exit ${r.code} · ${changes.value.length} 文件变更`,
         payload: {
-          script: script.value.slice(0, 4000),
+          script: scriptSnapshot.slice(0, 4000),
           stdout: (r.stdout || '').slice(-4000),
           stderr: (r.stderr || '').slice(-4000),
           exit: r.code,
