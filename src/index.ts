@@ -596,6 +596,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         cwd: ROOT,
         env: process.env,
         shell: true,
+        timeoutMs: BASH_TIMEOUT_MS,
+        timeoutLabel: 'shell 脚本超时',
         signal: ac.signal,
         onChunk: (stream, data) => writeS({ type: 'chunk', stream, data }),
       })
