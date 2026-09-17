@@ -24,7 +24,15 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 const script = ref(loadFromStorage<string>(STORAGE_KEY_SCRIPT, ''))
 const running = ref(false)
 const result = ref<RunResponse | null>(loadFromStorage<RunResponse | null>(STORAGE_KEY_RESULT, null))
-const changes = ref<Change[]>(loadFromStorage<Change[]>(STORAGE_KEY_CHANGES, []))
+// DEDUP_LAST_RUN: 按 path 去重，只保留最近一次每文件的变更记录
+const changes = ref<Change[]>(
+  (loadFromStorage<Change[]>(STORAGE_KEY_CHANGES, []) || []).reduce<Change[]>((acc, c) => {
+    const i = acc.findIndex(x => x.path === c.path)
+    if (i >= 0) acc[i] = c
+    else acc.push(c)
+    return acc
+  }, []),
+)
 const rolling = ref<Record<string, boolean>>({})
 const busyAll = ref(false)
 const persistWarning = ref('')
@@ -156,7 +164,13 @@ async function run() {
       }
       const prevBaseline = baselineRunId.value
       result.value = data
-      changes.value = data.changes || []
+      // DEDUP_LAST_RUN: 按 path 去重，只保留本次运行每个文件一条记录
+      changes.value = (data.changes || []).reduce<Change[]>((acc, c) => {
+        const i = acc.findIndex(x => x.path === c.path)
+        if (i >= 0) acc[i] = c
+        else acc.push(c)
+        return acc
+      }, [])
       if (data.ok && data.runId) baselineRunId.value = data.runId
       if (result.value) result.value.baselineRunId = prevBaseline
     } else {
