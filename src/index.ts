@@ -580,6 +580,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const isNodeScript = hasShebang || looksJs
     const effectiveScript = isNodeScript && !hasShebang ? '#!/usr/bin/env node\n' + script : script
     if (!isNodeScript) {
+      const shellHit = checkBashBlacklist(script)
+      if (shellHit) {
+        return sendJSON(res, { error: `shell 脚本命中黑名单：${shellHit}`, blacklistHit: shellHit }, 400)
+      }
       res.writeHead(200, {
         'Content-Type': 'application/x-ndjson; charset=utf-8',
         'Cache-Control': 'no-cache',
