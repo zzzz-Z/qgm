@@ -20,17 +20,6 @@ const list = () => props.root ? tree.value : (props.nodes || [])
 const level = () => props.depth || 0
 
 const expanded = reactive(new Set<string>())
-if (props.root) {
-  setTimeout(() => {
-    const auto = ['src', 'plugins']
-    tree.value.forEach((n) => {
-      if (n.type === 'directory' && auto.includes(n.name)) {
-        expanded.add(n.path)
-        loadChildren(n.path)
-      }
-    })
-  }, 100)
-}
 
 function toggle(p: string) {
   if (expanded.has(p)) {

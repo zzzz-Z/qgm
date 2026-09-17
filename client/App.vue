@@ -1770,6 +1770,9 @@ const { addTrace } = useTraceLog()
   min-height: 0;
   display: flex;
   overflow: hidden;
+  padding: 12px;
+  background: var(--bg);
+  gap: 12px;
 }
 .ask-modal-body > * {
   flex: 1;
