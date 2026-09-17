@@ -4,6 +4,7 @@ const emit = defineEmits<{ sent: [] }>()
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FileTree from './FileTree.vue'
 import { copyAndFill } from '../composables/useDeepseekUrl'
+import { useAiWaiting } from '../composables/useAiWaiting'
 import { useCodeCleaner } from '../composables/useCodeCleaner'
 import { buildFullContext, enforceBudget } from '../utils/contextBuilder'
 import { useToast } from '../composables/useToast'
@@ -30,6 +31,8 @@ const success = ref(false)
 const successCount = ref(0)
 const copied = ref(false)
 const mainRef = ref<HTMLElement>()
+
+const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
 
 // 检索相关
 const searchQuery = ref('')
@@ -604,7 +607,12 @@ async function copyPrompt() {
   try {
     const text = prompt.value
     const r = await copyAndFill(text)
+    if (r === 'failed') {
+      toast('发送失败，已复制到剪贴板', 'warn', 4000)
+      return
+    }
     copied.value = true
+    startAiWaiting()
     setTimeout(() => { copied.value = false }, 1500)
     {
       const q = questionText.value || '(无问题描述)'
@@ -619,8 +627,7 @@ async function copyPrompt() {
       })
     }
     trackMessage('user', text)
-    if (r === 'failed') toast('发送失败，已复制到剪贴板', 'warn', 4000)
-    else emit('sent')
+    emit('sent')
   } catch {  }
 }
 
@@ -703,19 +710,23 @@ onBeforeUnmount(() => {
               <span>清空</span>
             </button>
             <button
-              v-tooltip="copied ? '已发送' : '把问题 + 规则 + 项目结构 + 相关文件拼成 prompt 复制并发给 DeepSeek'"
+              v-tooltip="aiWaiting ? '等待 AI 回复…' : copied ? '已发送' : '把问题 + 规则 + 项目结构 + 相关文件拼成 prompt 复制并发给 DeepSeek'"
               class="btn btn-primary btn-cta"
-              :disabled="!canCopy"
+              :class="{ loading: aiWaiting }"
+              :disabled="!canCopy || aiWaiting"
               @click="copyPrompt"
             >
-              <svg v-if="!copied" class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg v-if="aiWaiting" class="btn-ico spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+              <svg v-else-if="!copied" class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
               </svg>
               <svg v-else class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              <span>{{ copied ? '已发送' : '复制并提问' }}</span>
+              <span>{{ aiWaiting ? '等待回复…' : copied ? '已发送' : '发送给 AI' }}</span>
             </button>
           </div>
         </div>
@@ -1692,6 +1703,12 @@ onBeforeUnmount(() => {
 .btn-cta .btn-ico {
   width: 13px;
   height: 13px;
+}
+.btn-cta.loading {
+  cursor: progress;
+}
+.btn-ico.spin {
+  animation: at-spin 0.9s linear infinite;
 }
 
 .strip-toggle {

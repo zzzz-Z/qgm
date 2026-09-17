@@ -92,17 +92,8 @@ const summary = computed(() => {
   white-space: pre-wrap;
   word-break: break-word;
   color: #c9d1d9;
-  max-height: 200px;
-  overflow: auto;
 }
 .lint-content.err {
   color: #ffa198;
-}
-.lint-content::-webkit-scrollbar {
-  width: 8px;
-}
-.lint-content::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 12%);
-  border-radius: 4px;
 }
 </style>
