@@ -100,14 +100,39 @@ export function readDeepseekUrl(): string {
 // 活动窗口引用管理 —— postMessage 的目标 window 必须精确，否则跨域无法操作 DOM
 // 新窗口覆盖旧引用（简化：只跟最新一个），与油猴侧 window.opener 一一对应
 // ============================================================================
-let activeWin: Window | null = null
-
-export function getActiveWin(): Window | null {
-  return activeWin
+// [multi-loop-step3] 窗口表：按 sid 存储；activeWinSid 指向当前激活槽位
+const windowTable = new Map<string, { win: Window, url: string }>()
+const activeWinSid = ref<string>('default')
+export function getActiveWinSid(): string {
+  return activeWinSid.value
 }
-
+export function setActiveWinSid(sid: string): void {
+  activeWinSid.value = sid
+}
+export function getWindowBySid(sid: string): Window | null {
+  const entry = windowTable.get(sid)
+  if (!entry) return null
+  if (entry.win.closed) {
+    windowTable.delete(sid)
+    return null
+  }
+  return entry.win
+}
+export function listWindows(): Array<{ sid: string, url: string }> {
+  const out: Array<{ sid: string, url: string }> = []
+  for (const [sid, v] of windowTable) {
+    if (!v.win.closed) out.push({ sid, url: v.url })
+    else windowTable.delete(sid)
+  }
+  return out
+}
+export function getActiveWin(): Window | null {
+  return getWindowBySid(activeWinSid.value)
+}
 export function setActiveWin(win: Window | null): void {
-  activeWin = win
+  const sid = activeWinSid.value
+  if (!win) { windowTable.delete(sid); return }
+  windowTable.set(sid, { win, url: url.value })
 }
 
 /** 计算 postMessage 的目标 origin：从当前 url.value 提取 protocol://host */
@@ -126,10 +151,17 @@ function targetOrigin(): string {
  * 不在这里发 fill —— fill 由循环/手动调用方决定 prompt 后再调 sendFill。
  * @param atUrl 可选；不传则用当前 url.value
  */
-export function openDeepseek(atUrl?: string): Window | null {
+function windowName(sid: string): string {
+  return sid === 'default' ? 'ai-runner-deepseek' : 'ai-runner-deepseek-' + sid
+}
+export function openDeepseek(atUrl?: string, sid?: string): Window | null {
   const target = atUrl ?? url.value
-  const win = window.open(target, 'ai-runner-deepseek')
-  if (win) activeWin = win
+  const useSid = sid ?? activeWinSid.value
+  const win = window.open(target, windowName(useSid))
+  if (win) {
+    windowTable.set(useSid, { win, url: target })
+    activeWinSid.value = useSid
+  }
   return win
 }
 
@@ -144,12 +176,9 @@ export interface FillPayload {
  * - origin 精确到 protocol://host，不用 '*'
  * - 窗口未打开或已关闭 → 返回 false，调用方 toast 提示
  */
-export function sendFill(payload: FillPayload): boolean {
-  const win = activeWin
-  if (!win || win.closed) {
-    activeWin = null
-    return false
-  }
+export function sendFillTo(sid: string, payload: FillPayload): boolean {
+  const win = getWindowBySid(sid)
+  if (!win) return false
   const origin = targetOrigin()
   if (!origin) return false
   try {
@@ -159,14 +188,14 @@ export function sendFill(payload: FillPayload): boolean {
     return false
   }
 }
+export function sendFill(payload: FillPayload): boolean {
+  return sendFillTo(activeWinSid.value, payload)
+}
 
 /** 通知油猴停止（清 lastScript / Observer / 监听） */
-export function sendStop(): boolean {
-  const win = activeWin
-  if (!win || win.closed) {
-    activeWin = null
-    return false
-  }
+export function sendStopTo(sid: string): boolean {
+  const win = getWindowBySid(sid)
+  if (!win) return false
   const origin = targetOrigin()
   if (!origin) return false
   try {
@@ -176,11 +205,14 @@ export function sendStop(): boolean {
     return false
   }
 }
+export function sendStop(): boolean {
+  return sendStopTo(activeWinSid.value)
+}
 
 export interface RotatePayload { instruction: string }
-export function sendRotate(payload: RotatePayload): boolean {
-  const win = activeWin
-  if (!win || win.closed) { activeWin = null; return false }
+export function sendRotateTo(sid: string, payload: RotatePayload): boolean {
+  const win = getWindowBySid(sid)
+  if (!win) return false
   const origin = targetOrigin()
   if (!origin) return false
   try {
@@ -188,16 +220,22 @@ export function sendRotate(payload: RotatePayload): boolean {
     return true
   } catch { return false }
 }
+export function sendRotate(payload: RotatePayload): boolean {
+  return sendRotateTo(activeWinSid.value, payload)
+}
 export interface NewSessionPayload { summary: string }
-export function sendNewSession(payload: NewSessionPayload): boolean {
-  const win = activeWin
-  if (!win || win.closed) { activeWin = null; return false }
+export function sendNewSessionTo(sid: string, payload: NewSessionPayload): boolean {
+  const win = getWindowBySid(sid)
+  if (!win) return false
   const origin = targetOrigin()
   if (!origin) return false
   try {
     win.postMessage({ type: 'ai-runner:new-session', ...payload }, origin)
     return true
   } catch { return false }
+}
+export function sendNewSession(payload: NewSessionPayload): boolean {
+  return sendNewSessionTo(activeWinSid.value, payload)
 }
 
 export type FillResult = 'sent' | 'opened' | 'failed'
@@ -225,5 +263,13 @@ export function useDeepseekUrl() {
     display,
     MODELS,
     DEFAULT_URL,
+    getWindowBySid,
+    listWindows,
+    getActiveWinSid,
+    setActiveWinSid,
+    sendFillTo,
+    sendStopTo,
+    sendRotateTo,
+    sendNewSessionTo,
   }
 }
