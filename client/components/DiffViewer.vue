@@ -55,13 +55,21 @@ function escapeHtml(s: string): string {
     '\'': '&#39;',
   }[ch] as string))
 }
-function renderCode(text: string): string {
-  if (!text) return ''
+function highlightToLines(text: string): string[] {
+  if (!text) return []
   try {
-    return hljs.highlightAuto(text, ['javascript', 'typescript']).value
+    return hljs.highlightAuto(text, ['javascript', 'typescript']).value.split('\n')
   } catch {
-    return escapeHtml(text)
+    return text.split('\n').map(escapeHtml)
   }
+}
+const beforeLines = computed(() => highlightToLines(props.before))
+const afterLines = computed(() => highlightToLines(props.after))
+function renderLine(line: DiffLine): string {
+  const src = line.type === 'del' ? beforeLines.value : afterLines.value
+  const n = line.type === 'del' ? line.oldLine : line.newLine
+  const html = n != null ? src[n - 1] : undefined
+  return html ?? escapeHtml(line.text)
 }
 
 const diffLines = computed((): DiffLine[] => {
@@ -100,7 +108,7 @@ const stats = computed(() => {
         <!-- [5.4] 只显 newLine，坐标统一到 after 系统，与 prompt 一致 -->
         <span class="line-num new">{{ line.newLine ?? '' }}</span>
         <span class="line-prefix">{{ line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ' }}</span>
-        <pre class="line-text" v-html="renderCode(line.text)" />
+        <pre class="line-text" v-html="renderLine(line)" />
       </div>
       <div v-if="diffLines.length === 0" class="diff-empty">
         无内容变更
