@@ -406,7 +406,7 @@ const typescript: any = (typescriptNs as any).default ?? typescriptNs
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('typescript', typescript)
 
-const { script, running, result, changes, rolling, busyAll, persistWarning, baselineRunId, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save } = useRunner()
+const { script, running, result, changes, rolling, busyAll, persistWarning, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save } = useRunner()
 /** 当前 inbox 待取用条数（仅展示用，避免在模板里直接 inbox.value.length 触发响应式开销） */
 /** 取最新一条入队脚本，覆盖当前编辑器内容 */
 
@@ -442,7 +442,7 @@ const fileSuccess = ref(false)
 const statusText = ref('')
 const statusClass = ref('')
 
-const { waiting: aiWaiting, startWaiting: startAiWaiting, stopWaiting: stopAiWaiting } = useAiWaiting()
+const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
 
 // 分栏比例（终端占比）
 
@@ -758,7 +758,6 @@ async function buildAiPrompt() {
 const { stripComments, stripBlankLines } = useCodeCleaner()
 const { toast, confirmDialog } = useToast()
 const { addTrace } = useTraceLog()
-const { trackMessage } = useSessionManager()
 
 const TEMPLATES = [
   {
