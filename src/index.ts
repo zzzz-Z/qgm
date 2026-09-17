@@ -603,6 +603,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       gitInfo = await gitSnapshot(runId)
     }
     const scriptPath = path.join(SCRIPTS_DIR, `${runId}.cjs`)
+    try {
     fs.writeFileSync(scriptPath, effectiveScript)
 
     res.writeHead(200, {
@@ -747,6 +748,11 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       claimMismatch,
     })
     res.end()
+    } finally {
+      try { fs.unlinkSync(overlayPath) } catch { }
+      try { fs.unlinkSync(toolLogPath) } catch { }
+      try { fs.unlinkSync(scriptPath) } catch { }
+    }
     return
   }
 

@@ -284,6 +284,20 @@
   //   但只触发「在 AI 聊天框输入文本」这一低危操作
   // ===========================================================================
 
+  function clickStopGenerating() {
+    try {
+      const all = Array.from(document.querySelectorAll('button'))
+      const btn = all.find(b => {
+        const lbl = (b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '') + ' ' + (b.getAttribute('title') || '')
+        return /停止生成|停止回答|停止输出|stop\s*generat|stop\s*stream|stop\s*response|stop\s*answer/i.test(lbl)
+      })
+      if (btn && !btn.disabled) {
+        btn.click()
+        return true
+      }
+    } catch (e) { /* ignore */ }
+    return false
+  }
   function findInputBox() {
     // DeepSeek 用 textarea；ChatGPT/Claude 也都是 textarea；contenteditable 作为兜底
     const ta = document.querySelector('textarea:not([readonly]):not([disabled])')
@@ -364,6 +378,7 @@
     }
     if (d.type === 'ai-runner:stop') {
       // 清空回复检测状态：新循环开始前，旧代码块/DONE/正文签名全部重新计为「新」
+      clickStopGenerating()
       seenHashes.clear()
       seenDoneMarkers.clear()
       lastBodySig = ''
