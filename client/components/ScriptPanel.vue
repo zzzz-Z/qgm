@@ -740,7 +740,6 @@ const TEMPLATES = [
 ]
 
 function applyTemplate(code: string) {
-  if (script.value.trim() && !window.confirm('覆盖当前脚本？')) return
   script.value = code
 }
 
