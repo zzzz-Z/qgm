@@ -29,7 +29,13 @@
   const RATIO_LATIN = 0.25
 
   let lastId = ''
+  let lastSid = ''
   let lastTokens = -1
+// [multi-loop-step5-tm] 从 location.hash 读取窗口 sid（由 useDeepseekUrl.withSidHash 注入）
+  function extractSidFromHash() {
+    const m = location.hash.match(/(?:^#|&)sid=([\w.-]+)/)
+    return m ? m[1] : ''
+  }
 
   function extractId() {
     const href = location.href
@@ -94,16 +100,18 @@
 
   function send() {
     const id = extractId()
+    const sid = extractSidFromHash()
     const tokens = estimateTokens(collectText())
     let changed = false
     if (id && id !== lastId) { lastId = id; changed = true }
+    if (sid !== lastSid) { lastSid = sid; changed = true }
     if (tokens !== lastTokens && tokens > 0) { lastTokens = tokens; changed = true }
     if (!changed) return
     try {
       if (window.opener && !window.opener.closed) {
-        window.opener.postMessage({ type: 'ai-runner:session-id', id }, '*')
+        window.opener.postMessage({ type: 'ai-runner:session-id', id, sessionId: extractSidFromHash() }, '*')
         if (tokens > 0) {
-          window.opener.postMessage({ type: 'ai-runner:token-estimate', tokens }, '*')
+          window.opener.postMessage({ type: 'ai-runner:token-estimate', tokens, sessionId: extractSidFromHash() }, '*')
         }
       }
     } catch (e) {}
@@ -242,7 +250,7 @@
           if (replyText && replyText.length > 30 && replyText === handoffReplyText) {
             handoffMode = 'off'
             handoffReplyText = ''
-            window.opener.postMessage({ type: 'ai-runner:summary', text: replyText, sessionId: extractId(), degraded: false }, '*')
+            window.opener.postMessage({ type: 'ai-runner:summary', text: replyText, aiSiteId: extractId(), sessionId: extractSidFromHash(), degraded: false }, '*')
           } else if (replyText && replyText.length > 30) {
             handoffReplyText = replyText
           }
@@ -254,6 +262,7 @@
           window.opener.postMessage({
             type: 'ai-runner:reply', kind: 'script',
             code: s.code, lang: s.lang, hash: s.hash, site: location.origin,
+            sessionId: extractSidFromHash(),
           }, '*')
           lastBodySig = bodySignature()
           return
@@ -263,6 +272,7 @@
           seenDoneMarkers.add(doneMarker)
           window.opener.postMessage({
             type: 'ai-runner:reply', kind: 'done', site: location.origin,
+            sessionId: extractSidFromHash(),
           }, '*')
           lastBodySig = bodySignature()
           return
@@ -272,6 +282,7 @@
           lastBodySig = sig
           window.opener.postMessage({
             type: 'ai-runner:reply', kind: 'plain', site: location.origin,
+            sessionId: extractSidFromHash(),
           }, '*')
         }
       } catch {}
@@ -425,7 +436,7 @@
         setTimeout(() => {
           const box = findInputBox()
           if (!box) {
-            window.opener.postMessage({ type: 'ai-runner:new-session-created', url: location.href, id: extractId() }, '*')
+            window.opener.postMessage({ type: 'ai-runner:new-session-created', url: location.href, id: extractId(), sessionId: extractSidFromHash() }, '*')
             return
           }
           const prefix = '这是上一个会话的上下文总结，请基于此继续工作：\n'
@@ -435,10 +446,10 @@
             if (btn) btn.click()
             else sendEnter(box)
           }, 250)
-          window.opener.postMessage({ type: 'ai-runner:new-session-created', url: location.href, id: extractId() }, '*')
+          window.opener.postMessage({ type: 'ai-runner:new-session-created', url: location.href, id: extractId(), sessionId: extractSidFromHash() }, '*')
         }, 1500)
       } else {
-        window.opener.postMessage({ type: 'ai-runner:new-session-created', url: '', id: '', degraded: true }, '*')
+        window.opener.postMessage({ type: 'ai-runner:new-session-created', url: '', id: '', degraded: true, sessionId: extractSidFromHash() }, '*')
       }
       return
     }

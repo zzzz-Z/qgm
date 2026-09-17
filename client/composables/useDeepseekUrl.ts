@@ -154,10 +154,23 @@ function targetOrigin(): string {
 function windowName(sid: string): string {
   return sid === 'default' ? 'ai-runner-deepseek' : 'ai-runner-deepseek-' + sid
 }
+// [multi-loop-step5-url] 把 sid 拼进 hash，供油猴读取（AI 站点忽略未知 hash）
+function withSidHash(u: string, sid: string): string {
+  try {
+    const parsed = new URL(u)
+    const parts = parsed.hash.replace(/^#/, '').split('&').filter(p => p && !p.startsWith('sid='))
+    parts.push('sid=' + encodeURIComponent(sid))
+    parsed.hash = parts.join('&')
+    return parsed.toString()
+  } catch {
+    return u
+  }
+}
 export function openDeepseek(atUrl?: string, sid?: string): Window | null {
   const target = atUrl ?? url.value
   const useSid = sid ?? activeWinSid.value
-  const win = window.open(target, windowName(useSid))
+  const targetWithSid = withSidHash(target, useSid)
+  const win = window.open(targetWithSid, windowName(useSid))
   if (win) {
     windowTable.set(useSid, { win, url: target })
     activeWinSid.value = useSid
