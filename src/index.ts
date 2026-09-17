@@ -3,16 +3,22 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { BINARY_EXT, EXCLUDE_DIRS, PREFIX, ROOT, SCRIPTS_DIR, setRoot } from './config.js'
+import { PREFIX, ROOT, SCRIPTS_DIR, setRoot } from './config.js'
 import type { Change } from './config.js'
-import { diff, ensureDirs, gcSnapshots, readManifest, runDir, saveSnapshot, snapshot, writeRunLog } from './snapshot.js'
+import { diffMeta, ensureDirs, gcSnapshots, readManifest, runDir, saveSnapshot, scanMeta, snapshot, writeRunLog } from './snapshot.js'
 import { buildLauncher } from './launcher.js'
 import { closeBrowser, runSmoke } from './smoke.js'
 import type { SmokeResult } from './smoke.js'
-import { gitCommitAfter, gitSnapshot } from './git.js'
-import { diffIndexes, readIndex, saveIndex, scanIndex } from './index-index.js'
+import { gitCommitAfter, gitPreExecCheck, gitSnapshot } from './git.js'
+import { detectPackageManager, runProcess } from './proc.js'
+import { BASH_TIMEOUT_MS, buildEnvWhitelist, checkBashBlacklist } from './bash-guard.js'
+import { saveIndex, scanIndex } from './index-index.js'
+import { guardRequest, parseJSON, readBody, sendHTML, sendJSON } from './http.js'
+import type { AiRunnerOptions } from './http.js'
+import { handleFilesRoutes } from './files-routes.js'
+
+export type { AiRunnerOptions } from './http.js'
 
 // ============================================================================
 // 配置
@@ -30,68 +36,34 @@ interface ClaimMismatch {
   extra: string[]
 }
 
-function runScript(scriptPath: string, timeoutMs = 60_000, signal?: AbortSignal, overlayPath?: string, toolLogPath?: string, onChunk?: (stream: 'stdout' | 'stderr', data: string) => void): Promise<RunResult> {
-  return new Promise((resolve) => {
-    // [AI-Runner] console 拦截 + 全局错误捕获 wrapper
-    const wrapperCode = `
-      const __origLog = console.log;
-      const __origWarn = console.warn;
-      const __origError = console.error;
-      console.log = (...args) => { __origLog(...args); };
-      console.warn = (...args) => { __origWarn(...args); };
-      console.error = (...args) => { __origError(...args); };
-      process.on('uncaughtException', (e) => {
-        __origError('[uncaughtException]', e?.stack || e);
-        process.exitCode = 1;
-      });
-      process.on('unhandledRejection', (e) => {
-        __origError('[unhandledRejection]', e?.stack || e);
-        process.exitCode = 1;
-      });
-      try { require(${JSON.stringify(scriptPath)}); }
-      catch(e) { __origError('[script error]', e?.stack || e); process.exitCode = 1; }
-    `
-
-    const interceptorCjs = createRequire(import.meta.url).resolve('./interceptor.cjs')
-    const child = spawn(
-      'node',
-      ['--max-old-space-size=512', '-r', interceptorCjs, '-e', wrapperCode],
-      {
-        cwd: ROOT,
-        env: {
-          ...process.env,
-          AI_RUNNER_OVERLAY: overlayPath || '',
-          AI_RUNNER_TOOL_LOG: toolLogPath || '',
-        },
-      },
-    )
-    let stdout = ''
-    let stderr = ''
-    let killed = false
-
-    const timer = setTimeout(() => {
-      killed = true
-      child.kill('SIGTERM')
-    }, timeoutMs)
-
-    const onAbort = () => {
-      killed = true
-      child.kill('SIGKILL')
-    }
-    signal?.addEventListener('abort', onAbort, { once: true })
-
-    child.stdout?.on('data', (d: Buffer) => { const s = d.toString(); stdout += s; onChunk?.('stdout', s) })
-    child.stderr?.on('data', (d: Buffer) => { const s = d.toString(); stderr += s; onChunk?.('stderr', s) })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', onAbort)
-      resolve({
-        code: code ?? -1,
-        stdout,
-        stderr: killed ? `${stderr}\n[超时 ${timeoutMs / 1000}s 强制终止]` : stderr,
-      })
-    })
+async function runScript(scriptPath: string, timeoutMs = 60_000, signal?: AbortSignal, overlayPath?: string, toolLogPath?: string, onChunk?: (stream: 'stdout' | 'stderr', data: string) => void): Promise<RunResult> {
+  // 全局错误捕获 wrapper（console 走原生输出，拦截器负责文件 API，无需包裹）
+  const wrapperCode = `
+    process.on('uncaughtException', (e) => {
+      console.error('[uncaughtException]', e?.stack || e);
+      process.exitCode = 1;
+    });
+    process.on('unhandledRejection', (e) => {
+      console.error('[unhandledRejection]', e?.stack || e);
+      process.exitCode = 1;
+    });
+    try { require(${JSON.stringify(scriptPath)}); }
+    catch(e) { console.error('[script error]', e?.stack || e); process.exitCode = 1; }
+  `
+  const interceptorCjs = createRequire(import.meta.url).resolve('./interceptor.cjs')
+  const r = await runProcess(process.execPath, {
+    args: ['--max-old-space-size=512', '-r', interceptorCjs, '-e', wrapperCode],
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      AI_RUNNER_OVERLAY: overlayPath || '',
+      AI_RUNNER_TOOL_LOG: toolLogPath || '',
+    },
+    timeoutMs,
+    signal,
+    onChunk,
   })
+  return { code: r.code, stdout: r.stdout, stderr: r.stderr }
 }
 
 // ============================================================================
@@ -102,7 +74,7 @@ function applyOverlay(overlayPath: string): { applied: number, failed?: string }
   if (!fs.existsSync(overlayPath)) return { applied: 0 }
   let raw: string
   try { raw = fs.readFileSync(overlayPath, 'utf8') } catch { return { applied: 0 } }
-  let entries: Record<string, { op: string, data: string | null }>
+  let entries: Record<string, { op: string, data: string | null, dir?: boolean }>
   try { entries = JSON.parse(raw) } catch { return { applied: 0 } }
   let applied = 0
   for (const [abs, v] of Object.entries(entries)) {
@@ -110,7 +82,11 @@ function applyOverlay(overlayPath: string): { applied: number, failed?: string }
     if (rel.startsWith('..') || path.isAbsolute(rel)) continue
     try {
       if (v.op === 'delete') {
-        if (fs.existsSync(abs)) fs.unlinkSync(abs)
+        // 目录（rmSync recursive）→ 整目录删除；文件 → unlink
+        if (fs.existsSync(abs)) {
+          if (v.dir || fs.statSync(abs).isDirectory()) fs.rmSync(abs, { recursive: true, force: true })
+          else fs.unlinkSync(abs)
+        }
       } else if (v.op === 'write' && v.data) {
         fs.mkdirSync(path.dirname(abs), { recursive: true })
         fs.writeFileSync(abs, Buffer.from(v.data, 'base64'))
@@ -128,7 +104,7 @@ function readOverlayChanges(overlayPath: string, before: Map<string, string>): C
   if (!fs.existsSync(overlayPath)) return []
   let raw: string
   try { raw = fs.readFileSync(overlayPath, 'utf8') } catch { return [] }
-  let entries: Record<string, { op: string, data: string | null }>
+  let entries: Record<string, { op: string, data: string | null, dir?: boolean }>
   try { entries = JSON.parse(raw) } catch { return [] }
   const out: Change[] = []
   for (const [abs, v] of Object.entries(entries)) {
@@ -162,111 +138,6 @@ async function readToolLogWithRetry(p: string, maxMs = 1000): Promise<ToolCall[]
   }
   return last
 }
-interface FileNode {
-  name: string
-  path: string
-  type: 'file' | 'directory'
-  children?: FileNode[]
-}
-
-/** 文件树扫描时额外排除（覆盖默认，用于树 API 更激进的过滤） */
-const TREE_EXCLUDE = new Set([
-  ...EXCLUDE_DIRS,
-  'coverage',
-  'build',
-  'out',
-  'tmp',
-  'temp',
-  'logs',
-])
-
-function buildFileTree(dir: string, rel = '', depth = 0, maxDepth = 5): FileNode[] {
-  const out: FileNode[] = []
-  let entries: string[]
-  try {
-    entries = fs.readdirSync(dir)
-  } catch {
-    return out
-  }
-  entries.sort((a, b) => {
-    const ap = path.join(dir, a)
-    const bp = path.join(dir, b)
-    let ad = false
-    let bd = false
-    try { ad = fs.statSync(ap).isDirectory() } catch { /* */ }
-    try { bd = fs.statSync(bp).isDirectory() } catch { /* */ }
-    if (ad !== bd) return ad ? -1 : 1
-    return a.localeCompare(b)
-  })
-
-  for (const name of entries) {
-    if (name.startsWith('.')) continue
-    if (TREE_EXCLUDE.has(name)) continue
-    const full = path.join(dir, name)
-    const r = rel ? `${rel}/${name}` : name
-    let stat: fs.Stats
-    try { stat = fs.statSync(full) } catch { continue }
-
-    if (stat.isDirectory()) {
-      const isLeaf = depth + 1 >= maxDepth
-      let hasChildren = false
-      if (isLeaf) {
-        try {
-          const sub = fs.readdirSync(full)
-          hasChildren = sub.some(n => !n.startsWith('.') && !TREE_EXCLUDE.has(n))
-        } catch { /* ignore */ }
-      }
-      const children = isLeaf ? undefined : buildFileTree(full, r, depth + 1, maxDepth)
-      const node: any = { name, path: r, type: 'directory' }
-      if (children !== undefined) node.children = children
-      if (isLeaf) node.hasChildren = hasChildren
-      out.push(node)
-    } else if (stat.isFile()) {
-      out.push({ name, path: r, type: 'file' })
-    }
-  }
-  return out
-}
-
-// ============================================================================
-// 全局检索（glob / grep）
-// ============================================================================
-
-const SEARCH_SKIP = new Set(['node_modules', '.git', 'dist', '.vite', '.turbo', '.cache', 'coverage'])
-
-function* walkFiles(dir: string, rel = ''): Generator<{ abs: string, rel: string }> {
-  let entries: string[]
-  try { entries = fs.readdirSync(dir) } catch { return }
-  for (const name of entries) {
-    if (name.startsWith('.') || SEARCH_SKIP.has(name)) continue
-    const absPath = path.join(dir, name)
-    const r = rel ? `${rel}/${name}` : name
-    let st: fs.Stats
-    try { st = fs.statSync(absPath) } catch { continue }
-    if (st.isDirectory()) { yield* walkFiles(absPath, r)
-    }
-    else if (st.isFile() && !BINARY_EXT.has(path.extname(name).toLowerCase())) {
-      yield { abs: absPath, rel: r }
-    }
-  }
-}
-
-function globToRe(glob: string): RegExp {
-  const SPECIAL = '\\^$.|?*+()[]{}'
-  let out = ''
-  let i = 0
-  while (i < glob.length) {
-    const ch = glob[i]
-    if (ch === '*' && glob[i + 1] === '*') { out += '.*'; i += 2; continue }
-    if (ch === '*') { out += '[^/]*'; i++; continue }
-    if (ch === '?') { out += '[^/]'; i++; continue }
-    if (SPECIAL.includes(ch)) out += `\\${ch}`
-    else out += ch
-    i++
-  }
-  return new RegExp(out)
-}
-
 // ============================================================================
 // Launcher：往主页面注入悬浮按钮
 // ============================================================================
@@ -316,59 +187,37 @@ function hasEslint(): boolean {
   return false
 }
 
-/** 对给定文件跑 eslint --fix，超时 60s；优先用项目本地二进制 */
-function runEslint(files: string[], timeoutMs = 60_000): Promise<{ code: number, stdout: string, stderr: string }> {
-  return new Promise((resolve) => {
-    const binName = process.platform === 'win32' ? 'eslint.cmd' : 'eslint'
-    const localBin = path.join(ROOT, 'node_modules', '.bin', binName)
-    const useLocal = fs.existsSync(localBin)
-    const cmd = useLocal ? localBin : 'pnpm'
-    const args = useLocal ? ['--fix', ...files] : ['exec', 'eslint', '--fix', ...files]
-
-    const child = spawn(cmd, args, { cwd: ROOT, shell: !useLocal && process.platform === 'win32' })
-    let stdout = ''
-    let stderr = ''
-    let killed = false
-
-    const timer = setTimeout(() => {
-      killed = true
-      child.kill('SIGTERM')
-    }, timeoutMs)
-
-    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
-    child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
-    child.on('error', (e) => {
-      clearTimeout(timer)
-      resolve({ code: -1, stdout, stderr: `${stderr}\n${String(e)}` })
+/** 对给定文件跑 eslint --fix，超时 60s；优先项目本地二进制，否则按项目包管理器调用 */
+async function runEslint(files: string[], timeoutMs = 60_000): Promise<{ code: number, stdout: string, stderr: string }> {
+  const binName = process.platform === 'win32' ? 'eslint.cmd' : 'eslint'
+  const localBin = path.join(ROOT, 'node_modules', '.bin', binName)
+  if (fs.existsSync(localBin)) {
+    const r = await runProcess(localBin, {
+      args: ['--fix', ...files], cwd: ROOT, timeoutMs, timeoutLabel: 'eslint 超时',
+      shell: process.platform === 'win32',
     })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      resolve({
-        code: code ?? -1,
-        stdout,
-        stderr: killed ? `${stderr}\n[eslint 超时 ${timeoutMs / 1000}s 强制终止]` : stderr,
-      })
-    })
+    return { code: r.code, stdout: r.stdout, stderr: r.stderr }
+  }
+  const pm = detectPackageManager(ROOT)
+  const execArgs = pm === 'yarn'
+    ? ['eslint', '--fix', ...files]
+    : pm === 'npm'
+      ? ['exec', '--no', 'eslint', '--fix', ...files]
+      : ['exec', 'eslint', '--fix', ...files]
+  const r = await runProcess(pm, {
+    args: execArgs, cwd: ROOT, timeoutMs, timeoutLabel: 'eslint 超时',
+    shell: process.platform === 'win32',
   })
+  return { code: r.code, stdout: r.stdout, stderr: r.stderr }
 }
 
 // ============================================================================
 // [AI-Runner] 工程化预检 + TDD 测试运行器
 // ============================================================================
 
-function runCmd(cmd: string, args: string[], timeoutMs = 60_000): Promise<{ code: number, stdout: string, stderr: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd: ROOT })
-    let stdout = ''; let stderr = ''; let killed = false
-    const timer = setTimeout(() => { killed = true; child.kill('SIGTERM') }, timeoutMs)
-    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
-    child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      resolve({ code: code ?? -1, stdout, stderr: killed ? `${stderr}\n[超时]` : stderr })
-    })
-    child.on('error', (e) => { clearTimeout(timer); resolve({ code: -1, stdout, stderr: String(e) }) })
-  })
+async function runCmd(cmd: string, args: string[], timeoutMs = 60_000): Promise<{ code: number, stdout: string, stderr: string }> {
+  const r = await runProcess(cmd, { args, cwd: ROOT, timeoutMs })
+  return { code: r.code, stdout: r.stdout, stderr: r.stderr }
 }
 
 const TSC_EXTS = new Set(['.ts', '.tsx', '.vue', '.mts', '.cts'])
@@ -473,9 +322,26 @@ function extractErrorFiles(text: string): string[] {
 // ============================================================================
 // HTTP 工具
 // ============================================================================
-function parseScriptDesc(script: string): string {
-  const m = script.match(/^\s*\/\/\s*@desc\s*:\s*(.+)$/m)
-  return m ? m[1].trim().slice(0, 200) : ''
+interface ScriptMeta {
+  desc: string
+  why: string
+}
+
+/**
+ * 从脚本首部解析 @desc / @why 元注释。
+ * - cjs：`// @desc: ...` / `// @why: ...`
+ * - bash：`# @desc: ...` / `# @why: ...`
+ * 失败字段为空字符串，不阻塞执行（降级显示「AI 未提供说明」）。
+ */
+function parseScriptMeta(script: string): ScriptMeta {
+  const out: ScriptMeta = { desc: '', why: '' }
+  const re = /^\s*(?:\/\/|#)\s*@(desc|why)\s*:\s*(.+)$/gm
+  let m: RegExpExecArray | null
+  while ((m = re.exec(script)) !== null) {
+    const key = m[1] === 'desc' ? 'desc' : 'why'
+    if (!out[key]) out[key] = m[2].trim().slice(0, 200)
+  }
+  return out
 }
 function parseClaimed(script: string): string[] | null {
   const out: string[] = []
@@ -488,42 +354,6 @@ function parseClaimed(script: string): string[] | null {
     }
   }
   return out.length ? out : null
-}
-function sendJSON(res: ServerResponse, data: unknown, code = 200) {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(data))
-}
-
-function sendHTML(res: ServerResponse, html: string) {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-  res.end(html)
-}
-
-const MAX_BODY = 5 * 1024 * 1024
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve) => {
-    let body = ''
-    let over = false
-    req.on('data', (c: Buffer) => {
-      if (over) return
-      body += c.toString()
-      if (body.length > MAX_BODY) {
-        over = true
-        req.destroy()
-        resolve('')
-      }
-    })
-    req.on('end', () => { if (!over) resolve(body) })
-    req.on('error', () => { if (!over) resolve(body) })
-  })
-}
-
-function parseJSON<T = any>(raw: string): T | null {
-  try {
-    return raw ? JSON.parse(raw) as T : null
-  } catch {
-    return null
-  }
 }
 
 // ============================================================================
@@ -569,10 +399,33 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
 
   // POST /exec — 流式执行 shell 命令（NDJSON，每行 {stream,data|code}）
+  // 安全层（v6 §8.2-8.4 + §8.7-8.8）：
+  //   1. 静态黑名单 10 条命中 → 400 + { blacklistHit } 直接拒绝
+  //   2. env 白名单（PATH/HOME/LANG/.../USER），密钥自动剥离
+  //   3. 120s 超时 + SIGTERM→SIGKILL
+  //   4. 跑前 git status 检查：干净 → 记录 rollbackRef；脏 → 400 + { dirty, files } 让用户决策
   if (req.method === 'POST' && pathname === '/exec') {
-    const body = parseJSON<{ cmd?: string }>(await readBody(req))
+    const body = parseJSON<{ cmd?: string, allowDirty?: boolean }>(await readBody(req))
     const cmd = String(body?.cmd || '').trim()
     if (!cmd) return sendJSON(res, { error: 'cmd 为空' }, 400)
+
+    // 1. 黑名单
+    const hit = checkBashBlacklist(cmd)
+    if (hit) {
+      return sendJSON(res, { error: `命中黑名单：${hit}`, blacklistHit: hit }, 400)
+    }
+
+    // 2. git 跑前检查
+    const gitCheck = await gitPreExecCheck()
+    if (!gitCheck.ok && gitCheck.dirty && !body?.allowDirty) {
+      return sendJSON(res, {
+        error: '工作区不干净，请先 commit 或 stash',
+        dirty: true,
+        files: gitCheck.files,
+      }, 400)
+    }
+    // 非 git 仓库或用户允许强行执行 → 继续执行（无 git 兜底或用户已知风险）
+
     res.writeHead(200, {
       'Content-Type': 'application/x-ndjson; charset=utf-8',
       'Cache-Control': 'no-cache',
@@ -581,19 +434,22 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const write = (obj: unknown) => {
       try { res.write(`${JSON.stringify(obj)}\n`) } catch { }
     }
-    const child = spawn(cmd, { cwd: ROOT, shell: true, env: process.env })
-    child.stdout?.on('data', (d: Buffer) => write({ stream: 'stdout', data: d.toString() }))
-    child.stderr?.on('data', (d: Buffer) => write({ stream: 'stderr', data: d.toString() }))
-    child.on('error', (e: Error) => {
-      write({ stream: 'stderr', data: String(e?.message || e) })
-      write({ stream: 'exit', code: -1 })
-      res.end()
+    if (gitCheck.ok) {
+      write({ stream: 'meta', rollbackRef: gitCheck.rollbackRef })
+    }
+    const ac = new AbortController()
+    req.on('aborted', () => ac.abort())
+    const r = await runProcess(cmd, {
+      cwd: ROOT,
+      env: buildEnvWhitelist(ROOT),
+      shell: true,
+      timeoutMs: BASH_TIMEOUT_MS,
+      timeoutLabel: 'bash 超时',
+      signal: ac.signal,
+      onChunk: (stream, data) => write({ stream, data }),
     })
-    child.on('close', (code) => {
-      write({ stream: 'exit', code: code ?? -1 })
-      res.end()
-    })
-    req.on('aborted', () => { try { child.kill('SIGKILL') } catch { } })
+    write({ stream: 'exit', code: r.code })
+    res.end()
     return
   }
 
@@ -676,9 +532,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     ensureDirs()
     fs.mkdirSync(path.join(ROOT, '.ai-runner/tmp'), { recursive: true })
     const startedAt = Date.now()
-    const body = parseJSON<{ script?: string, gitCommit?: boolean }>(await readBody(req))
+    const body = parseJSON<{ script?: string, gitCommit?: boolean, gitVerify?: boolean }>(await readBody(req))
     const script = String(body?.script || '').trim()
     const gitCommit = Boolean(body?.gitCommit)
+    const gitVerify = Boolean(body?.gitVerify)
     if (!script) return sendJSON(res, { error: '脚本为空' }, 400)
     // === shebang 分流：非 node shebang 走 shell ===
     const firstLine = script.split('\n', 1)[0].trim()
@@ -689,32 +546,22 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         'Cache-Control': 'no-cache',
         'X-Accel-Buffering': 'no',
       })
-      const writeS = (obj) => { try { res.write(JSON.stringify(obj) + '\n') } catch {} }
-      let shellOut = ''
-      let shellErr = ''
-      const child = spawn(script, { cwd: ROOT, shell: true, env: process.env })
-      child.stdout?.on('data', (d) => { const s = d.toString(); shellOut += s; writeS({ type: 'chunk', stream: 'stdout', data: s }) })
-      child.stderr?.on('data', (d) => { const s = d.toString(); shellErr += s; writeS({ type: 'chunk', stream: 'stderr', data: s }) })
-      child.on('error', (e) => {
-        const msg = String(e?.message || e)
-        writeS({ type: 'chunk', stream: 'stderr', data: msg })
-        writeS({
-          type: 'summary', runId: '', code: -1, ok: false,
-          stdout: shellOut, stderr: shellErr + msg, changes: [],
-          shell: true,
-        })
-        res.end()
+      const writeS = (obj: unknown) => { try { res.write(JSON.stringify(obj) + '\n') } catch { } }
+      const ac = new AbortController()
+      req.on('aborted', () => ac.abort())
+      const r = await runProcess(script, {
+        cwd: ROOT,
+        env: process.env,
+        shell: true,
+        signal: ac.signal,
+        onChunk: (stream, data) => writeS({ type: 'chunk', stream, data }),
       })
-      child.on('close', (code) => {
-        const cc = code ?? -1
-        writeS({
-          type: 'summary', runId: '', code: cc, ok: cc === 0,
-          stdout: shellOut, stderr: shellErr, changes: [],
-          shell: true,
-        })
-        res.end()
+      writeS({
+        type: 'summary', runId: '', code: r.code, ok: r.code === 0,
+        stdoutTail: r.stdout.slice(-2000), stderrTail: r.stderr.slice(-4000), changes: [],
+        shell: true,
       })
-      req.on('aborted', () => { try { child.kill('SIGKILL') } catch {} })
+      res.end()
       return
     }
     // === 以下原有 node 沙盒逻辑 ===
@@ -739,7 +586,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const writeFrame = (obj: unknown) => {
       try { res.write(`${JSON.stringify(obj)}\n`) } catch { }
     }
-    const before = snapshot()
+    const beforeSnap = snapshot()
+    const before = beforeSnap.contents
+    const beforeMeta = beforeSnap.meta
     const ac = new AbortController()
     req.on('aborted', () => ac.abort())
     const result = await runScript(scriptPath, 60_000, ac.signal, overlayPath, toolLogPath, (stream, data) => {
@@ -766,13 +615,16 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       }
     }
     try { fs.unlinkSync(overlayPath) } catch { }
-    const mid = snapshot()
 
-    // 脚本自身改动
-    const scriptChanges = diff(before, mid)
+    // 脚本自身改动（增量元数据扫描，只读取疑似变更文件的内容）
+    const scriptChanges = diffMeta(before, beforeMeta, scanMeta())
 
     // 对改动源文件跑 eslint --fix
-    const lintTargets = pickLintTargets(scriptChanges)
+    // [fix] 首次扫描疑似 overlay 落盘竞态漏检，兜底重扫一次
+    const lintTargets = pickLintTargets(scriptChanges.length ? scriptChanges : diffMeta(before, beforeMeta, scanMeta()))
+    if (process.env.AI_RUNNER_LINT_DEBUG) {
+      console.error(`[ai-runner][lint-debug] scriptChanges=${scriptChanges.length} targets=${lintTargets.length} hasEslint=${hasEslint()}`)
+    }
     let lint: LintResult | null = null
     if (lintTargets.length && hasEslint()) {
       const r = await runEslint(lintTargets)
@@ -785,9 +637,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       }
     }
 
-    // eslint 后可能又改了文件 —— 用最终快照重新算净变化
-    const after = snapshot()
-    const changes = diff(before, after)
+    // eslint 后可能又改了文件 —— 用最终元数据重新算净变化
+    const changes = diffMeta(before, beforeMeta, scanMeta())
 
     saveSnapshot(runId, before, changes)
     try { saveIndex(runId, scanIndex(), runDir(runId)) } catch { }
@@ -802,7 +653,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     try { fs.unlinkSync(scriptPath) } catch { /* ignore */ }
 
     // 失败时从错误输出里提取项目内文件，供前端补全源码
-    const scriptDesc = parseScriptDesc(script)
+    const scriptMeta = parseScriptMeta(script)
+    const scriptDesc = scriptMeta.desc
+    const scriptWhy = scriptMeta.why
     const claimed = parseClaimed(script)
     let claimMismatch: ClaimMismatch | null = null
     if (claimed) {
@@ -818,7 +671,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     // after commit：按本次 changes 提交
     let gitAfter: { ok: boolean, commit?: string, reason?: string } | null = null
     if (gitCommit && gitInfo.ok && changes.length > 0) {
-      gitAfter = await gitCommitAfter(runId, changes, result.code, Date.now() - startedAt)
+      gitAfter = await gitCommitAfter(runId, changes, result.code, Date.now() - startedAt, gitVerify)
     }
 
     let smoke: SmokeResult | null = null
@@ -832,6 +685,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       ts: startedAt,
       runId,
       desc: scriptDesc,
+      why: scriptWhy,
       script: script.slice(0, 2000),
       exit: result.code,
       durationMs: Date.now() - startedAt,
@@ -844,10 +698,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       type: 'summary',
       runId,
       scriptDesc,
+      scriptWhy,
       code: result.code,
       ok: scriptOk,
-      stdout: result.stdout,
-      stderr: applyError ? (`${result.stderr}\n[overlay apply error] ${applyError}`) : result.stderr,
+      // stdout/stderr 全程已通过 chunk 帧流式发出，summary 只带尾部片段（刷新/丢帧兜底），不再全量重复
+      stdoutTail: result.stdout.length > 2000 ? result.stdout.slice(-2000) : result.stdout,
+      stderrTail: result.stderr.length > 4000 ? result.stderr.slice(-4000) : result.stderr,
+      notice: applyError ? `[overlay apply error] ${applyError}` : undefined,
       changes,
       lint,
       test,
@@ -933,41 +790,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true })
     return sendJSON(res, { ok: true })
   }
-  // POST /files/before { runId, file } → 读取变更前的文件快照
-  if (req.method === 'POST' && pathname === '/files/before') {
-    const body = parseJSON<{ runId?: string, file?: string }>(await readBody(req))
-    const { runId, file } = body || {}
-    if (!runId || !file) return sendJSON(res, { error: '缺 runId 或 file' }, 400)
-
-    const dir = runDir(String(runId))
-    const bak = path.join(dir, `${file}.before`)
-
-    if (!fs.existsSync(bak)) {
-      return sendJSON(res, { content: '', exists: false })
-    }
-
-    try {
-      const content = fs.readFileSync(bak, 'utf8')
-      return sendJSON(res, { content, exists: true })
-    } catch (e) {
-      return sendJSON(res, { error: String(e) }, 500)
-    }
-  }
-
   // POST /script/save { script } → 把编辑器内容落盘到 .ai-runner/scripts/draft-*.cjs
-  if (req.method === 'POST' && pathname === '/diff-from-baseline') {
-    const body = parseJSON<{ baselineRunId?: string }>(await readBody(req))
-    const baselineRunId = String(body?.baselineRunId || '')
-    if (!baselineRunId) return sendJSON(res, { error: '缺 baselineRunId' }, 400)
-    const dir = runDir(baselineRunId)
-    if (!fs.existsSync(dir)) return sendJSON(res, { error: '基准记录不存在' }, 404)
-    const baseIdx = readIndex(dir)
-    if (!baseIdx) return sendJSON(res, { error: '基准索引缺失' }, 404)
-    const curIdx = scanIndex()
-    const entries = diffIndexes(baseIdx, curIdx)
-    const changes = entries.map(e => ({ path: e.path, type: e.type }))
-    return sendJSON(res, { baselineRunId, changes })
-  }
   if (req.method === 'POST' && pathname === '/script/save') {
     const body = parseJSON<{ script?: string }>(await readBody(req))
     const scriptText = String(body?.script || '').trim()
@@ -979,37 +802,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     return sendJSON(res, { ok: true, path: path.relative(ROOT, file) })
   }
 
-  // GET /files?depth=N → 项目文件树（默认 5，上限 6）
-  if (req.method === 'GET' && pathname === '/files') {
-    const depth = Math.min(Number(url.searchParams.get('depth')) || 1, 6)
-    const tree = buildFileTree(ROOT, '', 0, depth)
-    return sendJSON(res, { tree })
-  }
-
-  // POST /files/read { paths: string[] } → 读文件内容（安全校验）
-  if (req.method === 'GET' && pathname === '/files/tree') {
-    const rel = url.searchParams.get('path') || ''
-    const abs = path.resolve(ROOT, rel)
-    if (abs !== ROOT && !abs.startsWith(ROOT + path.sep)) {
-      return sendJSON(res, { error: '路径越界' }, 403)
-    }
-    if (!fs.existsSync(abs)) {
-      return sendJSON(res, { error: '路径不存在' }, 404)
-    }
-    // depth=32 足够覆盖任何合理项目（2^5 = 32 层）
-    const tree = buildFileTree(abs, rel, 0, 32)
-    return sendJSON(res, { tree })
-  }
-
-  if (req.method === 'GET' && pathname === '/files/children') {
-    const rel = url.searchParams.get('path') || ''
-    const abs = path.resolve(ROOT, rel)
-    if (abs !== ROOT && !abs.startsWith(ROOT + path.sep)) {
-      return sendJSON(res, { error: '路径越界' }, 403)
-    }
-    const children = buildFileTree(abs, rel, 0, 1)
-    return sendJSON(res, { children })
-  }
+  // 文件树 / 检索 / 快照读取类路由（委派到 files-routes.ts）
+  if (await handleFilesRoutes(req, res, url)) return
 
   // ---------- Skills ----------
   if (req.method === 'GET' && pathname === '/skills') {
@@ -1054,97 +848,6 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     return sendJSON(res, { ok: true })
   }
 
-  if (req.method === 'POST' && pathname === '/files/read') {
-    const body = parseJSON<{ paths?: string[] }>(await readBody(req))
-    const paths = Array.isArray(body?.paths) ? body!.paths! : []
-    const results: Array<{ path: string, content: string, error?: string }> = []
-
-    for (const p of paths) {
-      const safe = String(p || '').trim()
-      if (!safe) {
-        results.push({ path: p, content: '', error: '空路径' })
-        continue
-      }
-      // 路径越界检查：必须落在项目根内
-      const abs = path.resolve(ROOT, safe)
-      if (abs !== ROOT && !abs.startsWith(ROOT + path.sep)) {
-        results.push({ path: safe, content: '', error: '路径越界' })
-        continue
-      }
-      try {
-        const realAbs = fs.realpathSync(abs)
-        const realRoot = fs.realpathSync(ROOT)
-        if (realAbs !== realRoot && !realAbs.startsWith(realRoot + path.sep)) {
-          results.push({ path: safe, content: '', error: '路径越界（软链接）' })
-          continue
-        }
-      } catch { /* 文件不存在时下面的 existsSync 会处理 */ }
-      try {
-        if (!fs.existsSync(abs)) {
-          results.push({ path: safe, content: '', error: '文件不存在' })
-          continue
-        }
-        const stat = fs.statSync(abs)
-        if (stat.isDirectory()) {
-          results.push({ path: safe, content: '', error: '是目录' })
-          continue
-        }
-        if (stat.size > 200_000) {
-          results.push({ path: safe, content: '', error: '文件过大（>200KB）' })
-          continue
-        }
-        // 二进制检查：前 512 字节含 NUL 视为二进制
-        const buf = fs.readFileSync(abs)
-        if (buf.subarray(0, 512).includes(0)) {
-          results.push({ path: safe, content: '', error: '二进制文件' })
-          continue
-        }
-        results.push({ path: safe, content: buf.toString('utf8') })
-      } catch (e) {
-        results.push({ path: safe, content: '', error: String(e) })
-      }
-    }
-
-    return sendJSON(res, { files: results })
-  }
-
-  // POST /search { pattern, glob?, mode?: 'file' | 'content', max? }
-  if (req.method === 'POST' && pathname === '/search') {
-    const body = parseJSON<{ pattern?: string, glob?: string, mode?: string, max?: number }>(await readBody(req))
-    const pattern = String(body?.pattern || '').trim()
-    if (!pattern) return sendJSON(res, { error: 'pattern 为空' }, 400)
-    const mode = body?.mode === 'file' ? 'file' : 'content'
-    const globRe = body?.glob ? globToRe(body.glob) : null
-    const max = Math.min(Number(body?.max) || 100, 500)
-
-    let re: RegExp
-    try { re = new RegExp(pattern) } catch (e) { return sendJSON(res, { error: String(e) }, 400) }
-
-    const hits: Array<{ path: string, line?: number, text?: string }> = []
-    for (const f of walkFiles(ROOT)) {
-      if (hits.length >= max) break
-      if (globRe && !globRe.test(f.rel)) continue
-
-      if (mode === 'file') {
-        if (re.test(f.rel)) hits.push({ path: f.rel })
-        continue
-      }
-
-      let content: string
-      try { content = fs.readFileSync(f.abs, 'utf8') } catch { continue }
-      if (content.length > 400_000) continue
-      const lines = content.split('\n')
-      for (let i = 0; i < lines.length && hits.length < max; i++) {
-        if (re.test(lines[i])) {
-          hits.push({ path: f.rel, line: i + 1, text: lines[i].trim().slice(0, 200) })
-        }
-      }
-    }
-    return sendJSON(res, { results: hits, truncated: hits.length >= max })
-  }
-
-  // POST /context/regenerate → 内存生成（不落盘）
-
   res.writeHead(404)
   res.end('Not Found')
 }
@@ -1152,13 +855,6 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 // ============================================================================
 // 插件导出
 // ============================================================================
-
-// 模块级 contextOptions，由 aiRunner 注入；
-// handle() 是模块级函数，只能通过模块级变量读到它。
-
-export interface AiRunnerOptions {
-  root?: string
-}
 
 export function aiRunner(options: AiRunnerOptions = {}): Plugin {
   if (options.root) setRoot(options.root)
@@ -1182,6 +878,7 @@ export function aiRunner(options: AiRunnerOptions = {}): Plugin {
     configureServer(server: ViteDevServer) {
       server.middlewares.use(PREFIX, (req, res) => {
         if (!req.url || req.url === '') req.url = '/'
+        if (!guardRequest(req, res, options)) return
 
         Promise.resolve(handle(req, res)).catch((e: unknown) => {
           console.error('[ai-runner] 处理失败:', e)
