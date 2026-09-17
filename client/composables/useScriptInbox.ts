@@ -72,7 +72,7 @@ export function push(opts: PushOptions): InboxItem | null {
   }
   const meta = parseMeta(code, opts.lang)
   const item: InboxItem = {
-    id: `inb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    id: `inb_${crypto.randomUUID().slice(0, 8)}`,
     code,
     lang: opts.lang,
     site: opts.site,

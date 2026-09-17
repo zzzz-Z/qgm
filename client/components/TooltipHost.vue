@@ -3,8 +3,10 @@
     <Transition name="tt-fade">
       <div
         v-if="state.visible"
+        ref="floatingRef"
         class="tt-host"
-        :style="{ left: `${state.x}px`, top: `${state.y}px` }"
+        :style="floatingStyles"
+        role="tooltip"
       >
         {{ state.text }}
       </div>
@@ -13,17 +15,60 @@
 </template>
 
 <script setup lang="ts">
-defineOptions({ name: 'TooltipHost' })
+import { ref, watch } from 'vue'
+import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/vue'
+import type { VirtualElement } from '@floating-ui/dom'
 import { useTooltip } from '../composables/useTooltip'
 
+defineOptions({ name: 'TooltipHost' })
+
 const { state } = useTooltip()
+
+/**
+ * 虚拟参考元素：位置跟随鼠标光标（0×0 矩形）。
+ * getBoundingClientRect 每次调用都读取最新光标坐标，
+ * 配合 update() 在 mousemove 时重新定位。
+ */
+const referenceRef = ref<VirtualElement>({
+  getBoundingClientRect() {
+    const x = state.value.x
+    const y = state.value.y
+    return {
+      x,
+      y,
+      top: y,
+      left: x,
+      right: x,
+      bottom: y,
+      width: 0,
+      height: 0,
+    }
+  },
+})
+
+const floatingRef = ref<HTMLElement | null>(null)
+
+const { floatingStyles, update } = useFloating(referenceRef, floatingRef, {
+  // 光标右下方弹出，贴近原 translate(12px, 14px) 的视觉效果
+  placement: 'bottom-start',
+  strategy: 'fixed',
+  // offset: 距光标 12px；flip: 下方空间不足时翻到上方；shift: 水平触边时自动内移
+  middleware: [offset(12), flip({ padding: 8 }), shift({ padding: 8 })],
+  // 滚动 / 窗口尺寸变化时自动重算
+  whileElementsMounted: autoUpdate,
+})
+
+// 光标移动或显隐切换时，手动触发重新定位
+watch(
+  () => [state.value.x, state.value.y, state.value.visible] as const,
+  () => update(),
+)
 </script>
 
 <style scoped>
 .tt-host {
-  position: fixed;
+  /* position / top / left 由 floatingStyles 提供，不再手动写 */
   z-index: 2147483647;
-  transform: translate(12px, 14px);
   max-width: 360px;
   padding: 6px 10px;
   background: rgb(15 23 42 / 96%);

@@ -13,7 +13,7 @@ export const HARD_LIMIT = 50000
 const STORAGE_KEY = 'ai_runner_session_ctx'
 
 function generateId(): string {
-  return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  return `sess_${crypto.randomUUID().slice(0, 8)}`
 }
 
 const sessionId = ref<string>(generateId())

@@ -206,7 +206,7 @@ src/                          # Vite 插件（Node 侧）
 ├── smoke.ts                  # Playwright headless 页面冒烟
 └── launcher.ts               # 注入业务页面的悬浮球（Shadow DOM）脚本
 
-client/                       # 工作台 SPA（Vue 3 + CodeMirror 6 + reka-ui）
+client/                       # 工作台 SPA（Vue 3 + CodeMirror 6）
 ├── App.vue                   # 主布局 + 3 个 tab + 设置 / 会话管理
 ├── main.ts / index.html      # SPA 入口
 ├── vite.config.ts            # 自托管：5174 端口挂自家插件（root 指向包根）
@@ -221,7 +221,7 @@ client/                       # 工作台 SPA（Vue 3 + CodeMirror 6 + reka-ui�
 │                             # useTraceLog / useToast / useTooltip
 ├── utils/                    # contextBuilder（prompt 组装）/ tokenEstimator
 ├── e2e/ai-runner.spec.ts     # Playwright e2e
-└── *.node-test.ts            # node:test 单测（codeCleaner / lcsDiff）
+└── *.node-test.ts            # node:test 单测（codeCleaner / loopLogic / interceptor 拦截器沙盒）
 
 bin/                          # 5 个 CLI（见上表）
 skills/
@@ -271,7 +271,7 @@ pnpm typecheck    # 仅类型检查
 pnpm web:dev      # 启动 client 自托管 dev（http://localhost:5174/__ai/，插件 root 指向包根）
 pnpm web:build    # 构建 client
 
-pnpm test:unit    # node:test：codeCleaner / lcsDiff / interceptor 拦截器沙盒
+pnpm test:unit    # node:test：codeCleaner / loopLogic / interceptor 拦截器沙盒
 pnpm test:e2e     # Playwright e2e（需先起 dev server）
 pnpm lint         # ESLint（flat config）
 pnpm run-all      # 全量回归（air-run-all）
