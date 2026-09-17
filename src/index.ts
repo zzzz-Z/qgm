@@ -563,7 +563,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if (!script) return sendJSON(res, { error: '脚本为空' }, 400)
     // === shebang 分流：非 node shebang 走 shell ===
     const firstLine = script.split('\n', 1)[0].trim()
-    const isNodeScript = /^#!\s*\/usr\/bin\/(env\s+)?node\b/.test(firstLine)
+    const hasShebang = /^#!\s*\/usr\/bin\/(env\s+)?node\b/.test(firstLine)
+    const looksJs = !hasShebang && /^(?:console\.|require\s*\(|import\s|export\s|const\s|let\s|var\s|function\s|async\s|await\s|class\s|if\s*\(|for\s*\(|while\s*\(|switch\s*\(|try\s*\{|throw\s|return\s|\/\/|\/\*)/.test(firstLine)
+    const isNodeScript = hasShebang || looksJs
+    const effectiveScript = isNodeScript && !hasShebang ? '#!/usr/bin/env node\n' + script : script
     if (!isNodeScript) {
       res.writeHead(200, {
         'Content-Type': 'application/x-ndjson; charset=utf-8',
@@ -600,7 +603,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       gitInfo = await gitSnapshot(runId)
     }
     const scriptPath = path.join(SCRIPTS_DIR, `${runId}.cjs`)
-    fs.writeFileSync(scriptPath, script)
+    fs.writeFileSync(scriptPath, effectiveScript)
 
     res.writeHead(200, {
       'Content-Type': 'application/x-ndjson; charset=utf-8',
@@ -677,10 +680,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     try { fs.unlinkSync(scriptPath) } catch { /* ignore */ }
 
     // 失败时从错误输出里提取项目内文件，供前端补全源码
-    const scriptMeta = parseScriptMeta(script)
+    const scriptMeta = parseScriptMeta(effectiveScript)
     const scriptDesc = scriptMeta.desc
     const scriptWhy = scriptMeta.why
-    const claimed = parseClaimed(script)
+    const claimed = parseClaimed(effectiveScript)
     let claimMismatch: ClaimMismatch | null = null
     if (claimed) {
       const actual = changes.map(c => c.path)
@@ -710,7 +713,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       runId,
       desc: scriptDesc,
       why: scriptWhy,
-      script: script.slice(0, 2000),
+      script: effectiveScript.slice(0, 2000),
       exit: result.code,
       durationMs: Date.now() - startedAt,
       changeCount: changes.length,
