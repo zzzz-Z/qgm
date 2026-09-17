@@ -28,6 +28,7 @@ export interface TraceEntry {
     hash?: string
     /** 归属循环 ID（P2 useAutoLoop 写入；P1 manual 模式留空） */
     loopId?: string
+    summary?: string
     /** 循环轮次（P2 useAutoLoop 写入；P1 manual 模式留空） */
     loopRound?: number
   }

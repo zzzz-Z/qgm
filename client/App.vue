@@ -10,6 +10,7 @@ import {
   isLoopActive,
   onNonScriptReply,
   onScriptArrival,
+  setTokenEstimate,
   onSummary,
   onNewSessionCreated,
 } from './composables/useAutoLoop'

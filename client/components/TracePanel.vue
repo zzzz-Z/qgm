@@ -36,7 +36,7 @@ const groups = computed<TraceGroup[]>(() => {
   for (const e of filtered.value) {
     const lid = e.payload.loopId
     if (!lid) {
-      out.push({ key: `s_${e.id}`, isLoop: false, items: [e] })
+      out.push({ key: `s_${e.id}`, isLoop: false, maxRound: 0, items: [e] })
       continue
     }
     let g = loopIndex.get(lid)
