@@ -306,8 +306,12 @@ async function toleranceFail(detail: string): Promise<void> {
   const decision = decideTolerance(toleranceLeft.value)
   if (decision.action === 'retry') {
     toleranceLeft.value = decision.remaining
+    const okSent = sendFill({ prompt: buildRetryPrompt(detail) })
+    if (!okSent) {
+      await finish('window-lost', '重试时 AI 窗口已关闭或发送失败')
+      return
+    }
     toast(`格式不符，要求 AI 重试（仅剩 ${decision.remaining} 次宽容）`, 'warn', 4000)
-    sendFill({ prompt: buildRetryPrompt(detail) })
     enterWaiting()
     return
   }

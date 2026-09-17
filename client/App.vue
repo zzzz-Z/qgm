@@ -278,9 +278,9 @@ function onSessionIdMessage(e: MessageEvent) {
           void onScriptArrival(item)
         } else {
           // 手动模式：覆盖保护后填入编辑器，并自动运行
-          scriptInbox.applyToEditor(item)
-          runner.script.value = item.code
-          void runner.run()
+          if (scriptInbox.applyToEditor(item) === 'overwritten') {
+            void runner.run()
+          }
         }
       }
       return
@@ -308,9 +308,9 @@ function onSessionIdMessage(e: MessageEvent) {
       if (isLoopActive.value) {
         void onScriptArrival(item)
       } else {
-        scriptInbox.applyToEditor(item)
-        runner.script.value = item.code
-        void runner.run()
+        if (scriptInbox.applyToEditor(item) === 'overwritten') {
+          void runner.run()
+        }
       }
     }
     return
