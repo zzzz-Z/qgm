@@ -256,6 +256,8 @@ async function runTsc(
     compilerOptions: {
       skipLibCheck: true,
       noEmit: true,
+      // [fix] 覆盖 rootDir：允许 client/*.vue 进入检查（原 rootDir=./src 会触发 TS6059）
+      rootDir: '.',
     },
     files: [],
     include: targets.map(p => `./${p}`),
