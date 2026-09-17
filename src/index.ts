@@ -661,7 +661,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
     // 对改动源文件跑 eslint --fix
     // [fix] 首次扫描疑似 overlay 落盘竞态漏检，兜底重扫一次
-    const lintTargets = pickLintTargets(scriptChanges.length ? scriptChanges : diffMeta(before, beforeMeta, scanMeta()))
+    const lintTargets = pickLintTargets(scriptChanges)
     if (process.env.AI_RUNNER_LINT_DEBUG) {
       console.error(`[ai-runner][lint-debug] scriptChanges=${scriptChanges.length} targets=${lintTargets.length} hasEslint=${hasEslint()}`)
     }
