@@ -669,8 +669,33 @@ async function finish(reason: string, detail?: string): Promise<void> {
 // ============================================================================
 // token 估算（App.vue 桥接）
 // ============================================================================
+const KEY_AUTO_ROTATE = '__ai_auto_rotate_session'
+const LOOP_ROTATE_THRESHOLD = 40000
+function loadBoolSetting(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key)
+    return v === null ? fallback : v === '1'
+  } catch { return fallback }
+}
+export const autoRotateSession = ref<boolean>(loadBoolSetting(KEY_AUTO_ROTATE, true))
+watch(autoRotateSession, (v) => {
+  try { localStorage.setItem(KEY_AUTO_ROTATE, v ? '1' : '0') } catch { }
+})
+
 export function setTokenEstimate(n: number): void {
-  latestTokens.value = Math.max(0, Number(n) || 0)
+  const v = Math.max(0, Number(n) || 0)
+  latestTokens.value = v
+  if (!autoRotateSession.value) return
+  if (!isLoopActive.value) return
+  if (loopState.value === 'handoff') return
+  if (loopState.value !== 'waiting') return
+  if (v < LOOP_ROTATE_THRESHOLD) return
+  addTrace({
+    kind: 'loop',
+    summary: `⚠ token 达 ${(v / 1000).toFixed(1)}k ≥ ${LOOP_ROTATE_THRESHOLD / 1000}k，自动触发轮转`,
+    payload: { loopId: loopId.value, loopRound: loopRound.value },
+  })
+  void startHandoff()
 }
 
 // ============================================================================
@@ -753,6 +778,7 @@ export async function onSummary(text: string, sessionId: string, degraded: boole
 export async function onNewSessionCreated(url: string, id: string): Promise<void> {
   if (loopState.value !== 'handoff') return
   handoffDisarm()
+  latestTokens.value = 0
   addTrace({
     kind: 'loop',
     summary: `✓ 已切到新会话 · ${id || url}`,
@@ -808,6 +834,6 @@ export function useAutoLoop() {
     tokenBudget: LOOP_TOKEN_BUDGET,
     startLoop, startTakeover, killCurrent, stopAndRollback, requestPause,
     onScriptArrival, onNonScriptReply, setTokenEstimate, currentLoopContext,
-    startHandoff, onSummary, onNewSessionCreated, resumeLoop,
+    startHandoff, onSummary, onNewSessionCreated, autoRotateSession, resumeLoop,
   }
 }

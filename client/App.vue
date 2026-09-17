@@ -13,6 +13,7 @@ import {
     setTokenEstimate,
     onSummary,
     onNewSessionCreated,
+  autoRotateSession,
 } from './composables/useAutoLoop'
 import { useSessionManager } from './composables/useSessionManager'
 import { useToast } from './composables/useToast'
@@ -26,7 +27,7 @@ import TooltipHost from './components/TooltipHost.vue'
 const SESSION_HISTORY_KEY = '__ai_session_history'
 /** mock 通道（v6 §13.2 ?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
 const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
-interface SessionEntry { id: string, url: string, title: string, createdAt: number, tokens?: number }
+interface SessionEntry { id: string, url: string, title: string, createdAt: number, tokens?: number, handedOff?: boolean }
 function loadHistory(): SessionEntry[] {
   try { const raw = localStorage.getItem(SESSION_HISTORY_KEY); return raw ? JSON.parse(raw) : [] } catch { return [] }
 }
@@ -345,6 +346,20 @@ function onSessionIdMessage(e: MessageEvent) {
   if (d.type === 'ai-runner:new-session-created') {
     const url = String(d.url || '')
     const id = String(d.id || '')
+    const oldId = activeSessionId.value
+    if (oldId) {
+      const i = sessionHistory.value.findIndex(x => x.id === oldId)
+      if (i >= 0 && !sessionHistory.value[i].handedOff) {
+        sessionHistory.value[i] = { ...sessionHistory.value[i], handedOff: true }
+        sessionHistory.value = [...sessionHistory.value]
+        saveHistory(sessionHistory.value)
+      }
+    }
+    if (url && id) {
+      const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      addSessionToHistory(id, url, `轮转 · ${hhmm}`)
+      activeSessionId.value = id
+    }
     void onNewSessionCreated(url, id)
     return
   }
@@ -517,6 +532,10 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
             <option value="always">always</option>
           </select>
         </label>
+        <label v-tooltip="'循环态下会话 token 达 40k（80%）自动触发轮转'" class="settings-row">
+          <span class="settings-label">会话自动轮转</span>
+          <input v-model="autoRotateSession" type="checkbox">
+        </label>
       </div>
     </div>
   </div>
@@ -613,13 +632,14 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
           :key="s.id"
           v-tooltip="s.url || s.title || s.id"
           class="sidebar-item is-card"
-          :class="{ 'is-active': s.id === activeSessionId }"
+          :class="{ 'is-active': s.id === activeSessionId, 'handed-off': !!s.handedOff }"
           @click="selectSession(s)"
           @dblclick.stop="openEditSessionDialog(s)"
         >
           <div class="sidebar-item-main">
             <div class="sidebar-item-title">
               {{ s.title || s.id }}
+              <span v-if="s.handedOff" class="handed-off-badge">→ 已交接</span>
             </div>
             <div class="sidebar-item-meta">
               <span class="sidebar-item-id">{{ s.id }}</span>
@@ -1384,6 +1404,21 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
     0 4px 12px rgb(79 70 229 / 14%),
     0 0 0 1px var(--primary);
 }
+.sidebar-item.handed-off {
+  opacity: 0.55;
+}
+.handed-off-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  letter-spacing: 0.3px;
+}
+
 .sidebar-item.is-active .sidebar-item-title {
   color: var(--primary);
   font-weight: 600;
