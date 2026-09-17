@@ -632,7 +632,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const ac = new AbortController()
     req.on('aborted', () => ac.abort())
     const result = await runScript(scriptPath, 60_000, ac.signal, overlayPath, toolLogPath, (stream, data) => {
-      writeFrame({ type: 'chunk', stream, data }, sandbox)
+      writeFrame({ type: 'chunk', stream, data })
     }, sandbox)
     const scriptOk = result.code === 0
     const tools = await readToolLogWithRetry(toolLogPath)
