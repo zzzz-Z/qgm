@@ -3,14 +3,18 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ScriptPanel from './components/ScriptPanel.vue'
 import GeneratePanel from './components/GeneratePanel.vue'
 import TracePanel from './components/TracePanel.vue'
-import { MODELS, useDeepseekUrl } from './composables/useDeepseekUrl'
+import { DEFAULT_URL, MODELS, getActiveWin, openDeepseek, useDeepseekUrl } from './composables/useDeepseekUrl'
+import { useScriptInbox } from './composables/useScriptInbox'
 import { useSessionManager } from './composables/useSessionManager'
 import { useToast } from './composables/useToast'
+import { useTraceLog } from './composables/useTraceLog'
 import { useCodeCleaner } from './composables/useCodeCleaner'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
 
 const SESSION_HISTORY_KEY = '__ai_session_history'
+/** mock 通道（v6 §13.2 ?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
+const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
 interface SessionEntry { id: string, url: string, title: string, createdAt: number, tokens?: number }
 function loadHistory(): SessionEntry[] {
   try { const raw = localStorage.getItem(SESSION_HISTORY_KEY); return raw ? JSON.parse(raw) : [] } catch { return [] }
@@ -153,7 +157,7 @@ function confirmNewSession() {
   const text = `上一步会话总结：\n\n（粘贴 AI 的总结到这里）\n\n会话 ID: ${oldId}`
   navigator.clipboard.writeText(text).catch(() => { })
   resetSession()
-  window.open(url, 'ai-runner-deepseek')
+  openDeepseek(url)
   showNewSessionDialog.value = false
   editingSessionId.value = ''
 }
@@ -176,11 +180,11 @@ async function handoffToNextSession(s: SessionEntry) {
   activeSessionId.value = id
   setDeepseekUrl(url)
   resetSession()
-  window.open(url, 'ai-runner-deepseek')
+  openDeepseek(url)
   toast('交接总结已复制，新会话已创建', 'success')
 }
 function openSessionUrl(url: string) {
-  if (url) window.open(url, 'ai-runner-deepseek')
+  if (url) openDeepseek(url)
 }
 function selectSession(s: SessionEntry) {
   activeSessionId.value = s.id
@@ -215,15 +219,56 @@ const headerUrl = computed(() => {
 function onSessionIdMessage(e: MessageEvent) {
   const d = e.data
   if (!d) return
-  if (d.type === 'ai-runner:token-estimate' && activeSessionId.value) {
-    const i = sessionHistory.value.findIndex(x => x.id === activeSessionId.value)
-    if (i < 0) return
-    if (sessionHistory.value[i].tokens === d.tokens) return
-    sessionHistory.value[i] = { ...sessionHistory.value[i], tokens: Number(d.tokens) || 0 }
-    sessionHistory.value = [...sessionHistory.value]
-    saveHistory(sessionHistory.value)
+
+  // ============================================================================
+  // 油猴 → 工作台：脚本到达（v6 §3.1 ai-runner:script）
+  // 安全约束（v6 §3.4）：origin 必须落在已知 AI 站点；source 优先比对 getActiveWin()
+  // ============================================================================
+  if (d.type === 'ai-runner:script') {
+    if (!isFromActiveAiSite(e)) return
+    const code = String(d.code || '')
+    const lang = (d.lang === 'bash' ? 'bash' : 'cjs') as 'cjs' | 'bash'
+    const site = String(d.site || e.origin || '')
+    const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined })
+    if (item) {
+      const lineCount = code.split('\n').length
+      toast(`AI 脚本已到达 · ${lang} · ${lineCount} 行 · ${item.desc || '无说明'}`, 'info', 4000)
+      // 决策链路：脚本到达事件入 TraceLog（v6 §3.2）
+      addTrace({
+        kind: 'script',
+        summary: `📥 脚本到达 · ${lang} · ${lineCount} 行${item.desc ? ' · ' + item.desc : ''}`,
+        payload: {
+          script: code.slice(0, 4000),
+          desc: item.desc,
+          why: item.why,
+          lang,
+          hash: item.hash,
+        },
+      })
+      // 手动模式：直接尝试覆盖编辑器；循环模式由 useAutoLoop 消费（P2 接入）
+      scriptInbox.applyToEditor(item)
+    }
     return
   }
+
+  // token-estimate 用固定 key 原地更新，防 MutationObserver 风暴（v6 §12.5）
+  if (d.type === 'ai-runner:token-estimate') {
+    if (activeSessionId.value) {
+      const i = sessionHistory.value.findIndex(x => x.id === activeSessionId.value)
+      if (i >= 0 && sessionHistory.value[i].tokens !== d.tokens) {
+        sessionHistory.value[i] = { ...sessionHistory.value[i], tokens: Number(d.tokens) || 0 }
+        sessionHistory.value = [...sessionHistory.value]
+        saveHistory(sessionHistory.value)
+      }
+    }
+    const tokens = Number(d.tokens) || 0
+    if (tokens > 0) {
+      const k = Math.max(0, tokens / 1000).toFixed(1)
+      toast(`会话 token 约 ${k}k`, 'info', 3000, { key: 'ai-runner:token-estimate' })
+    }
+    return
+  }
+
   if (d.type !== 'ai-runner:session-id' || !d.id) return
   if (!activeSessionId.value) return
   const idx = sessionHistory.value.findIndex(x => x.id === activeSessionId.value)
@@ -238,8 +283,67 @@ function onSessionIdMessage(e: MessageEvent) {
   saveHistory(sessionHistory.value)
   setDeepseekUrl(url)
 }
+
+/** 油猴来源校验：origin 必须落在已知 AI 站点；source 优先比对 getActiveWin()，为 null 时降级只校验 origin */
+function isFromActiveAiSite(e: MessageEvent): boolean {
+  // mock 模式：跳过来源校验，让合成 MessageEvent 直走完整链路
+  if (MOCK_MODE) return true
+  const AI_ORIGINS = MODELS
+    .map(m => { try { return new URL(m.url).origin } catch { return '' } })
+    .filter(Boolean)
+  if (!AI_ORIGINS.includes(e.origin)) {
+    console.warn('[ai-runner] 来源 origin 非 AI 站点，已忽略', e.origin)
+    return false
+  }
+  // e.source 可能为 null（窗口已关 / 跨域限制）；只在非 null 时比对
+  if (e.source !== null) {
+    const active = getActiveWin()
+    if (active !== null && e.source !== active) {
+      console.warn('[ai-runner] source 非当前循环窗口，已忽略')
+      return false
+    }
+  }
+  return true
+}
 onMounted(() => {
   window.addEventListener('message', onSessionIdMessage)
+  // —— mock 通道（v6 §13.2 ?mock=1）—— 不打开真实 AI 站点，注入合成 message 自检整条链路
+  // 注意：必须放在 activeSessionId 早退之前，否则无会话时无法触发
+  if (MOCK_MODE) {
+    toast('mock 模式已启用：将注入合成脚本，无需打开 AI 站点', 'warn', 6000)
+    const fakeScript = [
+      '#!/usr/bin/env node',
+      '// @desc: 给所有 .vue 文件补 defineOptions({ name })',
+      '// @why: P1 mock 自检 · 验证脚本到达 → 覆盖编辑器 → 运行 整条链路',
+      "const fs = require('node:fs')",
+      "const path = require('node:path')",
+      "const files = fs.readdirSync('.').filter(f => f.endsWith('.vue'))",
+      'for (const f of files) {',
+      '  const p = path.join(".", f)',
+      "  const src = fs.readFileSync(p, 'utf8')",
+      '  if (!/defineOptions\\s*\\(\\s*{/.test(src)) {',
+      '    const name = f.replace(/\\.vue$/, "")',
+      '    const updated = src.replace(/<script setup lang="ts">/, `<script setup lang="ts">\\ndefineOptions({ name: ${JSON.stringify(name)} })`)',
+      "    fs.writeFileSync(p, updated)",
+      '    console.log("updated", f)',
+      '  }',
+      '}',
+    ].join('\n')
+    setTimeout(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: {
+          type: 'ai-runner:script',
+          code: fakeScript,
+          lang: 'cjs',
+          hash: 'mock0001',
+          site: 'https://chat.deepseek.com',
+        },
+        origin: 'https://chat.deepseek.com',
+        source: window,
+      }))
+    }, 1200)
+    return  // mock 模式下不需要拉会话历史 url
+  }
   if (!activeSessionId.value) return
   const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
   if (s && s.url && deepseekUrl.value !== s.url) {
@@ -252,6 +356,9 @@ onBeforeUnmount(() => {
 const { sessionId, resetSession, generateHandoffSummary } = useSessionManager()
 const { toast } = useToast()
 const { stripComments, stripBlankLines, toggleStripComments, toggleStripBlankLines } = useCodeCleaner()
+const scriptInbox = useScriptInbox()
+const { addTrace } = useTraceLog()
+// 注意：getActiveWin 是 useDeepseekUrl 模块级导出，已在 import 中带入；这里无需再解构
 </script>
 
 <template>
@@ -1540,3 +1647,5 @@ const { stripComments, stripBlankLines, toggleStripComments, toggleStripBlankLin
 }
 </style>
 <!-- tooltip-audit -->
+
+// __lint_probe__
