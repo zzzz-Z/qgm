@@ -729,13 +729,14 @@ const TEMPLATES = [
     id: 'hello',
     label: 'Hello',
     title: '打印一行',
-    code: 'console.log(\'hello from ai-runner\')',
+    code: '#!/usr/bin/env node\nconsole.log(\'hello from ai-runner\')',
   },
   {
     id: 'find-todo',
     label: '找 TODO',
     title: '扫描 TODO / FIXME',
     code: [
+      '#!/usr/bin/env node',
       'const fs = require(\'fs\')',
       'const path = require(\'path\')',
       'function walk(d) {',
@@ -759,6 +760,7 @@ const TEMPLATES = [
     label: '批量替换',
     title: '在 src/ 下替换字符串（先改常量）',
     code: [
+      '#!/usr/bin/env node',
       '// 使用前修改 FROM / TO',
       'const fs = require(\'fs\')',
       'const path = require(\'path\')',
@@ -786,9 +788,19 @@ const TEMPLATES = [
     label: '跑单测',
     title: '执行 pnpm test:unit',
     code: [
+      '#!/usr/bin/env node',
       'const { spawnSync } = require(\'child_process\')',
       'const r = spawnSync(\'pnpm\', [\'test:unit\'], { stdio: \'inherit\' })',
       'process.exit(r.status ?? 1)',
+    ].join('\n'),
+  },
+  {
+    id: 'bash-hello',
+    label: 'Bash',
+    title: 'bash 打印一行',
+    code: [
+      '#!/usr/bin/env bash',
+      'echo "hello from bash"',
     ].join('\n'),
   },
 ]
