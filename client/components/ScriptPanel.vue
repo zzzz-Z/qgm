@@ -10,7 +10,18 @@
     >
       <!-- 自动化循环控制条（P2） -->
       <section v-if="loopState !== 'idle'" class="loop-bar card" :class="`is-${loopState}`">
-        <template v-if="isLoopActive">
+        <template v-if="loopState === 'budget-limited'">
+          <span class="loop-status">
+            <span>⏸</span>
+            预算已用尽 · 第 {{ loopRound }}/{{ maxRounds }} 轮
+          </span>
+          <span class="loop-goal-text" :title="loopGoal">{{ loopGoal.slice(0, 40) }}</span>
+          <div class="loop-actions">
+            <button v-tooltip="'从当前轮次继续（token 基线重置）'" class="loop-btn" @click="resumeLoop">▶ 继续</button>
+            <button v-tooltip="'急停并 git reset 到循环起点'" class="loop-btn rollback" @click="stopAndRollback">⏹ 停止并回滚</button>
+          </div>
+        </template>
+        <template v-else-if="isLoopActive">
           <span class="loop-status">
             <span class="loop-spin">⟳</span>
             第 {{ loopRound }}/{{ maxRounds }} 轮 · {{ loopState }}
@@ -42,20 +53,23 @@
           <span class="file-badge term-title">终端输出</span>
           <div class="bar-actions">
             <button
-              v-tooltip="copied ? '已发送' : `把本次运行的完整上下文（脚本 / 输出 / 变更 / 错误源码）拼成 prompt 复制并发给 AI`"
+              v-tooltip="aiWaiting ? '等待 AI 回复…' : copied ? '已发送' : `把本次运行的完整上下文（脚本 / 输出 / 变更 / 错误源码）拼成 prompt 复制并发给 AI`"
               class="term-btn copy"
-              :class="{ done: copied }"
-              :disabled="!hasAnyOutput && !changes.length"
+              :class="{ done: copied, loading: aiWaiting }"
+              :disabled="(!hasAnyOutput && !changes.length) || aiWaiting"
               @click="copyOutput"
             >
-              <svg v-if="copied" class="term-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <svg v-if="aiWaiting" class="term-ico spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+              <svg v-else-if="copied" class="term-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
               <svg v-else class="term-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
               </svg>
-              <span>{{ copied ? '已发送' : `发送给 AI` }}</span>
+              <span>{{ aiWaiting ? '等待回复…' : copied ? '已发送' : `发送给 AI` }}</span>
             </button>
             <button
               v-tooltip="asking ? '正在请求 API' : '直接调用 API 询问（不打开网页）'"
@@ -405,6 +419,7 @@ import FileList from './FileList.vue'
 import DiffViewer from './DiffViewer.vue'
 import LintBlock from './LintBlock.vue'
 import { copyAndFill } from '../composables/useDeepseekUrl'
+import { useAiWaiting } from '../composables/useAiWaiting'
 import { useCodeCleaner } from '../composables/useCodeCleaner'
 import { buildErrorContext, enforceBudget, parseErrorLocations } from '../utils/contextBuilder'
 import { useToast } from '../composables/useToast'
@@ -442,7 +457,7 @@ function takeLatestFromInbox() {
 const {
   loopState, loopRound, loopGoal, stopReason, toleranceLeft,
   tokenDelta, maxRounds, tokenBudget, isLoopActive,
-  startTakeover, killCurrent, stopAndRollback, startHandoff,
+  startTakeover, killCurrent, stopAndRollback, startHandoff, resumeLoop,
 } = useAutoLoop()
 async function runAndTakeover() {
   if (!script.value.trim()) { toast('脚本为空', 'warn'); return }
@@ -466,6 +481,8 @@ const fileDragging = ref(false)
 const fileSuccess = ref(false)
 const statusText = ref('')
 const statusClass = ref('')
+
+const { waiting: aiWaiting, startWaiting: startAiWaiting, stopWaiting: stopAiWaiting } = useAiWaiting()
 
 // 分栏比例（终端占比）
 
@@ -884,6 +901,7 @@ ${question}`
   statusText.value = '✅ 已发送'
   statusClass.value = 'ok'
   script.value = ''
+  startAiWaiting()
   setTimeout(() => { statusText.value = ''; statusClass.value = '' }, 1500)
 }
 async function execCmd(text: string) {
@@ -963,9 +981,13 @@ async function copyOutput() {
     const text = await buildAiPrompt()
     if (!text) return
     const r = await copyAndFill(text)
+    if (r === 'failed') {
+      toast('发送失败，已复制到剪贴板', 'warn', 4000)
+      return
+    }
     copied.value = true
+    startAiWaiting()
     setTimeout(() => { copied.value = false }, 2000)
-    if (r === 'failed') toast('发送失败，已复制到剪贴板', 'warn', 4000)
   } catch (e) { console.error(e) }
 }
 
@@ -2605,6 +2627,7 @@ function onHtmlDrop(e: DragEvent) {
 .loop-bar.is-executing, .loop-bar.is-parsing, .loop-bar.is-feedback { border-left-color: #e6a23c; }
 .loop-bar.is-interrupted { border-left-color: var(--danger); }
 .loop-bar.is-stopped { border-left-color: var(--text-3); }
+.loop-bar.is-budget-limited { border-left-color: #e6a23c; }
 .loop-goal-input {
   flex: 1 1 320px;
   min-width: 200px;

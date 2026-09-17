@@ -37,6 +37,7 @@ export type LoopState =
   | 'stopped'      // 自然终止（done / 熔断）
   | 'interrupted'  // 用户中断（暂停/急停/回滚）
   | 'handoff'
+  | 'budget-limited'
 
 export type StopRequest = 'none' | 'pause' | 'kill' | 'rollback'
 
@@ -427,6 +428,46 @@ interface RoundOutcome {
   stdout: string, stderr: string, changeCount: number, changedFiles: string[]
 }
 
+
+const pendingRound = ref<RoundOutcome | null>(null)
+function budgetLimited(o: RoundOutcome, tokenDelta: number): void {
+  disarmTimer()
+  pendingRound.value = o
+  stopReason.value = `循环内 token 增量约 ${(tokenDelta / 1000).toFixed(1)}k，达到 ${LOOP_TOKEN_BUDGET / 1000}k 上限`
+  loopState.value = 'budget-limited'
+  persist()
+  sendStop()
+  unbindKeyboard()
+  addTrace({
+    kind: 'loop',
+    summary: `⏸ 循环暂停（预算用尽）· ${stopReason.value}`,
+    payload: { loopId: loopId.value, loopRound: loopRound.value },
+  })
+  toast('预算已用尽，点击「继续」恢复', 'warn', 6000)
+}
+export async function resumeLoop(): Promise<void> {
+  if (loopState.value !== 'budget-limited') { toast('当前不在 budget-limited 状态', 'warn'); return }
+  const o = pendingRound.value
+  if (!o) { toast('无待发反馈，无法续跑', 'error'); return }
+  const win = getActiveWin()
+  if (!win || win.closed) { toast('AI 窗口已关闭，无法续跑', 'error'); return }
+  loopStartTokens.value = latestTokens.value
+  pendingRound.value = null
+  const feedback = buildFeedback(o, { nextRound: loopRound.value + 1, tokenDelta: 0 })
+  const okSent = sendFill({ prompt: feedback })
+  if (!okSent) { await finish('window-lost', '续跑时窗口发送失败'); return }
+  bindKeyboard()
+  loopRound.value += 1
+  loopState.value = 'waiting'
+  persist()
+  enterWaiting()
+  addTrace({
+    kind: 'loop',
+    summary: `▶ 续跑 · 从第 ${loopRound.value} 轮`,
+    payload: { loopId: loopId.value, loopRound: loopRound.value },
+  })
+  toast(`▶ 续跑，从第 ${loopRound.value} 轮开始`, 'success', 4000)
+}
 async function afterRound(o: RoundOutcome): Promise<void> {
   // 用户暂停：等当前轮完成后停（不再回填、不进下一轮）
   if (stopRequest.value === 'pause') {
@@ -445,7 +486,7 @@ async function afterRound(o: RoundOutcome): Promise<void> {
   const tokenDelta = Math.max(0, latestTokens.value - loopStartTokens.value)
   const breakReason = checkRoundBreak(loopRound.value, tokenDelta)
   if (breakReason === 'token-budget') {
-    await finish('token-budget', `循环内 token 增量约 ${(tokenDelta / 1000).toFixed(1)}k，达到 ${LOOP_TOKEN_BUDGET / 1000}k 上限`)
+    budgetLimited(o, tokenDelta)
     return
   }
   if (breakReason === 'round-limit') {
@@ -529,6 +570,7 @@ async function handleStopAfterRound(): Promise<void> {
 // ============================================================================
 async function finish(reason: string, detail?: string): Promise<void> {
   disarmTimer()
+  pendingRound.value = null
   const wasRollback = stopRequest.value === 'rollback'
   const interrupted = reason === 'interrupted'
   stopReason.value = detail || reason
@@ -714,6 +756,6 @@ export function useAutoLoop() {
     tokenBudget: LOOP_TOKEN_BUDGET,
     startLoop, startTakeover, killCurrent, stopAndRollback, requestPause,
     onScriptArrival, onNonScriptReply, setTokenEstimate, currentLoopContext,
-    startHandoff, onSummary, onNewSessionCreated,
+    startHandoff, onSummary, onNewSessionCreated, resumeLoop,
   }
 }
