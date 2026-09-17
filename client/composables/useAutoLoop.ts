@@ -201,6 +201,24 @@ const activeLoop = computed<LoopInstance | null>(() => {
 })
 
 // 由 App.vue 注入的 activeSessionId 读取器：循环启动时把当前活动会话 id 绑定到 inst.sessionId
+// [multi-loop-step2] 多实例读写 API（步骤 4 消息路由依赖）
+export function getLoopBySessionId(sid: string): LoopInstance | undefined {
+  return loopInstances.get(sid)
+}
+export function listActiveLoops(): LoopInstance[] {
+  return [...loopInstances.values()].filter(i => i.state.value !== 'idle')
+}
+export function setActiveLoopSessionId(sid: string): void {
+  activeLoopSid.value = sid
+}
+export function createLoopInstanceFor(sid: string): LoopInstance {
+  let inst = loopInstances.get(sid)
+  if (!inst) {
+    inst = createLoopInstance(sid)
+    loopInstances.set(sid, inst)
+  }
+  return inst
+}
 let getActiveSessionId: () => string = () => ''
 
 let keyboardBound = false
@@ -1134,5 +1152,6 @@ export function useAutoLoop() {
     startLoop, startTakeover, killCurrent, stopAndRollback, requestPause,
     onScriptArrival, onNonScriptReply, setTokenEstimate, currentLoopContext,
     startHandoff, onSummary, onNewSessionCreated, autoRotateSession, resumeLoop,
+    getLoopBySessionId, listActiveLoops, setActiveLoopSessionId, createLoopInstanceFor,
   }
 }
