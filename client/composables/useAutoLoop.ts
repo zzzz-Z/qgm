@@ -58,7 +58,7 @@ export interface AiReply {
 // —— 熔断参数集中在 loopLogic.ts（带单测），此处仅持久化 key ——
 const STORAGE_KEY = '__ai_runner_loop'
 
-// —— 模块级单例状态 ——
+// —— 模块级单例状态（步骤 2：被 singletonView 包装；步骤 3 起多实例后仅作单例 fallback） ——
 const loopState = ref<LoopState>('idle')
 const loopId = ref('')
 const loopRound = ref(0)
@@ -78,13 +78,12 @@ const waitingStartedAt = ref(0)
 const waitingElapsed = ref(0)
 /** 当前轮超时毫秒（根据上一轮 lang 决定，bash=180s / cjs=90s） */
 const roundTimeoutMs = ref(LOOP_ROUND_TIMEOUT_MS)
-/** 当前循环绑定的 AI 会话 ID（多窗口隔离用；startLoop 时从 App.vue 取） */
-const loopSessionId = ref('')
 
 // ============================================================================
-// 多循环并发改造 · 步骤 1：LoopInstance 类型 + Map 存储 + activeLoop 代理
-// 当前阶段：定义类型基础设施 + computed 代理；内部函数仍操作模块级单例 refs
-// （步骤 2 将把内部函数改造为接受 inst 参数，步骤 3 起真正多实例并发）
+// 多循环并发改造 · 步骤 2：LoopInstance 类型 + Map 存储 + activeLoop 代理
+// 内部函数全部改造为接受 inst: LoopInstance 首参；
+// activeLoopSid 为空时 activeLoop 返回 singletonView（指向模块级 refs），行为不变
+// （步骤 3 起真正多实例并发：createLoopInstance 创建独立实例塞入 Map）
 // ============================================================================
 
 // RoundOutcome 原位于 afterRound 区（L526），提前到模块级供 LoopInstance 引用
@@ -92,13 +91,11 @@ interface RoundOutcome {
   lang: 'js' | 'cjs' | 'bash', desc: string, exit: number, ok: boolean
   stdout: string, stderr: string, changeCount: number, changedFiles: string[]
 }
-/** 待回填的轮次结果（budget-limited 暂停后 resume 用） */
-const pendingRound = ref<RoundOutcome | null>(null)
 
 /**
  * 单个循环实例的完整状态。
- * 步骤 2 将把所有模块级 ref 迁移到 createLoopInstance(sid) 工厂内，
- * 每个会话拥有独立实例；步骤 1 先定义类型形状 + 单例视图。
+ * 步骤 2：所有内部函数接受 inst 参数；singletonView 包装模块级 refs 作单例 fallback。
+ * 步骤 3：createLoopInstance(sid) 创建真实独立实例塞入 Map。
  */
 export interface LoopInstance {
   state: Ref<LoopState>
@@ -119,21 +116,22 @@ export interface LoopInstance {
   /** 绑定后不可变：循环所属的 AI 会话 id */
   sessionId: string
   pendingRound: Ref<RoundOutcome | null>
-  /** 定时器句柄（非响应式，步骤 2 迁移到实例内） */
+  /** 定时器句柄（非响应式，随实例生命周期） */
   roundTimer: ReturnType<typeof setTimeout> | null
   waitingTicker: ReturnType<typeof setInterval> | null
   handoffTimer: ReturnType<typeof setTimeout> | null
 }
 
-/** 多循环实例存储（步骤 2 起按 sid 索引；步骤 1 先建表） */
+/** 多循环实例存储（步骤 3 起按 sid 索引；步骤 2 先建表） */
 const loopInstances = new Map<string, LoopInstance>()
 
 /** 当前激活会话 id（由 App.vue 通过 setActiveSessionIdGetter 更新） */
 const activeLoopSid = ref('')
 
 /**
- * 步骤 1 单例视图：把现有模块级 ref 包装成 LoopInstance 形状的静态对象。
- * 步骤 2 将改为 createLoopInstance(sid) 创建真实独立实例塞入 Map。
+ * 步骤 2 单例视图：把现有模块级 ref 包装成 LoopInstance 形状的静态对象。
+ * sessionId 是普通字符串，initLoop 时被赋值（绑定当前 AI 会话）。
+ * activeLoopSid 为空时 activeLoop fallback 到此对象 → 行为与改造前一致。
  */
 const singletonView: LoopInstance = {
   state: loopState,
@@ -152,16 +150,46 @@ const singletonView: LoopInstance = {
   waitingElapsed: waitingElapsed,
   roundTimeoutMs: roundTimeoutMs,
   sessionId: '',
-  pendingRound: pendingRound,
+  pendingRound: ref<RoundOutcome | null>(null),
   roundTimer: null,
   waitingTicker: null,
   handoffTimer: null,
 }
 
 /**
+ * 创建独立循环实例（步骤 3 起由 startLoop 调用塞入 loopInstances Map）。
+ * 每个会话拥有独立状态 refs + 定时器句柄。
+ * 步骤 2 先定义工厂，暂不被调用（activeLoopSid 恒空 → 走 singletonView）。
+ */
+function createLoopInstance(sid: string): LoopInstance {
+  return {
+    state: ref<LoopState>('idle'),
+    id: ref(''),
+    round: ref(0),
+    goal: ref(''),
+    startCommit: ref(''),
+    startTokens: ref(0),
+    latestTokens: ref(0),
+    toleranceLeft: ref(LOOP_TOLERANCE_BUDGET),
+    stopRequest: ref<StopRequest>('none'),
+    stopReason: ref(''),
+    lastHash: ref(''),
+    lastExec: ref<{ lang: string, exit: number, changes: number, durationMs: number } | null>(null),
+    waitingStartedAt: ref(0),
+    waitingElapsed: ref(0),
+    roundTimeoutMs: ref(LOOP_ROUND_TIMEOUT_MS),
+    sessionId: sid,
+    pendingRound: ref<RoundOutcome | null>(null),
+    roundTimer: null,
+    waitingTicker: null,
+    handoffTimer: null,
+  }
+}
+
+/**
  * 当前激活循环实例（computed 代理）。
- * - 步骤 1：activeLoopSid 为空时 fallback 到 singletonView（现有单例）
- * - 步骤 2：从 loopInstances.get(activeLoopSid.value) 取真实独立实例
+ * - 步骤 2：activeLoopSid 为空时 fallback 到 singletonView（现有单例）
+ * - 步骤 3：从 loopInstances.get(activeLoopSid.value) 取真实独立实例
  */
 const activeLoop = computed<LoopInstance | null>(() => {
   if (activeLoopSid.value) {
@@ -171,11 +199,9 @@ const activeLoop = computed<LoopInstance | null>(() => {
   return singletonView
 })
 
-// 由 App.vue 注入的 activeSessionId 读取器：循环启动时把当前活动会话 id 绑定到 loopSessionId
+// 由 App.vue 注入的 activeSessionId 读取器：循环启动时把当前活动会话 id 绑定到 inst.sessionId
 let getActiveSessionId: () => string = () => ''
 
-let roundTimer: ReturnType<typeof setTimeout> | null = null
-let waitingTicker: ReturnType<typeof setInterval> | null = null
 let keyboardBound = false
 let originalTitle = ''
 
@@ -194,24 +220,24 @@ interface PersistShape {
   loopStartTokens: number, stopReason: string, state: LoopState
 }
 
-function persist() {
-  if (loopState.value === 'idle') {
+function persist(inst: LoopInstance) {
+  if (inst.state.value === 'idle') {
     try { sessionStorage.removeItem(STORAGE_KEY) } catch { }
     return
   }
   const snap: PersistShape = {
-    loopId: loopId.value,
-    loopGoal: loopGoal.value,
-    loopRound: loopRound.value,
-    loopStartCommit: loopStartCommit.value,
-    loopStartTokens: loopStartTokens.value,
-    stopReason: stopReason.value,
-    state: loopState.value,
+    loopId: inst.id.value,
+    loopGoal: inst.goal.value,
+    loopRound: inst.round.value,
+    loopStartCommit: inst.startCommit.value,
+    loopStartTokens: inst.startTokens.value,
+    stopReason: inst.stopReason.value,
+    state: inst.state.value,
   }
   try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snap)) } catch { }
 }
 
-function restore() {
+function restore(inst: LoopInstance) {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY)
     if (!raw) return
@@ -219,29 +245,34 @@ function restore() {
     // 活动中的循环在刷新后无法续跑（窗口引用丢失）→ 标记 stopped 供用户查看
     const activeStates: LoopState[] = ['running', 'waiting', 'parsing', 'executing', 'feedback']
     if (activeStates.includes(snap.state)) {
-      loopId.value = snap.loopId
-      loopGoal.value = snap.loopGoal
-      loopRound.value = snap.loopRound
-      loopStartCommit.value = snap.loopStartCommit
-      loopStartTokens.value = snap.loopStartTokens
-      stopReason.value = '页面刷新，循环已中止（请手动重开）'
-      loopState.value = 'stopped'
-      persist()
+      inst.id.value = snap.loopId
+      inst.goal.value = snap.loopGoal
+      inst.round.value = snap.loopRound
+      inst.startCommit.value = snap.loopStartCommit
+      inst.startTokens.value = snap.loopStartTokens
+      inst.stopReason.value = '页面刷新，循环已中止（请手动重开）'
+      inst.state.value = 'stopped'
+      persist(inst)
     }
   } catch { }
 }
-restore()
+restore(singletonView)
 
 // ============================================================================
 // tab title 进度（v6 §12.3）
 // ============================================================================
-watch([loopState, loopRound], () => {
+watch([
+  () => activeLoop.value?.state.value,
+  () => activeLoop.value?.round.value,
+], () => {
   if (typeof document === 'undefined') return
+  const inst = activeLoop.value
+  if (!inst) return
   if (isLoopActive.value) {
-    document.title = `⟳ ${loopRound.value}/${LOOP_MAX_ROUNDS} AI Runner`
-  } else if (loopState.value === 'stopped' && stopReason.value === 'done') {
+    document.title = `⟳ ${inst.round.value}/${LOOP_MAX_ROUNDS} AI Runner`
+  } else if (inst.state.value === 'stopped' && inst.stopReason.value === 'done') {
     document.title = '✓ AI Runner（done）'
-  } else if (loopState.value === 'interrupted' || loopState.value === 'stopped') {
+  } else if (inst.state.value === 'interrupted' || inst.state.value === 'stopped') {
     if (originalTitle) document.title = originalTitle
   }
 })
@@ -253,6 +284,7 @@ watch([loopState, loopRound], () => {
 // ============================================================================
 
 async function initLoop(
+  inst: LoopInstance,
   prefix: string,
   goal: string,
   traceSummary: string,
@@ -269,95 +301,99 @@ async function initLoop(
     const d = await r.json()
     head = d.head || ''
   } catch { }
-  loopId.value = `${prefix}_${Date.now().toString(36)}`
-  loopGoal.value = goal
-  loopRound.value = 1
-  loopStartCommit.value = head
-  loopStartTokens.value = latestTokens.value
-  toleranceLeft.value = LOOP_TOLERANCE_BUDGET
-  stopRequest.value = 'none'
-  stopReason.value = ''
-  lastHash.value = ''
-  lastExec.value = null
+  inst.id.value = `${prefix}_${Date.now().toString(36)}`
+  inst.goal.value = goal
+  inst.round.value = 1
+  inst.startCommit.value = head
+  inst.startTokens.value = inst.latestTokens.value
+  inst.toleranceLeft.value = LOOP_TOLERANCE_BUDGET
+  inst.stopRequest.value = 'none'
+  inst.stopReason.value = ''
+  inst.lastHash.value = ''
+  inst.lastExec.value = null
   // 绑定当前循环所在 AI 会话 id（多窗口隔离用）
-  loopSessionId.value = getActiveSessionId() || ''
+  inst.sessionId = getActiveSessionId() || ''
   originalTitle = typeof document !== 'undefined' ? document.title : ''
   addTrace({
     kind: 'loop',
     summary: traceSummary,
-    payload: { loopId: loopId.value, loopRound: 0, ...tracePayload },
+    payload: { loopId: inst.id.value, loopRound: 0, ...tracePayload },
   })
   bindKeyboard()
   return true
 }
 
 export async function startLoop(goal: string): Promise<void> {
+  const inst = activeLoop.value
+  if (!inst) return
   const g = goal.trim()
   if (!g) { toast('请填写循环目标', 'warn'); return }
   if (isLoopActive.value) { toast('已有循环在运行', 'warn'); return }
-  if (!await initLoop('loop', g, `▶ 循环开始 · 目标：${g.slice(0, 60)}`, { prompt: g })) return
-  loopState.value = 'running'
-  persist()
+  if (!await initLoop(inst, 'loop', g, `▶ 循环开始 · 目标：${g.slice(0, 60)}`, { prompt: g })) return
+  inst.state.value = 'running'
+  persist(inst)
 
   const bfHook = await runHook('BeforeFill', {
-    loopId: loopId.value,
+    loopId: inst.id.value,
     goal: g,
     prompt: buildInitialPrompt(g),
   })
   if (bfHook.action === 'reject') {
-    await finish('hook-reject-before-fill', bfHook.reason || 'BeforeFill hook rejected')
+    await finish(inst, 'hook-reject-before-fill', bfHook.reason || 'BeforeFill hook rejected')
     return
   }
   if (bfHook.hooksRun > 0) {
     addTrace({
       kind: 'loop',
       summary: `🪝 BeforeFill · ${bfHook.hooksRun} 个 hook 通过`,
-      payload: { loopId: loopId.value, loopRound: 0 },
+      payload: { loopId: inst.id.value, loopRound: 0 },
     })
   }
   const ok = sendFill({ prompt: buildInitialPrompt(g) })
   if (!ok) {
-    await finish('window-lost', 'AI 窗口已关闭或跨域发送失败')
+    await finish(inst, 'window-lost', 'AI 窗口已关闭或跨域发送失败')
     return
   }
-  enterWaiting()
+  enterWaiting(inst)
 }
 
 // ============================================================================
 // 等待 AI 回复 + 单轮 90s 超时（熔断第 7 条）
 // ============================================================================
 export async function startTakeover(): Promise<void> {
+  const inst = activeLoop.value
+  if (!inst) return
   if (isLoopActive.value) { toast('已有循环在运行', 'warn'); return }
-  if (!await initLoop('take', '（脚本运行后接管）', '▶ 接管开始 · 等待 AI 回传脚本')) return
-  loopState.value = 'waiting'
-  persist()
-  enterWaiting()
+  if (!await initLoop(inst, 'take', '（脚本运行后接管）', '▶ 接管开始 · 等待 AI 回传脚本')) return
+  inst.state.value = 'waiting'
+  persist(inst)
+  enterWaiting(inst)
 }
-function enterWaiting() {
-  loopState.value = 'waiting'
-  persist()
-  if (roundTimer) clearTimeout(roundTimer)
+function enterWaiting(inst: LoopInstance) {
+  inst.state.value = 'waiting'
+  persist(inst)
+  if (inst.roundTimer) clearTimeout(inst.roundTimer)
   // bash 任务通常更复杂、AI 思考更久，给 180s；cjs / 首轮（无 lastExec）默认 90s
-  const lastLang = lastExec.value?.lang
+  const lastLang = inst.lastExec.value?.lang
   const timeoutMs = lastLang === 'bash' ? LOOP_ROUND_TIMEOUT_BASH_MS : LOOP_ROUND_TIMEOUT_MS
-  roundTimeoutMs.value = timeoutMs
+  inst.roundTimeoutMs.value = timeoutMs
   // UI 倒计时进度反馈：每秒更新已等待秒数
-  waitingStartedAt.value = Date.now()
-  waitingElapsed.value = 0
-  if (waitingTicker) clearInterval(waitingTicker)
-  waitingTicker = setInterval(() => {
-    waitingElapsed.value = Math.floor((Date.now() - waitingStartedAt.value) / 1000)
+  inst.waitingStartedAt.value = Date.now()
+  inst.waitingElapsed.value = 0
+  if (inst.waitingTicker) clearInterval(inst.waitingTicker)
+  inst.waitingTicker = setInterval(() => {
+    inst.waitingElapsed.value = Math.floor((Date.now() - inst.waitingStartedAt.value) / 1000)
   }, 1000)
-  const round = loopRound.value
-  roundTimer = setTimeout(() => {
-    void finish('round-timeout', `第 ${round} 轮等待 AI 回复超过 ${Math.round(timeoutMs / 1000)}s`)
+  const round = inst.round.value
+  inst.roundTimer = setTimeout(() => {
+    void finish(inst, 'round-timeout', `第 ${round} 轮等待 AI 回复超过 ${Math.round(timeoutMs / 1000)}s`)
   }, timeoutMs)
 }
 
-function disarmTimer() {
-  if (roundTimer) { clearTimeout(roundTimer); roundTimer = null }
-  if (waitingTicker) { clearInterval(waitingTicker); waitingTicker = null }
-  waitingElapsed.value = 0
+function disarmTimer(inst: LoopInstance) {
+  if (inst.roundTimer) { clearTimeout(inst.roundTimer); inst.roundTimer = null }
+  if (inst.waitingTicker) { clearInterval(inst.waitingTicker); inst.waitingTicker = null }
+  inst.waitingElapsed.value = 0
 }
 
 // ============================================================================
@@ -366,27 +402,29 @@ function disarmTimer() {
 
 /** 脚本到达（inbox 已去重）。仅在循环活动时由 App.vue 调用。 */
 export async function onScriptArrival(item: InboxItem): Promise<void> {
-  if (!isLoopActive.value || loopState.value !== 'waiting') return
-  disarmTimer()
+  const inst = activeLoop.value
+  if (!inst || !isLoopActive.value || inst.state.value !== 'waiting') return
+  disarmTimer(inst)
 
   // 熔断前置：用户急停
-  if (stopRequest.value !== 'none') { await handleStopAfterRound(); return }
+  if (inst.stopRequest.value !== 'none') { await handleStopAfterRound(inst); return }
 
   // 熔断：重复脚本（第 7 条 必须推进）—— 与格式错误共享宽容预算
-  if (item.hash === lastHash.value) {
-    await toleranceFail('连续两轮脚本完全相同（hash 未变），未见推进')
+  if (item.hash === inst.lastHash.value) {
+    await toleranceFail(inst, '连续两轮脚本完全相同（hash 未变），未见推进')
     return
   }
-  lastHash.value = item.hash
-  loopState.value = 'parsing'
-  await executeItem(item)
+  inst.lastHash.value = item.hash
+  inst.state.value = 'parsing'
+  await executeItem(inst, item)
 }
 
 /** 非脚本回复：done / plain / multi */
 export async function onNonScriptReply(reply: AiReply): Promise<void> {
-  if (!isLoopActive.value || loopState.value !== 'waiting') return
-  disarmTimer()
-  if (stopRequest.value !== 'none') { await handleStopAfterRound(); return }
+  const inst = activeLoop.value
+  if (!inst || !isLoopActive.value || inst.state.value !== 'waiting') return
+  disarmTimer(inst)
+  if (inst.stopRequest.value !== 'none') { await handleStopAfterRound(inst); return }
 
   if (reply.kind === 'done') {
     // 防御性二次校验：油猴可能误把含解释/标点的回复判为 done
@@ -395,12 +433,12 @@ export async function onNonScriptReply(reply: AiReply): Promise<void> {
       addTrace({
         kind: 'loop',
         summary: `⚠ 油猴标记 done 但 text 非严格 DONE，降级为 plain`,
-        payload: { loopId: loopId.value, loopRound: loopRound.value, text: String(reply.text).slice(0, 200) },
+        payload: { loopId: inst.id.value, loopRound: inst.round.value, text: String(reply.text).slice(0, 200) },
       })
-      await toleranceFail(`回复非严格 DONE（含其他字符）：${String(reply.text).slice(0, 60)}`)
+      await toleranceFail(inst, `回复非严格 DONE（含其他字符）：${String(reply.text).slice(0, 60)}`)
       return
     }
-    await finish('done', 'AI 回复 DONE')
+    await finish(inst, 'done', 'AI 回复 DONE')
     return
   }
   if (reply.kind === 'multi') {
@@ -411,40 +449,40 @@ export async function onNonScriptReply(reply: AiReply): Promise<void> {
     addTrace({
       kind: 'loop',
       summary: `⚠ 回复含 ${count || '多个'} 个代码块，要求重发（不消耗宽容预算）`,
-      payload: { loopId: loopId.value, loopRound: loopRound.value, count },
+      payload: { loopId: inst.id.value, loopRound: inst.round.value, count },
     })
     const okSent = sendFill({ prompt: buildRetryPrompt(`回复含 ${count || '多个'} 个代码块（契约要求仅一个）`) })
     if (!okSent) {
-      await finish('window-lost', 'multi 重试时 AI 窗口已关闭或发送失败')
+      await finish(inst, 'window-lost', 'multi 重试时 AI 窗口已关闭或发送失败')
       return
     }
     toast(`回复含多个代码块，要求 AI 重发（不消耗宽容预算）`, 'warn', 4000)
-    enterWaiting()
+    enterWaiting(inst)
     return
   }
   // plain
-  await toleranceFail('AI 未输出 cjs/bash 代码块（纯文本回复）')
+  await toleranceFail(inst, 'AI 未输出 cjs/bash 代码块（纯文本回复）')
 }
 
-async function toleranceFail(detail: string): Promise<void> {
+async function toleranceFail(inst: LoopInstance, detail: string): Promise<void> {
   addTrace({
     kind: 'loop',
     summary: `⚠ 宽容预算消耗 · ${detail}`,
-    payload: { loopId: loopId.value, loopRound: loopRound.value },
+    payload: { loopId: inst.id.value, loopRound: inst.round.value },
   })
-  const decision = decideTolerance(toleranceLeft.value)
+  const decision = decideTolerance(inst.toleranceLeft.value)
   if (decision.action === 'retry') {
-    toleranceLeft.value = decision.remaining
+    inst.toleranceLeft.value = decision.remaining
     const okSent = sendFill({ prompt: buildRetryPrompt(detail) })
     if (!okSent) {
-      await finish('window-lost', '重试时 AI 窗口已关闭或发送失败')
+      await finish(inst, 'window-lost', '重试时 AI 窗口已关闭或发送失败')
       return
     }
     toast(`格式不符，要求 AI 重试（仅剩 ${decision.remaining} 次宽容）`, 'warn', 4000)
-    enterWaiting()
+    enterWaiting(inst)
     return
   }
-  await finish('tolerance-exhausted', `宽容预算耗尽：${detail}`)
+  await finish(inst, 'tolerance-exhausted', `宽容预算耗尽：${detail}`)
 }
 
 // ============================================================================
@@ -472,26 +510,26 @@ async function runHook(event: HookEvent, payload: unknown): Promise<HookResult> 
   }
 }
 
-async function executeItem(item: InboxItem): Promise<void> {
-  loopState.value = 'executing'
-  persist()
+async function executeItem(inst: LoopInstance, item: InboxItem): Promise<void> {
+  inst.state.value = 'executing'
+  persist(inst)
   const hookRes = await runHook('BeforeScript', {
-    loopId: loopId.value,
-    round: loopRound.value,
+    loopId: inst.id.value,
+    round: inst.round.value,
     lang: item.lang,
     desc: item.desc,
     why: item.why,
     script: item.code,
   })
   if (hookRes.action === 'reject') {
-    await finish('hook-reject', hookRes.reason || 'BeforeScript hook rejected')
+    await finish(inst, 'hook-reject', hookRes.reason || 'BeforeScript hook rejected')
     return
   }
   if (hookRes.hooksRun > 0) {
     addTrace({
       kind: 'loop',
       summary: `🪝 BeforeScript · ${hookRes.hooksRun} 个 hook 通过`,
-      payload: { loopId: loopId.value, loopRound: loopRound.value },
+      payload: { loopId: inst.id.value, loopRound: inst.round.value },
     })
   }
   const startedAt = Date.now()
@@ -501,28 +539,27 @@ async function executeItem(item: InboxItem): Promise<void> {
     runner.script.value = item.code
     await runner.run()
     const r = runner.result.value
-    if (stopRequest.value === 'kill' || stopRequest.value === 'rollback') {
-      await handleStopAfterRound()
+    if (inst.stopRequest.value === 'kill' || inst.stopRequest.value === 'rollback') {
+      await handleStopAfterRound(inst)
       return
     }
     if (!r) {
-      await finish('exec-error', 'cjs 执行无返回结果')
+      await finish(inst, 'exec-error', 'cjs 执行无返回结果')
       return
     }
     const changeCount = runner.changes.value.length
-    lastExec.value = { lang: item.lang, exit: r.code, changes: changeCount, durationMs: Date.now() - startedAt }
+    inst.lastExec.value = { lang: item.lang, exit: r.code, changes: changeCount, durationMs: Date.now() - startedAt }
     addTrace({
       kind: 'loop',
-      summary: `第 ${loopRound.value} 轮执行 · cjs · exit ${r.code} · ${changeCount} 文件变更`,
+      summary: `第 ${inst.round.value} 轮执行 · cjs · exit ${r.code} · ${changeCount} 文件变更`,
       payload: {
-        loopId: loopId.value, loopRound: loopRound.value,
+        loopId: inst.id.value, loopRound: inst.round.value,
         desc: item.desc, why: item.why, lang: item.lang, hash: item.hash,
-        script: item.code.slice(0, 4000),
         exit: r.code, ok: r.ok,
         changes: runner.changes.value.map(c => ({ path: c.path, type: c.type })),
       },
     })
-    await afterRound({
+    await afterRound(inst, {
       lang: item.lang, desc: item.desc, exit: r.code, ok: r.ok,
       stdout: r.stdout || '', stderr: r.stderr || '',
       changeCount,
@@ -533,30 +570,29 @@ async function executeItem(item: InboxItem): Promise<void> {
 
   // bash：走 /exec（NDJSON 流）
   const exec = await runBash(item.code)
-  if (stopRequest.value === 'kill' || stopRequest.value === 'rollback') {
-    await handleStopAfterRound()
+  if (inst.stopRequest.value === 'kill' || inst.stopRequest.value === 'rollback') {
+    await handleStopAfterRound(inst)
     return
   }
   if (exec.blacklistHit) {
-    await finish('bash-blacklist', `命中 bash 黑名单：${exec.blacklistHit}`)
+    await finish(inst, 'bash-blacklist', `命中 bash 黑名单：${exec.blacklistHit}`)
     return
   }
   if (exec.dirty) {
-    await finish('dirty-workspace', `工作区不干净（${exec.dirtyFiles.length} 个未提交文件），bash 已拒绝执行`)
+    await finish(inst, 'dirty-workspace', `工作区不干净（${exec.dirtyFiles.length} 个未提交文件），bash 已拒绝执行`)
     return
   }
-  lastExec.value = { lang: 'bash', exit: exec.code, changes: 0, durationMs: Date.now() - startedAt }
+  inst.lastExec.value = { lang: 'bash', exit: exec.code, changes: 0, durationMs: Date.now() - startedAt }
   addTrace({
     kind: 'loop',
-    summary: `第 ${loopRound.value} 轮执行 · bash · exit ${exec.code}`,
+    summary: `第 ${inst.round.value} 轮执行 · bash · exit ${exec.code}`,
     payload: {
-      loopId: loopId.value, loopRound: loopRound.value,
+      loopId: inst.id.value, loopRound: inst.round.value,
       desc: item.desc, why: item.why, lang: 'bash', hash: item.hash,
-      script: item.code.slice(0, 4000),
       exit: exec.code, ok: exec.code === 0,
     },
   })
-  await afterRound({
+  await afterRound(inst, {
     lang: 'bash', desc: item.desc, exit: exec.code, ok: exec.code === 0,
     stdout: exec.stdout, stderr: exec.stderr,
     changeCount: 0, changedFiles: [],
@@ -616,61 +652,63 @@ async function runBash(cmd: string): Promise<BashExecResult> {
 // ============================================================================
 // 轮后：反馈 → 熔断检查 → 下一轮
 // ============================================================================
-function budgetLimited(o: RoundOutcome, tokenDelta: number): void {
-  disarmTimer()
-  pendingRound.value = o
-  stopReason.value = `循环内 token 增量约 ${(tokenDelta / 1000).toFixed(1)}k，达到 ${(LOOP_TOKEN_HARD_LIMIT / 1000).toFixed(1)}k 熔断线`
-  loopState.value = 'budget-limited'
-  persist()
+function budgetLimited(inst: LoopInstance, o: RoundOutcome, tokenDelta: number): void {
+  disarmTimer(inst)
+  inst.pendingRound.value = o
+  inst.stopReason.value = `循环内 token 增量约 ${(tokenDelta / 1000).toFixed(1)}k，达到 ${(LOOP_TOKEN_HARD_LIMIT / 1000).toFixed(1)}k 熔断线`
+  inst.state.value = 'budget-limited'
+  persist(inst)
   sendStop()
   unbindKeyboard()
   addTrace({
     kind: 'loop',
-    summary: `⏸ 循环暂停（预算熔断）· ${stopReason.value}`,
-    payload: { loopId: loopId.value, loopRound: loopRound.value },
+    summary: `⏸ 循环暂停（预算熔断）· ${inst.stopReason.value}`,
+    payload: { loopId: inst.id.value, loopRound: inst.round.value },
   })
   toast('预算已熔断，点击「继续」恢复', 'warn', 6000)
 }
 export async function resumeLoop(): Promise<void> {
-  if (loopState.value !== 'budget-limited') { toast('当前不在 budget-limited 状态', 'warn'); return }
-  const o = pendingRound.value
+  const inst = activeLoop.value
+  if (!inst) return
+  if (inst.state.value !== 'budget-limited') { toast('当前不在 budget-limited 状态', 'warn'); return }
+  const o = inst.pendingRound.value
   if (!o) { toast('无待发反馈，无法续跑', 'error'); return }
   const win = getActiveWin()
   if (!win || win.closed) { toast('AI 窗口已关闭，无法续跑', 'error'); return }
-  loopStartTokens.value = latestTokens.value
-  pendingRound.value = null
+  inst.startTokens.value = inst.latestTokens.value
+  inst.pendingRound.value = null
   // 清空上轮 lastHash：budget 恢复后 AI 重发同一脚本是合理的（它没收到结果），
   // 避免被误判为「连续两轮重复」而熔断
-  lastHash.value = ''
-  const feedback = buildFeedback(o, { nextRound: loopRound.value + 1, tokenDelta: 0 })
+  inst.lastHash.value = ''
+  const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta: 0 })
   const okSent = sendFill({ prompt: feedback })
-  if (!okSent) { await finish('window-lost', '续跑时窗口发送失败'); return }
+  if (!okSent) { await finish(inst, 'window-lost', '续跑时窗口发送失败'); return }
   bindKeyboard()
-  loopRound.value += 1
-  loopState.value = 'waiting'
-  persist()
-  enterWaiting()
+  inst.round.value += 1
+  inst.state.value = 'waiting'
+  persist(inst)
+  enterWaiting(inst)
   addTrace({
     kind: 'loop',
-    summary: `▶ 续跑 · 从第 ${loopRound.value} 轮`,
-    payload: { loopId: loopId.value, loopRound: loopRound.value },
+    summary: `▶ 续跑 · 从第 ${inst.round.value} 轮`,
+    payload: { loopId: inst.id.value, loopRound: inst.round.value },
   })
-  toast(`▶ 续跑，从第 ${loopRound.value} 轮开始`, 'success', 4000)
+  toast(`▶ 续跑，从第 ${inst.round.value} 轮开始`, 'success', 4000)
 }
-async function afterRound(o: RoundOutcome): Promise<void> {
+async function afterRound(inst: LoopInstance, o: RoundOutcome): Promise<void> {
   // 用户暂停：等当前轮完成后停（不再回填、不进下一轮）
-  if (stopRequest.value === 'pause') {
-    await finish('interrupted', '用户暂停（当前轮已完成）')
+  if (inst.stopRequest.value === 'pause') {
+    await finish(inst, 'interrupted', '用户暂停（当前轮已完成）')
     return
   }
-  if (stopRequest.value === 'kill' || stopRequest.value === 'rollback') {
-    await handleStopAfterRound()
+  if (inst.stopRequest.value === 'kill' || inst.stopRequest.value === 'rollback') {
+    await handleStopAfterRound(inst)
     return
   }
 
   const asHook = await runHook('AfterScript', {
-    loopId: loopId.value,
-    round: loopRound.value,
+    loopId: inst.id.value,
+    round: inst.round.value,
     lang: o.lang,
     desc: o.desc,
     exit: o.exit,
@@ -680,24 +718,24 @@ async function afterRound(o: RoundOutcome): Promise<void> {
     changeCount: o.changeCount,
   })
   if (asHook.action === 'reject') {
-    await finish('hook-reject-after-script', asHook.reason || 'AfterScript hook rejected')
+    await finish(inst, 'hook-reject-after-script', asHook.reason || 'AfterScript hook rejected')
     return
   }
   if (asHook.hooksRun > 0) {
     addTrace({
       kind: 'loop',
       summary: `🪝 AfterScript · ${asHook.hooksRun} 个 hook 通过`,
-      payload: { loopId: loopId.value, loopRound: loopRound.value },
+      payload: { loopId: inst.id.value, loopRound: inst.round.value },
     })
   }
-  loopState.value = 'feedback'
-  persist()
+  inst.state.value = 'feedback'
+  persist(inst)
 
   // 熔断判定（轮数 / token），规则与优先级由 loopLogic.checkRoundBreak 单测锁定
-  const tokenDelta = Math.max(0, latestTokens.value - loopStartTokens.value)
-  const breakReason = checkRoundBreak(loopRound.value, tokenDelta)
+  const tokenDelta = Math.max(0, inst.latestTokens.value - inst.startTokens.value)
+  const breakReason = checkRoundBreak(inst.round.value, tokenDelta)
   if (breakReason === 'token-budget') {
-    budgetLimited(o, tokenDelta)
+    budgetLimited(inst, o, tokenDelta)
     return
   }
   if (breakReason === 'token-warn') {
@@ -705,18 +743,18 @@ async function afterRound(o: RoundOutcome): Promise<void> {
     addTrace({
       kind: 'loop',
       summary: `⚠ token 增量约 ${(tokenDelta / 1000).toFixed(1)}k，已达预算警告线（熔断线 ${(LOOP_TOKEN_HARD_LIMIT / 1000).toFixed(1)}k）`,
-      payload: { loopId: loopId.value, loopRound: loopRound.value, tokenDelta },
+      payload: { loopId: inst.id.value, loopRound: inst.round.value, tokenDelta },
     })
     toast(`token 已用约 ${(tokenDelta / 1000).toFixed(1)}k（警告），到 ${(LOOP_TOKEN_HARD_LIMIT / 1000).toFixed(1)}k 将熔断`, 'warn', 5000)
   }
   if (breakReason === 'round-limit') {
-    await finish('round-limit', `已达 ${LOOP_MAX_ROUNDS} 轮上限`)
+    await finish(inst, 'round-limit', `已达 ${LOOP_MAX_ROUNDS} 轮上限`)
     return
   }
 
   const arHook = await runHook('AfterResult', {
-    loopId: loopId.value,
-    round: loopRound.value,
+    loopId: inst.id.value,
+    round: inst.round.value,
     lang: o.lang,
     exit: o.exit,
     ok: o.ok,
@@ -724,22 +762,22 @@ async function afterRound(o: RoundOutcome): Promise<void> {
     tokenDelta,
   })
   if (arHook.action === 'reject') {
-    await finish('hook-reject-after-result', arHook.reason || 'AfterResult hook rejected')
+    await finish(inst, 'hook-reject-after-result', arHook.reason || 'AfterResult hook rejected')
     return
   }
   if (arHook.hooksRun > 0) {
     addTrace({
       kind: 'loop',
       summary: `🪝 AfterResult · ${arHook.hooksRun} 个 hook 通过`,
-      payload: { loopId: loopId.value, loopRound: loopRound.value },
+      payload: { loopId: inst.id.value, loopRound: inst.round.value },
     })
   }
-  const feedback = buildFeedback(o, { nextRound: loopRound.value + 1, tokenDelta })
+  const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta })
   const ok = sendFill({ prompt: feedback })
-  if (!ok) { await finish('window-lost', '回填结果时 AI 窗口已关闭'); return }
+  if (!ok) { await finish(inst, 'window-lost', '回填结果时 AI 窗口已关闭'); return }
 
-  loopRound.value += 1
-  enterWaiting()
+  inst.round.value += 1
+  enterWaiting(inst)
 }
 
 // 回填文本构造已抽至 loopLogic.buildFeedback（带单测）
@@ -750,89 +788,92 @@ async function afterRound(o: RoundOutcome): Promise<void> {
 
 /** Esc 软暂停：当前轮跑完即停，不发下一轮 */
 function requestPause() {
-  if (!isLoopActive.value) return
-  stopRequest.value = 'pause'
+  const inst = activeLoop.value
+  if (!inst || !isLoopActive.value) return
+  inst.stopRequest.value = 'pause'
   toast('将在当前轮完成后暂停', 'info', 3000)
 }
 
 /** ■ 停当前：立即 abort 执行 */
 async function killCurrent(): Promise<void> {
-  if (!isLoopActive.value) return
-  stopRequest.value = 'kill'
-  disarmTimer()
+  const inst = activeLoop.value
+  if (!inst || !isLoopActive.value) return
+  inst.stopRequest.value = 'kill'
+  disarmTimer(inst)
   const runner = useRunner()
   runner.stop() // cjs abort；bash 依赖连接中断
-  await finish('interrupted', '用户急停（终止当前执行）')
+  await finish(inst, 'interrupted', '用户急停（终止当前执行）')
 }
 
 /** Ctrl+Esc 停止并回滚：abort + git reset 到循环起点 */
 async function stopAndRollback(): Promise<void> {
-  if (!isLoopActive.value) return
-  stopRequest.value = 'rollback'
-  disarmTimer()
+  const inst = activeLoop.value
+  if (!inst || !isLoopActive.value) return
+  inst.stopRequest.value = 'rollback'
+  disarmTimer(inst)
   useRunner().stop()
-  if (loopStartCommit.value) {
+  if (inst.startCommit.value) {
     try {
       const r = await fetch('/__ai/git/reset', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ref: loopStartCommit.value }),
+        body: JSON.stringify({ ref: inst.startCommit.value }),
       })
       const d = await r.json()
       if (!d.ok) toast(`回滚失败：${d.reason || '未知错误'}`, 'error', 5000)
-      else toast(`已回滚到 ${loopStartCommit.value}`, 'success', 5000)
+      else toast(`已回滚到 ${inst.startCommit.value}`, 'success', 5000)
     } catch (e) {
       toast(`回滚请求失败：${String(e)}`, 'error', 5000)
     }
   } else {
     toast('无循环起点 commit，跳过 git 回滚', 'warn', 4000)
   }
-  await finish('interrupted', `用户急停并回滚到 ${loopStartCommit.value || '（无）'}`)
+  await finish(inst, 'interrupted', `用户急停并回滚到 ${inst.startCommit.value || '（无）'}`)
 }
 
-async function handleStopAfterRound(): Promise<void> {
-  if (stopRequest.value === 'rollback') {
-    if (loopStartCommit.value) {
+async function handleStopAfterRound(inst: LoopInstance): Promise<void> {
+  if (inst.stopRequest.value === 'rollback') {
+    if (inst.startCommit.value) {
       try {
         await fetch('/__ai/git/reset', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ref: loopStartCommit.value }),
+          body: JSON.stringify({ ref: inst.startCommit.value }),
         })
       } catch { }
     }
-    await finish('interrupted', '用户急停并回滚')
+    await finish(inst, 'interrupted', '用户急停并回滚')
     return
   }
-  await finish('interrupted', '用户急停/暂停')
+  await finish(inst, 'interrupted', '用户急停/暂停')
 }
 
 // ============================================================================
 // 终止 + 循环级 commit（v6 §6.10）
 // ============================================================================
-async function finish(reason: string, detail?: string): Promise<void> {
-  disarmTimer()
-  pendingRound.value = null
-  const wasRollback = stopRequest.value === 'rollback'
+async function finish(inst: LoopInstance, reason: string, detail?: string): Promise<void> {
+  disarmTimer(inst)
+  inst.pendingRound.value = null
+  const wasRollback = inst.stopRequest.value === 'rollback'
   const interrupted = reason === 'interrupted'
-  stopReason.value = detail || reason
+  inst.stopReason.value = detail || reason
 
-  loopState.value = interrupted ? 'interrupted' : 'stopped'
+  inst.state.value = interrupted ? 'interrupted' : 'stopped'
   sendStop()
   unbindKeyboard()
-  persist()
+  persist(inst)
 
   addTrace({
     kind: 'loop',
-    summary: `${interrupted ? '⏹' : '■'} 循环结束 · ${stopReason.value}`,
+    summary: `${interrupted ? '⏹' : '■'} 循环结束 · ${inst.stopReason.value}`,
     payload: {
-      loopId: loopId.value,
-      loopRound: loopRound.value,
+      loopId: inst.id.value,
+      loopRound: inst.round.value,
       reason,
       // 失败链路 trace ref：把终止时的关键状态打包，便于事后复盘
-      lastExec: lastExec.value,
-      lastHash: lastHash.value,
-      toleranceLeft: toleranceLeft.value,
-      tokenDelta: Math.max(0, latestTokens.value - loopStartTokens.value),
-      loopSessionId: loopSessionId.value,
+      lastExec: inst.lastExec.value,
+      lastHash: inst.lastHash.value,
+      toleranceLeft: inst.toleranceLeft.value,
+      tokenDelta: Math.max(0, inst.latestTokens.value - inst.startTokens.value),
+      loopSessionId: inst.sessionId,
     },
   })
 
@@ -842,15 +883,15 @@ async function finish(reason: string, detail?: string): Promise<void> {
       const r = await fetch('/__ai/git/commit-loop', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `ai-runner: ${loopId.value} · ${loopRound.value} 轮 · ${reason}`,
+          message: `ai-runner: ${inst.id.value} · ${inst.round.value} 轮 · ${reason}`,
         }),
       })
       const d = await r.json()
       if (d.ok && d.commit) {
-        const hint = loopStartCommit.value
-          ? `撤回：git reset --hard ${loopStartCommit.value}`
+        const hint = inst.startCommit.value
+          ? `撤回：git reset --hard ${inst.startCommit.value}`
           : ''
-        toast(`循环已提交 ${d.commit}（${loopRound.value} 轮）${hint ? ' · ' + hint : ''}`, 'success', 8000)
+        toast(`循环已提交 ${d.commit}（${inst.round.value} 轮）${hint ? ' · ' + hint : ''}`, 'success', 8000)
       } else if (d.ok && d.empty) {
         toast('循环结束，无文件改动', 'info', 4000)
       } else {
@@ -861,10 +902,10 @@ async function finish(reason: string, detail?: string): Promise<void> {
     }
   }
 
-  stopRequest.value = 'none'
+  inst.stopRequest.value = 'none'
   void runHook('LoopStop', {
-    loopId: loopId.value,
-    round: loopRound.value,
+    loopId: inst.id.value,
+    round: inst.round.value,
     reason,
     detail: detail || '',
   }).catch(() => {})
@@ -888,25 +929,29 @@ watch(autoRotateSession, (v) => {
 
 export function setTokenEstimate(n: number): void {
   const v = Math.max(0, Number(n) || 0)
-  latestTokens.value = v
+  const inst = activeLoop.value
+  if (!inst) return
+  inst.latestTokens.value = v
   if (!autoRotateSession.value) return
   if (!isLoopActive.value) return
-  if (loopState.value === 'handoff') return
-  if (loopState.value !== 'waiting') return
+  if (inst.state.value === 'handoff') return
+  if (inst.state.value !== 'waiting') return
   if (v < LOOP_ROTATE_THRESHOLD) return
   addTrace({
     kind: 'loop',
     summary: `⚠ token 达 ${(v / 1000).toFixed(1)}k ≥ ${LOOP_ROTATE_THRESHOLD / 1000}k，自动触发轮转`,
-    payload: { loopId: loopId.value, loopRound: loopRound.value },
+    payload: { loopId: inst.id.value, loopRound: inst.round.value },
   })
   void startHandoff()
 }
 
 // ============================================================================
 // 键盘：Esc 暂停 / Ctrl+Esc 回滚（v6 §6.6）
+// 键盘绑定是全局的（每页一份），onKeydown 从 activeLoop 取当前实例
 // ============================================================================
 function onKeydown(e: KeyboardEvent) {
-  if (!isLoopActive.value) return
+  const inst = activeLoop.value
+  if (!inst || !isLoopActive.value) return
   if (e.key === 'Escape') {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
@@ -937,7 +982,7 @@ export function currentLoopContext(): { loopId?: string, loopRound?: number } {
 
 /**
  * 注入 activeSessionId 读取器（App.vue 在 onMounted 调用一次）。
- * 用于循环启动时把当前活动会话 id 绑定到 loopSessionId，
+ * 用于循环启动时把当前活动会话 id 绑定到 inst.sessionId，
  * 配合 isFromCurrentLoop 做多 AI 窗口隔离。
  */
 export function setActiveSessionIdGetter(fn: () => string): void {
@@ -948,14 +993,14 @@ export function setActiveSessionIdGetter(fn: () => string): void {
  * 多 AI 窗口 session 隔离：
  * - 非循环模式：始终 true（无隔离需求）
  * - 循环模式 + 油猴未传 sessionId：true（兼容旧版油猴）
- * - 循环模式 + 油猴传 sessionId：必须与 loopSessionId 一致才接受
+ * - 循环模式 + 油猴传 sessionId：必须与当前循环实例的 sessionId 一致才接受
  *   （同 origin 多窗口情况下 source 比对可能失效，靠 sessionId 兜底）
  */
 export function isFromCurrentLoop(sessionId: string): boolean {
   if (!isLoopActive.value) return true
   const sid = String(sessionId || '')
   if (!sid) return true
-  return sid === loopSessionId.value
+  return sid === activeLoop.value?.sessionId
 }
 
 const SUMMARY_INSTRUCTION = [
@@ -979,83 +1024,91 @@ const SUMMARY_INSTRUCTION = [
   '只输出上述结构，不加其他文字、不加代码块。',
 ].join('\n')
 export async function startHandoff(): Promise<void> {
-  if (!isLoopActive.value) { toast('没有进行中的循环', 'warn'); return }
-  if (loopState.value === 'handoff') { toast('已在轮转中', 'warn'); return }
-  loopState.value = 'handoff'
-  persist()
-  addTrace({ kind: 'loop', summary: '🔄 开始轮转 · 请求 AI 总结当前会话', payload: { loopId: loopId.value, loopRound: loopRound.value } })
+  const inst = activeLoop.value
+  if (!inst || !isLoopActive.value) { toast('没有进行中的循环', 'warn'); return }
+  if (inst.state.value === 'handoff') { toast('已在轮转中', 'warn'); return }
+  inst.state.value = 'handoff'
+  persist(inst)
+  addTrace({ kind: 'loop', summary: '🔄 开始轮转 · 请求 AI 总结当前会话', payload: { loopId: inst.id.value, loopRound: inst.round.value } })
   const okSent = sendRotate({ instruction: SUMMARY_INSTRUCTION })
-  if (!okSent) { handoffFail('发送 rotate 失败（窗口已关？）'); return }
-  handoffArm('总结请求超时（30s）')
+  if (!okSent) { handoffFail(inst, '发送 rotate 失败（窗口已关？）'); return }
+  handoffArm(inst, '总结请求超时（30s）')
 }
 export async function onSummary(text: string, sessionId: string, degraded: boolean): Promise<void> {
-  if (loopState.value !== 'handoff') return
-  handoffDisarm()
+  const inst = activeLoop.value
+  if (!inst || inst.state.value !== 'handoff') return
+  handoffDisarm(inst)
   const t = String(text || '').trim()
-  const finalSummary = t || localFallbackSummary()
+  const finalSummary = t || localFallbackSummary(inst)
   const wasDegraded = degraded || !t
   addTrace({
     kind: 'loop',
     summary: wasDegraded ? '⚠ 摘要降级为本地拼' : `✓ 已收到 AI 总结（${t.length} 字）`,
-    payload: { loopId: loopId.value, loopRound: loopRound.value, summary: finalSummary.slice(0, 2000) },
+    payload: { loopId: inst.id.value, loopRound: inst.round.value, summary: finalSummary.slice(0, 2000) },
   })
   const okSent = sendNewSession({ summary: finalSummary })
-  if (!okSent) { handoffFail('发送 new-session 失败'); return }
-  handoffArm('新会话创建超时（30s）')
+  if (!okSent) { handoffFail(inst, '发送 new-session 失败'); return }
+  handoffArm(inst, '新会话创建超时（30s）')
 }
 export async function onNewSessionCreated(url: string, id: string): Promise<void> {
-  if (loopState.value !== 'handoff') return
-  handoffDisarm()
-  latestTokens.value = 0
+  const inst = activeLoop.value
+  if (!inst || inst.state.value !== 'handoff') return
+  handoffDisarm(inst)
+  inst.latestTokens.value = 0
   addTrace({
     kind: 'loop',
     summary: `✓ 已切到新会话 · ${id || url}`,
-    payload: { loopId: loopId.value, loopRound: loopRound.value },
+    payload: { loopId: inst.id.value, loopRound: inst.round.value },
   })
-  stopRequest.value = 'none'
-  loopState.value = 'waiting'
-  persist()
-  enterWaiting()
+  inst.stopRequest.value = 'none'
+  inst.state.value = 'waiting'
+  persist(inst)
+  enterWaiting(inst)
   toast(`✓ 已切到新会话 · ${id || url}`, 'success', 5000)
 }
-function localFallbackSummary(): string {
+function localFallbackSummary(inst: LoopInstance): string {
   const lines = [
     '# 任务',
-    loopGoal.value || '（无）',
+    inst.goal.value || '（无）',
     '',
     '# 当前状态',
-    `已完成 ${loopRound.value} 轮；最后执行：${lastExec.value ? JSON.stringify(lastExec.value) : '无'}`,
+    `已完成 ${inst.round.value} 轮；最后执行：${inst.lastExec.value ? JSON.stringify(inst.lastExec.value) : '无'}`,
     '',
     '# 下一步',
     '继续推进目标',
   ]
   return lines.join('\n')
 }
-let handoffTimer: ReturnType<typeof setTimeout> | null = null
-function handoffArm(msg: string) {
-  handoffDisarm()
-  handoffTimer = setTimeout(() => { handoffFail(msg) }, 30_000)
+function handoffArm(inst: LoopInstance, msg: string) {
+  handoffDisarm(inst)
+  inst.handoffTimer = setTimeout(() => { handoffFail(inst, msg) }, 30_000)
 }
-function handoffDisarm() {
-  if (handoffTimer) { clearTimeout(handoffTimer); handoffTimer = null }
+function handoffDisarm(inst: LoopInstance) {
+  if (inst.handoffTimer) { clearTimeout(inst.handoffTimer); inst.handoffTimer = null }
 }
-function handoffFail(reason: string) {
-  handoffDisarm()
-  stopReason.value = reason
-  loopState.value = 'stopped'
-  persist()
+function handoffFail(inst: LoopInstance, reason: string) {
+  handoffDisarm(inst)
+  inst.stopReason.value = reason
+  inst.state.value = 'stopped'
+  persist(inst)
   sendStop()
   unbindKeyboard()
-  addTrace({ kind: 'loop', summary: `✗ 轮转失败 · ${reason}`, payload: { loopId: loopId.value, loopRound: loopRound.value } })
+  addTrace({ kind: 'loop', summary: `✗ 轮转失败 · ${reason}`, payload: { loopId: inst.id.value, loopRound: inst.round.value } })
   toast(`✗ 轮转失败：${reason}`, 'error', 6000)
 }
 
 
 export function useAutoLoop() {
   return {
+    // 步骤 2：仍返回模块级 refs（singletonView 包装同一批 refs）
+    // 步骤 3 将改为 computed 读 activeLoop 以支持多实例
     loopState, loopId, loopRound, loopGoal, loopStartCommit,
     toleranceLeft, stopReason, lastExec,
-    tokenDelta: computed(() => Math.max(0, latestTokens.value - loopStartTokens.value)),
+    tokenDelta: computed(() => {
+      const inst = activeLoop.value
+      if (!inst) return 0
+      return Math.max(0, inst.latestTokens.value - inst.startTokens.value)
+    }),
     latestTokens,
     isLoopActive,
     maxRounds: LOOP_MAX_ROUNDS,
