@@ -5,6 +5,12 @@ import GeneratePanel from './components/GeneratePanel.vue'
 import TracePanel from './components/TracePanel.vue'
 import { DEFAULT_URL, MODELS, getActiveWin, openDeepseek, useDeepseekUrl } from './composables/useDeepseekUrl'
 import { useScriptInbox } from './composables/useScriptInbox'
+import {
+  currentLoopContext,
+  isLoopActive,
+  onNonScriptReply,
+  onScriptArrival
+} from './composables/useAutoLoop'
 import { useSessionManager } from './composables/useSessionManager'
 import { useToast } from './composables/useToast'
 import { useTraceLog } from './composables/useTraceLog'
@@ -191,8 +197,9 @@ function selectSession(s: SessionEntry) {
   if (s.url) setDeepseekUrl(s.url)
 }
 
-type Tab = 'run' | 'generate' | 'trace'
+type Tab = 'run' | 'trace'
 const tab = ref<Tab>('run')
+const askOpen = ref(false)
 const isEmbedded = typeof window !== 'undefined' && window.parent !== window
 function collapsePanel() {
   if (!isEmbedded) return
@@ -221,9 +228,55 @@ function onSessionIdMessage(e: MessageEvent) {
   if (!d) return
 
   // ============================================================================
-  // 油猴 → 工作台：脚本到达（v6 §3.1 ai-runner:script）
+  // 油猴 → 工作台：统一回复通道（v6 §3.1 ai-runner:reply）
+  // kind: script（恰好 1 个新 cjs/bash 块）/ done（严格 DONE）/ plain（纯文本）/ multi（多块）
   // 安全约束（v6 §3.4）：origin 必须落在已知 AI 站点；source 优先比对 getActiveWin()
   // ============================================================================
+  if (d.type === 'ai-runner:reply') {
+    if (!isFromActiveAiSite(e)) return
+    const kind = String(d.kind || '')
+    if (kind === 'script') {
+      const code = String(d.code || '')
+      const lang = (d.lang === 'bash' ? 'bash' : 'cjs') as 'cjs' | 'bash'
+      const site = String(d.site || e.origin || '')
+      const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined })
+      if (item) {
+        const lineCount = code.split('\n').length
+        toast(`AI 脚本已到达 · ${lang} · ${lineCount} 行 · ${item.desc || '无说明'}`, 'info', 4000)
+        // 决策链路：脚本到达事件入 TraceLog（v6 §3.2），循环中盖 loopId/loopRound
+        addTrace({
+          kind: 'script',
+          summary: `📥 脚本到达 · ${lang} · ${lineCount} 行${item.desc ? ' · ' + item.desc : ''}`,
+          payload: {
+            script: code.slice(0, 4000),
+            desc: item.desc,
+            why: item.why,
+            lang,
+            hash: item.hash,
+            ...currentLoopContext(),
+          },
+        })
+        if (isLoopActive.value) {
+          // 循环模式：状态机接管（不经编辑器覆盖策略）
+          void onScriptArrival(item)
+        } else {
+          // 手动模式：覆盖保护后填入编辑器
+          scriptInbox.applyToEditor(item)
+        }
+      }
+      return
+    }
+    // done / plain / multi 仅循环模式消费
+    if (isLoopActive.value) {
+      void onNonScriptReply({
+        kind: kind as 'done' | 'plain' | 'multi',
+        count: Number(d.count) || 0,
+      })
+    }
+    return
+  }
+
+  // 兼容旧版油猴（v1.2）的 ai-runner:script 单脚本消息
   if (d.type === 'ai-runner:script') {
     if (!isFromActiveAiSite(e)) return
     const code = String(d.code || '')
@@ -231,22 +284,8 @@ function onSessionIdMessage(e: MessageEvent) {
     const site = String(d.site || e.origin || '')
     const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined })
     if (item) {
-      const lineCount = code.split('\n').length
-      toast(`AI 脚本已到达 · ${lang} · ${lineCount} 行 · ${item.desc || '无说明'}`, 'info', 4000)
-      // 决策链路：脚本到达事件入 TraceLog（v6 §3.2）
-      addTrace({
-        kind: 'script',
-        summary: `📥 脚本到达 · ${lang} · ${lineCount} 行${item.desc ? ' · ' + item.desc : ''}`,
-        payload: {
-          script: code.slice(0, 4000),
-          desc: item.desc,
-          why: item.why,
-          lang,
-          hash: item.hash,
-        },
-      })
-      // 手动模式：直接尝试覆盖编辑器；循环模式由 useAutoLoop 消费（P2 接入）
-      scriptInbox.applyToEditor(item)
+      if (isLoopActive.value) void onScriptArrival(item)
+      else scriptInbox.applyToEditor(item)
     }
     return
   }
@@ -265,6 +304,8 @@ function onSessionIdMessage(e: MessageEvent) {
     if (tokens > 0) {
       const k = Math.max(0, tokens / 1000).toFixed(1)
       toast(`会话 token 约 ${k}k`, 'info', 3000, { key: 'ai-runner:token-estimate' })
+      // 喂给循环状态机做 30k 增量熔断（v6 §6.9 第 4 条）
+      setTokenEstimate(tokens)
     }
     return
   }
@@ -305,8 +346,12 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
   }
   return true
 }
+function onEscClose(e: KeyboardEvent) {
+  if (e.key === 'Escape' && askOpen.value) askOpen.value = false
+}
 onMounted(() => {
   window.addEventListener('message', onSessionIdMessage)
+  window.addEventListener('keydown', onEscClose)
   // —— mock 通道（v6 §13.2 ?mock=1）—— 不打开真实 AI 站点，注入合成 message 自检整条链路
   // 注意：必须放在 activeSessionId 早退之前，否则无会话时无法触发
   if (MOCK_MODE) {
@@ -352,6 +397,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('message', onSessionIdMessage)
+  window.removeEventListener('keydown', onEscClose)
 })
 const { sessionId, resetSession, generateHandoffSummary } = useSessionManager()
 const { toast } = useToast()
@@ -394,6 +440,16 @@ const { addTrace } = useTraceLog()
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
+      </button>
+      <button
+        v-tooltip="'打开「问 AI」面板（拖文件 + 写问题 → 拼 prompt）'"
+        class="ask-open-btn"
+        @click="askOpen = true"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        <span>问 AI</span>
       </button>
       <div class="ds-url">
         <span v-tooltip="headerUrl || '（未选中会话）'" class="ds-value-static">{{ headerUrl || '（未选中会话）' }}</span>
@@ -596,20 +652,31 @@ const { addTrace } = useTraceLog()
         <button v-tooltip="'写脚本 -> 运行 -> 看 diff / 回滚'" :class="{ active: tab === 'run' }" @click="tab = 'run'">
           运行脚本
         </button>
-        <button v-tooltip="'拖文件 + 写问题 -> 拼 prompt -> 打开 AI 会话'" :class="{ active: tab === 'generate' }" @click="tab = 'generate'">
-          问 AI
-        </button>
         <button v-tooltip="'查看运行脚本 / 问 AI 的历史记录'" :class="{ active: tab === 'trace' }" @click="tab = 'trace'">
           会话记录
         </button>
       </nav>
       <main class="main">
         <ScriptPanel v-if="tab === 'run'" />
-        <GeneratePanel v-if="tab === 'generate'" />
         <TracePanel v-if="tab === 'trace'" />
       </main>
     </div>
   </div>
+  <Teleport to="body">
+    <Transition name="ask-modal">
+      <div v-if="askOpen" class="ask-modal-mask" @click.self="askOpen = false">
+        <div class="ask-modal-card">
+          <div class="ask-modal-head">
+            <span class="ask-modal-title">问 AI</span>
+            <button v-tooltip="'关闭（Esc）'" class="ask-modal-close" @click="askOpen = false">×</button>
+          </div>
+          <div class="ask-modal-body">
+            <GeneratePanel v-if="askOpen" />
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
   <ToastHost />
   <TooltipHost />
 </template>
@@ -1644,6 +1711,104 @@ const { addTrace } = useTraceLog()
 }
 .collapse-btn svg {
   flex-shrink: 0;
+}
+
+
+.ask-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: 0.12s;
+  font-family: inherit;
+}
+.ask-open-btn:hover {
+  background: var(--primary);
+  color: #fff;
+}
+.ask-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483645;
+  background: rgb(15 30 60 / 42%);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.ask-modal-card {
+  width: min(1280px, 96vw);
+  height: min(900px, 92vh);
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgb(15 30 60 / 28%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: ask-modal-in 0.18s ease-out;
+}
+.ask-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  flex-shrink: 0;
+}
+.ask-modal-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ask-modal-close {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: 0.12s;
+}
+.ask-modal-close:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+.ask-modal-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.ask-modal-body > * {
+  flex: 1;
+  min-width: 0;
+}
+.ask-modal-enter-active,
+.ask-modal-leave-active {
+  transition: opacity 0.18s ease;
+}
+.ask-modal-enter-from,
+.ask-modal-leave-to {
+  opacity: 0;
+}
+@keyframes ask-modal-in {
+  from { transform: scale(0.97); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 </style>
 <!-- tooltip-audit -->
