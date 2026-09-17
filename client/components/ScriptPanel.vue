@@ -70,6 +70,16 @@
               </svg>
               <span>{{ asking ? '请求中…' : '问 API' }}</span>
             </button>
+            <button
+              v-tooltip="'打开「问 AI」面板（拖文件 + 写问题 → 拼 prompt）'"
+              class="term-btn ask-panel"
+              @click="emit('open-ask')"
+            >
+              <svg class="term-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              <span>问 AI</span>
+            </button>
           </div>
         </header>
 
@@ -362,6 +372,7 @@
 
 <script setup lang="ts">
 defineOptions({ name: 'ScriptPanel' })
+const emit = defineEmits<{ 'open-ask': [] }>()
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRunner } from '../composables/useRunner'
 import { useScriptInbox } from '../composables/useScriptInbox'

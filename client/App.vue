@@ -667,7 +667,7 @@ const { addTrace } = useTraceLog()
         </button>
       </nav>
       <main class="main">
-        <ScriptPanel v-if="tab === 'run'" />
+        <ScriptPanel v-if="tab === 'run'" @open-ask="askOpen = true" />
         <TracePanel v-if="tab === 'trace'" />
       </main>
     </div>
