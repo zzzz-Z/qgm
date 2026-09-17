@@ -1029,7 +1029,7 @@ function createEditor() {
       /* editor-no-h-scroll */
       EditorView.lineWrapping,
       editableComp.of(EditorView.editable.of(!isLoopActive.value)),
-      placeholder('// CommonJS 脚本 · !命令 走 shell · @问题 发给 AI · ⌘/Ctrl + ↵ 运行 · Alt+↑↓ 翻历史'),
+      placeholder('写脚本，或 !命令 走 shell · @问题 发给 AI · ⌘/Ctrl + ↵ 运行'),
       EditorView.theme({
         '&': { height: '100%', fontSize: '12px' },
         '.cm-scroller': { fontFamily: 'var(--mono, monospace)', lineHeight: '20px', overflowX: 'hidden', overflowY: 'auto' },
