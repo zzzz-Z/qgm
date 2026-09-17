@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ScriptPanel from './components/ScriptPanel.vue'
 import GeneratePanel from './components/GeneratePanel.vue'
 import TracePanel from './components/TracePanel.vue'
-import { DEFAULT_URL, MODELS, getActiveWin, openDeepseek, useDeepseekUrl } from './composables/useDeepseekUrl'
+import { DEFAULT_URL, MODELS, getActiveWin, getWindowBySid, listWindows, openDeepseek, setActiveWinSid, useDeepseekUrl } from './composables/useDeepseekUrl'
 import { useScriptInbox } from './composables/useScriptInbox'
 import {
     currentLoopContext,
@@ -11,6 +11,8 @@ import {
     isFromCurrentLoop,
     onNonScriptReply,
     onScriptArrival,
+    setActiveLoopSessionId,
+    createLoopInstanceFor,
     setActiveSessionIdGetter,
     setTokenEstimate,
     onSummary,
@@ -47,7 +49,12 @@ watch(activeSessionId, (v) => {
     if (v) localStorage.setItem(ACTIVE_SESSION_KEY, v)
     else localStorage.removeItem(ACTIVE_SESSION_KEY)
   } catch { }
-})
+// [multi-loop-step4-app] 同步到 loop 实例表与窗口表（多循环并发的前提）
+  const sid = v || 'default'
+  setActiveLoopSessionId(sid)
+  createLoopInstanceFor(sid)
+  setActiveWinSid(sid)
+}, { immediate: true })
 const sidebarOpen = ref(false)
 const settingsOpen = ref(false)
 const KEY_SANDBOX = '__ai_sandbox'
@@ -401,9 +408,16 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
   }
   // e.source 可能为 null（窗口已关 / 跨域限制）；只在非 null 时比对
   if (e.source !== null) {
-    const active = getActiveWin()
-    if (active !== null && e.source !== active) {
-      console.warn('[ai-runner] source 非当前循环窗口，已忽略')
+// [multi-loop-step4-app] 接受任一已注册 AI 窗口（多循环并发）
+    const wins = listWindows()
+    if (wins.length === 0) return true
+    let matched = false
+    for (const { sid } of wins) {
+      const w = getWindowBySid(sid)
+      if (w && w === e.source) { matched = true; break }
+    }
+    if (!matched) {
+      console.warn('[ai-runner] source 非任一注册窗口，已忽略')
       return false
     }
   }

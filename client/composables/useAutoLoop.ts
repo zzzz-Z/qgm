@@ -1,6 +1,6 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import { useRunner } from './useRunner'
-import { getActiveWin, sendFill, sendStop, sendRotate, sendNewSession } from './useDeepseekUrl'
+import { getActiveWin, getWindowBySid, sendFillTo, sendStopTo, sendRotateTo, sendNewSessionTo } from './useDeepseekUrl'
 import { toast } from './useToast'
 import { useTraceLog } from './useTraceLog'
 import { readNdjson } from '../utils/stream'
@@ -226,10 +226,21 @@ let originalTitle = ''
 
 const { addTrace } = useTraceLog()
 
-export const isLoopActive = computed(() => {
-  const s = activeLoop.value?.state.value
-  return s !== undefined && s !== 'idle' && s !== 'stopped' && s !== 'interrupted'
-})
+// [multi-loop-step4-auto] 按 inst 判断活跃（多实例共用）
+function isInstActive(inst: LoopInstance | null): boolean {
+  if (!inst) return false
+  const s = inst.state.value
+  return s !== 'idle' && s !== 'stopped' && s !== 'interrupted'
+}
+// [multi-loop-step4-auto] 按 sid 解析循环实例：sid 命中则用之，否则回落到 active
+function resolveInst(sid?: string): LoopInstance | null {
+  if (sid) {
+    const inst = loopInstances.get(sid)
+    if (inst) return inst
+  }
+  return activeLoop.value
+}
+export const isLoopActive = computed(() => isInstActive(activeLoop.value))
 
 // ============================================================================
 // 持久化（v6 §11.4）：刷新后不自动续跑（activeWin 引用已失效）→ 恢复为 stopped
@@ -309,7 +320,9 @@ async function initLoop(
   traceSummary: string,
   tracePayload?: Record<string, unknown>,
 ): Promise<boolean> {
-  const win = getActiveWin()
+  const sid = getActiveSessionId() || inst.sessionId || 'default'
+  inst.sessionId = sid
+  const win = getWindowBySid(sid) ?? getActiveWin()
   if (!win || win.closed) {
     toast('AI 站点窗口未打开，请先打开会话窗口', 'error', 5000)
     return false
@@ -332,7 +345,6 @@ async function initLoop(
   inst.lastHash.value = ''
   inst.lastExec.value = null
   // 绑定当前循环所在 AI 会话 id（多窗口隔离用）
-  inst.sessionId = getActiveSessionId() || ''
   originalTitle = typeof document !== 'undefined' ? document.title : ''
   addTrace({
     kind: 'loop',
@@ -369,7 +381,7 @@ export async function startLoop(goal: string): Promise<void> {
       payload: { loopId: inst.id.value, loopRound: 0 },
     })
   }
-  const ok = sendFill({ prompt: buildInitialPrompt(g) })
+  const ok = sendFillTo(inst.sessionId, { prompt: buildInitialPrompt(g) })
   if (!ok) {
     await finish(inst, 'window-lost', 'AI 窗口已关闭或跨域发送失败')
     return
@@ -421,15 +433,11 @@ function disarmTimer(inst: LoopInstance) {
 // ============================================================================
 
 /** 脚本到达（inbox 已去重）。仅在循环活动时由 App.vue 调用。 */
-export async function onScriptArrival(item: InboxItem): Promise<void> {
-  const inst = activeLoop.value
-  if (!inst || !isLoopActive.value || inst.state.value !== 'waiting') return
+export async function onScriptArrival(item: InboxItem, sid?: string): Promise<void> {
+  const inst = resolveInst(sid)
+  if (!inst || !isInstActive(inst) || inst.state.value !== 'waiting') return
   disarmTimer(inst)
-
-  // 熔断前置：用户急停
   if (inst.stopRequest.value !== 'none') { await handleStopAfterRound(inst); return }
-
-  // 熔断：重复脚本（第 7 条 必须推进）—— 与格式错误共享宽容预算
   if (item.hash === inst.lastHash.value) {
     await toleranceFail(inst, '连续两轮脚本完全相同（hash 未变），未见推进')
     return
@@ -440,9 +448,9 @@ export async function onScriptArrival(item: InboxItem): Promise<void> {
 }
 
 /** 非脚本回复：done / plain / multi */
-export async function onNonScriptReply(reply: AiReply): Promise<void> {
-  const inst = activeLoop.value
-  if (!inst || !isLoopActive.value || inst.state.value !== 'waiting') return
+export async function onNonScriptReply(reply: AiReply, sid?: string): Promise<void> {
+  const inst = resolveInst(sid)
+  if (!inst || !isInstActive(inst) || inst.state.value !== 'waiting') return
   disarmTimer(inst)
   if (inst.stopRequest.value !== 'none') { await handleStopAfterRound(inst); return }
 
@@ -471,7 +479,7 @@ export async function onNonScriptReply(reply: AiReply): Promise<void> {
       summary: `⚠ 回复含 ${count || '多个'} 个代码块，要求重发（不消耗宽容预算）`,
       payload: { loopId: inst.id.value, loopRound: inst.round.value, count },
     })
-    const okSent = sendFill({ prompt: buildRetryPrompt(`回复含 ${count || '多个'} 个代码块（契约要求仅一个）`) })
+    const okSent = sendFillTo(inst.sessionId, { prompt: buildRetryPrompt(`回复含 ${count || '多个'} 个代码块（契约要求仅一个）`) })
     if (!okSent) {
       await finish(inst, 'window-lost', 'multi 重试时 AI 窗口已关闭或发送失败')
       return
@@ -493,7 +501,7 @@ async function toleranceFail(inst: LoopInstance, detail: string): Promise<void> 
   const decision = decideTolerance(inst.toleranceLeft.value)
   if (decision.action === 'retry') {
     inst.toleranceLeft.value = decision.remaining
-    const okSent = sendFill({ prompt: buildRetryPrompt(detail) })
+    const okSent = sendFillTo(inst.sessionId, { prompt: buildRetryPrompt(detail) })
     if (!okSent) {
       await finish(inst, 'window-lost', '重试时 AI 窗口已关闭或发送失败')
       return
@@ -678,7 +686,7 @@ function budgetLimited(inst: LoopInstance, o: RoundOutcome, tokenDelta: number):
   inst.stopReason.value = `循环内 token 增量约 ${(tokenDelta / 1000).toFixed(1)}k，达到 ${(LOOP_TOKEN_HARD_LIMIT / 1000).toFixed(1)}k 熔断线`
   inst.state.value = 'budget-limited'
   persist(inst)
-  sendStop()
+  sendStopTo(inst.sessionId)
   unbindKeyboard()
   addTrace({
     kind: 'loop',
@@ -701,7 +709,7 @@ export async function resumeLoop(): Promise<void> {
   // 避免被误判为「连续两轮重复」而熔断
   inst.lastHash.value = ''
   const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta: 0 })
-  const okSent = sendFill({ prompt: feedback })
+  const okSent = sendFillTo(inst.sessionId, { prompt: feedback })
   if (!okSent) { await finish(inst, 'window-lost', '续跑时窗口发送失败'); return }
   bindKeyboard()
   inst.round.value += 1
@@ -793,7 +801,7 @@ async function afterRound(inst: LoopInstance, o: RoundOutcome): Promise<void> {
     })
   }
   const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta })
-  const ok = sendFill({ prompt: feedback })
+  const ok = sendFillTo(inst.sessionId, { prompt: feedback })
   if (!ok) { await finish(inst, 'window-lost', '回填结果时 AI 窗口已关闭'); return }
 
   inst.round.value += 1
@@ -877,7 +885,7 @@ async function finish(inst: LoopInstance, reason: string, detail?: string): Prom
   inst.stopReason.value = detail || reason
 
   inst.state.value = interrupted ? 'interrupted' : 'stopped'
-  sendStop()
+  sendStopTo(inst.sessionId)
   unbindKeyboard()
   if (inst.id.value) loopRegistry.unregister(inst.id.value)
   persist(inst)
@@ -1051,7 +1059,7 @@ export async function startHandoff(): Promise<void> {
   inst.state.value = 'handoff'
   persist(inst)
   addTrace({ kind: 'loop', summary: '🔄 开始轮转 · 请求 AI 总结当前会话', payload: { loopId: inst.id.value, loopRound: inst.round.value } })
-  const okSent = sendRotate({ instruction: SUMMARY_INSTRUCTION })
+  const okSent = sendRotateTo(inst.sessionId, { instruction: SUMMARY_INSTRUCTION })
   if (!okSent) { handoffFail(inst, '发送 rotate 失败（窗口已关？）'); return }
   handoffArm(inst, '总结请求超时（30s）')
 }
@@ -1067,7 +1075,7 @@ export async function onSummary(text: string, sessionId: string, degraded: boole
     summary: wasDegraded ? '⚠ 摘要降级为本地拼' : `✓ 已收到 AI 总结（${t.length} 字）`,
     payload: { loopId: inst.id.value, loopRound: inst.round.value, summary: finalSummary.slice(0, 2000) },
   })
-  const okSent = sendNewSession({ summary: finalSummary })
+  const okSent = sendNewSessionTo(inst.sessionId, { summary: finalSummary })
   if (!okSent) { handoffFail(inst, '发送 new-session 失败'); return }
   handoffArm(inst, '新会话创建超时（30s）')
 }
@@ -1112,7 +1120,7 @@ function handoffFail(inst: LoopInstance, reason: string) {
   inst.stopReason.value = reason
   inst.state.value = 'stopped'
   persist(inst)
-  sendStop()
+  sendStopTo(inst.sessionId)
   unbindKeyboard()
   if (inst.id.value) loopRegistry.unregister(inst.id.value)
   addTrace({ kind: 'loop', summary: `✗ 轮转失败 · ${reason}`, payload: { loopId: inst.id.value, loopRound: inst.round.value } })
