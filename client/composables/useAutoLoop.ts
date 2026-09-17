@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import { useRunner } from './useRunner'
 import { getActiveWin, sendFill, sendStop, sendRotate, sendNewSession } from './useDeepseekUrl'
 import { toast } from './useToast'
@@ -81,6 +81,96 @@ const roundTimeoutMs = ref(LOOP_ROUND_TIMEOUT_MS)
 /** 当前循环绑定的 AI 会话 ID（多窗口隔离用；startLoop 时从 App.vue 取） */
 const loopSessionId = ref('')
 
+// ============================================================================
+// 多循环并发改造 · 步骤 1：LoopInstance 类型 + Map 存储 + activeLoop 代理
+// 当前阶段：定义类型基础设施 + computed 代理；内部函数仍操作模块级单例 refs
+// （步骤 2 将把内部函数改造为接受 inst 参数，步骤 3 起真正多实例并发）
+// ============================================================================
+
+// RoundOutcome 原位于 afterRound 区（L526），提前到模块级供 LoopInstance 引用
+interface RoundOutcome {
+  lang: 'js' | 'cjs' | 'bash', desc: string, exit: number, ok: boolean
+  stdout: string, stderr: string, changeCount: number, changedFiles: string[]
+}
+/** 待回填的轮次结果（budget-limited 暂停后 resume 用） */
+const pendingRound = ref<RoundOutcome | null>(null)
+
+/**
+ * 单个循环实例的完整状态。
+ * 步骤 2 将把所有模块级 ref 迁移到 createLoopInstance(sid) 工厂内，
+ * 每个会话拥有独立实例；步骤 1 先定义类型形状 + 单例视图。
+ */
+export interface LoopInstance {
+  state: Ref<LoopState>
+  id: Ref<string>
+  round: Ref<number>
+  goal: Ref<string>
+  startCommit: Ref<string>
+  startTokens: Ref<number>
+  latestTokens: Ref<number>
+  toleranceLeft: Ref<number>
+  stopRequest: Ref<StopRequest>
+  stopReason: Ref<string>
+  lastHash: Ref<string>
+  lastExec: Ref<{ lang: string, exit: number, changes: number, durationMs: number } | null>
+  waitingStartedAt: Ref<number>
+  waitingElapsed: Ref<number>
+  roundTimeoutMs: Ref<number>
+  /** 绑定后不可变：循环所属的 AI 会话 id */
+  sessionId: string
+  pendingRound: Ref<RoundOutcome | null>
+  /** 定时器句柄（非响应式，步骤 2 迁移到实例内） */
+  roundTimer: ReturnType<typeof setTimeout> | null
+  waitingTicker: ReturnType<typeof setInterval> | null
+  handoffTimer: ReturnType<typeof setTimeout> | null
+}
+
+/** 多循环实例存储（步骤 2 起按 sid 索引；步骤 1 先建表） */
+const loopInstances = new Map<string, LoopInstance>()
+
+/** 当前激活会话 id（由 App.vue 通过 setActiveSessionIdGetter 更新） */
+const activeLoopSid = ref('')
+
+/**
+ * 步骤 1 单例视图：把现有模块级 ref 包装成 LoopInstance 形状的静态对象。
+ * 步骤 2 将改为 createLoopInstance(sid) 创建真实独立实例塞入 Map。
+ */
+const singletonView: LoopInstance = {
+  state: loopState,
+  id: loopId,
+  round: loopRound,
+  goal: loopGoal,
+  startCommit: loopStartCommit,
+  startTokens: loopStartTokens,
+  latestTokens: latestTokens,
+  toleranceLeft: toleranceLeft,
+  stopRequest: stopRequest,
+  stopReason: stopReason,
+  lastHash: lastHash,
+  lastExec: lastExec,
+  waitingStartedAt: waitingStartedAt,
+  waitingElapsed: waitingElapsed,
+  roundTimeoutMs: roundTimeoutMs,
+  sessionId: '',
+  pendingRound: pendingRound,
+  roundTimer: null,
+  waitingTicker: null,
+  handoffTimer: null,
+}
+
+/**
+ * 当前激活循环实例（computed 代理）。
+ * - 步骤 1：activeLoopSid 为空时 fallback 到 singletonView（现有单例）
+ * - 步骤 2：从 loopInstances.get(activeLoopSid.value) 取真实独立实例
+ */
+const activeLoop = computed<LoopInstance | null>(() => {
+  if (activeLoopSid.value) {
+    const fromMap = loopInstances.get(activeLoopSid.value)
+    if (fromMap) return fromMap
+  }
+  return singletonView
+})
+
 // 由 App.vue 注入的 activeSessionId 读取器：循环启动时把当前活动会话 id 绑定到 loopSessionId
 let getActiveSessionId: () => string = () => ''
 
@@ -91,9 +181,10 @@ let originalTitle = ''
 
 const { addTrace } = useTraceLog()
 
-export const isLoopActive = computed(() =>
-  loopState.value !== 'idle' && loopState.value !== 'stopped' && loopState.value !== 'interrupted',
-)
+export const isLoopActive = computed(() => {
+  const s = activeLoop.value?.state.value
+  return s !== undefined && s !== 'idle' && s !== 'stopped' && s !== 'interrupted'
+})
 
 // ============================================================================
 // 持久化（v6 §11.4）：刷新后不自动续跑（activeWin 引用已失效）→ 恢复为 stopped
@@ -426,6 +517,7 @@ async function executeItem(item: InboxItem): Promise<void> {
       payload: {
         loopId: loopId.value, loopRound: loopRound.value,
         desc: item.desc, why: item.why, lang: item.lang, hash: item.hash,
+        script: item.code.slice(0, 4000),
         exit: r.code, ok: r.ok,
         changes: runner.changes.value.map(c => ({ path: c.path, type: c.type })),
       },
@@ -460,6 +552,7 @@ async function executeItem(item: InboxItem): Promise<void> {
     payload: {
       loopId: loopId.value, loopRound: loopRound.value,
       desc: item.desc, why: item.why, lang: 'bash', hash: item.hash,
+      script: item.code.slice(0, 4000),
       exit: exec.code, ok: exec.code === 0,
     },
   })
@@ -523,13 +616,6 @@ async function runBash(cmd: string): Promise<BashExecResult> {
 // ============================================================================
 // 轮后：反馈 → 熔断检查 → 下一轮
 // ============================================================================
-interface RoundOutcome {
-  lang: 'js' | 'cjs' | 'bash', desc: string, exit: number, ok: boolean
-  stdout: string, stderr: string, changeCount: number, changedFiles: string[]
-}
-
-
-const pendingRound = ref<RoundOutcome | null>(null)
 function budgetLimited(o: RoundOutcome, tokenDelta: number): void {
   disarmTimer()
   pendingRound.value = o
@@ -844,8 +930,9 @@ function unbindKeyboard() {
 
 /** 当前循环上下文（ScriptPanel 记 run trace 时盖 loopId/loopRound 用） */
 export function currentLoopContext(): { loopId?: string, loopRound?: number } {
-  if (!isLoopActive.value) return {}
-  return { loopId: loopId.value, loopRound: loopRound.value }
+  const inst = activeLoop.value
+  if (!inst || !isLoopActive.value) return {}
+  return { loopId: inst.id.value, loopRound: inst.round.value }
 }
 
 /**
