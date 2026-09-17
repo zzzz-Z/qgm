@@ -390,7 +390,7 @@ import { fnv1a8 } from '../utils/hash'
 import { useToast } from '../composables/useToast'
 import { useTraceLog } from '../composables/useTraceLog'
 import { useSessionManager } from '../composables/useSessionManager'
-import type { Change } from '../types'
+import type { Change, RunResponse } from '../types'
 import { basicSetup } from 'codemirror'
 import { EditorView, keymap, placeholder, Decoration, ViewPlugin } from '@codemirror/view'
 import { EditorState, Prec, Compartment, RangeSetBuilder } from '@codemirror/state'
@@ -574,6 +574,14 @@ function shouldIncludeChanges(
   }
   return true
 }
+function isReadonlyResult(r: RunResponse | null): boolean {
+  if (!r || !r.ok) return false
+  if (r.runId === '') return false
+  if ((r.changes || []).length > 0) return false
+  if (isLoopActive.value) return false
+  return true
+}
+
 async function buildAiPrompt() {
   if (!result.value) return ''
   const errorLocs = parseErrorLocations(`${result.value.stderr || ''}\n${result.value.stdout || ''}`)
@@ -702,7 +710,12 @@ async function buildAiPrompt() {
       p.push('# 脚本声明的改动 vs 实际改动')
       p.push(`声明：${cm.claimed.join(', ') || '（无）'}`)
       p.push(`实际：${cm.actual.join(', ') || '（无）'}`)
-      if (cm.missing.length) p.push(`⚠ 声明但未改动：${cm.missing.join(', ')}`)
+      const instruction = !result.value.ok
+        ? '结合上方源码和错误信息诊断根因，给出最小修复方案，生成脚本。不要回退无关代码。'
+        : isReadonlyResult(result.value)
+          ? '这是只读诊断脚本的输出。基于上方 stdout 分析现状，给出下一步建议或修改脚本。'
+          : '确认改动。'
+      p.push('# 指令', instruction)
       if (cm.extra.length) p.push(`⚠ 未声明但改动：${cm.extra.join(', ')}`)
       if (!cm.actual.length) p.push('⚠ 脚本未产生任何文件改动')
       p.push('')
@@ -1293,15 +1306,17 @@ watch(running, (v) => {
     } else {
       statusText.value = result.value.ok ? '✅ 成功' : '❌ 失败'
       statusClass.value = result.value.ok ? 'ok' : 'err'
-      // autoAskOnFailure: 失败时延迟 3s 再自动复制并发给 AI（主动停止除外）
-      const FAIL_ASK_DELAY_MS = 3000
-      const preflightFailed =
+      // autoAskOnResult: 失败或只读诊断（成功无改动、非循环）时延迟 3s 自动复制并发给 AI（主动停止除外）
+      const isReadonlyProbe = isReadonlyResult(result.value)
+      const AUTO_ASK_DELAY_MS = 3000
+      const shouldAutoAsk =
         !result.value.ok ||
+        isReadonlyProbe ||
         result.value.tsc?.ok === false ||
         result.value.lint?.ok === false ||
         result.value.test?.ok === false
-      if (preflightFailed && result.value.error !== '已取消') {
-        setTimeout(() => { void copyOutput() }, FAIL_ASK_DELAY_MS)
+      if (shouldAutoAsk && result.value.error !== '已取消') {
+        setTimeout(() => { void copyOutput() }, AUTO_ASK_DELAY_MS)
       }
       // 清空编辑器（成功 / 失败均清空）
       const scriptSnapshot = script.value
