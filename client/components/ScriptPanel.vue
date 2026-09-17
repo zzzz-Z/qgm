@@ -1771,6 +1771,7 @@ function onHtmlDrop(e: DragEvent) {
   min-height: 200px;
   background: #1e1e1e;
   border-color: #2a2a2a;
+  margin-bottom: 8px;
 }
 .terminal .term-bar {
   background: #252526;
