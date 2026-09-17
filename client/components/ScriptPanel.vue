@@ -258,6 +258,33 @@
           </button>
         </div>
         <div class="editor-body">
+          <!-- @FILE_PICKER_V1 -->
+          <div v-if="pickerOpen" ref="pickerRef" class="file-picker" :style="pickerStyle">
+            <input
+              ref="pickerInputRef"
+              v-model="pickerQuery"
+              class="fp-input"
+              placeholder="搜索文件，Enter 选择，Esc 取消"
+              @keydown.down.prevent="pickerMove(1)"
+              @keydown.up.prevent="pickerMove(-1)"
+              @keydown.enter.prevent="pickerConfirm"
+              @keydown.esc.prevent="pickerClose"
+            />
+            <div class="fp-list">
+              <div
+                v-for="(f, i) in pickerFiltered"
+                :key="f"
+                class="fp-item"
+                :class="{ active: i === pickerIndex }"
+                @mousedown.prevent="pickerPick(f)"
+              >
+                {{ f }}
+              </div>
+              <div v-if="!pickerFiltered.length" class="fp-empty">
+                无匹配文件
+              </div>
+            </div>
+          </div>
           <div
             ref="cmHost"
             class="cm-host"
@@ -369,7 +396,7 @@ v-if="changes.length"
 <script setup lang="ts">
 defineOptions({ name: 'ScriptPanel' })
 const emit = defineEmits<{ 'open-ask': [] }>()
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRunner } from '../composables/useRunner'
 import { useScriptInbox } from '../composables/useScriptInbox'
 import { currentLoopContext, useAutoLoop } from '../composables/useAutoLoop'
@@ -384,8 +411,8 @@ import { useTraceLog } from '../composables/useTraceLog'
 import { useSessionManager } from '../composables/useSessionManager'
 import type { Change } from '../types'
 import { basicSetup } from 'codemirror'
-import { EditorView, keymap, placeholder } from '@codemirror/view'
-import { EditorState, Prec, Compartment } from '@codemirror/state'
+import { EditorView, keymap, placeholder, Decoration, ViewPlugin } from '@codemirror/view'
+import { EditorState, Prec, Compartment, RangeSetBuilder } from '@codemirror/state'
 import { javascript as cmJavascript } from '@codemirror/lang-javascript'
 import { oneDark } from '@codemirror/theme-one-dark'
 import * as hljsNs from 'highlight.js/lib/core'
@@ -1045,6 +1072,127 @@ async function saveDraft() {
 const cmHost = ref<HTMLDivElement | null>(null)
 let cmView: EditorView | null = null
 const editableComp = new Compartment()
+
+/* @FILE_PICKER_V1 */
+const pickerOpen = ref(false)
+const pickerQuery = ref('')
+const pickerIndex = ref(0)
+const pickerPos = ref(0)
+const pickerAnchor = ref(0)
+const pickerX = ref(0)
+const pickerY = ref(0)
+const pickerRef = ref<HTMLDivElement | null>(null)
+const pickerInputRef = ref<HTMLInputElement | null>(null)
+const pickerFiles = ref<string[]>([])
+const pickerStyle = computed(() => ({ left: pickerX.value + 'px', top: pickerY.value + 'px' }))
+
+async function pickerLoadFiles() {
+  if (pickerFiles.value.length) return
+  try {
+    const res = await fetch('/__ai/files?depth=6')
+    const data = await res.json()
+    const flat: string[] = []
+    const walk = (nodes: any[]) => {
+      for (const n of nodes || []) {
+        if (n.type === 'file') flat.push(n.path)
+        else if (n.children) walk(n.children)
+      }
+    }
+    walk(data.tree || [])
+    pickerFiles.value = flat
+  } catch { pickerFiles.value = [] }
+}
+
+const pickerFiltered = computed(() => {
+  const q = pickerQuery.value.toLowerCase()
+  const all = pickerFiles.value
+  if (!q) return all.slice(0, 200)
+  return all.filter(p => p.toLowerCase().includes(q)).slice(0, 200)
+})
+
+function pickerOpenAt(atPos: number) {
+  pickerOpen.value = true
+  pickerQuery.value = ''
+  pickerIndex.value = 0
+  pickerPos.value = atPos
+  pickerAnchor.value = atPos + 1
+  if (cmView) {
+    const coords = cmView.coordsAtPos(atPos)
+    if (coords) {
+      pickerX.value = coords.left
+      pickerY.value = coords.bottom + 4
+    }
+  }
+  void pickerLoadFiles()
+  nextTick(() => pickerInputRef.value?.focus())
+}
+
+function pickerClose() {
+  pickerOpen.value = false
+  pickerQuery.value = ''
+  pickerIndex.value = 0
+}
+
+function pickerMove(d: number) {
+  const n = pickerFiltered.value.length
+  if (!n) return
+  pickerIndex.value = (pickerIndex.value + d + n) % n
+}
+
+function pickerConfirm() {
+  const f = pickerFiltered.value[pickerIndex.value]
+  if (f) pickerPick(f)
+}
+
+function pickerPick(filePath: string) {
+  if (!cmView) return
+  pickerOpen.value = false
+  const insertText = '@' + filePath + ' '
+  const from = pickerPos.value
+  const to = cmView.state.selection.main.head
+  cmView.dispatch({ changes: { from, to, insert: insertText }, selection: { anchor: from + insertText.length } })
+  pickerQuery.value = ''
+  pickerIndex.value = 0
+  cmView.focus()
+}
+
+function onEditorUpdate(u: any) {
+  if (!u.docChanged) return
+  const pos = u.state.selection.main.head
+  if (pos < 1) return
+  const ch = u.state.sliceDoc(pos - 1, pos)
+  if (ch === '@') {
+    pickerOpenAt(pos - 1)
+    return
+  }
+  if (pickerOpen.value) {
+    if (pos <= pickerPos.value) { pickerClose(); return }
+    const q = u.state.sliceDoc(pickerAnchor.value, pos)
+    if (/^[\w./\-]*$/.test(q)) pickerQuery.value = q
+    else pickerClose()
+  }
+}
+
+const fileTagPlugin = ViewPlugin.fromClass(class {
+  decorations: any
+  constructor(view: any) { this.decorations = this.build(view) }
+  update(u: any) { if (u.docChanged) this.decorations = this.build(u.view) }
+  build(view: any) {
+    const builder = new RangeSetBuilder<any>()
+    const text = view.state.doc.toString()
+    const re = /@[\w./\-]+/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(text)) !== null) {
+      const from = m.index
+      const to = m.index + m[0].length
+      const after = text[to]
+      if (after === undefined || after === ' ' || after === '\n' || after === '\t') {
+        builder.add(from, to, Decoration.mark({ class: 'cm-file-tag' }))
+      }
+    }
+    return builder.finish()
+  }
+}, { decorations: (v: any) => v.decorations })
 function createEditor() {
   if (!cmHost.value || cmView) return
   const state = EditorState.create({
@@ -1081,8 +1229,12 @@ function createEditor() {
         } },
       ])),
       EditorView.updateListener.of((u) => {
-        if (u.docChanged) script.value = u.state.doc.toString()
+        if (u.docChanged) {
+          script.value = u.state.doc.toString()
+          onEditorUpdate(u)
+        }
       }),
+      fileTagPlugin,
     ],
   })
   cmView = new EditorView({ state, parent: cmHost.value })
@@ -1341,6 +1493,61 @@ function onHtmlDrop(e: DragEvent) {
 .pane-side :deep(.diff-viewer) {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* @FILE_PICKER_V1 */
+.file-picker {
+  position: fixed;
+  z-index: 9999;
+  min-width: 260px;
+  max-width: 440px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(15 30 60 / 15%);
+}
+.fp-input {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 8px 10px;
+  font: 12px var(--mono);
+  outline: none;
+  background: transparent;
+  color: var(--text);
+}
+.fp-list {
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.fp-item {
+  padding: 5px 10px;
+  font: 11px/1.4 var(--mono);
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fp-item.active {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+.fp-empty {
+  padding: 10px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 11px;
+}
+:deep(.cm-file-tag) {
+  background: var(--primary-bg);
+  color: var(--primary);
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: 0 1px;
 }
 
 /* ============ Card ============ */
