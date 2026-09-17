@@ -1714,23 +1714,26 @@ const { addTrace } = useTraceLog()
   position: fixed;
   inset: 0;
   z-index: 2147483645;
-  background: rgb(15 30 60 / 42%);
-  backdrop-filter: blur(3px);
+  background: rgb(15 30 60 / 38%);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 20px;
 }
 .ask-modal-card {
-  width: min(1280px, 96vw);
-  height: min(900px, 92vh);
+  width: min(1100px, 94vw);
+  height: min(720px, 88vh);
   background: var(--surface);
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgb(15 30 60 / 28%);
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  box-shadow:
+    0 24px 64px rgb(15 30 60 / 22%),
+    0 2px 6px rgb(15 30 60 / 8%);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: ask-modal-in 0.18s ease-out;
+  animation: ask-modal-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .ask-modal-head {
   display: flex;
@@ -1738,13 +1741,25 @@ const { addTrace } = useTraceLog()
   justify-content: space-between;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+  background: linear-gradient(180deg, var(--surface), var(--surface-2));
   flex-shrink: 0;
 }
 .ask-modal-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text);
+  letter-spacing: 0.3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ask-modal-title::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-bg);
 }
 .ask-modal-close {
   width: 26px;
@@ -1759,7 +1774,7 @@ const { addTrace } = useTraceLog()
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
-  transition: 0.12s;
+  transition: color 0.12s, background 0.12s;
 }
 .ask-modal-close:hover {
   color: var(--danger);
@@ -1770,9 +1785,9 @@ const { addTrace } = useTraceLog()
   min-height: 0;
   display: flex;
   overflow: hidden;
-  padding: 12px;
+  padding: 10px 12px 12px;
   background: var(--bg);
-  gap: 12px;
+  gap: 10px;
 }
 .ask-modal-body > * {
   flex: 1;
