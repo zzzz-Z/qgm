@@ -4,6 +4,7 @@ import { getActiveWin, sendFill, sendStop, sendRotate, sendNewSession } from './
 import { toast } from './useToast'
 import { useTraceLog } from './useTraceLog'
 import { readNdjson } from '../utils/stream'
+import * as loopRegistry from './loopRegistry'
 import type { InboxItem } from './useScriptInbox'
 import {
   LOOP_MAX_ROUNDS,
@@ -302,6 +303,7 @@ async function initLoop(
     head = d.head || ''
   } catch { }
   inst.id.value = `${prefix}_${Date.now().toString(36)}`
+  loopRegistry.register(inst.id.value, prefix === 'take' ? 'takeover' : 'loop')
   inst.goal.value = goal
   inst.round.value = 1
   inst.startCommit.value = head
@@ -859,6 +861,7 @@ async function finish(inst: LoopInstance, reason: string, detail?: string): Prom
   inst.state.value = interrupted ? 'interrupted' : 'stopped'
   sendStop()
   unbindKeyboard()
+  if (inst.id.value) loopRegistry.unregister(inst.id.value)
   persist(inst)
 
   addTrace({
@@ -1093,6 +1096,7 @@ function handoffFail(inst: LoopInstance, reason: string) {
   persist(inst)
   sendStop()
   unbindKeyboard()
+  if (inst.id.value) loopRegistry.unregister(inst.id.value)
   addTrace({ kind: 'loop', summary: `✗ 轮转失败 · ${reason}`, payload: { loopId: inst.id.value, loopRound: inst.round.value } })
   toast(`✗ 轮转失败：${reason}`, 'error', 6000)
 }
