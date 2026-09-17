@@ -19,7 +19,7 @@ export const MODELS: ModelOption[] = [
 ]
 
 const DEFAULT_MODEL_ID = 'deepseek'
-const DEFAULT_URL = 'https://chat.deepseek.com/'
+export const DEFAULT_URL = 'https://chat.deepseek.com/'
 const STORAGE_KEY_URL = '__ai_deepseek_url'
 const STORAGE_KEY_MODEL = '__ai_model_id'
 const STORAGE_KEY_SESSION = '__ai_web_session_id'
@@ -96,10 +96,101 @@ export function readDeepseekUrl(): string {
   return url.value
 }
 
-export function openDeepseek(): void {
-  window.open(url.value, 'ai-runner-deepseek')
+// ============================================================================
+// 活动窗口引用管理 —— postMessage 的目标 window 必须精确，否则跨域无法操作 DOM
+// 新窗口覆盖旧引用（简化：只跟最新一个），与油猴侧 window.opener 一一对应
+// ============================================================================
+let activeWin: Window | null = null
+
+export function getActiveWin(): Window | null {
+  return activeWin
 }
 
+export function setActiveWin(win: Window | null): void {
+  activeWin = win
+}
+
+/** 计算 postMessage 的目标 origin：从当前 url.value 提取 protocol://host */
+function targetOrigin(): string {
+  try {
+    const u = new URL(url.value)
+    return `${u.protocol}//${u.host}`
+  } catch {
+    // 退化：origin 未知则不发，避免用 '*'（违反 v6 §3.4 安全约束）
+    return ''
+  }
+}
+
+/**
+ * 打开 AI 站点窗口并保存引用，便于后续 postMessage。
+ * 不在这里发 fill —— fill 由循环/手动调用方决定 prompt 后再调 sendFill。
+ * @param atUrl 可选；不传则用当前 url.value
+ */
+export function openDeepseek(atUrl?: string): Window | null {
+  const target = atUrl ?? url.value
+  const win = window.open(target, 'ai-runner-deepseek')
+  if (win) activeWin = win
+  return win
+}
+
+export interface FillPayload {
+  prompt: string
+  /** 可选：附加上下文/契约摘要，由调用方组装 */
+  context?: string
+}
+
+/**
+ * 向 AI 站点窗口发送 fill 消息。油猴侧接收后填入输入框并触发发送。
+ * - origin 精确到 protocol://host，不用 '*'
+ * - 窗口未打开或已关闭 → 返回 false，调用方 toast 提示
+ */
+export function sendFill(payload: FillPayload): boolean {
+  const win = activeWin
+  if (!win || win.closed) {
+    activeWin = null
+    return false
+  }
+  const origin = targetOrigin()
+  if (!origin) return false
+  try {
+    win.postMessage({ type: 'ai-runner:fill', ...payload }, origin)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 通知油猴停止（清 lastScript / Observer / 监听） */
+export function sendStop(): boolean {
+  const win = activeWin
+  if (!win || win.closed) {
+    activeWin = null
+    return false
+  }
+  const origin = targetOrigin()
+  if (!origin) return false
+  try {
+    win.postMessage({ type: 'ai-runner:stop' }, origin)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export type FillResult = 'sent' | 'opened' | 'failed'
+
+export async function copyAndFill(prompt: string): Promise<FillResult> {
+  if (!prompt) return 'failed'
+  try { await navigator.clipboard.writeText(prompt) } catch { }
+  const win = getActiveWin()
+  if (win && !win.closed) {
+    return sendFill({ prompt }) ? 'sent' : 'failed'
+  }
+  const w = openDeepseek()
+  if (!w) return 'failed'
+  await new Promise((resolve) => setTimeout(resolve, 1500))
+  return sendFill({ prompt }) ? 'opened' : 'failed'
+}
 export function useDeepseekUrl() {
   return {
     modelId,

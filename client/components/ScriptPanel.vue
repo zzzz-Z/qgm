@@ -8,6 +8,40 @@
       @dragover="onHtmlDragOver"
       @drop="onHtmlDrop"
     >
+      <!-- 自动化循环控制条（P2） -->
+      <section class="loop-bar card" :class="`is-${loopState}`">
+        <template v-if="!isLoopActive && loopState === 'idle'">
+          <input
+            v-model="loopGoalInput"
+            class="loop-goal-input"
+            type="text"
+            placeholder="循环目标，如：让 pnpm test 全绿 / 给所有 .vue 补 name（需先打开 AI 会话窗口）"
+            @keydown.enter="onStartLoop"
+          >
+          <button class="loop-btn primary" @click="onStartLoop">⟳ 开始循环</button>
+        </template>
+        <template v-else-if="isLoopActive">
+          <span class="loop-status">
+            <span class="loop-spin">⟳</span>
+            第 {{ loopRound }}/{{ maxRounds }} 轮 · {{ loopState }}
+            · tok {{ (tokenDelta / 1000).toFixed(1) }}k/{{ tokenBudget / 1000 }}k
+            · 宽容 {{ toleranceLeft }}
+          </span>
+          <span class="loop-goal-text" :title="loopGoal">{{ loopGoal.slice(0, 40) }}</span>
+          <div class="loop-actions">
+            <button v-tooltip="'立即终止当前执行（不等本轮完成）'" class="loop-btn kill" @click="killCurrent">■ 停当前</button>
+            <button v-tooltip="'Esc：当前轮跑完即停，不再发下一轮'" class="loop-btn" disabled>⏸ 暂停(Esc)</button>
+            <button v-tooltip="'Ctrl+Esc：急停并 git reset 到循环起点'" class="loop-btn rollback" @click="stopAndRollback">⏹ 停止并回滚</button>
+          </div>
+        </template>
+        <template v-else>
+          <span class="loop-end-status">
+            {{ loopState === 'interrupted' ? '⏹ 已中断' : '■ 已停止' }} · 第 {{ loopRound }}/{{ maxRounds }} 轮
+            <em v-if="stopReason">（{{ stopReason }}）</em>
+          </span>
+          <button class="loop-btn" @click="loopState = 'idle'">收起</button>
+        </template>
+      </section>
       <!-- 编辑器 (上方) -->
       <section class="editor card" :class="{ 'is-running': running }">
         <header class="bar editor-bar">
@@ -173,7 +207,7 @@
           <span v-else-if="lastDuration" class="meta">{{ lastDuration }}</span>
           <div class="bar-actions">
             <button
-              v-tooltip="copied ? '已复制并打开会话' : `把本次运行的完整上下文（脚本 / 输出 / 变更 / 错误源码）拼成 prompt 复制并打开 ${modelLabel}`"
+              v-tooltip="copied ? '已发送' : `把本次运行的完整上下文（脚本 / 输出 / 变更 / 错误源码）拼成 prompt 复制并发给 AI`"
               class="term-btn copy"
               :class="{ done: copied }"
               :disabled="!hasAnyOutput && !changes.length"
@@ -186,7 +220,7 @@
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
               </svg>
-              <span>{{ copied ? '已复制并打开' : `复制并跳转 ${modelLabel}` }}</span>
+              <span>{{ copied ? '已发送' : `复制并提问` }}</span>
             </button>
             <button
               v-tooltip="asking ? '正在请求 API' : '直接调用 API 询问（不打开网页）'"
@@ -341,10 +375,11 @@ defineOptions({ name: 'ScriptPanel' })
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRunner } from '../composables/useRunner'
 import { useScriptInbox } from '../composables/useScriptInbox'
+import { currentLoopContext, useAutoLoop } from '../composables/useAutoLoop'
 import FileList from './FileList.vue'
 import DiffViewer from './DiffViewer.vue'
 import LintBlock from './LintBlock.vue'
-import { modelLabel, openDeepseek } from '../composables/useDeepseekUrl'
+import { copyAndFill } from '../composables/useDeepseekUrl'
 import { useCodeCleaner } from '../composables/useCodeCleaner'
 import { buildErrorContext, enforceBudget, parseErrorLocations } from '../utils/contextBuilder'
 import { useToast } from '../composables/useToast'
@@ -376,6 +411,19 @@ function takeLatestFromInbox() {
   if (!item) return
   script.value = item.code
   toast(`已取用 · ${item.lang} · ${item.desc || '无说明'}`, 'success', 3000)
+}
+
+// —— 自动化循环（P2 useAutoLoop）——
+const {
+  loopState, loopRound, loopGoal, stopReason, toleranceLeft,
+  tokenDelta, maxRounds, tokenBudget, isLoopActive,
+  startLoop, killCurrent, stopAndRollback,
+} = useAutoLoop()
+const loopGoalInput = ref('')
+async function onStartLoop() {
+  const g = loopGoalInput.value.trim()
+  if (!g) { toast('请填写循环目标', 'warn'); return }
+  await startLoop(g)
 }
 
 const mainRef = ref<HTMLElement | null>(null)
@@ -871,12 +919,10 @@ async function copyOutput() {
   try {
     const text = await buildAiPrompt()
     if (!text) return
-    await navigator.clipboard.writeText(text)
+    const r = await copyAndFill(text)
     copied.value = true
     setTimeout(() => { copied.value = false }, 2000)
-
-    // 用配置的 DeepSeek URL；短 prompt 尝试 ?q= 预填，长 prompt 降级为纯 URL。
-    openDeepseek()
+    if (r === 'failed') toast('发送失败，已复制到剪贴板', 'warn', 4000)
   } catch (e) { console.error(e) }
 }
 
@@ -1157,6 +1203,7 @@ watch(running, (v) => {
           why,
           lang,
           hash,
+          ...currentLoopContext(),
         },
       })
     }
@@ -2278,5 +2325,59 @@ function onHtmlDrop(e: DragEvent) {
     opacity: 1;
   }
 }
+
+/* —— P2 自动化循环控制条 —— */
+.loop-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.loop-bar.is-waiting, .loop-bar.is-running { border-left: 3px solid #409eff; }
+.loop-bar.is-executing, .loop-bar.is-parsing, .loop-bar.is-feedback { border-left: 3px solid #e6a23c; }
+.loop-bar.is-interrupted { border-left: 3px solid #f56c6c; }
+.loop-bar.is-stopped { border-left: 3px solid #909399; }
+.loop-goal-input {
+  flex: 1 1 320px;
+  min-width: 200px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color, #dcdfe6);
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--input-bg, #fff);
+  color: inherit;
+}
+.loop-status { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.loop-goal-text {
+  flex: 1 1 160px;
+  font-size: 12px;
+  opacity: .7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.loop-actions { display: flex; gap: 6px; }
+.loop-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border-color, #dcdfe6);
+  border-radius: 6px;
+  background: var(--btn-bg, #fff);
+  font-size: 12px;
+  cursor: pointer;
+  color: inherit;
+  white-space: nowrap;
+}
+.loop-btn:hover:not(:disabled) { border-color: #409eff; }
+.loop-btn:disabled { opacity: .5; cursor: default; }
+.loop-btn.primary { background: #409eff; border-color: #409eff; color: #fff; }
+.loop-btn.kill { border-color: #f56c6c; color: #f56c6c; }
+.loop-btn.rollback { border-color: #f56c6c; color: #f56c6c; }
+.loop-end-status { flex: 1; font-size: 12px; }
+.loop-end-status em { opacity: .65; font-style: normal; }
+.loop-spin { display: inline-block; animation: loop-spin 1.6s linear infinite; }
+@keyframes loop-spin { to { transform: rotate(360deg); } }
+.inbox-badge { color: #409eff; border-color: #409eff; }
 </style>
 <!-- tooltip-audit -->

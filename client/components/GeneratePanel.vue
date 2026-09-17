@@ -2,7 +2,7 @@
 defineOptions({ name: 'GeneratePanel' })
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FileTree from './FileTree.vue'
-import { openDeepseek } from '../composables/useDeepseekUrl'
+import { copyAndFill } from '../composables/useDeepseekUrl'
 import { useCodeCleaner } from '../composables/useCodeCleaner'
 import { buildFullContext, enforceBudget } from '../utils/contextBuilder'
 import { useToast } from '../composables/useToast'
@@ -599,11 +599,10 @@ async function copyPrompt() {
   const budget = enforceBudget(prompt.value)
   if (!budget.ok) {
     toast(`prompt 超出预算：${budget.size} / ${budget.budget} 字节`, 'error', 5000)
-    // return
   }
   try {
     const text = prompt.value
-    await navigator.clipboard.writeText(text)
+    const r = await copyAndFill(text)
     copied.value = true
     setTimeout(() => { copied.value = false }, 1500)
     {
@@ -618,11 +617,9 @@ async function copyPrompt() {
         },
       })
     }
-
-    // 用配置的 DeepSeek URL；短 prompt 尝试 ?q= 预填，长 prompt 降级为纯 URL。
     trackMessage('user', text)
-    openDeepseek()
-  } catch { /* ignore */ }
+    if (r === 'failed') toast('发送失败，已复制到剪贴板', 'warn', 4000)
+  } catch {  }
 }
 
 // ---------- 生命周期 ----------
@@ -704,7 +701,7 @@ onBeforeUnmount(() => {
               <span>清空</span>
             </button>
             <button
-              v-tooltip="copied ? '已复制，正在打开会话' : '把问题 + 规则 + 项目结构 + 相关文件拼成 prompt 复制并打开 DeepSeek'"
+              v-tooltip="copied ? '已发送' : '把问题 + 规则 + 项目结构 + 相关文件拼成 prompt 复制并发给 DeepSeek'"
               class="btn btn-primary btn-cta"
               :disabled="!canCopy"
               @click="copyPrompt"
@@ -716,7 +713,7 @@ onBeforeUnmount(() => {
               <svg v-else class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              <span>{{ copied ? '已复制' : '复制并打开' }}</span>
+              <span>{{ copied ? '已发送' : '复制并提问' }}</span>
             </button>
           </div>
         </div>
