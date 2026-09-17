@@ -257,6 +257,7 @@ async function runTsc(
   const cfg = {
     extends: `./${path.basename(baseConfig)}`,
     compilerOptions: {
+      lib: ['ES2022', 'DOM', 'DOM.Iterable'],
       skipLibCheck: true,
       noEmit: true,
       // [fix] 覆盖 rootDir：允许 client/*.vue 进入检查（原 rootDir=./src 会触发 TS6059）
