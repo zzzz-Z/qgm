@@ -84,6 +84,10 @@
               </svg>
               <span>问 AI</span>
             </button>
+            <span v-if="statusText" class="status head-status" :class="statusClass">
+              <span class="s-dot" />{{ statusText }}<template v-if="result"> · exit {{ result.code }}</template>
+            </span>
+            <span v-if="lastDuration" class="meta head-meta">{{ lastDuration }}</span>
           </div>
         </header>
 
@@ -198,15 +202,6 @@
               清空
             </button>
             <button
-              v-if="pendingCount > 0"
-              v-tooltip="`收件箱有 ${pendingCount} 条待取用脚本，点击覆盖当前编辑器`"
-              class="ghost-btn inbox-badge"
-              :disabled="running"
-              @click="takeLatestFromInbox"
-            >
-              📥 {{ pendingCount }}
-            </button>
-            <button
               v-if="!running"
               v-tooltip="script.trim().startsWith('#!') ? '运行脚本（Ctrl\/Cmd + ↵）' : script.trim().startsWith('!') ? '运行 shell 命令（以 ! 开头）' : '把编辑器内容作为问题发给 AI（Ctrl\/Cmd + ↵）'"
               class="primary-btn run head-run"
@@ -227,11 +222,6 @@
             <button v-else v-tooltip="'停止当前运行'" class="primary-btn stop head-run" @click="stop">
               <span class="ico">■</span><span>停止</span>
             </button>
-            <!-- status-moved -->
-            <span v-if="statusText" class="status head-status" :class="statusClass">
-              <span class="s-dot" />{{ statusText }}<template v-if="result"> · exit {{ result.code }}</template>
-            </span>
-            <span v-if="lastDuration" class="meta head-meta">{{ lastDuration }}</span>
           </div>
         </header>
 
@@ -387,7 +377,6 @@ defineOptions({ name: 'ScriptPanel' })
 const emit = defineEmits<{ 'open-ask': [] }>()
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRunner } from '../composables/useRunner'
-import { useScriptInbox } from '../composables/useScriptInbox'
 import { currentLoopContext, useAutoLoop } from '../composables/useAutoLoop'
 import FileList from './FileList.vue'
 import DiffViewer from './DiffViewer.vue'
@@ -418,16 +407,8 @@ hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('typescript', typescript)
 
 const { script, running, result, changes, rolling, busyAll, persistWarning, baselineRunId, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save } = useRunner()
-const { inbox, consume: consumeInbox } = useScriptInbox()
 /** 当前 inbox 待取用条数（仅展示用，避免在模板里直接 inbox.value.length 触发响应式开销） */
-const pendingCount = computed(() => inbox.value.length)
 /** 取最新一条入队脚本，覆盖当前编辑器内容 */
-function takeLatestFromInbox() {
-  const item = consumeInbox()
-  if (!item) return
-  script.value = item.code
-  toast(`已取用 · ${item.lang} · ${item.desc || '无说明'}`, 'success', 3000)
-}
 
 // —— 自动化循环（P2 useAutoLoop）——
 const {
@@ -1332,7 +1313,6 @@ watch(running, (v) => {
       const whyMatch = scriptSnapshot.match(/^\s*(?:\/\/|#)\s*@why\s*:\s*(.+)$/m)
       const why = r.scriptWhy || (whyMatch ? whyMatch[1].trim() : '')
       const lang: 'js' | 'bash' = /^\s*#\s*(@desc|@why)/m.test(scriptSnapshot) ? 'bash' : 'js'
-      // 计算 hash（与油猴 / useScriptInbox 一致：FNV-1a 8 hex）
       const hash = fnv1a8(scriptSnapshot)
       addTrace({
         kind: 'run',
