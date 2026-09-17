@@ -17,8 +17,21 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/vue'
-import type { VirtualElement } from '@floating-ui/dom'
 import { useTooltip } from '../composables/useTooltip'
+
+type VirtualElement = {
+  getBoundingClientRect(): {
+    x: number
+    y: number
+    top: number
+    right: number
+    bottom: number
+    left: number
+    width: number
+    height: number
+  }
+  contextElement?: Element
+}
 
 defineOptions({ name: 'TooltipHost' })
 
