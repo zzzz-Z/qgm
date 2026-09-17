@@ -218,7 +218,7 @@
             </button>
             <button
               v-if="!running"
-              v-tooltip="script.trim().startsWith('!') ? '运行 shell 命令（以 ! 开头）' : script.trim().startsWith('@') ? '把 @ 后文本作为问题发给 AI' : '运行脚本（Ctrl\/Cmd + ↵）'"
+              v-tooltip="script.trim().startsWith('#!') ? '运行脚本（Ctrl\/Cmd + ↵）' : script.trim().startsWith('!') ? '运行 shell 命令（以 ! 开头）' : '把编辑器内容作为问题发给 AI（Ctrl\/Cmd + ↵）'"
               class="primary-btn run head-run"
               :disabled="!script.trim()"
               @click="runSmart"
@@ -797,14 +797,25 @@ function onGlobalKey(e: KeyboardEvent) {
 function runSmart() {
   const text = script.value.trim()
   if (!text) return
-  if (text.startsWith('!')) {
-    execCmd(text)
-  } else if (text.startsWith('@')) {
-    void askAi(text.slice(1).trim())
-  } else {
+  const firstLine = text.split('\n', 1)[0].trim()
+  const isNode = /^#!\s*\/usr\/bin\/(env\s+)?node\b/.test(firstLine)
+  const isBash = /^#!\s*\/usr\/bin\/(env\s+)?bash\b/.test(firstLine)
+  if (isNode) {
     runningCommand.value = ''
     run()
+    return
   }
+  if (isBash) {
+    runningCommand.value = ''
+    run()
+    return
+  }
+  if (text.startsWith('!')) {
+    execCmd(text)
+    return
+  }
+  // 无 shebang：默认问 AI
+  void askAi(text)
 }
 
 async function loadSkillsForAsk(): Promise<string> {
