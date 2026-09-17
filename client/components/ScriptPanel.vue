@@ -1129,7 +1129,7 @@ function onEditorUpdate(u: any) {
   if (pickerOpen.value) {
     if (pos <= pickerPos.value) { pickerClose(); return }
     const q = u.state.sliceDoc(pickerAnchor.value, pos)
-    if (/^[\w./\-]*$/.test(q)) pickerQuery.value = q
+    if (/^[\w./-]*$/.test(q)) pickerQuery.value = q
     else pickerClose()
   }
 }
@@ -1141,7 +1141,7 @@ const fileTagPlugin = ViewPlugin.fromClass(class {
   build(view: any) {
     const builder = new RangeSetBuilder<any>()
     const text = view.state.doc.toString()
-    const re = /@[\w./\-]+/g
+    const re = /@[\w./-]+/g
     let m: RegExpExecArray | null
     while ((m = re.exec(text)) !== null) {
       const from = m.index
