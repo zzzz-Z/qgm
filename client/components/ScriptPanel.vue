@@ -9,18 +9,8 @@
       @drop="onHtmlDrop"
     >
       <!-- 自动化循环控制条（P2） -->
-      <section class="loop-bar card" :class="`is-${loopState}`">
-        <template v-if="!isLoopActive && loopState === 'idle'">
-          <input
-            v-model="loopGoalInput"
-            class="loop-goal-input"
-            type="text"
-            placeholder="循环目标，如：让 pnpm test 全绿 / 给所有 .vue 补 name（需先打开 AI 会话窗口）"
-            @keydown.enter="onStartLoop"
-          >
-          <button class="loop-btn primary" @click="onStartLoop">⟳ 开始循环</button>
-        </template>
-        <template v-else-if="isLoopActive">
+      <section v-if="loopState !== 'idle'" class="loop-bar card" :class="`is-${loopState}`">
+        <template v-if="isLoopActive">
           <span class="loop-status">
             <span class="loop-spin">⟳</span>
             第 {{ loopRound }}/{{ maxRounds }} 轮 · {{ loopState }}
@@ -73,6 +63,15 @@
               @click="runSmart"
             >
               <span class="ico">▶</span><span>运行</span><kbd class="btn-kbd">{{ runKbd }}</kbd>
+            </button>
+            <button
+              v-if="!running && !isLoopActive"
+              v-tooltip="'先运行当前脚本；成功后进入自动化接管：AI 回传脚本自动执行'"
+              class="primary-btn takeover head-run"
+              :disabled="!script.trim()"
+              @click="runAndTakeover"
+            >
+              <span class="ico">⟳</span><span>运行并接管</span>
             </button>
             <button v-else v-tooltip="'停止当前运行'" class="primary-btn stop head-run" @click="stop">
               <span class="ico">■</span><span>停止</span>
@@ -379,7 +378,7 @@ import { useSessionManager } from '../composables/useSessionManager'
 import type { Change } from '../types'
 import { basicSetup } from 'codemirror'
 import { EditorView, keymap, placeholder } from '@codemirror/view'
-import { EditorState, Prec } from '@codemirror/state'
+import { EditorState, Prec, Compartment } from '@codemirror/state'
 import { javascript as cmJavascript } from '@codemirror/lang-javascript'
 import { oneDark } from '@codemirror/theme-one-dark'
 import * as hljsNs from 'highlight.js/lib/core'
@@ -408,13 +407,18 @@ function takeLatestFromInbox() {
 const {
   loopState, loopRound, loopGoal, stopReason, toleranceLeft,
   tokenDelta, maxRounds, tokenBudget, isLoopActive,
-  startLoop, killCurrent, stopAndRollback,
+  startTakeover, killCurrent, stopAndRollback,
 } = useAutoLoop()
-const loopGoalInput = ref('')
-async function onStartLoop() {
-  const g = loopGoalInput.value.trim()
-  if (!g) { toast('请填写循环目标', 'warn'); return }
-  await startLoop(g)
+async function runAndTakeover() {
+  if (!script.value.trim()) { toast('脚本为空', 'warn'); return }
+  runningCommand.value = ''
+  await run()
+  const r = result.value
+  if (!r || !r.ok) {
+    toast('脚本运行失败，未进入接管', 'error', 4000)
+    return
+  }
+  await startTakeover()
 }
 
 const mainRef = ref<HTMLElement | null>(null)
@@ -1019,6 +1023,7 @@ async function saveDraft() {
 // ---------- 右侧面板宽度拖拽 ----------
 const cmHost = ref<HTMLDivElement | null>(null)
 let cmView: EditorView | null = null
+const editableComp = new Compartment()
 function createEditor() {
   if (!cmHost.value || cmView) return
   const state = EditorState.create({
@@ -1029,6 +1034,7 @@ function createEditor() {
       oneDark,
       /* editor-no-h-scroll */
       EditorView.lineWrapping,
+      editableComp.of(EditorView.editable.of(!isLoopActive.value)),
       placeholder('// 输入 CommonJS 脚本，或 !命令 走 shell（如 !ls -la）· ⌘/Ctrl + ↵ 运行 · Alt+↑↓ 翻历史'),
       EditorView.theme({
         '&': { height: '100%', fontSize: '12px' },
@@ -1060,6 +1066,10 @@ function createEditor() {
   })
   cmView = new EditorView({ state, parent: cmHost.value })
 }
+watch(isLoopActive, (v) => {
+  if (!cmView) return
+  cmView.dispatch({ effects: editableComp.reconfigure(EditorView.editable.of(!v)) })
+})
 watch(script, (v) => {
   if (!cmView) return
   const cur = cmView.state.doc.toString()
@@ -1551,6 +1561,13 @@ function onHtmlDrop(e: DragEvent) {
   padding: 5px 14px;
   font-size: 12px;
   font-weight: 600;
+}
+.primary-btn.takeover {
+  background: #d97706;
+  box-shadow: 0 1px 2px rgb(217 119 6 / 30%);
+}
+.primary-btn.takeover:hover:not(:disabled) {
+  background: #b45309;
 }
 .primary-btn.run:hover:not(:disabled) {
   background: var(--primary-hover, #1d4ed8);
