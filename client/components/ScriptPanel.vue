@@ -314,6 +314,7 @@
 
     <!-- 拖拽条：调整右侧面板宽度 -->
     <div
+v-if="changes.length"
       v-tooltip="'拖拽调整右侧面板宽度'"
       class="side-resize-handle"
       :class="{ active: resizingSide }"
@@ -321,7 +322,8 @@
     />
 
     <!-- 右侧：变更列表 & Diff -->
-    <aside class="pane-side" :style="{ width: `${sideWidth}px` }">
+    <!-- SIDE_VIF_CHANGES -->
+    <aside v-if="changes.length" class="pane-side" :style="{ width: `${sideWidth}px` }">
       <!-- 空占位：无变更且未运行时，位于终端上方 -->
       <div v-if="!result && !changes.length" class="side-empty">
         <div class="side-empty-icon">
