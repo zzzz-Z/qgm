@@ -418,6 +418,7 @@ import { copyAndFill } from '../composables/useDeepseekUrl'
 import { useAiWaiting } from '../composables/useAiWaiting'
 import { useCodeCleaner } from '../composables/useCodeCleaner'
 import { buildErrorContext, enforceBudget, parseErrorLocations } from '../utils/contextBuilder'
+import { readNdjson } from '../utils/stream'
 import { fnv1a8 } from '../utils/hash'
 import { useToast } from '../composables/useToast'
 import { useTraceLog } from '../composables/useTraceLog'
@@ -946,26 +947,11 @@ async function execCmd(text: string) {
       try { detail = await res.text() } catch { }
       throw new Error(`HTTP ${res.status} ${res.statusText}${detail ? `\n${detail}` : ''}`)
     }
-    const reader = res.body.getReader()
-    const dec = new TextDecoder('utf8')
-    let buf = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += dec.decode(value, { stream: true })
-      let idx: number
-      while ((idx = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, idx).trim()
-        buf = buf.slice(idx + 1)
-        if (!line) continue
-        try {
-          const j = JSON.parse(line)
-          if (j.stream === 'stdout') liveStdout.value += j.data
-          else if (j.stream === 'stderr') liveStderr.value += j.data
-          else if (j.stream === 'exit') exitCode = j.code
-        } catch { }
-      }
-    }
+    await readNdjson<{ stream?: string, data?: string, code?: number }>(res.body, (j) => {
+      if (j.stream === 'stdout') liveStdout.value += String(j.data || '')
+      else if (j.stream === 'stderr') liveStderr.value += String(j.data || '')
+      else if (j.stream === 'exit') exitCode = j.code ?? -1
+    })
     result.value = {
       runId: '',
       code: exitCode,

@@ -1,4 +1,5 @@
 import { ref, watch } from 'vue'
+import { readNdjson } from '../utils/stream'
 import type { Change, RunResponse } from '../types'
 
 const STORAGE_KEY_SCRIPT = '__ai_runner_script'
@@ -119,29 +120,16 @@ async function run() {
       }
       return
     }
-    const reader = res.body.getReader()
-    const dec = new TextDecoder('utf8')
-    let buf = ''
-    let summary: Record<string, unknown> | null = null
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += dec.decode(value, { stream: true })
-      let idx: number
-      while ((idx = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, idx).trim()
-        buf = buf.slice(idx + 1)
-        if (!line) continue
-        let frame: Record<string, unknown>
-        try { frame = JSON.parse(line) } catch { continue }
-        if (frame.type === 'chunk') {
-          if (frame.stream === 'stdout') liveStdout.value += String(frame.data || '')
-          else if (frame.stream === 'stderr') liveStderr.value += String(frame.data || '')
-        } else if (frame.type === 'summary') {
-          summary = frame
-        }
+    const frames: Record<string, unknown>[] = []
+    await readNdjson<Record<string, unknown>>(res.body, (frame) => {
+      if (frame.type === 'chunk') {
+        if (frame.stream === 'stdout') liveStdout.value += String(frame.data || '')
+        else if (frame.stream === 'stderr') liveStderr.value += String(frame.data || '')
+      } else if (frame.type === 'summary') {
+        frames.push(frame)
       }
-    }
+    }, abortController.signal)
+    const summary: Record<string, unknown> | null = frames.length > 0 ? frames[frames.length - 1] : null
     if (summary) {
       const s = summary
       const data: RunResponse = {

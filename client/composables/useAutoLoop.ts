@@ -3,6 +3,7 @@ import { useRunner } from './useRunner'
 import { getActiveWin, sendFill, sendStop, sendRotate, sendNewSession } from './useDeepseekUrl'
 import { toast } from './useToast'
 import { useTraceLog } from './useTraceLog'
+import { readNdjson } from '../utils/stream'
 import type { InboxItem } from './useScriptInbox'
 import {
   LOOP_MAX_ROUNDS,
@@ -437,26 +438,11 @@ async function runBash(cmd: string): Promise<BashExecResult> {
       return out
     }
     if (!res.body) return out
-    const reader = res.body.getReader()
-    const dec = new TextDecoder('utf8')
-    let buf = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += dec.decode(value, { stream: true })
-      let idx: number
-      while ((idx = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, idx).trim()
-        buf = buf.slice(idx + 1)
-        if (!line) continue
-        try {
-          const frame = JSON.parse(line)
-          if (frame.stream === 'stdout') out.stdout += String(frame.data || '')
-          else if (frame.stream === 'stderr') out.stderr += String(frame.data || '')
-          else if (frame.stream === 'exit') out.code = Number(frame.code ?? -1)
-        } catch { }
-      }
-    }
+    await readNdjson<{ stream?: string, data?: string, code?: number }>(res.body, (frame) => {
+      if (frame.stream === 'stdout') out.stdout += String(frame.data || '')
+      else if (frame.stream === 'stderr') out.stderr += String(frame.data || '')
+      else if (frame.stream === 'exit') out.code = Number(frame.code ?? -1)
+    })
     return out
   } catch (e) {
     out.stderr = `请求异常：${String(e)}`
