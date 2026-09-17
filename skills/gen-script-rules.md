@@ -174,16 +174,24 @@ description: AI 协作规则——输出形状、决策方式、项目约束三�
      #!/usr/bin/env node
      // @desc: 一句话：脚本做什么
      // @why: 解决什么问题
+     // @plan: 本轮唯一子目标，对应 state.todo 中一项
+     // @state: state 文件相对路径，缺省 .ai-runner/state.json
+     // @done: 本轮收尾的机器可判定条件；非收尾轮省略
      ```
    - bash 用 `#`：
      ```bash
      #!/usr/bin/env bash
      # @desc: 一句话：脚本做什么
      # @why: 解决什么问题
+     # @plan: 本轮唯一子目标，对应 state.todo 中一项
+     # @state: state 文件相对路径，缺省 .ai-runner/state.json
+     # @done: 本轮收尾的机器可判定条件；非收尾轮省略
      ```
    - shebang 必须是第一行，前后无空行；`#!/usr/bin/env node` / `#!/usr/bin/env bash` 二选一，禁止硬编码路径（如 `#!/bin/bash`），保证跨平台
    - `@desc` 与 `@why` 均为必需，缺一会被要求重试一次
    - 服务端 `parseScriptMeta` 正则不会误匹配 shebang（`#!/...` 不命中 `^\s*(?://|#)\s*@(desc|why)` 模式），无需特殊处理
+   - 可选扩展字段：`@plan`（本轮子目标）/ `@state`（state 路径，缺省 `.ai-runner/state.json`）/ `@done`（机器可判定收尾条件，非收尾轮省略）；服务端 `parseScriptMeta` 仅匹配 `@desc|@why`，新增字段被忽略、不报错
+   - bash 版注释块同结构，前缀换 `#`
 4. **bash 禁止破坏性命令**（命中即停循环，不重试）：
    - `rm -rf` / `sudo` / `curl|sh` / `wget|sh` / `dd if=` / `mkfs`
    - `> /dev/sd*` / `git push -f` / `git reset --hard` / fork bomb `:(){ :|:& };:`
@@ -198,3 +206,30 @@ description: AI 协作规则——输出形状、决策方式、项目约束三�
 10. **收到「请说明完成条件」时**，回复**可验证**的完成条件，如：
     - `bash: pnpm test 退出码 0`
     - `cjs: 所有 .vue 文件含 name 选项`（由工作台执行后判定）
+
+11. **首轮建 state**：循环第一轮脚本只做初始化，写 `.ai-runner/state.json`：
+    `{ "goal": "...", "todo": ["..."], "done": [], "round": 0, "status": "running" }`
+    `todo` 每项必须是单脚本可完成、可机器判定的原子动作。
+
+12. **每轮读改写 state**：脚本开头读，结尾把本轮 item 从 `todo` 移入 `done`、`round += 1`。幂等——重复跑同一轮不重复入账。
+
+13. **终止由机器判定**：
+    - 退出码 0 且 `todo` 空 → 置 `status="done"` → 循环收工
+    - 退出码 0 且 todo 非空 → 把 `{goal, 剩余 todo, 上轮 @desc}` 注入下一轮上下文
+    - 退出码 1 → 允许重试一轮；退出码 2 → 暂停请求人工
+    - AI 回 `DONE` 降级为兜底，仅当机器判定未生效时使用
+
+14. **失败即换策略**：同一 hash 连续 2 次被跳过，或同一 todo 项连续 2 轮未推进 → 禁止再发同类脚本，必须输出只读诊断脚本打印现场，或退出码 2。
+
+15. **循环模式永不询问**：命中选项类问题时直接执行第一推荐；仅破坏性操作或退出码 2 才停。
+
+## 八、循环编排（Loop Protocol）
+
+循环模式 = 第七节覆盖前六节 + 以下编排：
+
+1. 首轮：初始化脚本——建 state、列全 todo、零业务改动
+2. 中间轮：每轮一脚本，完成 todo 下一项，回写 state
+3. 收尾轮：todo 空 → 跑验收命令 → 全绿置 `status="done"`、退出码 0
+4. 轮次上限 8：第 7 轮仍 `running` → 第 8 轮必须输出只读「卡点报告」（打印 state + 未完成项 + 建议），并置 `status="blocked"`
+5. 预算与终止完全由工作台读 state + 退出码决策，AI 不再自评完成
+
