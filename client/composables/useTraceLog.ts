@@ -36,6 +36,7 @@ export interface TraceEntry {
 
 const STORAGE_KEY = '__ai_trace_log'
 const MAX_ENTRIES = 200
+const MAX_BYTES = 1_000_000
 
 function load(): TraceEntry[] {
   try {
@@ -52,7 +53,14 @@ let seq = entries.value.reduce((m, e) => Math.max(m, e.id), 0)
 
 function persist() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.value))
+    let list = entries.value
+    let json = JSON.stringify(list)
+    while (json.length > MAX_BYTES && list.length > 1) {
+      list = list.slice(0, Math.max(1, Math.floor(list.length * 0.8)))
+      json = JSON.stringify(list)
+    }
+    localStorage.setItem(STORAGE_KEY, json)
+    if (list.length !== entries.value.length) entries.value = list
   } catch { }
 }
 
