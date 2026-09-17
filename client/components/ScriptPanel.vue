@@ -10,6 +10,12 @@
     >
       <!-- 自动化循环控制条（P2） -->
       <section v-if="loopState !== 'idle'" class="loop-bar card" :class="`is-${loopState}`">
+        <!-- [multi-loop-step6-panel] -->
+        <span
+          v-if="activeLoopsCount > 1"
+          v-tooltip="`还有 ${activeLoopsCount - 1} 个循环在其他会话中运行（点左侧会话切换查看）`"
+          class="loop-multi-badge"
+        >+{{ activeLoopsCount - 1 }} 循环</span>
         <template v-if="loopState === 'budget-limited'">
           <span class="loop-status">
             <span>⏸</span>
@@ -412,7 +418,7 @@ const { script, running, result, changes, rolling, busyAll, persistWarning, live
 
 // —— 自动化循环（P2 useAutoLoop）——
 const {
-  loopState, loopRound, loopGoal, stopReason, toleranceLeft,
+  loopState, loopRound, loopGoal, stopReason, toleranceLeft, activeLoopsCount,
   tokenDelta, maxRounds, tokenBudget,
   roundTimeoutMs, waitingElapsed, isLoopActive,
   startTakeover, killCurrent, stopAndRollback, startHandoff, resumeLoop,
@@ -2676,5 +2682,18 @@ function onHtmlDrop(e: DragEvent) {
 .loop-spin { display: inline-block; animation: loop-spin 1.6s linear infinite; }
 @keyframes loop-spin { to { transform: rotate(360deg); } }
 .inbox-badge { color: #409eff; border-color: #409eff; }
+/* [multi-loop-step6-panel] */
+.loop-multi-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 </style>
 <!-- tooltip-audit -->

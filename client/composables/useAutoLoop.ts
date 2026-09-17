@@ -127,6 +127,9 @@ export interface LoopInstance {
 const loopInstances = new Map<string, LoopInstance>()
 
 /** 当前激活会话 id（由 App.vue 通过 setActiveSessionIdGetter 更新） */
+// [multi-loop-step6-auto] 版本号：Map 变更时 bump，供 computed 响应式依赖
+const loopInstancesVersion = ref(0)
+function bumpLoopInstancesVersion(): void { loopInstancesVersion.value++ }
 const activeLoopSid = ref('')
 
 /**
@@ -219,6 +222,16 @@ export function createLoopInstanceFor(sid: string): LoopInstance {
   }
   return inst
 }
+// [multi-loop-step6-auto] 当前活跃循环数量（依赖版本号，能响应新实例加入）
+export const activeLoopsCount = computed(() => {
+  void loopInstancesVersion.value
+  let n = 0
+  for (const inst of loopInstances.values()) {
+    const s = inst.state.value
+    if (s !== 'idle' && s !== 'stopped' && s !== 'interrupted') n++
+  }
+  return n
+})
 let getActiveSessionId: () => string = () => ''
 
 let keyboardBound = false
@@ -320,6 +333,7 @@ async function initLoop(
   traceSummary: string,
   tracePayload?: Record<string, unknown>,
 ): Promise<boolean> {
+  bumpLoopInstancesVersion()
   const sid = getActiveSessionId() || inst.sessionId || 'default'
   inst.sessionId = sid
   const win = getWindowBySid(sid) ?? getActiveWin()
@@ -1160,6 +1174,6 @@ export function useAutoLoop() {
     startLoop, startTakeover, killCurrent, stopAndRollback, requestPause,
     onScriptArrival, onNonScriptReply, setTokenEstimate, currentLoopContext,
     startHandoff, onSummary, onNewSessionCreated, autoRotateSession, resumeLoop,
-    getLoopBySessionId, listActiveLoops, setActiveLoopSessionId, createLoopInstanceFor,
+    getLoopBySessionId, listActiveLoops, setActiveLoopSessionId, createLoopInstanceFor, activeLoopsCount,
   }
 }
