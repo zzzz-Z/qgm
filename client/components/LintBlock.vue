@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { defineOptions } from 'vue'
 defineOptions({ name: 'LintBlock' })
 import { computed } from 'vue'
 import type { LintResult } from '../types'

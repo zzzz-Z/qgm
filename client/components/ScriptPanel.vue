@@ -337,7 +337,6 @@
 </template>
 
 <script setup lang="ts">
-import { defineOptions } from 'vue'
 defineOptions({ name: 'ScriptPanel' })
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRunner } from '../composables/useRunner'

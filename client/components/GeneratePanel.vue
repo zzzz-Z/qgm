@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { defineOptions } from 'vue'
 defineOptions({ name: 'GeneratePanel' })
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FileTree from './FileTree.vue'
