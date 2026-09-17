@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ScriptPanel from './components/ScriptPanel.vue'
 import GeneratePanel from './components/GeneratePanel.vue'
 import TracePanel from './components/TracePanel.vue'
-import { DEFAULT_URL, MODELS, getActiveWin, openDeepseek, setActiveWin, useDeepseekUrl } from './composables/useDeepseekUrl'
+import { DEFAULT_URL, MODELS, getActiveWin, openDeepseek, useDeepseekUrl } from './composables/useDeepseekUrl'
 import { useScriptInbox } from './composables/useScriptInbox'
 import {
     currentLoopContext,
@@ -11,13 +11,11 @@ import {
     isFromCurrentLoop,
     onNonScriptReply,
     onScriptArrival,
-    resumeLoop,
     setActiveSessionIdGetter,
     setTokenEstimate,
     onSummary,
     onNewSessionCreated,
   autoRotateSession,
-  startTakeover,
 } from './composables/useAutoLoop'
 import { useSessionManager } from './composables/useSessionManager'
 import { useToast } from './composables/useToast'
@@ -420,56 +418,6 @@ onMounted(() => {
   window.addEventListener('keydown', onEscClose)
   // 注入 activeSessionId 读取器：循环启动时取当前活动会话 id 绑定到 loopSessionId
   setActiveSessionIdGetter(() => activeSessionId.value)
-  // —— mock 通道（v6 §13.2 ?mock=1）—— 不打开真实 AI 站点，注入合成 message 自检整条链路
-  // 注意：必须放在 activeSessionId 早退之前，否则无会话时无法触发
-  if (MOCK_MODE) {
-    toast('mock 模式已启用：将注入合成脚本，无需打开 AI 站点', 'warn', 6000)
-    // mock 自检：把自身设为活动窗口 + 暴露循环驱动钩子，方便 browser_evaluate 触发循环
-    setActiveWin(window)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window as any).__aiRunnerMock = {
-      startTakeover,
-      resumeLoop,
-      setTokenEstimate,
-      dispatchReply: (over: Record<string, unknown>) => window.dispatchEvent(new MessageEvent('message', {
-        data: { type: 'ai-runner:reply', site: 'https://chat.deepseek.com', ...over },
-        origin: 'https://chat.deepseek.com',
-        source: window,
-      })),
-    }
-    const fakeScript = [
-      '#!/usr/bin/env node',
-      '// @desc: 给所有 .vue 文件补 defineOptions({ name })',
-      '// @why: P1 mock 自检 · 验证脚本到达 → 覆盖编辑器 → 运行 整条链路',
-      "const fs = require('node:fs')",
-      "const path = require('node:path')",
-      "const files = fs.readdirSync('.').filter(f => f.endsWith('.vue'))",
-      'for (const f of files) {',
-      '  const p = path.join(".", f)',
-      "  const src = fs.readFileSync(p, 'utf8')",
-      '  if (!/defineOptions\\s*\\(\\s*{/.test(src)) {',
-      '    const name = f.replace(/\\.vue$/, "")',
-      '    const updated = src.replace(/<script setup lang="ts">/, `<script setup lang="ts">\\ndefineOptions({ name: ${JSON.stringify(name)} })`)',
-      "    fs.writeFileSync(p, updated)",
-      '    console.log("updated", f)',
-      '  }',
-      '}',
-    ].join('\n')
-    setTimeout(() => {
-      window.dispatchEvent(new MessageEvent('message', {
-        data: {
-          type: 'ai-runner:script',
-          code: fakeScript,
-          lang: 'cjs',
-          hash: 'mock0001',
-          site: 'https://chat.deepseek.com',
-        },
-        origin: 'https://chat.deepseek.com',
-        source: window,
-      }))
-    }, 1200)
-    return  // mock 模式下不需要拉会话历史 url
-  }
   if (!activeSessionId.value) return
   const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
   if (s && s.url && deepseekUrl.value !== s.url) {
