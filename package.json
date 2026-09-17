@@ -29,6 +29,7 @@
     "air-run-all": "./bin/run-all.cjs"
   },
   "dependencies": {
+    "@ast-grep/cli": "^0.28.0",
     "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/state": "^6.7.4",
     "@codemirror/theme-one-dark": "^6.1.3",

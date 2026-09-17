@@ -5,6 +5,7 @@ import { BINARY_EXT, EXCLUDE_DIRS, ROOT } from './config.js'
 import { runDir } from './snapshot.js'
 import { diffIndexes, readIndex, scanIndex } from './index-index.js'
 import { parseJSON, readBody, sendJSON } from './http.js'
+import { runProcess } from './proc.js'
 
 interface FileNode {
   name: string
@@ -148,6 +149,49 @@ function globToRe(glob: string): RegExp {
 }
 
 /** 文件树 / 检索 / 快照读取类路由；返回 true 表示已命中处理 */
+
+interface AstHit { path: string, line?: number, text?: string }
+let astGrepWarned = false
+async function runAstGrep(pattern: string, lang: string, glob: string | null, max: number): Promise<{ results: AstHit[], error?: string }> {
+  const binName = process.platform === 'win32' ? 'sg.cmd' : 'sg'
+  const localBin = path.join(ROOT, 'node_modules', '.bin', binName)
+  const useLocal = fs.existsSync(localBin)
+  if (!useLocal && !astGrepWarned) {
+    astGrepWarned = true
+    console.warn('[ai-runner] 未找到 @ast-grep/cli（node_modules/.bin/sg）；运行 pnpm install 后可用')
+  }
+  if (!useLocal) {
+    return { results: [], error: '未安装 @ast-grep/cli，请先 pnpm install' }
+  }
+  const args = ['run', '--pattern', pattern, '--lang', lang, '--json']
+  if (glob) args.push('--globs', glob)
+  const r = await runProcess(localBin, {
+    args,
+    cwd: ROOT,
+    timeoutMs: 30_000,
+    timeoutLabel: 'ast-grep 超时',
+    shell: process.platform === 'win32',
+  })
+  // sg 退出码：0 = 有匹配，1 = 无匹配（非错），其他 = 错
+  if (r.code !== 0 && r.code !== 1) {
+    return { results: [], error: `ast-grep exit ${r.code}: ${(r.stderr || '').slice(0, 300)}` }
+  }
+  let arr: any[]
+  try { arr = JSON.parse(r.stdout || '[]') } catch (e) {
+    return { results: [], error: `ast-grep JSON 解析失败: ${String(e)}` }
+  }
+  if (!Array.isArray(arr)) return { results: [] }
+  const out: AstHit[] = []
+  for (const m of arr.slice(0, max)) {
+    const p = String(m.file || m.path || '')
+    const startLine = m.range?.start?.line
+    const line = typeof startLine === 'number' ? startLine + 1 : undefined
+    const txt = String(m.text || m.lines || '').trim().slice(0, 200)
+    if (p) out.push({ path: p, line, text: txt })
+  }
+  return { results: out }
+}
+
 export async function handleFilesRoutes(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   const { pathname } = url
 
@@ -286,10 +330,18 @@ export async function handleFilesRoutes(req: IncomingMessage, res: ServerRespons
     const body = parseJSON<{ pattern?: string, glob?: string, mode?: string, max?: number }>(await readBody(req))
     const pattern = String(body?.pattern || '').trim()
     if (!pattern) { sendJSON(res, { error: 'pattern 为空' }, 400); return true }
-    const mode = body?.mode === 'file' ? 'file' : 'content'
+    const modeRaw = String(body?.mode || 'content')
+    const mode = modeRaw === 'file' || modeRaw === 'ast' ? modeRaw : 'content'
+    const lang = String((body as any)?.lang || 'typescript')
     const globRe = body?.glob ? globToRe(body.glob) : null
     const max = Math.min(Number(body?.max) || 100, 500)
 
+    if (mode === 'ast') {
+      const astMax = Math.min(Number(body?.max) || 100, 500)
+      const ar = await runAstGrep(pattern, lang, body?.glob || null, astMax)
+      if (ar.error) return sendJSON(res, { error: ar.error }, 400)
+      return sendJSON(res, { results: ar.results, truncated: ar.results.length >= astMax })
+    }
     let re: RegExp
     try { re = new RegExp(pattern) } catch (e) { sendJSON(res, { error: String(e) }, 400); return true }
 

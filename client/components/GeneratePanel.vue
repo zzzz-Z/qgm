@@ -37,6 +37,8 @@ const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
 // 检索相关
 const searchQuery = ref('')
 const searchGlob = ref('')
+const searchMode = ref<'content' | 'file' | 'ast'>('content')
+const searchLang = ref('typescript')
 const searching = ref(false)
 const searchResults = ref<Array<{ path: string, line?: number, text?: string }>>([])
 const searchError = ref('')
@@ -439,7 +441,13 @@ async function runSearch() {
     const res = await fetch('/__ai/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pattern: p, glob: searchGlob.value.trim() || undefined, max: 100 }),
+      body: JSON.stringify({
+        pattern: p,
+        glob: searchGlob.value.trim() || undefined,
+        mode: searchMode.value,
+        lang: searchMode.value === 'ast' ? (searchLang.value.trim() || 'typescript') : undefined,
+        max: 100,
+      }),
     })
     const data = await res.json()
     if (id !== searchReqId) return
@@ -875,6 +883,18 @@ onBeforeUnmount(() => {
               placeholder="glob（如 src/**/*.ts）"
               @keydown.enter="runSearch"
             >
+            <select v-model="searchMode" class="search-mode">
+              <option value="content">文本</option>
+              <option value="file">文件名</option>
+              <option value="ast">AST</option>
+            </select>
+            <input
+              v-if="searchMode === 'ast'"
+              v-model="searchLang"
+              class="search-lang"
+              spellcheck="false"
+              placeholder="typescript / javascript / vue"
+            >
             <button v-tooltip="searching ? '正在搜索…' : '按关键字 / 正则搜索（Enter）'" class="btn btn-primary btn-mini" :disabled="searching || !searchQuery.trim()" @click="runSearch">
               {{ searching ? '搜索中…' : '搜索' }}
             </button>
@@ -1299,6 +1319,33 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border-2);
   border-radius: var(--radius-sm);
   outline: 0;
+}
+
+.search-mode {
+  flex: 0 0 96px;
+  padding: 6px 8px;
+  font: 12px/1.5 var(--mono);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  cursor: pointer;
+}
+.search-lang {
+  flex: 0 0 140px;
+  padding: 6px 10px;
+  font: 12px/1.5 var(--mono);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  outline: 0;
+}
+.search-lang:focus,
+.search-mode:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-bg);
 }
 .search-input {
   flex: 1;
