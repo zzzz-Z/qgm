@@ -848,9 +848,35 @@ function runSmart() {
   }
 }
 
+async function loadSkillsForAsk(): Promise<string> {
+  let selected: string[] = ['gen-script-rules']
+  try {
+    const raw = localStorage.getItem('__ai_selected_skills')
+    if (raw) {
+      const arr = JSON.parse(raw)
+      if (Array.isArray(arr)) selected = arr
+    }
+  } catch { }
+  if (!selected.length) return ''
+  try {
+    const res = await fetch('/__ai/skills')
+    const all = await res.json()
+    if (!Array.isArray(all)) return ''
+    const picked = all.filter((s: any) => selected.includes(s.name))
+    if (!picked.length) return ''
+    return picked.map((s: any) => s.content).join('\n\n---\n\n')
+  } catch {
+    return ''
+  }
+}
 async function askAi(question: string) {
   if (!question) { toast('@ 后没有内容', 'warn'); return }
-  const r = await copyAndFill(question)
+  const skills = await loadSkillsForAsk()
+  const prompt = skills
+    ? `# 规则\n\n${skills}\n\n# 问题\n
+${question}`
+    : question
+  const r = await copyAndFill(prompt)
   if (r === 'failed') {
     toast('发送失败，已复制到剪贴板', 'warn', 4000)
     return
