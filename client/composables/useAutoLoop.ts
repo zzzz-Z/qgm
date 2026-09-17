@@ -143,26 +143,25 @@ watch([loopState, loopRound], () => {
 // 主入口
 // ============================================================================
 
-export async function startLoop(goal: string): Promise<void> {
-  const g = goal.trim()
-  if (!g) { toast('请填写循环目标', 'warn'); return }
-  if (isLoopActive.value) { toast('已有循环在运行', 'warn'); return }
+async function initLoop(
+  prefix: string,
+  goal: string,
+  traceSummary: string,
+  tracePayload?: Record<string, unknown>,
+): Promise<boolean> {
   const win = getActiveWin()
   if (!win || win.closed) {
     toast('AI 站点窗口未打开，请先打开会话窗口', 'error', 5000)
-    return
+    return false
   }
-
-  // 记录循环起点 commit（回滚点）
   let head = ''
   try {
     const r = await fetch('/__ai/git/head')
     const d = await r.json()
     head = d.head || ''
-  } catch { /* 非 git 仓库也允许循环 */ }
-
-  loopId.value = `loop_${Date.now().toString(36)}`
-  loopGoal.value = g
+  } catch { }
+  loopId.value = `${prefix}_${Date.now().toString(36)}`
+  loopGoal.value = goal
   loopRound.value = 1
   loopStartCommit.value = head
   loopStartTokens.value = latestTokens.value
@@ -172,14 +171,20 @@ export async function startLoop(goal: string): Promise<void> {
   lastHash.value = ''
   lastExec.value = null
   originalTitle = typeof document !== 'undefined' ? document.title : ''
-
   addTrace({
     kind: 'loop',
-    summary: `▶ 循环开始 · 目标：${g.slice(0, 60)}`,
-    payload: { prompt: g, loopId: loopId.value, loopRound: 0 },
+    summary: traceSummary,
+    payload: { loopId: loopId.value, loopRound: 0, ...tracePayload },
   })
-
   bindKeyboard()
+  return true
+}
+
+export async function startLoop(goal: string): Promise<void> {
+  const g = goal.trim()
+  if (!g) { toast('请填写循环目标', 'warn'); return }
+  if (isLoopActive.value) { toast('已有循环在运行', 'warn'); return }
+  if (!await initLoop('loop', g, `▶ 循环开始 · 目标：${g.slice(0, 60)}`, { prompt: g })) return
   loopState.value = 'running'
   persist()
 
@@ -212,34 +217,7 @@ export async function startLoop(goal: string): Promise<void> {
 // ============================================================================
 export async function startTakeover(): Promise<void> {
   if (isLoopActive.value) { toast('已有循环在运行', 'warn'); return }
-  const win = getActiveWin()
-  if (!win || win.closed) {
-    toast('AI 站点窗口未打开，请先打开会话窗口', 'error', 5000)
-    return
-  }
-  let head = ''
-  try {
-    const r = await fetch('/__ai/git/head')
-    const d = await r.json()
-    head = d.head || ''
-  } catch { }
-  loopId.value = `take_${Date.now().toString(36)}`
-  loopGoal.value = '（脚本运行后接管）'
-  loopRound.value = 1
-  loopStartCommit.value = head
-  loopStartTokens.value = latestTokens.value
-  toleranceLeft.value = LOOP_TOLERANCE_BUDGET
-  stopRequest.value = 'none'
-  stopReason.value = ''
-  lastHash.value = ''
-  lastExec.value = null
-  originalTitle = typeof document !== 'undefined' ? document.title : ''
-  addTrace({
-    kind: 'loop',
-    summary: `▶ 接管开始 · 等待 AI 回传脚本`,
-    payload: { loopId: loopId.value, loopRound: 0 },
-  })
-  bindKeyboard()
+  if (!await initLoop('take', '（脚本运行后接管）', '▶ 接管开始 · 等待 AI 回传脚本')) return
   loopState.value = 'waiting'
   persist()
   enterWaiting()
