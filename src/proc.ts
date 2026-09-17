@@ -15,6 +15,7 @@ export interface RunProcessOptions {
   /** 超时附加信息前缀，默认「超时」 */
   timeoutLabel?: string
   onChunk?: (stream: 'stdout' | 'stderr', data: string) => void
+  stdin?: string
 }
 
 export interface ProcessResult {
@@ -35,6 +36,9 @@ export function runProcess(cmd: string, options: RunProcessOptions = {}): Promis
       env: options.env,
       shell: options.shell,
     })
+    if (options.stdin !== undefined && child.stdin) {
+      child.stdin.end(options.stdin)
+    }
     let stdout = ''
     let stderr = ''
     let killed = false

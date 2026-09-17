@@ -301,9 +301,50 @@ async function toleranceFail(detail: string): Promise<void> {
 // ============================================================================
 // 执行
 // ============================================================================
+
+type HookEvent = 'BeforeFill' | 'BeforeScript' | 'AfterScript' | 'AfterResult' | 'LoopStop'
+interface HookResult {
+  event: HookEvent
+  action: 'ok' | 'reject'
+  reason?: string
+  hooksRun: number
+}
+async function runHook(event: HookEvent, payload: unknown): Promise<HookResult> {
+  try {
+    const res = await fetch('/__ai/hooks/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event, payload }),
+    })
+    if (!res.ok) return { event, action: 'ok', hooksRun: 0 }
+    return await res.json() as HookResult
+  } catch {
+    return { event, action: 'ok', hooksRun: 0 }
+  }
+}
+
 async function executeItem(item: InboxItem): Promise<void> {
   loopState.value = 'executing'
   persist()
+  const hookRes = await runHook('BeforeScript', {
+    loopId: loopId.value,
+    round: loopRound.value,
+    lang: item.lang,
+    desc: item.desc,
+    why: item.why,
+    script: item.code,
+  })
+  if (hookRes.action === 'reject') {
+    await finish('hook-reject', hookRes.reason || 'BeforeScript hook rejected')
+    return
+  }
+  if (hookRes.hooksRun > 0) {
+    addTrace({
+      kind: 'loop',
+      summary: `🪝 BeforeScript · ${hookRes.hooksRun} 个 hook 通过`,
+      payload: { loopId: loopId.value, loopRound: loopRound.value },
+    })
+  }
   const startedAt = Date.now()
   const runner = useRunner()
 
@@ -612,6 +653,12 @@ async function finish(reason: string, detail?: string): Promise<void> {
   }
 
   stopRequest.value = 'none'
+  void runHook('LoopStop', {
+    loopId: loopId.value,
+    round: loopRound.value,
+    reason,
+    detail: detail || '',
+  }).catch(() => {})
 }
 
 // ============================================================================

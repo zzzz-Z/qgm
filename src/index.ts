@@ -17,6 +17,8 @@ import { saveIndex, scanIndex } from './index-index.js'
 import { guardRequest, parseJSON, readBody, sendHTML, sendJSON } from './http.js'
 import type { AiRunnerOptions } from './http.js'
 import { handleFilesRoutes } from './files-routes.js'
+import { runHook } from './hooks.js'
+import type { HookEvent } from './hooks.js'
 
 export type { AiRunnerOptions } from './http.js'
 
@@ -836,6 +838,14 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
 
   // 文件树 / 检索 / 快照读取类路由（委派到 files-routes.ts）
+  if (req.method === 'POST' && pathname === '/hooks/run') {
+    const body = parseJSON<{ event?: string, payload?: unknown }>(await readBody(req))
+    const event = String(body?.event || '') as HookEvent
+    const ALLOWED: HookEvent[] = ['BeforeFill', 'BeforeScript', 'AfterScript', 'AfterResult', 'LoopStop']
+    if (!ALLOWED.includes(event)) return sendJSON(res, { error: `未知事件: ${event}` }, 400)
+    const r = await runHook(event, body?.payload)
+    return sendJSON(res, r)
+  }
   if (await handleFilesRoutes(req, res, url)) return
 
   // ---------- Skills ----------
