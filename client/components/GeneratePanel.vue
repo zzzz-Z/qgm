@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { defineOptions } from 'vue'
+defineOptions({ name: 'GeneratePanel' })
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FileTree from './FileTree.vue'
 import { openDeepseek } from '../composables/useDeepseekUrl'
@@ -209,7 +211,14 @@ function onEditorInput() {
     atRect.value = { top: rect.bottom + 4, left: rect.left }
   }
   atVisible.value = true
-  runAtSearch(det.query)
+  scheduleAtSearch(det.query)
+}
+
+// @ 补全检索防抖：连续输入只在停顿 200ms 后发一次请求
+let atSearchTimer: ReturnType<typeof setTimeout> | undefined
+function scheduleAtSearch(q: string) {
+  clearTimeout(atSearchTimer)
+  atSearchTimer = setTimeout(() => { void runAtSearch(q) }, 200)
 }
 
 async function runAtSearch(q: string) {
@@ -696,7 +705,7 @@ onBeforeUnmount(() => {
               <span>清空</span>
             </button>
             <button
-              v-tooltip="copied ? '已复制，正在打开会话' : `把问题 + 规则 + 项目结构 + 相关文件拼成 prompt 复制并打开 ${modelLabel}`"
+              v-tooltip="copied ? '已复制，正在打开会话' : '把问题 + 规则 + 项目结构 + 相关文件拼成 prompt 复制并打开 DeepSeek'"
               class="btn btn-primary btn-cta"
               :disabled="!canCopy"
               @click="copyPrompt"

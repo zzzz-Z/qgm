@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { defineOptions } from 'vue'
+defineOptions({ name: 'DiffViewer' })
 import { computed } from 'vue'
 import * as hljsNs from 'highlight.js/lib/core'
 const hljs: any = (hljsNs as any).default ?? hljsNs

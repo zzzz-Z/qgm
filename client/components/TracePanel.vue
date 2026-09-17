@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { defineOptions } from 'vue'
+defineOptions({ name: 'TracePanel' })
 import { computed, ref } from 'vue'
 import { useTraceLog } from '../composables/useTraceLog'
 

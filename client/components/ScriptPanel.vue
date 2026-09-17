@@ -32,6 +32,15 @@
               清空
             </button>
             <button
+              v-if="pendingCount > 0"
+              v-tooltip="`收件箱有 ${pendingCount} 条待取用脚本，点击覆盖当前编辑器`"
+              class="ghost-btn inbox-badge"
+              :disabled="running"
+              @click="takeLatestFromInbox"
+            >
+              📥 {{ pendingCount }}
+            </button>
+            <button
               v-if="!running"
               v-tooltip="script.trim().startsWith('!') ? '运行 shell 命令（以 ! 开头）' : '运行脚本（Ctrl\/Cmd + ↵）'"
               class="primary-btn run head-run"
@@ -328,8 +337,11 @@
 </template>
 
 <script setup lang="ts">
+import { defineOptions } from 'vue'
+defineOptions({ name: 'ScriptPanel' })
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRunner } from '../composables/useRunner'
+import { useScriptInbox } from '../composables/useScriptInbox'
 import FileList from './FileList.vue'
 import DiffViewer from './DiffViewer.vue'
 import LintBlock from './LintBlock.vue'
@@ -356,6 +368,16 @@ hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('typescript', typescript)
 
 const { script, running, result, changes, rolling, busyAll, persistWarning, gitCommit, smokeEnabled, baselineRunId, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save } = useRunner()
+const { inbox, consume: consumeInbox } = useScriptInbox()
+/** 当前 inbox 待取用条数（仅展示用，避免在模板里直接 inbox.value.length 触发响应式开销） */
+const pendingCount = computed(() => inbox.value.length)
+/** 取最新一条入队脚本，覆盖当前编辑器内容 */
+function takeLatestFromInbox() {
+  const item = consumeInbox()
+  if (!item) return
+  script.value = item.code
+  toast(`已取用 · ${item.lang} · ${item.desc || '无说明'}`, 'success', 3000)
+}
 
 const mainRef = ref<HTMLElement | null>(null)
 
@@ -1105,8 +1127,21 @@ watch(running, (v) => {
       statusText.value = result.value.ok ? '✅ 成功' : '❌ 失败'
       statusClass.value = result.value.ok ? 'ok' : 'err'
       const r = result.value
-      const descMatch = script.value.match(/^\s*\/\/\s*@desc\s*:\s*(.+)$/m)
+      // 兼容旧脚本只写 // @desc；新脚本可能 // 或 #，从 result.value.scriptDesc/scriptWhy 拿（server 已解析）
+      const descMatch = script.value.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
       const desc = r.scriptDesc || (descMatch ? descMatch[1].trim() : '')
+      const whyMatch = script.value.match(/^\s*(?:\/\/|#)\s*@why\s*:\s*(.+)$/m)
+      const why = r.scriptWhy || (whyMatch ? whyMatch[1].trim() : '')
+      const lang: 'cjs' | 'bash' = /^\s*#\s*(@desc|@why)/m.test(script.value) ? 'bash' : 'cjs'
+      // 计算 hash（与油猴 / useScriptInbox 一致：FNV-1a 8 hex）
+      let hash = ''
+      try {
+        let h = 0x811c9dc5
+        for (let i = 0; i < script.value.length; i++) {
+          h = Math.imul(h ^ script.value.charCodeAt(i), 0x1000193) >>> 0
+        }
+        hash = (h >>> 0).toString(16).padStart(8, '0')
+      } catch { /* ignore */ }
       addTrace({
         kind: 'run',
         summary: desc
@@ -1119,6 +1154,10 @@ watch(running, (v) => {
           exit: r.code,
           ok: r.ok,
           changes: changes.value.map(x => ({ path: x.path, type: x.type })),
+          desc,
+          why,
+          lang,
+          hash,
         },
       })
     }

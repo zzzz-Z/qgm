@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { defineOptions } from 'vue'
+defineOptions({ name: 'FileList' })
 import { computed } from 'vue'
 import type { Change, ChangeType } from '../types'
 

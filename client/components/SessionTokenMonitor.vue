@@ -22,6 +22,8 @@
 </template>
 
 <script setup lang="ts">
+import { defineOptions } from 'vue'
+defineOptions({ name: 'SessionTokenMonitor' })
 import { computed, onMounted } from 'vue'
 import { HARD_LIMIT, useSessionManager } from '../composables/useSessionManager'
 

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { defineOptions } from 'vue'
+defineOptions({ name: 'ToastHost' })
 import { useToast } from '../composables/useToast'
 
 const { toasts, confirmState, dismissToast, resolveConfirm } = useToast()

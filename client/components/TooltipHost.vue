@@ -13,6 +13,8 @@
 </template>
 
 <script setup lang="ts">
+import { defineOptions } from 'vue'
+defineOptions({ name: 'TooltipHost' })
 import { useTooltip } from '../composables/useTooltip'
 
 const { state } = useTooltip()
