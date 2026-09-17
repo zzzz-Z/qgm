@@ -1102,24 +1102,35 @@ function handoffFail(inst: LoopInstance, reason: string) {
 }
 
 
+// [multi-loop-step1]
 export function useAutoLoop() {
   return {
-    // 步骤 2：仍返回模块级 refs（singletonView 包装同一批 refs）
-    // 步骤 3 将改为 computed 读 activeLoop 以支持多实例
-    loopState, loopId, loopRound, loopGoal, loopStartCommit,
-    toleranceLeft, stopReason, lastExec,
+    loopState: computed({
+      get: () => activeLoop.value?.state.value ?? 'idle',
+      set: (v: LoopState) => {
+        const i = activeLoop.value
+        if (i) i.state.value = v
+      },
+    }),
+    loopId: computed(() => activeLoop.value?.id.value ?? ''),
+    loopRound: computed(() => activeLoop.value?.round.value ?? 0),
+    loopGoal: computed(() => activeLoop.value?.goal.value ?? ''),
+    loopStartCommit: computed(() => activeLoop.value?.startCommit.value ?? ''),
+    toleranceLeft: computed(() => activeLoop.value?.toleranceLeft.value ?? LOOP_TOLERANCE_BUDGET),
+    stopReason: computed(() => activeLoop.value?.stopReason.value ?? ''),
+    lastExec: computed(() => activeLoop.value?.lastExec.value ?? null),
     tokenDelta: computed(() => {
       const inst = activeLoop.value
       if (!inst) return 0
       return Math.max(0, inst.latestTokens.value - inst.startTokens.value)
     }),
-    latestTokens,
+    latestTokens: computed(() => activeLoop.value?.latestTokens.value ?? 0),
     isLoopActive,
     maxRounds: LOOP_MAX_ROUNDS,
     tokenBudget: LOOP_TOKEN_BUDGET,
     tokenHardLimit: LOOP_TOKEN_HARD_LIMIT,
-    roundTimeoutMs,
-    waitingElapsed,
+    roundTimeoutMs: computed(() => activeLoop.value?.roundTimeoutMs.value ?? LOOP_ROUND_TIMEOUT_MS),
+    waitingElapsed: computed(() => activeLoop.value?.waitingElapsed.value ?? 0),
     startLoop, startTakeover, killCurrent, stopAndRollback, requestPause,
     onScriptArrival, onNonScriptReply, setTokenEstimate, currentLoopContext,
     startHandoff, onSummary, onNewSessionCreated, autoRotateSession, resumeLoop,
