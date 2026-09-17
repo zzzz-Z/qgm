@@ -633,7 +633,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     req.on('aborted', () => ac.abort())
     const result = await runScript(scriptPath, 60_000, ac.signal, overlayPath, toolLogPath, (stream, data) => {
       writeFrame({ type: 'chunk', stream, data }, sandbox)
-    })
+    }, sandbox)
     const scriptOk = result.code === 0
     const tools = await readToolLogWithRetry(toolLogPath)
     try { fs.unlinkSync(toolLogPath) } catch { }
