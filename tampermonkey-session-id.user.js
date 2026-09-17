@@ -188,20 +188,24 @@
     if (/\bif\s+\[\s/.test(head) || /\bfi\b/.test(head) || /\$\(/.test(head)) return 'bash'
     return null
   }
-  function scanNewBlocks() {
-    const out = []
+    function extractLatestScript() {
     const pres = document.querySelectorAll('pre')
+    let last = null
+    let lastMarked = null
     for (const pre of pres) {
       const text = (pre.textContent || '').replace(/^\n+|\n+$/g, '')
       if (!text) continue
       if (!text.includes('\n') && text.length < 120) continue
       const lang = guessLangFromDom(pre) || guessLangFromContent(text) || null
       if (lang !== 'cjs' && lang !== 'bash') continue
-      const hash = hash32(text)
-      if (seenHashes.has(hash)) continue
-      out.push({ lang, code: text, hash })
+      const item = { lang, code: text, hash: hash32(text) }
+      last = item
+      const marked = /^#!\s*\/usr\/bin\/env\s+(node|bash)\b/m.test(text)
+        || /^\s*\/\/\s*@desc\s*:/m.test(text)
+        || /^\s*#\s*@desc\s*:/m.test(text)
+      if (marked) lastMarked = item
     }
-    return out
+    return lastMarked || last
   }
 
   /** 找严格 DONE：独立元素文本 trim 后恰为 DONE（防止「this task is done」误判） */
@@ -227,16 +231,14 @@
   }
 
   let replyDebounce = null
-  function classifyAndPost() {
+    function classifyAndPost() {
     if (replyDebounce) clearTimeout(replyDebounce)
     replyDebounce = setTimeout(() => {
       replyDebounce = null
       try {
         if (!window.opener || window.opener.closed) return
-        const fresh = scanNewBlocks()
-        const doneMarker = findNewDone()
-        if (fresh.length === 1) {
-          const s = fresh[0]
+        const s = extractLatestScript()
+        if (s && !seenHashes.has(s.hash)) {
           seenHashes.add(s.hash)
           window.opener.postMessage({
             type: 'ai-runner:reply', kind: 'script',
@@ -245,14 +247,7 @@
           lastBodySig = bodySignature()
           return
         }
-        if (fresh.length > 1) {
-          fresh.forEach(s => seenHashes.add(s.hash))
-          window.opener.postMessage({
-            type: 'ai-runner:reply', kind: 'multi', count: fresh.length, site: location.origin,
-          }, '*')
-          lastBodySig = bodySignature()
-          return
-        }
+        const doneMarker = findNewDone()
         if (doneMarker) {
           seenDoneMarkers.add(doneMarker)
           window.opener.postMessage({
@@ -261,7 +256,6 @@
           lastBodySig = bodySignature()
           return
         }
-        // 纯文本：正文签名变化才回传（避免 token 浮层等噪声反复触发）
         const sig = bodySignature()
         if (sig !== lastBodySig) {
           lastBodySig = sig
