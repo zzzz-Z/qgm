@@ -109,6 +109,10 @@ export function getActiveWinSid(): string {
 export function setActiveWinSid(sid: string): void {
   activeWinSid.value = sid
 }
+// [multi-loop-step7-url] 删除窗口表条目（供 App.vue 删会话时同步清理）
+export function removeWindowBySid(sid: string): void {
+  windowTable.delete(sid)
+}
 export function getWindowBySid(sid: string): Window | null {
   const entry = windowTable.get(sid)
   if (!entry) return null
@@ -284,5 +288,6 @@ export function useDeepseekUrl() {
     sendStopTo,
     sendRotateTo,
     sendNewSessionTo,
+    removeWindowBySid,
   }
 }

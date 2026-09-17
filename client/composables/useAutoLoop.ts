@@ -223,6 +223,17 @@ export function createLoopInstanceFor(sid: string): LoopInstance {
   return inst
 }
 // [multi-loop-step6-auto] 当前活跃循环数量（依赖版本号，能响应新实例加入）
+// [multi-loop-step7-auto] 删除循环实例：清定时器、注销 registry、从表移除
+export function removeLoopInstance(sid: string): void {
+  const inst = loopInstances.get(sid)
+  if (!inst) return
+  if (inst.roundTimer) { clearTimeout(inst.roundTimer); inst.roundTimer = null }
+  if (inst.waitingTicker) { clearInterval(inst.waitingTicker); inst.waitingTicker = null }
+  if (inst.handoffTimer) { clearTimeout(inst.handoffTimer); inst.handoffTimer = null }
+  if (inst.id.value) loopRegistry.unregister(inst.id.value)
+  loopInstances.delete(sid)
+  bumpLoopInstancesVersion()
+}
 export const activeLoopsCount = computed(() => {
   void loopInstancesVersion.value
   let n = 0
@@ -1174,6 +1185,6 @@ export function useAutoLoop() {
     startLoop, startTakeover, killCurrent, stopAndRollback, requestPause,
     onScriptArrival, onNonScriptReply, setTokenEstimate, currentLoopContext,
     startHandoff, onSummary, onNewSessionCreated, autoRotateSession, resumeLoop,
-    getLoopBySessionId, listActiveLoops, setActiveLoopSessionId, createLoopInstanceFor, activeLoopsCount,
+    getLoopBySessionId, listActiveLoops, setActiveLoopSessionId, createLoopInstanceFor, activeLoopsCount, removeLoopInstance,
   }
 }

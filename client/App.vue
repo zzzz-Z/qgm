@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ScriptPanel from './components/ScriptPanel.vue'
 import GeneratePanel from './components/GeneratePanel.vue'
 import TracePanel from './components/TracePanel.vue'
-import { DEFAULT_URL, MODELS, getActiveWin, getWindowBySid, listWindows, openDeepseek, setActiveWinSid, useDeepseekUrl } from './composables/useDeepseekUrl'
+import { DEFAULT_URL, MODELS, getActiveWin, getWindowBySid, listWindows, openDeepseek, removeWindowBySid, setActiveWinSid, useDeepseekUrl } from './composables/useDeepseekUrl'
 import { useScriptInbox } from './composables/useScriptInbox'
 import {
     currentLoopContext,
@@ -13,6 +13,7 @@ import {
     onScriptArrival,
     setActiveLoopSessionId,
     createLoopInstanceFor,
+    removeLoopInstance,
     setActiveSessionIdGetter,
     setTokenEstimate,
     onSummary,
@@ -75,6 +76,9 @@ function removeSessionFromHistory(id: string) {
   sessionHistory.value = sessionHistory.value.filter(s => s.id !== id)
   saveHistory(sessionHistory.value)
   if (activeSessionId.value === id) activeSessionId.value = ''
+// [multi-loop-step7-app] 同步清理循环实例与窗口表
+  removeLoopInstance(id)
+  removeWindowBySid(id)
 }
 const TOKEN_LIMIT = 50000
 function tokenPct(n?: number): number {
