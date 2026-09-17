@@ -6,21 +6,26 @@ test.describe('AI Runner', () => {
     await page.waitForSelector('.hdr', { timeout: 10_000 })
   })
 
+  const tabButtons = (page: import('@playwright/test').Page) =>
+    page.locator('.tabs button:not(.tabs-burger)')
+
   test('header 显示核心控件', async ({ page }) => {
     await expect(page.locator('h1')).toContainText('AI Runner')
-    await expect(page.locator('.clean-toggle')).toHaveCount(2)
+    await expect(page.locator('.settings-toggle')).toBeVisible()
     await expect(page.locator('.ds-url')).toBeVisible()
   })
 
-  test('两个标签可切换', async ({ page }) => {
-    const tabs = page.locator('.tabs button')
-    await expect(tabs).toHaveCount(2)
+  test('三个标签可切换', async ({ page }) => {
+    const tabs = tabButtons(page)
+    await expect(tabs).toHaveCount(3)
     await tabs.nth(1).click()
-    await expect(page.locator('.smart-editor')).toBeVisible()
+    await expect(page.locator('.editor-content')).toBeVisible()
+    await tabs.nth(2).click()
+    await expect(page.locator('.trace-panel')).toHaveCount(1)
   })
 
   test('生成问题：@ 呼出检索面板', async ({ page }) => {
-    await page.locator('.tabs button').nth(1).click()
+    await tabButtons(page).nth(1).click()
     const editor = page.locator('.editor-content')
     await editor.click()
     await page.keyboard.type('@')
@@ -30,12 +35,12 @@ test.describe('AI Runner', () => {
   })
 
   test('生成问题：拖文件到输入区', async ({ page }) => {
-    await page.locator('.tabs button').nth(1).click()
+    await tabButtons(page).nth(1).click()
     await page.waitForSelector('.tree-head .title')
 
-    // 展开 plugins 目录（若未展开）
-    const pluginRow = page.locator('.row.dir', { hasText: 'plugins' }).first()
-    if (await pluginRow.count()) await pluginRow.click()
+    // 展开 src 目录（若未展开）
+    const srcRow = page.locator('.row.dir', { hasText: 'src' }).first()
+    if (await srcRow.count()) await srcRow.click()
 
     // 找第一个文件行
     const fileRow = page.locator('.row.file').first()
@@ -58,10 +63,14 @@ test.describe('AI Runner', () => {
   })
 
   test('claim mismatch：声明但未改动入 prompt', async ({ page }) => {
-    await page.locator('.tabs button').nth(0).click()
-    const textarea = page.locator('.editor-textarea')
-    await textarea.click()
-    await textarea.fill('// @changes: src/never-written.ts\nconsole.log("noop")')
+    await tabButtons(page).nth(0).click()
+    const editor = page.locator('.cm-content')
+    await editor.click()
+    await page.keyboard.type('#!/usr/bin/env node', { delay: 5 })
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('// @changes: src/never-written.ts', { delay: 5 })
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('console.log("noop")', { delay: 5 })
     await page.locator('.primary-btn.run').click()
     await expect(page.locator('.exit-badge.ok')).toBeVisible({ timeout: 15_000 })
     await page.evaluate(() => {
@@ -82,10 +91,12 @@ test.describe('AI Runner', () => {
   })
 
   test('运行脚本：终端有输出', async ({ page }) => {
-    await page.locator('.tabs button').nth(0).click()
-    const textarea = page.locator('.editor-textarea')
-    await textarea.click()
-    await textarea.fill('console.log("hello from e2e")')
+    await tabButtons(page).nth(0).click()
+    const editor = page.locator('.cm-content')
+    await editor.click()
+    await page.keyboard.type('#!/usr/bin/env node', { delay: 5 })
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('console.log("hello from e2e")', { delay: 5 })
     await page.locator('.primary-btn.run').click()
 
     // 等终端出现 hello

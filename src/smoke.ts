@@ -1,5 +1,15 @@
-import { chromium } from 'playwright'
 import type { Browser } from 'playwright'
+
+// playwright 为可选依赖：仅 smoke 巡检时动态加载，未安装时返回明确错误而非插件启动失败
+type PlaywrightModule = typeof import('playwright')
+let pwModule: PlaywrightModule | null | undefined
+async function loadPlaywright(): Promise<PlaywrightModule | null> {
+  if (pwModule === undefined) {
+    try { pwModule = await import('playwright') }
+    catch { pwModule = null }
+  }
+  return pwModule
+}
 
 export interface SmokePageResult {
   url: string
@@ -17,7 +27,9 @@ let cachedBrowser: Browser | null = null
 
 async function getBrowser(): Promise<Browser> {
   if (cachedBrowser && cachedBrowser.isConnected()) return cachedBrowser
-  cachedBrowser = await chromium.launch({ headless: true })
+  const pw = await loadPlaywright()
+  if (!pw) throw new Error('未安装 playwright（可选依赖），跳过 smoke 巡检')
+  cachedBrowser = await pw.chromium.launch({ headless: true })
   return cachedBrowser
 }
 

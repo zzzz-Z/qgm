@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { defineOptions } from 'vue'
-defineOptions({ name: 'DiffViewer' })
 import { computed } from 'vue'
 import * as hljsNs from 'highlight.js/lib/core'
-const hljs: any = (hljsNs as any).default ?? hljsNs
 import * as javascriptNs from 'highlight.js/lib/languages/javascript'
-const javascript: any = (javascriptNs as any).default ?? javascriptNs
 import * as typescriptNs from 'highlight.js/lib/languages/typescript'
+defineOptions({ name: 'DiffViewer' })
+const hljs: any = (hljsNs as any).default ?? hljsNs
+const javascript: any = (javascriptNs as any).default ?? javascriptNs
 const typescript: any = (typescriptNs as any).default ?? typescriptNs
 
 hljs.registerLanguage('javascript', javascript)
@@ -21,7 +20,7 @@ const props = defineProps<{
 
 interface DiffLine {
   type: 'same' | 'add' | 'del'
-  text: string
+  text: string 
   oldLine?: number
   newLine?: number
 }

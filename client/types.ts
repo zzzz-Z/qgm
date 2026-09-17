@@ -39,6 +39,7 @@ export interface RunResponse {
   ok: boolean
   error?: string
   scriptDesc?: string
+  scriptWhy?: string
   stdout: string
   stderr: string
   changes: Change[]

@@ -1,2 +1,4 @@
 allowBuilds:
-  vue-demi: true
+  vue-demi: set this to true or false
+onlyBuiltDependencies:
+  - vue-demi

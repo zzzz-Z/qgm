@@ -216,7 +216,7 @@ client/                       # 工作台 SPA（Vue 3 + CodeMirror 6 + reka-ui�
 ├── components/               # ScriptPanel / GeneratePanel / TracePanel /
 │                             # DiffViewer / FileTree / FileList / LintBlock /
 │                             # SessionTokenMonitor / ToastHost / TooltipHost
-├── composables/              # useRunner / useScriptExecutor / useSessionManager /
+├── composables/              # useRunner（单例）/ useSessionManager /
 │                             # useFileTree / useCodeCleaner / useDeepseekUrl /
 │                             # useTraceLog / useToast / useTooltip
 ├── utils/                    # contextBuilder（prompt 组装）/ tokenEstimator
@@ -237,13 +237,14 @@ tampermonkey-session-id.user.js  # 可选：AI 站点会话 ID / token 回传油
 | --- | --- |
 | 写盘安全 | 沙盒内全部 fs 写删走内存 overlay，exit 0 才 flush；失败零改动 |
 | 路径穿越 | 所有文件 API `path.resolve` + `realpathSync` 双重校验，越界 / 软链接逃逸拒绝 |
-| 资源限制 | 子进程 512MB 堆上限、60s 超时；eslint 60s、tsc 120s、单测 30s |
-| 回滚保护 | 落盘前保存 `.before` 快照，可单文件 / 整次回滚；可选 git 运行前自动 commit |
+| CSRF 防护 | POST 强制 `Content-Type: application/json`（415 拒绝跨域简单请求）；Origin 与 Host 同源校验（403）；非 loopback Host 禁用 `/exec`、`/run`（`allowRemote: true` 可放开） |
+| 资源限制 | 子进程 512MB 堆上限、60s 超时（SIGTERM→5s→SIGKILL 升级）；eslint 60s、tsc 120s、单测 30s |
+| 回滚保护 | 落盘前保存 `.before` 快照，可单文件 / 整次回滚；可选 git 运行前 `stash create` 保存工作区（不动 HEAD/工作区） |
 | 请求限制 | HTTP body 上限 5MB；读文件单文件 ≤ 200KB，含 NUL 字节判为二进制拒绝 |
 | 快照范围 | 跳过 `node_modules` / `.git` / `dist` / `.vite` 等、点开头目录、>500KB 文件与二进制后缀 |
 | API key | 推荐走服务端环境变量 / 本地 config，`/ask` 在 Node 侧代理，不暴露给浏览器 |
 | shell 沙盒外 | `!命令` 与首行非 `#!/usr/bin/env node` 的脚本走 shell，**不经过 overlay、无快照、无回滚**，直接对真实磁盘操作 |
-| fd 级写盘 | `openSync`（写模式）/ `writeSync` / `closeSync` / `fstatSync` / `fsyncSync` 已重定向到 overlay；`createWriteStream` 与底层 libuv 写仍不拦截 |
+| fd 级写盘 | `openSync`（写模式）/ `writeSync` / `writevSync` / `closeSync` / `fstatSync` / `fsyncSync` / `ftruncateSync` 全部走虚拟 fd overlay；`createWriteStream` 也拦截（finish 后汇入 overlay）；`cpSync`/`cp` 递归拦截；callback 风格 API + `fs.promises.open` FileHandle-like 均覆盖；`rmSync` 记录 `dir` 标志用于整目录回滚 |
 
 ---
 
@@ -251,12 +252,11 @@ tampermonkey-session-id.user.js  # 可选：AI 站点会话 ID / token 回传油
 
 - 沙盒**无网络隔离**：脚本能访问外网与任意 Node API，定位是本机可信工具，不是多租户沙箱
 - 快照不覆盖二进制文件与 >500KB 文本
-- 无登录 / 鉴权机制，假设只绑定本机 dev server 使用
+- 无登录 / 鉴权机制，假设只绑定本机 dev server 使用（已加 CSRF 防护与 loopback 限制，但非完整鉴权）
 - LCS diff 在超大文件（N×M > 4M 格）退化为全删全增展示
 - Git 保护默认关闭，需界面手动勾选
 - `@` 提及只匹配文件路径，不做符号检索
 - `!命令` 与 shell 分流脚本在沙盒外执行，无 overlay / 快照 / 回滚保护
-- `fs.createWriteStream` / 底层 fd 流写不拦截；仅同步 `openSync`（写模式）+ `writeSync` 走 overlay
 - `enforceBudget` 目前按字符数（200KB）判断，非 token 数；中文场景实际 token 远超预算口径
 
 ---
@@ -271,17 +271,18 @@ pnpm typecheck    # 仅类型检查
 pnpm web:dev      # 启动 client 自托管 dev（http://localhost:5174/__ai/，插件 root 指向包根）
 pnpm web:build    # 构建 client
 
-pnpm test:unit    # node:test：codeCleaner / lcsDiff
+pnpm test:unit    # node:test：codeCleaner / lcsDiff / interceptor 拦截器沙盒
 pnpm test:e2e     # Playwright e2e（需先起 dev server）
+pnpm lint         # ESLint（flat config）
 pnpm run-all      # 全量回归（air-run-all）
 pnpm recover      # 快照恢复 picker（air-recover）
 ```
 
-环境要求：Node.js ≥ 18，Vite ≥ 5（peerDependency）。
+环境要求：Node.js ≥ 20.19.0（`--experimental-strip-types`），Vite ≥ 5（peerDependency）。
 
 ### 扩展指引
 
-- **加 HTTP 端点**：在 [src/index.ts](./src/index.ts) 的 `handle()` 里加分支；常量 / 类型放 [src/config.ts](./src/config.ts)
+- **加 HTTP 端点**：在 [src/index.ts](./src/index.ts) 的 `handle()` 里加分支；文件树 / 检索类路由放 [src/files-routes.ts](./src/files-routes.ts)；共享 HTTP 工具在 [src/http.ts](./src/http.ts)
 - **加面板**：新建 `client/components/XxxPanel.vue`，在 [client/App.vue](./client/App.vue) 的 `Tab` 联合类型与 `<nav class="tabs">` 中注册
 - **加 skill**：丢一个 `.md` 到 `skills/`（内置）或项目的 `.ai-runner/skills/`（用户级），刷新即加载
 

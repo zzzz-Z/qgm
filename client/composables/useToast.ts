@@ -4,6 +4,9 @@ export type ToastType = 'info' | 'success' | 'warn' | 'error'
 
 export interface ToastItem {
   id: number
+  /** 稳定 key：相同 key 的 toast 不新增，原地更新内容并续期计时器
+   *  用于流式输出期间频繁触发的提示（如 token-estimate），防 MutationObserver 风暴 */
+  key?: string
   msg: string
   type: ToastType
   icon: string
@@ -18,21 +21,56 @@ const ICONS: Record<ToastType, string> = {
 
 const toasts = ref<ToastItem[]>([])
 let toastSeq = 0
+/** 最多同时可见条数；超出时淘汰最旧 */
+const MAX_VISIBLE = 3
+const timers = new Map<number, ReturnType<typeof setTimeout>>()
 
-export function toast(msg: string, type: ToastType = 'info', duration = 3200) {
+function clearTimer(id: number) {
+  const t = timers.get(id)
+  if (t) { clearTimeout(t); timers.delete(id) }
+}
+
+function evict() {
+  while (toasts.value.length > MAX_VISIBLE) {
+    const oldest = toasts.value[0]
+    if (oldest) {
+      clearTimer(oldest.id)
+      toasts.value.shift()
+    } else break
+  }
+}
+
+export function toast(msg: string, type: ToastType = 'info', duration = 3200, opts: { key?: string } = {}) {
+  const key = opts.key
+  if (key) {
+    const idx = toasts.value.findIndex(t => t.key === key)
+    if (idx >= 0) {
+      // 原地更新 + 续期
+      const existing = toasts.value[idx]
+      toasts.value[idx] = { ...existing, msg, type, icon: ICONS[type] }
+      clearTimer(existing.id)
+      timers.set(existing.id, setTimeout(() => {
+        const i = toasts.value.findIndex(t => t.id === existing.id)
+        if (i >= 0) toasts.value.splice(i, 1)
+        timers.delete(existing.id)
+      }, duration))
+      return
+    }
+  }
   const id = ++toastSeq
-  toasts.value.push({ id, msg, type, icon: ICONS[type] })
-  // 上限 8 条，快速连续触发时淘汰最旧的，防止定时器/内存无限增长
-  if (toasts.value.length > 8) toasts.value.shift()
-  setTimeout(() => {
+  toasts.value.push({ id, key, msg, type, icon: ICONS[type] })
+  evict()
+  timers.set(id, setTimeout(() => {
     const i = toasts.value.findIndex(t => t.id === id)
     if (i >= 0) toasts.value.splice(i, 1)
-  }, duration)
+    timers.delete(id)
+  }, duration))
 }
 
 export function dismissToast(id: number) {
   const i = toasts.value.findIndex(t => t.id === id)
   if (i >= 0) toasts.value.splice(i, 1)
+  clearTimer(id)
 }
 
 export interface ConfirmOptions {

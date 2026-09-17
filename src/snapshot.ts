@@ -9,28 +9,105 @@ export function isExcluded(rel: string): boolean {
   return parts.some(seg => EXCLUDE_DIRS.has(seg))
 }
 
-export function snapshot(): Map<string, string> {
-  const map = new Map<string, string>()
+const MAX_SNAPSHOT_SIZE = 500_000
+
+export interface FileMeta {
+  size: number
+  mtimeMs: number
+  ino: number
+}
+
+export interface SnapshotData {
+  contents: Map<string, string>
+  meta: Map<string, FileMeta>
+}
+
+function acceptSnapshotFile(name: string, stat: fs.Stats): boolean {
+  if (!stat.isFile()) return false
+  if (stat.size > MAX_SNAPSHOT_SIZE) return false
+  if (BINARY_EXT.has(path.extname(name).toLowerCase())) return false
+  return true
+}
+
+/** 仅扫描元数据（不读内容），用于增量比对定位候选变更 */
+export function scanMeta(): Map<string, FileMeta> {
+  const meta = new Map<string, FileMeta>()
   const walk = (dir: string) => {
-    let entries: string[]
-    try { entries = fs.readdirSync(dir) } catch { return }
-    for (const name of entries) {
-      if (name.startsWith('.')) continue
-      const full = path.join(dir, name)
+    let entries: fs.Dirent[]
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const ent of entries) {
+      if (ent.name.startsWith('.')) continue
+      const full = path.join(dir, ent.name)
       const rel = path.relative(ROOT, full)
       if (isExcluded(rel)) continue
       let stat: fs.Stats
       try { stat = fs.statSync(full) } catch { continue }
       if (stat.isDirectory()) { walk(full) }
-      else if (stat.isFile()) {
-        if (stat.size > 500_000) continue
-        if (BINARY_EXT.has(path.extname(name).toLowerCase())) continue
-        try { map.set(rel, fs.readFileSync(full, 'utf8')) } catch { /* ignore */ }
+      else if (acceptSnapshotFile(ent.name, stat)) {
+        meta.set(rel, { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino })
       }
     }
   }
   walk(ROOT)
-  return map
+  return meta
+}
+
+/** 全量快照：内容 + 元数据（运行前调用一次，供备份与比对基准） */
+export function snapshot(): SnapshotData {
+  const contents = new Map<string, string>()
+  const meta = new Map<string, FileMeta>()
+  const walk = (dir: string) => {
+    let entries: fs.Dirent[]
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const ent of entries) {
+      if (ent.name.startsWith('.')) continue
+      const full = path.join(dir, ent.name)
+      const rel = path.relative(ROOT, full)
+      if (isExcluded(rel)) continue
+      let stat: fs.Stats
+      try { stat = fs.statSync(full) } catch { continue }
+      if (stat.isDirectory()) { walk(full) }
+      else if (acceptSnapshotFile(ent.name, stat)) {
+        meta.set(rel, { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino })
+        try { contents.set(rel, fs.readFileSync(full, 'utf8')) } catch { /* ignore */ }
+      }
+    }
+  }
+  walk(ROOT)
+  return { contents, meta }
+}
+
+/**
+ * 增量 diff：元数据（size/mtime/ino）未变的文件直接跳过，
+ * 仅对疑似变更的文件读内容做精确比较（mtime 被 touch 但内容相同不算变更）。
+ */
+export function diffMeta(
+  before: Map<string, string>,
+  beforeMeta: Map<string, FileMeta>,
+  afterMeta: Map<string, FileMeta>,
+): Change[] {
+  const out: Change[] = []
+  const all = new Set<string>([...beforeMeta.keys(), ...afterMeta.keys()])
+  for (const p of all) {
+    const bm = beforeMeta.get(p)
+    const am = afterMeta.get(p)
+    if (!bm && am) {
+      let after = ''
+      try { after = fs.readFileSync(path.join(ROOT, p), 'utf8') } catch { /* ignore */ }
+      out.push({ path: p, type: 'added', afterLines: countLines(after) })
+    }
+    else if (bm && !am) {
+      out.push({ path: p, type: 'deleted' })
+    }
+    else if (bm && am && (bm.size !== am.size || bm.mtimeMs !== am.mtimeMs || bm.ino !== am.ino)) {
+      let after = ''
+      try { after = fs.readFileSync(path.join(ROOT, p), 'utf8') } catch { /* ignore */ }
+      if (before.get(p) !== after) {
+        out.push({ path: p, type: 'modified', afterLines: countLines(after) })
+      }
+    }
+  }
+  return out.sort((x, y) => x.path.localeCompare(y.path))
 }
 
 function countLines(s: string): number {
@@ -40,19 +117,6 @@ function countLines(s: string): number {
   }
   return n
 }
-export function diff(before: Map<string, string>, after: Map<string, string>): Change[] {
-  const out: Change[] = []
-  const all = new Set<string>([...before.keys(), ...after.keys()])
-  for (const p of all) {
-    const b = before.get(p)
-    const a = after.get(p)
-    if (b === undefined && a !== undefined) out.push({ path: p, type: 'added', afterLines: countLines(a) })
-    else if (b !== undefined && a === undefined) out.push({ path: p, type: 'deleted' })
-    else if (b !== a) out.push({ path: p, type: 'modified', afterLines: countLines(a as string) })
-  }
-  return out.sort((x, y) => x.path.localeCompare(y.path))
-}
-
 const LOG_KEEP_DAYS = 30
 function gcLogs() {
   try {

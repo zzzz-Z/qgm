@@ -5,20 +5,79 @@ import { useTraceLog } from '../composables/useTraceLog'
 
 const { entries, removeTrace, clearTraces, MAX_ENTRIES } = useTraceLog()
 const expanded = ref<Set<number>>(new Set())
-const filter = ref<'all' | 'ask' | 'run'>('all')
+/** 折叠的循环分组（key = loopId） */
+const collapsedLoops = ref<Set<string>>(new Set())
+const filter = ref<'all' | 'ask' | 'run' | 'loop'>('all')
 
 const filtered = computed(() => {
   if (filter.value === 'all') return entries.value
+  if (filter.value === 'loop') {
+    return entries.value.filter(e => e.kind === 'loop' || e.kind === 'script' || Boolean(e.payload.loopId))
+  }
   return entries.value.filter(e => e.kind === filter.value)
 })
 
+interface TraceGroup {
+  key: string
+  isLoop: boolean
+  loopId?: string
+  goal?: string
+  maxRound: number
+  items: typeof entries.value
+}
+
+/**
+ * 按 loopId 聚合（v6 §3.2 LoopEntry）：带 loopId 的记录归入循环折叠组，其余独立成组。
+ * 顺序遵循 filtered（新→旧），循环组在其最新一条记录的位置出现。
+ */
+const groups = computed<TraceGroup[]>(() => {
+  const out: TraceGroup[] = []
+  const loopIndex = new Map<string, TraceGroup>()
+  for (const e of filtered.value) {
+    const lid = e.payload.loopId
+    if (!lid) {
+      out.push({ key: `s_${e.id}`, isLoop: false, items: [e] })
+      continue
+    }
+    let g = loopIndex.get(lid)
+    if (!g) {
+      g = { key: `l_${lid}`, isLoop: true, loopId: lid, maxRound: 0, items: [] }
+      loopIndex.set(lid, g)
+      out.push(g)
+    }
+    g.items.push(e)
+    g.maxRound = Math.max(g.maxRound, Number(e.payload.loopRound) || 0)
+    // 循环开始记录（kind=loop 且 round=0）的 prompt 即目标
+    if (!g.goal && e.kind === 'loop' && e.payload.prompt) g.goal = e.payload.prompt
+  }
+  return out
+})
+
+function toggleLoop(loopId: string) {
+  const s = new Set(collapsedLoops.value)
+  if (s.has(loopId)) s.delete(loopId)
+  else s.add(loopId)
+  collapsedLoops.value = s
+}
+
+function kindLabel(kind: string): string {
+  if (kind === 'ask') return 'ASK'
+  if (kind === 'run') return 'RUN'
+  if (kind === 'script') return '📥'
+  if (kind === 'loop') return '⟳'
+  return kind.toUpperCase()
+}
+
 const counts = computed(() => {
-  let ask = 0; let run = 0
+  let ask = 0; let run = 0; let loopCount = 0
+  const loopIds = new Set<string>()
   for (const e of entries.value) {
     if (e.kind === 'ask') ask++
     else if (e.kind === 'run') run++
+    if (e.payload.loopId) loopIds.add(e.payload.loopId)
   }
-  return { ask, run, total: entries.value.length }
+  loopCount = loopIds.size
+  return { ask, run, loopCount, total: entries.value.length }
 })
 
 function toggle(id: number) {
@@ -54,6 +113,7 @@ function confirmClear() {
         <span class="trace-breakdown">
           <span class="t-pill ask">问 AI {{ counts.ask }}</span>
           <span class="t-pill run">运行 {{ counts.run }}</span>
+          <span class="t-pill loop">循环 {{ counts.loopCount }}</span>
         </span>
       </div>
       <div class="trace-actions">
@@ -66,6 +126,9 @@ function confirmClear() {
           </button>
           <button v-tooltip="'只看「运行脚本」记录'" :class="{ active: filter === 'run' }" @click="filter = 'run'">
             运行脚本
+          </button>
+          <button v-tooltip="'只看自动化循环的决策链记录'" :class="{ active: filter === 'loop' }" @click="filter = 'loop'">
+            循环
           </button>
         </div>
         <button v-tooltip="entries.length ? `清空全部 ${entries.length} 条记录` : '没有可清空的记录'" class="trace-clear" :disabled="!entries.length" @click="confirmClear">
@@ -85,9 +148,19 @@ function confirmClear() {
           运行脚本或复制 prompt 后自动记录
         </div>
       </div>
-      <div v-for="e in filtered" :key="e.id" class="trace-card" :class="[e.kind, { err: e.kind === 'run' && e.payload.ok === false }]">
+      <div v-for="g in groups" :key="g.key" class="trace-group">
+        <!-- 循环分组头（v6 §3.2 LoopEntry） -->
+        <div v-if="g.isLoop" class="loop-group-head" @click="g.loopId && toggleLoop(g.loopId)">
+          <span class="loop-group-caret" :class="{ open: g.loopId ? !collapsedLoops.has(g.loopId) : false }">▾</span>
+          <span class="loop-group-badge">⟳ 循环</span>
+          <span class="loop-group-goal" :title="g.goal">{{ g.goal || g.loopId }}</span>
+          <span class="loop-group-meta">{{ g.items.length }} 条决策 · {{ g.maxRound }} 轮</span>
+        </div>
+        <template v-if="!g.isLoop || (g.loopId && !collapsedLoops.has(g.loopId))">
+      <div v-for="e in g.items" :key="e.id" class="trace-card" :class="[e.kind, { err: e.kind === 'run' && e.payload.ok === false }]">
         <div class="trace-head" @click="toggle(e.id)">
-          <span class="trace-badge" :class="e.kind">{{ e.kind === 'ask' ? 'ASK' : 'RUN' }}</span>
+          <span class="trace-badge" :class="e.kind">{{ kindLabel(e.kind) }}</span>
+          <span v-if="e.payload.loopRound" class="round-pill">R{{ e.payload.loopRound }}</span>
           <span class="trace-summary">{{ e.summary }}</span>
           <span class="trace-time">{{ fmtTime(e.ts) }}</span>
           <button v-tooltip="'删除这条记录'" class="trace-del" @click.stop="removeTrace(e.id)">
@@ -162,6 +235,8 @@ function confirmClear() {
           </template>
         </div>
       </div>
+        </template>
+      </div>
     </div>
   </div>
 </template>
@@ -219,6 +294,10 @@ function confirmClear() {
 .t-pill.run {
   background: var(--success-bg);
   color: var(--success);
+}
+.t-pill.loop {
+  background: var(--warning-bg, rgba(230, 162, 60, 0.12));
+  color: var(--warning, #e6a23c);
 }
 .trace-actions {
   display: flex;
@@ -315,6 +394,84 @@ function confirmClear() {
 }
 .trace-card.run.err {
   border-left-color: var(--danger);
+}
+.trace-card.script {
+  border-left: 3px solid var(--primary);
+}
+.trace-card.loop {
+  border-left: 3px solid var(--warning, #e6a23c);
+}
+.trace-badge.script {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+.trace-badge.loop {
+  background: var(--warning-bg, rgba(230, 162, 60, 0.12));
+  color: var(--warning, #e6a23c);
+}
+.round-pill {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.trace-group + .trace-group {
+  margin-top: 10px;
+}
+.loop-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  cursor: pointer;
+  user-select: none;
+}
+.loop-group-head:hover {
+  border-color: var(--warning, #e6a23c);
+}
+.loop-group-caret {
+  font-size: 10px;
+  color: var(--text-3);
+  transition: transform 0.15s;
+}
+.loop-group-caret.open {
+  transform: rotate(0deg);
+}
+.loop-group-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--warning-bg, rgba(230, 162, 60, 0.12));
+  color: var(--warning, #e6a23c);
+}
+.loop-group-goal {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.loop-group-meta {
+  flex-shrink: 0;
+  font: 10px var(--mono);
+  color: var(--text-3);
+}
+.loop-group-head + template + .trace-card,
+.trace-group .trace-card {
+  margin-top: 6px;
 }
 .trace-head {
   display: flex;

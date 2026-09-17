@@ -1,9 +1,10 @@
 node_modules/
 dist/
-.ai/runs/
-.ai/logs/
-.ai/tmp/
-.ai/backup/
-.ai/scripts/
+.ai-runner/runs/
+.ai-runner/logs/
+.ai-runner/tmp/
+.ai-runner/backup/
+.ai-runner/scripts/
+.ai-runner/config.json
 .DS_Store
 *.log

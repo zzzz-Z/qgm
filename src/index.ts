@@ -10,7 +10,7 @@ import { diffMeta, ensureDirs, gcSnapshots, readManifest, runDir, saveSnapshot, 
 import { buildLauncher } from './launcher.js'
 import { closeBrowser, runSmoke } from './smoke.js'
 import type { SmokeResult } from './smoke.js'
-import { gitCommitAfter, gitPreExecCheck, gitSnapshot } from './git.js'
+import { gitCommitAfter, gitCommitAll, gitHead, gitPreExecCheck, gitResetHard, gitSnapshot } from './git.js'
 import { detectPackageManager, runProcess } from './proc.js'
 import { BASH_TIMEOUT_MS, buildEnvWhitelist, checkBashBlacklist } from './bash-guard.js'
 import { saveIndex, scanIndex } from './index-index.js'
@@ -453,6 +453,28 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     write({ stream: 'exit', code: r.code })
     res.end()
     return
+  }
+
+  // GET /git/head — 循环开始时记录回滚点（v6 §6.10）
+  if (req.method === 'GET' && pathname === '/git/head') {
+    const head = await gitHead()
+    return sendJSON(res, { ok: Boolean(head), head: head || '' })
+  }
+
+  // POST /git/commit-loop — 循环结束一次性提交（v6 §6.10）
+  if (req.method === 'POST' && pathname === '/git/commit-loop') {
+    const body = parseJSON<{ message?: string }>(await readBody(req))
+    const message = String(body?.message || 'ai-runner: loop commit').slice(0, 200)
+    const r = await gitCommitAll(message)
+    return sendJSON(res, r, r.ok ? 200 : 400)
+  }
+
+  // POST /git/reset — 用户急停回滚专用通道（v6 §6.6 Ctrl+Esc），不走 /exec 黑名单
+  if (req.method === 'POST' && pathname === '/git/reset') {
+    const body = parseJSON<{ ref?: string }>(await readBody(req))
+    const ref = String(body?.ref || 'HEAD').slice(0, 64)
+    const r = await gitResetHard(ref)
+    return sendJSON(res, r, r.ok ? 200 : 400)
   }
 
   // POST /run

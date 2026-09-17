@@ -3,7 +3,7 @@
 const { spawnSync } = require('node:child_process')
 
 const ROOT = process.cwd()
-const BASE_URL = process.env.AI_RUNNER_BASE_URL || 'http://localhost:5173'
+const BASE_URL = process.env.AI_RUNNER_BASE_URL || 'http://localhost:5174'
 const TTY = Boolean(process.stdout.isTTY)
 const c = (n, s) => (TTY ? `\x1B[${n}m${s}\x1B[0m` : s)
 const ok = s => console.log(c(32, '✓'), s)

@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 
-export type TraceKind = 'ask' | 'run'
+export type TraceKind = 'ask' | 'run' | 'script' | 'loop'
 
 export interface TraceEntry {
   id: number
@@ -17,6 +17,19 @@ export interface TraceEntry {
     exit?: number
     ok?: boolean
     changes?: Array<{ path: string, type: string }>
+    // —— v6 §3.2 决策链补充字段（P1 起记录，P2 useAutoLoop 消费）——
+    /** 解析自脚本首部 @desc */
+    desc?: string
+    /** 解析自脚本首部 @why */
+    why?: string
+    /** 脚本语言 cjs/bash（manual 模式 run 时填） */
+    lang?: 'cjs' | 'bash'
+    /** 脚本内容 hash 前 8 位（用于去重 / 跨轮对比） */
+    hash?: string
+    /** 归属循环 ID（P2 useAutoLoop 写入；P1 manual 模式留空） */
+    loopId?: string
+    /** 循环轮次（P2 useAutoLoop 写入；P1 manual 模式留空） */
+    loopRound?: number
   }
 }
 
