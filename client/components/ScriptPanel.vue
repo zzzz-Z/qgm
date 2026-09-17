@@ -2339,11 +2339,28 @@ function onHtmlDrop(e: DragEvent) {
 /* —— P2 自动化循环控制条 —— */
 .loop-bar {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  margin-bottom: 6px;
+  min-height: 0;
+  max-height: 44px;
+  overflow: hidden;
+}
+.loop-bar .loop-status {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.loop-bar .loop-goal-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.loop-bar .loop-actions {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 .loop-bar.is-waiting, .loop-bar.is-running { border-left: 3px solid #409eff; }
 .loop-bar.is-executing, .loop-bar.is-parsing, .loop-bar.is-feedback { border-left: 3px solid #e6a23c; }
