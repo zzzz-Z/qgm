@@ -1190,9 +1190,10 @@ watch(running, (v) => {
     } else {
       statusText.value = result.value.ok ? '✅ 成功' : '❌ 失败'
       statusClass.value = result.value.ok ? 'ok' : 'err'
-      // autoAskOnFailure: 失败时自动复制并发给 AI（主动停止除外）
+      // autoAskOnFailure: 失败时延迟 3s 再自动复制并发给 AI（主动停止除外）
+      const FAIL_ASK_DELAY_MS = 3000
       if (!result.value.ok && result.value.error !== '已取消') {
-        void copyOutput()
+        setTimeout(() => { void copyOutput() }, FAIL_ASK_DELAY_MS)
       }
       // 清空编辑器（成功 / 失败均清空）
       script.value = ''
