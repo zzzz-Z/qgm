@@ -31,6 +31,12 @@ export interface TraceEntry {
     summary?: string
     /** 循环轮次（P2 useAutoLoop 写入；P1 manual 模式留空） */
     loopRound?: number
+    text?: string
+    count?: number
+    tokenDelta?: number
+    reason?: string
+    lastExec?: unknown
+    [key: string]: unknown
   }
 }
 
