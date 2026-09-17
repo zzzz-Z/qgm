@@ -1313,6 +1313,7 @@ watch(running, (v) => {
       const whyMatch = scriptSnapshot.match(/^\s*(?:\/\/|#)\s*@why\s*:\s*(.+)$/m)
       const why = r.scriptWhy || (whyMatch ? whyMatch[1].trim() : '')
       const lang: 'js' | 'bash' = /^\s*#\s*(@desc|@why)/m.test(scriptSnapshot) ? 'bash' : 'js'
+      // 计算 hash（与油猴脚本一致：FNV-1a 8 hex）
       const hash = fnv1a8(scriptSnapshot)
       addTrace({
         kind: 'run',
