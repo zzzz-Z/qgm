@@ -75,17 +75,6 @@
               <span>{{ aiWaiting ? '等待回复…' : copied ? '已发送' : `发送给 AI` }}</span>
             </button>
             <button
-              v-tooltip="asking ? '正在请求 API' : '直接调用 API 询问（不打开网页）'"
-              class="term-btn ask"
-              :disabled="!result || asking"
-              @click="askApi"
-            >
-              <svg class="term-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-              <span>{{ asking ? '请求中…' : '问 API' }}</span>
-            </button>
-            <button
               v-tooltip="'打开「问 AI」面板（拖文件 + 写问题 → 拼 prompt）'"
               class="term-btn ask-panel"
               @click="emit('open-ask')"
@@ -191,21 +180,6 @@
                 <span class="label-text" :class="{ err: !result.tsc.ok }">tsc · 类型检查</span>
               </div>
               <pre class="term-content" :class="{ err: !result.tsc.ok }">{{ tscText }}</pre>
-            </div>
-            <div v-if="asking || askText || askError" class="term-section">
-              <div class="term-label">
-                <span class="prompt-char" :class="{ err: !!askError }">{{ askError ? '!' : '?' }}</span>
-                <span class="label-text" :class="{ err: !!askError }">ask deepseek · 回复</span>
-                <button
-                  v-if="askText && !asking"
-                  v-tooltip="'把 AI 回复（优先抽第一段代码块）填入脚本编辑器'"
-                  class="ghost-btn apply-ask"
-                  @click="applyAskToScript"
-                >
-                  应用到编辑器
-                </button>
-              </div>
-              <pre class="term-content" :class="{ err: !!askError }">{{ askError || askText || '…' }}</pre>
             </div>
           </section>
         </div>
@@ -482,9 +456,6 @@ async function runAndTakeover() {
 const mainRef = ref<HTMLElement | null>(null)
 
 const copied = ref(false)
-const asking = ref(false)
-const askText = ref('')
-const askError = ref('')
 const fileDragging = ref(false)
 const fileSuccess = ref(false)
 const statusText = ref('')
@@ -547,8 +518,8 @@ const previewAfter = ref<string>('')
 const runKbd = computed(() => /Mac|iPhone|iPad/i.test(navigator.platform) ? '⌘↵' : 'Ctrl↵')
 const hasStdout = computed(() => !!result.value?.stdout?.trim())
 const hasStderr = computed(() => !!result.value?.stderr?.trim())
-const showTerminalBody = computed(() => hasStdout.value || hasStderr.value || result.value?.lint?.ran || result.value?.test?.ran || (result.value?.tools?.length || 0) > 0 || !!result.value?.smoke?.ran || !!result.value?.tsc || asking.value || !!askText.value || !!askError.value)
-const hasAnyOutput = computed(() => hasStdout.value || hasStderr.value || (result.value?.tools?.length || 0) > 0 || !!result.value?.smoke?.ran || !!result.value?.tsc || asking.value || !!askText.value || !!askError.value)
+const showTerminalBody = computed(() => hasStdout.value || hasStderr.value || result.value?.lint?.ran || result.value?.test?.ran || (result.value?.tools?.length || 0) > 0 || !!result.value?.smoke?.ran || !!result.value?.tsc)
+const hasAnyOutput = computed(() => hasStdout.value || hasStderr.value || (result.value?.tools?.length || 0) > 0 || !!result.value?.smoke?.ran || !!result.value?.tsc)
 const testOutput = computed(() => { const t = result.value?.test; return t ? (t.stdout || t.stderr || '(无)') : '' })
 const tscText = computed(() => {
   const t = result.value?.tsc
@@ -1022,63 +993,7 @@ async function copyOutput() {
 
 // stderr 里把 file.ts:12:34 变成可点击（点击复制路径）
 // ponytail: 不做跨文件跳转（无 Monaco，行号可能失准），只复制路径。
-async function askApi() {
-  if (!result.value || asking.value) return
-  asking.value = true
-  askText.value = ''
-  askError.value = ''
-  try {
-    const prompt = await buildAiPrompt()
-    if (!prompt) return
-    const res = await fetch('/__ai/ask', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
-    })
-    if (!res.ok) {
-      let detail = ''
-      try { detail = await res.text() } catch { }
-      askError.value = `HTTP ${res.status}${detail ? `：${detail.slice(0, 300)}` : ''}`
-      return
-    }
-    const reader = res.body!.getReader()
-    const dec = new TextDecoder('utf8')
-    let buf = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += dec.decode(value, { stream: true })
-      let idx: number
-      while ((idx = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, idx).replace(/\r$/, '')
-        buf = buf.slice(idx + 1)
-        if (!line.startsWith('data: ')) continue
-        const payload = line.slice(6)
-        if (payload === '[DONE]') continue
-        try {
-          const j = JSON.parse(payload)
-          if (j.delta) askText.value += j.delta
-          if (j.error) askError.value = String(j.error)
-        } catch { }
-      }
-    }
-  } catch (e) {
-    askError.value = String(e)
-  } finally {
-    if (askText.value) trackMessage('assistant', askText.value)
-    asking.value = false
-  }
-}
 
-function applyAskToScript() {
-  const text = askText.value.trim()
-  if (!text) return
-  const m = text.match(/```[a-z]*\n([\s\S]*?)```/i)
-  script.value = m ? m[1].trim() : text
-  statusText.value = '✓ 已应用到编辑器'
-  statusClass.value = 'ok'
-  setTimeout(() => { statusText.value = ''; statusClass.value = '' }, 1500)
-}
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, ch => ({
@@ -1913,15 +1828,6 @@ function onHtmlDrop(e: DragEvent) {
   animation: loop-spin 0.9s linear infinite;
 }
 
-.term-btn.ask {
-  color: #a0a8b2;
-  border-color: rgb(255 255 255 / 14%);
-}
-.term-btn.ask:hover:not(:disabled) {
-  background: rgb(255 255 255 / 8%);
-  border-color: rgb(255 255 255 / 26%);
-  color: #e0e5eb;
-}
 .term-btn.ask-panel {
   color: var(--primary, #2563eb);
   border-color: var(--primary, #2563eb);
@@ -1933,17 +1839,6 @@ function onHtmlDrop(e: DragEvent) {
   color: #fff;
 }
 
-.ghost-btn.apply-ask {
-  margin-left: auto;
-  padding: 2px 8px;
-  font-size: 11px;
-  color: var(--primary, #2563eb);
-  border: 1px solid var(--border-2);
-  border-radius: 4px;
-}
-.ghost-btn.apply-ask:hover:not(:disabled) {
-  background: var(--primary-bg, #eaf2ff);
-}
 
 .ghost-btn {
   padding: 4px 10px;
