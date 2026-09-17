@@ -49,7 +49,6 @@
             <span class="dot d-red" /><span class="dot d-yellow" /><span class="dot d-green" />
           </div>
           <span class="file-badge">script.cjs</span>
-          <span class="meta">{{ lineCount }} 行 · {{ script.length }} 字符</span>
           <div class="bar-actions">
             <span v-tooltip="'运行 / 保存'" class="kbd-hint">
               <kbd>⌘</kbd><span class="slash">/</span><kbd>Ctrl</kbd><span class="plus">+</span><kbd>↵</kbd>
@@ -481,7 +480,6 @@ const previewFile = ref<string | null>(null)
 const previewBefore = ref<string | null>(null)
 const previewAfter = ref<string>('')
 
-const lineCount = computed(() => script.value.split('\n').length)
 const runKbd = computed(() => /Mac|iPhone|iPad/i.test(navigator.platform) ? '⌘↵' : 'Ctrl↵')
 const hasStdout = computed(() => !!result.value?.stdout?.trim())
 const hasStderr = computed(() => !!result.value?.stderr?.trim())
