@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { diffLines as diffLibLines } from 'diff'
 import * as hljsNs from 'highlight.js/lib/core'
-import * as javascriptNs from 'highlight.js/lib/languages/javascript'
-import * as typescriptNs from 'highlight.js/lib/languages/typescript'
-defineOptions({ name: 'DiffViewer' })
 const hljs: any = (hljsNs as any).default ?? hljsNs
+import * as javascriptNs from 'highlight.js/lib/languages/javascript'
 const javascript: any = (javascriptNs as any).default ?? javascriptNs
+import * as typescriptNs from 'highlight.js/lib/languages/typescript'
 const typescript: any = (typescriptNs as any).default ?? typescriptNs
 
 hljs.registerLanguage('javascript', javascript)
@@ -26,26 +24,9 @@ interface DiffLine {
   newLine?: number
 }
 
-// 用 jsdiff 的 Myers 算法（O((N+M)D)）替代自研 LCS DP（O(N*M)）。
-// oneChangePerToken 让每个 change 对应一行，便于逐行编号。
-function computeDiff(before: string, after: string): DiffLine[] {
-  const changes = diffLibLines(before, after, { oneChangePerToken: true })
-  const out: DiffLine[] = []
-  let oldLine = 1
-  let newLine = 1
-  for (const c of changes) {
-    const text = c.value.replace(/\r?\n$/, '')
-    if (c.added) {
-      out.push({ type: 'add', text, newLine: newLine++ })
-    } else if (c.removed) {
-      out.push({ type: 'del', text, oldLine: oldLine++ })
-    } else {
-      out.push({ type: 'same', text, oldLine: oldLine++, newLine: newLine++ })
-    }
-  }
-  return out
-}
-
+// LCS DP：O(N*M) 内存/时间。对齐质量远好于朴素滑动比较。
+// ponytail: N*M > 4M 走 fallback（全删全增），防大文件卡死。
+// 升级路径：换 Myers O((N+M)D)，但代码复杂 3 倍。
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, ch => ({
     '&': '&amp;',
@@ -55,21 +36,47 @@ function escapeHtml(s: string): string {
     '\'': '&#39;',
   }[ch] as string))
 }
-function highlightToLines(text: string): string[] {
-  if (!text) return []
+function renderCode(text: string): string {
+  if (!text) return ''
   try {
-    return hljs.highlightAuto(text, ['javascript', 'typescript']).value.split('\n')
+    return hljs.highlightAuto(text, ['javascript', 'typescript']).value
   } catch {
-    return text.split('\n').map(escapeHtml)
+    return escapeHtml(text)
   }
 }
-const beforeLines = computed(() => highlightToLines(props.before))
-const afterLines = computed(() => highlightToLines(props.after))
-function renderLine(line: DiffLine): string {
-  const src = line.type === 'del' ? beforeLines.value : afterLines.value
-  const n = line.type === 'del' ? line.oldLine : line.newLine
-  const html = n != null ? src[n - 1] : undefined
-  return html ?? escapeHtml(line.text)
+function lcsDiff(a: string[], b: string[]): DiffLine[] {
+  const N = a.length
+  const M = b.length
+  if (N * M > 4_000_000) {
+    const out: DiffLine[] = []
+    a.forEach((t, i) => out.push({ type: 'del', text: t, oldLine: i + 1 }))
+    b.forEach((t, i) => out.push({ type: 'add', text: t, newLine: i + 1 }))
+    return out
+  }
+  const dp: number[][] = Array.from({ length: N + 1 }, () => new Array(M + 1).fill(0))
+  for (let i = N - 1; i >= 0; i--) {
+    for (let j = M - 1; j >= 0; j--) {
+      if (a[i] === b[j]) dp[i][j] = dp[i + 1][j + 1] + 1
+      else dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1])
+    }
+  }
+  const out: DiffLine[] = []
+  let i = 0; let j = 0
+  while (i < N && j < M) {
+    if (a[i] === b[j]) {
+      out.push({ type: 'same', text: a[i], oldLine: i + 1, newLine: j + 1 })
+      i++; j++
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      out.push({ type: 'del', text: a[i], oldLine: i + 1 })
+      i++
+    } else {
+      out.push({ type: 'add', text: b[j], newLine: j + 1 })
+      j++
+    }
+  }
+  while (i < N) { out.push({ type: 'del', text: a[i], oldLine: i + 1 }); i++ }
+  while (j < M) { out.push({ type: 'add', text: b[j], newLine: j + 1 }); j++ }
+  return out
 }
 
 const diffLines = computed((): DiffLine[] => {
@@ -79,7 +86,7 @@ const diffLines = computed((): DiffLine[] => {
   if (props.changeType === 'deleted') {
     return props.before.split('\n').map((line, i) => ({ type: 'del' as const, text: line, oldLine: i + 1 }))
   }
-  return computeDiff(props.before, props.after)
+  return lcsDiff(props.before.split('\n'), props.after.split('\n'))
 })
 
 const stats = computed(() => {
@@ -108,7 +115,7 @@ const stats = computed(() => {
         <!-- [5.4] 只显 newLine，坐标统一到 after 系统，与 prompt 一致 -->
         <span class="line-num new">{{ line.newLine ?? '' }}</span>
         <span class="line-prefix">{{ line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ' }}</span>
-        <pre class="line-text" v-html="renderLine(line)" />
+        <pre class="line-text" v-html="renderCode(line.text)" />
       </div>
       <div v-if="diffLines.length === 0" class="diff-empty">
         无内容变更

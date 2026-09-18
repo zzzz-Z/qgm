@@ -8,7 +8,8 @@ import { useScriptInbox } from './composables/useScriptInbox'
 import {
     currentLoopContext,
     isLoopActive,
-    isFromCurrentLoop,
+    isInstActive,
+    getLoopBySessionId,
     onNonScriptReply,
     onScriptArrival,
     setActiveLoopSessionId,
@@ -265,11 +266,10 @@ function onSessionIdMessage(e: MessageEvent) {
     stopAiWaiting()
     // 多 AI 窗口 session 隔离：循环模式下若油猴传了 sessionId，
     // 必须与当前循环绑定的 loopSessionId 一致，否则丢弃
+    // [multi-loop-step4b-app] 多循环路由
     const sid = String(d.sessionId || '')
-    if (sid && !isFromCurrentLoop(sid)) {
-      console.warn('[ai-runner] sessionId 非当前循环，已忽略', sid)
-      return
-    }
+    const inst = sid ? getLoopBySessionId(sid) : undefined
+    const routedToLoop = Boolean(inst && isInstActive(inst))
     const kind = String(d.kind || '')
     if (kind === 'script') {
       const code = String(d.code || '')
@@ -292,9 +292,9 @@ function onSessionIdMessage(e: MessageEvent) {
             ...currentLoopContext(),
           },
         })
-        if (isLoopActive.value) {
+        if (routedToLoop) {
           // 循环模式：状态机接管（不经编辑器覆盖策略）
-          void onScriptArrival(item)
+          void onScriptArrival(item, sid)
         } else {
           // 手动模式：覆盖保护后填入编辑器，并自动运行
           if (scriptInbox.applyToEditor(item) === 'overwritten') {
@@ -305,13 +305,13 @@ function onSessionIdMessage(e: MessageEvent) {
       return
     }
     // done / plain / multi 仅循环模式消费
-    if (isLoopActive.value) {
+    if (routedToLoop) {
       void onNonScriptReply({
         kind: kind as 'done' | 'plain' | 'multi',
         count: Number(d.count) || 0,
         // 油猴可能未传 text；传了则用于二次校验 isStrictDone
         text: d.text !== undefined ? String(d.text) : undefined,
-      })
+      }, sid)
     }
     return
   }
@@ -326,8 +326,12 @@ function onSessionIdMessage(e: MessageEvent) {
     const site = String(d.site || e.origin || '')
     const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined })
     if (item) {
-      if (isLoopActive.value) {
-        void onScriptArrival(item)
+      // [multi-loop-step4b-app-fallback] 兜底通道同样按 sid 路由
+      const sid = String(d.sessionId || '')
+      const inst = sid ? getLoopBySessionId(sid) : undefined
+      const routedToLoop = Boolean(inst && isInstActive(inst))
+      if (routedToLoop) {
+        void onScriptArrival(item, sid)
       } else {
         if (scriptInbox.applyToEditor(item) === 'overwritten') {
           void runner.run()

@@ -29,7 +29,7 @@ export function readBody(req: IncomingMessage): Promise<string> {
   })
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export function parseJSON<T = any>(raw: string): T | null {
   try {
     return raw ? JSON.parse(raw) as T : null

@@ -1,10 +1,9 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import { useRunner } from './useRunner'
-import { getActiveWin, getWindowBySid, sendFillTo, sendStopTo, sendRotateTo, sendNewSessionTo } from './useDeepseekUrl'
+import { getActiveWin, sendFill, sendStop, sendRotate, sendNewSession } from './useDeepseekUrl'
 import { toast } from './useToast'
 import { useTraceLog } from './useTraceLog'
 import { readNdjson } from '../utils/stream'
-import * as loopRegistry from './loopRegistry'
 import type { InboxItem } from './useScriptInbox'
 import {
   LOOP_MAX_ROUNDS,
@@ -81,22 +80,19 @@ const waitingElapsed = ref(0)
 const roundTimeoutMs = ref(LOOP_ROUND_TIMEOUT_MS)
 
 // ============================================================================
-// 多循环并发改造 · 步骤 2：LoopInstance 类型 + Map 存储 + activeLoop 代理
-// 内部函数全部改造为接受 inst: LoopInstance 首参；
-// activeLoopSid 为空时 activeLoop 返回 singletonView（指向模块级 refs），行为不变
-// （步骤 3 起真正多实例并发：createLoopInstance 创建独立实例塞入 Map）
+// LoopInstance 类型 + 单例 activeLoop
+// 单对话模式：全局只有 singletonView 一份实例，inst 参数仅作函数签名一致性
 // ============================================================================
 
-// RoundOutcome 原位于 afterRound 区（L526），提前到模块级供 LoopInstance 引用
+// RoundOutcome 原位于 afterRound 区，提前到模块级供 LoopInstance 引用
 interface RoundOutcome {
   lang: 'js' | 'cjs' | 'bash', desc: string, exit: number, ok: boolean
   stdout: string, stderr: string, changeCount: number, changedFiles: string[]
 }
 
 /**
- * 单个循环实例的完整状态。
- * 步骤 2：所有内部函数接受 inst 参数；singletonView 包装模块级 refs 作单例 fallback。
- * 步骤 3：createLoopInstance(sid) 创建真实独立实例塞入 Map。
+ * 循环实例的完整状态。单对话模式：全局只有 singletonView 一份实例，
+ * inst 参数保留用于函数签名一致性，运行时指向同一份 singletonView。
  */
 export interface LoopInstance {
   state: Ref<LoopState>
@@ -114,8 +110,6 @@ export interface LoopInstance {
   waitingStartedAt: Ref<number>
   waitingElapsed: Ref<number>
   roundTimeoutMs: Ref<number>
-  /** 绑定后不可变：循环所属的 AI 会话 id */
-  sessionId: string
   pendingRound: Ref<RoundOutcome | null>
   /** 定时器句柄（非响应式，随实例生命周期） */
   roundTimer: ReturnType<typeof setTimeout> | null
@@ -123,19 +117,9 @@ export interface LoopInstance {
   handoffTimer: ReturnType<typeof setTimeout> | null
 }
 
-/** 多循环实例存储（步骤 3 起按 sid 索引；步骤 2 先建表） */
-const loopInstances = new Map<string, LoopInstance>()
-
-/** 当前激活会话 id（由 App.vue 通过 setActiveSessionIdGetter 更新） */
-// [multi-loop-step6-auto] 版本号：Map 变更时 bump，供 computed 响应式依赖
-const loopInstancesVersion = ref(0)
-function bumpLoopInstancesVersion(): void { loopInstancesVersion.value++ }
-const activeLoopSid = ref('')
-
 /**
- * 步骤 2 单例视图：把现有模块级 ref 包装成 LoopInstance 形状的静态对象。
- * sessionId 是普通字符串，initLoop 时被赋值（绑定当前 AI 会话）。
- * activeLoopSid 为空时 activeLoop fallback 到此对象 → 行为与改造前一致。
+ * 单例视图：把模块级 ref 包装成 LoopInstance 形状的静态对象。
+ * activeLoop computed 始终返回此对象。
  */
 const singletonView: LoopInstance = {
   state: loopState,
@@ -153,116 +137,25 @@ const singletonView: LoopInstance = {
   waitingStartedAt: waitingStartedAt,
   waitingElapsed: waitingElapsed,
   roundTimeoutMs: roundTimeoutMs,
-  sessionId: '',
   pendingRound: ref<RoundOutcome | null>(null),
   roundTimer: null,
   waitingTicker: null,
   handoffTimer: null,
 }
 
-/**
- * 创建独立循环实例（步骤 3 起由 startLoop 调用塞入 loopInstances Map）。
- * 每个会话拥有独立状态 refs + 定时器句柄。
- * 步骤 2 先定义工厂，暂不被调用（activeLoopSid 恒空 → 走 singletonView）。
- */
-function createLoopInstance(sid: string): LoopInstance {
-  return {
-    state: ref<LoopState>('idle'),
-    id: ref(''),
-    round: ref(0),
-    goal: ref(''),
-    startCommit: ref(''),
-    startTokens: ref(0),
-    latestTokens: ref(0),
-    toleranceLeft: ref(LOOP_TOLERANCE_BUDGET),
-    stopRequest: ref<StopRequest>('none'),
-    stopReason: ref(''),
-    lastHash: ref(''),
-    lastExec: ref<{ lang: string, exit: number, changes: number, durationMs: number } | null>(null),
-    waitingStartedAt: ref(0),
-    waitingElapsed: ref(0),
-    roundTimeoutMs: ref(LOOP_ROUND_TIMEOUT_MS),
-    sessionId: sid,
-    pendingRound: ref<RoundOutcome | null>(null),
-    roundTimer: null,
-    waitingTicker: null,
-    handoffTimer: null,
-  }
-}
-
-/**
- * 当前激活循环实例（computed 代理）。
- * - 步骤 2：activeLoopSid 为空时 fallback 到 singletonView（现有单例）
- * - 步骤 3：从 loopInstances.get(activeLoopSid.value) 取真实独立实例
- */
-const activeLoop = computed<LoopInstance | null>(() => {
-  if (activeLoopSid.value) {
-    const fromMap = loopInstances.get(activeLoopSid.value)
-    if (fromMap) return fromMap
-  }
-  return singletonView
-})
-
-// 由 App.vue 注入的 activeSessionId 读取器：循环启动时把当前活动会话 id 绑定到 inst.sessionId
-// [multi-loop-step2] 多实例读写 API（步骤 4 消息路由依赖）
-export function getLoopBySessionId(sid: string): LoopInstance | undefined {
-  return loopInstances.get(sid)
-}
-export function listActiveLoops(): LoopInstance[] {
-  return [...loopInstances.values()].filter(i => i.state.value !== 'idle')
-}
-export function setActiveLoopSessionId(sid: string): void {
-  activeLoopSid.value = sid
-}
-export function createLoopInstanceFor(sid: string): LoopInstance {
-  let inst = loopInstances.get(sid)
-  if (!inst) {
-    inst = createLoopInstance(sid)
-    loopInstances.set(sid, inst)
-  }
-  return inst
-}
-// [multi-loop-step6-auto] 当前活跃循环数量（依赖版本号，能响应新实例加入）
-// [multi-loop-step7-auto] 删除循环实例：清定时器、注销 registry、从表移除
-export function removeLoopInstance(sid: string): void {
-  const inst = loopInstances.get(sid)
-  if (!inst) return
-  if (inst.roundTimer) { clearTimeout(inst.roundTimer); inst.roundTimer = null }
-  if (inst.waitingTicker) { clearInterval(inst.waitingTicker); inst.waitingTicker = null }
-  if (inst.handoffTimer) { clearTimeout(inst.handoffTimer); inst.handoffTimer = null }
-  if (inst.id.value) loopRegistry.unregister(inst.id.value)
-  loopInstances.delete(sid)
-  bumpLoopInstancesVersion()
-}
-export const activeLoopsCount = computed(() => {
-  void loopInstancesVersion.value
-  let n = 0
-  for (const inst of loopInstances.values()) {
-    const s = inst.state.value
-    if (s !== 'idle' && s !== 'stopped' && s !== 'interrupted') n++
-  }
-  return n
-})
-let getActiveSessionId: () => string = () => ''
+/** 当前激活循环实例（单例视图，computed 维持响应式依赖） */
+const activeLoop = computed<LoopInstance | null>(() => singletonView)
 
 let keyboardBound = false
 let originalTitle = ''
 
 const { addTrace } = useTraceLog()
 
-// [multi-loop-step4-auto] 按 inst 判断活跃（多实例共用）
+/** 判断实例是否处于活动状态（非 idle/stopped/interrupted） */
 function isInstActive(inst: LoopInstance | null): boolean {
   if (!inst) return false
   const s = inst.state.value
   return s !== 'idle' && s !== 'stopped' && s !== 'interrupted'
-}
-// [multi-loop-step4-auto] 按 sid 解析循环实例：sid 命中则用之，否则回落到 active
-function resolveInst(sid?: string): LoopInstance | null {
-  if (sid) {
-    const inst = loopInstances.get(sid)
-    if (inst) return inst
-  }
-  return activeLoop.value
 }
 export const isLoopActive = computed(() => isInstActive(activeLoop.value))
 
@@ -344,10 +237,7 @@ async function initLoop(
   traceSummary: string,
   tracePayload?: Record<string, unknown>,
 ): Promise<boolean> {
-  bumpLoopInstancesVersion()
-  const sid = getActiveSessionId() || inst.sessionId || 'default'
-  inst.sessionId = sid
-  const win = getWindowBySid(sid) ?? getActiveWin()
+  const win = getActiveWin()
   if (!win || win.closed) {
     toast('AI 站点窗口未打开，请先打开会话窗口', 'error', 5000)
     return false
@@ -359,7 +249,6 @@ async function initLoop(
     head = d.head || ''
   } catch { }
   inst.id.value = `${prefix}_${Date.now().toString(36)}`
-  loopRegistry.register(inst.id.value, prefix === 'take' ? 'takeover' : 'loop')
   inst.goal.value = goal
   inst.round.value = 1
   inst.startCommit.value = head
@@ -369,7 +258,6 @@ async function initLoop(
   inst.stopReason.value = ''
   inst.lastHash.value = ''
   inst.lastExec.value = null
-  // 绑定当前循环所在 AI 会话 id（多窗口隔离用）
   originalTitle = typeof document !== 'undefined' ? document.title : ''
   addTrace({
     kind: 'loop',
@@ -406,7 +294,7 @@ export async function startLoop(goal: string): Promise<void> {
       payload: { loopId: inst.id.value, loopRound: 0 },
     })
   }
-  const ok = sendFillTo(inst.sessionId, { prompt: buildInitialPrompt(g) })
+  const ok = sendFill({ prompt: buildInitialPrompt(g) })
   if (!ok) {
     await finish(inst, 'window-lost', 'AI 窗口已关闭或跨域发送失败')
     return
@@ -504,7 +392,7 @@ export async function onNonScriptReply(reply: AiReply, sid?: string): Promise<vo
       summary: `⚠ 回复含 ${count || '多个'} 个代码块，要求重发（不消耗宽容预算）`,
       payload: { loopId: inst.id.value, loopRound: inst.round.value, count },
     })
-    const okSent = sendFillTo(inst.sessionId, { prompt: buildRetryPrompt(`回复含 ${count || '多个'} 个代码块（契约要求仅一个）`) })
+    const okSent = sendFill({ prompt: buildRetryPrompt(`回复含 ${count || '多个'} 个代码块（契约要求仅一个）`) })
     if (!okSent) {
       await finish(inst, 'window-lost', 'multi 重试时 AI 窗口已关闭或发送失败')
       return
@@ -526,7 +414,7 @@ async function toleranceFail(inst: LoopInstance, detail: string): Promise<void> 
   const decision = decideTolerance(inst.toleranceLeft.value)
   if (decision.action === 'retry') {
     inst.toleranceLeft.value = decision.remaining
-    const okSent = sendFillTo(inst.sessionId, { prompt: buildRetryPrompt(detail) })
+    const okSent = sendFill({ prompt: buildRetryPrompt(detail) })
     if (!okSent) {
       await finish(inst, 'window-lost', '重试时 AI 窗口已关闭或发送失败')
       return
@@ -711,7 +599,7 @@ function budgetLimited(inst: LoopInstance, o: RoundOutcome, tokenDelta: number):
   inst.stopReason.value = `循环内 token 增量约 ${(tokenDelta / 1000).toFixed(1)}k，达到 ${(LOOP_TOKEN_HARD_LIMIT / 1000).toFixed(1)}k 熔断线`
   inst.state.value = 'budget-limited'
   persist(inst)
-  sendStopTo(inst.sessionId)
+  sendStop()
   unbindKeyboard()
   addTrace({
     kind: 'loop',
@@ -734,7 +622,7 @@ export async function resumeLoop(): Promise<void> {
   // 避免被误判为「连续两轮重复」而熔断
   inst.lastHash.value = ''
   const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta: 0 })
-  const okSent = sendFillTo(inst.sessionId, { prompt: feedback })
+  const okSent = sendFill({ prompt: feedback })
   if (!okSent) { await finish(inst, 'window-lost', '续跑时窗口发送失败'); return }
   bindKeyboard()
   inst.round.value += 1
@@ -826,7 +714,7 @@ async function afterRound(inst: LoopInstance, o: RoundOutcome): Promise<void> {
     })
   }
   const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta })
-  const ok = sendFillTo(inst.sessionId, { prompt: feedback })
+  const ok = sendFill({ prompt: feedback })
   if (!ok) { await finish(inst, 'window-lost', '回填结果时 AI 窗口已关闭'); return }
 
   inst.round.value += 1
@@ -910,7 +798,7 @@ async function finish(inst: LoopInstance, reason: string, detail?: string): Prom
   inst.stopReason.value = detail || reason
 
   inst.state.value = interrupted ? 'interrupted' : 'stopped'
-  sendStopTo(inst.sessionId)
+  sendStop()
   unbindKeyboard()
   if (inst.id.value) loopRegistry.unregister(inst.id.value)
   persist(inst)
@@ -1084,7 +972,7 @@ export async function startHandoff(): Promise<void> {
   inst.state.value = 'handoff'
   persist(inst)
   addTrace({ kind: 'loop', summary: '🔄 开始轮转 · 请求 AI 总结当前会话', payload: { loopId: inst.id.value, loopRound: inst.round.value } })
-  const okSent = sendRotateTo(inst.sessionId, { instruction: SUMMARY_INSTRUCTION })
+  const okSent = sendRotate({ instruction: SUMMARY_INSTRUCTION })
   if (!okSent) { handoffFail(inst, '发送 rotate 失败（窗口已关？）'); return }
   handoffArm(inst, '总结请求超时（30s）')
 }
@@ -1100,7 +988,7 @@ export async function onSummary(text: string, sessionId: string, degraded: boole
     summary: wasDegraded ? '⚠ 摘要降级为本地拼' : `✓ 已收到 AI 总结（${t.length} 字）`,
     payload: { loopId: inst.id.value, loopRound: inst.round.value, summary: finalSummary.slice(0, 2000) },
   })
-  const okSent = sendNewSessionTo(inst.sessionId, { summary: finalSummary })
+  const okSent = sendNewSession({ summary: finalSummary })
   if (!okSent) { handoffFail(inst, '发送 new-session 失败'); return }
   handoffArm(inst, '新会话创建超时（30s）')
 }
@@ -1145,7 +1033,7 @@ function handoffFail(inst: LoopInstance, reason: string) {
   inst.stopReason.value = reason
   inst.state.value = 'stopped'
   persist(inst)
-  sendStopTo(inst.sessionId)
+  sendStop()
   unbindKeyboard()
   if (inst.id.value) loopRegistry.unregister(inst.id.value)
   addTrace({ kind: 'loop', summary: `✗ 轮转失败 · ${reason}`, payload: { loopId: inst.id.value, loopRound: inst.round.value } })
