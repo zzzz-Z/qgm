@@ -800,7 +800,8 @@ async function finish(inst: LoopInstance, reason: string, detail?: string): Prom
   inst.state.value = interrupted ? 'interrupted' : 'stopped'
   sendStop()
   unbindKeyboard()
-  if (inst.id.value) loopRegistry.unregister(inst.id.value)
+  // loopRegistry 已删（PLAN #17 单例回退）
+  // if (inst.id.value) loopRegistry.unregister(inst.id.value)
   persist(inst)
 
   addTrace({
@@ -1035,13 +1036,22 @@ function handoffFail(inst: LoopInstance, reason: string) {
   persist(inst)
   sendStop()
   unbindKeyboard()
-  if (inst.id.value) loopRegistry.unregister(inst.id.value)
+  // loopRegistry 已删（PLAN #17 单例回退）
+  // if (inst.id.value) loopRegistry.unregister(inst.id.value)
   addTrace({ kind: 'loop', summary: `✗ 轮转失败 · ${reason}`, payload: { loopId: inst.id.value, loopRound: inst.round.value } })
   toast(`✗ 轮转失败：${reason}`, 'error', 6000)
 }
 
 
 // [multi-loop-step1]
+// 单例桩函数（PLAN #17 回退后多循环 Map 已删，保留接口给 App.vue/ScriptPanel 调用）
+const setActiveLoopSessionId = (_sid: string) => { /* no-op: singleton */ }
+const createLoopInstanceFor = (_sid: string): LoopInstance | undefined => activeLoop.value
+const removeLoopInstance = (_id: string) => { /* no-op: singleton, 用 killCurrent 代替 */ }
+const getLoopBySessionId = (_sid: string): LoopInstance | undefined => activeLoop.value
+const listActiveLoops = (): LoopInstance[] => activeLoop.value ? [activeLoop.value] : []
+const activeLoopsCount = computed(() => activeLoop.value ? 1 : 0)
+
 export function useAutoLoop() {
   return {
     loopState: computed({
@@ -1073,6 +1083,6 @@ export function useAutoLoop() {
     startLoop, startTakeover, killCurrent, stopAndRollback, requestPause,
     onScriptArrival, onNonScriptReply, setTokenEstimate, currentLoopContext,
     startHandoff, onSummary, onNewSessionCreated, autoRotateSession, resumeLoop,
-    getLoopBySessionId, listActiveLoops, setActiveLoopSessionId, createLoopInstanceFor, activeLoopsCount, removeLoopInstance,
+    getLoopBySessionId, listActiveLoops, setActiveLoopSessionId, createLoopInstanceFor, activeLoopsCount, removeLoopInstance, isInstActive,
   }
 }
