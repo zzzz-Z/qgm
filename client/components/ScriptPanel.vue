@@ -575,7 +575,7 @@ const termBodyRef = ref<HTMLElement | null>(null)
 type ChatRole = 'user' | 'ai' | 'sys' | 'step'
 function chatRole(kind: string): ChatRole {
   if (kind === 'ai:ask') return 'user'
-  if (kind === 'ai:script' || kind === 'run:start' || kind === 'run:end' || kind === 'run:error') return 'step'
+  if (kind === 'ai:script' || kind === 'run:start' || kind === 'run:end' || kind === 'run:error' || kind === 'run:stage') return 'step'
   if (kind === 'ai:done' || kind === 'ai:plain' || kind === 'ai:multi' || kind === 'ai:summary' || kind === 'ai:feedback' || kind === 'ai:decision' || kind === 'ai:need-files') return 'ai'
   return 'sys'
 }
@@ -619,6 +619,12 @@ function stepStateOf(e: { kind: string, payload?: Record<string, unknown> }): 'p
   }
   if (e.kind === 'run:error') return 'error'
   if (e.kind === 'run:end') return e.payload && e.payload.ok === false ? 'error' : 'done'
+  if (e.kind === 'run:stage') {
+    const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
+    if (phase === 'done') return 'done'
+    if (phase === 'error') return 'error'
+    return 'running'
+  }
   return 'pending'
 }
 function stepIconOf(e: { kind: string, payload?: Record<string, unknown> }): string {
@@ -631,6 +637,7 @@ function stepIconOf(e: { kind: string, payload?: Record<string, unknown> }): str
   }
   if (e.kind === 'run:end') return '■'
   if (e.kind === 'run:error') return '✗'
+  if (e.kind === 'run:stage') return '⚙'
   return '·'
 }
 function stepTitleOf(e: { kind: string, summary?: string, payload?: Record<string, unknown> }): string {
@@ -643,6 +650,16 @@ function stepTitleOf(e: { kind: string, summary?: string, payload?: Record<strin
     return '执行完成' + exit + (changes ? ' · ' + changes + ' 文件' : '')
   }
   if (e.kind === 'run:error') return String(e.summary || '执行失败')
+  if (e.kind === 'run:stage') {
+    const p = e.payload || {}
+    const name = String(p.name || 'stage')
+    const ms = typeof p.ms === 'number' ? ' · ' + p.ms + 'ms' : ''
+    const files = typeof p.files === 'number' && p.files > 0 ? ' · ' + p.files + ' 文件' : ''
+    const extra: string[] = []
+    if (p.tscOk === false) extra.push('tsc 失败')
+    if (p.testOk === false) extra.push('test 失败')
+    return name + files + ms + (extra.length ? ' · ' + extra.join(' / ') : '')
+  }
   return String(e.summary || '')
 }
 function stepLabelOf(e: { kind: string, payload?: Record<string, unknown> }): string {
@@ -655,6 +672,12 @@ function stepLabelOf(e: { kind: string, payload?: Record<string, unknown> }): st
   }
   if (e.kind === 'run:end') return e.payload && e.payload.ok === false ? '失败' : '已完成'
   if (e.kind === 'run:error') return '失败'
+  if (e.kind === 'run:stage') {
+    const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
+    if (phase === 'done') return '完成'
+    if (phase === 'error') return '失败'
+    return '处理中'
+  }
   return ''
 }
 

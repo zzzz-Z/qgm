@@ -153,6 +153,23 @@ async function run() {
         if (frame.stream === 'stdout') liveStdout.value += String(frame.data || '')
         else if (frame.stream === 'stderr') liveStderr.value += String(frame.data || '')
         flushChunk()
+      } else if (frame.type === 'stage') {
+        const name = String(frame.name || 'stage')
+        const status = String(frame.status || '')
+        const ms = frame.ms
+        const ok = frame.ok
+        emit('run:stage', name + (status === 'done' ? (ok === false ? ' · 失败' : ' · 完成') : ' · 处理中'), {
+          payload: {
+            name, status,
+            ms: typeof ms === 'number' ? ms : undefined,
+            ok: typeof ok === 'boolean' ? ok : undefined,
+            files: frame.files,
+            tscOk: frame.tscOk,
+            testOk: frame.testOk,
+            phase: status === 'done' ? (ok === false ? 'error' : 'done') : 'running',
+          },
+          updateKey: 'stage:' + name,
+        })
       } else if (frame.type === 'summary') {
         frames.push(frame)
       }
