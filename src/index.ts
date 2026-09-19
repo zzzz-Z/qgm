@@ -567,7 +567,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     ensureDirs()
     fs.mkdirSync(path.join(ROOT, '.ai-runner/tmp'), { recursive: true })
     const startedAt = Date.now()
-    const body = parseJSON<{ script?: string, gitCommit?: boolean, gitVerify?: boolean, sandbox?: string }>(await readBody(req))
+    const body = parseJSON<{ script?: string, gitCommit?: boolean, gitVerify?: boolean, sandbox?: string, loopCtx?: { loopId?: string, round?: number, max?: number } }>(await readBody(req))
     const sandboxRaw = String(body?.sandbox || 'read-only')
     const sandbox = ['read-only', 'workspace-write', 'full'].includes(sandboxRaw) ? sandboxRaw : 'read-only'
     const script = String(body?.script || '').trim()
