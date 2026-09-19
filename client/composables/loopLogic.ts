@@ -113,10 +113,30 @@ export interface FeedbackContext {
   nextRound: number
   /** 循环内 token 增量 */
   tokenDelta: number
+  /** 循环目标（用于记忆锚点） */
+  goal?: string
+  /** 当前已完成轮次 */
+  round?: number
+  /** 最大轮数 */
+  max?: number
+  /** 用户补充说明 */
+  userNote?: string
 }
 
 export function buildFeedback(o: FeedbackOutcome, ctx: FeedbackContext): string {
+  const max = ctx.max ?? LOOP_MAX_ROUNDS
+  const anchorLines: string[] = []
+  if (ctx.goal) {
+    const remain = Math.max(0, max - (ctx.round ?? 0))
+    anchorLines.push(`【锚】目标：${ctx.goal.slice(0, 40)} | 进度 ${ctx.round ?? 0}/${max} | 剩 ${remain} 轮`)
+    anchorLines.push('')
+  }
+  if (ctx.userNote) {
+    anchorLines.push(`【用户补充】${ctx.userNote}`)
+    anchorLines.push('')
+  }
   const lines: string[] = [
+    ...anchorLines,
     '【上轮执行结果】',
     `类型: ${o.lang}`,
     o.desc ? `说明: ${o.desc}` : '',
