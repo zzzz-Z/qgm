@@ -7343,5 +7343,99 @@ function onHtmlDrop(e: DragEvent) {
   min-height: 36px !important;
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   [fix-run-btn] 最后生效：运行按钮各态锁死 + 取消按钮图标显式
+   ═══════════════════════════════════════════════════════════ */
+
+/* 运行按钮（takeover / run / head-run）：全部锁死为透明底 + 橙描边 */
+.pane-main .editor .primary-btn.head-run,
+.pane-main .editor .primary-btn.takeover,
+.pane-main .editor .primary-btn.run {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  color: var(--primary) !important;
+  border: 1px solid var(--primary) !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+}
+
+.pane-main .editor .primary-btn.head-run:hover:not(:disabled),
+.pane-main .editor .primary-btn.takeover:hover:not(:disabled),
+.pane-main .editor .primary-btn.run:hover:not(:disabled),
+.pane-main .editor .primary-btn.head-run:focus-visible,
+.pane-main .editor .primary-btn.takeover:focus-visible,
+.pane-main .editor .primary-btn.run:focus-visible {
+  background: rgb(217 119 87 / 16%) !important;
+  background-color: rgb(217 119 87 / 16%) !important;
+  background-image: none !important;
+  color: var(--primary) !important;
+  border: 1px solid var(--primary) !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+}
+
+/* 按钮里 icon 和文字保持可见 */
+.pane-main .editor .primary-btn.head-run .ico-svg,
+.pane-main .editor .primary-btn.takeover .ico-svg,
+.pane-main .editor .primary-btn.run .ico-svg,
+.pane-main .editor .primary-btn.head-run span,
+.pane-main .editor .primary-btn.takeover span,
+.pane-main .editor .primary-btn.run span {
+  color: inherit !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* 暂停（stop 态）：红描边 */
+.pane-main .editor .primary-btn.stop,
+.pane-main .editor .primary-btn.stop.head-run {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  color: var(--danger) !important;
+  border: 1px solid var(--danger) !important;
+  box-shadow: none !important;
+}
+.pane-main .editor .primary-btn.stop:hover:not(:disabled) {
+  background: rgb(224 108 117 / 16%) !important;
+  background-color: rgb(224 108 117 / 16%) !important;
+  background-image: none !important;
+  color: var(--danger) !important;
+  border-color: var(--danger) !important;
+}
+.pane-main .editor .primary-btn.stop .ico-svg,
+.pane-main .editor .primary-btn.stop span {
+  color: inherit !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* 禁用态：稍微降不透明度，仍可读 */
+.pane-main .editor .primary-btn.head-run:disabled,
+.pane-main .editor .primary-btn.takeover:disabled,
+.pane-main .editor .primary-btn.run:disabled,
+.pane-main .editor .primary-btn.stop:disabled {
+  opacity: 0.45 !important;
+}
+
+/* 取消按钮图标显式可见 */
+.loop-btn > .ico-svg,
+.loop-btn > svg,
+.loop-btn .ico-svg,
+.loop-btn svg {
+  display: inline-block !important;
+  width: 12px !important;
+  height: 12px !important;
+  flex-shrink: 0 !important;
+  margin-right: 4px !important;
+  vertical-align: -2px !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  fill: none !important;
+  stroke: currentColor !important;
+}
+
 </style>
 <!-- tooltip-audit -->
