@@ -52,7 +52,8 @@
         </template>
         <template v-else-if="isLoopActive">
           <span class="loop-status">
-            <span class="loop-spin">⟳</span>
+            <span class="loop-spin">{{ stateIcon }}</span>
+            <span class="loop-stage-badge" :class="stageClass">{{ stageLabel }}</span>
             第 {{ loopRound }}/{{ maxRounds }} 轮 · {{ loopState }}
             · tok {{ (tokenDelta / 1000).toFixed(1) }}k/{{ tokenBudget / 1000 }}k
             <template v-if="loopCost !== null"> · {{ formatCost(loopCost) }}（{{ (loopUsage.prompt_tokens / 1000).toFixed(1) }}k / {{ (loopUsage.completion_tokens / 1000).toFixed(1) }}k）</template>
@@ -61,6 +62,9 @@
           <span v-if="loopState === 'waiting'" class="loop-waiting-progress" :title="`等待 AI 回复（已等 ${waitingElapsed}s / 总 ${Math.round(roundTimeoutMs / 1000)}s，超时即熔断）`">
             <span class="loop-waiting-text">⏱ {{ waitingElapsed }}s / {{ Math.round(roundTimeoutMs / 1000) }}s</span>
             <span class="loop-waiting-bar"><span class="loop-waiting-fill" :style="{ width: waitingPct + '%' }" /></span>
+          </span>
+          <span class="loop-round-bar" :title="`轮次 ${loopRound}/${maxRounds}`">
+            <span class="loop-round-fill" :style="{ width: roundPct + '%' }" />
           </span>
           <span class="loop-goal-text" :title="loopGoal">{{ loopGoal.slice(0, 40) }}</span>
           <div class="loop-actions">
@@ -144,11 +148,11 @@
               />
               <div v-else-if="e.role === 'user'" class="chat-bubble bubble-right">
                 <div class="bubble-head">👤 我 · {{ fmtTreeTime(e.ts) }}</div>
-                <div class="bubble-body" v-html="renderPayload(e.payload)" />
+                <div class="bubble-body" v-html="renderUserBubble(e)" />
               </div>
               <div v-else-if="e.role === 'ai'" class="chat-bubble bubble-left">
                 <div class="bubble-head">🤖 AI · {{ fmtTreeTime(e.ts) }}</div>
-                <div v-if="e.payload" class="bubble-body" v-html="renderPayload(e.payload)" />
+                <div v-if="e.payload" class="bubble-body" v-html="renderAiBubble(e)" />
                 <div v-else class="bubble-body">{{ e.summary }}</div>
               </div>
               <div v-else class="chat-sys">
@@ -478,7 +482,7 @@ function toggleAutoTakeover() {
 
 // —— 自动化循环（P2 useAutoLoop）——
 const {
-  loopState, loopRound, loopGoal, stopReason, toleranceLeft,
+  loopState, loopRound, loopGoal, stopReason, toleranceLeft, stage,
   tokenDelta, maxRounds, tokenBudget,
   roundTimeoutMs, waitingElapsed, isLoopActive,
   loopUsage, loopCost,
@@ -509,6 +513,29 @@ function submitDecisionCustom() {
 const waitingPct = computed(() => {
   if (loopState.value !== 'waiting' || !roundTimeoutMs.value) return 0
   return Math.min(100, Math.round((waitingElapsed.value * 1000 / roundTimeoutMs.value) * 100))
+})
+
+const stageLabel = computed(() => {
+  const s = stage.value
+  if (s === 'plan') return '规划'
+  if (s === 'verify') return '验证'
+  return '实现'
+})
+const stageClass = computed(() => 'stage-' + (stage.value || 'plan'))
+const stateIcon = computed(() => {
+  const s = loopState.value
+  if (s === 'waiting') return '⏱'
+  if (s === 'executing') return '⚙'
+  if (s === 'feedback') return '📤'
+  if (s === 'parsing') return '🧩'
+  if (s === 'handoff') return '🔄'
+  if (s === 'budget-limited') return '💰'
+  if (s === 'waiting-input') return '⏸'
+  return '⟳'
+})
+const roundPct = computed(() => {
+  const max = maxRounds.value || 8
+  return Math.min(100, Math.round((loopRound.value / max) * 100))
 })
 
 const mainRef = ref<HTMLElement | null>(null)
@@ -659,6 +686,34 @@ function renderMarkdown(text: string): string {
     i++
   }
   return out.join('')
+}
+
+function renderUserBubble(e: { kind: string, payload?: Record<string, unknown> }): string {
+  if (!e.payload) return ''
+  if (e.kind === 'ai:ask' && e.payload.question) return renderMarkdown(String(e.payload.question))
+  if (e.kind === 'ai:feedback') {
+    const cnt = Array.isArray(e.payload.changes) ? e.payload.changes.length : 0
+    const exit = e.payload.exit ?? '?'
+    return renderMarkdown(`回传 AI · exit ${exit} · ${cnt} 文件`)
+  }
+  return renderPayload(e.payload)
+}
+
+function renderAiBubble(e: { kind: string, payload?: Record<string, unknown>, summary?: string }): string {
+  if (!e.payload) return String(e.summary || '')
+  if (e.kind === 'ai:script') {
+    const desc = String(e.payload.desc || '')
+    const why = String(e.payload.why || '')
+    const lang = String(e.payload.lang || '')
+    const lc = Number(e.payload.lineCount) || 0
+    const head = desc ? '📥 ' + desc : ('📥 脚本 · ' + lang + (lc ? ' · ' + lc + ' 行' : ''))
+    const lines = [head]
+    if (why) lines.push('', '**为什么**：' + why)
+    return renderMarkdown(lines.join('\n'))
+  }
+  const text = e.payload.text !== undefined ? String(e.payload.text) : ''
+  if (text) return renderMarkdown(text)
+  return renderPayload(e.payload)
 }
 
 function renderPayload(p: unknown): string {
@@ -3196,6 +3251,36 @@ function onHtmlDrop(e: DragEvent) {
 .loop-end-status { flex: 1; font-size: var(--font-12); }
 .loop-end-status em { opacity: .65; font-style: normal; }
 .loop-spin { display: inline-block; animation: loop-spin 1.6s linear infinite; }
+.loop-stage-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--radius-10);
+  font-size: var(--font-10);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  margin: 0 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  color: var(--text-2);
+}
+.loop-stage-badge.stage-plan { background: var(--primary-bg); color: var(--primary); border-color: var(--primary); }
+.loop-stage-badge.stage-implement { background: var(--warning-bg, rgba(230, 162, 60, 0.12)); color: var(--warning, #e6a23c); border-color: var(--warning, #e6a23c); }
+.loop-stage-badge.stage-verify { background: var(--success-bg, rgba(16, 185, 129, 0.12)); color: var(--success, #10b981); border-color: var(--success, #10b981); }
+.loop-round-bar {
+  display: inline-block;
+  width: 80px;
+  height: 4px;
+  background: var(--border-color, #dcdfe6);
+  border-radius: var(--radius-2);
+  overflow: hidden;
+  margin: 0 4px;
+}
+.loop-round-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary, #2563eb) 0%, var(--warning, #e6a23c) 70%, var(--danger) 100%);
+  transition: width 0.3s ease;
+}
 @keyframes loop-spin { to { transform: rotate(360deg); } }
 .inbox-badge { color: #409eff; border-color: #409eff; }
 

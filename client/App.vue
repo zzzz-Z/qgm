@@ -27,6 +27,7 @@ import { useTraceLog } from './composables/useTraceLog'
 import { useCodeCleaner } from './composables/useCodeCleaner'
 import { useRunner } from './composables/useRunner'
 import { useAiWaiting } from './composables/useAiWaiting'
+import { emit as emitBus } from './composables/useEventStream'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
 
@@ -57,7 +58,6 @@ watch(activeSessionId, (v) => {
   createLoopInstanceFor(sid)
   setActiveWinSid(sid)
 }, { immediate: true })
-const sidebarOpen = ref(false)
 const settingsOpen = ref(false)
 const KEY_SANDBOX = '__ai_sandbox'
 const KEY_BASH_POLICY = '__ai_bash_policy'
@@ -251,6 +251,35 @@ const headerUrl = computed(() => {
   return s ? s.url : deepseekUrl.value
 })
 
+const urlEditing = ref(false)
+const urlDraft = ref('')
+const urlInputRef = ref<HTMLInputElement | null>(null)
+function openUrlEdit() {
+  urlEditing.value = true
+  urlDraft.value = headerUrl.value
+  nextTick(() => {
+    urlInputRef.value?.focus()
+    urlInputRef.value?.select()
+  })
+}
+function cancelUrl() {
+  urlEditing.value = false
+  urlDraft.value = ''
+}
+function saveUrl() {
+  const v = urlDraft.value.trim()
+  if (!v) { cancelUrl(); return }
+  if (!setDeepseekUrl(v)) {
+    try { toast('URL 格式不合法', 'error') } catch { /* ignore */ }
+    return
+  }
+  urlEditing.value = false
+  urlDraft.value = ''
+}
+function onUrlBlur() {
+  cancelUrl()
+}
+
 function onSessionIdMessage(e: MessageEvent) {
   const d = e.data
   if (!d) return
@@ -279,6 +308,7 @@ function onSessionIdMessage(e: MessageEvent) {
       if (item) {
         const lineCount = code.split('\n').length
         toast(`AI 脚本已到达 · ${lang} · ${lineCount} 行 · ${item.desc || '无说明'}`, 'info', 4000)
+        emitBus('ai:script', item.desc ? `📥 ${item.desc}` : `📥 脚本 · ${lang} · ${lineCount} 行`, { payload: { desc: item.desc, why: item.why, lang, lineCount, hash: item.hash, ...currentLoopContext() } })
         // 决策链路：脚本到达事件入 TraceLog（v6 §3.2），循环中盖 loopId/loopRound
         addTrace({
           kind: 'script',
@@ -305,6 +335,7 @@ function onSessionIdMessage(e: MessageEvent) {
       return
     }
     // done / plain / multi 仅循环模式消费
+    emitBus('ai:' + (kind || 'plain'), `AI 回复 · ${kind || 'plain'}`, { payload: { kind: kind || 'plain', text: d.text !== undefined ? String(d.text) : '', count: Number(d.count) || 0 } })
     if (routedToLoop) {
       void onNonScriptReply({
         kind: kind as 'done' | 'plain' | 'multi',
@@ -490,8 +521,24 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
       </button>
-      <div class="ds-url">
-        <span v-tooltip="headerUrl || '（未选中会话）'" class="ds-value-static">{{ headerUrl || '（未选中会话）' }}</span>
+      <div class="ds-url" :class="{ editing: urlEditing }">
+        <input
+          v-if="urlEditing"
+          ref="urlInputRef"
+          v-model="urlDraft"
+          class="ds-input"
+          spellcheck="false"
+          placeholder="https://..."
+          @keydown.enter.prevent="saveUrl"
+          @keydown.esc.prevent="cancelUrl"
+          @blur="onUrlBlur"
+        >
+        <span
+          v-else
+          v-tooltip="headerUrl ? '点击编辑对话地址' : '点击输入 AI 站点 URL'"
+          class="ds-value-static"
+          @click="openUrlEdit"
+        >{{ headerUrl || '（点击输入 URL）' }}</span>
       </div>
     </div>
   </header>
@@ -544,180 +591,8 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
       </div>
     </div>
   </div>
-  <div v-if="showNewSessionDialog" class="ns-mask" @click.self="closeNewSessionDialog">
-    <div class="ns-card">
-      <div class="ns-head">
-        <span class="ns-title">{{ editingSessionId ? '编辑会话' : '新建会话' }}</span>
-        <button v-tooltip="'关闭'" class="ns-close" @click="closeNewSessionDialog">
-          ×
-        </button>
-      </div>
-      <div class="ns-body">
-        <label class="ns-field">
-          <span class="ns-label">名称</span>
-          <input
-            ref="dialogTitleRef"
-            v-model="newSessionTitle"
-            class="ns-input"
-            spellcheck="false"
-            placeholder="会话名称（留空自动生成）"
-            @keydown.enter.prevent="confirmNewSession"
-          >
-        </label>
-        <label class="ns-field">
-          <span class="ns-label">模型</span>
-          <select v-model="newSessionModel" class="ns-select" @change="onNewSessionModelChange">
-            <option v-for="m in MODELS" :key="m.id" :value="m.id">
-              {{ m.label }}
-            </option>
-          </select>
-        </label>
-        <label class="ns-field">
-          <span class="ns-label">会话 URL</span>
-          <input v-model="newSessionUrl" class="ns-input" spellcheck="false" placeholder="https://..." @keydown.enter.prevent="confirmNewSession">
-        </label>
-        <div class="ns-hint">
-          <template v-if="editingSessionId">
-            保存后立即生效，列表与 header 同步更新
-          </template>
-          <!-- custom-tooltip -->
-          <template v-else>
-            创建后：本地会话重置 → 新会话加入左侧列表 → 打开上方 URL
-            <br>
-            header 与「复制并跳转」等按钮会跟着切到此 URL
-          </template>
-        </div>
-      </div>
-      <div class="ns-actions">
-        <button v-tooltip="'取消，不保存'" class="ns-btn ghost" @click="closeNewSessionDialog">
-          取消
-        </button>
-        <button
-          v-tooltip="editingSessionId ? '保存对该会话的修改' : '创建会话并打开配置的 URL'"
-          class="ns-btn primary"
-          :disabled="!newSessionUrl.trim()"
-          @click="confirmNewSession"
-        >
-          {{ editingSessionId ? '保存' : '创建并打开' }}
-        </button>
-      </div>
-    </div>
-  </div>
   <div class="layout-row">
-    <div
-      class="sidebar-mask"
-      :class="{ 'is-open': sidebarOpen }"
-      @click="sidebarOpen = false"
-    />
-    <aside class="session-sidebar" :class="{ 'is-open': sidebarOpen }">
-      <div class="sidebar-header">
-        <span class="sidebar-title">对话列表</span>
-        <span v-if="sessionHistory.length" class="sidebar-count">{{ sessionHistory.length }}</span>
-        <div class="sidebar-actions">
-          <button
-            v-if="sessionHistory.length"
-            v-tooltip="`清空全部 ${sessionHistory.length} 条会话历史（不可撤销）`"
-            class="sidebar-icon-btn"
-            @click="clearHistory"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-              <path d="M10 11v6M14 11v6" />
-            </svg>
-          </button>
-          <button v-tooltip="'新建会话：填写名称 \\/ 模型 \\/ URL，创建并打开'" class="sidebar-new-btn" @click="openNewSessionDialog">
-            +
-          </button>
-        </div>
-      </div>
-      <div v-if="sessionHistory.length" class="sidebar-list">
-        <div
-          v-for="s in sessionHistory"
-          :key="s.id"
-          v-tooltip="s.url || s.title || s.id"
-          class="sidebar-item is-card"
-          :class="{ 'is-active': s.id === activeSessionId, 'handed-off': !!s.handedOff }"
-          @click="selectSession(s)"
-          @dblclick.stop="openEditSessionDialog(s)"
-        >
-          <div class="sidebar-item-main">
-            <div class="sidebar-item-title">
-              {{ s.title || s.id }}
-              <span v-if="s.handedOff" class="handed-off-badge">→ 已交接</span>
-            </div>
-            <div class="sidebar-item-meta">
-              <span class="sidebar-item-id">{{ s.id }}</span>
-              <span
-                v-if="s.tokens"
-                v-tooltip="`页面估算：${s.tokens.toLocaleString()} / 50,000 tok（${tokenPct(s.tokens)}%）`"
-                class="sidebar-item-tokens"
-                :class="{ warn: tokenLevel(s.tokens) === 'warn', over: tokenLevel(s.tokens) === 'over' }"
-              >
-                <span class="tok-bar"><span class="tok-fill" :style="{ width: `${tokenPct(s.tokens)}%` }" /></span>
-                <span class="tok-num">{{ fmtTok(s.tokens) }}</span>
-              </span>
-              <span class="sidebar-item-time">{{ formatSessionTime(s.createdAt) }}</span>
-            </div>
-          </div>
-          <button
-            v-tooltip="'打开会话'"
-            class="sidebar-item-open"
-            @click.stop="openSessionUrl(s.url)"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-          </button>
-          <button
-            v-tooltip="'总结到下一会话（复制总结 → 创建新会话）'"
-            class="sidebar-item-handoff"
-            @click.stop="handoffToNextSession(s)"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 12h13" />
-              <polyline points="13 7 18 12 13 17" />
-              <path d="M20 4v16" />
-            </svg>
-          </button>
-          <button
-            v-tooltip="'删除'"
-            class="sidebar-item-del"
-            @click.stop="removeSessionFromHistory(s.id)"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-      <div v-else class="sidebar-empty">
-        <div class="sidebar-empty-icon">
-          💬
-        </div>
-        <div class="sidebar-empty-title">
-          还没有历史会话
-        </div>
-        <div class="sidebar-empty-hint">
-          点上方「新建会话」开始
-        </div>
-      </div>
-    </aside>
-
-    <div class="layout-main">
-      <nav class="tabs">
-        <button
-          v-tooltip="sidebarOpen ? '收起对话列表' : '展开对话列表'"
-          class="tabs-burger"
-          @click="sidebarOpen = !sidebarOpen"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
-        </button>
-      </nav>
+<div class="layout-main">
       <main class="main">
         <ScriptPanel @open-ask="askOpen = true" />
       </main>
