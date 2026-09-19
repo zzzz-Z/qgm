@@ -308,7 +308,11 @@ function onSessionIdMessage(e: MessageEvent) {
       if (item) {
         const lineCount = code.split('\n').length
         toast(`AI 脚本已到达 · ${lang} · ${lineCount} 行 · ${item.desc || '无说明'}`, 'info', 4000)
-        emitBus('ai:script', item.desc ? `📥 ${item.desc}` : `📥 脚本 · ${lang} · ${lineCount} 行`, { payload: { desc: item.desc, why: item.why, plan: meta('plan'), lang, lineCount, hash: item.hash, ...currentLoopContext() } })
+        const planM = code.match(/^\s*(?:\/\/|#)\s*@plan\s*:\s*(.+)$/m)
+        const plan = planM ? planM[1].trim().slice(0, 200) : ''
+        try {
+          emitBus('ai:script', item.desc ? `📥 ${item.desc}` : `📥 脚本 · ${lang} · ${lineCount} 行`, { payload: { desc: item.desc, why: item.why, plan, lang, lineCount, hash: item.hash, ...currentLoopContext() } })
+        } catch (e) { console.error('[ai:script emit] failed:', e) }
         // 决策链路：脚本到达事件入 TraceLog（v6 §3.2），循环中盖 loopId/loopRound
         addTrace({
           kind: 'script',
@@ -326,10 +330,10 @@ function onSessionIdMessage(e: MessageEvent) {
           // 循环模式：状态机接管（不经编辑器覆盖策略）
           void onScriptArrival(item, sid)
         } else {
-          // 手动模式：覆盖保护后填入编辑器，并自动运行
-          if (scriptInbox.applyToEditor(item) === 'overwritten') {
-            void runner.run()
-          }
+          // 手动模式：不回填编辑器，延迟 3-7s 直接执行
+          const delayMs = 3000 + Math.random() * 4000
+          toast(`⏱ ${Math.round(delayMs / 1000)}s 后自动执行`, 'info', Math.min(delayMs, 3000))
+          setTimeout(() => { void runScript({ script: code }) }, delayMs)
         }
       }
       return
@@ -364,9 +368,9 @@ function onSessionIdMessage(e: MessageEvent) {
       if (routedToLoop) {
         void onScriptArrival(item, sid)
       } else {
-        if (scriptInbox.applyToEditor(item) === 'overwritten') {
-          void runner.run()
-        }
+        // v1.2 兜底通道：延迟执行
+        const delayMs = 3000 + Math.random() * 4000
+        setTimeout(() => { void runScript({ script: code }) }, delayMs)
       }
     }
     return
@@ -462,6 +466,15 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
   }
   return true
 }
+function onOpenAiWin() {
+  const at = headerUrl.value || deepseekUrl.value
+  const w = openDeepseek(at)
+  if (w) {
+    toast('已打开 / 激活 AI 窗口', 'success', 2000)
+  } else {
+    toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
+  }
+}
 function onEscClose(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
   if (askOpen.value) askOpen.value = false
@@ -485,7 +498,7 @@ onBeforeUnmount(() => {
 const { sessionId, resetSession, generateHandoffSummary } = useSessionManager()
 const { toast } = useToast()
 const { stripComments, stripBlankLines, toggleStripComments, toggleStripBlankLines } = useCodeCleaner()
-const { smokeEnabled, gitCommit } = useRunner()
+const { smokeEnabled, gitCommit, run: runScript } = useRunner()
 const scriptInbox = useScriptInbox()
 const runner = useRunner()
 const { addTrace } = useTraceLog()
@@ -501,6 +514,18 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
       <span class="env">dev</span>
     </div>
     <div class="hdr-right">
+      <button
+        v-tooltip="'打开 / 激活 AI 窗口（点此建立工作台与 AI 站的连接）'"
+        aria-label="打开 AI 窗口"
+        class="open-ai-toggle"
+        @click="onOpenAiWin"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          <polyline points="15 3 21 3 21 9" />
+          <line x1="10" y1="14" x2="21" y2="3" />
+        </svg>
+      </button>
       <button
         v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
         class="theme-toggle"

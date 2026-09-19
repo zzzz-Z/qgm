@@ -86,8 +86,8 @@ function stop() {
   running.value = false
 }
 
-async function run() {
-  const code = script.value.trim()
+async function run(opts?: { script?: string }) {
+  const code = (opts?.script ?? script.value).trim()
   if (!code || running.value) return
   running.value = true
   result.value = null

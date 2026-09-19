@@ -147,6 +147,16 @@
                 <span class="sys-time">{{ fmtTreeTime(e.ts) }}</span>
               </div>
             </template>
+            <div v-if="aiWaiting" class="chat-msg chat-msg-ai chat-waiting">
+              <div class="bubble-head">
+                <span class="msg-avatar">🤖</span>
+                <span class="msg-name">AI</span>
+              </div>
+              <div class="bubble-body">
+                <span class="waiting-dots"><i /><i /><i /></span>
+                <span class="waiting-text">正在思考…</span>
+              </div>
+            </div>
             <div v-if="!chatItems.length" class="tree-empty">
               <div class="empty-title">还没有会话记录</div>
               <div class="empty-sub">点击「运行」开始自动化循环</div>
@@ -644,11 +654,13 @@ function stepIconOf(e: { kind: string, payload?: Record<string, unknown> }): str
 function stepTitleOf(e: { kind: string, summary?: string, payload?: Record<string, unknown> }): string {
   const p = e.payload || {}
   if (e.kind === 'ai:script') return String(p.desc || '脚本到达')
-  if (e.kind === 'run:start') return '开始执行'
+  if (e.kind === 'run:start') return '执行脚本：' + (String(p.desc || '').trim() || '未命名')
   if (e.kind === 'run:end') {
     const exit = p.exit !== undefined ? ' · exit ' + p.exit : ''
     const changes = Array.isArray(p.changes) ? p.changes.length : 0
-    return '执行完成' + exit + (changes ? ' · ' + changes + ' 文件' : '')
+    const desc = String(p.desc || '').trim()
+    const head = desc ? '执行脚本：' + desc : '执行完成'
+    return head + exit + (changes ? ' · ' + changes + ' 文件' : '')
   }
   if (e.kind === 'run:error') return String(e.summary || '执行失败')
   if (e.kind === 'run:stage') {
@@ -1560,12 +1572,15 @@ watch(previewFile, (v) => {
     : sideWidthBase.value
 })
 
-watch(() => busEvents.value.length, () => {
+function scrollTermToBottom() {
   nextTick(() => {
     const el = termBodyRef.value
-    if (el) el.scrollTop = el.scrollHeight
+    if (!el) return
+    el.scrollTop = el.scrollHeight
   })
-})
+}
+// watch 监听数组引用，覆盖 updateKey 覆盖更新（如 ai:stream 长度不变也能触发）
+watch(busEvents, scrollTermToBottom)
 
 onMounted(() => {
   try {
@@ -1580,6 +1595,7 @@ onMounted(() => {
   } catch { /* ignore */ }
 
   void createEditor()
+  scrollTermToBottom()
   window.addEventListener('ai-runner:auto-run', onAutoRun)
   window.addEventListener('keydown', onGlobalKey) })
 
@@ -4020,6 +4036,162 @@ function onHtmlDrop(e: DragEvent) {
 /* 强制覆盖旧左右分栏位置 */
 .chat-list .chat-msg {
   align-self: auto !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [step-dashed] 步骤行：无背景，虚线边框 + 字色
+   ═══════════════════════════════════════════════════════════ */
+.chat-step {
+  background: transparent !important;
+  border: 1px dashed var(--term-chip-border-2, rgb(255 255 255 / 18%)) !important;
+  border-left: 1px dashed var(--term-chip-border-2, rgb(255 255 255 / 18%)) !important;
+  color: var(--term-text-2, var(--text-2)) !important;
+}
+.chat-step:hover {
+  background: rgb(255 255 255 / 3%) !important;
+  border-color: rgb(255 255 255 / 28%) !important;
+  border-left-color: rgb(255 255 255 / 28%) !important;
+}
+
+/* 状态色：只改边框和字色 */
+.chat-step.state-pending {
+  border-color: rgb(255 255 255 / 14%) !important;
+  border-left-color: rgb(255 255 255 / 14%) !important;
+  color: var(--term-text-3, var(--text-3)) !important;
+}
+.chat-step.state-running {
+  border-color: rgb(96 165 250 / 55%) !important;
+  border-left-color: rgb(96 165 250 / 55%) !important;
+  color: #93c5fd !important;
+}
+.chat-step.state-running .step-dot {
+  border-color: rgb(96 165 250 / 35%) !important;
+  border-top-color: #93c5fd !important;
+  border-right-color: #93c5fd !important;
+}
+.chat-step.state-running .step-title { color: #93c5fd !important; }
+.chat-step.state-running .step-state {
+  background: transparent !important;
+  color: #93c5fd !important;
+  padding: 0 !important;
+}
+
+.chat-step.state-done {
+  border-color: rgb(16 185 129 / 45%) !important;
+  border-left-color: rgb(16 185 129 / 45%) !important;
+  color: #6ee7b7 !important;
+}
+.chat-step.state-done .step-dot { background: #10b981 !important; }
+.chat-step.state-done .step-title { color: #6ee7b7 !important; }
+.chat-step.state-done .step-state {
+  background: transparent !important;
+  color: #6ee7b7 !important;
+  padding: 0 !important;
+}
+
+.chat-step.state-error {
+  border-color: rgb(224 108 117 / 55%) !important;
+  border-left-color: rgb(224 108 117 / 55%) !important;
+  color: #fca5a5 !important;
+}
+.chat-step.state-error .step-dot { background: #e06c75 !important; }
+.chat-step.state-error .step-title { color: #fca5a5 !important; }
+.chat-step.state-error .step-state {
+  background: transparent !important;
+  color: #fca5a5 !important;
+  padding: 0 !important;
+}
+
+/* 时间戳跟字色同系 */
+.chat-step .step-time { color: inherit !important; opacity: 0.6; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [step-center] 步骤内容聚中
+   ═══════════════════════════════════════════════════════════ */
+.chat-step {
+  display: inline-flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: auto !important;
+  max-width: 92% !important;
+  margin: 4px auto !important;
+  padding: 4px 14px !important;
+}
+.chat-list {
+  text-align: center !important;
+}
+.chat-list > .chat-step {
+  display: inline-flex !important;
+}
+/* 步骤标题不再 flex:1 撑开 */
+.chat-step .step-title {
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
+  max-width: 60ch !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  text-align: left !important;
+}
+.chat-step .step-time,
+.chat-step .step-state {
+  flex: 0 0 auto !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [waiting-bubble] AI 等待气泡 + typing 动画
+   ═══════════════════════════════════════════════════════════ */
+.chat-waiting {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 6px 16px !important;
+  margin: 6px auto !important;
+  background: var(--term-chip-bg, rgb(255 255 255 / 4%)) !important;
+  border: 1px dashed var(--term-chip-border-2, rgb(255 255 255 / 18%)) !important;
+}
+.chat-waiting .bubble-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 !important;
+  font-size: 11px;
+  color: var(--term-text-3, var(--text-3));
+}
+.chat-waiting .bubble-body {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--term-text-2, var(--text-2));
+  font-size: 11px;
+}
+.waiting-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 12px;
+}
+.waiting-dots i {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--term-accent, var(--primary));
+  opacity: 0.6;
+  animation: waiting-bounce 1.2s infinite ease-in-out;
+}
+.waiting-dots i:nth-child(2) { animation-delay: 0.15s; }
+.waiting-dots i:nth-child(3) { animation-delay: 0.30s; }
+@keyframes waiting-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40% { transform: translateY(-4px); opacity: 1; }
+}
+.waiting-text {
+  font-family: var(--mono, monospace);
 }
 
 </style>

@@ -259,15 +259,48 @@ export type FillResult = 'sent' | 'opened' | 'failed'
 
 export async function copyAndFill(prompt: string): Promise<FillResult> {
   if (!prompt) return 'failed'
-  try { await navigator.clipboard.writeText(prompt) } catch { }
-  const win = getActiveWin()
+  try { await navigator.clipboard.writeText(prompt) } catch { /* ignore */ }
+
+  const sid = activeWinSid.value
+  const name = windowName(sid)
+
+  // 1. 内存里有引用且活着
+  let win = getActiveWin()
   if (win && !win.closed) {
     return sendFill({ prompt }) ? 'sent' : 'failed'
   }
+
+  // 2. [win-recover] 内存丢了（页面刷新过），但 AI 窗口可能还开着 —— 按名字找回
+  try {
+    const found = window.open('', name)
+    if (found && !found.closed && found !== window && found.location !== null) {
+      windowTable.set(sid, { win: found, url: url.value })
+      activeWinSid.value = sid
+      win = found
+    }
+  } catch { /* cross-origin 抛错视为找回失败 */ }
+
+  if (win && !win.closed) {
+    const ok1 = sendFill({ prompt })
+    if (ok1) return 'sent'
+  }
+
+  // 3. 都失败 → 尝试开新窗口（可能被 popup blocker 拦截）
   const w = openDeepseek()
-  if (!w) return 'failed'
-  await new Promise((resolve) => setTimeout(resolve, 1500))
-  return sendFill({ prompt }) ? 'opened' : 'failed'
+  if (w) {
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    return sendFill({ prompt }) ? 'opened' : 'failed'
+  }
+
+  // 4. 全失败
+  // [diag] copyAndFill 失败，打印诊断
+  console.error('[copyAndFill] 无法发送到 AI 窗口', {
+    activeWinSid: activeWinSid.value,
+    winName: name,
+    urlValue: url.value,
+    hint: '若 AI 窗口是手动打开的（非本工作台 openDeepseek 开），请点工作台右上角「打开 AI 窗口」重建引用',
+  })
+  return 'failed'
 }
 export function useDeepseekUrl() {
   return {
