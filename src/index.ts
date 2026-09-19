@@ -53,8 +53,9 @@ async function runScript(scriptPath: string, timeoutMs = 60_000, signal?: AbortS
     catch(e) { console.error('[script error]', e?.stack || e); process.exitCode = 1; }
   `
   const interceptorCjs = createRequire(import.meta.url).resolve('./interceptor.cjs')
+  const helpersCjs = createRequire(import.meta.url).resolve('./helpers.cjs')
   const r = await runProcess(process.execPath, {
-    args: ['--max-old-space-size=512', '-r', interceptorCjs, '-e', wrapperCode],
+    args: ['--max-old-space-size=512', '-r', interceptorCjs, '-r', helpersCjs, '-e', wrapperCode],
     cwd: ROOT,
     env: {
       ...process.env,
