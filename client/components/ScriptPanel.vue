@@ -100,8 +100,7 @@
       <section class="terminal card">
         <header class="bar term-bar">
           <div class="bar-actions">
-
-          </div>
+</div>
         </header>
 
         <div ref="termBodyRef" class="term-body">
@@ -230,8 +229,7 @@
       </section>
       <!-- 编辑器 (下方) -->
       <section class="editor card" :class="{ 'is-running': running, 'is-dragging': fileDragging }">
-
-        <div class="tpl-bar">
+<div class="tpl-bar">
           <button
             v-for="t in TEMPLATES"
             :key="t.id"
@@ -7080,6 +7078,51 @@ function onHtmlDrop(e: DragEvent) {
 .chat-msg-user .bubble-name,
 .chat-msg-user .bubble-time {
   line-height: 1.2 !important;
+}
+
+
+/* [step-vertical-center] 步骤条图标/文字/时间/状态垂直居中 */
+.chat-step {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  gap: 10px !important;
+}
+.chat-step .step-icon,
+.chat-step .step-dot {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex: 0 0 auto !important;
+  align-self: center !important;
+  line-height: 1 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+.chat-step .step-title {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  align-self: center !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  line-height: 1.4 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.chat-step.expanded .step-title {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  display: block !important;
+}
+.chat-step .step-time,
+.chat-step .step-state,
+.chat-step .step-caret {
+  align-self: center !important;
+  line-height: 1.2 !important;
+  margin: 0 !important;
 }
 
 </style>

@@ -46,7 +46,8 @@ export function emit(kind: EventKind, summary: string, opts?: { round?: number, 
   const { updateKey, round, payload: rawPayload } = opts || {}
   const payload: Record<string, unknown> = { ...(rawPayload || {}), ...(updateKey ? { updateKey } : {}) }
   if (updateKey) {
-    const idx = events.value.findIndex(e => e.kind === kind && String((e.payload as Record<string, unknown>)?.updateKey || '') === updateKey)
+    // [updatekey-fix] 只按 updateKey 匹配，允许跨 kind 覆盖（ai:ask → run:start 同一张卡）
+    const idx = events.value.findIndex(e => String((e.payload as Record<string, unknown>)?.updateKey || '') === updateKey)
     if (idx >= 0) {
       const next = [...events.value]
       next[idx] = { ...next[idx], ts: Date.now(), summary, payload: { ...(next[idx].payload || {}), ...payload } }

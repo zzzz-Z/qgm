@@ -122,13 +122,18 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   // [lifecycle] 记录本次执行的所有 stage（用于展开区时间线）
   let stageHistory: Array<{ name: string; status: string; ts: number; ms?: number; ok?: boolean; files?: number; tscOk?: boolean; testOk?: boolean }> = []
   const runStartedAt = Date.now()
-  emitStep('running')
+  let finalPhase: 'running' | 'done' | 'error' = 'running'  // [loading-fix]
+  const wrappedEmitStep = (phase: string, over: Record<string, unknown> = {}) => {
+    if (phase === 'done' || phase === 'error') finalPhase = phase as any
+    emitStep(phase, over)
+  }
+  wrappedEmitStep('running')
   let lastFlush = 0
   const flushChunk = () => {
     const now = Date.now()
     if (now - lastFlush < 250) return
     lastFlush = now
-    emitStep('running')
+    wrappedEmitStep('running')
   }
 
   try {
@@ -178,7 +183,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         if (idx >= 0) stageHistory[idx] = { ...stageHistory[idx], ...rec }
         else stageHistory.push(rec)
         const mark = status === 'done' ? (ok === false ? ' ✗' : ' ✓') : ' …'
-        emitStep('running', {
+        wrappedEmitStep('running', {
           currentStage: name + mark,
           stageName: name,
           stageStatus: status,
@@ -227,7 +232,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       }, [])
       if (data.ok && data.runId) baselineRunId.value = data.runId
       if (result.value) result.value.baselineRunId = prevBaseline
-      emitStep(data.ok ? 'done' : 'error', { exit: data.code, changeCount: changes.value.length, stageHistory, startedAt: runStartedAt, elapsedMs: Date.now() - runStartedAt })
+      wrappedEmitStep(data.ok ? 'done' : 'error', { exit: data.code, changeCount: changes.value.length, stageHistory, startedAt: runStartedAt, elapsedMs: Date.now() - runStartedAt })
     } else {
       result.value = {
         runId: '',
@@ -237,7 +242,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         stderr: liveStderr.value || '未收到 summary 帧',
         changes: [],
       }
-      emitStep('error', { reason: '未收到 summary 帧' })
+      wrappedEmitStep('error', { reason: '未收到 summary 帧' })
     }
   } catch (e) {
     const aborted = (e as { name?: string })?.name === 'AbortError'
@@ -250,8 +255,13 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       changes: [],
       error: aborted ? '已取消' : `请求异常：${String(e)}`,
     }
-    emitStep('error', { reason: aborted ? '已取消' : String(e).slice(0, 80) })
+    wrappedEmitStep('error', { reason: aborted ? '已取消' : String(e).slice(0, 80) })
   } finally {
+    // [loading-fix] 兜底：任何提前 return（HTTP 错误 / 无 body）都会走到这，确保 emit 结束态
+    if (finalPhase === 'running') {
+      const ok = result.value?.ok === true
+      wrappedEmitStep(ok ? 'done' : 'error', { exit: result.value?.code, changeCount: changes.value.length, fallback: true })
+    }
     running.value = false
   }
 }
