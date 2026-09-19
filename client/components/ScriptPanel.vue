@@ -122,7 +122,7 @@
                 v-html="renderMarkdown(e.summary)"
               />
               <div v-else-if="e.role === 'user'" class="chat-msg chat-msg-user">
-                <div class="bubble-head">👤 我 · {{ fmtTreeTime(e.ts) }}</div>
+                <div class="bubble-head"><span class="bubble-name">👤 我</span><span class="bubble-time">{{ fmtTreeTime(e.ts) }}</span></div>
                 <div class="bubble-body" v-html="renderUserBubble(e)" />
               </div>
               <div
@@ -199,7 +199,7 @@
                 </div>
               </div>
               <div v-else-if="e.role === 'ai'" class="chat-msg chat-msg-ai">
-                <div class="bubble-head">🤖 AI · {{ fmtTreeTime(e.ts) }}</div>
+                <div class="bubble-head"><span class="bubble-name">🤖 AI</span><span class="bubble-time">{{ fmtTreeTime(e.ts) }}</span></div>
                 <div class="bubble-body" v-html="renderAiBubble(e)" />
               </div>
               <div v-else class="chat-sys">
@@ -6111,6 +6111,81 @@ function onHtmlDrop(e: DragEvent) {
   font-size: 12.5px !important;
   line-height: 1.6 !important;
   padding-left: 0 !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [time-right-tight] 时间右对齐 + 段间距 0 + AI 消息加背景
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── head：name 左 + time 右 ─── */
+.chat-msg-user .bubble-head,
+.chat-msg-ai .bubble-head {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  margin: 0 0 6px 0 !important;
+  padding: 0 0 6px 0 !important;
+  border-bottom: 1px solid rgb(255 255 255 / 5%) !important;
+  font-size: 11px !important;
+  color: var(--text-3, #6b6b6b) !important;
+}
+.chat-msg-user .bubble-name,
+.chat-msg-ai .bubble-name {
+  flex: 0 0 auto !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.2px !important;
+}
+.chat-msg-user .bubble-time,
+.chat-msg-ai .bubble-time {
+  flex: 0 0 auto !important;
+  margin-left: auto !important;
+  font-variant-numeric: tabular-nums !important;
+  opacity: 0.7 !important;
+  font-size: 10.5px !important;
+}
+
+/* ─── 消息体：段落无 margin + 紧凑行高 ─── */
+.chat-msg-user .bubble-body .md-p,
+.chat-msg-ai .bubble-body .md-p,
+.bubble-body .md-p {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.55 !important;
+}
+.chat-msg-user .bubble-body .md-ul,
+.chat-msg-ai .bubble-body .md-ul,
+.bubble-body .md-ul {
+  margin: 0 !important;
+  padding-left: 18px !important;
+  line-height: 1.55 !important;
+}
+.chat-msg-user .bubble-body p + p,
+.chat-msg-ai .bubble-body p + p {
+  margin-top: 2px !important;
+}
+/* 空 p 不占位 */
+.chat-msg-user .bubble-body .md-p:empty,
+.chat-msg-ai .bubble-body .md-p:empty { display: none !important; }
+
+/* ─── AI 消息：明显紫底 + 无边框 ─── */
+.chat-msg-ai {
+  background: linear-gradient(180deg, rgb(167 139 250 / 10%), rgb(167 139 250 / 6%)) !important;
+  border: 1px solid rgb(167 139 250 / 18%) !important;
+}
+.chat-msg-ai .bubble-head {
+  border-bottom-color: rgb(167 139 250 / 15%) !important;
+  color: #c4b5fd !important;
+}
+.chat-msg-ai .bubble-body strong {
+  color: #d8b4fe !important;
+}
+
+/* ─── 用户消息：保持中性底色 ─── */
+.chat-msg-user {
+  background: var(--surface, #141414) !important;
+  border: 1px solid var(--border, #262626) !important;
 }
 
 </style>
