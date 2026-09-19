@@ -223,6 +223,19 @@
             <div v-if="!chatItems.length" class="tree-empty">
               <div class="empty-title">还没有会话记录</div>
               <div class="empty-sub">点击「运行」开始自动化循环</div>
+          <div class="empty-cards">
+            <button
+              v-for="t in TEMPLATES"
+              :key="t.id"
+              v-tooltip="t.title"
+              class="empty-card"
+              @click="applyTemplate(t.code)"
+            >
+              <span class="empty-card-ico">{{ t.id === 'bash' ? '🖥' : t.id === 'ask' ? '💬' : '📝' }}</span>
+              <span class="empty-card-title">{{ t.label }}</span>
+              <span class="empty-card-desc">{{ t.title }}</span>
+            </button>
+          </div>
             </div>
           </div>
         </div>

@@ -63,6 +63,7 @@ const loopState = ref<LoopState>('idle')
 const loopId = ref('')
 const loopRound = ref(0)
 const loopGoal = ref('')
+const userNote = ref('')
 const loopStartCommit = ref('')
 const loopStartTokens = ref(0)
 const latestTokens = ref(0)
@@ -627,7 +628,7 @@ export async function resumeLoop(): Promise<void> {
   // 清空上轮 lastHash：budget 恢复后 AI 重发同一脚本是合理的（它没收到结果），
   // 避免被误判为「连续两轮重复」而熔断
   inst.lastHash.value = ''
-  const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta: 0 })
+  const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta: 0, goal: inst.goal.value, round: inst.round.value, max: LOOP_MAX_ROUNDS, userNote: userNote.value || undefined })
   const okSent = sendFill({ prompt: feedback })
   if (!okSent) { await finish(inst, 'window-lost', '续跑时窗口发送失败'); return }
   bindKeyboard()
@@ -719,7 +720,7 @@ async function afterRound(inst: LoopInstance, o: RoundOutcome): Promise<void> {
       payload: { loopId: inst.id.value, loopRound: inst.round.value },
     })
   }
-  const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta })
+  const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta, goal: inst.goal.value, round: inst.round.value, max: LOOP_MAX_ROUNDS, userNote: userNote.value || undefined })
   const ok = sendFill({ prompt: feedback })
   if (!ok) { await finish(inst, 'window-lost', '回填结果时 AI 窗口已关闭'); return }
 
@@ -832,7 +833,7 @@ async function finish(inst: LoopInstance, reason: string, detail?: string): Prom
       const r = await fetch('/__ai/git/commit-loop', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `ai-runner: ${inst.id.value} · ${inst.round.value} 轮 · ${reason}`,
+          message: `ai-runner: ${(inst.goal.value || inst.id.value).slice(0, 60)} · ${inst.round.value} 轮 · ${reason}`,
         }),
       })
       const d = await r.json()

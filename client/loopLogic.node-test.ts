@@ -196,6 +196,28 @@ it('回填：变更文件列表最多展示 10 个', () => {
   assert.ok(f.includes('变更: 15 个文件'))
 })
 
+it('回填：记忆锚点含目标与进度', () => {
+  const f = buildFeedback(cjsOutcome(), { nextRound: 2, tokenDelta: 0, goal: '让 pnpm test 全绿', round: 1, max: 8 })
+  assert.ok(f.includes('【锚】目标：让 pnpm test 全绿'))
+  assert.ok(f.includes('进度 1/8'))
+  assert.ok(f.includes('剩 7 轮'))
+})
+
+it('回填：无 goal 时无锚点行', () => {
+  const f = buildFeedback(cjsOutcome(), { nextRound: 2, tokenDelta: 0 })
+  assert.ok(!f.includes('【锚】'))
+})
+
+it('回填：userNote 注入', () => {
+  const f = buildFeedback(cjsOutcome(), { nextRound: 2, tokenDelta: 0, userNote: '注意保留注释' })
+  assert.ok(f.includes('【用户补充】注意保留注释'))
+})
+
+it('回填：无 userNote 时无用户补充行', () => {
+  const f = buildFeedback(cjsOutcome(), { nextRound: 2, tokenDelta: 0 })
+  assert.ok(!f.includes('【用户补充】'))
+})
+
 it('回填：末尾必含推进指令与 DONE 出口', () => {
   const f = buildFeedback(cjsOutcome(), { nextRound: 2, tokenDelta: 0 })
   assert.ok(f.includes('勿重复上轮脚本'))

@@ -18,7 +18,8 @@
     "test:unit": "node --test --experimental-strip-types client/*.node-test.ts src/*.test.cjs",
     "test:e2e": "playwright test --config client/playwright.config.ts",
     "run-all": "node bin/run-all.cjs",
-    "recover": "node bin/recover.cjs"
+    "recover": "node bin/recover.cjs",
+    "check-regression": "node bin/check-regression.cjs check"
   },
   "exports": {
     ".": {
@@ -39,7 +40,10 @@
     "air-check": "./bin/check-status.cjs",
     "air-log": "./bin/log-signal.cjs",
     "air-recover": "./bin/recover.cjs",
-    "air-run-all": "./bin/run-all.cjs"
+    "air-run-all": "./bin/run-all.cjs",
+    "air-notes": "./bin/gen-notes.cjs",
+    "air-compliance": "./bin/compliance-report.cjs",
+    "air-check-regression": "./bin/check-regression.cjs"
   },
   "dependencies": {
     "@ast-grep/cli": "^0.28.0",

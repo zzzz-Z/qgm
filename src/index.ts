@@ -53,8 +53,9 @@ async function runScript(scriptPath: string, timeoutMs = 60_000, signal?: AbortS
     catch(e) { console.error('[script error]', e?.stack || e); process.exitCode = 1; }
   `
   const interceptorCjs = createRequire(import.meta.url).resolve('./interceptor.cjs')
+  const helpersCjs = createRequire(import.meta.url).resolve('./helpers.cjs')
   const r = await runProcess(process.execPath, {
-    args: ['--max-old-space-size=512', '-r', interceptorCjs, '-e', wrapperCode],
+    args: ['--max-old-space-size=512', '-r', interceptorCjs, '-r', helpersCjs, '-e', wrapperCode],
     cwd: ROOT,
     env: {
       ...process.env,
@@ -566,7 +567,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     ensureDirs()
     fs.mkdirSync(path.join(ROOT, '.ai-runner/tmp'), { recursive: true })
     const startedAt = Date.now()
-    const body = parseJSON<{ script?: string, gitCommit?: boolean, gitVerify?: boolean, sandbox?: string }>(await readBody(req))
+    const body = parseJSON<{ script?: string, gitCommit?: boolean, gitVerify?: boolean, sandbox?: string, loopCtx?: { loopId?: string, round?: number, max?: number } }>(await readBody(req))
     const sandboxRaw = String(body?.sandbox || 'read-only')
     const sandbox = ['read-only', 'workspace-write', 'full'].includes(sandboxRaw) ? sandboxRaw : 'read-only'
     const script = String(body?.script || '').trim()
@@ -717,7 +718,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     // after commit：按本次 changes 提交
     let gitAfter: { ok: boolean, commit?: string, reason?: string } | null = null
     if (gitCommit && gitInfo.ok && changes.length > 0) {
-      gitAfter = await gitCommitAfter(runId, changes, result.code, Date.now() - startedAt, gitVerify)
+      const lc = body?.loopCtx
+      const loopCtxNormalized = lc && lc.loopId ? { loopId: String(lc.loopId), round: Number(lc.round) || 1, max: Number(lc.max) || 8 } : undefined
+      gitAfter = await gitCommitAfter(runId, changes, result.code, Date.now() - startedAt, gitVerify, scriptDesc, loopCtxNormalized)
     }
 
     let smoke: SmokeResult | null = null
