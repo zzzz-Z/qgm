@@ -125,12 +125,78 @@
                 <div class="bubble-head">👤 我 · {{ fmtTreeTime(e.ts) }}</div>
                 <div class="bubble-body" v-html="renderUserBubble(e)" />
               </div>
-              <div v-else-if="e.role === 'step'" class="chat-step" :class="'state-' + stepStateOf(e)">
+              <div
+                v-else-if="e.role === 'step'"
+                class="chat-step"
+                :class="['state-' + stepStateOf(e), { expanded: treeExpanded.has(e.id) }]"
+                @click="toggleTreeNode(e.id)"
+              >
                 <span class="step-dot" />
                 <span class="step-icon">{{ stepIconOf(e) }}</span>
                 <span class="step-title">{{ stepTitleOf(e) }}</span>
                 <span class="step-time">{{ fmtTreeTime(e.ts) }}</span>
                 <span class="step-state">{{ stepLabelOf(e) }}</span>
+                <span class="step-caret" :class="{ open: treeExpanded.has(e.id) }">▾</span>
+                <div v-if="treeExpanded.has(e.id)" class="step-detail" @click.stop>
+                  <!-- 1. 脚本声明 -->
+                  <template v-if="e.payload && e.payload.why">
+                    <div class="detail-row"><span class="detail-label">为什么</span><span class="detail-val">{{ e.payload.why }}</span></div>
+                  </template>
+                  <template v-if="e.payload && e.payload.plan">
+                    <div class="detail-row"><span class="detail-label">计划</span><span class="detail-val">{{ e.payload.plan }}</span></div>
+                  </template>
+
+                  <!-- 2. 生命周期时间线 -->
+                  <template v-if="e.payload && e.payload.stageHistory && e.payload.stageHistory.length">
+                    <div class="detail-row">
+                      <span class="detail-label">生命周期</span>
+                      <div class="detail-stages">
+                        <div v-for="(st, i) in e.payload.stageHistory" :key="st.name" class="stage-item">
+                          <span class="stage-idx">{{ i + 1 }}</span>
+                          <span class="stage-dot" :class="st.status === 'done' ? (st.ok === false ? 'err' : 'ok') : 'run'" />
+                          <span class="stage-name">{{ st.name }}</span>
+                          <span v-if="st.files !== undefined" class="stage-meta">{{ st.files }} 文件</span>
+                          <span v-if="st.ms !== undefined" class="stage-ms">{{ st.ms }}ms</span>
+                          <span v-if="st.tscOk === false" class="stage-tag err">tsc 失败</span>
+                          <span v-if="st.testOk === false" class="stage-tag err">test 失败</span>
+                          <span class="stage-status" :class="st.status === 'done' ? (st.ok === false ? 'err' : 'ok') : 'run'">
+                            {{ st.status === 'done' ? (st.ok === false ? '失败' : '完成') : '处理中' }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- 3. 一级执行完输出（stdout） -->
+                  <template v-if="e.payload && e.payload.stdoutTail">
+                    <div class="detail-row">
+                      <span class="detail-label">输出</span>
+                      <pre class="detail-pre">{{ e.payload.stdoutTail }}</pre>
+                    </div>
+                  </template>
+
+                  <!-- 4. stderr -->
+                  <template v-if="e.payload && e.payload.stderrTail">
+                    <div class="detail-row">
+                      <span class="detail-label err">stderr</span>
+                      <pre class="detail-pre err">{{ e.payload.stderrTail }}</pre>
+                    </div>
+                  </template>
+
+                  <!-- 5. 结果摘要 -->
+                  <template v-if="e.payload && (e.payload.exit !== undefined || e.payload.elapsedMs !== undefined)">
+                    <div class="detail-row">
+                      <span class="detail-label">结果</span>
+                      <span class="detail-val">
+                        <template v-if="e.payload.exit !== undefined">exit {{ e.payload.exit }}</template>
+                        <template v-if="e.payload.changeCount"> · {{ e.payload.changeCount }} 文件</template>
+                        <template v-if="e.payload.elapsedMs !== undefined"> · 耗时 {{ (e.payload.elapsedMs / 1000).toFixed(2) }}s</template>
+                      </span>
+                    </div>
+                  </template>
+
+                  <div v-if="!e.payload || (!e.payload.why && !e.payload.plan && !e.payload.stdoutTail && !e.payload.stderrTail && !(e.payload.stageHistory && e.payload.stageHistory.length) && e.payload.exit === undefined)" class="detail-empty">无更多信息</div>
+                </div>
               </div>
               <div v-else-if="e.role === 'ai'" class="chat-msg chat-msg-ai">
                 <div class="bubble-head">🤖 AI · {{ fmtTreeTime(e.ts) }}</div>
@@ -162,10 +228,6 @@
       <section class="editor card" :class="{ 'is-running': running }">
 
         <div class="tpl-bar">
-          <span v-tooltip="'运行 / 保存'" class="kbd-hint">
-            <kbd>⌘</kbd><span class="slash">/</span><kbd>Ctrl</kbd><span class="plus">+</span><kbd>↵</kbd>
-          </span>
-          <span class="tpl-divider" />
           <button
             v-for="t in TEMPLATES"
             :key="t.id"
@@ -640,13 +702,7 @@ function stepTitleOf(e: { kind: string, summary?: string, payload?: Record<strin
   if (e.kind === 'ai:script') return String(p.desc || '脚本到达')
   if (e.kind === 'run:start') {
     const desc = String(p.desc || '').trim() || '脚本'
-    const why = String(p.why || '').trim()
-    const plan = String(p.plan || '').trim()
-    const lines: string[] = []
-    if (desc) lines.push('**' + desc + '**')
-    if (why) lines.push('为什么：' + why)
-    if (plan) lines.push('计划：' + plan)
-    return lines.join('\n')
+    return desc
   }
   if (e.kind === 'run:end') {
     const exit = p.exit !== undefined ? ' · exit ' + p.exit : ''
@@ -1264,11 +1320,11 @@ async function execCmd(text: string) {
   }
 }
 let lastAutoAskedRunId = ''
-async function copyOutput() {
+async function copyOutput(force = false) {
   if (!result.value) return
   try {
     const runKey = result.value.runId || `${result.value.code}|${(result.value.stderr || '').slice(0, 64)}`
-    if (lastAutoAskedRunId === runKey) return
+    if (!force && lastAutoAskedRunId === runKey) return
     lastAutoAskedRunId = runKey
     const text = await buildAiPrompt()
     if (!text) return
@@ -1584,8 +1640,8 @@ watch(running, (v) => {
         'warn',
         5000,
       )
-      if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput() })
-      else setTimeout(() => { void copyOutput() }, 3000)
+      if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput(autoFeedbackRequested.value) })
+      else setTimeout(() => { void copyOutput(autoFeedbackRequested.value) }, 3000)
     } else {
       statusText.value = result.value.ok ? '✅ 成功' : '❌ 失败'
       statusClass.value = result.value.ok ? 'ok' : 'err'
@@ -1603,8 +1659,8 @@ watch(running, (v) => {
         result.value.test?.ok === false
       if (shouldAutoAsk && result.value.error !== '已取消') {
         if (forceFeedback) clearAutoFeedback()
-        if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput() })
-        else setTimeout(() => { void copyOutput() }, AUTO_ASK_DELAY_MS)
+        if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput(forceFeedback) })
+        else setTimeout(() => { void copyOutput(forceFeedback) }, AUTO_ASK_DELAY_MS)
       }
       // U.8: 运行后保留编辑器内容（便于重跑 / 微调）
       const scriptSnapshot = script.value
@@ -4939,6 +4995,672 @@ function onHtmlDrop(e: DragEvent) {
 .chat-step.state-done .step-state { background: rgb(74 222 128 / 12%) !important; color: #86efac !important; }
 .chat-step.state-error .step-state { background: rgb(248 113 113 / 14%) !important; color: #fca5a5 !important; }
 .chat-step.state-pending .step-state { background: rgb(255 255 255 / 5%) !important; color: var(--text-3, #7a7a7a) !important; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [toolbar-clean] 工具栏精简 + 清空/运行按钮样式优化
+   ═══════════════════════════════════════════════════════════ */
+
+/* 隐藏残留 kbd-hint（防其他位置） */
+.tpl-bar .kbd-hint,
+.tpl-bar .tpl-divider { display: none !important; }
+
+/* 清空按钮：幽灵样式，hover 才显形 */
+.tpl-bar .ghost-btn {
+  padding: 4px 12px !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  color: var(--text-2, #b0b0b0) !important;
+  font-size: 11.5px !important;
+  font-weight: 500 !important;
+  transition: background 0.12s ease, color 0.12s ease !important;
+}
+.tpl-bar .ghost-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text, #e0e0e0) !important;
+}
+.tpl-bar .ghost-btn:disabled { opacity: 0.35 !important; cursor: not-allowed !important; }
+
+/* 运行按钮：紫描边实底 hover */
+.tpl-bar .primary-btn.head-run {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  padding: 5px 14px !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.2px !important;
+  cursor: pointer !important;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease !important;
+}
+.tpl-bar .primary-btn.takeover.head-run {
+  background: transparent !important;
+  color: #c084fc !important;
+  border: 1px solid #c084fc !important;
+  box-shadow: none !important;
+}
+.tpl-bar .primary-btn.takeover.head-run:hover:not(:disabled) {
+  background: rgb(192 132 252 / 12%) !important;
+  color: #d8b4fe !important;
+  border-color: #d8b4fe !important;
+  box-shadow: 0 0 0 3px rgb(192 132 252 / 8%) !important;
+}
+.tpl-bar .primary-btn.stop.head-run {
+  background: rgb(240 171 252 / 10%) !important;
+  color: #f0abfc !important;
+  border: 1px solid #f0abfc !important;
+  box-shadow: none !important;
+}
+.tpl-bar .primary-btn.stop.head-run:hover:not(:disabled) {
+  background: rgb(240 171 252 / 18%) !important;
+  color: #f5d0fe !important;
+  border-color: #f5d0fe !important;
+}
+
+/* 图标基线 */
+.tpl-bar .primary-btn .ico-svg {
+  width: 11px !important;
+  height: 11px !important;
+  display: inline-block !important;
+  vertical-align: -1px !important;
+}
+
+/* tpl-bar 布局：模板 chip 靠左，清空/运行靠右 */
+.tpl-bar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 6px 12px !important;
+}
+.tpl-bar .tpl-chip { flex: 0 0 auto !important; }
+.tpl-bar .tpl-spacer { flex: 1 1 auto !important; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [msg-indent-btns] 用户消息略偏左 + 间距加大 + 按钮精修
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── 用户消息：右侧缩进，视觉偏左 ─── */
+.chat-msg-user {
+  margin-right: 48px !important;
+  margin-left: 0 !important;
+}
+/* ─── AI 消息：保持占满 ─── */
+.chat-msg-ai {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* ─── 消息间距加大 ─── */
+.chat-list {
+  gap: 10px !important;
+  padding: 16px 20px 24px !important;
+}
+
+/* 消息块内部间距宽松 */
+.chat-msg-user,
+.chat-msg-ai {
+  padding: 8px 14px !important;
+  border-radius: 8px !important;
+}
+.chat-msg-user .bubble-head,
+.chat-msg-ai .bubble-head {
+  padding-bottom: 5px !important;
+  margin-bottom: 5px !important;
+}
+
+/* 步骤条更宽松 */
+.chat-step {
+  padding: 8px 14px !important;
+  border-radius: 6px !important;
+}
+
+/* ─── 按钮精修：统一高度/圆角/字号 ─── */
+.tpl-bar {
+  padding: 8px 14px !important;
+  gap: 8px !important;
+}
+
+/* 模板 chip：更圆润 */
+.tpl-bar .tpl-chip {
+  padding: 4px 12px !important;
+  font-size: 11.5px !important;
+  border-radius: 6px !important;
+  border: 1px solid rgb(255 255 255 / 10%) !important;
+  background: transparent !important;
+  color: var(--text-2, #b0b0b0) !important;
+  transition: all 0.14s ease !important;
+}
+.tpl-bar .tpl-chip:hover {
+  background: rgb(192 132 252 / 10%) !important;
+  color: #c084fc !important;
+  border-color: rgb(192 132 252 / 40%) !important;
+}
+
+/* 清空按钮：幽灵型，加细边框 */
+.tpl-bar .ghost-btn {
+  padding: 4px 14px !important;
+  height: 26px !important;
+  border: 1px solid rgb(255 255 255 / 10%) !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  color: var(--text-2, #b0b0b0) !important;
+  font-size: 11.5px !important;
+  font-weight: 500 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.14s ease !important;
+}
+.tpl-bar .ghost-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text, #e0e0e0) !important;
+  border-color: rgb(255 255 255 / 20%) !important;
+}
+.tpl-bar .ghost-btn:disabled {
+  opacity: 0.35 !important;
+  cursor: not-allowed !important;
+}
+
+/* 运行/暂停按钮：统一高度 28px */
+.tpl-bar .primary-btn.head-run {
+  height: 28px !important;
+  padding: 0 16px !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.3px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  transition: all 0.16s ease !important;
+}
+.tpl-bar .primary-btn.head-run .ico-svg {
+  width: 12px !important;
+  height: 12px !important;
+  flex-shrink: 0 !important;
+}
+
+/* 运行按钮（takeover 态）：紫描边 hover 变实底 */
+.tpl-bar .primary-btn.takeover.head-run {
+  background: transparent !important;
+  color: #c084fc !important;
+  border: 1px solid #c084fc !important;
+  box-shadow: none !important;
+}
+.tpl-bar .primary-btn.takeover.head-run:hover:not(:disabled) {
+  background: rgb(192 132 252 / 14%) !important;
+  color: #d8b4fe !important;
+  border-color: #d8b4fe !important;
+  box-shadow: 0 0 0 4px rgb(192 132 252 / 8%) !important;
+}
+
+/* 暂停按钮（stop 态）：紫红描边 + 淡底 */
+.tpl-bar .primary-btn.stop.head-run {
+  background: rgb(240 171 252 / 8%) !important;
+  color: #f0abfc !important;
+  border: 1px solid #f0abfc !important;
+  box-shadow: none !important;
+}
+.tpl-bar .primary-btn.stop.head-run:hover:not(:disabled) {
+  background: rgb(240 171 252 / 16%) !important;
+  color: #f5d0fe !important;
+  border-color: #f5d0fe !important;
+  box-shadow: 0 0 0 4px rgb(240 171 252 / 8%) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [step-collapse] 步骤条折叠：默认 desc，点击展开详情
+   ═══════════════════════════════════════════════════════════ */
+.chat-step { cursor: pointer !important; position: relative !important; }
+.chat-step .step-caret {
+  flex: 0 0 auto !important;
+  font-size: 10px !important;
+  color: var(--text-3, #7a7a7a) !important;
+  margin-left: 4px !important;
+  margin-top: 4px !important;
+  transition: transform 0.15s ease !important;
+  opacity: 0.6 !important;
+}
+.chat-step:hover .step-caret { opacity: 1 !important; }
+.chat-step .step-caret.open { transform: rotate(180deg) !important; }
+
+/* step-title 单行省略（收起态） */
+.chat-step .step-title {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.chat-step.expanded .step-title {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
+/* 详情区 */
+.step-detail {
+  flex: 1 1 100% !important;
+  width: 100% !important;
+  margin-top: 8px !important;
+  padding-top: 8px !important;
+  border-top: 1px dashed rgb(255 255 255 / 10%) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  font-size: 11px !important;
+  cursor: default !important;
+}
+.detail-row {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 10px !important;
+  text-align: left !important;
+}
+.detail-label {
+  flex: 0 0 56px !important;
+  color: var(--text-3, #7a7a7a) !important;
+  font-size: 10px !important;
+  letter-spacing: 0.3px !important;
+  text-transform: uppercase !important;
+  padding-top: 2px !important;
+}
+.detail-label.err { color: #f87171 !important; }
+.detail-val {
+  flex: 1 1 auto !important;
+  color: var(--text, #e0e0e0) !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  min-width: 0 !important;
+}
+.detail-pre {
+  flex: 1 1 auto !important;
+  margin: 0 !important;
+  padding: 6px 8px !important;
+  background: rgb(0 0 0 / 30%) !important;
+  border-radius: 4px !important;
+  color: var(--text-2, #b0b0b0) !important;
+  font: 10.5px/1.5 var(--mono, monospace) !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  max-height: 200px !important;
+  overflow-y: auto !important;
+  min-width: 0 !important;
+}
+.detail-pre.err { color: #fca5a5 !important; }
+.detail-empty {
+  color: var(--text-3, #7a7a7a) !important;
+  font-size: 10.5px !important;
+  font-style: italic !important;
+}
+
+/* chat-step 展开时 flex-wrap 允许 */
+.chat-step.expanded { flex-wrap: wrap !important; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [linear-ui] Linear / VSCode 风格：中性灰 + 单一紫强调
+   覆盖前面所有补丁块，最终生效
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── 全局背景 ─── */
+.pane-main,
+.terminal,
+.terminal .term-body,
+.editor,
+.editor .editor-body,
+.editor .cm-editor,
+.editor .cm-scroller,
+.editor .cm-content,
+.editor .cm-gutters {
+  background: var(--bg, #0d0d0d) !important;
+}
+
+/* ─── 消息列：极简间距 ─── */
+.chat-list {
+  gap: 6px !important;
+  padding: 14px 20px 20px !important;
+  max-width: 800px !important;
+}
+
+/* ─── 步骤条：中性卡 ─── */
+.chat-step {
+  background: var(--surface, #141414) !important;
+  border: 1px solid var(--border, #262626) !important;
+  border-left: 2px solid var(--text-3, #6b6b6b) !important;
+  border-radius: 6px !important;
+  padding: 8px 12px !important;
+  color: var(--text-2, #a3a3a3) !important;
+  transition: background 0.12s, border-color 0.12s !important;
+}
+.chat-step:hover { background: var(--surface-2, #1a1a1a) !important; }
+.chat-step .step-title { color: var(--text, #e6e6e6) !important; font-weight: 500 !important; }
+.chat-step .step-title strong { color: var(--text, #e6e6e6) !important; font-weight: 600 !important; }
+.chat-step .step-time { color: var(--text-3, #6b6b6b) !important; font-size: 10.5px !important; }
+.chat-step .step-state {
+  background: rgb(255 255 255 / 4%) !important;
+  color: var(--text-3, #6b6b6b) !important;
+  border-radius: 10px !important;
+  font-weight: 500 !important;
+  padding: 1px 8px !important;
+  font-size: 10px !important;
+}
+
+/* 状态：只改左竖线 + 状态徽章色 */
+.chat-step.state-running {
+  border-left-color: var(--primary, #a78bfa) !important;
+}
+.chat-step.state-running .step-state { background: rgb(167 139 250 / 12%) !important; color: #c4b5fd !important; }
+.chat-step.state-running .step-dot {
+  border-color: rgb(167 139 250 / 30%) !important;
+  border-top-color: #a78bfa !important;
+  border-right-color: #a78bfa !important;
+}
+.chat-step.state-done { border-left-color: rgb(74 222 128 / 60%) !important; }
+.chat-step.state-done .step-state { background: rgb(74 222 128 / 10%) !important; color: #86efac !important; }
+.chat-step.state-done .step-dot { background: #4ade80 !important; }
+.chat-step.state-error { border-left-color: rgb(248 113 113 / 60%) !important; }
+.chat-step.state-error .step-state { background: rgb(248 113 113 / 10%) !important; color: #fca5a5 !important; }
+.chat-step.state-error .step-dot { background: #f87171 !important; }
+.chat-step.state-pending { border-left-color: var(--border-2, #333) !important; }
+
+/* ─── 用户消息：中性灰卡 + 右侧缩进 ─── */
+.chat-msg-user {
+  background: var(--surface, #141414) !important;
+  border: 1px solid var(--border, #262626) !important;
+  border-radius: 6px !important;
+  padding: 8px 14px !important;
+  margin-right: 48px !important;
+  margin-left: 0 !important;
+}
+.chat-msg-user .bubble-head { color: var(--text-3, #6b6b6b) !important; }
+.chat-msg-user .bubble-body { color: var(--text, #e6e6e6) !important; }
+
+/* ─── AI 消息：紫边卡 ─── */
+.chat-msg-ai {
+  background: rgb(167 139 250 / 4%) !important;
+  border: 1px solid rgb(167 139 250 / 12%) !important;
+  border-radius: 6px !important;
+  padding: 8px 14px !important;
+}
+.chat-msg-ai .bubble-head { color: var(--text-3, #6b6b6b) !important; }
+.chat-msg-ai .bubble-body { color: var(--text, #e6e6e6) !important; }
+.chat-msg-ai .bubble-body strong { color: #c4b5fd !important; font-weight: 600 !important; }
+
+/* ─── 等待气泡：紫左竖条 ─── */
+.chat-waiting {
+  background: var(--surface, #141414) !important;
+  border: 1px solid var(--border, #262626) !important;
+  border-left: 2px solid #a78bfa !important;
+  border-radius: 6px !important;
+}
+.chat-waiting .waiting-dots i { background: #a78bfa !important; }
+.chat-waiting .waiting-text { color: var(--text-2, #a3a3a3) !important; }
+
+/* ─── 顶部栏：极简 ─── */
+.term-bar,
+.editor-bar {
+  background: var(--surface, #141414) !important;
+  border-bottom: 1px solid var(--border, #262626) !important;
+}
+
+/* ─── tpl-bar 工具栏：Linear 风 ─── */
+.tpl-bar {
+  background: var(--surface, #141414) !important;
+  border-bottom: 1px solid var(--border, #262626) !important;
+  padding: 6px 12px !important;
+  gap: 6px !important;
+}
+.tpl-bar .tpl-chip {
+  background: transparent !important;
+  border: 1px solid var(--border, #262626) !important;
+  border-radius: 5px !important;
+  color: var(--text-2, #a3a3a3) !important;
+  padding: 3px 11px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+}
+.tpl-bar .tpl-chip:hover {
+  background: var(--surface-2, #1a1a1a) !important;
+  border-color: var(--border-2, #333) !important;
+  color: var(--text, #e6e6e6) !important;
+}
+.tpl-bar .ghost-btn {
+  background: transparent !important;
+  border: 1px solid var(--border, #262626) !important;
+  border-radius: 5px !important;
+  color: var(--text-2, #a3a3a3) !important;
+  padding: 3px 12px !important;
+  height: 26px !important;
+  font-size: 11.5px !important;
+  font-weight: 500 !important;
+}
+.tpl-bar .ghost-btn:hover:not(:disabled) {
+  background: var(--surface-2, #1a1a1a) !important;
+  border-color: var(--border-2, #333) !important;
+  color: var(--text, #e6e6e6) !important;
+}
+.tpl-bar .primary-btn.head-run {
+  height: 26px !important;
+  padding: 0 14px !important;
+  border-radius: 5px !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.2px !important;
+}
+.tpl-bar .primary-btn.takeover.head-run {
+  background: #a78bfa !important;
+  color: #0d0d0d !important;
+  border: 1px solid #a78bfa !important;
+  box-shadow: none !important;
+}
+.tpl-bar .primary-btn.takeover.head-run:hover:not(:disabled) {
+  background: #c4b5fd !important;
+  border-color: #c4b5fd !important;
+}
+.tpl-bar .primary-btn.stop.head-run {
+  background: transparent !important;
+  color: #f0abfc !important;
+  border: 1px solid #f0abfc !important;
+}
+.tpl-bar .primary-btn.stop.head-run:hover:not(:disabled) {
+  background: rgb(240 171 252 / 10%) !important;
+}
+
+/* ─── 侧栏 tab ─── */
+.side-tabs {
+  background: var(--surface, #141414) !important;
+  border-bottom: 1px solid var(--border, #262626) !important;
+}
+.side-tab.active {
+  background: var(--surface-2, #1a1a1a) !important;
+  color: #c4b5fd !important;
+}
+.side-tab-badge {
+  background: #a78bfa !important;
+  color: #0d0d0d !important;
+}
+
+/* ─── 隐藏所有旧气泡 ─── */
+.chat-bubble.bubble-left,
+.chat-bubble.bubble-right { display: none !important; }
+
+/* ─── 滚动条：Linear 极细 ─── */
+.pane-main *::-webkit-scrollbar { width: 8px !important; height: 8px !important; }
+.pane-main *::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 8%) !important;
+  border-radius: 4px !important;
+}
+.pane-main *::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 14%) !important;
+}
+.pane-main *::-webkit-scrollbar-track { background: transparent !important; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [editor-tune] 编辑器背景独立 + 间距收敛 + 字号上调
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── 编辑器区背景：稍亮于整体，形成层次 ─── */
+.editor,
+.editor .editor-body,
+.editor .cm-host,
+.editor .cm-editor,
+.editor .cm-scroller,
+.editor .cm-content {
+  background: var(--surface, #141414) !important;
+}
+.editor .cm-gutters {
+  background: var(--surface, #141414) !important;
+  border-right: 1px solid var(--border, #262626) !important;
+  color: var(--text-3, #6b6b6b) !important;
+}
+.editor .cm-activeLine {
+  background: rgb(255 255 255 / 3%) !important;
+}
+.editor .cm-activeLineGutter {
+  background: rgb(255 255 255 / 3%) !important;
+}
+
+/* 焦点时强调 */
+.editor:focus-within {
+  border-color: rgb(167 139 250 / 50%) !important;
+  box-shadow: 0 0 0 3px rgb(167 139 250 / 8%) !important;
+}
+
+/* ─── 编辑器字号 ─── */
+.editor .cm-content,
+.editor .cm-gutters,
+.editor .cm-scroller {
+  font-size: 12.5px !important;
+  line-height: 1.6 !important;
+}
+
+/* ─── 终端 / 消息区字号 ─── */
+.chat-list {
+  font-size: 12.5px !important;
+  gap: 5px !important;
+  padding: 12px 18px 18px !important;
+}
+.chat-msg-user,
+.chat-msg-ai {
+  padding: 7px 13px !important;
+}
+.chat-msg-user .bubble-body,
+.chat-msg-ai .bubble-body {
+  font-size: 12.5px !important;
+  line-height: 1.6 !important;
+}
+.chat-msg-user .bubble-head,
+.chat-msg-ai .bubble-head {
+  font-size: 11px !important;
+  margin-bottom: 4px !important;
+  padding-bottom: 4px !important;
+}
+
+/* ─── 步骤条：字号 + 间距 ─── */
+.chat-step {
+  padding: 7px 13px !important;
+  font-size: 12px !important;
+}
+.chat-step .step-title {
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+}
+.chat-step .step-title strong { font-size: 12.5px !important; }
+.chat-step .step-time { font-size: 11px !important; }
+.chat-step .step-state { font-size: 10.5px !important; padding: 1px 9px !important; }
+
+/* ─── 等待气泡字号 ─── */
+.chat-waiting .waiting-text { font-size: 12px !important; }
+.chat-waiting .bubble-head { font-size: 11px !important; }
+
+/* ─── tpl-bar 工具栏字号 ─── */
+.tpl-bar .tpl-chip { font-size: 11.5px !important; padding: 4px 12px !important; }
+.tpl-bar .ghost-btn { font-size: 12px !important; height: 28px !important; }
+.tpl-bar .primary-btn.head-run { font-size: 12px !important; height: 28px !important; }
+
+/* ─── 侧栏字号 ─── */
+.pane-side .tree-title,
+.pane-side .title { font-size: 11px !important; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [lifecycle-css] 生命周期时间线样式
+   ═══════════════════════════════════════════════════════════ */
+.detail-stages {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  background: rgb(0 0 0 / 20%);
+  border-radius: 4px;
+  min-width: 0;
+}
+.stage-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-2, #a3a3a3);
+}
+.stage-idx {
+  flex: 0 0 16px;
+  text-align: right;
+  color: var(--text-3, #6b6b6b);
+  font: 10px/1 var(--mono, monospace);
+  font-variant-numeric: tabular-nums;
+}
+.stage-dot {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3, #6b6b6b);
+}
+.stage-dot.ok { background: #4ade80; }
+.stage-dot.err { background: #f87171; }
+.stage-dot.run { background: #a78bfa; animation: stage-pulse 1.2s ease-in-out infinite; }
+@keyframes stage-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.stage-name {
+  flex: 0 0 auto;
+  font-weight: 500;
+  color: var(--text, #e6e6e6);
+  min-width: 70px;
+}
+.stage-meta, .stage-ms {
+  flex: 0 0 auto;
+  color: var(--text-3, #6b6b6b);
+  font: 10.5px/1 var(--mono, monospace);
+  font-variant-numeric: tabular-nums;
+}
+.stage-tag {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 9.5px;
+  font-weight: 600;
+}
+.stage-tag.err { background: rgb(248 113 113 / 16%); color: #fca5a5; }
+.stage-status {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: 8px;
+  color: var(--text-3, #6b6b6b);
+}
+.stage-status.ok { color: #86efac; background: rgb(74 222 128 / 10%); }
+.stage-status.err { color: #fca5a5; background: rgb(248 113 113 / 12%); }
+.stage-status.run { color: #c4b5fd; background: rgb(167 139 250 / 10%); }
+
+/* 展开区行间距 */
+.step-detail { gap: 8px !important; }
+.detail-pre { max-height: 260px !important; }
 
 </style>
 <!-- tooltip-audit -->

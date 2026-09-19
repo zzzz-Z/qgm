@@ -119,6 +119,9 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       updateKey: UK,
     })
   }
+  // [lifecycle] 记录本次执行的所有 stage（用于展开区时间线）
+  let stageHistory: Array<{ name: string; status: string; ts: number; ms?: number; ok?: boolean; files?: number; tscOk?: boolean; testOk?: boolean }> = []
+  const runStartedAt = Date.now()
   emitStep('running')
   let lastFlush = 0
   const flushChunk = () => {
@@ -165,8 +168,24 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         const name = String(frame.name || 'stage')
         const status = String(frame.status || '')
         const ok = frame.ok
+        const ms = typeof frame.ms === 'number' ? frame.ms : undefined
+        const files = typeof frame.files === 'number' ? frame.files : undefined
+        const tscOk = typeof frame.tscOk === 'boolean' ? frame.tscOk : undefined
+        const testOk = typeof frame.testOk === 'boolean' ? frame.testOk : undefined
+        // 同 name 的 start → done 更新（不重复添加）
+        const idx = stageHistory.findIndex(x => x.name === name)
+        const rec = { name, status, ts: Date.now(), ms, ok, files, tscOk, testOk }
+        if (idx >= 0) stageHistory[idx] = { ...stageHistory[idx], ...rec }
+        else stageHistory.push(rec)
         const mark = status === 'done' ? (ok === false ? ' ✗' : ' ✓') : ' …'
-        emitStep('running', { currentStage: name + mark, stageName: name, stageStatus: status })
+        emitStep('running', {
+          currentStage: name + mark,
+          stageName: name,
+          stageStatus: status,
+          stageHistory,
+          startedAt: runStartedAt,
+          elapsedMs: Date.now() - runStartedAt,
+        })
       } else if (frame.type === 'summary') {
         frames.push(frame)
       }
@@ -208,7 +227,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       }, [])
       if (data.ok && data.runId) baselineRunId.value = data.runId
       if (result.value) result.value.baselineRunId = prevBaseline
-      emitStep(data.ok ? 'done' : 'error', { exit: data.code, changeCount: changes.value.length })
+      emitStep(data.ok ? 'done' : 'error', { exit: data.code, changeCount: changes.value.length, stageHistory, startedAt: runStartedAt, elapsedMs: Date.now() - runStartedAt })
     } else {
       result.value = {
         runId: '',
