@@ -103,25 +103,6 @@
             <span class="dot d-red" /><span class="dot d-yellow" /><span class="dot d-green" />
           </div>
           <div class="bar-actions">
-            <button
-              v-tooltip="aiWaiting ? '等待 AI 回复…' : copied ? '已发送' : `把本次运行的完整上下文（脚本 / 输出 / 变更 / 错误源码）拼成 prompt 复制并发给 AI`"
-              class="term-btn copy"
-              :class="{ done: copied, loading: aiWaiting }"
-              :disabled="(!hasAnyOutput && !changes.length) || aiWaiting || autoTakeoverEnabled"
-              @click="copyOutput"
-            >
-              <svg v-if="aiWaiting" class="term-ico spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-              </svg>
-              <svg v-else-if="copied" class="term-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              <svg v-else class="term-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-              <span>{{ aiWaiting ? '等待回复…' : copied ? '已发送' : `发送给 AI` }}</span>
-            </button>
             <span v-if="statusText" class="status head-status" :class="statusClass">
               <span class="s-dot" />{{ statusText }}<template v-if="result"> · exit {{ result.code }}</template>
             </span>
@@ -199,23 +180,21 @@
 ×
 </button>
             <button
-              v-if="!running && !isLoopActive && !autoTakeoverEnabled"
-              v-tooltip="'开启自动接管：AI 回复自动回填，随机 3-10s 后自动执行，执行完自动发回 AI'"
+              v-if="running || isLoopActive || autoTakeoverEnabled"
+              v-tooltip="'暂停：停止当前执行并关闭自动接管'"
+              class="primary-btn stop head-run"
+              @click="pauseAll"
+            >
+              <span class="ico">⏸</span>
+              <span>{{ autoTakeoverCountdown > 0 ? '暂停 · ' + autoTakeoverCountdown + 's' : '暂停' }}</span>
+            </button>
+            <button
+              v-else
+              v-tooltip="'运行：执行脚本 → 结果自动发 AI → AI 回复后自动执行下一轮'"
               class="primary-btn takeover head-run"
               @click="toggleAutoTakeover"
             >
               <span class="ico">⟳</span><span>运行</span>
-            </button>
-            <button
-              v-else-if="!running && !isLoopActive && autoTakeoverEnabled"
-              v-tooltip="'已开启自动接管，点击关闭'"
-              class="primary-btn stop head-run"
-              @click="toggleAutoTakeover"
-            >
-              <span>{{ autoTakeoverCountdown > 0 ? '接管中 · ' + autoTakeoverCountdown + 's' : '关闭接管' }}</span>
-            </button>
-            <button v-else v-tooltip="'停止当前运行'" class="primary-btn stop head-run" @click="stop">
-              <span class="ico">■</span><span>停止</span>
             </button>
           </div>
         </header>
@@ -508,6 +487,15 @@ function submitDecisionCustom() {
   void submitDecision('__custom__', t)
   decisionCustomOpen.value = false
   decisionCustomText.value = ''
+}
+
+function pauseAll() {
+  cancelAutoRun()
+  disableAutoTakeover()
+  stop()
+  if (isLoopActive.value) {
+    void killCurrent()
+  }
 }
 
 const waitingPct = computed(() => {
