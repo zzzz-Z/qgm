@@ -7140,5 +7140,55 @@ function onHtmlDrop(e: DragEvent) {
   margin: 0 !important;
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   [msg-dark-bg] 聊天卡片背景统一深灰黑
+   ═══════════════════════════════════════════════════════════ */
+.chat-msg {
+  background: #1a1a1a !important;
+  border-color: #2a2a2a !important;
+}
+.chat-msg-user {
+  background: #1c1c22 !important;
+  border-color: #2a2a35 !important;
+}
+.chat-msg-ai {
+  background: #1a1a1a !important;
+  border-color: #2a2a2a !important;
+}
+.chat-bubble {
+  background: #1a1a1a !important;
+  border-color: #2a2a2a !important;
+}
+.chat-bubble.bubble-left,
+.chat-bubble.bubble-right {
+  background: #1a1a1a !important;
+  border-color: #2a2a2a !important;
+}
+.bubble-think,
+.chat-think {
+  background: #151515 !important;
+  border-color: #262626 !important;
+}
+.chat-step {
+  background: transparent !important;
+}
+.chat-step:hover {
+  background: rgb(255 255 255 / 3%) !important;
+}
+/* 展开的 details / pre 也统一深灰 */
+.chat-msg .bubble-body .md-code {
+  background: #141414 !important;
+  border-color: #2a2a2a !important;
+}
+.chat-msg .bubble-body .md-code-bar {
+  background: #1a1a1a !important;
+  border-bottom-color: #2a2a2a !important;
+}
+.chat-msg .bubble-body .md-code pre {
+  background: #141414 !important;
+  color: #d4d4d4 !important;
+}
+
 </style>
 <!-- tooltip-audit -->
