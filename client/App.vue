@@ -340,7 +340,21 @@ function onSessionIdMessage(e: MessageEvent) {
       return
     }
     // done / plain / multi 仅循环模式消费
-    emitBus('ai:' + (kind || 'plain'), `AI 回复 · ${kind || 'plain'}`, { payload: { kind: kind || 'plain', text: d.text !== undefined ? String(d.text) : '', count: Number(d.count) || 0 } })
+    // DONE：彻底停止循环（先停循环态再 emit，避免残留状态）
+    if (kind === 'done') {
+      if (isLoopActive.value) {
+        try { void killCurrent() } catch (e) { console.error('[done-stop-loop]', e) }
+      }
+      if (autoTakeover.enabled.value) {
+        autoTakeover.disable()
+      }
+    }
+    const text = d.text !== undefined ? String(d.text) : ''
+    if (kind === 'plain' || kind === 'multi' || (kind === 'done' && text.trim() && text.trim() !== 'DONE')) {
+      emitBus('ai:' + kind, `AI 回复 · ${kind}`, { payload: { kind, text, count: Number(d.count) || 0 } })
+    } else if (kind === 'done') {
+      emitBus('ai:done', 'AI 回复 DONE', { payload: { kind: 'done', text: 'DONE' } })
+    }
     if (routedToLoop) {
       void onNonScriptReply({
         kind: kind as 'done' | 'plain' | 'multi',

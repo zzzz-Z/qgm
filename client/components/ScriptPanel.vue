@@ -521,6 +521,13 @@ const statusClass = ref('')
 
 const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
 
+// [loop-loading] 循环态统一触发等待 loading，确保从发问起有「等待 AI」提示
+watch(loopState, (v, old) => {
+  if ((v === 'waiting' || v === 'preparing') && v !== old) {
+    startAiWaiting()
+  }
+})
+
 // 分栏比例（终端占比）
 
 // 右侧面板宽度
@@ -634,7 +641,14 @@ function stepTitleOf(e: { kind: string, summary?: string, payload?: Record<strin
   if (e.kind === 'run:start') {
     const phase = String(p.phase || '')
     const desc = String(p.desc || '').trim() || '脚本'
-    if (phase === 'pending') return '等待执行：' + desc
+    if (phase === 'pending') {
+      const why = String(p.why || '').trim()
+      const plan = String(p.plan || '').trim()
+      const lines = [desc]
+      if (why) lines.push('为什么：' + why)
+      if (plan) lines.push('计划：' + plan)
+      return lines.join('\n')
+    }
     return '执行脚本：' + desc
   }
   if (e.kind === 'run:end') {
@@ -4587,6 +4601,57 @@ function onHtmlDrop(e: DragEvent) {
 .terminal + .editor,
 .terminal + .split-handle,
 .editor { border-top: 1px solid var(--border) !important; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [step-multiline] 步骤标题多行展示（完整 desc/why/plan）
+   ═══════════════════════════════════════════════════════════ */
+.chat-step {
+  flex-wrap: wrap !important;
+  align-items: flex-start !important;
+}
+.chat-step .step-title {
+  white-space: pre-wrap !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  max-width: none !important;
+  flex: 1 1 auto !important;
+  text-align: left !important;
+  line-height: 1.5 !important;
+}
+.chat-step .step-time,
+.chat-step .step-state,
+.chat-step .step-icon,
+.chat-step .step-dot {
+  margin-top: 1px !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [msg-align] 用户右 / AI 左 / 步骤条居中
+   ═══════════════════════════════════════════════════════════ */
+.chat-msg-user {
+  align-self: flex-end !important;
+  margin-right: 4px !important;
+  margin-left: auto !important;
+}
+.chat-msg-user .bubble-head,
+.chat-msg-user .bubble-body {
+  text-align: right !important;
+}
+.chat-msg-ai {
+  align-self: flex-start !important;
+  margin-left: 4px !important;
+  margin-right: auto !important;
+}
+.chat-msg-ai .bubble-head,
+.chat-msg-ai .bubble-body {
+  text-align: left !important;
+}
+.chat-step,
+.chat-waiting {
+  align-self: center !important;
+}
 
 </style>
 <!-- tooltip-audit -->
