@@ -24,6 +24,28 @@
   --shadow-md: 0 4px 12px rgb(15 23 42 / 8%);
   --shadow-lg: 0 12px 32px rgb(15 23 42 / 12%);
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  /* 终端区变量（浅色主题） */
+  --term-bg: #f6f8fa;
+  --term-bar-bg: #eaeef3;
+  --term-border: #d0d7de;
+  --term-sep: #d8dee4;
+  --term-text: #1f2328;
+  --term-text-2: #57606a;
+  --term-text-3: #8c959f;
+  --term-code-color: #0550ae;
+  --term-chip-bg: rgb(31 35 40 / 4%);
+  --term-chip-bg-2: rgb(31 35 40 / 6%);
+  --term-chip-hover: rgb(31 35 40 / 8%);
+  --term-chip-border: rgb(31 35 40 / 10%);
+  --term-chip-border-2: rgb(31 35 40 / 14%);
+  --term-think-bg: rgb(31 35 40 / 4%);
+  --term-code-bg: rgb(31 35 40 / 5%);
+  --term-accent: #0969da;
+  --term-shadow: rgb(31 35 40 / 8%);
+  --term-user-bg: linear-gradient(180deg, rgb(79 70 229 / 12%), rgb(79 70 229 / 8%));
+  --term-user-border: rgb(79 70 229 / 28%);
+  --term-ai-bg: rgb(31 35 40 / 3%);
+  --term-ai-border: rgb(31 35 40 / 10%);
 }
 
 * { box-sizing: border-box; }
@@ -76,4 +98,26 @@ html[data-theme="dark"] {
   --shadow: 0 1px 2px rgb(0 0 0 / 50%);
   --shadow-md: 0 4px 12px rgb(0 0 0 / 45%);
   --shadow-lg: 0 12px 32px rgb(0 0 0 / 55%);
+  /* 终端区变量（深色主题） */
+  --term-bg: #1e1e1e;
+  --term-bar-bg: #252526;
+  --term-border: #333;
+  --term-sep: #2f2f2f;
+  --term-text: #d4d4d4;
+  --term-text-2: #9d9d9d;
+  --term-text-3: #808080;
+  --term-code-color: #9cdcfe;
+  --term-chip-bg: rgb(255 255 255 / 4%);
+  --term-chip-bg-2: rgb(255 255 255 / 6%);
+  --term-chip-hover: rgb(255 255 255 / 8%);
+  --term-chip-border: rgb(255 255 255 / 10%);
+  --term-chip-border-2: rgb(255 255 255 / 14%);
+  --term-think-bg: rgb(0 0 0 / 22%);
+  --term-code-bg: rgb(255 255 255 / 4%);
+  --term-accent: #60a5fa;
+  --term-shadow: rgb(0 0 0 / 25%);
+  --term-user-bg: linear-gradient(180deg, rgb(99 102 241 / 26%), rgb(99 102 241 / 18%));
+  --term-user-border: rgb(99 102 241 / 45%);
+  --term-ai-bg: rgb(255 255 255 / 6%);
+  --term-ai-border: rgb(255 255 255 / 10%);
 }

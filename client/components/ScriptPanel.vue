@@ -131,6 +131,13 @@
                 <div class="bubble-head">👤 我 · {{ fmtTreeTime(e.ts) }}</div>
                 <div class="bubble-body" v-html="renderUserBubble(e)" />
               </div>
+              <div v-else-if="e.role === 'step'" class="chat-step" :class="'state-' + stepStateOf(e)">
+                <span class="step-dot" />
+                <span class="step-icon">{{ stepIconOf(e) }}</span>
+                <span class="step-title">{{ stepTitleOf(e) }}</span>
+                <span class="step-time">{{ fmtTreeTime(e.ts) }}</span>
+                <span class="step-state">{{ stepLabelOf(e) }}</span>
+              </div>
               <div v-else-if="e.role === 'ai'" class="chat-bubble bubble-left">
                 <div class="bubble-head">🤖 AI · {{ fmtTreeTime(e.ts) }}</div>
                 <div v-if="e.payload" class="bubble-body" v-html="renderAiBubble(e)" />
@@ -185,7 +192,7 @@
               class="primary-btn stop head-run"
               @click="pauseAll"
             >
-              <span class="ico">⏸</span>
+              <svg class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="9" y1="4" x2="9" y2="20" /><line x1="15" y1="4" x2="15" y2="20" /></svg>
               <span>{{ autoTakeoverCountdown > 0 ? '暂停 · ' + autoTakeoverCountdown + 's' : '暂停' }}</span>
             </button>
             <button
@@ -194,7 +201,7 @@
               class="primary-btn takeover head-run"
               @click="toggleAutoTakeover"
             >
-              <span class="ico">⟳</span><span>运行</span>
+              <svg class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4" /></svg><span>运行</span>
             </button>
           </div>
         </header>
@@ -567,10 +574,11 @@ const hasStderr = computed(() => !!result.value?.stderr?.trim())
 const { events: busEvents } = useEventBus()
 const termBodyRef = ref<HTMLElement | null>(null)
 
-type ChatRole = 'user' | 'ai' | 'sys'
+type ChatRole = 'user' | 'ai' | 'sys' | 'step'
 function chatRole(kind: string): ChatRole {
   if (kind === 'ai:ask') return 'user'
-  if (kind === 'ai:script' || kind === 'ai:done' || kind === 'ai:plain' || kind === 'ai:multi' || kind === 'ai:summary' || kind === 'ai:feedback' || kind === 'ai:decision' || kind === 'ai:need-files') return 'ai'
+  if (kind === 'ai:script' || kind === 'run:start' || kind === 'run:end' || kind === 'run:error') return 'step'
+  if (kind === 'ai:done' || kind === 'ai:plain' || kind === 'ai:multi' || kind === 'ai:summary' || kind === 'ai:feedback' || kind === 'ai:decision' || kind === 'ai:need-files') return 'ai'
   return 'sys'
 }
 const chatItems = computed(() => busEvents.value
@@ -604,6 +612,39 @@ function treeIcon(kind: string): string {
   if (kind === 'loop:finish') return '⏹'
   return '·'
 }
+function stepStateOf(e: { kind: string, payload?: Record<string, unknown> }): 'pending' | 'running' | 'done' | 'error' {
+  if (e.kind === 'run:start') return 'running'
+  if (e.kind === 'run:error') return 'error'
+  if (e.kind === 'run:end') return e.payload && e.payload.ok === false ? 'error' : 'done'
+  return 'pending'
+}
+function stepIconOf(e: { kind: string }): string {
+  if (e.kind === 'ai:script') return '📥'
+  if (e.kind === 'run:start') return '▶'
+  if (e.kind === 'run:end') return '■'
+  if (e.kind === 'run:error') return '✗'
+  return '·'
+}
+function stepTitleOf(e: { kind: string, summary?: string, payload?: Record<string, unknown> }): string {
+  const p = e.payload || {}
+  if (e.kind === 'ai:script') return String(p.desc || '脚本到达')
+  if (e.kind === 'run:start') return '开始执行'
+  if (e.kind === 'run:end') {
+    const exit = p.exit !== undefined ? ' · exit ' + p.exit : ''
+    const changes = Array.isArray(p.changes) ? p.changes.length : 0
+    return '执行完成' + exit + (changes ? ' · ' + changes + ' 文件' : '')
+  }
+  if (e.kind === 'run:error') return String(e.summary || '执行失败')
+  return String(e.summary || '')
+}
+function stepLabelOf(e: { kind: string, payload?: Record<string, unknown> }): string {
+  if (e.kind === 'ai:script') return '待执行'
+  if (e.kind === 'run:start') return '执行中'
+  if (e.kind === 'run:end') return e.payload && e.payload.ok === false ? '失败' : '已完成'
+  if (e.kind === 'run:error') return '失败'
+  return ''
+}
+
 function fmtTreeTime(ts: number): string {
   const d = new Date(ts)
   const p = (n: number) => String(n).padStart(2, '0')
@@ -2423,6 +2464,52 @@ function onHtmlDrop(e: DragEvent) {
 .bubble-body .md-code pre { margin: 0; padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: 11px/1.55 var(--mono, monospace); color: #c9d1d9; }
 .chat-think { align-self: flex-start; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgb(0 0 0 / 22%); border-left: 3px solid #6a737d; border-radius: 8px; color: #9d9d9d; font-size: 12px; cursor: pointer; max-width: 84%; transition: background 0.15s; }
 .chat-think:hover { background: rgb(255 255 255 / 6%); color: #c9d1d9; }
+.chat-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  margin: 2px 0;
+  border-radius: var(--radius-8);
+  background: rgb(255 255 255 / 3%);
+  border: 1px solid rgb(255 255 255 / 6%);
+  border-left: 3px solid #6a737d;
+  font: 12px/1.4 var(--mono, monospace);
+  color: #c9d1d9;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.chat-step:hover { background: rgb(255 255 255 / 5%); }
+.chat-step.state-pending { border-left-color: #6a737d; }
+.chat-step.state-running { border-left-color: #60a5fa; background: rgb(96 165 250 / 6%); }
+.chat-step.state-done { border-left-color: #10b981; }
+.chat-step.state-error { border-left-color: #f87171; background: rgb(248 113 113 / 8%); }
+.chat-step .step-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6a737d;
+  flex-shrink: 0;
+}
+.chat-step.state-running .step-dot { background: #60a5fa; animation: step-pulse 1s ease-in-out infinite; }
+.chat-step.state-done .step-dot { background: #10b981; }
+.chat-step.state-error .step-dot { background: #f87171; }
+.chat-step .step-icon { font-size: 12px; flex-shrink: 0; }
+.chat-step .step-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-step .step-time { font-size: 11px; color: #6a737d; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.chat-step .step-state {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 6%);
+  color: #9d9d9d;
+  flex-shrink: 0;
+}
+.chat-step.state-running .step-state { background: rgb(96 165 250 / 22%); color: #93c5fd; }
+.chat-step.state-done .step-state { background: rgb(16 185 129 / 18%); color: #6ee7b7; }
+.chat-step.state-error .step-state { background: rgb(248 113 113 / 22%); color: #fca5a5; }
+@keyframes step-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .chat-sys { align-self: center; display: flex; align-items: center; gap: 8px; padding: 2px 10px; color: #5b6673; font-size: 10px; opacity: 0.85; max-width: 90%; }
 .sys-tag { padding: 1px 8px; border: 1px dashed rgb(255 255 255 / 12%); border-radius: 10px; color: #7a8694; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; }
 .sys-time { color: #4f5a66; flex-shrink: 0; }
@@ -3272,5 +3359,77 @@ function onHtmlDrop(e: DragEvent) {
 @keyframes loop-spin { to { transform: rotate(360deg); } }
 .inbox-badge { color: #409eff; border-color: #409eff; }
 
+
+/* ═══════════════════════════════════════════════════════════
+   [terminal-theme-override] 终端区主题化
+   覆盖上方硬编码深色值，浅色主题下终端同样清晰可读
+   ═══════════════════════════════════════════════════════════ */
+.terminal { background: var(--term-bg); border-color: var(--term-border); }
+.terminal .term-bar { background: var(--term-bar-bg); border-bottom-color: var(--term-border); }
+.terminal .term-bar .file-badge { color: var(--term-text); }
+.terminal .term-bar .meta { color: var(--term-text-3); }
+.terminal .term-bar .ghost-btn { color: var(--term-text-2); }
+.terminal .term-bar .ghost-btn:hover:not(:disabled) { background: var(--term-chip-bg-2); color: var(--term-text); }
+.term-raw { color: var(--term-text); background: var(--term-chip-bg); }
+.term-loading { color: var(--term-accent); background: var(--term-chip-bg); border-bottom-color: var(--term-chip-border); }
+.term-loading-spinner { border-color: var(--term-chip-border); border-top-color: var(--term-accent); }
+.term-body { color: var(--term-text); }
+.term-ai-thinking { background: var(--term-chip-bg); border-left-color: var(--term-accent); }
+.term-ai-text { color: var(--term-text); }
+.term-ai-caret { color: var(--term-accent); }
+.chat-list { color: var(--term-text); }
+.chat-bubble { box-shadow: 0 1px 2px var(--term-shadow); }
+.chat-bubble.bubble-right { background: var(--term-user-bg); border: 1px solid var(--term-user-border); }
+.chat-bubble.bubble-left { background: var(--term-ai-bg); border: 1px solid var(--term-ai-border); }
+.bubble-think { background: var(--term-think-bg); border-left-color: var(--term-accent); color: var(--term-text-2); }
+.bubble-head { color: var(--term-text-3); }
+.bubble-body { color: var(--term-text); }
+.bubble-body .md-h { color: var(--term-accent); }
+.bubble-body code { background: var(--term-chip-bg-2); color: var(--term-code-color); }
+.bubble-body .md-code { background: var(--term-code-bg); border-color: var(--term-sep); }
+.bubble-body .md-code-bar { background: var(--term-chip-bg); border-bottom-color: var(--term-sep); }
+.bubble-body .md-code-lang { color: var(--term-text-2); }
+.bubble-body .md-code-acts button { border-color: var(--term-chip-border); color: var(--term-text-2); }
+.bubble-body .md-code-acts button:hover { color: var(--term-text); border-color: var(--term-text); }
+.bubble-body .md-code pre { color: var(--term-text); }
+.chat-think { background: var(--term-think-bg); border-left-color: var(--term-accent); color: var(--term-text-2); }
+.chat-think:hover { background: var(--term-chip-hover); color: var(--term-text); }
+.chat-sys { color: var(--term-text-3); }
+.sys-tag { border-color: var(--term-chip-border-2); color: var(--term-text-3); }
+.sys-time { color: var(--term-text-3); }
+.chat-step { background: var(--term-chip-bg); border-color: var(--term-chip-border); color: var(--term-text); }
+.chat-step:hover { background: var(--term-chip-hover); }
+.chat-step .step-time { color: var(--term-text-3); }
+.chat-step .step-state { background: var(--term-chip-bg-2); color: var(--term-text-2); }
+.think-row { color: var(--term-text-3); }
+.think-row:hover { background: var(--term-chip-bg-2); }
+.think-label { color: var(--term-text-2); }
+.think-body { background: var(--term-chip-bg); border-left-color: var(--term-accent); color: var(--term-text-2); }
+.think-body .md-p, .think-body .md-ul { color: var(--term-text-2); }
+.think-body .md-h { color: var(--term-text-2); }
+.tree-head:hover { background: var(--term-chip-bg-2); }
+.tree-title { color: var(--term-text); }
+.tree-node.is-other .tree-title { color: var(--term-text-3); }
+.tree-node.is-ask .tree-title { color: var(--term-text); background: var(--term-chip-bg-2); }
+.tree-body .md-p, .tree-body .md-ul { color: var(--term-text); }
+.tree-body code { background: var(--term-chip-bg-2); color: var(--term-code-color); }
+.tree-empty { color: var(--term-text-3); }
+.tree-empty .empty-title { color: var(--term-text); }
+.tree-empty .empty-sub { color: var(--term-text-2); }
+.md-code-bar { background: var(--term-chip-bg); border-bottom-color: var(--term-sep); }
+.md-code-lang { color: var(--term-text-2); }
+.md-code-acts button { border-color: var(--term-chip-border); color: var(--term-text-2); }
+.md-code-acts button:hover { color: var(--term-text); border-color: var(--term-text); }
+
+
+/* [button-icons] SVG 按钮图标 */
+.primary-btn .ico-svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: -1px;
+}
+.primary-btn .ico-svg + span { margin-left: 2px; }
 </style>
 <!-- tooltip-audit -->
