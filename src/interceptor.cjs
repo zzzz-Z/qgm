@@ -254,17 +254,35 @@ fs.statSync = function (p, opts) {
 fs.lstatSync = fs.statSync
 fs.readdirSync = function (p, opts) {
   const dir = norm(p)
+  const wantTypes = Boolean(opts && typeof opts === 'object' && opts.withFileTypes)
   const realList = orig.existsSync(dir) ? orig.readdirSync(dir, opts) : []
   const list = Array.isArray(realList) ? realList : [...realList]
-  const filtered = list.filter((name) => {
-    const entry = overlay.get(path.join(dir, name))
+  const nameOf = (x) => wantTypes ? String(x && x.name) : String(x)
+  const filtered = list.filter((x) => {
+    const entry = overlay.get(path.join(dir, nameOf(x)))
     return !(entry && entry.op === 'delete')
   })
   const added = new Set()
   for (const abs of overlay.keys()) {
     if (path.dirname(abs) === dir) added.add(path.basename(abs))
   }
-  return [...new Set([...filtered, ...added])]
+  if (!wantTypes) {
+    return [...new Set([...filtered.map(nameOf), ...added])]
+  }
+  const existing = new Set(filtered.map(nameOf))
+  const out = filtered.slice()
+  for (const baseName of added) {
+    if (existing.has(baseName)) continue
+    const entry = overlay.get(path.join(dir, baseName)) || {}
+    const isDir = Boolean(entry.dir)
+    out.push({
+      name: baseName,
+      isFile: () => !isDir,
+      isDirectory: () => isDir,
+      isSymbolicLink: () => false,
+    })
+  }
+  return out
 }
 fs.accessSync = function (p, mode) {
   const entry = lookupWrite(p)
