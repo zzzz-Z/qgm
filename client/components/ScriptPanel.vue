@@ -7190,5 +7190,67 @@ function onHtmlDrop(e: DragEvent) {
   color: #d4d4d4 !important;
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   [editor-tight] 编辑器边距收窄 + 圆角
+   ═══════════════════════════════════════════════════════════ */
+
+/* 编辑器卡片圆角 + 顶部圆角 */
+.pane-main > .editor.card {
+  border-radius: 10px !important;
+  overflow: hidden !important;
+}
+.pane-main > .terminal.card {
+  border-radius: 10px !important;
+  overflow: hidden !important;
+}
+
+/* 顶栏收窄 */
+.editor .editor-bar,
+.editor .tpl-bar {
+  padding: 2px 8px !important;
+  gap: 4px !important;
+}
+.editor .tpl-bar {
+  padding: 2px 6px !important;
+}
+.editor .tpl-chip {
+  padding: 2px 8px !important;
+  font-size: 11px !important;
+}
+.editor .editor-bar .bar-actions {
+  gap: 4px !important;
+}
+
+/* 编辑器内容区收窄 */
+.editor .editor-body,
+.editor .cm-host {
+  padding: 0 !important;
+  margin: 0 !important;
+}
+/* CodeMirror 内容内边距 */
+.editor .cm-content {
+  padding: 8px 12px !important;
+}
+.editor .cm-gutters {
+  padding: 8px 0 !important;
+  min-width: 36px !important;
+}
+.editor .cm-lineNumbers .cm-gutterElement {
+  padding: 0 8px 0 4px !important;
+  min-width: 36px !important;
+  font-size: 11px !important;
+}
+
+/* 底栏收窄 */
+.editor .editor-foot {
+  padding: 3px 10px !important;
+}
+
+/* 终端区顶栏也收窄 */
+.terminal .term-bar {
+  padding: 0 8px !important;
+}
+
 </style>
 <!-- tooltip-audit -->
