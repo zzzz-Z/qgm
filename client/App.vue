@@ -27,7 +27,7 @@ import { useTraceLog } from './composables/useTraceLog'
 import { useCodeCleaner } from './composables/useCodeCleaner'
 import { useRunner } from './composables/useRunner'
 import { useAiWaiting } from './composables/useAiWaiting'
-import { emit as emitBus } from './composables/useEventStream'
+import { emit as emitBus, takePendingAskKey } from './composables/useEventStream'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
 
@@ -310,7 +310,8 @@ function onSessionIdMessage(e: MessageEvent) {
         toast(`AI 脚本已到达 · ${lang} · ${lineCount} 行 · ${item.desc || '无说明'}`, 'info', 4000)
         const planM = code.match(/^\s*(?:\/\/|#)\s*@plan\s*:\s*(.+)$/m)
         const plan = planM ? planM[1].trim().slice(0, 200) : ''
-        const runKey = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
+        // 若用户刚发过提问，复用那条等待卡的 key —— 原地替换为执行卡
+        const runKey = takePendingAskKey() || ('run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6))
         try {
           emitBus('run:start', `等待执行：${item.desc || '脚本'}`, { payload: { desc: item.desc, why: item.why, plan, lang, lineCount, hash: item.hash, phase: 'pending', runKey, ...currentLoopContext() }, updateKey: runKey })
         } catch (e) { console.error('[run:start pending] failed:', e) }

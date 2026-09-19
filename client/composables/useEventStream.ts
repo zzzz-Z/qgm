@@ -69,6 +69,16 @@ export function clearEvents(): void {
 
 export function useEventBus() { return { events, emit, clearEvents } }
 
+// [ask-pending-card] 用户提问 → 生成等待卡 → AI 回复后同 key 原地替换
+const pendingAskKey = ref('')
+export function setPendingAskKey(k: string) { pendingAskKey.value = k }
+export function takePendingAskKey(): string {
+  const k = pendingAskKey.value
+  pendingAskKey.value = ''
+  return k
+}
+export function peekPendingAskKey(): string { return pendingAskKey.value }
+
 export interface EventStreamMessage {
   type: string
   kind?: string

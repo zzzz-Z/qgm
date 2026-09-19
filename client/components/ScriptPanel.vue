@@ -438,7 +438,7 @@ import { copyAndFill } from '../composables/useDeepseekUrl'
 import { formatCost } from '../utils/pricing'
 import { useAiWaiting } from '../composables/useAiWaiting'
 import { useAutoTakeover } from '../composables/useAutoTakeover'
-import { useEventBus, emit } from '../composables/useEventStream'
+import { useEventBus, emit, setPendingAskKey } from '../composables/useEventStream'
 import { useCodeCleaner } from '../composables/useCodeCleaner'
 import { buildErrorContext, enforceBudget, parseErrorLocations } from '../utils/contextBuilder'
 import { readNdjson } from '../utils/stream'
@@ -628,7 +628,7 @@ const termBodyRef = ref<HTMLElement | null>(null)
 
 type ChatRole = 'user' | 'ai' | 'sys' | 'step'
 function chatRole(kind: string): ChatRole {
-  if (kind === 'ai:ask') return 'user'
+  if (kind === 'ai:ask') return 'step'
   if (kind === 'ai:script' || kind === 'run:start' || kind === 'run:end' || kind === 'run:error' || kind === 'run:stage') return 'step'
   if (kind === 'ai:done' || kind === 'ai:plain' || kind === 'ai:multi' || kind === 'ai:summary' || kind === 'ai:feedback' || kind === 'ai:decision' || kind === 'ai:need-files') return 'ai'
   return 'sys'
@@ -679,6 +679,7 @@ function stepStateOf(e: { kind: string, payload?: Record<string, unknown> }): 'p
     if (phase === 'error') return 'error'
     return 'running'
   }
+  if (e.kind === 'ai:ask') return 'running'
   if (e.kind === 'run:error') return 'error'
   if (e.kind === 'run:end') return e.payload && e.payload.ok === false ? 'error' : 'done'
   if (e.kind === 'run:stage') {
@@ -690,6 +691,7 @@ function stepStateOf(e: { kind: string, payload?: Record<string, unknown> }): 'p
   return 'pending'
 }
 function stepIconOf(e: { kind: string, payload?: Record<string, unknown> }): string {
+  if (e.kind === 'ai:ask') return '💬'
   if (e.kind === 'ai:script') return '📥'
   if (e.kind === 'run:start') {
     const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
@@ -704,6 +706,12 @@ function stepIconOf(e: { kind: string, payload?: Record<string, unknown> }): str
 }
 function stepTitleOf(e: { kind: string, summary?: string, payload?: Record<string, unknown> }): string {
   const p = e.payload || {}
+  if (e.kind === 'ai:ask') {
+    const phase = String(p.phase || 'pending')
+    const q = String(p.question || '').trim()
+    if (phase === 'pending') return '正在等待 AI 回答' + (q ? '：' + q.slice(0, 60) : '')
+    return q || '提问'
+  }
   if (e.kind === 'ai:script') return String(p.desc || '脚本到达')
   if (e.kind === 'run:start') {
     const desc = String(p.desc || '').trim() || '脚本'
@@ -730,6 +738,7 @@ function stepTitleOf(e: { kind: string, summary?: string, payload?: Record<strin
   return String(e.summary || '')
 }
 function stepLabelOf(e: { kind: string, payload?: Record<string, unknown> }): string {
+  if (e.kind === 'ai:ask') return '等待中'
   if (e.kind === 'ai:script') return '待执行'
   if (e.kind === 'run:start') {
     const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
@@ -1245,7 +1254,9 @@ ${question}`
     toast('发送失败，已复制到剪贴板', 'warn', 4000)
     return
   }
-  emit('ai:ask', `👤 提问：${question.slice(0, 80)}`, { payload: { question, prompt } })
+  const askKey = 'ask-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
+  setPendingAskKey(askKey)
+  emit('ai:ask', question.slice(0, 100), { payload: { question, prompt, phase: 'pending' }, updateKey: askKey })
   statusText.value = '✅ 已发送'
   statusClass.value = 'ok'
   script.value = ''
