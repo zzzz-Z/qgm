@@ -6188,5 +6188,70 @@ function onHtmlDrop(e: DragEvent) {
   border: 1px solid var(--border, #262626) !important;
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   [unified-bg] 所有消息卡统一默认底色
+   ═══════════════════════════════════════════════════════════ */
+
+.chat-msg-user,
+.chat-msg-ai,
+.chat-step,
+.chat-waiting {
+  background: var(--surface, #141414) !important;
+  border: 1px solid var(--border, #262626) !important;
+  border-radius: 8px !important;
+  padding: 10px 14px 10px 18px !important;
+  position: relative !important;
+  margin: 0 !important;
+  align-self: stretch !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  color: var(--text, #e6e6e6) !important;
+}
+
+.chat-msg-user::before,
+.chat-msg-ai::before,
+.chat-step::before,
+.chat-waiting::before {
+  content: '' !important;
+  position: absolute !important;
+  left: 0 !important;
+  top: 8px !important;
+  bottom: 8px !important;
+  width: 3px !important;
+  border-radius: 0 3px 3px 0 !important;
+  background: var(--text-3, #6b6b6b) !important;
+}
+
+.chat-msg-user::before { background: rgb(167 139 250 / 55%) !important; }
+.chat-msg-ai::before { background: #a78bfa !important; }
+.chat-waiting::before { background: #a78bfa !important; }
+.chat-step.state-pending::before { background: rgb(255 255 255 / 14%) !important; }
+.chat-step.state-running::before { background: #a78bfa !important; }
+.chat-step.state-done::before { background: #4ade80 !important; }
+.chat-step.state-error::before { background: #f87171 !important; }
+
+/* AI 卡强制回默认底 */
+.chat-msg-ai {
+  background: var(--surface, #141414) !important;
+  border: 1px solid var(--border, #262626) !important;
+}
+
+.chat-msg-user .bubble-head,
+.chat-msg-ai .bubble-head {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  margin: 0 0 6px 0 !important;
+  padding: 0 0 6px 0 !important;
+  border-bottom: 1px solid rgb(255 255 255 / 5%) !important;
+  font-size: 11px !important;
+  color: var(--text-3, #6b6b6b) !important;
+}
+.chat-msg-ai .bubble-body strong {
+  color: #c4b5fd !important;
+  font-weight: 600 !important;
+}
+
 </style>
 <!-- tooltip-audit -->
