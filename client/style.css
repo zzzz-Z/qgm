@@ -76,14 +76,14 @@ body {
 html { color-scheme: light; }
 html[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #1e1e1e;
-  --surface: #252526;
-  --surface-2: #2d2d30;
-  --border: #3c3c3c;
-  --border-2: #4a4a4a;
-  --text: #cccccc;
-  --text-2: #9d9d9d;
-  --text-3: #6a6a6a;
+  --bg: #1a1a1a;
+  --surface: #212121;
+  --surface-2: #282828;
+  --border: #333333;
+  --border-2: #454545;
+  --text: #e0e0e0;
+  --text-2: #b0b0b0;
+  --text-3: #7a7a7a;
   --primary: #d97757;
   --primary-hover: #e08a6e;
   --primary-bg: rgb(217 119 87 / 12%);

@@ -99,14 +99,8 @@
       <!-- 终端 (上方) -->
       <section class="terminal card">
         <header class="bar term-bar">
-          <div class="dots">
-            <span class="dot d-red" /><span class="dot d-yellow" /><span class="dot d-green" />
-          </div>
           <div class="bar-actions">
-            <span v-if="statusText" class="status head-status" :class="statusClass">
-              <span class="s-dot" />{{ statusText }}<template v-if="result"> · exit {{ result.code }}</template>
-            </span>
-            <span v-if="lastDuration" class="meta head-meta">{{ lastDuration }}</span>
+
           </div>
         </header>
 
@@ -166,56 +160,12 @@
       </section>
       <!-- 编辑器 (下方) -->
       <section class="editor card" :class="{ 'is-running': running }">
-        <header class="bar editor-bar">
-          <div class="dots">
-            <span class="dot d-red" /><span class="dot d-yellow" /><span class="dot d-green" />
-          </div>
-          <div class="bar-actions">
-            <span v-tooltip="'运行 / 保存'" class="kbd-hint">
-              <kbd>⌘</kbd><span class="slash">/</span><kbd>Ctrl</kbd><span class="plus">+</span><kbd>↵</kbd>
-            </span>
-            <button v-tooltip="'清空编辑器内容（不落盘）'" class="ghost-btn" :disabled="running || !script" @click="script = ''">
-              清空
-            </button>
-            <select
-              v-model="draftSelected"
-              v-tooltip="'草稿：选中加载；选「＋ 保存当前…」存为新草稿'"
-              class="draft-select"
-              @change="onDraftChange"
-            >
-              <option value="">草稿</option>
-              <option value="__save__">＋ 保存当前…</option>
-              <option v-for="d in drafts" :key="d.name" :value="d.name">{{ d.name }}</option>
-            </select>
-            <button
-              v-if="draftSelected && draftSelected !== '__save__'"
-              v-tooltip="`删除草稿「${draftSelected}」`"
-              class="ghost-btn draft-del"
-              @click="onDraftDelete"
-            >
-×
-</button>
-            <button
-              v-if="running || isLoopActive || autoTakeoverEnabled"
-              v-tooltip="'暂停：停止当前执行并关闭自动接管'"
-              class="primary-btn stop head-run"
-              @click="pauseAll"
-            >
-              <svg class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="9" y1="4" x2="9" y2="20" /><line x1="15" y1="4" x2="15" y2="20" /></svg>
-              <span>{{ autoTakeoverCountdown > 0 ? '暂停 · ' + autoTakeoverCountdown + 's' : '暂停' }}</span>
-            </button>
-            <button
-              v-else
-              v-tooltip="'运行：执行脚本 → 结果自动发 AI → AI 回复后自动执行下一轮'"
-              class="primary-btn takeover head-run"
-              @click="toggleAutoTakeover"
-            >
-              <svg class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4" /></svg><span>运行</span>
-            </button>
-          </div>
-        </header>
 
         <div class="tpl-bar">
+          <span v-tooltip="'运行 / 保存'" class="kbd-hint">
+            <kbd>⌘</kbd><span class="slash">/</span><kbd>Ctrl</kbd><span class="plus">+</span><kbd>↵</kbd>
+          </span>
+          <span class="tpl-divider" />
           <button
             v-for="t in TEMPLATES"
             :key="t.id"
@@ -224,6 +174,27 @@
             @click="applyTemplate(t.code)"
           >
             {{ t.label }}
+          </button>
+          <div class="tpl-spacer" />
+          <button v-tooltip="'清空编辑器内容（不落盘）'" class="ghost-btn" :disabled="running || !script" @click="script = ''">
+            清空
+          </button>
+          <button
+            v-if="running || isLoopActive || autoTakeoverEnabled"
+            v-tooltip="'暂停：停止当前执行并关闭自动接管'"
+            class="primary-btn stop head-run"
+            @click="pauseAll"
+          >
+            <svg class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="9" y1="4" x2="9" y2="20" /><line x1="15" y1="4" x2="15" y2="20" /></svg>
+            <span>{{ autoTakeoverCountdown > 0 ? '暂停 · ' + autoTakeoverCountdown + 's' : '暂停' }}</span>
+          </button>
+          <button
+            v-else
+            v-tooltip="'运行：执行脚本 → 结果自动发 AI → AI 回复后自动执行下一轮'"
+            class="primary-btn takeover head-run"
+            @click="toggleAutoTakeover"
+          >
+            <svg class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4" /></svg><span>运行</span>
           </button>
         </div>
         <div class="editor-body">
@@ -258,8 +229,6 @@
             ref="cmHost"
             class="cm-host"
             tabindex="0"
-            @keydown.ctrl.enter.prevent="runSmart()"
-            @keydown.meta.enter.prevent="runSmart()"
           />
         </div><footer class="editor-foot">
           <span v-if="persistWarning" v-tooltip="persistWarning" class="persist-warning">⚠ 会话存储已满</span>
@@ -455,7 +424,7 @@ async function ensureCM(): Promise<CMModule> {
 }
 
 
-const { script, running, result, changes, rolling, busyAll, persistWarning, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save, drafts, saveDraftAs, loadDraft, deleteDraft } = useRunner()
+const { script, running, result, changes, rolling, busyAll, persistWarning, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback } = useRunner()
 const { enabled: autoTakeoverEnabled, countdown: autoTakeoverCountdown, enable: enableAutoTakeover, disable: disableAutoTakeover, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
 function toggleAutoTakeover() {
   if (autoTakeoverEnabled.value) {
@@ -592,7 +561,15 @@ function chatRole(kind: string): ChatRole {
 }
 const chatItems = computed(() => busEvents.value
   .filter((e) => e.kind !== 'ai:token')
-  .map((e) => ({ ...e, role: chatRole(e.kind) })))
+  .map((e) => ({ ...e, role: chatRole(e.kind) }))
+  .filter((e) => {
+    // 过滤无内容的 AI 气泡：脚本到达已由步骤条显示，纯文本空回复不显示
+    if (e.role !== 'ai') return true
+    const p = (e.payload || {}) as Record<string, unknown>
+    if (String(p.text || '').trim()) return true
+    if (String(p.desc || '').trim()) return true
+    return false
+  }))
 
 const treeExpanded = ref<Set<number>>(new Set())
 function toggleTreeNode(id: number) {
@@ -654,7 +631,12 @@ function stepIconOf(e: { kind: string, payload?: Record<string, unknown> }): str
 function stepTitleOf(e: { kind: string, summary?: string, payload?: Record<string, unknown> }): string {
   const p = e.payload || {}
   if (e.kind === 'ai:script') return String(p.desc || '脚本到达')
-  if (e.kind === 'run:start') return '执行脚本：' + (String(p.desc || '').trim() || '未命名')
+  if (e.kind === 'run:start') {
+    const phase = String(p.phase || '')
+    const desc = String(p.desc || '').trim() || '脚本'
+    if (phase === 'pending') return '等待执行：' + desc
+    return '执行脚本：' + desc
+  }
   if (e.kind === 'run:end') {
     const exit = p.exit !== undefined ? ' · exit ' + p.exit : ''
     const changes = Array.isArray(p.changes) ? p.changes.length : 0
@@ -679,6 +661,7 @@ function stepLabelOf(e: { kind: string, payload?: Record<string, unknown> }): st
   if (e.kind === 'ai:script') return '待执行'
   if (e.kind === 'run:start') {
     const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
+    if (phase === 'pending') return '等待中'
     if (phase === 'done') return '已完成'
     if (phase === 'error') return '失败'
     return '执行中'
@@ -1295,50 +1278,7 @@ async function copyOutput() {
 
 
 
-const draftSelected = ref('')
-function onDraftChange() {
-  if (draftSelected.value === '__save__') {
-    const raw = typeof window !== 'undefined' ? window.prompt('草稿名（最多 5 个，超出尾部淘汰）', '') : null
-    draftSelected.value = ''
-    const n = String(raw || '').trim()
-    if (!n) return
-    const saved = saveDraftAs(n, script.value)
-    if (saved) {
-      statusText.value = '✓ 已存草稿'
-      statusClass.value = 'ok'
-      setTimeout(() => { statusText.value = ''; statusClass.value = '' }, 1500)
-    }
-    return
-  }
-  if (!draftSelected.value) return
-  const c = loadDraft(draftSelected.value)
-  if (c === null) return
-  script.value = c
-}
-function onDraftDelete() {
-  if (!draftSelected.value || draftSelected.value === '__save__') return
-  deleteDraft(draftSelected.value)
-  draftSelected.value = ''
-}
 
-async function saveDraft() {
-  if (!script.value) return
-  try {
-    const res = await fetch('/__ai/script/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script: script.value }),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    statusText.value = '✓ 已保存草稿'
-    statusClass.value = 'ok'
-    setTimeout(() => { statusText.value = ''; statusClass.value = '' }, 1500)
-  } catch (e) {
-    statusText.value = '✗ 保存失败'
-    statusClass.value = 'err'
-    setTimeout(() => { statusText.value = ''; statusClass.value = '' }, 2000)
-  }
-}
 
 // ---------- 分栏拖拽 ----------
 
@@ -1492,12 +1432,10 @@ async function createEditor() {
       }),
       m.Prec.highest(m.keymap.of([
         { key: 'Mod-Enter', preventDefault: true, run: () => { runSmart(); return true } },
-        { key: 'Ctrl-Enter', preventDefault: true, run: () => { runSmart(); return true } },
-        { key: 'Cmd-Enter', preventDefault: true, run: () => { runSmart(); return true } },
         { key: 'Alt-r', preventDefault: true, run: () => { runSmart(); return true } },
         { key: 'Alt-ArrowUp', preventDefault: true, run: () => { cmdHistoryPrev(); return true } },
         { key: 'Alt-ArrowDown', preventDefault: true, run: () => { cmdHistoryNext(); return true } },
-        { key: 'Mod-s', preventDefault: true, run: () => { saveDraft(); return true } },
+
         { key: 'Enter', run: () => {
           const text = script.value.trim()
           if (text.startsWith('!') && !text.includes('\n')) {
@@ -1643,7 +1581,9 @@ watch(running, (v) => {
       // autoAskOnResult: 失败或只读诊断（成功无改动、非循环）时延迟 3s 自动复制并发给 AI（主动停止除外）
       const isReadonlyProbe = isReadonlyResult(result.value)
       const AUTO_ASK_DELAY_MS = 3000
+      const forceFeedback = autoFeedbackRequested.value
       const shouldAutoAsk =
+        forceFeedback ||
         autoTakeoverEnabled.value ||
         !result.value.ok ||
         isReadonlyProbe ||
@@ -1651,6 +1591,7 @@ watch(running, (v) => {
         result.value.lint?.ok === false ||
         result.value.test?.ok === false
       if (shouldAutoAsk && result.value.error !== '已取消') {
+        if (forceFeedback) clearAutoFeedback()
         if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput() })
         else setTimeout(() => { void copyOutput() }, AUTO_ASK_DELAY_MS)
       }
@@ -4193,6 +4134,459 @@ function onHtmlDrop(e: DragEvent) {
 .waiting-text {
   font-family: var(--mono, monospace);
 }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [user-step-style] 用户提问样式与步骤条一致
+   ═══════════════════════════════════════════════════════════ */
+.chat-msg-user {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: auto !important;
+  max-width: 92% !important;
+  margin: 4px auto !important;
+  padding: 4px 14px !important;
+  background: transparent !important;
+  border: 1px dashed var(--term-chip-border-2, rgb(255 255 255 / 18%)) !important;
+  border-radius: 3px !important;
+  font: 11px/1.5 var(--mono, monospace) !important;
+  color: var(--term-text-2, var(--text-2)) !important;
+}
+.chat-msg-user .bubble-head {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 11px !important;
+  color: var(--term-text-3, var(--text-3)) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  flex: 0 0 auto !important;
+  white-space: nowrap !important;
+}
+.chat-msg-user .bubble-body {
+  display: inline !important;
+  color: var(--term-text-2, var(--text-2)) !important;
+  font-size: 11px !important;
+  line-height: 1.5 !important;
+  word-break: break-word !important;
+  max-width: 60ch !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.chat-msg-user .bubble-body p {
+  display: inline !important;
+  margin: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.chat-msg-user .bubble-body strong {
+  color: var(--term-text, var(--text)) !important;
+  font-weight: 500 !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [align-left] 容器居中 + 内容左对齐
+   ═══════════════════════════════════════════════════════════ */
+
+/* 步骤条：宽度自适应居中；内容左对齐 */
+.chat-step {
+  display: inline-flex !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  width: auto !important;
+  max-width: 92% !important;
+  margin: 4px auto !important;
+  text-align: left !important;
+}
+.chat-step .step-title {
+  flex: 0 1 auto !important;
+  min-width: 0 !important;
+  text-align: left !important;
+}
+.chat-step .step-time,
+.chat-step .step-state,
+.chat-step .step-icon,
+.chat-step .step-dot {
+  flex: 0 0 auto !important;
+}
+
+/* 用户消息：同款 */
+.chat-msg-user {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  width: auto !important;
+  max-width: 92% !important;
+  margin: 4px auto !important;
+  text-align: left !important;
+}
+.chat-msg-user .bubble-head {
+  flex: 0 0 auto !important;
+  text-align: left !important;
+}
+.chat-msg-user .bubble-body {
+  flex: 0 1 auto !important;
+  text-align: left !important;
+}
+
+/* AI 消息：同款 */
+.chat-msg-ai {
+  display: inline-flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  width: auto !important;
+  max-width: min(720px, 92%) !important;
+  margin: 4px auto !important;
+  text-align: left !important;
+}
+.chat-msg-ai .bubble-head,
+.chat-msg-ai .bubble-body {
+  align-self: stretch !important;
+  text-align: left !important;
+}
+
+/* chat-list 容器保持居中排列、不强制 text-align */
+.chat-list {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  text-align: left !important;
+}
+
+/* 等待气泡也遵循 */
+.chat-waiting {
+  display: inline-flex !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  width: auto !important;
+  margin: 4px auto !important;
+  text-align: left !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [no-shell] 彻底去掉卡片外壳边框
+   ═══════════════════════════════════════════════════════════ */
+.pane-main > .terminal,
+.pane-main > .editor {
+  background: transparent !important;
+  border: 0 !important;
+  border-top: 0 !important;
+  border-left: 0 !important;
+  border-right: 0 !important;
+  border-bottom: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  overflow: visible !important;
+}
+.pane-main > .terminal .term-bar,
+.pane-main > .editor .editor-bar {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+.pane-main > .terminal .term-bar .dots,
+.pane-main > .editor .editor-bar .dots {
+  display: none !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [bg-tune] 背景层次：编辑器/终端统一深色，融入整体
+   ═══════════════════════════════════════════════════════════ */
+.pane-main {
+  background: var(--bg, #181818) !important;
+}
+
+/* 终端区：更深的 bg，微边框区分 */
+.terminal {
+  background: var(--bg, #181818) !important;
+}
+.terminal .term-body {
+  background: var(--bg, #181818) !important;
+}
+
+/* 编辑器区：稍亮 surface，形成层次 */
+.editor {
+  background: var(--surface, #1f1f1f) !important;
+}
+.editor .editor-body,
+.editor .cm-host,
+.editor .cm-editor,
+.editor .cm-scroller,
+.editor .cm-content {
+  background: var(--surface, #1f1f1f) !important;
+}
+.editor .cm-gutters {
+  background: var(--surface, #1f1f1f) !important;
+  border-right: 1px solid var(--border, #2a2a2a) !important;
+}
+
+/* 顶栏淡背景 */
+.terminal .term-bar,
+.editor .editor-bar {
+  background: var(--surface-2, #252526) !important;
+}
+
+
+/* [toolbar-refactor] tpl-bar 撑开 */
+.tpl-spacer { flex: 1; min-width: 8px; }
+.tpl-bar { gap: 6px; align-items: center; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [purple-run] tpl-bar 一行 + 运行按钮紫色
+   ═══════════════════════════════════════════════════════════ */
+
+/* tpl-bar 一行紧凑 */
+.tpl-bar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 6px 12px !important;
+  border-bottom: 1px solid var(--border, #2a2a2a) !important;
+  background: var(--surface-2, #252526) !important;
+}
+.tpl-bar .kbd-hint {
+  flex: 0 0 auto !important;
+  margin-right: 2px !important;
+}
+.tpl-bar .tpl-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--border, #2a2a2a);
+  flex: 0 0 auto;
+  margin: 0 4px;
+}
+.tpl-bar .tpl-spacer { flex: 1 1 auto !important; min-width: 8px !important; }
+
+/* 运行按钮紫色 */
+.primary-btn.takeover {
+  background: transparent !important;
+  color: #a78bfa !important;
+  border: 1px solid #a78bfa !important;
+  box-shadow: none !important;
+  font-weight: 600 !important;
+}
+.primary-btn.takeover:hover:not(:disabled) {
+  background: rgb(167 139 250 / 14%) !important;
+  color: #c4b5fd !important;
+  border-color: #c4b5fd !important;
+  box-shadow: 0 0 0 3px rgb(167 139 250 / 10%) !important;
+}
+
+/* 暂停按钮紫红系（与运行按钮一致色系但区分） */
+.primary-btn.stop {
+  background: transparent !important;
+  color: #f0abfc !important;
+  border: 1px solid #f0abfc !important;
+  box-shadow: none !important;
+  font-weight: 600 !important;
+}
+.primary-btn.stop:hover:not(:disabled) {
+  background: rgb(240 171 252 / 14%) !important;
+  color: #f5d0fe !important;
+  border-color: #f5d0fe !important;
+}
+
+/* tpl-chip hover 也走紫色 */
+.tpl-chip:hover {
+  color: #c4b5fd !important;
+  border-color: #a78bfa !important;
+  background: rgb(167 139 250 / 8%) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [hide-scrollbar] 隐藏所有滚动条
+   ═══════════════════════════════════════════════════════════ */
+.pane-main *::-webkit-scrollbar,
+.terminal ::-webkit-scrollbar,
+.editor ::-webkit-scrollbar,
+.term-body::-webkit-scrollbar,
+.chat-list::-webkit-scrollbar,
+.cm-scroller::-webkit-scrollbar,
+.cm-host::-webkit-scrollbar,
+.pane-side ::-webkit-scrollbar,
+.side-tree ::-webkit-scrollbar,
+.side-changes ::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+  display: none !important;
+}
+.pane-main *,
+.term-body,
+.chat-list,
+.cm-scroller,
+.cm-host,
+.pane-side * {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   [purple-fix] 运行按钮紫色改偏红
+   ═══════════════════════════════════════════════════════════ */
+.primary-btn.takeover {
+  color: #c084fc !important;
+  border-color: #c084fc !important;
+}
+.primary-btn.takeover:hover:not(:disabled) {
+  background: rgb(192 132 252 / 14%) !important;
+  color: #d8b4fe !important;
+  border-color: #d8b4fe !important;
+  box-shadow: 0 0 0 3px rgb(192 132 252 / 10%) !important;
+}
+.primary-btn.stop {
+  color: #f0abfc !important;
+  border-color: #f0abfc !important;
+}
+.primary-btn.stop:hover:not(:disabled) {
+  background: rgb(240 171 252 / 14%) !important;
+  color: #f5d0fe !important;
+  border-color: #f5d0fe !important;
+}
+.tpl-chip:hover {
+  color: #c084fc !important;
+  border-color: #c084fc !important;
+  background: rgb(192 132 252 / 8%) !important;
+}
+
+
+/* [pending-loading] 等待/执行中状态均显示 loading */
+.chat-step.state-running .step-dot,
+.chat-step.state-pending .step-dot {
+  width: 10px !important;
+  height: 10px !important;
+  background: transparent !important;
+  border: 2px solid rgb(255 255 255 / 20%) !important;
+  border-top-color: #60a5fa !important;
+  border-right-color: #60a5fa !important;
+  border-radius: 50% !important;
+  animation: step-spin 0.75s linear infinite !important;
+  box-shadow: none !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [ui-polish-v3] UI 精修：统一间距/字号/圆角/对比度
+   位置：最后加载，覆盖前面所有补丁块
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── 统一字号 ─── */
+.chat-list { font-size: 11.5px !important; }
+.chat-step .step-title,
+.chat-step .step-time,
+.chat-step .step-state,
+.chat-step .step-icon { font-size: 11px !important; }
+.chat-step .step-state { font-size: 9.5px !important; letter-spacing: 0.3px !important; }
+.chat-msg-user .bubble-head,
+.chat-msg-user .bubble-body,
+.chat-msg-ai .bubble-head,
+.chat-msg-ai .bubble-body { font-size: 11.5px !important; }
+
+/* ─── 统一间距 ─── */
+.chat-list { gap: 3px !important; padding: 10px 14px 16px !important; }
+.chat-step,
+.chat-msg-user,
+.chat-msg-ai,
+.chat-waiting { margin: 3px auto !important; }
+
+/* ─── 统一 padding ─── */
+.chat-step,
+.chat-msg-user,
+.chat-waiting { padding: 3px 12px !important; }
+.chat-msg-ai { padding: 6px 12px !important; }
+
+/* ─── 统一圆角（虚线块用小圆角）─── */
+.chat-step,
+.chat-msg-user,
+.chat-msg-ai,
+.chat-waiting { border-radius: 4px !important; }
+
+/* ─── 统一边框（虚线 + 同色）─── */
+.chat-step,
+.chat-msg-user,
+.chat-waiting {
+  border: 1px dashed var(--term-chip-border-2, rgb(255 255 255 / 22%)) !important;
+}
+.chat-msg-ai {
+  border: 1px solid var(--term-chip-border, rgb(255 255 255 / 10%)) !important;
+}
+
+/* ─── 统一图标尺寸 ─── */
+.chat-step .step-icon { font-size: 12px !important; }
+.chat-step .step-dot { width: 5px !important; height: 5px !important; }
+
+/* ─── 步骤状态色（统一色系）─── */
+.chat-step.state-pending {
+  border-color: rgb(255 255 255 / 16%) !important;
+  color: var(--term-text-3) !important;
+}
+.chat-step.state-running {
+  border-color: rgb(192 132 252 / 55%) !important;
+  color: #d8b4fe !important;
+}
+.chat-step.state-running .step-state {
+  background: rgb(192 132 252 / 14%) !important;
+  color: #d8b4fe !important;
+}
+.chat-step.state-done {
+  border-color: rgb(74 222 128 / 45%) !important;
+  color: #86efac !important;
+}
+.chat-step.state-done .step-state {
+  background: rgb(74 222 128 / 12%) !important;
+  color: #86efac !important;
+}
+.chat-step.state-error {
+  border-color: rgb(248 113 113 / 55%) !important;
+  color: #fca5a5 !important;
+}
+.chat-step.state-error .step-state {
+  background: rgb(248 113 113 / 14%) !important;
+  color: #fca5a5 !important;
+}
+
+/* ─── 时间戳弱化 ─── */
+.chat-step .step-time,
+.chat-msg-user .bubble-head,
+.chat-msg-ai .bubble-head { color: var(--term-text-3) !important; opacity: 0.75; }
+
+/* ─── 顶栏统一高度 ─── */
+.term-bar,
+.editor-bar,
+.tpl-bar {
+  min-height: 32px !important;
+  padding: 0 12px !important;
+}
+
+/* ─── 底部工具栏对齐 ─── */
+.tpl-bar { padding: 5px 12px !important; }
+.tpl-bar .tpl-chip { padding: 2px 10px !important; font-size: 11px !important; }
+.tpl-bar .kbd-hint { font-size: 10.5px !important; }
+.tpl-bar .ghost-btn { padding: 3px 10px !important; font-size: 11px !important; }
+.tpl-bar .primary-btn.head-run { padding: 4px 14px !important; font-size: 11.5px !important; }
+
+/* ─── 编辑器区顶部留白 ─── */
+.editor-body { border-top: 1px solid var(--border) !important; }
+
+/* ─── 终端区与编辑器区分隔 ─── */
+.terminal + .editor,
+.terminal + .split-handle,
+.editor { border-top: 1px solid var(--border) !important; }
 
 </style>
 <!-- tooltip-audit -->

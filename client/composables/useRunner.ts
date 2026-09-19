@@ -42,6 +42,8 @@ const liveStdout = ref('')
 const liveStderr = ref('')
 const smokeEnabled = ref(loadFromStorage<boolean>(STORAGE_KEY_SMOKE, true))
 const baselineRunId = ref(loadFromStorage<string>(STORAGE_KEY_BASELINE, ''))
+// [auto-feedback] 一次性标志：AI 直接返回的脚本执行后无条件回传结果
+const autoFeedbackRequested = ref(false)
 const gitCommit = ref(loadFromStorage<boolean>(GIT_KEY, false))
 
 let abortController: AbortController | null = null
@@ -86,7 +88,8 @@ function stop() {
   running.value = false
 }
 
-async function run(opts?: { script?: string }) {
+async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boolean }) {
+  if (opts?.autoFeedback) autoFeedbackRequested.value = true
   const code = (opts?.script ?? script.value).trim()
   if (!code || running.value) return
   running.value = true
@@ -98,15 +101,19 @@ async function run(opts?: { script?: string }) {
   const metaM = code.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
   const desc = metaM ? metaM[1].trim().slice(0, 80) : '执行脚本'
   // [run-uk-unique] 每次运行唯一 key，避免同 key 覆盖历史事件导致位置错乱
-  const UK = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
+  const UK = opts?.runKey || ('run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6))
+  let lastStage = ''
   const titleOf = () => {
     const combined = (liveStdout.value + '\n' + liveStderr.value).trim()
-    if (!combined) return desc
     const lines = combined.split('\n').filter(Boolean)
     const tail = (lines[lines.length - 1] || '').trim()
-    return tail ? desc + ' · ' + tail.slice(0, 100) : desc
+    const parts = [desc]
+    if (lastStage) parts.push(lastStage)
+    if (tail) parts.push(tail.slice(0, 100))
+    return parts.join(' · ')
   }
   const emitStep = (phase: string, over: Record<string, unknown> = {}) => {
+    if (typeof over.currentStage === 'string') lastStage = over.currentStage
     emit('run:start', titleOf(), {
       payload: { desc, phase, stdoutTail: liveStdout.value.slice(-400), stderrTail: liveStderr.value.slice(-400), ...over },
       updateKey: UK,
@@ -157,20 +164,9 @@ async function run(opts?: { script?: string }) {
       } else if (frame.type === 'stage') {
         const name = String(frame.name || 'stage')
         const status = String(frame.status || '')
-        const ms = frame.ms
         const ok = frame.ok
-        emit('run:stage', name + (status === 'done' ? (ok === false ? ' · 失败' : ' · 完成') : ' · 处理中'), {
-          payload: {
-            name, status,
-            ms: typeof ms === 'number' ? ms : undefined,
-            ok: typeof ok === 'boolean' ? ok : undefined,
-            files: frame.files,
-            tscOk: frame.tscOk,
-            testOk: frame.testOk,
-            phase: status === 'done' ? (ok === false ? 'error' : 'done') : 'running',
-          },
-          updateKey: 'stage:' + name,
-        })
+        const mark = status === 'done' ? (ok === false ? ' ✗' : ' ✓') : ' …'
+        emitStep('running', { currentStage: name + mark, stageName: name, stageStatus: status })
       } else if (frame.type === 'summary') {
         frames.push(frame)
       }
@@ -304,6 +300,8 @@ export function useRunner() {
     baselineRunId,
     liveStdout,
     liveStderr,
+    autoFeedbackRequested,
+    clearAutoFeedback: () => { autoFeedbackRequested.value = false },
     run,
     stop,
     rollback,

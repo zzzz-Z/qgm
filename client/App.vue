@@ -310,9 +310,10 @@ function onSessionIdMessage(e: MessageEvent) {
         toast(`AI 脚本已到达 · ${lang} · ${lineCount} 行 · ${item.desc || '无说明'}`, 'info', 4000)
         const planM = code.match(/^\s*(?:\/\/|#)\s*@plan\s*:\s*(.+)$/m)
         const plan = planM ? planM[1].trim().slice(0, 200) : ''
+        const runKey = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
         try {
-          emitBus('ai:script', item.desc ? `📥 ${item.desc}` : `📥 脚本 · ${lang} · ${lineCount} 行`, { payload: { desc: item.desc, why: item.why, plan, lang, lineCount, hash: item.hash, ...currentLoopContext() } })
-        } catch (e) { console.error('[ai:script emit] failed:', e) }
+          emitBus('run:start', `等待执行：${item.desc || '脚本'}`, { payload: { desc: item.desc, why: item.why, plan, lang, lineCount, hash: item.hash, phase: 'pending', runKey, ...currentLoopContext() }, updateKey: runKey })
+        } catch (e) { console.error('[run:start pending] failed:', e) }
         // 决策链路：脚本到达事件入 TraceLog（v6 §3.2），循环中盖 loopId/loopRound
         addTrace({
           kind: 'script',
@@ -333,7 +334,7 @@ function onSessionIdMessage(e: MessageEvent) {
           // 手动模式：不回填编辑器，延迟 3-7s 直接执行
           const delayMs = 3000 + Math.random() * 4000
           toast(`⏱ ${Math.round(delayMs / 1000)}s 后自动执行`, 'info', Math.min(delayMs, 3000))
-          setTimeout(() => { void runScript({ script: code }) }, delayMs)
+          setTimeout(() => { void runScript({ script: code, runKey, autoFeedback: true }) }, delayMs)
         }
       }
       return
@@ -369,8 +370,9 @@ function onSessionIdMessage(e: MessageEvent) {
         void onScriptArrival(item, sid)
       } else {
         // v1.2 兜底通道：延迟执行
+        const runKey = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
         const delayMs = 3000 + Math.random() * 4000
-        setTimeout(() => { void runScript({ script: code }) }, delayMs)
+        setTimeout(() => { void runScript({ script: code, runKey, autoFeedback: true }) }, delayMs)
       }
     }
     return
