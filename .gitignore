@@ -9,3 +9,8 @@ dist/
 .DS_Store
 *.log
 .trae/
+
+# ai-runner 运行态（阶段 0 补）
+.ai-runner/compliance.jsonl
+.ai-runner/SESSION-HANDOFF.md
+.ai-runner/plans/
