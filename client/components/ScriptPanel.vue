@@ -10,13 +10,7 @@
     >
       <!-- 自动化循环控制条（P2） -->
       <section v-if="loopState !== 'idle'" class="loop-bar card" :class="`is-${loopState}`">
-        <!-- [multi-loop-step6-panel] -->
-        <span
-          v-if="activeLoopsCount > 1"
-          v-tooltip="`还有 ${activeLoopsCount - 1} 个循环在其他会话中运行（点左侧会话切换查看）`"
-          class="loop-multi-badge"
-        >+{{ activeLoopsCount - 1 }} 循环</span>
-        <template v-if="loopState === 'budget-limited'">
+<template v-if="loopState === 'budget-limited'">
           <span class="loop-status">
             <span>⏸</span>
             预算已用尽 · 第 {{ loopRound }}/{{ maxRounds }} 轮
@@ -27,11 +21,41 @@
             <button v-tooltip="'急停并 git reset 到循环起点'" class="loop-btn rollback" @click="stopAndRollback">⏹ 停止并回滚</button>
           </div>
         </template>
+        <template v-else-if="loopState === 'waiting-input'">
+          <span class="loop-status">
+            <span>⏸</span>
+            决策点 · 第 {{ loopRound }}/{{ maxRounds }} 轮
+          </span>
+          <span class="loop-goal-text" :title="pendingDecision?.question">{{ pendingDecision?.question || '（缺问题文本）' }}</span>
+          <div class="loop-actions decision-actions">
+            <button
+              v-for="opt in (pendingDecision?.options || [])"
+              :key="opt.id"
+              v-tooltip="`选择「${opt.label}」并回填 AI`"
+              class="loop-btn decision-btn"
+              @click="submitDecision(opt.id)"
+            >
+{{ opt.label }}
+</button>
+            <button v-tooltip="'取消决策点，结束循环'" class="loop-btn" @click="submitDecision('__cancel__')">取消</button>
+<button v-tooltip="'输入自定义答案'" class="loop-btn" @click="decisionCustomOpen = !decisionCustomOpen">✎ 自定义</button>
+          </div>
+          <div v-if="decisionCustomOpen" class="decision-custom">
+            <input
+              v-model="decisionCustomText"
+              class="decision-input"
+              placeholder="输入答案后回车发送"
+              @keydown.enter.prevent="submitDecisionCustom"
+            />
+            <button class="loop-btn primary" :disabled="!decisionCustomText.trim()" @click="submitDecisionCustom">发送</button>
+          </div>
+        </template>
         <template v-else-if="isLoopActive">
           <span class="loop-status">
             <span class="loop-spin">⟳</span>
             第 {{ loopRound }}/{{ maxRounds }} 轮 · {{ loopState }}
             · tok {{ (tokenDelta / 1000).toFixed(1) }}k/{{ tokenBudget / 1000 }}k
+            <template v-if="loopCost !== null"> · {{ formatCost(loopCost) }}（{{ (loopUsage.prompt_tokens / 1000).toFixed(1) }}k / {{ (loopUsage.completion_tokens / 1000).toFixed(1) }}k）</template>
             · 宽容 {{ toleranceLeft }}
           </span>
           <span v-if="loopState === 'waiting'" class="loop-waiting-progress" :title="`等待 AI 回复（已等 ${waitingElapsed}s / 总 ${Math.round(roundTimeoutMs / 1000)}s，超时即熔断）`">
@@ -44,6 +68,7 @@
             <button v-tooltip="'Esc：当前轮跑完即停，不再发下一轮'" class="loop-btn" disabled>⏸ 暂停(Esc)</button>
             <button v-tooltip="'Ctrl+Esc：急停并 git reset 到循环起点'" class="loop-btn rollback" @click="stopAndRollback">⏹ 停止并回滚</button>
             <button v-tooltip="'请求 AI 总结当前会话，切到新会话继续循环'" class="loop-btn" @click="startHandoff">🔄 轮转</button>
+            <button v-tooltip="'给 AI 补充说明（下一轮反馈时带上）'" class="loop-btn" @click="showUserNote = !showUserNote">📝 补充</button>
           </div>
         </template>
         <template v-else>
@@ -51,8 +76,21 @@
             {{ loopState === 'interrupted' ? '⏹ 已中断' : '■ 已停止' }} · 第 {{ loopRound }}/{{ maxRounds }} 轮
             <em v-if="stopReason">（{{ stopReason }}）</em>
           </span>
+          <button v-if="lastGoal" v-tooltip="`用相同目标重跑：${lastGoal.slice(0, 60)}`" class="loop-btn" @click="startLoop(lastGoal)">🔄 再来一次</button>
           <button class="loop-btn" @click="loopState = 'idle'">收起</button>
         </template>
+      </section>
+      <section v-if="showUserNote && isLoopActive" class="note-bar card">
+        <textarea
+          v-model="userNoteDraft"
+          class="note-input"
+          rows="2"
+          placeholder="给 AI 的补充说明（提交后下一轮反馈时带上，提交后清空）"
+        />
+        <div class="note-actions">
+          <button class="loop-btn" @click="showUserNote = false; userNoteDraft = ''">取消</button>
+          <button class="loop-btn primary" :disabled="!userNoteDraft.trim()" @click="submitUserNote">保存</button>
+        </div>
       </section>
       <!-- 终端 (上方) -->
       <section class="terminal card">
@@ -65,7 +103,7 @@
               v-tooltip="aiWaiting ? '等待 AI 回复…' : copied ? '已发送' : `把本次运行的完整上下文（脚本 / 输出 / 变更 / 错误源码）拼成 prompt 复制并发给 AI`"
               class="term-btn copy"
               :class="{ done: copied, loading: aiWaiting }"
-              :disabled="(!hasAnyOutput && !changes.length) || aiWaiting"
+              :disabled="(!hasAnyOutput && !changes.length) || aiWaiting || autoTakeoverEnabled"
               @click="copyOutput"
             >
               <svg v-if="aiWaiting" class="term-ico spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -80,16 +118,6 @@
               </svg>
               <span>{{ aiWaiting ? '等待回复…' : copied ? '已发送' : `发送给 AI` }}</span>
             </button>
-            <button
-              v-tooltip="'打开「问 AI」面板（拖文件 + 写问题 → 拼 prompt）'"
-              class="term-btn ask-panel"
-              @click="emit('open-ask')"
-            >
-              <svg class="term-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-              <span>问 AI</span>
-            </button>
             <span v-if="statusText" class="status head-status" :class="statusClass">
               <span class="s-dot" />{{ statusText }}<template v-if="result"> · exit {{ result.code }}</template>
             </span>
@@ -97,101 +125,42 @@
           </div>
         </header>
 
-        <div class="term-body">
-          <div v-if="running" class="term-empty term-running">
-            <template v-if="runningCommand">
-              <div class="term-shell-line">
-                <span class="term-shell-prompt">$</span>
-                <span class="term-shell-cmd">{{ runningCommand.replace(/^!/, '') }}</span>
-                <span class="term-shell-wait">{{ waitFrames[waitFrameIdx] }}</span>
+        <div ref="termBodyRef" class="term-body">
+          <div class="chat-list">
+            <template v-for="e in chatItems" :key="e.id">
+              <div
+                v-if="e.kind === 'ai:stream'"
+                class="chat-think"
+                @click="toggleTreeNode(e.id)"
+              >
+                <span class="think-icon">🧠</span>
+                <span class="think-label">已思考（{{ fmtTreeTime(e.ts) }}）</span>
+                <span class="think-caret" :class="{ open: treeExpanded.has(e.id) }">▸</span>
               </div>
-              <pre v-if="liveStdout" class="term-live-out">{{ liveStdout }}</pre>
-              <pre v-if="liveStderr" class="term-live-err">{{ liveStderr }}</pre>
+              <div
+                v-if="e.kind === 'ai:stream' && treeExpanded.has(e.id)"
+                class="chat-bubble bubble-left bubble-think"
+                v-html="renderMarkdown(e.summary)"
+              />
+              <div v-else-if="e.role === 'user'" class="chat-bubble bubble-right">
+                <div class="bubble-head">👤 我 · {{ fmtTreeTime(e.ts) }}</div>
+                <div class="bubble-body" v-html="renderPayload(e.payload)" />
+              </div>
+              <div v-else-if="e.role === 'ai'" class="chat-bubble bubble-left">
+                <div class="bubble-head">🤖 AI · {{ fmtTreeTime(e.ts) }}</div>
+                <div v-if="e.payload" class="bubble-body" v-html="renderPayload(e.payload)" />
+                <div v-else class="bubble-body">{{ e.summary }}</div>
+              </div>
+              <div v-else class="chat-sys">
+                <span class="sys-tag">{{ treeIcon(e.kind) }} {{ e.summary }}</span>
+                <span class="sys-time">{{ fmtTreeTime(e.ts) }}</span>
+              </div>
             </template>
-            <template v-else>
-              <pre v-if="liveStdout" class="term-live-out">{{ liveStdout }}</pre>
-              <pre v-if="liveStderr" class="term-live-err">{{ liveStderr }}</pre>
-              <div class="run-status-row">
-                <span class="run-frame" aria-hidden="true">{{ waitFrames[waitFrameIdx] }}</span>
-                <span class="run-label">正在执行<span class="run-ico">▶</span></span>
-              </div>
-            </template>
-          </div>
-          <div v-else-if="!result" class="term-empty">
-            <div class="empty-icon">
-              ⚡
-            </div>
-            <div class="empty-title">
-              准备就绪
-            </div>
-            <div class="empty-sub">
-              按 <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>↵</kbd> 运行
+            <div v-if="!chatItems.length" class="tree-empty">
+              <div class="empty-title">还没有会话记录</div>
+              <div class="empty-sub">点击「运行」开始自动化循环</div>
             </div>
           </div>
-          <div v-else-if="!showTerminalBody" class="term-empty">
-            <div class="empty-icon dim">
-              ∅
-            </div>
-            <div class="empty-title">
-              无输出
-            </div>
-            <div class="empty-sub">
-              脚本执行完成，未产生任何输出
-            </div>
-          </div>
-          <section v-else class="term-sections">
-            <div class="term-section term-status" :class="result.ok ? 'ok' : 'err'">
-              <div class="term-label">
-                <span class="prompt-char" :class="{ err: !result.ok }">{{ result.ok ? '✓' : '✗' }}</span>
-                <span class="term-status-detail">
-                  {{ result.ok ? '执行成功' : '执行失败' }} · 退出码 {{ result.code }}<template v-if="lastDuration"> · 耗时 {{ lastDuration }}</template><template v-if="changes.length"> · {{ changes.length }} 个文件已变更</template>
-                </span>
-              </div>
-            </div>
-            <div v-if="hasStdout" class="term-section">
-              <div class="term-label">
-                <span class="prompt-char">$</span>
-                <span class="label-text">stdout · 标准输出</span>
-              </div>
-              <pre class="term-content" v-html="renderCode(result.stdout)" />
-            </div>
-            <div v-if="hasStderr" class="term-section">
-              <div class="term-label">
-                <span class="prompt-char err">!</span>
-                <span class="label-text err">stderr · 错误输出</span>
-              </div>
-              <pre class="term-content err" v-html="renderCode(result.stderr)" />
-            </div>
-            <div v-if="result.tools?.length" class="term-section">
-              <div class="term-label">
-                <span class="prompt-char">#</span>
-                <span class="label-text">工具调用 · {{ result.tools.length }} 次</span>
-              </div>
-              <pre class="term-content">{{ toolsText }}</pre>
-            </div>
-            <div v-if="result.smoke?.ran" class="term-section">
-              <div class="term-label">
-                <span class="prompt-char" :class="{ err: !result.smoke.ok }">{{ result.smoke.ok ? 'OK' : 'X' }}</span>
-                <span class="label-text" :class="{ err: !result.smoke.ok }">smoke · 页面冒烟</span>
-              </div>
-              <pre class="term-content" :class="{ err: !result.smoke.ok }">{{ smokeText }}</pre>
-            </div>
-            <LintBlock v-if="result.lint?.ran" :lint="result.lint" />
-            <div v-if="result.test?.ran" class="term-section">
-              <div class="term-label">
-                <span class="prompt-char" :class="{ err: !result.test.ok }">{{ result.test.ok ? '$' : '!' }}</span>
-                <span class="label-text" :class="{ err: !result.test.ok }">test · 单元测试</span>
-              </div>
-              <pre class="term-content" :class="{ err: !result.test.ok }">{{ testOutput }}</pre>
-            </div>
-            <div v-if="result.tsc" class="term-section">
-              <div class="term-label">
-                <span class="prompt-char" :class="{ err: !result.tsc.ok }">{{ result.tsc.ok ? '$' : '!' }}</span>
-                <span class="label-text" :class="{ err: !result.tsc.ok }">tsc · 类型检查</span>
-              </div>
-              <pre class="term-content" :class="{ err: !result.tsc.ok }">{{ tscText }}</pre>
-            </div>
-          </section>
         </div>
       </section>
       <!-- 编辑器 (下方) -->
@@ -207,23 +176,39 @@
             <button v-tooltip="'清空编辑器内容（不落盘）'" class="ghost-btn" :disabled="running || !script" @click="script = ''">
               清空
             </button>
-            <button
-              v-if="!running"
-              v-tooltip="script.trim().startsWith('#!') ? '运行脚本（Ctrl\/Cmd + ↵）' : script.trim().startsWith('!') ? '运行 shell 命令（以 ! 开头）' : '把编辑器内容作为问题发给 AI（Ctrl\/Cmd + ↵）'"
-              class="primary-btn run head-run"
-              :disabled="!script.trim()"
-              @click="runSmart"
+            <select
+              v-model="draftSelected"
+              v-tooltip="'草稿：选中加载；选「＋ 保存当前…」存为新草稿'"
+              class="draft-select"
+              @change="onDraftChange"
             >
-              <span class="ico">▶</span><span>运行</span><kbd class="btn-kbd">{{ runKbd }}</kbd>
+              <option value="">草稿</option>
+              <option value="__save__">＋ 保存当前…</option>
+              <option v-for="d in drafts" :key="d.name" :value="d.name">{{ d.name }}</option>
+            </select>
+            <button
+              v-if="draftSelected && draftSelected !== '__save__'"
+              v-tooltip="`删除草稿「${draftSelected}」`"
+              class="ghost-btn draft-del"
+              @click="onDraftDelete"
+            >
+×
+</button>
+            <button
+              v-if="!running && !isLoopActive && !autoTakeoverEnabled"
+              v-tooltip="'开启自动接管：AI 回复自动回填，随机 3-10s 后自动执行，执行完自动发回 AI'"
+              class="primary-btn takeover head-run"
+              @click="toggleAutoTakeover"
+            >
+              <span class="ico">⟳</span><span>运行</span>
             </button>
             <button
-              v-if="!running && !isLoopActive"
-              v-tooltip="'先运行当前脚本；成功后进入自动化接管：AI 回传脚本自动执行'"
-              class="primary-btn takeover head-run"
-              :disabled="!script.trim()"
-              @click="runAndTakeover"
+              v-else-if="!running && !isLoopActive && autoTakeoverEnabled"
+              v-tooltip="'已开启自动接管，点击关闭'"
+              class="primary-btn stop head-run"
+              @click="toggleAutoTakeover"
             >
-              <span class="ico">⟳</span><span>运行并接管</span>
+              <span>{{ autoTakeoverCountdown > 0 ? '接管中 · ' + autoTakeoverCountdown + 's' : '关闭接管' }}</span>
             </button>
             <button v-else v-tooltip="'停止当前运行'" class="primary-btn stop head-run" @click="stop">
               <span class="ico">■</span><span>停止</span>
@@ -274,8 +259,8 @@
             ref="cmHost"
             class="cm-host"
             tabindex="0"
-            @keydown.ctrl.enter.prevent="runSmart"
-            @keydown.meta.enter.prevent="runSmart"
+            @keydown.ctrl.enter.prevent="runSmart()"
+            @keydown.meta.enter.prevent="runSmart()"
           />
         </div><footer class="editor-foot">
           <span v-if="persistWarning" v-tooltip="persistWarning" class="persist-warning">⚠ 会话存储已满</span>
@@ -326,7 +311,6 @@
 
     <!-- 拖拽条：调整右侧面板宽度 -->
     <div
-v-if="changes.length"
       v-tooltip="'拖拽调整右侧面板宽度'"
       class="side-resize-handle"
       :class="{ active: resizingSide }"
@@ -335,29 +319,58 @@ v-if="changes.length"
 
     <!-- 右侧：变更列表 & Diff -->
     <!-- SIDE_VIF_CHANGES -->
-    <aside v-if="changes.length" class="pane-side" :style="{ width: `${sideWidth}px` }">
-      <!-- 空占位：无变更且未运行时，位于终端上方 -->
-      <div v-if="!result && !changes.length" class="side-empty">
-        <div class="side-empty-icon">
-          📋
-        </div>
-        <div class="side-empty-text">
-          运行后显示变更
-        </div>
+    <button
+      v-tooltip="sideDrawerOpen ? '收起变更面板' : '展开变更面板'"
+      aria-label="切换变更面板"
+      class="side-drawer-toggle"
+      :class="{ 'drawer-open': sideDrawerOpen }"
+      @click="sideDrawerOpen = !sideDrawerOpen"
+    >
+{{ sideDrawerOpen ? '›' : '‹' }}
+</button>
+    <div v-if="sideDrawerOpen" class="side-drawer-backdrop" @click="sideDrawerOpen = false" />
+    <aside class="pane-side" :class="{ 'drawer-open': sideDrawerOpen }" :style="{ width: `${sideWidth}px` }">
+      <div class="side-tabs">
+        <button
+          :class="{ active: sideTab === 'tree' }"
+          class="side-tab"
+          @click="sideTab = 'tree'"
+        >
+树
+</button>
+        <button
+          :class="{ active: sideTab === 'changes' }"
+          class="side-tab"
+          @click="sideTab = 'changes'"
+        >
+变更<span v-if="changes.length" class="side-tab-badge">{{ changes.length }}</span>
+</button>
       </div>
-      <!-- 变更列表 -->
-      <FileList
-        v-if="changes.length"
-        :changes="changes"
-        :rolling="rolling"
-        :busy-all="busyAll"
-        :active-file="previewFile!"
-        @rollback="onRollback"
-        @rollback-all="onRollbackAll"
-        @save="save"
-        @preview="onPreviewFile"
-      />
-</aside>
+      <div v-show="sideTab === 'tree'" class="side-tree">
+        <FileTree root draggable />
+      </div>
+      <div v-show="sideTab === 'changes'" class="side-changes">
+        <div v-if="!result && !changes.length" class="side-empty">
+          <div class="side-empty-icon">
+            📋
+          </div>
+          <div class="side-empty-text">
+            运行后显示变更
+          </div>
+        </div>
+        <FileList
+          v-if="changes.length"
+          :changes="changes"
+          :rolling="rolling"
+          :busy-all="busyAll"
+          :active-file="previewFile!"
+          @rollback="onRollback"
+          @rollback-all="onRollbackAll"
+          @save="save"
+          @preview="onPreviewFile"
+        />
+      </div>
+    </aside>
     <div
       v-if="changes.length && previewFile && previewBefore !== null"
       class="diff-overlay"
@@ -380,65 +393,123 @@ v-if="changes.length"
 
 <script setup lang="ts">
 defineOptions({ name: 'ScriptPanel' })
-const emit = defineEmits<{ 'open-ask': [] }>()
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRunner } from '../composables/useRunner'
 import { currentLoopContext, useAutoLoop } from '../composables/useAutoLoop'
 import FileList from './FileList.vue'
 import DiffViewer from './DiffViewer.vue'
-import LintBlock from './LintBlock.vue'
+import FileTree from './FileTree.vue'
 import { copyAndFill } from '../composables/useDeepseekUrl'
+import { formatCost } from '../utils/pricing'
 import { useAiWaiting } from '../composables/useAiWaiting'
+import { useAutoTakeover } from '../composables/useAutoTakeover'
+import { useEventBus, emit } from '../composables/useEventStream'
 import { useCodeCleaner } from '../composables/useCodeCleaner'
 import { buildErrorContext, enforceBudget, parseErrorLocations } from '../utils/contextBuilder'
 import { readNdjson } from '../utils/stream'
 import { fnv1a8 } from '../utils/hash'
+import hljs from 'highlight.js/lib/common'
 import { useToast } from '../composables/useToast'
 import { useTraceLog } from '../composables/useTraceLog'
-import { useSessionManager } from '../composables/useSessionManager'
+import { setLastAutoFilled } from '../composables/useScriptInbox'
 import type { Change, RunResponse } from '../types'
-import { basicSetup } from 'codemirror'
-import { EditorView, keymap, placeholder, Decoration, ViewPlugin } from '@codemirror/view'
-import { EditorState, Prec, Compartment, RangeSetBuilder } from '@codemirror/state'
-import { javascript as cmJavascript } from '@codemirror/lang-javascript'
-import { oneDark } from '@codemirror/theme-one-dark'
-import * as hljsNs from 'highlight.js/lib/core'
-const hljs: any = (hljsNs as any).default ?? hljsNs
-import * as javascriptNs from 'highlight.js/lib/languages/javascript'
-const javascript: any = (javascriptNs as any).default ?? javascriptNs
-import * as typescriptNs from 'highlight.js/lib/languages/typescript'
-const typescript: any = (typescriptNs as any).default ?? typescriptNs
+// U.3: CodeMirror 全家桶懒加载——首建编辑器时才 await import，CM 打进独立 chunk
+interface CMModule {
+  EditorView: any
+  EditorState: any
+  keymap: any
+  placeholder: any
+  Decoration: any
+  ViewPlugin: any
+  Prec: any
+  Compartment: any
+  RangeSetBuilder: any
+  basicSetup: any
+  cmJavascript: any
+  oneDark: any
+}
+let CM: CMModule | null = null
+async function ensureCM(): Promise<CMModule> {
+  if (CM) return CM
+  const [v, s, j, t, c] = await Promise.all([
+    import('@codemirror/view'),
+    import('@codemirror/state'),
+    import('@codemirror/lang-javascript'),
+    import('@codemirror/theme-one-dark'),
+    import('codemirror'),
+  ])
+  CM = {
+    EditorView: v.EditorView,
+    keymap: v.keymap,
+    placeholder: v.placeholder,
+    Decoration: v.Decoration,
+    ViewPlugin: v.ViewPlugin,
+    EditorState: s.EditorState,
+    Prec: s.Prec,
+    Compartment: s.Compartment,
+    RangeSetBuilder: s.RangeSetBuilder,
+    basicSetup: (c as any).basicSetup,
+    cmJavascript: j.javascript,
+    oneDark: t.oneDark,
+  }
+  return CM
+}
 
-hljs.registerLanguage('javascript', javascript)
-hljs.registerLanguage('typescript', typescript)
 
-const { script, running, result, changes, rolling, busyAll, persistWarning, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save } = useRunner()
+const { script, running, result, changes, rolling, busyAll, persistWarning, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save, drafts, saveDraftAs, loadDraft, deleteDraft } = useRunner()
+const { enabled: autoTakeoverEnabled, countdown: autoTakeoverCountdown, enable: enableAutoTakeover, disable: disableAutoTakeover, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
+function toggleAutoTakeover() {
+  if (autoTakeoverEnabled.value) {
+    disableAutoTakeover()
+    cancelAutoRun()
+    toast('已关闭自动接管', 'info', 3000)
+  } else {
+    if (!script.value.trim()) {
+      toast('请先在编辑器写脚本再开启接管', 'warn', 3000)
+      return
+    }
+    enableAutoTakeover()
+    toast('已开启自动接管：立即执行当前脚本 → 结果发 AI → AI 回填后 3-10s 自动执行', 'success', 6000)
+    void runSmart({ bypassAutoGuard: true })
+  }
+}
 /** 当前 inbox 待取用条数（仅展示用，避免在模板里直接 inbox.value.length 触发响应式开销） */
 /** 取最新一条入队脚本，覆盖当前编辑器内容 */
 
 // —— 自动化循环（P2 useAutoLoop）——
 const {
-  loopState, loopRound, loopGoal, stopReason, toleranceLeft, activeLoopsCount,
+  loopState, loopRound, loopGoal, stopReason, toleranceLeft,
   tokenDelta, maxRounds, tokenBudget,
   roundTimeoutMs, waitingElapsed, isLoopActive,
-  startTakeover, killCurrent, stopAndRollback, startHandoff, resumeLoop,
+  loopUsage, loopCost,
+  killCurrent, stopAndRollback, startHandoff, resumeLoop,
+  startLoop, lastGoal, userNote,
+  pendingDecision, submitDecision,
 } = useAutoLoop()
 // 倒计时进度百分比：waitingElapsed / roundTimeoutMs
+const showUserNote = ref(false)
+const userNoteDraft = ref('')
+function submitUserNote() {
+  userNote.value = userNoteDraft.value.trim()
+  showUserNote.value = false
+  userNoteDraft.value = ''
+  if (userNote.value) toast('补充说明已记录，将在下一轮反馈带上', 'success', 3000)
+}
+
+const decisionCustomOpen = ref(false)
+const decisionCustomText = ref('')
+function submitDecisionCustom() {
+  const t = decisionCustomText.value.trim()
+  if (!t) return
+  void submitDecision('__custom__', t)
+  decisionCustomOpen.value = false
+  decisionCustomText.value = ''
+}
+
 const waitingPct = computed(() => {
   if (loopState.value !== 'waiting' || !roundTimeoutMs.value) return 0
   return Math.min(100, Math.round((waitingElapsed.value * 1000 / roundTimeoutMs.value) * 100))
 })
-async function runAndTakeover() {
-  if (!script.value.trim()) { toast('脚本为空', 'warn'); return }
-  runningCommand.value = ''
-  await run()
-  const r = result.value
-  if (!r || !r.ok) {
-    toast('脚本运行失败，未进入接管', 'error', 4000)
-    return
-  }
-  await startTakeover()
-}
 
 const mainRef = ref<HTMLElement | null>(null)
 
@@ -465,74 +536,152 @@ const resizingSide = ref(false)
 const lastDuration = ref('')
 const runningElapsed = ref('')
 const runningCommand = ref('')
-const waitFrames = [
-  '⠋',
-  '⠙',
-  '⠹',
-  '⠸',
-  '⠼',
-  '⠴',
-  '⠦',
-  '⠧',
-  '⠇',
-  '⠏',
-  '⣾',
-  '⣽',
-  '⣻',
-  '⢿',
-  '⡿',
-  '⣟',
-  '⣯',
-  '⣷',
-  '◐',
-  '◓',
-  '◑',
-  '◒',
-  '|',
-  '/',
-  '-',
-  '\\',
-]
-const waitFrameIdx = ref(0)
 let elapsedTimer: ReturnType<typeof setInterval> | null = null
 let runStartAt = 0
 
 // Diff 预览
+const sideTab = ref<'tree' | 'changes'>('tree')
+// U.12: 窄屏抽屉开合
+const sideDrawerOpen = ref(false)
 const previewFile = ref<string | null>(null)
 const previewBefore = ref<string | null>(null)
 const previewAfter = ref<string>('')
 
-const runKbd = computed(() => /Mac|iPhone|iPad/i.test(navigator.platform) ? '⌘↵' : 'Ctrl↵')
 const hasStdout = computed(() => !!result.value?.stdout?.trim())
 const hasStderr = computed(() => !!result.value?.stderr?.trim())
-const showTerminalBody = computed(() => hasStdout.value || hasStderr.value || result.value?.lint?.ran || result.value?.test?.ran || (result.value?.tools?.length || 0) > 0 || !!result.value?.smoke?.ran || !!result.value?.tsc)
-const hasAnyOutput = computed(() => hasStdout.value || hasStderr.value || (result.value?.tools?.length || 0) > 0 || !!result.value?.smoke?.ran || !!result.value?.tsc)
-const testOutput = computed(() => { const t = result.value?.test; return t ? (t.stdout || t.stderr || '(无)') : '' })
-const tscText = computed(() => {
-  const t = result.value?.tsc
-  if (!t) return ''
-  return (t.stdout || '') + (t.stderr ? `\n${t.stderr}` : '')
-})
-const smokeText = computed(() => {
-  const s = result.value?.smoke
-  if (!s) return ''
-  if (s.error) return `启动失败: ${s.error}`
-  const lines: string[] = []
-  for (const p of s.pages) {
-    lines.push(`${p.ok ? '✓' : '✗'} ${p.url}`)
-    for (const e of p.errors) lines.push(`    ${e}`)
-  }
-  return lines.join('\n')
-})
-const toolsText = computed(() => {
-  const t = result.value?.tools
-  if (!t || !t.length) return ''
-  return t.map((x) => {
-    const label = x.op === 'write' ? 'writeFile' : 'deleteFile'
-    return `${label} ${x.path} (${x.size}B)`
-  }).join('\n')
-})
+const { events: busEvents } = useEventBus()
+const termBodyRef = ref<HTMLElement | null>(null)
 
+type ChatRole = 'user' | 'ai' | 'sys'
+function chatRole(kind: string): ChatRole {
+  if (kind === 'ai:ask') return 'user'
+  if (kind === 'ai:script' || kind === 'ai:done' || kind === 'ai:plain' || kind === 'ai:multi' || kind === 'ai:summary' || kind === 'ai:feedback' || kind === 'ai:decision' || kind === 'ai:need-files') return 'ai'
+  return 'sys'
+}
+const chatItems = computed(() => busEvents.value
+  .filter((e) => e.kind !== 'ai:token')
+  .map((e) => ({ ...e, role: chatRole(e.kind) })))
+
+const treeExpanded = ref<Set<number>>(new Set())
+function toggleTreeNode(id: number) {
+  const s = new Set(treeExpanded.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  treeExpanded.value = s
+}
+function treeIcon(kind: string): string {
+  if (kind === 'ai:ask') return '👤'
+  if (kind === 'ai:feedback') return '📤'
+  if (kind === 'ai:script') return '📥'
+  if (kind === 'ai:done') return '✓'
+  if (kind === 'ai:plain' || kind === 'ai:multi') return '💬'
+  if (kind === 'ai:stream') return '🤖'
+  if (kind === 'ai:summary') return '📋'
+  if (kind === 'ai:token') return '🔢'
+  if (kind === 'ai:decision') return '⏸'
+  if (kind === 'ai:need-files') return '📂'
+  if (kind === 'run:start') return '▶'
+  if (kind === 'run:end') return '■'
+  if (kind === 'run:error') return '✗'
+  if (kind === 'run:stage') return '⚙'
+  if (kind === 'loop:round') return '⟳'
+  if (kind === 'loop:static') return '⚠'
+  if (kind === 'loop:finish') return '⏹'
+  return '·'
+}
+function fmtTreeTime(ts: number): string {
+  const d = new Date(ts)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
+}
+
+function escapeHtmlMd(s: string): string {
+  return String(s).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[ch] as string))
+}
+
+/** 极简 markdown：代码块（折叠）/ 标题 / 列表 / 行内 code / 粗体 / 段落 */
+/** 用 highlight.js 着色；语言不可用则回退 auto，再失败转纯 escape */
+function highlightCode(code: string, lang: string): string {
+  const source = String(code ?? '')
+  const l = String(lang || '').toLowerCase()
+  try {
+    if (l && hljs.getLanguage(l)) return hljs.highlight(source, { language: l, ignoreIllegals: true }).value
+    return hljs.highlightAuto(source).value
+  } catch {
+    return escapeHtmlMd(source)
+  }
+}
+
+function renderMarkdown(text: string): string {
+  const s = String(text ?? '')
+  if (!s) return ''
+  const lines = s.split('\n')
+  const out: string[] = []
+  const inline = (t: string): string => escapeHtmlMd(t)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  let i = 0
+  while (i < lines.length) {
+    const l = lines[i]
+    const fence = l.match(/^\s*```(\w*)\s*$/)
+    if (fence) {
+      const lang = fence[1] || 'code'
+      const buf: string[] = []
+      i++
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { buf.push(lines[i]); i++ }
+      i++
+      const codeId = 'c' + Math.random().toString(36).slice(2, 8)
+      const body = highlightCode(buf.join('\n'), lang)
+      const bar = '<div class="md-code-bar"><span class="md-code-lang">' + escapeHtmlMd(lang) + ' · ' + buf.length + ' 行</span><span class="md-code-acts"><button class="md-code-copy" data-code-id="' + codeId + '" onclick="(function(b){var p=b.closest(\'.md-code\').querySelector(\'pre\');navigator.clipboard.writeText(p.textContent||\'\');b.textContent=\'已复制\';setTimeout(function(){b.textContent=\'复制\'},1200)})(this)">复制</button><button class="md-code-dl" data-code-id="' + codeId + '" onclick="(function(b){var p=b.closest(\'.md-code\').querySelector(\'pre\');var a=document.createElement(\'a\');a.href=URL.createObjectURL(new Blob([p.textContent||\'\'],{type:\'text/plain\'}));a.download=\'snippet.txt\';a.click();URL.revokeObjectURL(a.href)})(this)">下载</button></span></div>'
+      out.push('<details class="md-code" open><summary>' + bar + '</summary><pre>' + body + '</pre></details>')
+      continue
+    }
+    const h = l.match(/^(#{1,4})\s+(.+)$/)
+    if (h) {
+      const n = h[1].length + 2
+      out.push('<h' + n + ' class="md-h">' + escapeHtmlMd(h[2]) + '</h' + n + '>')
+      i++
+      continue
+    }
+    if (/^\s*[-*]\s+/.test(l)) {
+      const items: string[] = []
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        items.push('<li>' + inline(lines[i].replace(/^\s*[-*]\s+/, '')) + '</li>')
+        i++
+      }
+      out.push('<ul class="md-ul">' + items.join('') + '</ul>')
+      continue
+    }
+    if (/^\s*$/.test(l)) { i++; continue }
+    out.push('<p class="md-p">' + inline(l) + '</p>')
+    i++
+  }
+  return out.join('')
+}
+
+function renderPayload(p: unknown): string {
+  if (!p || typeof p !== 'object') return ''
+  const parts: string[] = []
+  for (const [k, v] of Object.entries(p as Record<string, unknown>)) {
+    if (v === null || v === undefined || v === '') continue
+    if (typeof v === 'string') {
+      parts.push('### ' + k + '\n\n' + v)
+    } else if (Array.isArray(v)) {
+      const ls = v.map((x) => typeof x === 'object' ? '- ' + JSON.stringify(x) : '- ' + String(x)).join('\n')
+      parts.push('### ' + k + '\n\n' + ls)
+    } else if (typeof v === 'object') {
+      parts.push('### ' + k + '\n\n```json\n' + JSON.stringify(v, null, 2) + '\n```')
+    } else {
+      parts.push('### ' + k + '\n\n' + String(v))
+    }
+  }
+  return renderMarkdown(parts.join('\n\n'))
+}
+/** 最新的 AI 流式文本（取最后一条 ai:stream 事件） */
+
+const hasAnyOutput = computed(() => hasStdout.value || hasStderr.value || (result.value?.tools?.length || 0) > 0 || !!result.value?.smoke?.ran || !!result.value?.tsc)
 function getChangeType(p: string) {
   const c = changes.value.find(x => x.path === p)
   return c ? c.type : 'modified'
@@ -829,13 +978,27 @@ function cmdHistoryNext() {
   if (cmdHistoryIndex < 0) script.value = cmdHistoryDraft
   else script.value = cmdHistory.value[cmdHistoryIndex]
 }
+/** 自动接管：收到 AI 脚本回填后，随机 3-10s 后自动运行 */
+function onAutoRun() {
+  if (!autoTakeoverEnabled.value) return
+  if (running.value) { toast('脚本运行中，跳过本次自动执行', 'warn', 2000); return }
+  scheduleAutoRun(() => {
+    if (!autoTakeoverEnabled.value || running.value) return
+    void runSmart({ bypassAutoGuard: true })
+  })
+}
+
 function onGlobalKey(e: KeyboardEvent) {
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
     e.preventDefault()
     runSmart()
   }
 }
-function runSmart() {
+function runSmart(opts?: { bypassAutoGuard?: boolean }) {
+  if (autoTakeoverEnabled.value && !opts?.bypassAutoGuard) {
+    toast('自动接管中，请先关闭接管再手动运行', 'warn', 2500)
+    return
+  }
   const text = script.value.trim()
   if (!text) return
   const firstLine = text.split('\n', 1)[0].trim()
@@ -892,6 +1055,7 @@ ${question}`
     toast('发送失败，已复制到剪贴板', 'warn', 4000)
     return
   }
+  emit('ai:ask', `👤 提问：${question.slice(0, 80)}`, { payload: { question, prompt } })
   statusText.value = '✅ 已发送'
   statusClass.value = 'ok'
   script.value = ''
@@ -984,6 +1148,7 @@ async function copyOutput() {
       toast('发送失败，已复制到剪贴板', 'warn', 4000)
       return
     }
+    emit('ai:feedback', `📤 回传 AI：${changes.value.length} 文件 · exit ${result.value?.code ?? -1}`, { payload: { prompt: text.slice(0, 8000), changes: changes.value.map(c => ({ path: c.path, type: c.type })), exit: result.value?.code ?? -1, ok: result.value?.ok ?? false } })
     copied.value = true
     startAiWaiting()
     setTimeout(() => { copied.value = false }, 2000)
@@ -994,23 +1159,31 @@ async function copyOutput() {
 // ponytail: 不做跨文件跳转（无 Monaco，行号可能失准），只复制路径。
 
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, ch => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    '\'': '&#39;',
-  }[ch] as string))
-}
 
-function renderCode(text: string): string {
-  if (!text) return ''
-  try {
-    return hljs.highlightAuto(text, ['javascript', 'typescript']).value
-  } catch {
-    return escapeHtml(text)
+const draftSelected = ref('')
+function onDraftChange() {
+  if (draftSelected.value === '__save__') {
+    const raw = typeof window !== 'undefined' ? window.prompt('草稿名（最多 5 个，超出尾部淘汰）', '') : null
+    draftSelected.value = ''
+    const n = String(raw || '').trim()
+    if (!n) return
+    const saved = saveDraftAs(n, script.value)
+    if (saved) {
+      statusText.value = '✓ 已存草稿'
+      statusClass.value = 'ok'
+      setTimeout(() => { statusText.value = ''; statusClass.value = '' }, 1500)
+    }
+    return
   }
+  if (!draftSelected.value) return
+  const c = loadDraft(draftSelected.value)
+  if (c === null) return
+  script.value = c
+}
+function onDraftDelete() {
+  if (!draftSelected.value || draftSelected.value === '__save__') return
+  deleteDraft(draftSelected.value)
+  draftSelected.value = ''
 }
 
 async function saveDraft() {
@@ -1036,8 +1209,8 @@ async function saveDraft() {
 
 // ---------- 右侧面板宽度拖拽 ----------
 const cmHost = ref<HTMLDivElement | null>(null)
-let cmView: EditorView | null = null
-const editableComp = new Compartment()
+let cmView: any = null
+let editableComp: any = null
 
 /* @FILE_PICKER_V1 */
 const pickerOpen = ref(false)
@@ -1139,45 +1312,50 @@ function onEditorUpdate(u: any) {
   }
 }
 
-const fileTagPlugin = ViewPlugin.fromClass(class {
-  decorations: any
-  constructor(view: any) { this.decorations = this.build(view) }
-  update(u: any) { if (u.docChanged) this.decorations = this.build(u.view) }
-  build(view: any) {
-    const builder = new RangeSetBuilder<any>()
-    const text = view.state.doc.toString()
-    const re = /@[\w./-]+/g
-    let m: RegExpExecArray | null
-    while ((m = re.exec(text)) !== null) {
-      const from = m.index
-      const to = m.index + m[0].length
-      const after = text[to]
-      if (after === undefined || after === ' ' || after === '\n' || after === '\t') {
-        builder.add(from, to, Decoration.mark({ class: 'cm-file-tag' }))
-      }
-    }
-    return builder.finish()
-  }
-}, { decorations: (v: any) => v.decorations })
-function createEditor() {
+let fileTagPlugin: any = null
+async function createEditor() {
   if (!cmHost.value || cmView) return
-  const state = EditorState.create({
+  const m = await ensureCM()
+  if (!editableComp) editableComp = new m.Compartment()
+  if (!fileTagPlugin) {
+    fileTagPlugin = m.ViewPlugin.fromClass(class {
+      decorations: any
+      constructor(view: any) { this.decorations = this.build(view) }
+      update(u: any) { if (u.docChanged) this.decorations = this.build(u.view) }
+      build(view: any) {
+        const builder = new m.RangeSetBuilder()
+        const text = view.state.doc.toString()
+        const re = /@[\w./-]+/g
+        let match: RegExpExecArray | null
+        while ((match = re.exec(text)) !== null) {
+          const from = match.index
+          const to = match.index + match[0].length
+          const after = text[to]
+          if (after === undefined || after === ' ' || after === '\n' || after === '\t') {
+            builder.add(from, to, m.Decoration.mark({ class: 'cm-file-tag' }))
+          }
+        }
+        return builder.finish()
+      }
+    }, { decorations: (v: any) => v.decorations })
+  }
+  const state = m.EditorState.create({
     doc: script.value,
     extensions: [
-      basicSetup,
-      cmJavascript(),
-      oneDark,
+      m.basicSetup,
+      m.cmJavascript(),
+      m.oneDark,
       /* editor-no-h-scroll */
-      EditorView.lineWrapping,
-      editableComp.of(EditorView.editable.of(!isLoopActive.value)),
-      placeholder('写脚本，或 !命令 走 shell · @问题 发给 AI · ⌘/Ctrl + ↵ 运行'),
-      EditorView.theme({
+      m.EditorView.lineWrapping,
+      editableComp.of(m.EditorView.editable.of(!isLoopActive.value)),
+      m.placeholder('写脚本，或 !命令 走 shell · @问题 发给 AI · ⌘/Ctrl + ↵ 运行'),
+      m.EditorView.theme({
         '&': { height: '100%', fontSize: '12px' },
         '.cm-scroller': { fontFamily: 'var(--mono, monospace)', lineHeight: '20px', overflowX: 'hidden', overflowY: 'auto' },
         '.cm-content': { caretColor: '#528bff' },
         '&.cm-focused': { outline: 'none' },
       }),
-      Prec.highest(keymap.of([
+      m.Prec.highest(m.keymap.of([
         { key: 'Mod-Enter', preventDefault: true, run: () => { runSmart(); return true } },
         { key: 'Ctrl-Enter', preventDefault: true, run: () => { runSmart(); return true } },
         { key: 'Cmd-Enter', preventDefault: true, run: () => { runSmart(); return true } },
@@ -1194,7 +1372,7 @@ function createEditor() {
           return false
         } },
       ])),
-      EditorView.updateListener.of((u) => {
+      m.EditorView.updateListener.of((u: any) => {
         if (u.docChanged) {
           script.value = u.state.doc.toString()
           onEditorUpdate(u)
@@ -1203,11 +1381,11 @@ function createEditor() {
       fileTagPlugin,
     ],
   })
-  cmView = new EditorView({ state, parent: cmHost.value })
+  cmView = new m.EditorView({ state, parent: cmHost.value })
 }
 watch(isLoopActive, (v) => {
-  if (!cmView) return
-  cmView.dispatch({ effects: editableComp.reconfigure(EditorView.editable.of(!v)) })
+  if (!cmView || !CM || !editableComp) return
+  cmView.dispatch({ effects: editableComp.reconfigure(CM.EditorView.editable.of(!v)) })
 })
 watch(script, (v) => {
   if (!cmView) return
@@ -1240,11 +1418,14 @@ function onSideUp() {
 // changes 为空时清空 diff 状态，避免残留
 watch(
   () => changes.value.length,
-  (len) => {
+  (len, prevLen) => {
     if (len === 0) {
       previewFile.value = null
       previewBefore.value = null
       previewAfter.value = ''
+    }
+    if (len > 0 && (!prevLen || prevLen === 0)) {
+      sideTab.value = 'changes'
     }
   },
 )
@@ -1254,6 +1435,13 @@ watch(previewFile, (v) => {
   sideWidth.value = v
     ? Math.max(sideWidthBase.value, SIDE_WIDTH_DIFF)
     : sideWidthBase.value
+})
+
+watch(() => busEvents.value.length, () => {
+  nextTick(() => {
+    const el = termBodyRef.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
 })
 
 onMounted(() => {
@@ -1268,7 +1456,8 @@ onMounted(() => {
     }
   } catch { /* ignore */ }
 
-  createEditor()
+  void createEditor()
+  window.addEventListener('ai-runner:auto-run', onAutoRun)
   window.addEventListener('keydown', onGlobalKey) })
 
 onBeforeUnmount(() => {
@@ -1276,6 +1465,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', onSideUp)
   if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
 
+  window.removeEventListener('ai-runner:auto-run', onAutoRun)
   window.removeEventListener('keydown', onGlobalKey)
   cmView?.destroy()
   cmView = null })
@@ -1292,7 +1482,6 @@ watch(running, (v) => {
     elapsedTimer = setInterval(() => {
       const s = (performance.now() - runStartAt) / 1000
       runningElapsed.value = `${s.toFixed(1)}s`
-      waitFrameIdx.value = (waitFrameIdx.value + 1) % waitFrames.length
     }, 100)
   } else if (result.value) {
     if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
@@ -1307,7 +1496,8 @@ watch(running, (v) => {
         'warn',
         5000,
       )
-      setTimeout(() => { void copyOutput() }, 3000)
+      if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput() })
+      else setTimeout(() => { void copyOutput() }, 3000)
     } else {
       statusText.value = result.value.ok ? '✅ 成功' : '❌ 失败'
       statusClass.value = result.value.ok ? 'ok' : 'err'
@@ -1315,17 +1505,20 @@ watch(running, (v) => {
       const isReadonlyProbe = isReadonlyResult(result.value)
       const AUTO_ASK_DELAY_MS = 3000
       const shouldAutoAsk =
+        autoTakeoverEnabled.value ||
         !result.value.ok ||
         isReadonlyProbe ||
         result.value.tsc?.ok === false ||
         result.value.lint?.ok === false ||
         result.value.test?.ok === false
       if (shouldAutoAsk && result.value.error !== '已取消') {
-        setTimeout(() => { void copyOutput() }, AUTO_ASK_DELAY_MS)
+        if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput() })
+        else setTimeout(() => { void copyOutput() }, AUTO_ASK_DELAY_MS)
       }
-      // 清空编辑器（成功 / 失败均清空）
+      // U.8: 运行后保留编辑器内容（便于重跑 / 微调）
       const scriptSnapshot = script.value
-      script.value = ''
+      // 把跑过的脚本记为「已消费」，让后续 AI 回填能直接覆盖（不误伤手动编辑）
+      setLastAutoFilled(scriptSnapshot)
       const r = result.value
       // 兼容旧脚本只写 // @desc；新脚本可能 // 或 #，从 result.value.scriptDesc/scriptWhy 拿（server 已解析）
       const descMatch = scriptSnapshot.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
@@ -1402,6 +1595,38 @@ function onHtmlDrop(e: DragEvent) {
   position: relative;
   z-index: 1;
 }
+/* U.12: 窄屏抽屉 toggle 与 backdrop（桌面不显示） */
+.side-drawer-toggle {
+  display: none;
+  position: fixed;
+  right: 8px;
+  top: 50%;
+  z-index: 40;
+  width: 28px;
+  height: 44px;
+  transform: translateY(-50%);
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border-2);
+  border-radius: 6px 0 0 6px;
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.side-drawer-toggle.drawer-open {
+  right: 320px;
+  border-radius: 0 6px 6px 0;
+}
+.side-drawer-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgb(15 30 60 / 35%);
+}
 .side-resize-handle::after {
   content: '';
   position: absolute;
@@ -1425,6 +1650,68 @@ function onHtmlDrop(e: DragEvent) {
   user-select: none !important;
   cursor: col-resize !important;
 }
+.side-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.side-tab {
+  flex: 1;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--font-12);
+  cursor: pointer;
+  border-radius: var(--radius-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-family: inherit;
+}
+.side-tab:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.side-tab.active {
+  background: var(--surface);
+  color: var(--primary);
+  font-weight: 600;
+}
+.side-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  border-radius: var(--radius-8);
+  font-size: var(--font-10);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.side-tree {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 6px;
+}
+.side-changes {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .pane-main {
   flex: 1;
   min-width: 0;
@@ -1475,7 +1762,7 @@ function onHtmlDrop(e: DragEvent) {
   overflow: hidden;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   box-shadow: 0 8px 24px rgb(15 30 60 / 15%);
 }
 .fp-input {
@@ -1508,12 +1795,12 @@ function onHtmlDrop(e: DragEvent) {
   padding: 10px;
   text-align: center;
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--font-11);
 }
 :deep(.cm-file-tag) {
   background: var(--primary-bg);
   color: var(--primary);
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   padding: 1px 4px;
   margin: 0 1px;
 }
@@ -1522,7 +1809,7 @@ function onHtmlDrop(e: DragEvent) {
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1578,7 +1865,7 @@ function onHtmlDrop(e: DragEvent) {
   color: var(--text-2);
 }
 .meta {
-  font-size: 11px;
+  font-size: var(--font-11);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -1666,24 +1953,24 @@ function onHtmlDrop(e: DragEvent) {
   flex: 1;
 }
 .loc-link {
-  color: #059669;
+  color: var(--success);
   text-decoration: underline;
   text-decoration-style: dotted;
   cursor: pointer;
 }
 .loc-link:hover {
-  color: #059669;
+  color: var(--success);
   background: rgb(5 150 105 / 10%);
 }
 .meta-running {
-  color: #059669;
+  color: var(--success);
   font-variant-numeric: tabular-nums;
 }
 .git-toggle {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--font-11);
   color: var(--text-2);
   cursor: pointer;
   user-select: none;
@@ -1694,21 +1981,21 @@ function onHtmlDrop(e: DragEvent) {
 }
 .git-after {
   font-family: var(--mono, monospace);
-  font-size: 11px;
+  font-size: var(--font-11);
   color: var(--success, #059669);
   margin-right: 8px;
   cursor: help;
 }
 .persist-warning {
-  font-size: 11px;
+  font-size: var(--font-11);
   color: var(--danger);
   margin-right: 8px;
   cursor: help;
 }
 .req-err-badge {
   padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 11px;
+  border-radius: var(--radius-10);
+  font-size: var(--font-11);
   font-weight: 600;
   color: #fff;
   background: var(--danger, #ef4444);
@@ -1723,8 +2010,8 @@ function onHtmlDrop(e: DragEvent) {
   gap: 6px;
   padding: 6px 14px;
   border: 0;
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--radius-6);
+  font-size: var(--font-12);
   font-weight: 500;
   cursor: pointer;
   transition: 0.12s;
@@ -1735,7 +2022,7 @@ function onHtmlDrop(e: DragEvent) {
   cursor: not-allowed;
 }
 .primary-btn .ico {
-  font-size: 10px;
+  font-size: var(--font-10);
   line-height: 1;
 }
 
@@ -1750,14 +2037,14 @@ function onHtmlDrop(e: DragEvent) {
   background: rgb(255 255 255 / 18%);
   border: 1px solid rgb(255 255 255 / 28%);
   border-bottom-width: 2px;
-  border-radius: 3px;
+  border-radius: var(--radius-3);
   font: 10px/1.5 var(--mono, monospace);
   color: rgb(255 255 255 / 92%);
   vertical-align: middle;
 }
 .primary-btn.head-run {
   padding: 5px 14px;
-  font-size: 12px;
+  font-size: var(--font-12);
   font-weight: 600;
 }
 .primary-btn.takeover {
@@ -1785,10 +2072,10 @@ function onHtmlDrop(e: DragEvent) {
   align-items: center;
   gap: 5px;
   padding: 5px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   border: 1px solid transparent;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--font-12);
   font-weight: 500;
   cursor: pointer;
   transition: 0.14s;
@@ -1815,7 +2102,7 @@ function onHtmlDrop(e: DragEvent) {
   color: #93c5fd;
 }
 .term-btn.copy.done {
-  color: #059669;
+  color: var(--success);
   border-color: rgb(5 150 105 / 50%);
   background: rgb(5 150 105 / 12%);
 }
@@ -1840,14 +2127,13 @@ function onHtmlDrop(e: DragEvent) {
   color: #fff;
 }
 
-
 .ghost-btn {
   padding: 4px 10px;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   color: var(--text-2);
-  font-size: 12px;
+  font-size: var(--font-12);
   cursor: pointer;
   transition: 0.12s;
 }
@@ -1865,7 +2151,7 @@ function onHtmlDrop(e: DragEvent) {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 11px;
+  font-size: var(--font-11);
   color: var(--text-3);
   user-select: none;
 }
@@ -1876,7 +2162,7 @@ function onHtmlDrop(e: DragEvent) {
   background: var(--surface);
   border: 1px solid var(--border-2);
   border-bottom-width: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   font: 10px/1 var(--mono, monospace);
   color: var(--text-2);
   text-align: center;
@@ -1884,7 +2170,7 @@ function onHtmlDrop(e: DragEvent) {
 .kbd-hint .slash,
 .kbd-hint .plus {
   color: var(--text-3);
-  font-size: 10px;
+  font-size: var(--font-10);
 }
 
 /* ============ 状态 ============ */
@@ -1892,7 +2178,7 @@ function onHtmlDrop(e: DragEvent) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--font-12);
   color: var(--text-3);
 }
 .status.ok {
@@ -1910,7 +2196,7 @@ function onHtmlDrop(e: DragEvent) {
 /* status-moved */
 .head-status {
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--surface-2);
   border: 1px solid var(--border);
 }
@@ -1946,7 +2232,7 @@ function onHtmlDrop(e: DragEvent) {
 .split-grip {
   width: 36px;
   height: 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-2);
   background: var(--border-2);
   transition: 0.15s;
 }
@@ -1991,13 +2277,13 @@ function onHtmlDrop(e: DragEvent) {
 
 .exit-badge {
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   font: 11px/1.4 var(--mono, monospace);
   font-weight: 600;
 }
 .exit-badge.ok {
   background: rgb(46 160 67 / 18%);
-  color: #059669;
+  color: var(--success);
 }
 .exit-badge.err {
   background: rgb(248 81 73 / 18%);
@@ -2011,8 +2297,8 @@ function onHtmlDrop(e: DragEvent) {
   overflow-x: hidden;
   overflow-y: auto;
   /* tighten-spacing */
-  padding: 8px 0;
-  background: #1e1e1e;
+  padding: 0;
+  background: #181818;
   color: #d4d4d4;
 }
 .term-body::-webkit-scrollbar {
@@ -2021,13 +2307,129 @@ function onHtmlDrop(e: DragEvent) {
 }
 .term-body::-webkit-scrollbar-thumb {
   background: rgb(255 255 255 / 12%);
-  border-radius: 4px;
+  border-radius: var(--radius-4);
 }
 .term-body::-webkit-scrollbar-thumb:hover {
   background: rgb(255 255 255 / 20%);
 }
 
 /* 空状态 */
+.term-ai-thinking {
+  padding: 10px 14px;
+  background: rgb(255 255 255 / 2%);
+  border-left: 3px solid #60a5fa;
+  margin: 4px 0;
+}
+.term-ai-label {
+  gap: 6px;
+  padding: 0 0 6px;
+}
+.term-ai-label .run-spinner {
+  width: 10px;
+  height: 10px;
+}
+.term-ai-text {
+  margin: 0;
+  padding: 0;
+  font: 12px/1.65 var(--mono, monospace);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: #d4d4d4;
+  max-height: 200px;
+  overflow: auto;
+}
+.term-ai-caret {
+  display: inline-block;
+  color: #60a5fa;
+  animation: ai-caret-blink 1s steps(2, start) infinite;
+}
+@keyframes ai-caret-blink { to { visibility: hidden; } }
+
+.chat-list { display: flex; flex-direction: column; gap: 12px; padding: 14px 18px 20px; font: 13px/1.65 var(--mono, monospace); }
+.chat-bubble { max-width: 84%; padding: 10px 14px; border-radius: 12px; word-break: break-word; line-height: 1.7; box-shadow: 0 1px 2px rgb(0 0 0 / 25%); }
+.bubble-right { align-self: flex-end; background: linear-gradient(180deg, rgb(37 99 235 / 26%), rgb(37 99 235 / 18%)); border: 1px solid rgb(37 99 235 / 45%); border-bottom-right-radius: 4px; }
+.bubble-left { align-self: flex-start; background: rgb(255 255 255 / 6%); border: 1px solid rgb(255 255 255 / 10%); border-bottom-left-radius: 4px; }
+.bubble-think { background: rgb(0 0 0 / 30%); border-left: 3px solid #6a737d; color: #9d9d9d; font-size: 12px; border-radius: 8px; }
+.bubble-head { margin-bottom: 6px; color: #7a8694; font-size: 11px; font-weight: 600; letter-spacing: 0.3px; }
+.bubble-body { color: #dbe2ea; }
+.bubble-body .md-h { margin: 6px 0 3px; font-size: 12px; color: #79b8ff; text-transform: none; letter-spacing: 0.3px; }
+.bubble-body .md-p { margin: 2px 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.bubble-body .md-ul { margin: 2px 0; padding-left: 18px; }
+.bubble-body code { padding: 1px 4px; background: rgb(255 255 255 / 8%); border-radius: 3px; font: 11px var(--mono, monospace); color: #9cdcfe; }
+.bubble-body strong { color: #dcdcaa; }
+.bubble-body .md-code { margin: 6px 0; border: 1px solid #2f2f2f; border-radius: var(--radius-4); overflow: hidden; background: rgb(0 0 0 / 25%); }
+.bubble-body .md-code-bar { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; background: rgb(255 255 255 / 4%); border-bottom: 1px solid #2f2f2f; }
+.bubble-body .md-code-lang { color: #9d9d9d; font: 11px var(--mono, monospace); }
+.bubble-body .md-code-acts { display: flex; gap: 6px; }
+.bubble-body .md-code-acts button { padding: 1px 8px; border: 1px solid #3a3a3a; border-radius: var(--radius-3); background: transparent; color: #9d9d9d; font: 10px var(--mono, monospace); cursor: pointer; }
+.bubble-body .md-code-acts button:hover { color: #d4d4d4; border-color: #d4d4d4; }
+.bubble-body .md-code summary { list-style: none; padding: 0; }
+.bubble-body .md-code summary::-webkit-details-marker { display: none; }
+.bubble-body :deep(.hljs-keyword), .bubble-body :deep(.hljs-literal), .tree-body :deep(.hljs-keyword), .tree-body :deep(.hljs-literal) { color: #569cd6; }
+.bubble-body :deep(.hljs-string), .tree-body :deep(.hljs-string) { color: #ce9178; }
+.bubble-body :deep(.hljs-number), .tree-body :deep(.hljs-number) { color: #b5cea8; }
+.bubble-body :deep(.hljs-comment), .tree-body :deep(.hljs-comment) { color: #6a9955; font-style: italic; }
+.bubble-body :deep(.hljs-function), .bubble-body :deep(.hljs-title), .tree-body :deep(.hljs-function), .tree-body :deep(.hljs-title) { color: #dcdcaa; }
+.bubble-body :deep(.hljs-variable), .bubble-body :deep(.hljs-params), .bubble-body :deep(.hljs-attr), .tree-body :deep(.hljs-variable), .tree-body :deep(.hljs-params), .tree-body :deep(.hljs-attr) { color: #9cdcfe; }
+.bubble-body :deep(.hljs-built_in), .bubble-body :deep(.hljs-type), .tree-body :deep(.hljs-built_in), .tree-body :deep(.hljs-type) { color: #4ec9b0; }
+.bubble-body :deep(.hljs-meta), .tree-body :deep(.hljs-meta) { color: #569cd6; }
+.bubble-body :deep(.hljs-section), .tree-body :deep(.hljs-section) { color: #4ec9b0; }
+.bubble-body :deep(.hljs-symbol), .bubble-body :deep(.hljs-bullet), .tree-body :deep(.hljs-symbol), .tree-body :deep(.hljs-bullet) { color: #d7ba7d; }
+
+.bubble-body .md-code pre { margin: 0; padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: 11px/1.55 var(--mono, monospace); color: #c9d1d9; }
+.chat-think { align-self: flex-start; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgb(0 0 0 / 22%); border-left: 3px solid #6a737d; border-radius: 8px; color: #9d9d9d; font-size: 12px; cursor: pointer; max-width: 84%; transition: background 0.15s; }
+.chat-think:hover { background: rgb(255 255 255 / 6%); color: #c9d1d9; }
+.chat-sys { align-self: center; display: flex; align-items: center; gap: 8px; padding: 2px 10px; color: #5b6673; font-size: 10px; opacity: 0.85; max-width: 90%; }
+.sys-tag { padding: 1px 8px; border: 1px dashed rgb(255 255 255 / 12%); border-radius: 10px; color: #7a8694; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; }
+.sys-time { color: #4f5a66; flex-shrink: 0; }
+
+.session-tree { padding: 8px 12px; font: 12px/1.6 var(--mono, monospace); }
+.tree-node { margin-bottom: 1px; }
+.tree-head { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: var(--radius-4); cursor: pointer; }
+.tree-head:hover { background: rgb(255 255 255 / 5%); }
+.tree-caret { font-size: 10px; color: #6a737d; transition: transform 0.15s; }
+.tree-caret.open { transform: rotate(90deg); }
+.tree-icon { flex-shrink: 0; width: 18px; text-align: center; }
+.tree-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d4d4d4; }
+.tree-time { flex-shrink: 0; color: #6a737d; font-size: 10px; }
+.tree-node.is-ai .tree-title { color: #9cdcfe; }
+.tree-node.is-run .tree-title { color: #b5cea8; }
+.tree-node.is-loop .tree-title { color: #dcdcaa; }
+.tree-node.is-other .tree-title { color: #808080; }
+.tree-node.is-stream { margin-left: 0; }
+.think-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; cursor: pointer; color: #808080; font-size: 11px; border-radius: var(--radius-4); }
+.think-row:hover { background: rgb(255 255 255 / 4%); }
+.think-icon { font-size: 12px; }
+.think-label { flex: 1; min-width: 0; color: #9d9d9d; }
+.think-caret { transition: transform 0.15s; }
+.think-caret.open { transform: rotate(90deg); }
+.think-body { margin: 2px 0 8px 24px; padding: 8px 12px; background: rgb(0 0 0 / 15%); border-left: 2px solid #6a737d; border-radius: var(--radius-4); font: 11px/1.6 var(--mono, monospace); color: #9d9d9d; }
+.think-body .md-p, .think-body .md-ul { color: #9d9d9d; }
+.think-body .md-h { color: #9d9d9d; }
+.md-code-bar { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; background: rgb(255 255 255 / 4%); border-bottom: 1px solid #2f2f2f; }
+.md-code-lang { color: #9d9d9d; font: 11px var(--mono, monospace); }
+.md-code-acts { display: flex; gap: 6px; }
+.md-code-acts button { padding: 1px 8px; border: 1px solid #3a3a3a; border-radius: var(--radius-3); background: transparent; color: #9d9d9d; font: 10px var(--mono, monospace); cursor: pointer; }
+.md-code-acts button:hover { color: #d4d4d4; border-color: #d4d4d4; }
+.md-code summary { list-style: none; padding: 0; }
+.md-code summary::-webkit-details-marker { display: none; }
+.tree-node.is-ask .tree-title { color: #d4d4d4; background: rgb(0 0 0 / 20%); padding: 4px 8px; border-radius: var(--radius-4); }
+
+.tree-body { margin: 4px 0 8px 24px; padding: 8px 12px; background: rgb(0 0 0 / 20%); border-radius: var(--radius-6); }
+.tree-body .md-h { margin: 8px 0 4px; font-size: 12px; font-weight: 700; color: #79b8ff; letter-spacing: 0.3px; text-transform: none; }
+.tree-body .md-h:first-child { margin-top: 0; }
+.tree-body .md-p { margin: 2px 0; color: #d4d4d4; font: 12px/1.65 var(--mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.tree-body .md-ul { margin: 2px 0; padding-left: 18px; color: #d4d4d4; font: 12px/1.65 var(--mono, monospace); }
+.tree-body code { padding: 1px 4px; background: rgb(255 255 255 / 8%); border-radius: 3px; font: 11px var(--mono, monospace); color: #9cdcfe; }
+.tree-body strong { color: #dcdcaa; }
+.tree-body .md-code { margin: 6px 0; border: 1px solid #2f2f2f; border-radius: var(--radius-4); overflow: hidden; background: rgb(0 0 0 / 25%); }
+.tree-body .md-code summary { padding: 4px 10px; cursor: pointer; color: #808080; font: 11px var(--mono, monospace); background: rgb(255 255 255 / 3%); user-select: none; }
+.tree-body .md-code summary:hover { color: #d4d4d4; }
+.tree-body .md-code[open] summary { border-bottom: 1px solid #2f2f2f; }
+.tree-body .md-code pre { margin: 0; padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: 11px/1.55 var(--mono, monospace); color: #c9d1d9; }
+.tree-empty { padding: 60px 20px; text-align: center; color: #808080; }
+
 .term-empty {
   display: flex;
   flex-direction: column;
@@ -2056,7 +2458,7 @@ function onHtmlDrop(e: DragEvent) {
   color: #d4d4d4;
 }
 .empty-sub {
-  font-size: 11px;
+  font-size: var(--font-11);
   color: #808080;
   display: flex;
   align-items: center;
@@ -2070,8 +2472,49 @@ function onHtmlDrop(e: DragEvent) {
   background: #2a2a2a;
   border: 1px solid #3a3a3a;
   border-bottom-width: 2px;
-  border-radius: 3px;
+  border-radius: var(--radius-3);
   font: 10px/1 var(--mono, monospace);
+  color: #d4d4d4;
+}
+.empty-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  max-width: 620px;
+  width: 100%;
+  margin-top: 8px;
+}
+.empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px 14px;
+  background: #252526;
+  border: 1px solid #2f2f2f;
+  border-radius: var(--radius-6);
+  text-align: left;
+}
+.empty-card-ico {
+  font-size: 16px;
+  opacity: 0.85;
+}
+.empty-card-title {
+  font-size: var(--font-12);
+  font-weight: 600;
+  color: #d4d4d4;
+}
+.empty-card-desc {
+  font-size: var(--font-11);
+  color: #808080;
+  line-height: 1.5;
+}
+.empty-card-desc code {
+  padding: 0 4px;
+  background: #2a2a2a;
+  border-radius: var(--radius-3);
+  font-family: var(--mono, monospace);
+  font-size: 10px;
   color: #d4d4d4;
 }
 .term-running.term-empty {
@@ -2081,10 +2524,10 @@ function onHtmlDrop(e: DragEvent) {
   padding: 14px 16px;
 }
 .term-running .empty-title {
-  color: #059669;
+  color: var(--success);
 }
 .term-running .empty-sub {
-  color: #059669;
+  color: var(--success);
   opacity: 0.85;
 }
 .term-shell-line {
@@ -2098,7 +2541,7 @@ function onHtmlDrop(e: DragEvent) {
 }
 .term-shell-prompt {
   flex-shrink: 0;
-  color: #059669;
+  color: var(--success);
   font-weight: 700;
 }
 .term-shell-cmd {
@@ -2109,8 +2552,8 @@ function onHtmlDrop(e: DragEvent) {
 }
 .term-shell-wait {
   flex-shrink: 0;
-  color: #059669;
-  font-size: 14px;
+  color: var(--success);
+  font-size: var(--font-14);
   font-variant-numeric: tabular-nums;
 }
 .term-live-out,
@@ -2125,7 +2568,7 @@ function onHtmlDrop(e: DragEvent) {
   word-break: break-word;
   color: #e6edf3;
   background: rgb(255 255 255 / 3%);
-  border-radius: 6px;
+  border-radius: var(--radius-6);
 }
 .term-live-err {
   color: #f48771;
@@ -2134,7 +2577,7 @@ function onHtmlDrop(e: DragEvent) {
 .run-ico {
   display: inline-block;
   margin-left: 4px;
-  font-size: 10px;
+  font-size: var(--font-10);
   animation: run-pulse 1s ease-in-out infinite;
 }
 .run-status-row {
@@ -2144,13 +2587,25 @@ function onHtmlDrop(e: DragEvent) {
   margin-top: 8px;
   align-self: flex-start;
 }
+.run-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgb(255 255 255 / 25%);
+  border-top-color: var(--success);
+  border-radius: 50%;
+  animation: run-spin 0.7s linear infinite;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+@keyframes run-spin { to { transform: rotate(360deg); } }
 .run-frame {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 14px;
   font: 14px/1 var(--mono, monospace);
-  color: #059669;
+  color: var(--success);
   text-shadow: 0 0 8px rgb(5 150 105 / 55%);
   user-select: none;
   font-variant-numeric: tabular-nums;
@@ -2159,15 +2614,15 @@ function onHtmlDrop(e: DragEvent) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--font-11);
   font-weight: 600;
   letter-spacing: 0.4px;
-  color: #059669;
+  color: var(--success);
   text-shadow: 0 0 8px rgb(5 150 105 / 35%);
 }
 .run-elapsed {
   margin-top: 6px;
-  font-size: 11px;
+  font-size: var(--font-11);
   color: #7a8694;
   letter-spacing: 0.3px;
   font-variant-numeric: tabular-nums;
@@ -2194,14 +2649,14 @@ function onHtmlDrop(e: DragEvent) {
   padding-bottom: 4px;
 }
 .term-status.ok .term-status-detail {
-  color: #059669;
+  color: var(--success);
 }
 .term-status.err .term-status-detail {
   color: #f48771;
 }
 .term-status-detail {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--font-11);
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
@@ -2209,6 +2664,27 @@ function onHtmlDrop(e: DragEvent) {
   font-variant-numeric: tabular-nums;
   user-select: text;
 }
+.term-summary { padding-bottom: 4px; }
+.term-summary .term-label { gap: 6px; }
+.term-summary-text {
+  margin-left: 4px;
+  color: #9d9d9d;
+  font-size: var(--font-11);
+  letter-spacing: 0;
+  text-transform: none;
+  font-family: var(--mono, monospace);
+}
+.term-summary-line {
+  flex: 1;
+  min-width: 0;
+  color: #d4d4d4;
+  font: 12px/1.5 var(--mono, monospace);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.term-line-summary.err .term-summary-line { color: #f48771; }
+.term-line-value { margin-left: auto; color: #9d9d9d; font-size: var(--font-11); font-family: var(--mono, monospace); letter-spacing: 0; text-transform: none; }
+.term-line-value.err { color: #f48771; }
 .term-section + .term-section {
   border-top: 1px solid #2a2a2a;
   /* tighten-spacing */
@@ -2225,8 +2701,8 @@ function onHtmlDrop(e: DragEvent) {
   text-transform: uppercase;
 }
 .prompt-char {
-  color: #059669;
-  font-size: 12px;
+  color: var(--success);
+  font-size: var(--font-12);
 }
 .prompt-char.err {
   color: #f48771;
@@ -2236,59 +2712,6 @@ function onHtmlDrop(e: DragEvent) {
 }
 .label-text.err {
   color: #f48771;
-}
-
-.term-content {
-  margin: 0;
-  padding: 0 16px;
-  font: 12px/1.65 var(--mono, monospace);
-  /* no-h-scroll */
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  color: #d4d4d4;
-}
-.term-content.err {
-  color: #f48771;
-}
-.term-content :deep(.hljs-keyword),
-.term-content :deep(.hljs-literal) {
-  color: #569cd6;
-}
-.term-content :deep(.hljs-string) {
-  color: #ce9178;
-}
-.term-content :deep(.hljs-number) {
-  color: #b5cea8;
-}
-.term-content :deep(.hljs-comment) {
-  color: #6a9955;
-  font-style: italic;
-}
-.term-content :deep(.hljs-function),
-.term-content :deep(.hljs-title) {
-  color: #dcdcaa;
-}
-.term-content :deep(.hljs-variable),
-.term-content :deep(.hljs-params),
-.term-content :deep(.hljs-attr) {
-  color: #9cdcfe;
-}
-.term-content :deep(.hljs-built_in),
-.term-content :deep(.hljs-type) {
-  color: #4ec9b0;
-}
-.term-content .hl-ok {
-  color: #059669;
-}
-.term-content .hl-err {
-  color: #f48771;
-}
-.term-content .hl-warn {
-  color: #fbbf24;
-}
-.term-content .hl-info {
-  color: #60a5fa;
 }
 
 /* ============ Side ============ */
@@ -2301,7 +2724,7 @@ function onHtmlDrop(e: DragEvent) {
   gap: 8px;
   background: var(--surface);
   border: 1px dashed var(--border-2);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   color: var(--text-3);
 }
 .side-empty-icon {
@@ -2309,7 +2732,7 @@ function onHtmlDrop(e: DragEvent) {
   opacity: 0.5;
 }
 .side-empty-text {
-  font-size: 12px;
+  font-size: var(--font-12);
 }
 
 /* ============ Overlay ============ */
@@ -2321,7 +2744,7 @@ function onHtmlDrop(e: DragEvent) {
   align-items: center;
   justify-content: center;
   pointer-events: none;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
 }
 .overlay.drop {
   background: rgb(37 99 235 / 8%);
@@ -2337,7 +2760,7 @@ function onHtmlDrop(e: DragEvent) {
   gap: 6px;
   padding: 20px 28px;
   background: #fff;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   box-shadow: 0 6px 24px rgb(15 30 60 / 18%);
   animation: pop-in 0.2s ease-out;
 }
@@ -2351,7 +2774,7 @@ function onHtmlDrop(e: DragEvent) {
   font-size: 26px;
 }
 .overlay-text {
-  font-size: 13px;
+  font-size: var(--font-13);
   font-weight: 600;
 }
 .overlay-card.drop .overlay-text {
@@ -2387,10 +2810,30 @@ function onHtmlDrop(e: DragEvent) {
   .side-resize-handle {
     display: none;
   }
+  .side-drawer-toggle {
+    display: inline-flex;
+  }
+  .side-drawer-backdrop {
+    display: block;
+  }
+  /* U.12: 窄屏 pane-side 改右侧抽屉 */
   .pane-side {
-    width: 100% !important;
-    height: 300px;
-    flex-shrink: 0;
+    position: fixed !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 320px !important;
+    height: 100vh !important;
+    z-index: 35 !important;
+    transform: translateX(100%) !important;
+    transition: transform 0.22s ease !important;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    padding: 8px;
+    box-sizing: border-box;
+  }
+  .pane-side.drawer-open {
+    transform: translateX(0) !important;
   }
   .pane-side :deep(.changes) {
     max-height: 42%;
@@ -2416,7 +2859,7 @@ function onHtmlDrop(e: DragEvent) {
   }
   .gutter-num {
     padding-right: 6px;
-    font-size: 11px;
+    font-size: var(--font-11);
   }
   .editor-textarea {
     padding: 8px 10px;
@@ -2438,7 +2881,7 @@ function onHtmlDrop(e: DragEvent) {
   overflow-x: auto;
 }
 .tpl-label {
-  font-size: 11px;
+  font-size: var(--font-11);
   font-weight: 600;
   color: var(--text-3);
   letter-spacing: 0.3px;
@@ -2451,12 +2894,31 @@ function onHtmlDrop(e: DragEvent) {
   border-radius: 12px;
   background: var(--surface);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: var(--font-11);
   cursor: pointer;
   white-space: nowrap;
   transition: 0.12s;
   font-family: inherit;
   flex-shrink: 0;
+}
+.draft-select {
+  max-width: 120px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: 11px/1.4 var(--mono, monospace);
+  cursor: pointer;
+  outline: 0;
+}
+.draft-select:focus {
+  border-color: var(--primary);
+}
+.draft-del {
+  padding: 2px 6px;
+  font-size: 14px;
+  line-height: 1;
 }
 .tpl-chip:hover {
   background: var(--primary-bg);
@@ -2471,8 +2933,7 @@ function onHtmlDrop(e: DragEvent) {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgb(15 30 60 / 38%);
-  backdrop-filter: blur(2px);
+  background: rgb(15 30 60 / 45%);
   animation: overlay-in 0.15s ease-out;
 }
 .diff-overlay-panel {
@@ -2482,13 +2943,13 @@ function onHtmlDrop(e: DragEvent) {
   display: flex;
   flex-direction: column;
   box-shadow: 0 12px 40px rgb(15 30 60 / 26%);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   overflow: hidden;
 }
 .diff-overlay-panel :deep(.diff-viewer) {
   flex: 1;
   min-height: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--surface);
 }
 .diff-overlay-close {
@@ -2503,7 +2964,7 @@ function onHtmlDrop(e: DragEvent) {
   justify-content: center;
   padding: 0;
   border: 1px solid var(--border-2);
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   background: var(--surface);
   color: var(--text-2);
   font-size: 16px;
@@ -2529,21 +2990,22 @@ function onHtmlDrop(e: DragEvent) {
 .loop-bar {
   display: flex;
   flex-direction: row;
-  flex-wrap: nowrap;
+  /* U.12: 窄屏按钮换行，不再一行硬挤 */
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
   padding: 6px 12px;
   margin-bottom: 6px;
   min-height: 0;
-  max-height: 44px;
+  max-height: 88px;
   overflow: hidden;
   background: var(--surface);
   border: 1px solid var(--border);
   border-left-width: 4px;
   border-left-style: solid;
   border-left-color: var(--border-2);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
 }
 .loop-bar .loop-status {
   flex-shrink: 0;
@@ -2567,7 +3029,7 @@ function onHtmlDrop(e: DragEvent) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--font-11);
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
@@ -2576,7 +3038,7 @@ function onHtmlDrop(e: DragEvent) {
   width: 80px;
   height: 4px;
   background: var(--border-color, #dcdfe6);
-  border-radius: 2px;
+  border-radius: var(--radius-2);
   overflow: hidden;
 }
 .loop-waiting-fill {
@@ -2590,15 +3052,15 @@ function onHtmlDrop(e: DragEvent) {
   min-width: 200px;
   padding: 6px 10px;
   border: 1px solid var(--border-color, #dcdfe6);
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--radius-6);
+  font-size: var(--font-12);
   background: var(--input-bg, #fff);
   color: inherit;
 }
-.loop-status { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.loop-status { font-size: var(--font-12); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .loop-goal-text {
   flex: 1 1 160px;
-  font-size: 12px;
+  font-size: var(--font-12);
   opacity: .7;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2617,7 +3079,7 @@ function onHtmlDrop(e: DragEvent) {
   min-height: 26px;
   padding: 0 12px;
   border: 1px solid var(--border-2);
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   background: var(--surface);
   color: var(--text-2);
   font: 500 12px/1 inherit;
@@ -2673,27 +3135,69 @@ function onHtmlDrop(e: DragEvent) {
 .loop-btn.kill:hover:not(:disabled),
 .loop-btn.rollback:hover:not(:disabled) {
   background: #dc2626;
-  border-color: #dc2626;
+  border-color: var(--danger);
   color: #fff;
   box-shadow: 0 3px 8px rgb(239 68 68 / 32%);
 }
-.loop-end-status { flex: 1; font-size: 12px; }
+.note-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+}
+.note-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  font: 12px/1.5 var(--mono);
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-6);
+  outline: 0;
+  resize: vertical;
+}
+.note-input:focus { border-color: var(--primary); }
+.note-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.decision-actions { flex-wrap: wrap; }
+.decision-custom {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  margin-top: 4px;
+}
+.decision-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-6);
+  background: var(--surface-2);
+  color: var(--text);
+  font: 12px/1.5 var(--mono, monospace);
+  outline: 0;
+}
+.decision-input:focus { border-color: var(--primary); }
+.decision-btn {
+  background: var(--primary-bg);
+  color: var(--primary);
+  border-color: var(--primary);
+  font-weight: 600;
+}
+.decision-btn:hover:not(:disabled) {
+  background: var(--primary);
+  color: #fff;
+}
+.loop-end-status { flex: 1; font-size: var(--font-12); }
 .loop-end-status em { opacity: .65; font-style: normal; }
 .loop-spin { display: inline-block; animation: loop-spin 1.6s linear infinite; }
 @keyframes loop-spin { to { transform: rotate(360deg); } }
 .inbox-badge { color: #409eff; border-color: #409eff; }
-/* [multi-loop-step6-panel] */
-.loop-multi-badge {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  padding: 1px 8px;
-  border-radius: 10px;
-  background: var(--primary-bg);
-  color: var(--primary);
-  font-size: 11px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
+
 </style>
 <!-- tooltip-audit -->
