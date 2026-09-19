@@ -5981,5 +5981,137 @@ function onHtmlDrop(e: DragEvent) {
   padding-top: 10px !important;
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   [card-bar-style] 卡片样式：粗左竖条 + 无边框 + 时间右对齐
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── 通用卡片基础：无边框 + 圆角 + 无左竖线边框 ─── */
+.chat-msg-user,
+.chat-msg-ai,
+.chat-step,
+.chat-waiting {
+  background: var(--surface, #141414) !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  padding: 10px 14px 10px 18px !important;
+  position: relative !important;
+}
+
+/* 粗左竖条（用伪元素，圆角与卡片一致） */
+.chat-msg-user::before,
+.chat-msg-ai::before,
+.chat-step::before,
+.chat-waiting::before {
+  content: '' !important;
+  position: absolute !important;
+  left: 0 !important;
+  top: 8px !important;
+  bottom: 8px !important;
+  width: 3px !important;
+  border-radius: 0 3px 3px 0 !important;
+  background: var(--text-3, #6b6b6b) !important;
+}
+.chat-msg-user::before { background: rgb(167 139 250 / 55%) !important; }
+.chat-msg-ai::before { background: #a78bfa !important; }
+.chat-waiting::before { background: #a78bfa !important; }
+.chat-step.state-pending::before { background: rgb(255 255 255 / 14%) !important; }
+.chat-step.state-running::before { background: #a78bfa !important; }
+.chat-step.state-done::before { background: #4ade80 !important; }
+.chat-step.state-error::before { background: #f87171 !important; }
+
+/* ─── 内容左对齐同一列 ─── */
+.chat-list {
+  align-items: stretch !important;
+  gap: 10px !important;
+  padding: 14px 18px 22px !important;
+  max-width: 860px !important;
+}
+.chat-msg-user,
+.chat-msg-ai,
+.chat-step,
+.chat-waiting {
+  margin: 0 !important;
+  align-self: stretch !important;
+  width: 100% !important;
+  text-align: left !important;
+  box-sizing: border-box !important;
+}
+
+/* ─── 头行：左信息 + 右时间 ─── */
+.chat-msg-user .bubble-head,
+.chat-msg-ai .bubble-head {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  justify-content: flex-start !important;
+  margin: 0 0 6px 0 !important;
+  padding: 0 !important;
+  border-bottom: 0 !important;
+  color: var(--text-3, #6b6b6b) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+}
+/* 时间推到右侧 */
+.chat-msg-user .bubble-head::after,
+.chat-msg-ai .bubble-head::after {
+  content: '' !important;
+  flex: 1 1 auto !important;
+  order: 0 !important;
+}
+.chat-msg-user .bubble-head > :last-child,
+.chat-msg-ai .bubble-head > :last-child {
+  margin-left: auto !important;
+  order: 1 !important;
+}
+
+/* ─── 步骤条：标题左 + 时间/状态右 ─── */
+.chat-step {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  gap: 10px !important;
+}
+.chat-step .step-title {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.chat-step.expanded .step-title {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+.chat-step .step-time {
+  flex: 0 0 auto !important;
+  font-size: 11px !important;
+  color: var(--text-3, #6b6b6b) !important;
+  opacity: 0.85 !important;
+  font-variant-numeric: tabular-nums !important;
+}
+.chat-step .step-state {
+  flex: 0 0 auto !important;
+  background: rgb(255 255 255 / 5%) !important;
+  padding: 1px 9px !important;
+  border-radius: 10px !important;
+  font-size: 10.5px !important;
+  font-weight: 500 !important;
+  color: var(--text-3, #6b6b6b) !important;
+}
+.chat-step.state-running .step-state { background: rgb(167 139 250 / 14%) !important; color: #c4b5fd !important; }
+.chat-step.state-done .step-state { background: rgb(74 222 128 / 12%) !important; color: #86efac !important; }
+.chat-step.state-error .step-state { background: rgb(248 113 113 / 14%) !important; color: #fca5a5 !important; }
+
+/* ─── 消息体字号 ─── */
+.chat-msg-user .bubble-body,
+.chat-msg-ai .bubble-body {
+  color: var(--text, #e6e6e6) !important;
+  font-size: 12.5px !important;
+  line-height: 1.6 !important;
+  padding-left: 0 !important;
+}
+
 </style>
 <!-- tooltip-audit -->
