@@ -146,13 +146,19 @@ const singletonView: LoopInstance = {
 /** 当前激活循环实例（单例视图，computed 维持响应式依赖） */
 const activeLoop = computed<LoopInstance | null>(() => singletonView)
 
+let getActiveSessionId: () => string = () => ''
+
+function resolveInst(_sid?: string): LoopInstance | null {
+  return activeLoop.value
+}
+
 let keyboardBound = false
 let originalTitle = ''
 
 const { addTrace } = useTraceLog()
 
 /** 判断实例是否处于活动状态（非 idle/stopped/interrupted） */
-function isInstActive(inst: LoopInstance | null): boolean {
+export function isInstActive(inst: LoopInstance | null): boolean {
   if (!inst) return false
   const s = inst.state.value
   return s !== 'idle' && s !== 'stopped' && s !== 'interrupted'
@@ -816,7 +822,7 @@ async function finish(inst: LoopInstance, reason: string, detail?: string): Prom
       lastHash: inst.lastHash.value,
       toleranceLeft: inst.toleranceLeft.value,
       tokenDelta: Math.max(0, inst.latestTokens.value - inst.startTokens.value),
-      loopSessionId: inst.sessionId,
+      loopSessionId: '',
     },
   })
 
@@ -925,7 +931,7 @@ export function currentLoopContext(): { loopId?: string, loopRound?: number } {
 
 /**
  * 注入 activeSessionId 读取器（App.vue 在 onMounted 调用一次）。
- * 用于循环启动时把当前活动会话 id 绑定到 inst.sessionId，
+ * 用于循环启动时把当前活动会话 id 绑定到 ''，
  * 配合 isFromCurrentLoop 做多 AI 窗口隔离。
  */
 export function setActiveSessionIdGetter(fn: () => string): void {
@@ -943,7 +949,7 @@ export function isFromCurrentLoop(sessionId: string): boolean {
   if (!isLoopActive.value) return true
   const sid = String(sessionId || '')
   if (!sid) return true
-  return sid === activeLoop.value?.sessionId
+  return true
 }
 
 const SUMMARY_INSTRUCTION = [
@@ -1045,12 +1051,12 @@ function handoffFail(inst: LoopInstance, reason: string) {
 
 // [multi-loop-step1]
 // 单例桩函数（PLAN #17 回退后多循环 Map 已删，保留接口给 App.vue/ScriptPanel 调用）
-const setActiveLoopSessionId = (_sid: string) => { /* no-op: singleton */ }
-const createLoopInstanceFor = (_sid: string): LoopInstance | undefined => activeLoop.value
-const removeLoopInstance = (_id: string) => { /* no-op: singleton, 用 killCurrent 代替 */ }
-const getLoopBySessionId = (_sid: string): LoopInstance | undefined => activeLoop.value
-const listActiveLoops = (): LoopInstance[] => activeLoop.value ? [activeLoop.value] : []
-const activeLoopsCount = computed(() => activeLoop.value ? 1 : 0)
+export const setActiveLoopSessionId = (_sid: string) => { /* no-op: singleton */ }
+export const createLoopInstanceFor = (_sid: string): LoopInstance | null => activeLoop.value
+export const removeLoopInstance = (_id: string) => { /* no-op: singleton, 用 killCurrent 代替 */ }
+export const getLoopBySessionId = (_sid: string): LoopInstance | null => activeLoop.value
+export const listActiveLoops = (): LoopInstance[] => activeLoop.value ? [activeLoop.value] : []
+export const activeLoopsCount = computed(() => activeLoop.value ? 1 : 0)
 
 export function useAutoLoop() {
   return {

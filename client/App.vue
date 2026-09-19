@@ -27,6 +27,7 @@ import { useTraceLog } from './composables/useTraceLog'
 import { useCodeCleaner } from './composables/useCodeCleaner'
 import { useRunner } from './composables/useRunner'
 import { useAiWaiting } from './composables/useAiWaiting'
+import { emit as emitBus, takePendingAskKey } from './composables/useEventStream'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
 
@@ -57,7 +58,6 @@ watch(activeSessionId, (v) => {
   createLoopInstanceFor(sid)
   setActiveWinSid(sid)
 }, { immediate: true })
-const sidebarOpen = ref(false)
 const settingsOpen = ref(false)
 const KEY_SANDBOX = '__ai_sandbox'
 const KEY_BASH_POLICY = '__ai_bash_policy'
@@ -237,7 +237,7 @@ function collapsePanel() {
 }
 const KEY_THEME = '__ai_theme'
 function loadTheme(): 'light' | 'dark' {
-  try { return localStorage.getItem(KEY_THEME) === 'dark' ? 'dark' : 'light' } catch { return 'light' }
+  try { return localStorage.getItem(KEY_THEME) === 'light' ? 'light' : 'dark' } catch { return 'light' }
 }
 const theme = ref<'light' | 'dark'>(loadTheme())
 watch(theme, (v) => {
@@ -250,6 +250,35 @@ const headerUrl = computed(() => {
   const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
   return s ? s.url : deepseekUrl.value
 })
+
+const urlEditing = ref(false)
+const urlDraft = ref('')
+const urlInputRef = ref<HTMLInputElement | null>(null)
+function openUrlEdit() {
+  urlEditing.value = true
+  urlDraft.value = headerUrl.value
+  nextTick(() => {
+    urlInputRef.value?.focus()
+    urlInputRef.value?.select()
+  })
+}
+function cancelUrl() {
+  urlEditing.value = false
+  urlDraft.value = ''
+}
+function saveUrl() {
+  const v = urlDraft.value.trim()
+  if (!v) { cancelUrl(); return }
+  if (!setDeepseekUrl(v)) {
+    try { toast('URL 格式不合法', 'error') } catch { /* ignore */ }
+    return
+  }
+  urlEditing.value = false
+  urlDraft.value = ''
+}
+function onUrlBlur() {
+  cancelUrl()
+}
 
 function onSessionIdMessage(e: MessageEvent) {
   const d = e.data
@@ -279,6 +308,13 @@ function onSessionIdMessage(e: MessageEvent) {
       if (item) {
         const lineCount = code.split('\n').length
         toast(`AI 脚本已到达 · ${lang} · ${lineCount} 行 · ${item.desc || '无说明'}`, 'info', 4000)
+        const planM = code.match(/^\s*(?:\/\/|#)\s*@plan\s*:\s*(.+)$/m)
+        const plan = planM ? planM[1].trim().slice(0, 200) : ''
+        // 若用户刚发过提问，复用那条等待卡的 key —— 原地替换为执行卡
+        const runKey = takePendingAskKey() || ('run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6))
+        try {
+          emitBus('run:start', `等待执行：${item.desc || '脚本'}`, { payload: { desc: item.desc, why: item.why, plan, lang, lineCount, hash: item.hash, phase: 'pending', runKey, ...currentLoopContext() }, updateKey: runKey })
+        } catch (e) { console.error('[run:start pending] failed:', e) }
         // 决策链路：脚本到达事件入 TraceLog（v6 §3.2），循环中盖 loopId/loopRound
         addTrace({
           kind: 'script',
@@ -296,15 +332,30 @@ function onSessionIdMessage(e: MessageEvent) {
           // 循环模式：状态机接管（不经编辑器覆盖策略）
           void onScriptArrival(item, sid)
         } else {
-          // 手动模式：覆盖保护后填入编辑器，并自动运行
-          if (scriptInbox.applyToEditor(item) === 'overwritten') {
-            void runner.run()
-          }
+          // 手动模式：不回填编辑器，延迟 3-7s 直接执行
+          const delayMs = 3000 + Math.random() * 4000
+          toast(`⏱ ${Math.round(delayMs / 1000)}s 后自动执行`, 'info', Math.min(delayMs, 3000))
+          setTimeout(() => { void runScript({ script: code, runKey, autoFeedback: true }) }, delayMs)
         }
       }
       return
     }
     // done / plain / multi 仅循环模式消费
+    // DONE：彻底停止循环（先停循环态再 emit，避免残留状态）
+    if (kind === 'done') {
+      if (isLoopActive.value) {
+        try { void killCurrent() } catch (e) { console.error('[done-stop-loop]', e) }
+      }
+      if (autoTakeover.enabled.value) {
+        autoTakeover.disable()
+      }
+    }
+    const text = d.text !== undefined ? String(d.text) : ''
+    if (kind === 'plain' || kind === 'multi' || (kind === 'done' && text.trim() && text.trim() !== 'DONE')) {
+      emitBus('ai:' + kind, `AI 回复 · ${kind}`, { payload: { kind, text, count: Number(d.count) || 0 } })
+    } else if (kind === 'done') {
+      emitBus('ai:done', 'AI 回复 DONE', { payload: { kind: 'done', text: 'DONE' } })
+    }
     if (routedToLoop) {
       void onNonScriptReply({
         kind: kind as 'done' | 'plain' | 'multi',
@@ -333,9 +384,10 @@ function onSessionIdMessage(e: MessageEvent) {
       if (routedToLoop) {
         void onScriptArrival(item, sid)
       } else {
-        if (scriptInbox.applyToEditor(item) === 'overwritten') {
-          void runner.run()
-        }
+        // v1.2 兜底通道：延迟执行
+        const runKey = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
+        const delayMs = 3000 + Math.random() * 4000
+        setTimeout(() => { void runScript({ script: code, runKey, autoFeedback: true }) }, delayMs)
       }
     }
     return
@@ -431,6 +483,15 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
   }
   return true
 }
+function onOpenAiWin() {
+  const at = headerUrl.value || deepseekUrl.value
+  const w = openDeepseek(at)
+  if (w) {
+    toast('已打开 / 激活 AI 窗口', 'success', 2000)
+  } else {
+    toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
+  }
+}
 function onEscClose(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
   if (askOpen.value) askOpen.value = false
@@ -454,7 +515,7 @@ onBeforeUnmount(() => {
 const { sessionId, resetSession, generateHandoffSummary } = useSessionManager()
 const { toast } = useToast()
 const { stripComments, stripBlankLines, toggleStripComments, toggleStripBlankLines } = useCodeCleaner()
-const { smokeEnabled, gitCommit } = useRunner()
+const { smokeEnabled, gitCommit, run: runScript } = useRunner()
 const scriptInbox = useScriptInbox()
 const runner = useRunner()
 const { addTrace } = useTraceLog()
@@ -471,12 +532,24 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
     </div>
     <div class="hdr-right">
       <button
+        v-tooltip="'打开 / 激活 AI 窗口（点此建立工作台与 AI 站的连接）'"
+        aria-label="打开 AI 窗口"
+        class="open-ai-toggle"
+        @click="onOpenAiWin"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          <polyline points="15 3 21 3 21 9" />
+          <line x1="10" y1="14" x2="21" y2="3" />
+        </svg>
+      </button>
+      <button
         v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
         class="theme-toggle"
         @click="theme = theme === 'dark' ? 'light' : 'dark'"
       >
-        <span v-if="theme === 'dark'">☀</span>
-        <span v-else>☾</span>
+        <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
+        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
       </button>
       <button v-tooltip="traceOpen ? '关闭会话记录' : '打开会话记录'" class="trace-toggle" @click="traceOpen = !traceOpen">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -490,8 +563,24 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
       </button>
-      <div class="ds-url">
-        <span v-tooltip="headerUrl || '（未选中会话）'" class="ds-value-static">{{ headerUrl || '（未选中会话）' }}</span>
+      <div class="ds-url" :class="{ editing: urlEditing }">
+        <input
+          v-if="urlEditing"
+          ref="urlInputRef"
+          v-model="urlDraft"
+          class="ds-input"
+          spellcheck="false"
+          placeholder="https://..."
+          @keydown.enter.prevent="saveUrl"
+          @keydown.esc.prevent="cancelUrl"
+          @blur="onUrlBlur"
+        >
+        <span
+          v-else
+          v-tooltip="headerUrl ? '点击编辑对话地址' : '点击输入 AI 站点 URL'"
+          class="ds-value-static"
+          @click="openUrlEdit"
+        >{{ headerUrl || '（点击输入 URL）' }}</span>
       </div>
     </div>
   </header>
@@ -544,180 +633,8 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
       </div>
     </div>
   </div>
-  <div v-if="showNewSessionDialog" class="ns-mask" @click.self="closeNewSessionDialog">
-    <div class="ns-card">
-      <div class="ns-head">
-        <span class="ns-title">{{ editingSessionId ? '编辑会话' : '新建会话' }}</span>
-        <button v-tooltip="'关闭'" class="ns-close" @click="closeNewSessionDialog">
-          ×
-        </button>
-      </div>
-      <div class="ns-body">
-        <label class="ns-field">
-          <span class="ns-label">名称</span>
-          <input
-            ref="dialogTitleRef"
-            v-model="newSessionTitle"
-            class="ns-input"
-            spellcheck="false"
-            placeholder="会话名称（留空自动生成）"
-            @keydown.enter.prevent="confirmNewSession"
-          >
-        </label>
-        <label class="ns-field">
-          <span class="ns-label">模型</span>
-          <select v-model="newSessionModel" class="ns-select" @change="onNewSessionModelChange">
-            <option v-for="m in MODELS" :key="m.id" :value="m.id">
-              {{ m.label }}
-            </option>
-          </select>
-        </label>
-        <label class="ns-field">
-          <span class="ns-label">会话 URL</span>
-          <input v-model="newSessionUrl" class="ns-input" spellcheck="false" placeholder="https://..." @keydown.enter.prevent="confirmNewSession">
-        </label>
-        <div class="ns-hint">
-          <template v-if="editingSessionId">
-            保存后立即生效，列表与 header 同步更新
-          </template>
-          <!-- custom-tooltip -->
-          <template v-else>
-            创建后：本地会话重置 → 新会话加入左侧列表 → 打开上方 URL
-            <br>
-            header 与「复制并跳转」等按钮会跟着切到此 URL
-          </template>
-        </div>
-      </div>
-      <div class="ns-actions">
-        <button v-tooltip="'取消，不保存'" class="ns-btn ghost" @click="closeNewSessionDialog">
-          取消
-        </button>
-        <button
-          v-tooltip="editingSessionId ? '保存对该会话的修改' : '创建会话并打开配置的 URL'"
-          class="ns-btn primary"
-          :disabled="!newSessionUrl.trim()"
-          @click="confirmNewSession"
-        >
-          {{ editingSessionId ? '保存' : '创建并打开' }}
-        </button>
-      </div>
-    </div>
-  </div>
   <div class="layout-row">
-    <div
-      class="sidebar-mask"
-      :class="{ 'is-open': sidebarOpen }"
-      @click="sidebarOpen = false"
-    />
-    <aside class="session-sidebar" :class="{ 'is-open': sidebarOpen }">
-      <div class="sidebar-header">
-        <span class="sidebar-title">对话列表</span>
-        <span v-if="sessionHistory.length" class="sidebar-count">{{ sessionHistory.length }}</span>
-        <div class="sidebar-actions">
-          <button
-            v-if="sessionHistory.length"
-            v-tooltip="`清空全部 ${sessionHistory.length} 条会话历史（不可撤销）`"
-            class="sidebar-icon-btn"
-            @click="clearHistory"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-              <path d="M10 11v6M14 11v6" />
-            </svg>
-          </button>
-          <button v-tooltip="'新建会话：填写名称 \\/ 模型 \\/ URL，创建并打开'" class="sidebar-new-btn" @click="openNewSessionDialog">
-            +
-          </button>
-        </div>
-      </div>
-      <div v-if="sessionHistory.length" class="sidebar-list">
-        <div
-          v-for="s in sessionHistory"
-          :key="s.id"
-          v-tooltip="s.url || s.title || s.id"
-          class="sidebar-item is-card"
-          :class="{ 'is-active': s.id === activeSessionId, 'handed-off': !!s.handedOff }"
-          @click="selectSession(s)"
-          @dblclick.stop="openEditSessionDialog(s)"
-        >
-          <div class="sidebar-item-main">
-            <div class="sidebar-item-title">
-              {{ s.title || s.id }}
-              <span v-if="s.handedOff" class="handed-off-badge">→ 已交接</span>
-            </div>
-            <div class="sidebar-item-meta">
-              <span class="sidebar-item-id">{{ s.id }}</span>
-              <span
-                v-if="s.tokens"
-                v-tooltip="`页面估算：${s.tokens.toLocaleString()} / 50,000 tok（${tokenPct(s.tokens)}%）`"
-                class="sidebar-item-tokens"
-                :class="{ warn: tokenLevel(s.tokens) === 'warn', over: tokenLevel(s.tokens) === 'over' }"
-              >
-                <span class="tok-bar"><span class="tok-fill" :style="{ width: `${tokenPct(s.tokens)}%` }" /></span>
-                <span class="tok-num">{{ fmtTok(s.tokens) }}</span>
-              </span>
-              <span class="sidebar-item-time">{{ formatSessionTime(s.createdAt) }}</span>
-            </div>
-          </div>
-          <button
-            v-tooltip="'打开会话'"
-            class="sidebar-item-open"
-            @click.stop="openSessionUrl(s.url)"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-          </button>
-          <button
-            v-tooltip="'总结到下一会话（复制总结 → 创建新会话）'"
-            class="sidebar-item-handoff"
-            @click.stop="handoffToNextSession(s)"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 12h13" />
-              <polyline points="13 7 18 12 13 17" />
-              <path d="M20 4v16" />
-            </svg>
-          </button>
-          <button
-            v-tooltip="'删除'"
-            class="sidebar-item-del"
-            @click.stop="removeSessionFromHistory(s.id)"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-      <div v-else class="sidebar-empty">
-        <div class="sidebar-empty-icon">
-          💬
-        </div>
-        <div class="sidebar-empty-title">
-          还没有历史会话
-        </div>
-        <div class="sidebar-empty-hint">
-          点上方「新建会话」开始
-        </div>
-      </div>
-    </aside>
-
-    <div class="layout-main">
-      <nav class="tabs">
-        <button
-          v-tooltip="sidebarOpen ? '收起对话列表' : '展开对话列表'"
-          class="tabs-burger"
-          @click="sidebarOpen = !sidebarOpen"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
-        </button>
-      </nav>
+<div class="layout-main">
       <main class="main">
         <ScriptPanel @open-ask="askOpen = true" />
       </main>
@@ -787,10 +704,12 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
 .env {
   padding: 2px 8px;
   border-radius: 10px;
-  background: var(--primary-bg);
-  color: var(--primary);
+  background: var(--surface-2);
+  color: var(--text-3);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  letter-spacing: 0.3px;
 }
 
 .tabs {
@@ -1898,6 +1817,267 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   from { transform: scale(0.97); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
+
+/* [button-icons] 主题按钮 SVG 基线 */
+.theme-toggle svg {
+  display: block;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   [button-theme] 按钮配色重做：暖橙强调 + 灰阶次按钮
+   参考 Claude Code / Codex 克制配色
+   ═══════════════════════════════════════════════════════════ */
+
+/* ——— 次按钮：透明底 + 细边框，hover 时淡淡提亮 ——— */
+.ghost-btn {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--text-2) !important;
+  border-radius: 6px !important;
+  padding: 4px 10px !important;
+  font-size: var(--font-12) !important;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+}
+.ghost-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text) !important;
+  border-color: rgb(255 255 255 / 8%) !important;
+}
+.ghost-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
+
+/* ——— 终端内按钮 ——— */
+.term-btn {
+  background: transparent !important;
+  border: 1px solid rgb(255 255 255 / 8%) !important;
+  color: var(--text-2) !important;
+  border-radius: 6px !important;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+}
+.term-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text) !important;
+  border-color: rgb(255 255 255 / 14%) !important;
+}
+.term-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
+.term-btn.copy, .term-btn.ask-panel { color: var(--text-2) !important; border-color: rgb(255 255 255 / 8%) !important; }
+.term-btn.copy:hover:not(:disabled), .term-btn.ask-panel:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; border-color: rgb(255 255 255 / 14%) !important;
+}
+
+/* ——— 芯片 / 下拉 / tab ——— */
+.tpl-chip {
+  background: transparent !important;
+  border: 1px solid rgb(255 255 255 / 8%) !important;
+  color: var(--text-2) !important;
+  border-radius: 6px !important;
+}
+.tpl-chip:hover {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text) !important;
+  border-color: rgb(255 255 255 / 14%) !important;
+}
+.draft-select {
+  background: transparent !important;
+  border: 1px solid rgb(255 255 255 / 8%) !important;
+  color: var(--text-2) !important;
+  border-radius: 6px !important;
+}
+.draft-select:hover { border-color: rgb(255 255 255 / 14%) !important; }
+
+/* ——— primary 系列（运行/主操作）：暖橙实底 ——— */
+.primary-btn.run {
+  background: var(--primary) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+  border: 0 !important;
+}
+.primary-btn.run:hover:not(:disabled) { background: var(--primary-hover) !important; box-shadow: none !important; }
+
+/* 运行按钮（takeover 态）：暖橙描边，非实心，更克制 */
+.primary-btn.takeover {
+  background: transparent !important;
+  color: var(--primary) !important;
+  border: 1px solid var(--primary) !important;
+  box-shadow: none !important;
+}
+.primary-btn.takeover:hover:not(:disabled) {
+  background: rgb(217 119 87 / 12%) !important;
+  color: var(--primary-hover) !important;
+  border-color: var(--primary-hover) !important;
+}
+
+/* 停止 / 暂停：柔和红描边 */
+.primary-btn.stop {
+  background: transparent !important;
+  color: var(--danger) !important;
+  border: 1px solid var(--danger) !important;
+  box-shadow: none !important;
+}
+.primary-btn.stop:hover:not(:disabled) {
+  background: rgb(224 108 117 / 14%) !important;
+  color: #fff !important;
+  border-color: var(--danger) !important;
+}
+
+/* ——— loop-btn 系列 ——— */
+.loop-btn {
+  background: transparent !important;
+  border: 1px solid rgb(255 255 255 / 8%) !important;
+  color: var(--text-2) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+}
+.loop-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text) !important;
+  border-color: rgb(255 255 255 / 14%) !important;
+}
+.loop-btn:active:not(:disabled) { box-shadow: none !important; }
+.loop-btn:focus-visible { outline: 0 !important; box-shadow: 0 0 0 2px rgb(217 119 87 / 30%) !important; }
+.loop-btn:disabled { opacity: 0.4 !important; background: transparent !important; color: var(--text-3) !important; }
+
+.loop-btn.primary {
+  background: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+.loop-btn.primary:hover:not(:disabled) {
+  background: var(--primary-hover) !important;
+  border-color: var(--primary-hover) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+.loop-btn.kill, .loop-btn.rollback {
+  background: transparent !important;
+  border-color: rgb(224 108 117 / 55%) !important;
+  color: var(--danger) !important;
+  box-shadow: none !important;
+}
+.loop-btn.kill:hover:not(:disabled), .loop-btn.rollback:hover:not(:disabled) {
+  background: rgb(224 108 117 / 14%) !important;
+  border-color: var(--danger) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+/* ——— 决策按钮 ——— */
+.decision-btn {
+  background: rgb(217 119 87 / 12%) !important;
+  color: var(--primary) !important;
+  border-color: var(--primary) !important;
+  font-weight: 600 !important;
+}
+.decision-btn:hover:not(:disabled) {
+  background: var(--primary) !important;
+  color: #fff !important;
+  border-color: var(--primary) !important;
+}
+
+/* ——— 焦点环统一暖橙 ——— */
+.primary-btn:focus-visible, .term-btn:focus-visible, .ghost-btn:focus-visible, .tpl-chip:focus-visible, .draft-select:focus-visible {
+  outline: 0 !important;
+  box-shadow: 0 0 0 2px rgb(217 119 87 / 35%) !important;
+}
+
+/* ——— 图标按钮（App 头部）——— */
+.theme-toggle, .trace-toggle, .settings-toggle, .ask-toggle, .timeline-toggle {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--text-2) !important;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+}
+.theme-toggle:hover, .trace-toggle:hover, .settings-toggle:hover, .ask-toggle:hover, .timeline-toggle:hover {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text) !important;
+  border-color: rgb(255 255 255 / 10%) !important;
+}
+
+/* ——— 主色大按钮（FileList.save-btn / GeneratePanel.btn-primary）——— */
+.save-btn, .btn-primary {
+  background: var(--primary) !important;
+  color: #fff !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 6px !important;
+}
+.save-btn:hover:not(:disabled), .btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover) !important;
+  box-shadow: none !important;
+}
+
+/* ——— FileList 撤回按钮 ——— */
+.undo-btn {
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--text-3) !important;
+}
+.undo-btn:hover:not(:disabled) {
+  background: rgb(224 108 117 / 14%) !important;
+  color: var(--danger) !important;
+}
+
+/* ——— FileTree 刷新 ——— */
+.refresh { background: transparent !important; border: 0 !important; color: var(--text-3) !important; }
+.refresh:hover:not(:disabled) { background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [button-theme-v2] 静默全灰阶，橙色只 hover / 主操作
+   ═══════════════════════════════════════════════════════════ */
+
+/* 主题/图标按钮：纯灰阶 */
+.theme-toggle, .trace-toggle, .settings-toggle, .ask-toggle, .timeline-toggle {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--text-3) !important;
+}
+.theme-toggle:hover, .trace-toggle:hover, .settings-toggle:hover, .ask-toggle:hover, .timeline-toggle:hover {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text) !important;
+  border-color: rgb(255 255 255 / 8%) !important;
+}
+
+/* 主按钮（FileList / GeneratePanel）：透明底 + 橙描边，不实底 */
+.save-btn, .btn-primary {
+  background: transparent !important;
+  color: var(--primary) !important;
+  border: 1px solid var(--primary) !important;
+  box-shadow: none !important;
+  border-radius: 6px !important;
+}
+.save-btn:hover:not(:disabled), .btn-primary:hover:not(:disabled) {
+  background: var(--primary-bg) !important;
+  color: var(--primary-hover) !important;
+  border-color: var(--primary-hover) !important;
+}
+
+/* 对话框主按钮同样处理 */
+.ns-btn.primary {
+  background: transparent !important;
+  color: var(--primary) !important;
+  border: 1px solid var(--primary) !important;
+  box-shadow: none !important;
+}
+.ns-btn.primary:hover:not(:disabled) {
+  background: var(--primary-bg) !important;
+  border-color: var(--primary-hover) !important;
+  color: var(--primary-hover) !important;
+}
+
+
+/* [tight-margin] 外层容器边距收窄 */
+.main {
+  padding: 4px 6px !important;
+}
+.layout-row {
+  padding: 0 !important;
+}
+.layout-main {
+  padding: 0 !important;
+}
+
 </style>
 <!-- tooltip-audit -->
 

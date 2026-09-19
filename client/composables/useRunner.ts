@@ -1,5 +1,6 @@
 import { ref, watch } from 'vue'
 import { readNdjson } from '../utils/stream'
+import { emit } from './useEventStream'
 import type { Change, RunResponse } from '../types'
 
 const STORAGE_KEY_SCRIPT = '__ai_runner_script'
@@ -41,6 +42,8 @@ const liveStdout = ref('')
 const liveStderr = ref('')
 const smokeEnabled = ref(loadFromStorage<boolean>(STORAGE_KEY_SMOKE, true))
 const baselineRunId = ref(loadFromStorage<string>(STORAGE_KEY_BASELINE, ''))
+// [auto-feedback] 一次性标志：AI 直接返回的脚本执行后无条件回传结果
+const autoFeedbackRequested = ref(false)
 const gitCommit = ref(loadFromStorage<boolean>(GIT_KEY, false))
 
 let abortController: AbortController | null = null
@@ -85,14 +88,54 @@ function stop() {
   running.value = false
 }
 
-async function run() {
-  const code = script.value.trim()
+async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boolean }) {
+  if (opts?.autoFeedback) autoFeedbackRequested.value = true
+  const code = (opts?.script ?? script.value).trim()
   if (!code || running.value) return
   running.value = true
   result.value = null
   changes.value = []
   liveStdout.value = ''
   liveStderr.value = ''
+
+  const metaM = code.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
+  const desc = metaM ? metaM[1].trim().slice(0, 80) : '执行脚本'
+  // [run-uk-unique] 每次运行唯一 key，避免同 key 覆盖历史事件导致位置错乱
+  const UK = opts?.runKey || ('run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6))
+  let lastStage = ''
+  const titleOf = () => {
+    const combined = (liveStdout.value + '\n' + liveStderr.value).trim()
+    const lines = combined.split('\n').filter(Boolean)
+    const tail = (lines[lines.length - 1] || '').trim()
+    const parts = [desc]
+    if (lastStage) parts.push(lastStage)
+    if (tail) parts.push(tail.slice(0, 100))
+    return parts.join(' · ')
+  }
+  const emitStep = (phase: string, over: Record<string, unknown> = {}) => {
+    if (typeof over.currentStage === 'string') lastStage = over.currentStage
+    emit('run:start', titleOf(), {
+      payload: { desc, phase, stdoutTail: liveStdout.value.slice(-400), stderrTail: liveStderr.value.slice(-400), ...over },
+      updateKey: UK,
+    })
+  }
+  // [lifecycle] 记录本次执行的所有 stage（用于展开区时间线）
+  let stageHistory: Array<{ name: string; status: string; ts: number; ms?: number; ok?: boolean; files?: number; tscOk?: boolean; testOk?: boolean }> = []
+  const runStartedAt = Date.now()
+  let finalPhase: 'running' | 'done' | 'error' = 'running'  // [loading-fix]
+  const wrappedEmitStep = (phase: string, over: Record<string, unknown> = {}) => {
+    if (phase === 'done' || phase === 'error') finalPhase = phase as any
+    emitStep(phase, over)
+  }
+  wrappedEmitStep('running')
+  let lastFlush = 0
+  const flushChunk = () => {
+    const now = Date.now()
+    if (now - lastFlush < 250) return
+    lastFlush = now
+    wrappedEmitStep('running')
+  }
+
   try {
     abortController = new AbortController()
     const res = await fetch('/__ai/run', {
@@ -125,6 +168,29 @@ async function run() {
       if (frame.type === 'chunk') {
         if (frame.stream === 'stdout') liveStdout.value += String(frame.data || '')
         else if (frame.stream === 'stderr') liveStderr.value += String(frame.data || '')
+        flushChunk()
+      } else if (frame.type === 'stage') {
+        const name = String(frame.name || 'stage')
+        const status = String(frame.status || '')
+        const ok = frame.ok
+        const ms = typeof frame.ms === 'number' ? frame.ms : undefined
+        const files = typeof frame.files === 'number' ? frame.files : undefined
+        const tscOk = typeof frame.tscOk === 'boolean' ? frame.tscOk : undefined
+        const testOk = typeof frame.testOk === 'boolean' ? frame.testOk : undefined
+        // 同 name 的 start → done 更新（不重复添加）
+        const idx = stageHistory.findIndex(x => x.name === name)
+        const rec = { name, status, ts: Date.now(), ms, ok, files, tscOk, testOk }
+        if (idx >= 0) stageHistory[idx] = { ...stageHistory[idx], ...rec }
+        else stageHistory.push(rec)
+        const mark = status === 'done' ? (ok === false ? ' ✗' : ' ✓') : ' …'
+        wrappedEmitStep('running', {
+          currentStage: name + mark,
+          stageName: name,
+          stageStatus: status,
+          stageHistory,
+          startedAt: runStartedAt,
+          elapsedMs: Date.now() - runStartedAt,
+        })
       } else if (frame.type === 'summary') {
         frames.push(frame)
       }
@@ -166,6 +232,7 @@ async function run() {
       }, [])
       if (data.ok && data.runId) baselineRunId.value = data.runId
       if (result.value) result.value.baselineRunId = prevBaseline
+      wrappedEmitStep(data.ok ? 'done' : 'error', { exit: data.code, changeCount: changes.value.length, stageHistory, startedAt: runStartedAt, elapsedMs: Date.now() - runStartedAt })
     } else {
       result.value = {
         runId: '',
@@ -175,6 +242,7 @@ async function run() {
         stderr: liveStderr.value || '未收到 summary 帧',
         changes: [],
       }
+      wrappedEmitStep('error', { reason: '未收到 summary 帧' })
     }
   } catch (e) {
     const aborted = (e as { name?: string })?.name === 'AbortError'
@@ -187,7 +255,13 @@ async function run() {
       changes: [],
       error: aborted ? '已取消' : `请求异常：${String(e)}`,
     }
+    wrappedEmitStep('error', { reason: aborted ? '已取消' : String(e).slice(0, 80) })
   } finally {
+    // [loading-fix] 兜底：任何提前 return（HTTP 错误 / 无 body）都会走到这，确保 emit 结束态
+    if (finalPhase === 'running') {
+      const ok = result.value?.ok === true
+      wrappedEmitStep(ok ? 'done' : 'error', { exit: result.value?.code, changeCount: changes.value.length, fallback: true })
+    }
     running.value = false
   }
 }
@@ -255,6 +329,8 @@ export function useRunner() {
     baselineRunId,
     liveStdout,
     liveStderr,
+    autoFeedbackRequested,
+    clearAutoFeedback: () => { autoFeedbackRequested.value = false },
     run,
     stop,
     rollback,
