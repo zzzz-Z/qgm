@@ -6353,5 +6353,191 @@ function onHtmlDrop(e: DragEvent) {
   color: var(--text, #e6e6e6) !important;
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   [toast-exact] 消息卡逐字复制 ToastHost 的 CSS 值
+   参考: ToastHost.vue .toast / .toast-icon
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── 卡片 = .toast ─── */
+.chat-msg-user,
+.chat-msg-ai,
+.chat-step,
+.chat-waiting {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 6px !important;
+  padding: 10px 14px !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--border, #e5e9f0) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 24px rgb(15 30 60 / 14%) !important;
+  font-size: 13px !important;
+  position: relative !important;
+  margin: 0 !important;
+  align-self: stretch !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* ─── border-left 按类型（对齐 .toast.info / .success / .warn / .error）─── */
+.chat-msg-user { border-left: 3px solid var(--primary, #a78bfa) !important; }
+.chat-msg-ai { border-left: 3px solid var(--primary, #a78bfa) !important; }
+.chat-waiting { border-left: 3px solid var(--primary, #a78bfa) !important; }
+.chat-step.state-pending { border-left: 3px solid var(--text-3, #6b6b6b) !important; }
+.chat-step.state-running { border-left: 3px solid var(--primary, #a78bfa) !important; }
+.chat-step.state-done { border-left: 3px solid var(--success, #10b981) !important; }
+.chat-step.state-error { border-left: 3px solid var(--danger, #ef4444) !important; }
+
+/* 清掉旧的伪元素左竖条（toast 用 border-left，不用伪元素） */
+.chat-msg-user::before,
+.chat-msg-ai::before,
+.chat-step::before,
+.chat-waiting::before {
+  display: none !important;
+  content: none !important;
+}
+
+/* ─── 图标 = .toast-icon ─── */
+.bubble-icon,
+.chat-waiting .bubble-icon {
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  border-radius: 50% !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  flex-shrink: 0 !important;
+  background: var(--primary-bg, #eaf2ff) !important;
+  color: var(--primary, #2563eb) !important;
+  line-height: 1 !important;
+}
+.chat-msg-ai .bubble-icon {
+  background: var(--primary-bg, #eaf2ff) !important;
+  color: var(--primary, #2563eb) !important;
+}
+.chat-msg-user .bubble-icon {
+  background: var(--primary-bg, #eaf2ff) !important;
+  color: var(--primary, #2563eb) !important;
+}
+
+/* ─── head：icon + name 左，time 右（横排对齐 .toast display flex gap 10）─── */
+.chat-msg-user .bubble-head,
+.chat-msg-ai .bubble-head {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-bottom: 0 !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  color: var(--text, #1f2d3d) !important;
+}
+.chat-msg-user .bubble-name,
+.chat-msg-ai .bubble-name {
+  flex: 0 0 auto !important;
+  font-weight: 600 !important;
+  color: var(--text, #1f2d3d) !important;
+}
+.chat-msg-user .bubble-time,
+.chat-msg-ai .bubble-time {
+  margin-left: auto !important;
+  font-size: 11px !important;
+  color: var(--text-3, #94a3b8) !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+/* ─── body：正文 ─── */
+.chat-msg-user .bubble-body,
+.chat-msg-ai .bubble-body {
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+  color: var(--text, #1f2d3d) !important;
+  word-break: break-word !important;
+}
+
+/* ─── 步骤条：一行紧凑，对齐 toast 结构 ─── */
+.chat-step {
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+.chat-step .step-title {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  font-size: 13px !important;
+  color: var(--text, #1f2d3d) !important;
+  font-weight: 500 !important;
+}
+.chat-step .step-time {
+  flex: 0 0 auto !important;
+  font-size: 11px !important;
+  color: var(--text-3, #94a3b8) !important;
+  opacity: 1 !important;
+}
+.chat-step .step-state {
+  flex: 0 0 auto !important;
+  font-size: 11px !important;
+  padding: 0 8px !important;
+  border-radius: 10px !important;
+  background: var(--surface-2, #f8fafc) !important;
+  color: var(--text-2, #475569) !important;
+  font-weight: 600 !important;
+}
+
+/* ─── chat-list 容器 ─── */
+.chat-list {
+  gap: 10px !important;
+  padding: 14px 18px 22px !important;
+  max-width: 860px !important;
+}
+
+
+/* [chatlist-transparent] chat-list 容器透明无背景 */
+.chat-list,
+.term-body,
+.terminal,
+.editor-body {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+
+/* [no-shadow] 消息卡去阴影（toast 阴影在满宽长条上变黑影） */
+.chat-msg-user,
+.chat-msg-ai,
+.chat-step,
+.chat-waiting {
+  box-shadow: none !important;
+}
+
+
+/* [left-border-only] 卡片只留左竖条，其他三边无边框 */
+.chat-msg-user,
+.chat-msg-ai,
+.chat-step,
+.chat-waiting {
+  border-top: 0 !important;
+  border-right: 0 !important;
+  border-bottom: 0 !important;
+  border-left-width: 3px !important;
+  border-left-style: solid !important;
+}
+
+
+/* [transparent-card] 消息卡背景透明，只保留左竖条 */
+.chat-msg-user,
+.chat-msg-ai,
+.chat-step,
+.chat-waiting {
+  background: transparent !important;
+}
+
 </style>
 <!-- tooltip-audit -->
