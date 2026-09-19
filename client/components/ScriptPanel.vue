@@ -6539,5 +6539,36 @@ function onHtmlDrop(e: DragEvent) {
   background: transparent !important;
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   [status-bg] 卡片背景 = 半透明状态色
+   ═══════════════════════════════════════════════════════════ */
+
+/* 用户消息：淡紫底 */
+.chat-msg-user {
+  background: rgb(167 139 250 / 5%) !important;
+}
+/* AI 消息：淡紫底（略深） */
+.chat-msg-ai {
+  background: rgb(167 139 250 / 7%) !important;
+}
+/* 等待：淡紫底 */
+.chat-waiting {
+  background: rgb(167 139 250 / 5%) !important;
+}
+/* 步骤条：按状态 */
+.chat-step.state-pending {
+  background: rgb(255 255 255 / 2%) !important;
+}
+.chat-step.state-running {
+  background: rgb(167 139 250 / 6%) !important;
+}
+.chat-step.state-done {
+  background: rgb(74 222 128 / 5%) !important;
+}
+.chat-step.state-error {
+  background: rgb(248 113 113 / 6%) !important;
+}
+
 </style>
 <!-- tooltip-audit -->
