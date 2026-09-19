@@ -264,7 +264,16 @@
             <svg class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4" /></svg><span>运行</span>
           </button>
         </div>
-        <div class="editor-body">
+        <div v-if="attachedFiles.length" class="attach-bar">
+          <div v-for="f in attachedFiles" :key="f.id" class="attach-tag" :class="'kind-' + f.kind">
+            <img v-if="f.kind === 'image'" :src="f.content" :alt="f.name" class="attach-img">
+            <span v-else class="attach-ico">📄</span>
+            <span class="attach-name" :title="f.name">{{ f.name }}</span>
+            <span class="attach-size">{{ fmtSize(f.size) }}</span>
+            <button v-tooltip="'移除'" class="attach-del" @click="removeAttach(f.id)">×</button>
+          </div>
+        </div>
+        <div class="editor-body" @paste.capture="onEditorPaste" @dragover.prevent @drop="onDesktopDrop">
           <!-- @FILE_PICKER_V1 -->
           <div v-if="pickerOpen" ref="pickerRef" class="file-picker" :style="pickerStyle">
             <input
@@ -583,6 +592,100 @@ const mainRef = ref<HTMLElement | null>(null)
 const copied = ref(false)
 const fileDragging = ref(false)
 const fileSuccess = ref(false)
+/* [attachments] 附件：粘贴图片 / 拖文件 → tag 展示；发送时文本内容拼入脚本 */
+interface AttachedFile {
+  id: string
+  name: string
+  size: number
+  kind: 'image' | 'text'
+  content: string
+}
+const attachedFiles = ref<AttachedFile[]>([])
+const MAX_ATTACH_BYTES = 500 * 1024  // 单文件 500KB
+function fmtSize(n: number): string {
+  if (n < 1024) return n + 'B'
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + 'KB'
+  return (n / 1024 / 1024).toFixed(2) + 'MB'
+}
+function readAsText(file: File): Promise<string> {
+  return new Promise((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(String(r.result || ''))
+    r.onerror = rej
+    r.readAsText(file)
+  })
+}
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(String(r.result || ''))
+    r.onerror = rej
+    r.readAsDataURL(file)
+  })
+}
+async function addAttachedFile(file: File): Promise<void> {
+  if (file.size > MAX_ATTACH_BYTES) {
+    toast(`附件 ${file.name} 超 ${fmtSize(MAX_ATTACH_BYTES)}，已跳过`, 'warn', 4000)
+    return
+  }
+  const isImage = file.type.startsWith('image/')
+  try {
+    const content = isImage ? await readAsDataUrl(file) : await readAsText(file)
+    attachedFiles.value.push({
+      id: 'at-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+      name: file.name || (isImage ? 'pasted-image' : 'file'),
+      size: file.size,
+      kind: isImage ? 'image' : 'text',
+      content,
+    })
+  } catch (e) {
+    toast(`附件读取失败：${String(e)}`, 'error', 4000)
+  }
+}
+function removeAttach(id: string): void {
+  attachedFiles.value = attachedFiles.value.filter(f => f.id !== id)
+}
+async function onEditorPaste(e: ClipboardEvent): Promise<void> {
+  const items = Array.from(e.clipboardData?.items || [])
+  const images: File[] = []
+  for (const it of items) {
+    if (it.type && it.type.startsWith('image/')) {
+      const f = it.getAsFile()
+      if (f) images.push(f)
+    }
+  }
+  if (!images.length) return  // 普通文本粘贴交给 CodeMirror 处理
+  e.preventDefault()
+  for (const f of images) await addAttachedFile(f)
+}
+async function onDesktopDrop(e: DragEvent): Promise<void> {
+  const files = Array.from(e.dataTransfer?.files || [])
+  if (!files.length) return
+  e.preventDefault()
+  for (const f of files) await addAttachedFile(f)
+  fileSuccess.value = true
+  setTimeout(() => { fileSuccess.value = false }, 1500)
+}
+function isBashScript(scriptText: string): boolean {
+  const first = (scriptText.split('\n', 1)[0] || '').trim()
+  return /^#!\s*\/usr\/bin\/(env\s+)?bash\b/.test(first)
+}
+function buildScriptWithAttachments(scriptText: string, files: AttachedFile[]): string {
+  if (!files.length) return scriptText
+  const isBash = isBashScript(scriptText)
+  const p = isBash ? '#' : '//'
+  const parts: string[] = []
+  for (const f of files) {
+    parts.push(`${p} ═════ 附件 ${f.name} (${fmtSize(f.size)}) ═════`)
+    if (f.kind === 'image') {
+      parts.push(`${p} [图片数据 (${fmtSize(f.size)})，如需处理请依赖 AI 站点原生粘贴]`)
+    } else {
+      for (const line of f.content.split('\n')) parts.push(`${p} ${line}`)
+    }
+  }
+  parts.push('')
+  return parts.join('\n') + scriptText
+}
 const statusText = ref('')
 const statusClass = ref('')
 
@@ -1198,19 +1301,20 @@ function runSmart(opts?: { bypassAutoGuard?: boolean }) {
     toast('自动接管中，请先关闭接管再手动运行', 'warn', 2500)
     return
   }
-  const text = script.value.trim()
-  if (!text) return
+  const rawScript = script.value.trim()
+  if (!rawScript) return
+  const text = attachedFiles.value.length ? buildScriptWithAttachments(rawScript, attachedFiles.value) : rawScript
   const firstLine = text.split('\n', 1)[0].trim()
   const isNode = /^#!\s*\/usr\/bin\/(env\s+)?node\b/.test(firstLine)
   const isBash = /^#!\s*\/usr\/bin\/(env\s+)?bash\b/.test(firstLine)
   if (isNode) {
     runningCommand.value = ''
-    run()
+    run({ script: text })
     return
   }
   if (isBash) {
     runningCommand.value = ''
-    run()
+    run({ script: text })
     return
   }
   if (text.startsWith('!')) {
@@ -6688,6 +6792,76 @@ function onHtmlDrop(e: DragEvent) {
   margin: 0 !important;
 }
 .chat-step:hover .step-caret { opacity: 0.9 !important; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [attachments-css] 附件 tag 区
+   ═══════════════════════════════════════════════════════════ */
+.attach-bar {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  padding: 8px 12px !important;
+  border-bottom: 1px solid var(--border, #262626) !important;
+  background: var(--surface-2, #1a1a1a) !important;
+  max-height: 120px !important;
+  overflow-y: auto !important;
+}
+.attach-tag {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 3px 8px 3px 4px !important;
+  border-radius: 6px !important;
+  background: var(--surface, #141414) !important;
+  border: 1px solid var(--border, #262626) !important;
+  font-size: 11.5px !important;
+  color: var(--text, #e6e6e6) !important;
+  max-width: 260px !important;
+}
+.attach-tag.kind-image { border-color: rgb(167 139 250 / 30%) !important; }
+.attach-img {
+  width: 22px !important;
+  height: 22px !important;
+  object-fit: cover !important;
+  border-radius: 4px !important;
+  flex-shrink: 0 !important;
+  background: rgb(0 0 0 / 20%) !important;
+}
+.attach-ico { font-size: 14px !important; line-height: 1 !important; }
+.attach-name {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  font-weight: 500 !important;
+}
+.attach-size {
+  flex: 0 0 auto !important;
+  color: var(--text-3, #6b6b6b) !important;
+  font: 10px/1 var(--mono, monospace) !important;
+}
+.attach-del {
+  flex: 0 0 auto !important;
+  width: 16px !important;
+  height: 16px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 4px !important;
+  background: transparent !important;
+  color: var(--text-3, #6b6b6b) !important;
+  cursor: pointer !important;
+  font-size: 14px !important;
+  line-height: 1 !important;
+}
+.attach-del:hover {
+  color: #f87171 !important;
+  background: rgb(248 113 113 / 12%) !important;
+}
 
 </style>
 <!-- tooltip-audit -->
