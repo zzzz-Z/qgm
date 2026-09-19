@@ -230,7 +230,7 @@
         </div>
       </section>
       <!-- 编辑器 (下方) -->
-      <section class="editor card" :class="{ 'is-running': running }">
+      <section class="editor card" :class="{ 'is-running': running, 'is-dragging': fileDragging }">
 
         <div class="tpl-bar">
           <button
@@ -665,6 +665,79 @@ async function onDesktopDrop(e: DragEvent): Promise<void> {
   for (const f of files) await addAttachedFile(f)
   fileSuccess.value = true
   setTimeout(() => { fileSuccess.value = false }, 1500)
+}
+/* [tree-drop] 从文件树拖到编辑区 → 附件 */
+function isInEditor(x: number, y: number): boolean {
+  try {
+    const el = document.elementFromPoint(x, y)
+    if (!el) return false
+    return Boolean((el as HTMLElement).closest('.editor'))
+  } catch { return false }
+}
+async function fetchTreePaths(rootPath: string): Promise<string[]> {
+  const out: string[] = []
+  const walk = (nodes: any[]) => {
+    for (const n of nodes || []) {
+      if (n.type === 'file') out.push(String(n.path || ''))
+      else if (n.children) walk(n.children)
+    }
+  }
+  try {
+    const res = await fetch(`/__ai/files/tree?path=${encodeURIComponent(rootPath)}`)
+    const data = await res.json()
+    walk(data.tree || [])
+  } catch { /* ignore */ }
+  return out.filter(Boolean)
+}
+async function addTreePaths(paths: string[]): Promise<void> {
+  const flat: string[] = []
+  for (const p of paths) {
+    if (!p) continue
+    const tree = await fetchTreePaths(p)
+    if (tree.length) flat.push(...tree)
+    else flat.push(p)
+  }
+  const uniq = [...new Set(flat)].filter(p => !attachedFiles.value.some(a => a.name === p))
+  if (!uniq.length) return
+  try {
+    const res = await fetch('/__ai/files/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: uniq }),
+    })
+    const data = await res.json()
+    for (const f of (data.files || [])) {
+      if (f.error) {
+        toast(`附件 ${f.path} 读取失败：${f.error}`, 'warn', 4000)
+        continue
+      }
+      const content = String(f.content || '')
+      attachedFiles.value.push({
+        id: 'at-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+        name: f.path,
+        size: content.length,
+        kind: 'text',
+        content,
+      })
+    }
+    toast(`已附加 ${attachedFiles.value.length} 个文件`, 'success', 2000)
+  } catch (e) {
+    toast(`附件读取失败：${String(e)}`, 'error', 4000)
+  }
+}
+function onTreeDrag(e: Event) {
+  const d = (e as CustomEvent).detail as { x: number, y: number }
+  if (!d) return
+  fileDragging.value = isInEditor(d.x, d.y)
+}
+function onTreeDragCancel() {
+  fileDragging.value = false
+}
+function onTreeDrop(e: Event) {
+  const d = (e as CustomEvent).detail as { paths: string[], x: number, y: number }
+  fileDragging.value = false
+  if (!d || !isInEditor(d.x, d.y)) return
+  void addTreePaths(d.paths || [])
 }
 function isBashScript(scriptText: string): boolean {
   const first = (scriptText.split('\n', 1)[0] || '').trim()
@@ -1722,7 +1795,10 @@ onMounted(() => {
   void createEditor()
   scrollTermToBottom()
   window.addEventListener('ai-runner:auto-run', onAutoRun)
-  window.addEventListener('keydown', onGlobalKey) })
+  window.addEventListener('keydown', onGlobalKey)
+  window.addEventListener('ai-runner:drag', onTreeDrag)
+  window.addEventListener('ai-runner:drop', onTreeDrop)
+  window.addEventListener('ai-runner:drag-cancel', onTreeDragCancel) })
 
 onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onSideMove)
@@ -1731,6 +1807,9 @@ onBeforeUnmount(() => {
 
   window.removeEventListener('ai-runner:auto-run', onAutoRun)
   window.removeEventListener('keydown', onGlobalKey)
+  window.removeEventListener('ai-runner:drag', onTreeDrag)
+  window.removeEventListener('ai-runner:drop', onTreeDrop)
+  window.removeEventListener('ai-runner:drag-cancel', onTreeDragCancel)
   cmView?.destroy()
   cmView = null })
 
@@ -6861,6 +6940,29 @@ function onHtmlDrop(e: DragEvent) {
 .attach-del:hover {
   color: #f87171 !important;
   background: rgb(248 113 113 / 12%) !important;
+}
+
+
+/* [tree-drop-css] 编辑器拖拽高亮 */
+.editor.is-dragging {
+  border-color: rgb(167 139 250 / 60%) !important;
+  box-shadow: 0 0 0 3px rgb(167 139 250 / 12%) !important;
+  background: rgb(167 139 250 / 4%) !important;
+}
+.editor.is-dragging::after {
+  content: '松开以附加文件' !important;
+  position: absolute !important;
+  inset: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgb(167 139 250 / 8%) !important;
+  color: #c4b5fd !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  pointer-events: none !important;
+  z-index: 10 !important;
+  border-radius: inherit !important;
 }
 
 </style>
