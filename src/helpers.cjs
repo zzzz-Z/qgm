@@ -3,12 +3,28 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 
+function safeReaddir(p) {
+  const names = fs.readdirSync(p)
+  return names.map(function (n) {
+    let st = null
+    try { st = fs.statSync(path.join(p, n)) } catch (e) {}
+    return {
+      name: n,
+      isDirectory: function () { return st ? st.isDirectory() : false },
+      isFile: function () { return st ? st.isFile() : false },
+    }
+  })
+}
+
 function globToRe(glob) {
   let re = ''
   let i = 0
   while (i < glob.length) {
     const ch = glob[i]
-    if (ch === '*' && glob[i + 1] === '*') { re += '.*'; i += 2; continue }
+    if (ch === '*' && glob[i + 1] === '*') {
+      if (glob[i + 2] === '/') { re += '(?:.*/)?'; i += 3; continue }
+      re += '.*'; i += 2; continue
+    }
     if (ch === '*') { re += '[^/]*'; i++; continue }
     if (ch === '?') { re += '[^/]'; i++; continue }
     if ('\\^$.|?*+()[]{}'.includes(ch)) re += '\\' + ch
@@ -45,7 +61,7 @@ const __AI__ = {
   exists(p) { return fs.existsSync(p) },
   listDir(p) {
     try {
-      return fs.readdirSync(p, { withFileTypes: true }).map(function (e) {
+      return safeReaddir(p).map(function (e) {
         return { name: e.name, isDir: e.isDirectory(), isFile: e.isFile() }
       })
     } catch { return [] }
@@ -71,7 +87,7 @@ const __AI__ = {
     const re = globToRe(glob)
     const walk = function (dir) {
       let entries
-      try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+      try { entries = safeReaddir(dir) } catch { return }
       for (const ent of entries) {
         if (ent.name.startsWith('.') || ent.name === 'node_modules') continue
         const full = path.join(dir, ent.name)
