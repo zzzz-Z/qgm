@@ -7252,5 +7252,21 @@ function onHtmlDrop(e: DragEvent) {
   padding: 0 8px !important;
 }
 
+
+/* [tight-margin-sp] 内层容器边距收窄 */
+.pane-main {
+  padding: 0 !important;
+  gap: 0 !important;
+}
+.pane-main > .terminal.card {
+  margin-bottom: 4px !important;
+}
+.pane-main > .editor.card {
+  margin-bottom: 0 !important;
+}
+.pane {
+  padding: 0 !important;
+}
+
 </style>
 <!-- tooltip-audit -->

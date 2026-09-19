@@ -2066,6 +2066,18 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   color: var(--primary-hover) !important;
 }
 
+
+/* [tight-margin] 外层容器边距收窄 */
+.main {
+  padding: 4px 6px !important;
+}
+.layout-row {
+  padding: 0 !important;
+}
+.layout-main {
+  padding: 0 !important;
+}
+
 </style>
 <!-- tooltip-audit -->
 
