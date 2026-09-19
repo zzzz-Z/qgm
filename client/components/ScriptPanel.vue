@@ -7438,5 +7438,36 @@ function onHtmlDrop(e: DragEvent) {
   stroke: currentColor !important;
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   [ghost-nowrap] ghost-btn 硬锁横排
+   ═══════════════════════════════════════════════════════════ */
+.ghost-btn {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  white-space: nowrap !important;
+  width: auto !important;
+  min-width: auto !important;
+  flex-wrap: nowrap !important;
+}
+.ghost-btn > .ico-svg,
+.ghost-btn > svg {
+  display: inline-block !important;
+  width: 13px !important;
+  height: 13px !important;
+  flex-shrink: 0 !important;
+  margin: 0 !important;
+  vertical-align: middle !important;
+  fill: none !important;
+  stroke: currentColor !important;
+}
+.ghost-btn > span {
+  display: inline-block !important;
+  white-space: nowrap !important;
+}
+
 </style>
 <!-- tooltip-audit -->
