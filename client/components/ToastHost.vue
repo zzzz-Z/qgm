@@ -3,6 +3,14 @@ defineOptions({ name: 'ToastHost' })
 import { useToast } from '../composables/useToast'
 
 const { toasts, confirmState, dismissToast, resolveConfirm } = useToast()
+function onToastClick(t: { id: number, traceId?: number }) {
+  if (t.traceId !== undefined) {
+    try {
+      window.dispatchEvent(new CustomEvent('ai-runner:open-trace', { detail: { id: t.traceId } }))
+    } catch { /* ignore */ }
+  }
+  dismissToast(t.id)
+}
 </script>
 
 <template>
@@ -13,8 +21,8 @@ const { toasts, confirmState, dismissToast, resolveConfirm } = useToast()
           v-for="t in toasts"
           :key="t.id"
           class="toast"
-          :class="t.type"
-          @click="dismissToast(t.id)"
+          :class="[t.type, { 'has-trace': t.traceId !== undefined }]"
+          @click="onToastClick(t)"
         >
           <span class="toast-icon">{{ t.icon }}</span>
           <span class="toast-msg">{{ t.msg }}</span>
@@ -255,5 +263,10 @@ const { toasts, confirmState, dismissToast, resolveConfirm } = useToast()
 .modal-leave-to {
   opacity: 0;
 }
+
+/* [toast-trace] 有 traceId 的 toast 提示可点 */
+.toast.has-trace { cursor: pointer; }
+.toast.has-trace:hover { border-color: rgb(167 139 250 / 40%); }
+
 </style>
 <!-- tooltip-audit -->

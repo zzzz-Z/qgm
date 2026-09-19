@@ -122,7 +122,7 @@
                 v-html="renderMarkdown(e.summary)"
               />
               <div v-else-if="e.role === 'user'" class="chat-msg chat-msg-user">
-                <div class="bubble-head"><span class="bubble-name">👤 我</span><span class="bubble-time">{{ fmtTreeTime(e.ts) }}</span></div>
+                <div class="bubble-head"><span class="bubble-icon">👤</span><span class="bubble-name">我</span><span class="bubble-time">{{ fmtTreeTime(e.ts) }}</span></div>
                 <div class="bubble-body" v-html="renderUserBubble(e)" />
               </div>
               <div
@@ -199,7 +199,7 @@
                 </div>
               </div>
               <div v-else-if="e.role === 'ai'" class="chat-msg chat-msg-ai">
-                <div class="bubble-head"><span class="bubble-name">🤖 AI</span><span class="bubble-time">{{ fmtTreeTime(e.ts) }}</span></div>
+                <div class="bubble-head"><span class="bubble-icon">🤖</span><span class="bubble-name">AI</span><span class="bubble-time">{{ fmtTreeTime(e.ts) }}</span></div>
                 <div class="bubble-body" v-html="renderAiBubble(e)" />
               </div>
               <div v-else class="chat-sys">
@@ -209,8 +209,8 @@
             </template>
             <div v-if="aiWaiting" class="chat-msg chat-msg-ai chat-waiting">
               <div class="bubble-head">
-                <span class="msg-avatar">🤖</span>
-                <span class="msg-name">AI</span>
+                <span class="bubble-icon">🤖</span>
+                <span class="bubble-name">AI</span>
               </div>
               <div class="bubble-body">
                 <span class="waiting-dots"><i /><i /><i /></span>
@@ -6251,6 +6251,106 @@ function onHtmlDrop(e: DragEvent) {
 .chat-msg-ai .bubble-body strong {
   color: #c4b5fd !important;
   font-weight: 600 !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [toast-style-msg] 消息卡对齐 toast 风：圆图标 + 左竖条 + 圆角卡
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── 图标：紫色圆底 ─── */
+.bubble-icon,
+.chat-waiting .bubble-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  border-radius: 50% !important;
+  background: rgb(167 139 250 / 18%) !important;
+  color: #c4b5fd !important;
+  font-size: 12px !important;
+  line-height: 1 !important;
+  flex-shrink: 0 !important;
+}
+.chat-msg-user .bubble-icon {
+  background: rgb(167 139 250 / 12%) !important;
+  color: #c4b5fd !important;
+}
+.chat-msg-ai .bubble-icon {
+  background: rgb(167 139 250 / 22%) !important;
+  color: #d8b4fe !important;
+}
+
+/* ─── head 布局：icon + name 左 + time 右 ─── */
+.chat-msg-user .bubble-head,
+.chat-msg-ai .bubble-head {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  margin: 0 0 8px 0 !important;
+  padding: 0 0 8px 0 !important;
+  border-bottom: 1px solid rgb(255 255 255 / 5%) !important;
+  font-size: 11.5px !important;
+  color: var(--text-2, #a3a3a3) !important;
+}
+.chat-msg-user .bubble-name,
+.chat-msg-ai .bubble-name {
+  flex: 0 0 auto !important;
+  font-weight: 500 !important;
+  color: var(--text, #e6e6e6) !important;
+  letter-spacing: 0.2px !important;
+}
+.chat-msg-user .bubble-time,
+.chat-msg-ai .bubble-time {
+  margin-left: auto !important;
+  font-size: 10.5px !important;
+  color: var(--text-3, #6b6b6b) !important;
+  font-variant-numeric: tabular-nums !important;
+  opacity: 0.8 !important;
+}
+
+/* ─── 卡片整体：toast 风（深底 + 圆角 + 左竖条）─── */
+.chat-msg-user,
+.chat-msg-ai,
+.chat-step,
+.chat-waiting {
+  background: var(--surface, #141414) !important;
+  border: 1px solid var(--border, #262626) !important;
+  border-radius: 10px !important;
+  padding: 10px 14px 12px 18px !important;
+  position: relative !important;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 30%) !important;
+}
+
+/* 左竖条：4px 圆角 */
+.chat-msg-user::before,
+.chat-msg-ai::before,
+.chat-step::before,
+.chat-waiting::before {
+  content: '' !important;
+  position: absolute !important;
+  left: 0 !important;
+  top: 10px !important;
+  bottom: 10px !important;
+  width: 4px !important;
+  border-radius: 0 4px 4px 0 !important;
+}
+.chat-msg-user::before { background: rgb(167 139 250 / 55%) !important; }
+.chat-msg-ai::before { background: #a78bfa !important; }
+.chat-waiting::before { background: #a78bfa !important; }
+.chat-step.state-pending::before { background: rgb(255 255 255 / 14%) !important; }
+.chat-step.state-running::before { background: #a78bfa !important; }
+.chat-step.state-done::before { background: #4ade80 !important; }
+.chat-step.state-error::before { background: #f87171 !important; }
+
+/* ─── 消息体字号 ─── */
+.chat-msg-user .bubble-body,
+.chat-msg-ai .bubble-body {
+  font-size: 12.5px !important;
+  line-height: 1.6 !important;
+  color: var(--text, #e6e6e6) !important;
 }
 
 </style>

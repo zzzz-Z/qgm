@@ -40,8 +40,9 @@ function evict() {
   }
 }
 
-export function toast(msg: string, type: ToastType = 'info', duration = 3200, opts: { key?: string } = {}) {
+export function toast(msg: string, type: ToastType = 'info', duration = 3200, opts: { key?: string, traceId?: number } = {}) {
   const key = opts.key
+  const traceId = opts.traceId
   if (key) {
     const idx = toasts.value.findIndex(t => t.key === key)
     if (idx >= 0) {
@@ -58,7 +59,7 @@ export function toast(msg: string, type: ToastType = 'info', duration = 3200, op
     }
   }
   const id = ++toastSeq
-  toasts.value.push({ id, key, msg, type, icon: ICONS[type] })
+  toasts.value.push({ id, key, msg, type, icon: ICONS[type], traceId })
   evict()
   timers.set(id, setTimeout(() => {
     const i = toasts.value.findIndex(t => t.id === id)
