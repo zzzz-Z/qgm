@@ -123,7 +123,15 @@
               />
               <div v-else-if="e.role === 'user'" class="chat-msg chat-msg-user">
                 <div class="bubble-head"><span class="bubble-icon">👤</span><span class="bubble-name">我</span><span class="bubble-time">{{ fmtTreeTime(e.ts) }}</span></div>
-                <div class="bubble-body" v-html="renderUserBubble(e)" />
+                <div class="bubble-body">
+                  <span class="bubble-text" v-html="renderUserBubble(e)" />
+                  <span v-if="aiWaiting && isLastUserMsg(e.id)" class="bubble-loading" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+                      <circle cx="12" cy="12" r="9" opacity="0.25" />
+                      <path d="M21 12a9 9 0 0 0-9-9" />
+                    </svg>
+                  </span>
+                </div>
               </div>
               <div
                 v-else-if="e.role === 'step'"
@@ -212,16 +220,7 @@
                 <span class="sys-time">{{ fmtTreeTime(e.ts) }}</span>
               </div>
             </template>
-            <div v-if="aiWaiting" class="chat-msg chat-msg-ai chat-waiting">
-              <div class="bubble-head">
-                <span class="bubble-icon">🤖</span>
-                <span class="bubble-name">AI</span>
-              </div>
-              <div class="bubble-body">
-                <span class="waiting-dots"><i /><i /><i /></span>
-                <span class="waiting-text">正在思考…</span>
-              </div>
-            </div>
+
             <div v-if="!chatItems.length" class="tree-empty">
               <div class="empty-title">还没有会话记录</div>
               <div class="empty-sub">点击「运行」开始自动化循环</div>
@@ -798,6 +797,13 @@ const statusText = ref('')
 const statusClass = ref('')
 
 const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
+function isLastUserMsg(id: number): boolean {
+  const list = chatItems.value
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].role === 'user') return list[i].id === id
+  }
+  return false
+}
 
 // [loop-loading] 循环态统一触发等待 loading，确保从发问起有「等待 AI」提示
 watch(loopState, (v, old) => {
@@ -6998,6 +7004,82 @@ function onHtmlDrop(e: DragEvent) {
   pointer-events: none !important;
   z-index: 10 !important;
   border-radius: inherit !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [inline-loading] 提问卡内联 loading + 附件 tag 居中
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── 用户卡 body 内联 loading ─── */
+.chat-msg-user .bubble-body {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  text-align: left !important;
+}
+.chat-msg-user .bubble-text {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  text-align: left !important;
+  word-break: break-word !important;
+  color: var(--text, #e6e6e6) !important;
+}
+.chat-msg-user .bubble-text > p {
+  display: inline !important;
+  margin: 0 !important;
+}
+.chat-msg-user .bubble-loading {
+  flex: 0 0 auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 14px !important;
+  height: 14px !important;
+  color: #a78bfa !important;
+  animation: bubble-loading-spin 0.9s linear infinite !important;
+}
+.chat-msg-user .bubble-loading svg {
+  width: 13px !important;
+  height: 13px !important;
+  display: block !important;
+}
+@keyframes bubble-loading-spin { to { transform: rotate(360deg); } }
+
+/* ─── 附件 tag 内容居中（图标 + 名 + 大小 + 删除）─── */
+.attach-tag {
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 4px 8px !important;
+}
+.attach-tag .attach-ico,
+.attach-tag .attach-img {
+  align-self: center !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+.attach-tag .attach-name,
+.attach-tag .attach-size,
+.attach-tag .attach-del {
+  align-self: center !important;
+  line-height: 1.2 !important;
+}
+
+/* ─── 用户卡 head 图标与文字垂直居中 ─── */
+.chat-msg-user .bubble-head {
+  align-items: center !important;
+}
+.chat-msg-user .bubble-icon {
+  align-self: center !important;
+  line-height: 1 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+.chat-msg-user .bubble-name,
+.chat-msg-user .bubble-time {
+  line-height: 1.2 !important;
 }
 
 </style>
