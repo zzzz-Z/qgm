@@ -66,6 +66,8 @@ export async function gitCommitAfter(
   exit: number,
   durationMs: number,
   verify = false,
+  desc = '',
+  loopCtx?: { loopId: string, round: number, max: number },
 ): Promise<{ ok: boolean, commit?: string, reason?: string }> {
   if (!(await gitAvailable())) {
     return { ok: false, reason: '非 git 仓库' }
@@ -88,7 +90,17 @@ export async function gitCommitAfter(
     ? `\n... 共 ${changes.length} 个文件`
     : ''
 
-  const head = `ai-runner: ${runId}`
+  const conventionalRe = /^(fix|feat|refactor|chore|docs|test|style|perf|build|ci)(\(.+?\))?:/
+  const safeDesc = String(desc || '').trim().slice(0, 72)
+  let head: string
+  if (safeDesc && conventionalRe.test(safeDesc)) {
+    head = safeDesc
+  } else if (loopCtx) {
+    const fallback = safeDesc || runId
+    head = `ai-runner[${loopCtx.loopId} R${loopCtx.round}/${loopCtx.max}]: ${fallback.slice(0, 60)}`
+  } else {
+    head = `ai-runner: ${(safeDesc || runId).slice(0, 60)}`
+  }
   const body = summary + truncated
   const foot = `exit: ${exit}, duration: ${durationMs}ms`
 

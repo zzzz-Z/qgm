@@ -718,7 +718,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     // after commit：按本次 changes 提交
     let gitAfter: { ok: boolean, commit?: string, reason?: string } | null = null
     if (gitCommit && gitInfo.ok && changes.length > 0) {
-      gitAfter = await gitCommitAfter(runId, changes, result.code, Date.now() - startedAt, gitVerify)
+      const lc = body?.loopCtx
+      const loopCtxNormalized = lc && lc.loopId ? { loopId: String(lc.loopId), round: Number(lc.round) || 1, max: Number(lc.max) || 8 } : undefined
+      gitAfter = await gitCommitAfter(runId, changes, result.code, Date.now() - startedAt, gitVerify, scriptDesc, loopCtxNormalized)
     }
 
     let smoke: SmokeResult | null = null

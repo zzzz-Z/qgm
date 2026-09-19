@@ -832,7 +832,7 @@ async function finish(inst: LoopInstance, reason: string, detail?: string): Prom
       const r = await fetch('/__ai/git/commit-loop', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `ai-runner: ${inst.id.value} · ${inst.round.value} 轮 · ${reason}`,
+          message: `ai-runner: ${(inst.goal.value || inst.id.value).slice(0, 60)} · ${inst.round.value} 轮 · ${reason}`,
         }),
       })
       const d = await r.json()
