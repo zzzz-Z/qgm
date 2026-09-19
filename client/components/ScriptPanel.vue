@@ -639,17 +639,14 @@ function stepTitleOf(e: { kind: string, summary?: string, payload?: Record<strin
   const p = e.payload || {}
   if (e.kind === 'ai:script') return String(p.desc || '脚本到达')
   if (e.kind === 'run:start') {
-    const phase = String(p.phase || '')
     const desc = String(p.desc || '').trim() || '脚本'
-    if (phase === 'pending') {
-      const why = String(p.why || '').trim()
-      const plan = String(p.plan || '').trim()
-      const lines = [desc]
-      if (why) lines.push('为什么：' + why)
-      if (plan) lines.push('计划：' + plan)
-      return lines.join('\n')
-    }
-    return '执行脚本：' + desc
+    const why = String(p.why || '').trim()
+    const plan = String(p.plan || '').trim()
+    const lines: string[] = []
+    if (desc) lines.push('**' + desc + '**')
+    if (why) lines.push('为什么：' + why)
+    if (plan) lines.push('计划：' + plan)
+    return lines.join('\n')
   }
   if (e.kind === 'run:end') {
     const exit = p.exit !== undefined ? ' · exit ' + p.exit : ''
@@ -4652,6 +4649,296 @@ function onHtmlDrop(e: DragEvent) {
 .chat-waiting {
   align-self: center !important;
 }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [center-v2] 全部消息居中 + 内容左对齐（撤销右/左分布）
+   色系：中性灰为主 + 单一强调色（紫）+ 语义色仅状态
+   ═══════════════════════════════════════════════════════════ */
+
+/* 撤销 [msg-align] 的左右分布 */
+.chat-msg-user,
+.chat-msg-ai {
+  align-self: center !important;
+  margin: 4px auto !important;
+}
+.chat-msg-user .bubble-head,
+.chat-msg-user .bubble-body,
+.chat-msg-ai .bubble-head,
+.chat-msg-ai .bubble-body {
+  text-align: left !important;
+}
+
+/* 统一容器宽度和居中 */
+.chat-msg-user,
+.chat-msg-ai,
+.chat-step,
+.chat-waiting {
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+/* 消息块：中性边框，去掉彩色底 */
+.chat-msg-user,
+.chat-msg-ai {
+  background: var(--term-chip-bg, rgb(255 255 255 / 3%)) !important;
+  border: 1px solid var(--border, #333) !important;
+  border-radius: 6px !important;
+}
+.chat-msg-user { border-color: rgb(255 255 255 / 8%) !important; }
+.chat-msg-ai   { border-color: rgb(255 255 255 / 8%) !important; }
+
+/* 头行弱化 */
+.chat-msg-user .bubble-head,
+.chat-msg-ai .bubble-head {
+  color: var(--text-3, #7a7a7a) !important;
+  font-size: 10.5px !important;
+  margin-bottom: 4px !important;
+}
+.chat-msg-user .bubble-body,
+.chat-msg-ai .bubble-body {
+  color: var(--text, #e0e0e0) !important;
+  font-size: 11.5px !important;
+  line-height: 1.55 !important;
+}
+.chat-msg-ai .bubble-body strong {
+  color: #c084fc !important;  /* 单一强调色 */
+  font-weight: 600 !important;
+}
+
+/* 步骤条：中性底 + 虚线，状态靠左竖线区分 */
+.chat-step {
+  background: var(--term-chip-bg, rgb(255 255 255 / 3%)) !important;
+  border: 1px dashed rgb(255 255 255 / 12%) !important;
+  border-left: 2px solid var(--text-3, #7a7a7a) !important;
+  border-radius: 4px !important;
+  color: var(--text-2, #b0b0b0) !important;
+}
+.chat-step .step-title { color: var(--text, #e0e0e0) !important; }
+.chat-step .step-time  { color: var(--text-3, #7a7a7a) !important; opacity: 0.7; }
+.chat-step .step-state {
+  background: transparent !important;
+  color: var(--text-3, #7a7a7a) !important;
+  border: 0 !important;
+  padding: 0 !important;
+}
+
+/* 状态色：只改左边竖线和 state 文字 */
+.chat-step.state-pending {
+  border-left-color: rgb(255 255 255 / 20%) !important;
+  color: var(--text-3, #7a7a7a) !important;
+}
+.chat-step.state-running {
+  border-left-color: #c084fc !important;
+  background: rgb(192 132 252 / 6%) !important;
+}
+.chat-step.state-running .step-title { color: #d8b4fe !important; }
+.chat-step.state-running .step-state { color: #c084fc !important; }
+.chat-step.state-running .step-dot {
+  border-color: rgb(192 132 252 / 30%) !important;
+  border-top-color: #c084fc !important;
+  border-right-color: #c084fc !important;
+}
+
+.chat-step.state-done {
+  border-left-color: #4ade80 !important;
+}
+.chat-step.state-done .step-state { color: #86efac !important; }
+.chat-step.state-done .step-dot   { background: #4ade80 !important; }
+
+.chat-step.state-error {
+  border-left-color: #f87171 !important;
+  background: rgb(248 113 113 / 6%) !important;
+}
+.chat-step.state-error .step-title { color: #fca5a5 !important; }
+.chat-step.state-error .step-state { color: #f87171 !important; }
+
+/* 等待气泡：与步骤条一致 */
+.chat-waiting {
+  background: var(--term-chip-bg, rgb(255 255 255 / 3%)) !important;
+  border: 1px dashed rgb(255 255 255 / 12%) !important;
+  border-left: 2px solid #c084fc !important;
+  border-radius: 4px !important;
+}
+.chat-waiting .waiting-text { color: var(--text-2, #b0b0b0) !important; }
+.chat-waiting .waiting-dots i { background: #c084fc !important; }
+.chat-waiting .bubble-head,
+.chat-waiting .msg-name { color: var(--text-3, #7a7a7a) !important; }
+
+/* chat-list 统一 gap */
+.chat-list { gap: 4px !important; }
+
+/* 隐藏旧左右气泡 */
+.chat-bubble.bubble-left,
+.chat-bubble.bubble-right { display: none !important; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [center-uniform] 统一宽度居中 + 左对齐
+   ═══════════════════════════════════════════════════════════ */
+
+/* chat-list 容器：限制最大宽度居中 */
+.chat-list {
+  max-width: 780px !important;
+  margin: 0 auto !important;
+  padding: 12px 16px 20px !important;
+  gap: 5px !important;
+}
+
+/* 所有消息块：统一宽度占满 chat-list */
+.chat-msg-user,
+.chat-msg-ai,
+.chat-step,
+.chat-waiting {
+  width: 100% !important;
+  max-width: 100% !important;
+  align-self: stretch !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  text-align: left !important;
+}
+
+/* user 和 ai 消息块：内部对齐由 head+body 控制 */
+.chat-msg-user .bubble-head,
+.chat-msg-ai .bubble-head {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  justify-content: flex-start !important;
+  text-align: left !important;
+  padding-bottom: 3px !important;
+  margin-bottom: 3px !important;
+  border-bottom: 1px solid rgb(255 255 255 / 5%) !important;
+}
+.chat-msg-user .bubble-body,
+.chat-msg-ai .bubble-body {
+  text-align: left !important;
+  word-break: break-word !important;
+}
+.chat-msg-ai .bubble-body strong {
+  color: #c084fc !important;
+  font-weight: 600 !important;
+}
+
+/* 步骤条：完整展示 desc/why/plan，多行不折叠 */
+.chat-step {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 8px !important;
+  padding: 6px 12px !important;
+  line-height: 1.55 !important;
+}
+.chat-step .step-title {
+  white-space: pre-wrap !important;
+  text-align: left !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+.chat-step .step-time,
+.chat-step .step-state,
+.chat-step .step-icon,
+.chat-step .step-dot {
+  flex: 0 0 auto !important;
+  align-self: flex-start !important;
+  margin-top: 4px !important;
+}
+
+/* 用户消息：淡灰底 */
+.chat-msg-user {
+  background: rgb(255 255 255 / 4%) !important;
+  border: 1px solid rgb(255 255 255 / 8%) !important;
+  border-radius: 6px !important;
+  padding: 6px 12px !important;
+}
+
+/* AI 消息：稍深底 */
+.chat-msg-ai {
+  background: rgb(192 132 252 / 6%) !important;
+  border: 1px solid rgb(192 132 252 / 18%) !important;
+  border-radius: 6px !important;
+  padding: 6px 12px !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [step-tidy] 步骤条紧凑化：标题加粗 + 次级弱化 + 时间/状态右对齐
+   ═══════════════════════════════════════════════════════════ */
+
+/* 布局：图标[dot+icon] + 内容[title flex:1] + 右侧[time+state] */
+.chat-step {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: flex-start !important;
+  gap: 8px !important;
+  padding: 6px 12px !important;
+  line-height: 1.55 !important;
+}
+
+/* step-dot + step-icon 固定左列，紧贴 */
+.chat-step .step-dot,
+.chat-step .step-icon {
+  flex: 0 0 auto !important;
+  margin-top: 5px !important;
+  line-height: 1 !important;
+}
+
+/* 内容区：占满 */
+.chat-step .step-title {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  white-space: pre-wrap !important;
+  text-align: left !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  padding-right: 8px !important;
+}
+
+/* 首行 desc：加粗为标题 */
+.chat-step .step-title strong {
+  display: block !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  color: var(--text, #e0e0e0) !important;
+  margin-bottom: 2px !important;
+}
+
+/* 时间 + 状态：固定右侧，同基线 */
+.chat-step .step-time {
+  flex: 0 0 auto !important;
+  align-self: flex-start !important;
+  margin-top: 4px !important;
+  font-size: 10.5px !important;
+  color: var(--text-3, #7a7a7a) !important;
+  opacity: 0.7 !important;
+  padding-right: 6px !important;
+}
+.chat-step .step-state {
+  flex: 0 0 auto !important;
+  align-self: flex-start !important;
+  margin-top: 3px !important;
+  padding: 1px 8px !important;
+  border-radius: 10px !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text-3, #7a7a7a) !important;
+}
+
+/* why/plan 行弱化 */
+.chat-step.state-done .step-title {
+  color: var(--text-2, #b0b0b0) !important;
+}
+.chat-step.state-done .step-title strong {
+  color: var(--text, #e0e0e0) !important;
+}
+
+/* 状态徽章色 */
+.chat-step.state-running .step-state { background: rgb(192 132 252 / 14%) !important; color: #c084fc !important; }
+.chat-step.state-done .step-state { background: rgb(74 222 128 / 12%) !important; color: #86efac !important; }
+.chat-step.state-error .step-state { background: rgb(248 113 113 / 14%) !important; color: #fca5a5 !important; }
+.chat-step.state-pending .step-state { background: rgb(255 255 255 / 5%) !important; color: var(--text-3, #7a7a7a) !important; }
 
 </style>
 <!-- tooltip-audit -->
