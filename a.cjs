@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// @desc: useAutoLoop.ts baseline 最小修复：补导出 + 补定义 + 清残留
-// @why: c5fe711 缺 export/resolveInst/getActiveSessionId/sessionId，页面白屏；为能跑补最小集
-// @plan: baseline 最小修复
+// @desc: 重建 client/utils/pricing.ts（formatCost / estimateCost / PRICING / Usage）
+// @why: ScriptPanel.vue:403 import formatCost 但文件全盘丢失；按 PLAN.md A.17 + 用法重建
+// @plan: pricing.ts 重建
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -13,115 +13,69 @@ const ok = m => console.log(C.green + '✓' + C.reset + ' ' + m)
 const skip = m => console.log(C.yellow + '!' + C.reset + ' ' + m)
 const err = m => console.error(C.red + '✗' + C.reset + ' ' + m)
 
-const REL = 'client/composables/useAutoLoop.ts'
+const REL = 'client/utils/pricing.ts'
 const ABS = path.join(ROOT, REL)
-const BAK = path.join(ROOT, '.ai-runner/backup/baseline-minimal-fix/useAutoLoop.ts')
 
 if (process.argv.includes('--rollback')) {
-  if (!fs.existsSync(BAK)) { err('无备份：' + BAK); process.exit(1) }
-  fs.copyFileSync(BAK, ABS); ok('已回滚 ' + REL); process.exit(0)
+  if (fs.existsSync(ABS)) { fs.unlinkSync(ABS); ok('已删除 ' + REL) }
+  else skip(REL + ' 不存在')
+  process.exit(0)
 }
 
 console.log('▶ 检查')
-if (!fs.existsSync(ABS)) { err(REL + ' 不存在'); process.exit(1) }
-const lines = fs.readFileSync(ABS, 'utf8').split('\n')
-
-console.log('▶ 备份')
-fs.mkdirSync(path.dirname(BAK), { recursive: true })
-if (!fs.existsSync(BAK)) { fs.writeFileSync(BAK, lines.join('\n')); ok('备份 → ' + path.relative(ROOT, BAK)) }
-else skip('备份已存在')
-
-const touched = []
-
-// A. 6 桩函数加 export
-const NAMES = ['setActiveLoopSessionId', 'createLoopInstanceFor', 'removeLoopInstance', 'getLoopBySessionId', 'listActiveLoops', 'activeLoopsCount']
-for (let i = 0; i < lines.length; i++) {
-  for (const n of NAMES) {
-    if (new RegExp('^const\\s+' + n + '\\b').test(lines[i])) {
-      lines[i] = 'export ' + lines[i]
-      touched.push('A: export const ' + n + ' @ ' + (i + 1))
-    }
-  }
+if (fs.existsSync(ABS)) {
+  skip(REL + ' 已存在，跳过')
+  process.exit(0)
 }
 
-// B. isInstActive 加 export
-for (let i = 0; i < lines.length; i++) {
-  if (/^function\s+isInstActive\s*\(/.test(lines[i])) {
-    lines[i] = 'export ' + lines[i]
-    touched.push('B: export function isInstActive @ ' + (i + 1))
-  }
+const SRC = `export interface Price { input: number, output: number }
+
+/**
+ * 单价表：input/output 均为「元 / token」。
+ * 未列出的模型 estimateCost 返回 null（调用方显示 token 数不显示金额）。
+ */
+export const PRICING: Record<string, Price> = {
+  'deepseek-chat': { input: 1e-6, output: 2e-6 },
+  'deepseek-reasoner': { input: 4e-6, output: 16e-6 },
 }
 
-// E. inst.sessionId → ''
-let cCount = 0
-for (let i = 0; i < lines.length; i++) {
-  if (/\binst\.sessionId\b/.test(lines[i])) {
-    lines[i] = lines[i].replace(/\binst\.sessionId\b/g, "''")
-    cCount++
-  }
-}
-if (cCount) touched.push('E: inst.sessionId → \'\' (' + cCount + ' 处)')
+export interface Usage { prompt_tokens: number, completion_tokens: number }
 
-// F. activeLoop.value?.sessionId 处理
-let fCount = 0
-for (let i = 0; i < lines.length; i++) {
-  if (lines[i].includes('activeLoop.value?.sessionId')) {
-    if (/^\s*return\b/.test(lines[i])) lines[i] = lines[i].replace(/return\s+.+/, 'return true')
-    else lines[i] = lines[i].split('activeLoop.value?.sessionId').join('undefined')
-    fCount++
-  }
-}
-if (fCount) touched.push('F: activeLoop.value?.sessionId (' + fCount + ' 处)')
-
-// G. : LoopInstance | undefined → null
-let gCount = 0
-for (let i = 0; i < lines.length; i++) {
-  if (/: LoopInstance \| undefined\b/.test(lines[i])) {
-    lines[i] = lines[i].replace(/: LoopInstance \| undefined/g, ': LoopInstance | null')
-    gCount++
-  }
-}
-if (gCount) touched.push('G: | undefined → | null (' + gCount + ' 处)')
-
-// C. resolveInst 补定义（在 activeLoop 声明之后插入）
-if (!lines.some(l => /^(export\s+)?function\s+resolveInst\s*\(/.test(l))) {
-  const anchor = lines.findIndex(l => /^const\s+activeLoop\s*=\s*computed/.test(l))
-  if (anchor < 0) { err('C: 找不到 activeLoop 锚点'); process.exit(1) }
-  lines.splice(anchor + 1, 0, '', 'function resolveInst(_sid?: string): LoopInstance | null {', '  return activeLoop.value', '}')
-  touched.push('C: 补 resolveInst @ ' + (anchor + 2))
+export function estimateCost(model: string, usage: Usage): number | null {
+  const p = PRICING[model]
+  if (!p) return null
+  const inTok = Math.max(0, Number(usage.prompt_tokens) || 0)
+  const outTok = Math.max(0, Number(usage.completion_tokens) || 0)
+  return inTok * p.input + outTok * p.output
 }
 
-// D. getActiveSessionId 补声明
-if (!lines.some(l => /^(let|var|const)\s+getActiveSessionId\b/.test(l))) {
-  const anchor = lines.findIndex(l => /^const\s+activeLoop\s*=\s*computed/.test(l))
-  if (anchor < 0) { err('D: 找不到 activeLoop 锚点'); process.exit(1) }
-  lines.splice(anchor + 1, 0, '', "let getActiveSessionId: () => string = () => ''")
-  touched.push('D: 补 getActiveSessionId @ ' + (anchor + 2))
+export function formatCost(yuan: number | null): string {
+  if (yuan === null || yuan === undefined) return '未知'
+  if (!Number.isFinite(yuan)) return '未知'
+  if (yuan < 0.01) return '<¥0.01'
+  return '¥' + yuan.toFixed(2)
 }
+`
 
-if (!touched.length) { skip('全部已修，无需改动'); process.exit(0) }
-
-console.log('▶ 改动清单')
-for (const t of touched) ok(t)
-
-const out = lines.join('\n')
+console.log('▶ 写入 ' + REL)
+fs.mkdirSync(path.dirname(ABS), { recursive: true })
+fs.writeFileSync(ABS, SRC)
 
 console.log('▶ 自检')
+const written = fs.readFileSync(ABS, 'utf8')
 const checks = [
-  ['A: 6 桩全 export', NAMES.every(n => new RegExp('^export const ' + n + '\\b', 'm').test(out))],
-  ['B: isInstActive export', /^export function isInstActive\s*\(/m.test(out)],
-  ['C: resolveInst 定义', /^(export\s+)?function\s+resolveInst\s*\(/m.test(out)],
-  ['D: getActiveSessionId 声明', /^(let|var|const)\s+getActiveSessionId\b/m.test(out)],
-  ['E: 无 inst.sessionId', !/\binst\.sessionId\b/.test(out)],
-  ['F: 无 activeLoop.value?.sessionId', !out.includes('activeLoop.value?.sessionId')],
-  ['G: 无 : LoopInstance | undefined', !/: LoopInstance \| undefined\b/.test(out)],
-  ['useAutoLoop 保留', /export\s+function\s+useAutoLoop\s*\(/.test(out)],
-  ['activeLoop 保留', /const\s+activeLoop\s*=\s*computed/.test(out)],
+  ['含 PRICING 常量', /export\s+const\s+PRICING/.test(written)],
+  ['含 Price 接口', /export\s+interface\s+Price/.test(written)],
+  ['含 Usage 接口', /export\s+interface\s+Usage/.test(written)],
+  ['含 estimateCost', /export\s+function\s+estimateCost/.test(written)],
+  ['含 formatCost', /export\s+function\s+formatCost/.test(written)],
+  ['formatCost 处理 null', /yuan\s*===\s*null/.test(written)],
+  ['deepseek-chat 单价', /'deepseek-chat'/.test(written)],
+  ['deepseek-reasoner 单价', /'deepseek-reasoner'/.test(written)],
 ]
 let allOk = true
 for (const [n, p] of checks) { if (p) ok(n); else { err(n); allOk = false } }
-if (!allOk) { err('自检失败，磁盘未改动'); process.exit(1) }
+if (!allOk) { err('自检失败'); process.exit(1) }
 
-fs.writeFileSync(ABS, out)
-ok(REL + ' 已更新 (' + out.length + ' 字节)')
+ok(REL + ' 已创建 (' + written.length + ' 字节)')
 console.log('▶ 下一步：pnpm tsc；浏览器 Cmd+Shift+R 硬刷新')
