@@ -39,7 +39,9 @@
     "air-check": "./bin/check-status.cjs",
     "air-log": "./bin/log-signal.cjs",
     "air-recover": "./bin/recover.cjs",
-    "air-run-all": "./bin/run-all.cjs"
+    "air-run-all": "./bin/run-all.cjs",
+    "air-notes": "./bin/gen-notes.cjs",
+    "air-compliance": "./bin/compliance-report.cjs"
   },
   "dependencies": {
     "@ast-grep/cli": "^0.28.0",
