@@ -529,6 +529,7 @@ const {
   pendingDecision, submitDecision,
 } = useAutoLoop()
 // 倒计时进度百分比：waitingElapsed / roundTimeoutMs
+const lastRunScript = ref('')
 const showUserNote = ref(false)
 const userNoteDraft = ref('')
 function submitUserNote() {
@@ -861,6 +862,23 @@ const chatItems = computed(() => busEvents.value
   }))
 
 const treeExpanded = ref<Set<number>>(new Set())
+
+/* [auto-expand-stream] 自动展开最后一个 ai:stream */
+const lastStreamId = computed(() => {
+  const ev = busEvents.value
+  for (let i = ev.length - 1; i >= 0; i--) {
+    if (ev[i].kind === 'ai:stream') return ev[i].id
+  }
+  return 0
+})
+watch(lastStreamId, (id) => {
+  if (!id) return
+  const s2 = new Set(treeExpanded.value)
+  if (!s2.has(id)) {
+    s2.add(id)
+    treeExpanded.value = s2
+  }
+})
 function toggleTreeNode(id: number) {
   const s = new Set(treeExpanded.value)
   if (s.has(id)) s.delete(id)
@@ -1419,13 +1437,10 @@ async function runSmart(opts?: { bypassAutoGuard?: boolean }) {
   const firstLine = text.split('\n', 1)[0].trim()
   const isNode = /^#!\s*\/usr\/bin\/(env\s+)?node\b/.test(firstLine)
   const isBash = /^#!\s*\/usr\/bin\/(env\s+)?bash\b/.test(firstLine)
-  if (isNode) {
+  if (isNode || isBash) {
     runningCommand.value = ''
-    run({ script: text })
-    return
-  }
-  if (isBash) {
-    runningCommand.value = ''
+    lastRunScript.value = text
+    script.value = ''
     run({ script: text })
     return
   }
@@ -1900,8 +1915,8 @@ watch(running, (v) => {
         if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput(forceFeedback) })
         else setTimeout(() => { void copyOutput(forceFeedback) }, AUTO_ASK_DELAY_MS)
       }
-      // U.8: 运行后保留编辑器内容（便于重跑 / 微调）
-      const scriptSnapshot = script.value
+      // 清空编辑区模式：脚本快照从 lastRunScript 取（script 已清空）
+      const scriptSnapshot = lastRunScript.value || script.value
       // 把跑过的脚本记为「已消费」，让后续 AI 回填能直接覆盖（不误伤手动编辑）
       setLastAutoFilled(scriptSnapshot)
       const r = result.value
