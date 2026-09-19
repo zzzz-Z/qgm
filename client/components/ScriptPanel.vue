@@ -325,15 +325,13 @@
           :class="{ active: sideTab === 'tree' }"
           class="side-tab"
           @click="sideTab = 'tree'"
-        >
-树
-</button>
+        ><svg class="side-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
         <button
           :class="{ active: sideTab === 'changes' }"
           class="side-tab"
           @click="sideTab = 'changes'"
         >
-变更<span v-if="changes.length" class="side-tab-badge">{{ changes.length }}</span>
+<svg class="side-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6"/><path d="M9 17h6"/></svg><span v-if="changes.length" class="side-tab-badge">{{ changes.length }}</span>
 </button>
       </div>
       <div v-show="sideTab === 'tree'" class="side-tree">
@@ -3431,5 +3429,61 @@ function onHtmlDrop(e: DragEvent) {
   vertical-align: -1px;
 }
 .primary-btn .ico-svg + span { margin-left: 2px; }
+
+/* ═══════════════════════════════════════════════════════════
+   [ui-polish] 去外壳 + 按钮圆角 + tab 一体化
+   ═══════════════════════════════════════════════════════════ */
+
+/* 1. 去外壳：terminal / editor 去 card 边框、背景、阴影 */
+.pane-main > .terminal.card,
+.pane-main > .editor.card {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+/* 2. 顶栏 bar 加圆角，与内容视觉一体 */
+.pane-main .terminal .term-bar,
+.pane-main .editor .editor-bar {
+  border-radius: 10px 10px 0 0;
+}
+
+/* 3. 按钮圆角统一（原 6px → 8px） */
+.primary-btn,
+.loop-btn,
+.ghost-btn,
+.term-btn,
+.btn,
+.tpl-chip,
+.draft-select,
+.side-tab {
+  border-radius: 8px;
+}
+
+/* 4. side-tabs 图标化 + 与内容一体 */
+.side-tabs {
+  padding: 4px;
+  gap: 4px;
+  background: var(--surface-2);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+}
+.side-tab {
+  padding: 6px 10px;
+}
+.side-tab.active {
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(15 30 60 / 6%);
+}
+.side-tab-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  vertical-align: -2px;
+  flex-shrink: 0;
+}
+
 </style>
 <!-- tooltip-audit -->
