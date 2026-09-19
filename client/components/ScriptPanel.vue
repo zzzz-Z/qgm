@@ -3485,5 +3485,422 @@ function onHtmlDrop(e: DragEvent) {
   flex-shrink: 0;
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   [dark-compact] 紧凑深色：步骤小字 + 气泡收紧
+   ═══════════════════════════════════════════════════════════ */
+
+/* 对话区整体收紧 */
+.chat-list {
+  gap: 2px !important;
+  padding: 8px 12px 14px !important;
+  font: 12px/1.55 var(--mono, monospace) !important;
+}
+
+/* 步骤行（脚本执行过程）—— 小字日志风 */
+.chat-step {
+  padding: 2px 8px !important;
+  margin: 0 !important;
+  gap: 6px !important;
+  font: 11px/1.5 var(--mono, monospace) !important;
+  border-radius: 3px !important;
+  border: 0 !important;
+  border-left: 2px solid #6a737d !important;
+  background: transparent !important;
+  color: var(--text-2) !important;
+  min-height: 0 !important;
+}
+.chat-step:hover { background: var(--term-chip-bg-2) !important; }
+.chat-step.state-pending { border-left-color: #6a737d !important; }
+.chat-step.state-running { border-left-color: #60a5fa !important; background: rgb(96 165 250 / 6%) !important; }
+.chat-step.state-done { border-left-color: #10b981 !important; }
+.chat-step.state-error { border-left-color: #f87171 !important; background: rgb(248 113 113 / 8%) !important; }
+.chat-step .step-dot { width: 4px !important; height: 4px !important; }
+.chat-step .step-icon { font-size: 11px !important; }
+.chat-step .step-title { font-size: 11px !important; }
+.chat-step .step-time { font-size: 10px !important; }
+.chat-step .step-state {
+  font-size: 9px !important;
+  padding: 0 6px !important;
+  line-height: 1.5 !important;
+  border-radius: 3px !important;
+}
+
+/* 用户/AI 气泡收紧，别太占地方 */
+.chat-bubble {
+  padding: 6px 10px !important;
+  border-radius: 8px !important;
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+  margin: 3px 0 !important;
+  max-width: 88% !important;
+}
+.bubble-head {
+  margin-bottom: 3px !important;
+  font-size: 10px !important;
+  letter-spacing: 0.2px !important;
+}
+.bubble-body { font-size: 12px !important; }
+.bubble-body .md-h { margin: 3px 0 2px !important; font-size: 11px !important; }
+.bubble-body .md-p { margin: 1px 0 !important; }
+.bubble-body .md-code { margin: 4px 0 !important; }
+
+/* 系统小提示行紧凑 */
+.chat-sys {
+  padding: 1px 8px !important;
+  font-size: 10px !important;
+  gap: 6px !important;
+}
+.sys-tag { padding: 0 6px !important; font-size: 10px !important; }
+
+/* 思考行紧凑 */
+.chat-think {
+  padding: 3px 8px !important;
+  font-size: 11px !important;
+  gap: 6px !important;
+  max-width: 100% !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [button-theme] 按钮配色重做：暖橙强调 + 灰阶次按钮
+   参考 Claude Code / Codex 克制配色
+   ═══════════════════════════════════════════════════════════ */
+
+/* ——— 次按钮：透明底 + 细边框，hover 时淡淡提亮 ——— */
+.ghost-btn {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--text-2) !important;
+  border-radius: 6px !important;
+  padding: 4px 10px !important;
+  font-size: var(--font-12) !important;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+}
+.ghost-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text) !important;
+  border-color: rgb(255 255 255 / 8%) !important;
+}
+.ghost-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
+
+/* ——— 终端内按钮 ——— */
+.term-btn {
+  background: transparent !important;
+  border: 1px solid rgb(255 255 255 / 8%) !important;
+  color: var(--text-2) !important;
+  border-radius: 6px !important;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+}
+.term-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text) !important;
+  border-color: rgb(255 255 255 / 14%) !important;
+}
+.term-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
+.term-btn.copy, .term-btn.ask-panel { color: var(--text-2) !important; border-color: rgb(255 255 255 / 8%) !important; }
+.term-btn.copy:hover:not(:disabled), .term-btn.ask-panel:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; border-color: rgb(255 255 255 / 14%) !important;
+}
+
+/* ——— 芯片 / 下拉 / tab ——— */
+.tpl-chip {
+  background: transparent !important;
+  border: 1px solid rgb(255 255 255 / 8%) !important;
+  color: var(--text-2) !important;
+  border-radius: 6px !important;
+}
+.tpl-chip:hover {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text) !important;
+  border-color: rgb(255 255 255 / 14%) !important;
+}
+.draft-select {
+  background: transparent !important;
+  border: 1px solid rgb(255 255 255 / 8%) !important;
+  color: var(--text-2) !important;
+  border-radius: 6px !important;
+}
+.draft-select:hover { border-color: rgb(255 255 255 / 14%) !important; }
+
+/* ——— primary 系列（运行/主操作）：暖橙实底 ——— */
+.primary-btn.run {
+  background: var(--primary) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+  border: 0 !important;
+}
+.primary-btn.run:hover:not(:disabled) { background: var(--primary-hover) !important; box-shadow: none !important; }
+
+/* 运行按钮（takeover 态）：暖橙描边，非实心，更克制 */
+.primary-btn.takeover {
+  background: transparent !important;
+  color: var(--primary) !important;
+  border: 1px solid var(--primary) !important;
+  box-shadow: none !important;
+}
+.primary-btn.takeover:hover:not(:disabled) {
+  background: rgb(217 119 87 / 12%) !important;
+  color: var(--primary-hover) !important;
+  border-color: var(--primary-hover) !important;
+}
+
+/* 停止 / 暂停：柔和红描边 */
+.primary-btn.stop {
+  background: transparent !important;
+  color: var(--danger) !important;
+  border: 1px solid var(--danger) !important;
+  box-shadow: none !important;
+}
+.primary-btn.stop:hover:not(:disabled) {
+  background: rgb(224 108 117 / 14%) !important;
+  color: #fff !important;
+  border-color: var(--danger) !important;
+}
+
+/* ——— loop-btn 系列 ——— */
+.loop-btn {
+  background: transparent !important;
+  border: 1px solid rgb(255 255 255 / 8%) !important;
+  color: var(--text-2) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+}
+.loop-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text) !important;
+  border-color: rgb(255 255 255 / 14%) !important;
+}
+.loop-btn:active:not(:disabled) { box-shadow: none !important; }
+.loop-btn:focus-visible { outline: 0 !important; box-shadow: 0 0 0 2px rgb(217 119 87 / 30%) !important; }
+.loop-btn:disabled { opacity: 0.4 !important; background: transparent !important; color: var(--text-3) !important; }
+
+.loop-btn.primary {
+  background: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+.loop-btn.primary:hover:not(:disabled) {
+  background: var(--primary-hover) !important;
+  border-color: var(--primary-hover) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+.loop-btn.kill, .loop-btn.rollback {
+  background: transparent !important;
+  border-color: rgb(224 108 117 / 55%) !important;
+  color: var(--danger) !important;
+  box-shadow: none !important;
+}
+.loop-btn.kill:hover:not(:disabled), .loop-btn.rollback:hover:not(:disabled) {
+  background: rgb(224 108 117 / 14%) !important;
+  border-color: var(--danger) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+/* ——— 决策按钮 ——— */
+.decision-btn {
+  background: rgb(217 119 87 / 12%) !important;
+  color: var(--primary) !important;
+  border-color: var(--primary) !important;
+  font-weight: 600 !important;
+}
+.decision-btn:hover:not(:disabled) {
+  background: var(--primary) !important;
+  color: #fff !important;
+  border-color: var(--primary) !important;
+}
+
+/* ——— 焦点环统一暖橙 ——— */
+.primary-btn:focus-visible, .term-btn:focus-visible, .ghost-btn:focus-visible, .tpl-chip:focus-visible, .draft-select:focus-visible {
+  outline: 0 !important;
+  box-shadow: 0 0 0 2px rgb(217 119 87 / 35%) !important;
+}
+
+/* ——— 图标按钮（App 头部）——— */
+.theme-toggle, .trace-toggle, .settings-toggle, .ask-toggle, .timeline-toggle {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--text-2) !important;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+}
+.theme-toggle:hover, .trace-toggle:hover, .settings-toggle:hover, .ask-toggle:hover, .timeline-toggle:hover {
+  background: rgb(255 255 255 / 6%) !important;
+  color: var(--text) !important;
+  border-color: rgb(255 255 255 / 10%) !important;
+}
+
+/* ——— 主色大按钮（FileList.save-btn / GeneratePanel.btn-primary）——— */
+.save-btn, .btn-primary {
+  background: var(--primary) !important;
+  color: #fff !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 6px !important;
+}
+.save-btn:hover:not(:disabled), .btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover) !important;
+  box-shadow: none !important;
+}
+
+/* ——— FileList 撤回按钮 ——— */
+.undo-btn {
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--text-3) !important;
+}
+.undo-btn:hover:not(:disabled) {
+  background: rgb(224 108 117 / 14%) !important;
+  color: var(--danger) !important;
+}
+
+/* ——— FileTree 刷新 ——— */
+.refresh { background: transparent !important; border: 0 !important; color: var(--text-3) !important; }
+.refresh:hover:not(:disabled) { background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [button-theme-v2] 主按钮去实底，静默态灰
+   ═══════════════════════════════════════════════════════════ */
+
+/* run 态（P2 主操作）—— 透明底 + 橙描边 */
+.primary-btn.run {
+  background: transparent !important;
+  color: var(--primary) !important;
+  border: 1px solid var(--primary) !important;
+  box-shadow: none !important;
+}
+.primary-btn.run:hover:not(:disabled) {
+  background: var(--primary-bg) !important;
+  color: var(--primary-hover) !important;
+  border-color: var(--primary-hover) !important;
+  box-shadow: none !important;
+}
+
+/* takeover 态（运行按钮）—— 同样透明底 + 橙描边 */
+.primary-btn.takeover {
+  background: transparent !important;
+  color: var(--primary) !important;
+  border: 1px solid var(--primary) !important;
+  box-shadow: none !important;
+}
+.primary-btn.takeover:hover:not(:disabled) {
+  background: var(--primary-bg) !important;
+  color: var(--primary-hover) !important;
+  border-color: var(--primary-hover) !important;
+}
+
+/* stop 态（暂停）—— 透明底 + 柔红描边 */
+.primary-btn.stop {
+  background: transparent !important;
+  color: var(--danger) !important;
+  border: 1px solid var(--danger) !important;
+  box-shadow: none !important;
+}
+.primary-btn.stop:hover:not(:disabled) {
+  background: rgb(224 108 117 / 12%) !important;
+  color: var(--danger) !important;
+  border-color: var(--danger) !important;
+}
+
+/* loop-btn 主态：透明橙描边 */
+.loop-btn.primary {
+  background: transparent !important;
+  color: var(--primary) !important;
+  border-color: var(--primary) !important;
+}
+.loop-btn.primary:hover:not(:disabled) {
+  background: var(--primary-bg) !important;
+  color: var(--primary-hover) !important;
+  border-color: var(--primary-hover) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [side-connected] 树/变更 tab 与内容一体
+   ═══════════════════════════════════════════════════════════ */
+
+/* 1. 去掉 tab 与内容之间的间距 */
+.pane-side {
+  gap: 0 !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 10px !important;
+  overflow: hidden !important;
+}
+
+/* 2. tab 条紧贴内容，去圆角只留顶部，统一底色 */
+.side-tabs {
+  background: var(--surface-2) !important;
+  border-radius: 0 !important;
+  border-bottom: 1px solid var(--border) !important;
+  padding: 4px !important;
+  gap: 4px !important;
+  flex-shrink: 0 !important;
+}
+
+/* 3. 内容区透明无边框，融入外层圆角 */
+.side-tree,
+.side-changes {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 8px 10px !important;
+  gap: 0 !important;
+}
+
+/* 4. tab 激活态更柔和 */
+.side-tab.active {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+}
+.side-tab {
+  color: var(--text-3) !important;
+  transition: background 0.12s ease, color 0.12s ease !important;
+}
+.side-tab:hover {
+  background: rgb(255 255 255 / 4%) !important;
+  color: var(--text-2) !important;
+}
+
+/* 5. 项目结构标题行去底部留白 */
+.side-tree .tree-head {
+  margin-bottom: 4px !important;
+  padding: 0 4px 6px !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [tab-badge] 变更 tab 徽章：实心橙底白字，醒目显示数量
+   ═══════════════════════════════════════════════════════════ */
+.side-tab-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 18px !important;
+  height: 18px !important;
+  padding: 0 5px !important;
+  margin-left: 3px !important;
+  background: var(--primary) !important;
+  color: #fff !important;
+  border-radius: 9px !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  font-variant-numeric: tabular-nums !important;
+  line-height: 1 !important;
+  box-shadow: 0 0 0 2px var(--surface-2) !important;
+  transition: transform 0.15s ease !important;
+}
+/* 变更 tab 被激活时，徽章反色（白底橙字） */
+.side-tab.active .side-tab-badge {
+  background: var(--primary-bg) !important;
+  color: var(--primary) !important;
+  box-shadow: 0 0 0 2px var(--surface) !important;
+}
+
 </style>
 <!-- tooltip-audit -->
