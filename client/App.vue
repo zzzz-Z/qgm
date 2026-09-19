@@ -308,7 +308,7 @@ function onSessionIdMessage(e: MessageEvent) {
       if (item) {
         const lineCount = code.split('\n').length
         toast(`AI 脚本已到达 · ${lang} · ${lineCount} 行 · ${item.desc || '无说明'}`, 'info', 4000)
-        emitBus('ai:script', item.desc ? `📥 ${item.desc}` : `📥 脚本 · ${lang} · ${lineCount} 行`, { payload: { desc: item.desc, why: item.why, lang, lineCount, hash: item.hash, ...currentLoopContext() } })
+        emitBus('ai:script', item.desc ? `📥 ${item.desc}` : `📥 脚本 · ${lang} · ${lineCount} 行`, { payload: { desc: item.desc, why: item.why, plan: meta('plan'), lang, lineCount, hash: item.hash, ...currentLoopContext() } })
         // 决策链路：脚本到达事件入 TraceLog（v6 §3.2），循环中盖 loopId/loopRound
         addTrace({
           kind: 'script',

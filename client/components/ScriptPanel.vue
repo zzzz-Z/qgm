@@ -127,7 +127,7 @@
                 class="chat-bubble bubble-left bubble-think"
                 v-html="renderMarkdown(e.summary)"
               />
-              <div v-else-if="e.role === 'user'" class="chat-bubble bubble-right">
+              <div v-else-if="e.role === 'user'" class="chat-msg chat-msg-user">
                 <div class="bubble-head">👤 我 · {{ fmtTreeTime(e.ts) }}</div>
                 <div class="bubble-body" v-html="renderUserBubble(e)" />
               </div>
@@ -138,10 +138,9 @@
                 <span class="step-time">{{ fmtTreeTime(e.ts) }}</span>
                 <span class="step-state">{{ stepLabelOf(e) }}</span>
               </div>
-              <div v-else-if="e.role === 'ai'" class="chat-bubble bubble-left">
+              <div v-else-if="e.role === 'ai'" class="chat-msg chat-msg-ai">
                 <div class="bubble-head">🤖 AI · {{ fmtTreeTime(e.ts) }}</div>
-                <div v-if="e.payload" class="bubble-body" v-html="renderAiBubble(e)" />
-                <div v-else class="bubble-body">{{ e.summary }}</div>
+                <div class="bubble-body" v-html="renderAiBubble(e)" />
               </div>
               <div v-else class="chat-sys">
                 <span class="sys-tag">{{ treeIcon(e.kind) }} {{ e.summary }}</span>
@@ -325,13 +324,15 @@
           :class="{ active: sideTab === 'tree' }"
           class="side-tab"
           @click="sideTab = 'tree'"
-        ><svg class="side-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+        >
+<svg class="side-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+</button>
         <button
           :class="{ active: sideTab === 'changes' }"
           class="side-tab"
           @click="sideTab = 'changes'"
         >
-<svg class="side-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6"/><path d="M9 17h6"/></svg><span v-if="changes.length" class="side-tab-badge">{{ changes.length }}</span>
+<svg class="side-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M9 13h6" /><path d="M9 17h6" /></svg><span v-if="changes.length" class="side-tab-badge">{{ changes.length }}</span>
 </button>
       </div>
       <div v-show="sideTab === 'tree'" class="side-tree">
@@ -761,24 +762,26 @@ function renderUserBubble(e: { kind: string, payload?: Record<string, unknown> }
     const exit = e.payload.exit ?? '?'
     return renderMarkdown(`回传 AI · exit ${exit} · ${cnt} 文件`)
   }
-  return renderPayload(e.payload)
+  return ''
 }
 
 function renderAiBubble(e: { kind: string, payload?: Record<string, unknown>, summary?: string }): string {
-  if (!e.payload) return String(e.summary || '')
+  if (!e.payload) return ''
   if (e.kind === 'ai:script') {
-    const desc = String(e.payload.desc || '')
-    const why = String(e.payload.why || '')
-    const lang = String(e.payload.lang || '')
-    const lc = Number(e.payload.lineCount) || 0
-    const head = desc ? '📥 ' + desc : ('📥 脚本 · ' + lang + (lc ? ' · ' + lc + ' 行' : ''))
-    const lines = [head]
-    if (why) lines.push('', '**为什么**：' + why)
-    return renderMarkdown(lines.join('\n'))
+    const desc = String(e.payload.desc || '').trim()
+    const why = String(e.payload.why || '').trim()
+    const plan = String(e.payload.plan || '').trim()
+    const parts: string[] = []
+    if (desc) parts.push('**' + desc + '**')
+    if (why) parts.push('为什么：' + why)
+    if (plan) parts.push('计划：' + plan)
+    return parts.length ? renderMarkdown(parts.join('\n\n')) : ''
   }
-  const text = e.payload.text !== undefined ? String(e.payload.text) : ''
-  if (text) return renderMarkdown(text)
-  return renderPayload(e.payload)
+  if (e.kind === 'ai:done' || e.kind === 'ai:plain' || e.kind === 'ai:multi') {
+    const text = e.payload.text !== undefined ? String(e.payload.text).trim() : ''
+    return text ? renderMarkdown(text) : ''
+  }
+  return ''
 }
 
 function renderPayload(p: unknown): string {
@@ -3964,6 +3967,59 @@ function onHtmlDrop(e: DragEvent) {
 .chat-step.state-running .step-state {
   background: rgb(96 165 250 / 18%) !important;
   color: #93c5fd !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [msg-center-v2] 消息居中 + 精简
+   ═══════════════════════════════════════════════════════════ */
+.chat-msg {
+  display: block;
+  width: fit-content;
+  max-width: min(720px, 92%);
+  margin: 6px auto !important;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--term-chip-bg, rgb(255 255 255 / 4%));
+  border: 1px solid var(--term-chip-border, rgb(255 255 255 / 6%));
+  font: 12px/1.6 var(--mono, monospace);
+  color: var(--term-text, var(--text));
+  text-align: left;
+}
+.chat-msg-user {
+  background: rgb(99 102 241 / 8%);
+  border-color: rgb(99 102 241 / 18%);
+}
+.chat-msg-ai {
+  background: var(--term-chip-bg, rgb(255 255 255 / 4%));
+}
+.chat-msg .bubble-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 4px;
+  font-size: 10px;
+  color: var(--term-text-3, var(--text-3));
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+.chat-msg .bubble-body {
+  color: var(--term-text, var(--text));
+  word-break: break-word;
+}
+.chat-msg .bubble-body strong {
+  color: var(--term-accent, var(--primary));
+  font-weight: 600;
+}
+.chat-msg .bubble-body p {
+  margin: 2px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 强制覆盖旧左右分栏位置 */
+.chat-list .chat-msg {
+  align-self: auto !important;
 }
 
 </style>
