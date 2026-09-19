@@ -131,10 +131,15 @@
                 :class="['state-' + stepStateOf(e), { expanded: treeExpanded.has(e.id) }]"
                 @click="toggleTreeNode(e.id)"
               >
-                <span class="step-dot" />
                 <span class="step-icon">{{ stepIconOf(e) }}</span>
                 <span class="step-title">{{ stepTitleOf(e) }}</span>
                 <span class="step-time">{{ fmtTreeTime(e.ts) }}</span>
+                <span v-if="stepStateOf(e) === 'running' || stepStateOf(e) === 'pending'" class="step-loading" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+                    <circle cx="12" cy="12" r="9" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 0-9-9" />
+                  </svg>
+                </span>
                 <span class="step-state">{{ stepLabelOf(e) }}</span>
                 <span class="step-caret" :class="{ open: treeExpanded.has(e.id) }">▾</span>
                 <div v-if="treeExpanded.has(e.id)" class="step-detail" @click.stop>
@@ -6569,6 +6574,109 @@ function onHtmlDrop(e: DragEvent) {
 .chat-step.state-error {
   background: rgb(248 113 113 / 6%) !important;
 }
+
+
+/* ═══════════════════════════════════════════════════════════
+   [loading-right] loading 右侧 + 明显旋转圈 + 图标描述居中
+   ═══════════════════════════════════════════════════════════ */
+
+/* 步骤条：单行横向，左侧 icon+title，中间空白，右侧 time+loading+state+caret */
+.chat-step {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  gap: 10px !important;
+  padding: 10px 14px !important;
+}
+
+/* 隐藏旧 dot */
+.chat-step .step-dot { display: none !important; }
+
+/* 描述前图标：垂直居中 + 稍大 */
+.chat-step .step-icon {
+  flex: 0 0 auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 14px !important;
+  line-height: 1 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 20px !important;
+  height: 20px !important;
+}
+.chat-step .step-icon::before { content: '' !important; }
+
+/* 标题：与 icon 居中对齐 */
+.chat-step .step-title {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  font-size: 12.5px !important;
+  line-height: 1.5 !important;
+  margin: 0 !important;
+}
+.chat-step.expanded .step-title {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  display: block !important;
+}
+
+/* 时间 */
+.chat-step .step-time {
+  flex: 0 0 auto !important;
+  font-size: 11px !important;
+  color: var(--text-3, #6b6b6b) !important;
+  opacity: 0.9 !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+/* 右侧 loading 旋转圈 */
+.chat-step .step-loading {
+  flex: 0 0 auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 16px !important;
+  height: 16px !important;
+  color: var(--primary, #a78bfa) !important;
+  animation: step-loading-spin 0.9s linear infinite !important;
+}
+.chat-step .step-loading svg {
+  width: 14px !important;
+  height: 14px !important;
+  display: block !important;
+}
+@keyframes step-loading-spin { to { transform: rotate(360deg); } }
+
+/* 状态徽章 */
+.chat-step .step-state {
+  flex: 0 0 auto !important;
+  padding: 1px 9px !important;
+  border-radius: 10px !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  background: rgb(255 255 255 / 4%) !important;
+  color: var(--text-3, #6b6b6b) !important;
+}
+.chat-step.state-running .step-state { background: rgb(167 139 250 / 14%) !important; color: #c4b5fd !important; }
+.chat-step.state-done .step-state { background: rgb(74 222 128 / 12%) !important; color: #86efac !important; }
+.chat-step.state-error .step-state { background: rgb(248 113 113 / 14%) !important; color: #fca5a5 !important; }
+
+/* caret */
+.chat-step .step-caret {
+  flex: 0 0 auto !important;
+  font-size: 9px !important;
+  opacity: 0.4 !important;
+  margin: 0 !important;
+}
+.chat-step:hover .step-caret { opacity: 0.9 !important; }
 
 </style>
 <!-- tooltip-audit -->
