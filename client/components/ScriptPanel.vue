@@ -5662,5 +5662,236 @@ function onHtmlDrop(e: DragEvent) {
 .step-detail { gap: 8px !important; }
 .detail-pre { max-height: 260px !important; }
 
+
+/* ═══════════════════════════════════════════════════════════
+   [linear-polish] 步骤条 Linear 风：紧凑单行 + 状态圆点 + 弱化时间
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── chat-list 更窄居中 ─── */
+.chat-list {
+  max-width: 720px !important;
+  gap: 3px !important;
+  padding: 12px 16px 20px !important;
+}
+
+/* ─── 步骤条主体：单行紧凑 ─── */
+.chat-step {
+  padding: 5px 10px !important;
+  border-radius: 5px !important;
+  gap: 7px !important;
+  min-height: 0 !important;
+  border-left-width: 2px !important;
+  align-items: center !important;
+}
+.chat-step .step-dot {
+  width: 5px !important;
+  height: 5px !important;
+  margin-top: 0 !important;
+}
+.chat-step .step-icon {
+  font-size: 11px !important;
+  margin-top: 0 !important;
+  line-height: 1 !important;
+}
+.chat-step .step-title {
+  font-size: 11.5px !important;
+  font-weight: 500 !important;
+  line-height: 1.45 !important;
+  margin: 0 !important;
+}
+.chat-step .step-title strong { font-weight: 600 !important; }
+.chat-step .step-time {
+  font-size: 10px !important;
+  font-variant-numeric: tabular-nums !important;
+  opacity: 0.5 !important;
+  margin-top: 0 !important;
+}
+.chat-step .step-state {
+  padding: 0 !important;
+  background: transparent !important;
+  font-size: 10.5px !important;
+  font-weight: 500 !important;
+  margin-top: 0 !important;
+  letter-spacing: 0.2px !important;
+}
+.chat-step .step-caret {
+  font-size: 9px !important;
+  opacity: 0.4 !important;
+  margin-top: 0 !important;
+  margin-left: 2px !important;
+}
+.chat-step:hover .step-caret { opacity: 0.9 !important; }
+
+/* 状态色：只涂 dot + state 文字，无背景 */
+.chat-step.state-running { border-left-color: #a78bfa !important; background: rgb(167 139 250 / 5%) !important; }
+.chat-step.state-running .step-state { color: #c4b5fd !important; }
+.chat-step.state-done { border-left-color: rgb(74 222 128 / 55%) !important; background: transparent !important; }
+.chat-step.state-done .step-state { color: #86efac !important; }
+.chat-step.state-error { border-left-color: rgb(248 113 113 / 55%) !important; background: rgb(248 113 113 / 5%) !important; }
+.chat-step.state-error .step-state { color: #fca5a5 !important; }
+.chat-step.state-pending { border-left-color: rgb(255 255 255 / 14%) !important; background: transparent !important; }
+.chat-step.state-pending .step-state { color: var(--text-3, #6b6b6b) !important; }
+
+/* ─── 展开区：Linear 时间线 ─── */
+.step-detail {
+  gap: 10px !important;
+  padding-top: 10px !important;
+  margin-top: 10px !important;
+  border-top: 1px solid rgb(255 255 255 / 6%) !important;
+  font-size: 11.5px !important;
+}
+
+.detail-row {
+  gap: 12px !important;
+  align-items: flex-start !important;
+}
+.detail-label {
+  flex: 0 0 48px !important;
+  padding-top: 2px !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  color: var(--text-3, #6b6b6b) !important;
+  letter-spacing: 0.3px !important;
+  text-transform: uppercase !important;
+}
+.detail-val {
+  font-size: 11.5px !important;
+  line-height: 1.55 !important;
+}
+
+/* ─── 生命周期时间线：竖线连接 ─── */
+.detail-stages {
+  flex: 1 1 auto !important;
+  position: relative !important;
+  padding: 2px 0 2px 12px !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  gap: 4px !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+/* 竖线 */
+.detail-stages::before {
+  content: '' !important;
+  position: absolute !important;
+  left: 4px !important;
+  top: 8px !important;
+  bottom: 8px !important;
+  width: 1px !important;
+  background: rgb(255 255 255 / 10%) !important;
+}
+.stage-item {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 1px 0 !important;
+  font-size: 11px !important;
+  line-height: 1.5 !important;
+  min-height: 18px !important;
+}
+/* 时间线节点 */
+.stage-item .stage-idx { display: none !important; }
+.stage-item .stage-dot {
+  position: absolute !important;
+  left: -12px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 7px !important;
+  height: 7px !important;
+  border-radius: 50% !important;
+  border: 2px solid var(--bg, #0d0d0d) !important;
+  background: var(--text-3, #6b6b6b) !important;
+  box-sizing: content-box !important;
+}
+.stage-item .stage-dot.ok { background: #4ade80 !important; }
+.stage-item .stage-dot.err { background: #f87171 !important; }
+.stage-item .stage-dot.run { background: #a78bfa !important; animation: stage-pulse 1.2s ease-in-out infinite !important; }
+
+.stage-item .stage-name {
+  flex: 0 0 auto !important;
+  min-width: 60px !important;
+  font-weight: 500 !important;
+  color: var(--text, #e6e6e6) !important;
+  font-size: 11.5px !important;
+}
+.stage-item .stage-meta,
+.stage-item .stage-ms {
+  color: var(--text-3, #6b6b6b) !important;
+  font: 10.5px/1 var(--mono, monospace) !important;
+  font-variant-numeric: tabular-nums !important;
+}
+.stage-item .stage-tag {
+  font-size: 9.5px !important;
+  padding: 0 5px !important;
+  border-radius: 3px !important;
+}
+.stage-item .stage-status {
+  margin-left: auto !important;
+  padding: 0 6px !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  background: transparent !important;
+  border-radius: 3px !important;
+}
+.stage-item .stage-status.ok { color: #86efac !important; }
+.stage-item .stage-status.err { color: #fca5a5 !important; }
+.stage-item .stage-status.run { color: #c4b5fd !important; }
+
+/* ─── 输出 pre：更紧凑 ─── */
+.detail-pre {
+  padding: 8px 10px !important;
+  font: 10.5px/1.55 var(--mono, monospace) !important;
+  background: rgb(0 0 0 / 25%) !important;
+  border-radius: 4px !important;
+  max-height: 240px !important;
+  color: var(--text-2, #a3a3a3) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [revert-3] 撤销 linear-polish 的三处紧凑化
+   ═══════════════════════════════════════════════════════════ */
+
+/* 1. 步骤条 padding 恢复：更大内边距 */
+.chat-step {
+  padding: 8px 14px !important;
+  gap: 10px !important;
+  min-height: 24px !important;
+}
+
+/* 2. 时间：恢复正常透明度 */
+.chat-step .step-time {
+  opacity: 1 !important;
+  color: var(--text-3, #6b6b6b) !important;
+  font-size: 11px !important;
+}
+
+/* 3. 输出 pre：恢复正常行高/内边距 */
+.detail-pre {
+  padding: 10px 12px !important;
+  font: 11px/1.65 var(--mono, monospace) !important;
+  max-height: 320px !important;
+}
+
+/* 4. 状态徽章恢复淡底 */
+.chat-step .step-state {
+  background: rgb(255 255 255 / 5%) !important;
+  padding: 1px 9px !important;
+  border-radius: 10px !important;
+  font-size: 10.5px !important;
+  font-weight: 500 !important;
+}
+.chat-step.state-running .step-state { background: rgb(167 139 250 / 14%) !important; color: #c4b5fd !important; }
+.chat-step.state-done .step-state { background: rgb(74 222 128 / 12%) !important; color: #86efac !important; }
+.chat-step.state-error .step-state { background: rgb(248 113 113 / 14%) !important; color: #fca5a5 !important; }
+.chat-step.state-pending .step-state { background: rgb(255 255 255 / 5%) !important; color: var(--text-3, #6b6b6b) !important; }
+
+/* 5. chat-list 恢复原宽 */
+.chat-list {
+  max-width: 800px !important;
+  gap: 5px !important;
+}
+
 </style>
 <!-- tooltip-audit -->
