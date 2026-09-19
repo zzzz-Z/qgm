@@ -5893,5 +5893,93 @@ function onHtmlDrop(e: DragEvent) {
   gap: 5px !important;
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   [unify-spacing] 消息统一风格 + 加大间距
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── 消息间距加大 ─── */
+.chat-list {
+  gap: 12px !important;
+  padding: 18px 22px 28px !important;
+}
+
+/* ─── 用户消息：与步骤条同款（中性卡 + 左竖线 + 无紫底）─── */
+.chat-msg-user {
+  background: var(--surface, #141414) !important;
+  border: 1px solid var(--border, #262626) !important;
+  border-left: 2px solid rgb(167 139 250 / 55%) !important;
+  border-radius: 6px !important;
+  padding: 10px 14px !important;
+  margin-right: 40px !important;
+  margin-left: 0 !important;
+}
+.chat-msg-user .bubble-head {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  justify-content: flex-start !important;
+  color: var(--text-3, #6b6b6b) !important;
+  font-size: 11px !important;
+  margin: 0 0 6px 0 !important;
+  padding: 0 !important;
+  border-bottom: 0 !important;
+}
+.chat-msg-user .bubble-body {
+  color: var(--text, #e6e6e6) !important;
+  font-size: 12.5px !important;
+  line-height: 1.6 !important;
+}
+
+/* ─── AI 消息：同款（紫左竖线）─── */
+.chat-msg-ai {
+  background: var(--surface, #141414) !important;
+  border: 1px solid var(--border, #262626) !important;
+  border-left: 2px solid #a78bfa !important;
+  border-radius: 6px !important;
+  padding: 10px 14px !important;
+}
+.chat-msg-ai .bubble-head {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  color: var(--text-3, #6b6b6b) !important;
+  font-size: 11px !important;
+  margin: 0 0 6px 0 !important;
+  padding: 0 !important;
+  border-bottom: 0 !important;
+}
+.chat-msg-ai .bubble-body {
+  color: var(--text, #e6e6e6) !important;
+  font-size: 12.5px !important;
+  line-height: 1.6 !important;
+}
+.chat-msg-ai .bubble-body strong {
+  color: #c4b5fd !important;
+  font-weight: 600 !important;
+}
+
+/* ─── 步骤条：同款间距 ─── */
+.chat-step {
+  padding: 10px 14px !important;
+  gap: 10px !important;
+  margin: 0 !important;
+}
+
+/* ─── 等待气泡：同款 ─── */
+.chat-waiting {
+  background: var(--surface, #141414) !important;
+  border: 1px solid var(--border, #262626) !important;
+  border-left: 2px solid #a78bfa !important;
+  border-radius: 6px !important;
+  padding: 10px 14px !important;
+}
+
+/* ─── 展开区：与卡片内边距对齐 ─── */
+.step-detail {
+  margin-top: 10px !important;
+  padding-top: 10px !important;
+}
+
 </style>
 <!-- tooltip-audit -->
