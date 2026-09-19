@@ -37,7 +37,7 @@
             >
 {{ opt.label }}
 </button>
-            <button v-tooltip="'取消决策点，结束循环'" class="loop-btn" @click="submitDecision('__cancel__')">取消</button>
+            <button v-tooltip="'取消决策点，结束循环'" class="loop-btn" @click="submitDecision('__cancel__')"><svg class="ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg><span>取消</span></button>
 <button v-tooltip="'输入自定义答案'" class="loop-btn" @click="decisionCustomOpen = !decisionCustomOpen">✎ 自定义</button>
           </div>
           <div v-if="decisionCustomOpen" class="decision-custom">
@@ -92,7 +92,7 @@
           placeholder="给 AI 的补充说明（提交后下一轮反馈时带上，提交后清空）"
         />
         <div class="note-actions">
-          <button class="loop-btn" @click="showUserNote = false; userNoteDraft = ''">取消</button>
+          <button class="loop-btn" @click="showUserNote = false; userNoteDraft = ''"><svg class="ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg><span>取消</span></button>
           <button class="loop-btn primary" :disabled="!userNoteDraft.trim()" @click="submitUserNote">保存</button>
         </div>
       </section>
@@ -7266,6 +7266,81 @@ function onHtmlDrop(e: DragEvent) {
 }
 .pane {
   padding: 0 !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [ui-polish-v4] 4 项微调
+   ═══════════════════════════════════════════════════════════ */
+
+/* 1. 编辑框 ↔ 树 边距收窄 */
+.side-resize-handle {
+  width: 6px !important;
+}
+.pane {
+  gap: 0 !important;
+}
+.pane-side {
+  gap: 0 !important;
+  margin-left: 0 !important;
+}
+/* 树容器只留左细线，不占空 */
+.side-resize-handle::after {
+  left: 50% !important;
+}
+
+/* 2. 按钮 hover 统一（所有按钮过渡 + 暖橙描边反馈） */
+.primary-btn,
+.term-btn,
+.ghost-btn,
+.loop-btn,
+.tpl-chip,
+.draft-select,
+.side-tab,
+.refresh,
+.undo-btn,
+.save-btn {
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, opacity 0.14s ease !important;
+}
+/* 灰阶次按钮 hover 加暖橙字色 */
+.ghost-btn:hover:not(:disabled),
+.term-btn:hover:not(:disabled),
+.loop-btn:hover:not(:disabled),
+.tpl-chip:hover,
+.side-tab:hover {
+  color: var(--primary) !important;
+  border-color: rgb(217 119 87 / 40%) !important;
+  background: rgb(217 119 87 / 6%) !important;
+}
+/* 运行 / 主操作 hover 轻微提亮 */
+.primary-btn.takeover:hover:not(:disabled),
+.primary-btn.run:hover:not(:disabled) {
+  background: rgb(217 119 87 / 14%) !important;
+  border-color: var(--primary) !important;
+  color: var(--primary) !important;
+}
+
+/* 3. loop-btn 里 icon + 文字间距 */
+.loop-btn .ico-svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  margin-right: 2px;
+  display: inline-block;
+  vertical-align: -1px;
+}
+
+/* 4. 输入器 header 加 padding */
+.editor .editor-bar {
+  padding: 6px 12px !important;
+  min-height: 36px !important;
+}
+.editor .tpl-bar {
+  padding: 5px 12px !important;
+}
+.terminal .term-bar {
+  padding: 6px 12px !important;
+  min-height: 36px !important;
 }
 
 </style>
