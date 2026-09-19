@@ -243,7 +243,7 @@
             {{ t.label }}
           </button>
           <div class="tpl-spacer" />
-          <button v-tooltip="'清空编辑器内容（不落盘）'" class="ghost-btn" :disabled="running || !script" @click="script = ''">
+          <button v-tooltip="'清空编辑器内容 + 全部附件'" class="ghost-btn" :disabled="running || (!script && !attachedFiles.length)" @click="clearAll">
             清空
           </button>
           <button
@@ -267,9 +267,10 @@
         <div v-if="attachedFiles.length" class="attach-bar">
           <div v-for="f in attachedFiles" :key="f.id" class="attach-tag" :class="'kind-' + f.kind">
             <img v-if="f.kind === 'image'" :src="f.content" :alt="f.name" class="attach-img">
+            <span v-else-if="f.kind === 'folder'" class="attach-ico">📁</span>
             <span v-else class="attach-ico">📄</span>
             <span class="attach-name" :title="f.name">{{ f.name }}</span>
-            <span class="attach-size">{{ fmtSize(f.size) }}</span>
+            <span class="attach-size">{{ f.kind === 'folder' ? f.size + ' 文件' : fmtSize(f.size) }}</span>
             <button v-tooltip="'移除'" class="attach-del" @click="removeAttach(f.id)">×</button>
           </div>
         </div>
@@ -597,8 +598,9 @@ interface AttachedFile {
   id: string
   name: string
   size: number
-  kind: 'image' | 'text'
+  kind: 'image' | 'text' | 'folder'
   content: string
+  paths?: string[]  // folder 专用：展开后的文件列表
 }
 const attachedFiles = ref<AttachedFile[]>([])
 const MAX_ATTACH_BYTES = 500 * 1024  // 单文件 500KB
@@ -645,6 +647,10 @@ async function addAttachedFile(file: File): Promise<void> {
 function removeAttach(id: string): void {
   attachedFiles.value = attachedFiles.value.filter(f => f.id !== id)
 }
+function clearAll(): void {
+  script.value = ''
+  attachedFiles.value = []
+}
 async function onEditorPaste(e: ClipboardEvent): Promise<void> {
   const items = Array.from(e.clipboardData?.items || [])
   const images: File[] = []
@@ -690,39 +696,49 @@ async function fetchTreePaths(rootPath: string): Promise<string[]> {
   return out.filter(Boolean)
 }
 async function addTreePaths(paths: string[]): Promise<void> {
-  const flat: string[] = []
   for (const p of paths) {
     if (!p) continue
+    if (attachedFiles.value.some(a => a.name === p)) continue
     const tree = await fetchTreePaths(p)
-    if (tree.length) flat.push(...tree)
-    else flat.push(p)
-  }
-  const uniq = [...new Set(flat)].filter(p => !attachedFiles.value.some(a => a.name === p))
-  if (!uniq.length) return
-  try {
-    const res = await fetch('/__ai/files/read', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: uniq }),
-    })
-    const data = await res.json()
-    for (const f of (data.files || [])) {
+    if (tree.length) {
+      // 文件夹：只加一个 tag，发送时展开
+      attachedFiles.value.push({
+        id: 'at-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+        name: p,
+        size: tree.length,
+        kind: 'folder',
+        content: '',
+        paths: tree,
+      })
+      toast(`已附加文件夹 ${p}（${tree.length} 个文件）`, 'success', 2000)
+      continue
+    }
+    // 单文件：直接读源码
+    try {
+      const res = await fetch('/__ai/files/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: [p] }),
+      })
+      const data = await res.json()
+      const f = (data.files || [])[0]
+      if (!f) continue
       if (f.error) {
-        toast(`附件 ${f.path} 读取失败：${f.error}`, 'warn', 4000)
+        toast(`附件 ${p} 读取失败：${f.error}`, 'warn', 4000)
         continue
       }
       const content = String(f.content || '')
       attachedFiles.value.push({
         id: 'at-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
-        name: f.path,
+        name: p,
         size: content.length,
         kind: 'text',
         content,
       })
+      toast(`已附加 ${p}`, 'success', 1500)
+    } catch (e) {
+      toast(`附件读取失败：${String(e)}`, 'error', 4000)
     }
-    toast(`已附加 ${attachedFiles.value.length} 个文件`, 'success', 2000)
-  } catch (e) {
-    toast(`附件读取失败：${String(e)}`, 'error', 4000)
   }
 }
 function onTreeDrag(e: Event) {
@@ -743,16 +759,35 @@ function isBashScript(scriptText: string): boolean {
   const first = (scriptText.split('\n', 1)[0] || '').trim()
   return /^#!\s*\/usr\/bin\/(env\s+)?bash\b/.test(first)
 }
-function buildScriptWithAttachments(scriptText: string, files: AttachedFile[]): string {
+async function fetchFolderContents(paths: string[]): Promise<Array<{ path: string, content: string }>> {
+  try {
+    const res = await fetch('/__ai/files/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths }),
+    })
+    const data = await res.json()
+    return (data.files || []).filter((f: any) => !f.error).map((f: any) => ({ path: String(f.path), content: String(f.content || '') }))
+  } catch { return [] }
+}
+async function buildScriptWithAttachments(scriptText: string, files: AttachedFile[]): Promise<string> {
   if (!files.length) return scriptText
   const isBash = isBashScript(scriptText)
   const p = isBash ? '#' : '//'
   const parts: string[] = []
   for (const f of files) {
-    parts.push(`${p} ═════ 附件 ${f.name} (${fmtSize(f.size)}) ═════`)
-    if (f.kind === 'image') {
-      parts.push(`${p} [图片数据 (${fmtSize(f.size)})，如需处理请依赖 AI 站点原生粘贴]`)
+    if (f.kind === 'folder' && f.paths && f.paths.length) {
+      parts.push(`${p} ═════ 附件目录 ${f.name} (${f.paths.length} 文件) ═════`)
+      const contents = await fetchFolderContents(f.paths)
+      for (const cf of contents) {
+        parts.push(`${p} ----- ${cf.path} -----`)
+        for (const line of cf.content.split('\n')) parts.push(`${p} ${line}`)
+      }
+    } else if (f.kind === 'image') {
+      parts.push(`${p} ═════ 附件图片 ${f.name} (${fmtSize(f.size)}) ═════`)
+      parts.push(`${p} [图片数据无法嵌入，请在 AI 站点单独粘贴]`)
     } else {
+      parts.push(`${p} ═════ 附件 ${f.name} (${fmtSize(f.size)}) ═════`)
       for (const line of f.content.split('\n')) parts.push(`${p} ${line}`)
     }
   }
@@ -1369,14 +1404,14 @@ function onGlobalKey(e: KeyboardEvent) {
     runSmart()
   }
 }
-function runSmart(opts?: { bypassAutoGuard?: boolean }) {
+async function runSmart(opts?: { bypassAutoGuard?: boolean }) {
   if (autoTakeoverEnabled.value && !opts?.bypassAutoGuard) {
     toast('自动接管中，请先关闭接管再手动运行', 'warn', 2500)
     return
   }
   const rawScript = script.value.trim()
   if (!rawScript) return
-  const text = attachedFiles.value.length ? buildScriptWithAttachments(rawScript, attachedFiles.value) : rawScript
+  const text = attachedFiles.value.length ? await buildScriptWithAttachments(rawScript, attachedFiles.value) : rawScript
   const firstLine = text.split('\n', 1)[0].trim()
   const isNode = /^#!\s*\/usr\/bin\/(env\s+)?node\b/.test(firstLine)
   const isBash = /^#!\s*\/usr\/bin\/(env\s+)?bash\b/.test(firstLine)
