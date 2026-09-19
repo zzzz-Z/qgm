@@ -1,5 +1,6 @@
 import { ref, watch } from 'vue'
 import { readNdjson } from '../utils/stream'
+import { emit } from './useEventStream'
 import type { Change, RunResponse } from '../types'
 
 const STORAGE_KEY_SCRIPT = '__ai_runner_script'
@@ -93,6 +94,32 @@ async function run() {
   changes.value = []
   liveStdout.value = ''
   liveStderr.value = ''
+
+  const metaM = code.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
+  const desc = metaM ? metaM[1].trim().slice(0, 80) : '执行脚本'
+  const UK = 'run-active'
+  const titleOf = () => {
+    const combined = (liveStdout.value + '\n' + liveStderr.value).trim()
+    if (!combined) return desc
+    const lines = combined.split('\n').filter(Boolean)
+    const tail = (lines[lines.length - 1] || '').trim()
+    return tail ? desc + ' · ' + tail.slice(0, 100) : desc
+  }
+  const emitStep = (phase: string, over: Record<string, unknown> = {}) => {
+    emit('run:start', titleOf(), {
+      payload: { desc, phase, stdoutTail: liveStdout.value.slice(-400), stderrTail: liveStderr.value.slice(-400), ...over },
+      updateKey: UK,
+    })
+  }
+  emitStep('running')
+  let lastFlush = 0
+  const flushChunk = () => {
+    const now = Date.now()
+    if (now - lastFlush < 250) return
+    lastFlush = now
+    emitStep('running')
+  }
+
   try {
     abortController = new AbortController()
     const res = await fetch('/__ai/run', {
@@ -125,6 +152,7 @@ async function run() {
       if (frame.type === 'chunk') {
         if (frame.stream === 'stdout') liveStdout.value += String(frame.data || '')
         else if (frame.stream === 'stderr') liveStderr.value += String(frame.data || '')
+        flushChunk()
       } else if (frame.type === 'summary') {
         frames.push(frame)
       }
@@ -166,6 +194,7 @@ async function run() {
       }, [])
       if (data.ok && data.runId) baselineRunId.value = data.runId
       if (result.value) result.value.baselineRunId = prevBaseline
+      emitStep(data.ok ? 'done' : 'error', { exit: data.code, changeCount: changes.value.length })
     } else {
       result.value = {
         runId: '',
@@ -175,6 +204,7 @@ async function run() {
         stderr: liveStderr.value || '未收到 summary 帧',
         changes: [],
       }
+      emitStep('error', { reason: '未收到 summary 帧' })
     }
   } catch (e) {
     const aborted = (e as { name?: string })?.name === 'AbortError'
@@ -187,6 +217,7 @@ async function run() {
       changes: [],
       error: aborted ? '已取消' : `请求异常：${String(e)}`,
     }
+    emitStep('error', { reason: aborted ? '已取消' : String(e).slice(0, 80) })
   } finally {
     running.value = false
   }

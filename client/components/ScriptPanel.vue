@@ -611,14 +611,24 @@ function treeIcon(kind: string): string {
   return '·'
 }
 function stepStateOf(e: { kind: string, payload?: Record<string, unknown> }): 'pending' | 'running' | 'done' | 'error' {
-  if (e.kind === 'run:start') return 'running'
+  if (e.kind === 'run:start') {
+    const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
+    if (phase === 'done') return 'done'
+    if (phase === 'error') return 'error'
+    return 'running'
+  }
   if (e.kind === 'run:error') return 'error'
   if (e.kind === 'run:end') return e.payload && e.payload.ok === false ? 'error' : 'done'
   return 'pending'
 }
-function stepIconOf(e: { kind: string }): string {
+function stepIconOf(e: { kind: string, payload?: Record<string, unknown> }): string {
   if (e.kind === 'ai:script') return '📥'
-  if (e.kind === 'run:start') return '▶'
+  if (e.kind === 'run:start') {
+    const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
+    if (phase === 'done') return '■'
+    if (phase === 'error') return '✗'
+    return '▶'
+  }
   if (e.kind === 'run:end') return '■'
   if (e.kind === 'run:error') return '✗'
   return '·'
@@ -637,7 +647,12 @@ function stepTitleOf(e: { kind: string, summary?: string, payload?: Record<strin
 }
 function stepLabelOf(e: { kind: string, payload?: Record<string, unknown> }): string {
   if (e.kind === 'ai:script') return '待执行'
-  if (e.kind === 'run:start') return '执行中'
+  if (e.kind === 'run:start') {
+    const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
+    if (phase === 'done') return '已完成'
+    if (phase === 'error') return '失败'
+    return '执行中'
+  }
   if (e.kind === 'run:end') return e.payload && e.payload.ok === false ? '失败' : '已完成'
   if (e.kind === 'run:error') return '失败'
   return ''
@@ -3900,6 +3915,32 @@ function onHtmlDrop(e: DragEvent) {
   background: var(--primary-bg) !important;
   color: var(--primary) !important;
   box-shadow: 0 0 0 2px var(--surface) !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [run-steps] 运行时实时步骤 + 执行中 loading
+   ═══════════════════════════════════════════════════════════ */
+
+.chat-step.state-running .step-dot {
+  width: 10px !important;
+  height: 10px !important;
+  background: transparent !important;
+  border: 2px solid var(--term-chip-border-2, rgb(255 255 255 / 20%)) !important;
+  border-top-color: #60a5fa !important;
+  border-right-color: #60a5fa !important;
+  border-radius: 50% !important;
+  animation: step-spin 0.75s linear infinite !important;
+  box-shadow: none !important;
+}
+@keyframes step-spin { to { transform: rotate(360deg); } }
+
+.chat-step.state-running .step-title { color: var(--term-text) !important; font-weight: 500 !important; }
+.chat-step .step-title { font-variant-numeric: tabular-nums; }
+
+.chat-step.state-running .step-state {
+  background: rgb(96 165 250 / 18%) !important;
+  color: #93c5fd !important;
 }
 
 </style>
