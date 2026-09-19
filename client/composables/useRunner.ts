@@ -97,7 +97,8 @@ async function run(opts?: { script?: string }) {
 
   const metaM = code.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
   const desc = metaM ? metaM[1].trim().slice(0, 80) : '执行脚本'
-  const UK = 'run-active'
+  // [run-uk-unique] 每次运行唯一 key，避免同 key 覆盖历史事件导致位置错乱
+  const UK = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
   const titleOf = () => {
     const combined = (liveStdout.value + '\n' + liveStderr.value).trim()
     if (!combined) return desc
