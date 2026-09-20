@@ -10,7 +10,16 @@ export interface Message {
 
 export const WARN_THRESHOLD = 40000
 export const HARD_LIMIT = 50000
+// [auto-rotate-50] 提问达 N 次自动开新对话
+export const ASK_ROTATE_THRESHOLD = 10
 const STORAGE_KEY = 'ai_runner_session_ctx'
+const ASK_COUNT_KEY = '__ai_ask_count'
+function loadAskCount(): number {
+  try { return Math.max(0, Number(localStorage.getItem(ASK_COUNT_KEY)) || 0) } catch { return 0 }
+}
+function saveAskCount(v: number): void {
+  try { localStorage.setItem(ASK_COUNT_KEY, String(v)) } catch { /* ignore */ }
+}
 
 function generateId(): string {
   return `sess_${crypto.randomUUID().slice(0, 8)}`
@@ -19,6 +28,12 @@ function generateId(): string {
 const sessionId = ref<string>(generateId())
 const sessionUrl = ref<string>(typeof window !== 'undefined' ? window.location.href : '')
 const messages = ref<Message[]>([])
+const askCount = ref(loadAskCount())
+
+function resetAskCount(): void {
+  askCount.value = 0
+  saveAskCount(0)
+}
 
 function saveToStorage(): void {
   try {
@@ -58,9 +73,18 @@ export function useSessionManager() {
   function trackMessage(role: Message['role'], content: string): void {
     if (!content) return
     messages.value.push({ role, content })
+    if (role === 'user') { askCount.value += 1; saveAskCount(askCount.value) }
     saveToStorage()
   }
 
+  function maybeRotateSession(sendFn: (summary: string) => boolean) {
+    if (askCount.value < ASK_ROTATE_THRESHOLD) return { fired: false, sent: false, overCount: 0 }
+    const overCount = askCount.value
+    resetAskCount()
+    const summary = generateHandoffSummary()
+    const sent = Boolean(sendFn && sendFn(summary))
+    return { fired: true, sent, overCount }
+  }
   function generateHandoffSummary(): string {
     const { entries } = useTraceLog()
     const lines: string[] = []
@@ -108,6 +132,8 @@ export function useSessionManager() {
     sessionId.value = generateId()
     sessionUrl.value = typeof window !== 'undefined' ? window.location.href : ''
     messages.value = []
+    askCount.value = 0
+    saveAskCount(0)
     try { sessionStorage.removeItem(STORAGE_KEY) } catch { }
     toast('会话已重置', 'success')
   }
@@ -130,6 +156,9 @@ export function useSessionManager() {
     WARN_THRESHOLD,
     HARD_LIMIT,
     trackMessage,
+    maybeRotateSession,
+    askCount,
+    resetAskCount,
     copyAndHandoff,
     resetSession,
     restoreFromStorage,

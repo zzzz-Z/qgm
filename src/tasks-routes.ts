@@ -1,11 +1,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { ROOT } from './config.js'
+import { getRoot } from './config.js'
 import { parsePlanTodo } from './plan-parser.js'
 import { parseJSON, readBody, sendJSON } from './http.js'
 
-const STATE_PATH = path.join(ROOT, '.ai-runner', 'state.json')
+// [fix-root-env] 惰性求值，感知 setRoot
+function statePath(): string {
+  return path.join(getRoot(), '.ai-runner', 'state.json')
+}
 
 export interface TaskDoneItem {
   item: string
@@ -26,7 +29,7 @@ export interface TaskState {
 /** 读 .ai-runner/state.json；缺失或损坏时返回空态，不抛错。 */
 function readStateRaw(): TaskState {
   try {
-    const raw = fs.readFileSync(STATE_PATH, 'utf8')
+    const raw = fs.readFileSync(statePath(), 'utf8')
     const obj = JSON.parse(raw) as Record<string, unknown>
     const rawTodo = Array.isArray(obj.todo) ? obj.todo : []
     const rawDone = Array.isArray(obj.done) ? obj.done : []
@@ -105,8 +108,8 @@ function readState(): TaskState {
 }
 
 function writeState(next: TaskState): void {
-  fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true })
-  fs.writeFileSync(STATE_PATH, JSON.stringify(next, null, 2))
+  fs.mkdirSync(path.dirname(statePath()), { recursive: true })
+  fs.writeFileSync(statePath(), JSON.stringify(next, null, 2))
 }
 
 /**

@@ -26,6 +26,9 @@ const displayWidth = computed(() => {
   return WIDE_TABS.has(sideTab.value) ? base + WIDE_EXTRA : base
 })
 
+// [fix-side-collapse] 收起状态（本地，不持久化）
+const collapsed = ref(false)
+
 const emit = defineEmits<{
   rollback: [file: string]
   rollbackAll: []
@@ -36,7 +39,7 @@ const emit = defineEmits<{
 
 <template>
   <div v-if="model" class="side-drawer-backdrop bg-[rgb(15_30_60_/_35%)] inset-0 fixed z-30" @click="model = false" />
-  <aside class="pane-side rounded-l-lg h-full relative overflow-hidden" :class="{ 'translate-x-0!': model }" :style="{ width: `${displayWidth}px` }">
+  <aside class="pane-side rounded-l-lg h-full relative overflow-hidden" :class="{ 'translate-x-0!': model, 'is-collapsed': collapsed }" :style="{ width: collapsed ? '40px' : `${displayWidth}px` }">
     <div class="side-tabs p-1.5 px-2 border-b border-[var(--border)] bg-[var(--surface)] flex shrink-0 gap-1.5 items-center">
       <button :class="{ 'side-tab-active': sideTab === 'tree' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="sideTab = 'tree'">
         <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg></span>
@@ -52,6 +55,21 @@ const emit = defineEmits<{
         aria-label="任务清单" @click="sideTab = 'tasks'"
       >
         <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg></span>
+      </button>
+      <!-- [fix-side-collapse] 收起/展开 -->
+      <button
+        v-tooltip="collapsed ? '展开侧栏' : '收起侧栏'"
+        class="side-collapse-btn"
+        :aria-label="collapsed ? '展开侧栏' : '收起侧栏'"
+        @click="collapsed = !collapsed"
+      >
+        <!-- [fix-side-icon] 侧栏切换图标：圆角矩形 + 左竖线 -->
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="3" ry="3" />
+          <line x1="9" y1="4" x2="9" y2="20" />
+          <line v-if="collapsed" x1="13" y1="12" x2="17" y2="12" />
+          <polyline v-else points="17 9 14 12 17 15" />
+        </svg>
       </button>
     </div>
     <div v-show="sideTab === 'tree'" class="side-tree text-sm flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -98,5 +116,46 @@ const emit = defineEmits<{
 }
 .side-tab.side-tab-active .side-tab-icon {
   color: inherit;
+}
+
+/* [fix-side-collapse-css] 收起态 + 按钮 */
+.side-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+.side-collapse-btn:hover {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+}
+.pane-side.is-collapsed {
+  overflow: hidden;
+}
+.pane-side.is-collapsed > :not(.side-tabs) {
+  display: none !important;
+}
+.pane-side.is-collapsed .side-tabs {
+  flex-direction: column;
+  padding: 6px 4px;
+  gap: 4px;
+}
+.pane-side.is-collapsed .side-tab {
+  flex-shrink: 0;
+}
+.pane-side.is-collapsed .side-collapse-btn {
+  margin-left: 0;
+  margin-top: 4px;
 }
 </style>

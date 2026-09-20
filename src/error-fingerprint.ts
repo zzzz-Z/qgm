@@ -5,7 +5,10 @@ import process from 'node:process' // [fix-import-process-v1]
 import ts from 'typescript'
 // [fix-inline-root-v1] 内联 ROOT 去掉相对导入：--experimental-strip-types 不重写 .js → .ts 路径
 // 与 config.ts 的初始值一致（setRoot 未调用时）
-const ROOT = process.cwd()
+// [fix-root-env] 从 env 读 ROOT，避免 strip-types 下 import config 失败
+function getRoot(): string {
+  return process.env.AI_RUNNER_ROOT || process.cwd()
+}
 
 export interface Fingerprint {
   file: string
@@ -86,7 +89,7 @@ export function fingerprintErrors(text: string, max = 8): Fingerprint[] {
     if (p.includes('node_modules')) continue
     if (p.startsWith('node:')) continue
     if (path.isAbsolute(p)) {
-      const rel = path.relative(ROOT, p).replace(/\\/g, '/')
+      const rel = path.relative(getRoot(), p).replace(/\\/g, '/')
       if (rel.startsWith('..') || path.isAbsolute(rel)) continue
       p = rel
     }
@@ -95,7 +98,7 @@ export function fingerprintErrors(text: string, max = 8): Fingerprint[] {
     if (seen.has(key)) continue
     seen.add(key)
 
-    const abs = path.join(ROOT, p)
+    const abs = path.join(getRoot(), p)
     if (!fs.existsSync(abs)) continue
     let src = ''
     try {

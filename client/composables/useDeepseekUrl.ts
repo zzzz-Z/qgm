@@ -188,6 +188,15 @@ function withSidHash(u: string, sid: string): string {
   }
 }
 export function openDeepseek(atUrl?: string, sid?: string): Window | null {
+  // [fix-headless-open] 无头模式发 WS headless:open
+  if (_isHeadless()) {
+    const useSid = sid ?? activeWinSid.value
+    activeWinSid.value = useSid
+    void _loadTransport().then((t) => {
+      try { t.useAiTransport().transport.sendOpen?.(useSid, { url: atUrl ?? url.value }) } catch {}
+    })
+    return null
+  }
   const target = atUrl ?? url.value
   const useSid = sid ?? activeWinSid.value
   const targetWithSid = withSidHash(target, useSid)
@@ -281,6 +290,17 @@ export type FillResult = 'sent' | 'opened' | 'failed'
 export async function copyAndFill(prompt: string): Promise<FillResult> {
   if (!prompt) return 'failed'
   try { await navigator.clipboard.writeText(prompt) } catch { /* ignore */ }
+  // [fix-headless-copyfill] 无头模式直接发 WS，不开真实窗口
+  if (_isHeadless()) {
+    void _loadTransport().then((t) => {
+      try {
+        const tr = t.useAiTransport().transport
+        tr.sendOpen?.(activeWinSid.value, { url: url.value })
+        tr.sendFill(activeWinSid.value, { prompt })
+      } catch {}
+    })
+    return 'sent'
+  }
 
   const sid = activeWinSid.value
   const name = windowName(sid)

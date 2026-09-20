@@ -1,3 +1,9 @@
+---
+name: core-behavior
+description: AI 行为与决策准则（输出形状、决策阶梯、不做清单）
+keywords: 行为, 准则, adhd, 输出形状, 决策阶梯, 不做清单, 发送前自查
+---
+
 # AI 行为与决策准则
 
 ## 总则（最高优先级）

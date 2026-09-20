@@ -14,6 +14,8 @@ export const LOOP_TOKEN_BUDGET = 30_000
  *  容忍 tokenEstimator 的启发式估算误差，避免误熔断
  */
 export const LOOP_TOKEN_HARD_LIMIT = 33_000
+/** [fix-rotate-threshold] 循环内 token 达此值触发会话轮转（独立于熔断） */
+export const LOOP_ROTATE_THRESHOLD = 40_000
 /** 宽容预算：格式错误 OR 纯文本 OR 重复脚本共享（v6 §6.9 第 2 条） */
 export const LOOP_TOLERANCE_BUDGET = 1
 /** 单轮等待 AI 回复超时（v6 §6.9 第 7 条）—— cjs 默认 90s */

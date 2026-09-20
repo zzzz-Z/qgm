@@ -80,9 +80,23 @@ export function clickNewSessionInPage() {
 export function detectReplyInPage() {
   const w = window
   if (!w.__aiRunnerDedup) {
-    w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '' }
+    w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '', _pendingScriptHash: null, _plainSentInCycle: false } // [fix-reply-dedup] [fix-plain-once]
   }
   const dedup = w.__aiRunnerDedup
+  // [fix-poll-perf] body version + hash 缓存，避免每次 poll 重算
+  if (typeof dedup._bodyVersion !== 'number') dedup._bodyVersion = 0
+  if (!dedup._sigCache) dedup._sigCache = { version: -1, sig: '' }
+  if (!dedup._preCache) dedup._preCache = new WeakMap()
+  if (typeof dedup._seenGrowth !== 'boolean') dedup._seenGrowth = false
+  if (typeof dedup._stableCount !== 'number') dedup._stableCount = 0
+  if (!dedup._observerInstalled) {
+    dedup._observerInstalled = true
+    try {
+      const obs = new MutationObserver(() => { dedup._bodyVersion++ })
+      obs.observe(document.body, { childList: true, subtree: true, characterData: true })
+      dedup._observer = obs
+    } catch (e) {}
+  }
 
   function hash32(s) {
     let h = 0x811C9DC5
@@ -130,7 +144,10 @@ export function detectReplyInPage() {
   }
 
   function extractLatestScript() {
-    const pres = document.querySelectorAll('pre')
+    // [fix-assistant-selector] 只扫最后一条 assistant 消息，排除历史/用户消息
+    const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
+    const root = blocks.length > 0 ? blocks[blocks.length - 1] : document
+    const pres = root.querySelectorAll('pre')
     let last = null
     let lastMarked = null
     for (const pre of pres) {
@@ -139,7 +156,11 @@ export function detectReplyInPage() {
       if (!text.includes('\n') && text.length < 120) continue
       const lang = guessLangFromDom(pre) || guessLangFromContent(text) || null
       if (lang !== 'js' && lang !== 'bash') continue
-      const item = { lang, code: text, hash: hash32(text) }
+      let _h
+      const _cached = dedup._preCache.get(pre)
+      if (_cached && _cached.len === text.length) { _h = _cached.hash }
+      else { _h = hash32(text); dedup._preCache.set(pre, { len: text.length, hash: _h }) }
+      const item = { lang, code: text, hash: _h }
       last = item
       const marked = /^#!\s*\/usr\/bin\/env\s+(node|bash)\b/m.test(text)
         || /^\s*\/\/\s*@desc\s*:/m.test(text)
@@ -149,8 +170,21 @@ export function detectReplyInPage() {
     return lastMarked || last
   }
 
+
+  // [fix-plain-text] 取当前页面主文本（AI 回复区）
+  function getMainText() {
+    // [fix-assistant-selector] 只取最后一条 assistant 消息的文本
+    const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
+    if (blocks.length === 0) return ''
+    const el = blocks[blocks.length - 1]
+    const t = (el && el.innerText) || ''
+    return t.slice(-8000)
+  }
   function findNewDone() {
-    const nodes = document.querySelectorAll('div,p,span,li')
+    // [fix-assistant-selector] 只扫最后一条 assistant 消息
+    const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
+    const root = blocks.length > 0 ? blocks[blocks.length - 1] : document
+    const nodes = root.querySelectorAll('div,p,span,li')
     let found = null
     for (const el of nodes) {
       if (el.children.length > 0) continue
@@ -164,15 +198,26 @@ export function detectReplyInPage() {
   }
 
   function bodySignature() {
+    const cache = dedup._sigCache
+    if (cache.version === dedup._bodyVersion && cache.sig) return cache.sig
     const t = (document.body.innerText || '').replace(/\s+/g, ' ')
-    return hash32(t.slice(-300))
+    const s = hash32(t.slice(-300))
+    cache.version = dedup._bodyVersion
+    cache.sig = s
+    return s
   }
 
+  // [fix-reply-dedup] script 需连续 2 次相同 hash 才推，避开流式中途残缺
   const script = extractLatestScript()
   if (script && !dedup.seenHashes.includes(script.hash)) {
-    dedup.seenHashes.push(script.hash)
-    dedup.lastBodySig = bodySignature()
-    return { kind: 'script', code: script.code, lang: script.lang, hash: script.hash }
+    if (dedup._pendingScriptHash === script.hash) {
+      dedup._pendingScriptHash = null
+      dedup.seenHashes.push(script.hash)
+      dedup.lastBodySig = bodySignature()
+      return { kind: 'script', code: script.code, lang: script.lang, hash: script.hash }
+    }
+    dedup._pendingScriptHash = script.hash
+    return null
   }
 
   const doneMarker = findNewDone()
@@ -182,18 +227,34 @@ export function detectReplyInPage() {
     return { kind: 'done', text: 'DONE' }
   }
 
-  const sig = bodySignature()
-  if (sig !== dedup.lastBodySig) {
-    dedup.lastBodySig = sig
-    return { kind: 'plain' }
+  // [fix-stable-text] 文本稳定检测：连续 3 次 body 不变 → 生成结束，推 plain + text
+  const sig2 = bodySignature()
+  if (sig2 !== dedup.lastBodySig) {
+    dedup.lastBodySig = sig2
+    dedup._stableCount = 0
+    dedup._seenGrowth = true
+    return null
   }
+  if (!dedup._seenGrowth) return null
+  if (dedup._plainSentInCycle) return null
+  dedup._stableCount = (dedup._stableCount || 0) + 1
+  if (dedup._stableCount < 3) return null
+  dedup._plainSentInCycle = true
+  return { kind: 'plain', text: getMainText() }
 
   return null
 }
 
-/** 重置 dedup state（新循环开始时调用，避免旧代码块被忽略） */
+/** 重置 dedup state（fill 点发送后调用，避免旧代码块/用户消息误判） */
 export function resetReplyDedupInPage() {
-  window.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '' }
+  // [fix-reset-sig] 初始 lastBodySig 设为当前页面 sig，防止第一次 poll 因 sig != '' 误推 plain
+  const el = document.querySelector('main') || document.body
+  const t = ((el && el.innerText) || '').replace(/\s+/g, ' ')
+  const s = t.slice(-300)
+  let h = 0x811C9DC5
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x1000193) >>> 0
+  const sig = (h >>> 0).toString(16).padStart(8, '0')
+  window.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: sig, _pendingScriptHash: null, _plainSentInCycle: false, _stableCount: 0, _seenGrowth: false }
   return true
 }
 

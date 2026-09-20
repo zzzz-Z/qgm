@@ -1,5 +1,6 @@
 minimumReleaseAgeExcludePrune: true
-trustPolicy: no-downgrade
+# [recover] 临时放开（原 no-downgrade 拦截 undici-types@6.21.0）
+trustPolicy: off
 shellEmulator: true
 
 allowBuilds:

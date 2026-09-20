@@ -14,7 +14,9 @@ const running = computed(() => state.value.status === 'running')
 const done = computed(() => state.value.status === 'done')
 const blocked = computed(() => state.value.status === 'blocked')
 
-function pad(n: number): string { return String(n).padStart(2, '0') }
+function pad(n: number): string {
+  return String(n).padStart(2, '0')
+}
 function fmtTime(ms: number): string {
   if (!ms) return ''
   const d = new Date(ms)
@@ -30,7 +32,7 @@ function fmtUpdated(ms: number): string {
 </script>
 
 <template>
-  <section class="task-panel">
+  <section class="task-panel" :class="{ done, blocked, running }">
     <div class="task-panel-head">
       <span class="task-panel-dot" />
       <span class="task-panel-title">任务清单</span>
@@ -81,145 +83,261 @@ function fmtUpdated(ms: number): string {
 </template>
 
 <style scoped>
+/* [fix-task-style-v2] 任务清单样式 */
 .task-panel {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  font-size: 12px;
-  color: inherit;
   height: 100%;
+  min-height: 0;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
 }
+
+/* 头部 */
 .task-panel-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
-  cursor: pointer;
-  user-select: none;
-  border-bottom: 1px solid var(--border, #ddd);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  flex-shrink: 0;
 }
 .task-panel-dot {
   width: 8px;
   height: 8px;
-  border-radius: var(--radius-full);
-  background: #888;
+  border-radius: 50%;
+  background: var(--text-3);
   flex-shrink: 0;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
 }
 .task-panel:not(.done):not(.blocked) .task-panel-dot {
-  background: #22c55e;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-bg);
 }
 .task-panel.done .task-panel-dot {
-  background: #64748b;
+  background: var(--text-3);
 }
 .task-panel.blocked .task-panel-dot {
-  background: #ef4444;
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-bg);
 }
 .task-panel-title {
   flex: 1;
   font-weight: 600;
+  font-size: 12.5px;
+  color: var(--text);
 }
 .task-panel-count {
-  opacity: 0.7;
+  font-size: 11px;
+  font-family: var(--mono, monospace);
+  color: var(--text-3);
   font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--surface-3);
 }
+
+/* body */
 .task-panel-body {
-  padding: 8px 10px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  max-height: calc(100vh - 200px);
+  padding: 10px 12px 12px;
 }
+
+/* 进度条 */
 .task-panel-bar {
-  height: 4px;
-  background: rgba(128, 128, 128, 0.15);
-  border-radius: var(--radius-2);
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: 3px;
   overflow: hidden;
+  margin-bottom: 8px;
 }
 .task-panel-bar-fill {
   height: 100%;
-  background: #22c55e;
+  background: linear-gradient(90deg, var(--success), var(--primary));
+  border-radius: 3px;
   transition: width 0.3s ease;
 }
+
+/* 元信息 */
 .task-panel-meta {
   display: flex;
   justify-content: space-between;
-  margin-top: 6px;
-  opacity: 0.7;
+  align-items: center;
+  font-size: 11px;
+  font-family: var(--mono, monospace);
+  color: var(--text-3);
+  margin-bottom: 10px;
 }
 .task-panel-status {
-  text-transform: lowercase;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 10px;
 }
+
+/* 进行中 */
 .task-panel-current {
-  margin-top: 8px;
-  padding: 6px 8px;
-  border-left: 3px solid #22c55e;
-  background: rgba(34, 197, 94, 0.08);
-  border-radius: var(--radius-4);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: var(--primary-bg);
+  border-left: 3px solid var(--primary);
+  border-radius: 6px;
+  color: var(--text);
+  animation: task-pulse 1.8s ease-in-out infinite;
 }
 .task-panel-current-label {
-  display: block;
+  flex-shrink: 0;
   font-size: 10px;
-  opacity: 0.6;
-  margin-bottom: 2px;
+  font-weight: 600;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface);
+  margin-top: 1px;
 }
 .task-panel-current-text {
-  word-break: break-all;
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
 }
+@keyframes task-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+
+/* section */
 .task-panel-section {
-  margin-top: 10px;
+  margin-top: 12px;
+}
+.task-panel-section:first-child {
+  margin-top: 0;
 }
 .task-panel-section-title {
   font-size: 10px;
-  opacity: 0.5;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 4px;
+  letter-spacing: 0.6px;
+  color: var(--text-3);
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--border);
 }
+
+/* list */
 .task-panel-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 .task-panel-item {
-  padding: 3px 6px;
-  border-radius: var(--radius-4);
-  word-break: break-all;
-  line-height: 1.35;
+  padding: 5px 8px;
+  border-radius: 6px;
+  word-break: break-word;
+  line-height: 1.4;
+  font-size: 12px;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
 }
+
+/* 待办项 */
 .task-panel-item.pending {
-  background: rgba(128, 128, 128, 0.08);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
 }
+.task-panel-item.pending::before {
+  content: '';
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  border: 1.5px solid var(--text-3);
+  border-radius: 3px;
+}
+.task-panel-item.pending:hover {
+  background: var(--surface-3);
+  border-color: var(--border-2);
+}
+
+/* 完成项 */
 .task-panel-item.finished {
   display: flex;
-  gap: 6px;
-  background: rgba(100, 116, 139, 0.08);
-  opacity: 0.75;
+  align-items: flex-start;
+  gap: 8px;
+  background: transparent;
+  color: var(--text-3);
+  padding: 4px 8px;
+}
+.task-panel-item.finished::before {
+  content: '✓';
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--success);
+  line-height: 12px;
+  text-align: center;
 }
 .task-panel-item-time {
   flex-shrink: 0;
-  opacity: 0.5;
+  font-size: 10px;
+  font-family: var(--mono, monospace);
+  color: var(--text-3);
+  opacity: 0.7;
   font-variant-numeric: tabular-nums;
+  margin-top: 2px;
 }
 .task-panel-item-text {
   flex: 1;
+  min-width: 0;
 }
+
+/* 空态 */
 .task-panel-idle {
-  margin-top: 8px;
+  padding: 24px 8px;
   text-align: center;
-  opacity: 0.5;
-  padding: 8px;
+  color: var(--text-3);
+  font-size: 12px;
 }
+
+/* 底栏 */
 .task-panel-foot {
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--border, #ddd);
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
   font-size: 10px;
-  opacity: 0.5;
+  font-family: var(--mono, monospace);
+  color: var(--text-3);
   text-align: right;
 }
 .task-panel-error {
-  color: #ef4444;
-  opacity: 1;
+  color: var(--danger);
 }
 </style>

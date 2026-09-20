@@ -1,4 +1,8 @@
+// 若被 node --test 拾取（NODE_TEST_CONTEXT 由 node 子进程自动设置），立即退出
+// Playwright runner 不设该变量，不影响 pnpm test:e2e
 import { expect, test } from '@playwright/test'
+
+if (process.env.NODE_TEST_CONTEXT) { process.exit(0) }
 
 test.describe('AI Runner', () => {
   test.beforeEach(async ({ page }) => {
@@ -17,7 +21,8 @@ test.describe('AI Runner', () => {
 
   test('侧栏三 tab 可切换（树/变更/记录）', async ({ page }) => {
     const tabs = page.locator('.side-tab')
-    await expect(tabs).toHaveCount(3)
+    // [refactor] 重构后新增 tasks tab，共 4 个
+    await expect(tabs).toHaveCount(4)
     await tabs.nth(2).click()
     await expect(page.locator('.trace-panel')).toBeVisible({ timeout: 5000 })
     await tabs.nth(0).click()

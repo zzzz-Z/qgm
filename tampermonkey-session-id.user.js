@@ -313,18 +313,30 @@
   let handoffReplyText = ''
 
   function findNewChatButton() {
-    const all = Array.from(document.querySelectorAll('button, a'))
+    const all = Array.from(document.querySelectorAll('button, a, [role="button"]'))
     return all.find((el) => {
-      const lbl = `${el.getAttribute('aria-label') || ''} ${el.textContent || ''} ${el.getAttribute('title') || ''}`
-      return /新建对话|新对话|新建聊天|new\s*chat|new\s*conversation/i.test(lbl)
+      const lbl = `${el.getAttribute('aria-label') || ''} ${el.textContent || ''} ${el.getAttribute('title') || ''} ${el.getAttribute('data-testid') || ''}`
+      return /新建对话|新对话|新建聊天|新建会话|开启新对话|new\s*chat|new\s*conversation/i.test(lbl)
     }) || null
   }
-  function clickNewSession() {
-    const btn = findNewChatButton()
-    if (btn && !btn.disabled) {
-      try { btn.click(); return true } catch {}
+  // [newchat-fallback] 找不到按钮则降级跳站点首页
+  // [fallback-handoff] 找不到按钮则：存 summary → 跳站点首页
+  function fallbackNewChat(summary) {
+    const url = `${location.origin}/`
+    if (location.href !== url && location.pathname !== '/') {
+      try { sessionStorage.setItem('__ai_pending_new_session', String(summary || '')) } catch { /* ignore */ }
+      location.href = url
+      return true
     }
     return false
+  }
+  function clickNewSession(summary) {
+    const btn = findNewChatButton()
+    if (btn && !btn.disabled) {
+      try { btn.click(); return true } catch { /* ignore */ }
+    }
+    // [fallback-handoff] 降级带 summary
+    return fallbackNewChat(summary)
   }
 
   function findInputBox() {
@@ -470,8 +482,25 @@
       if (!prompt) return
       const box = findInputBox()
       if (!box) { console.warn('[ai-runner] 未找到输入框'); return }
+      const prevHref = location.href
+      const replySrc = e.source
       fillInput(box, prompt)
       setTimeout(doSend, 300, box)
+      // [url-updated] 发送后轮询 URL 变化并回传（最多 8s）
+      let urlTries = 0
+      const urlPoll = setInterval(() => {
+        urlTries += 1
+        if (location.href !== prevHref && location.href !== 'about:blank') {
+          clearInterval(urlPoll)
+          const payload = { type: 'ai-runner:url-updated', url: location.href, id: extractId() }
+          try {
+            const target = replySrc || window.opener
+            if (target) target.postMessage(payload, '*')
+          } catch { /* ignore */ }
+          return
+        }
+        if (urlTries > 32) clearInterval(urlPoll)
+      }, 250)
       return
     }
 
@@ -489,7 +518,7 @@
 
     if (d.type === 'ai-runner:new-session') {
       const summary = String(d.summary || '')
-      const clicked = clickNewSession()
+      const clicked = clickNewSession(summary)
       if (clicked) {
         setTimeout(() => {
           const box = findInputBox()
@@ -518,4 +547,23 @@
       if (replyDebounce) { clearTimeout(replyDebounce); replyDebounce = null }
     }
   })
+
+  // [fallback-handoff] 页面加载时若有 pending summary，等输入框就绪后填入并回执
+  ;(function consumePendingNewSession() {
+    let pending = ''
+    try { pending = sessionStorage.getItem('__ai_pending_new_session') || '' } catch { /* ignore */ }
+    if (!pending) return
+    try { sessionStorage.removeItem('__ai_pending_new_session') } catch { /* ignore */ }
+    let tries = 0
+    const t = setInterval(() => {
+      tries += 1
+      const box = findInputBox()
+      if (!box) { if (tries > 40) clearInterval(t); return }
+      clearInterval(t)
+      const prefix = `这是上一个会话的上下文总结，请基于此继续工作：${String.fromCharCode(10)}`
+      fillInput(box, prefix + pending)
+      setTimeout(doSend, 300, box)
+      try { if (window.opener) window.opener.postMessage({ type: 'ai-runner:new-session-created', url: location.href, id: extractId(), sessionId: extractSidFromHash() }, '*') } catch { /* ignore */ }
+    }, 250)
+  })()
 })()

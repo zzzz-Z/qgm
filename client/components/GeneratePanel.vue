@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FileTree from './FileTree.vue'
-import { copyAndFill } from '../composables/useDeepseekUrl'
+import { copyAndFill, sendNewSession } from '../composables/useDeepseekUrl'
 import { useAiWaiting } from '../composables/useAiWaiting'
 import { useCodeCleaner } from '../composables/useCodeCleaner'
 import { buildFullContext, enforceBudget } from '../utils/contextBuilder'
@@ -31,7 +31,6 @@ const dragInfo = ref<{ count: number, type: string } | null>(null)
 const success = ref(false)
 const successCount = ref(0)
 const copied = ref(false)
-const mainRef = ref<HTMLElement>()
 
 const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
 
@@ -59,7 +58,7 @@ let searchReqId = 0
 const { stripComments, stripBlankLines } = useCodeCleaner()
 const { toast } = useToast()
 const { addTrace } = useTraceLog()
-const { trackMessage } = useSessionManager()
+const { maybeRotateSession: rotateViaSM, trackMessage } = useSessionManager()
 const questionText = ref('')
 
 // Skills
@@ -323,18 +322,6 @@ function onPaste(e: ClipboardEvent) {
   }
   // 手动同步（execCommand 在某些浏览器不触发 input 事件）
   syncQuestion()
-}
-
-function focusEditor() {
-  nextTick(() => {
-    editorRef.value?.focus()
-    // 将光标移到末尾
-    const sel = window.getSelection()
-    if (sel && editorRef.value) {
-      sel.selectAllChildren(editorRef.value)
-      sel.collapseToEnd()
-    }
-  })
 }
 
 // ---------- 文件管理 ----------
@@ -607,14 +594,51 @@ const canCopy = computed(() => prompt.value.length > 0)
 // URL 长度安全上限。超过就打开纯 URL，靠剪贴板兜底。
 /* __ai_removed: DEEPSEEK_URL_MAX */
 
+// [rotate-on-mount] 阈值轮转：发送后 + onMounted 都调用
+function checkRotateSession(): void {
+  const r = rotateViaSM(summary => sendNewSession({ summary }))
+  if (!r.fired) return
+  if (r.sent) {
+    toast(`已达 ${r.overCount} 次提问，已请求开启新对话`, 'info', 4000)
+  } else {
+    toast(`已达 ${r.overCount} 次提问，但 AI 窗口未就绪（请点右上角「打开 AI 窗口」）`, 'warn', 6000)
+  }
+}
+
 async function copyPrompt() {
   if (!canCopy.value) return
-  const budget = enforceBudget(prompt.value)
+  // [skills-dynamic-load] 自动按任务匹配 skill，追加到 prompt
+  let autoSkillsContent = ''
+  let autoSkillKeys: string[] = []
+  try {
+    const q = questionText.value.trim()
+    if (q) {
+      const r = await fetch('/__ai/skills/load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task: q }),
+      })
+      if (r.ok) {
+        const d = await r.json()
+        autoSkillsContent = String(d?.content || '').trim()
+        autoSkillKeys = Array.isArray(d?.keys) ? d.keys : []
+      }
+    }
+  } catch { /* ignore */ }
+  const basePrompt = prompt.value
+  let mergedPrompt = basePrompt
+  if (autoSkillsContent) {
+    const skillNotice = autoSkillKeys.length
+      ? `# 本轮自动加载的 skill\n${autoSkillKeys.map(k => `- ${k}`).join('\n')}\n\n请在回答开头用一句话说明你预计会用到哪些 skill（若都不相关，写「不需要额外 skill」）。\n\n`
+      : ''
+    mergedPrompt = `${basePrompt}\n\n# 规则（自动匹配）\n\n${skillNotice}${autoSkillsContent}`
+  }
+  const budget = enforceBudget(mergedPrompt)
   if (!budget.ok) {
     toast(`prompt 超出预算：${budget.size} / ${budget.budget} 字节`, 'error', 5000)
   }
   try {
-    const text = prompt.value
+    const text = mergedPrompt
     const r = await copyAndFill(text)
     if (r === 'failed') {
       toast('发送失败，已复制到剪贴板', 'warn', 4000)
@@ -636,12 +660,15 @@ async function copyPrompt() {
       })
     }
     trackMessage('user', text)
+    checkRotateSession()
     emit('sent')
   } catch { }
 }
 
 // ---------- 生命周期 ----------
 onMounted(() => {
+  // [rotate-on-mount] 挂载补一次阈值检查
+  checkRotateSession()
   window.addEventListener('keydown', onAddAllHotkey)
 
   window.addEventListener('ai-runner:drag', onGlobalDrag)
@@ -781,7 +808,7 @@ function onAddAllHotkey(e: KeyboardEvent) {
           spellcheck="false"
           data-placeholder="描述你想问 AI 的问题… 支持 @ 呼出检索，或拖入文件 · ⌘/Ctrl + ↵ 发送"
           @input="onEditorInput"
-          @keydown="onEditorKeydown"
+          @keydown.exact="onEditorKeydown"
           @keydown.meta.enter.prevent="copyPrompt"
           @keydown.ctrl.enter.prevent="copyPrompt"
           @compositionstart="onCompositionStart"

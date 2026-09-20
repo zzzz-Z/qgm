@@ -103,21 +103,45 @@ function rateLimitedRatio(): number {
 type PlaywrightModule = typeof import('playwright')
 
 let pwCache: PlaywrightModule | null | undefined
+// [fix-cloak-engine] 优先 CloakBrowser，fallback playwright
+// [fix-engine-adapter] cloak 优先（仅 linux-x64 有 binary），否则 playwright
 async function loadPlaywright(): Promise<PlaywrightModule | null> {
-  if (pwCache !== undefined) {
-    return pwCache
+  if (pwCache !== undefined) return pwCache
+  // 1. 试 cloakbrowser（binary 存在才用；mac/win 会抛错）
+  if (process.platform === 'linux' && process.arch === 'x64') {
+    try {
+      const cloak = (await import('cloakbrowser')) as Record<string, unknown>
+      const info = (cloak.binaryInfo as () => { installed: boolean })()
+      if (info.installed) {
+        pwCache = (await import('playwright'))
+        console.log('[ai-headless] engine: cloakbrowser (linux-x64)')
+        return pwCache
+      }
+      console.log('[ai-headless] cloak binary 未装，降级 playwright')
+    } catch (e) { console.log('[ai-headless] cloak 不可用:', (e as Error).message.slice(0, 80)) }
+  } else {
+    console.log(`[ai-headless] platform=${process.platform}-${process.arch}，cloak 不支持，用 playwright`)
   }
+  // 2. playwright fallback
   try {
-    pwCache = await import('playwright')
+    pwCache = (await import('playwright'))
+    console.log('[ai-headless] engine: playwright')
   } catch {
     pwCache = null
+    console.error('[ai-headless] playwright 未装')
   }
   return pwCache
 }
 
 export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   const sessions = new Map<string, HeadlessSession>()
-  const userDataDir = opts.userDataDir || DEFAULT_USER_DATA_DIR
+// [fix-open-mutex] 全局串行锁
+let openMutex: Promise<void> = Promise.resolve()
+  const baseUserDataDir = opts.userDataDir || DEFAULT_USER_DATA_DIR
+  // [fix-userdata-sid] 每个 sid 独立 profile；default 保留原路径兼容旧登录态
+  function userDataDirFor(sid: string): string {
+    return sid === 'default' ? baseUserDataDir : path.join(baseUserDataDir, sid)
+  }
   const defaultUrl = opts.defaultUrl || DEFAULT_URL
   const headless = opts.headless !== false
   const poolLimit = opts.poolLimit || DEFAULT_POOL_LIMIT
@@ -147,6 +171,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   }
 
   async function launch(sid: string, url: string): Promise<HeadlessSession> {
+    const userDataDir = userDataDirFor(sid)
     const pw = await loadPlaywright()
     if (!pw) {
       const s: HeadlessSession = { sid, state: 'error', detail: 'playwright 未安装', createdAt: Date.now(), url }
@@ -169,6 +194,14 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     const context = await pw.chromium.launchPersistentContext(userDataDir, launchOpts as Parameters<typeof pw.chromium.launchPersistentContext>[1])
     const page = context.pages()[0] || await context.newPage()
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: LAUNCH_TIMEOUT_MS })
+    // [fix-wait-input] 等输入框渲染，避免 fill 时找不到
+    try {
+      await page.waitForSelector('textarea:not([readonly]):not([disabled]), [contenteditable="true"]', { timeout: 15000, state: 'visible' })
+    } catch (e) {
+      const s: HeadlessSession = { sid, state: 'error', detail: '页面加载后未找到输入框（可能未登录）', createdAt: Date.now(), url, context, page }
+      sessions.set(sid, s)
+      return s
+    }
     const s: HeadlessSession = { sid, state: 'idle', createdAt: Date.now(), url, context, page }
     sessions.set(sid, s)
     return s
@@ -185,14 +218,21 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
 
   return {
     async open(sid, url) {
-      const existing = sessions.get(sid)
-      if (existing && existing.context) {
-        return existing
+      // [fix-open-mutex] 全局串行，防并发 launch 抢 profile
+      const prev = openMutex
+      let rel: () => void = () => {}
+      openMutex = new Promise<void>((r) => { rel = r })
+      await prev
+      try {
+        const existing = sessions.get(sid)
+        if (existing && existing.context) return existing
+        await acquireSlot()
+        const s = await launch(sid, url || defaultUrl)
+        if (s.state === 'error') releaseSlot()
+        return s
+      } finally {
+        rel()
       }
-      await acquireSlot()
-      const s = await launch(sid, url || defaultUrl)
-      if (s.state === 'error') releaseSlot()
-      return s
     },
     async close(sid) {
       const s = sessions.get(sid)
@@ -264,14 +304,18 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
         return () => {}
       }
       let stopped = false
+      let running = false
+      // [fix-poll-reentry] 防并发重入：上轮 evaluate 未完成时跳过本轮
       const tick = async () => {
-        if (stopped) return
+        if (stopped || running) { if (!stopped) setTimeout(tick, 800); return }
+        running = true
         try {
           const reply = await page.evaluate(detectReplyInPage)
           if (!stopped && reply && typeof reply === 'object' && (reply as { kind?: string }).kind) {
             cb(reply as HeadlessReply)
           }
         } catch { /* 页面导航/关闭时忽略 */ }
+        running = false
         if (!stopped) setTimeout(tick, 800)
       }
       tick()

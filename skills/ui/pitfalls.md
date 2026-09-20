@@ -1,3 +1,9 @@
+---
+name: ui-pitfalls
+description: UI 排查踩坑（CSS 选择器、UnoCSS、组件抽取、!important）
+keywords: css, 样式, 颜色, 选择器, flex, 布局, 边距, important, uno, vue
+---
+
 # UI 排查踩坑录（2026-09 会话复盘）
 
 > 主题：One Dark 改造 + UnoCSS 迁移 + 组件抽取

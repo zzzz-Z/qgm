@@ -42,13 +42,13 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json && node -e \"require('fs').copyFileSync('src/interceptor.cjs','dist/interceptor.cjs')\"",
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('fs');fs.copyFileSync('src/interceptor.cjs','dist/interceptor.cjs');fs.copyFileSync('src/helpers.cjs','dist/helpers.cjs')\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "web:dev": "vite --config client/vite.config.ts",
     "web:build": "vite build --config client/vite.config.ts",
     "lint": "eslint . --fix",
     "tsc": "tsc -p tsconfig.json --noEmit",
-    "test:unit": "node --test --experimental-strip-types client/*.node-test.ts src/*.test.cjs",
+    "test:unit": "node --test --experimental-strip-types client/*.node-test.ts src/*.test.cjs src/post-run/*.node-test.ts",
     "test:e2e": "playwright test --config client/playwright.config.ts",
     "run-all": "node bin/run-all.cjs",
     "recover": "node bin/recover.cjs",
@@ -83,8 +83,8 @@
     "access": "public"
   },
   "optionalDependencies": {
-    "playwright": "^1.63.0",
-    "@zcc/cloak-browser": "^0.1.0"
+    "cloakbrowser": "^0.1.0",
+    "playwright": "^1.63.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -95,6 +95,7 @@
     "@unocss/eslint-plugin": "^66.10.5",
     "@vitejs/plugin-vue": "^6.0.9",
     "eslint": "^9.39.4",
+    "eslint-plugin-format": "^2.0.1",
     "eslint-plugin-vue": "^10.11.0",
     "sass-embedded": "^1.104.1",
     "typescript": "^5.6.0",

@@ -1,23 +1,13 @@
 node_modules/
 dist/
-.ai-runner/runs/
-.ai-runner/logs/
-.ai-runner/tmp/
-.ai-runner/backup/
-.ai-runner/scripts/
-.ai-runner/config.json
 .DS_Store
 *.log
 .trae/
-
-# ai-runner 运行态（阶段 0 补）
-.ai-runner/compliance.jsonl
-.ai-runner/SESSION-HANDOFF.md
-.ai-runner/plans/
+.ai-runner/
 PROJECT-NOTES.md
-.ai-runner/baseline.json
+client/pnpm-lock.yaml
+client/node_modules/
+
+# [refactor] e2e 运行态产物
 client/test-results/
-.ai-runner/headless-profile/
-a.cjs
-a.sh
-.ai-runner/state.json
+client/e2e/playwright-report/

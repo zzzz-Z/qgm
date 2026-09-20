@@ -128,8 +128,13 @@ async function toggleFilePreview(path: string) {
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 const PAGE_SIZE = ref(20)
 const page = ref(1)
-const visibleGroups = computed(() => groups.value.slice(0, page.value * PAGE_SIZE.value))
-const hasMore = computed(() => visibleGroups.value.length < groups.value.length)
+// [fix-pager-ui] 真分页（不累积）
+const visibleGroups = computed(() => {
+  const start = (page.value - 1) * PAGE_SIZE.value
+  return groups.value.slice(start, start + PAGE_SIZE.value)
+})
+const totalPages = computed(() => Math.max(1, Math.ceil(groups.value.length / PAGE_SIZE.value)))
+const hasMore = computed(() => page.value < totalPages.value)
 watch(filter, () => { page.value = 1 })
 
 function toggleLoop(loopId: string) {
@@ -147,7 +152,7 @@ function displayTitle(e: typeof entries.value[0]): string {
   const src = String(e.payload?.script || '')
   if (src) {
     // 2a. @desc 注释
-    const dm = src.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
+    const dm = src.match(/^[ \t]*(?:\/\/|#)[ \t]*@desc[ \t]*:[ \t]*(\S.*)$/m)
     if (dm && dm[1].trim()) return dm[1].trim().slice(0, 100)
     // 2b. shebang 后第一条注释
     const lines = src.split('\n')
@@ -211,7 +216,6 @@ async function copyText(t: string) {
 
 function confirmClear() {
   if (!entries.value.length) return
-  if (!window.confirm(`清空所有 ${entries.value.length} 条记录？`)) return
   clearTraces()
 }
 </script>
@@ -352,26 +356,46 @@ function confirmClear() {
                 </div>
               </template>
             </div>
+            <!-- [show-final-prompt] 最终发出的完整提示词（含自动匹配 skill） -->
+            <div v-if="e.payload.prompt" class="trace-section">
+              <div class="trace-label">
+                <span>最终提示词</span>
+                <button class="trace-mini" @click="copyText(e.payload.prompt || '')">
+                  复制
+                </button>
+              </div>
+              <pre
+                class="trace-pre"
+                :style="{ cursor: preTruncated(e.payload.prompt || '', e.id, 'prompt') ? 'pointer' : 'auto' }"
+                @click="preTruncated(e.payload.prompt || '', e.id, 'prompt') && togglePre(e.id, 'prompt')"
+              >{{ trimPre(e.payload.prompt || '', e.id, 'prompt') }}</pre>
+            </div>
           </div>
         </template>
       </div>
     </div>
   </div>
   <div v-if="groups.length" class="trace-pager">
-    <div class="trace-pager-info">
-      已显示 {{ visibleGroups.length }} / {{ groups.length }}
-    </div>
+    <!-- [fix-pager-ui] 页码导航 -->
+    <span class="trace-pager-info">共 {{ groups.length }} 条</span>
+    <button v-tooltip="'首页'" class="trace-page-btn" :disabled="page === 1" @click="page = 1">
+      «
+    </button>
+    <button v-tooltip="'上一页'" class="trace-page-btn" :disabled="page === 1" @click="page--">
+      ‹
+    </button>
+    <span class="trace-page-num">{{ page }} / {{ totalPages }}</span>
+    <button v-tooltip="'下一页'" class="trace-page-btn" :disabled="!hasMore" @click="page++">
+      ›
+    </button>
+    <button v-tooltip="'末页'" class="trace-page-btn" :disabled="!hasMore" @click="page = totalPages">
+      »
+    </button>
     <select v-model.number="PAGE_SIZE" class="trace-pager-size" @change="page = 1">
       <option v-for="n in PAGE_SIZE_OPTIONS" :key="n" :value="n">
-        每页 {{ n }}
+        {{ n }}/页
       </option>
     </select>
-    <button v-if="hasMore" class="trace-more" @click="page += 1">
-      加载下一页
-    </button>
-    <button v-else class="trace-more trace-more-end" disabled>
-      已到底
-    </button>
   </div>
 </template>
 
@@ -753,6 +777,73 @@ function confirmClear() {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-2);
+}
+
+/* [fix-pager-css] 分页 UI */
+.trace-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  flex-shrink: 0;
+}
+.trace-pager-info {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-right: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.trace-page-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-6);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: 0.12s;
+}
+.trace-page-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-bg);
+}
+.trace-page-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.trace-page-num {
+  font: 12px var(--mono, monospace);
+  color: var(--text-2);
+  padding: 0 8px;
+  min-width: 48px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.trace-pager-size {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-6);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  margin-left: 6px;
+}
+.trace-pager-size:focus {
+  border-color: var(--primary);
 }
 </style>
 <!-- tooltip-audit -->

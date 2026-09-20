@@ -1,3 +1,9 @@
+---
+name: core-loop-protocol
+description: 自动化循环协议（state.json、todo、退出码）
+keywords: 循环, loop, round, todo, state.json, 退出码, 卡点, 编排
+---
+
 # 自动化循环协议（Loop Protocol）
 
 ## 输出契约

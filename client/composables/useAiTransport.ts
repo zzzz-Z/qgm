@@ -5,6 +5,7 @@ export type AiTransportKind = 'tampermonkey' | 'headless'
 export interface AiTransport {
   readonly kind: AiTransportKind
   sendFill: (sid: string, payload: { prompt: string, context?: string }) => boolean
+  sendOpen?: (sid: string, payload: { url?: string }) => boolean
   sendStop: (sid: string) => boolean
   sendRotate: (sid: string, payload: { instruction: string }) => boolean
   sendNewSession: (sid: string, payload: { summary: string }) => boolean
@@ -132,6 +133,7 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   }
   return {
     kind: 'headless',
+    sendOpen(sid, p) { return send('headless:open', { sid, url: p.url }) },
     sendFill(sid, p) { return send('headless:fill', { sid, prompt: p.prompt, context: p.context }) },
     // [P3-1c] waitAck：等 headless:state 回包（filling/generating/error 任一），超时返回 false
     waitAck(_t, sid, timeoutMs = 3000) {

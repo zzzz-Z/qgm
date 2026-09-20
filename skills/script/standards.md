@@ -1,3 +1,9 @@
+---
+name: script-standards
+description: 脚本编写与技术规范（幂等、备份、回滚、自检）
+keywords: 脚本, 规范, 幂等, 回滚, 备份, 自检, 通道
+---
+
 # 脚本编写与技术规范
 
 ## 核心原则

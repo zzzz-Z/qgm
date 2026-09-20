@@ -1,3 +1,9 @@
+---
+name: env-preflight
+description: 会话首条自检 + 提交前闸门
+keywords: 环境, 自检, preflight, 提交闸门, pwd, worktree, tsc, lint
+---
+
 ## 环境自检（会话首条）
 
 - [ ] pwd 正确，非空目录

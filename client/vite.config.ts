@@ -15,6 +15,8 @@ export default defineConfig({
   plugins: [
     UnoCSS({ configFile: path.resolve(__dirname, 'uno.config.ts') }),
     vue(),
-    aiRunner({ root: PKG_ROOT }),
+    aiRunner({
+      root: PKG_ROOT
+    }),
   ],
 })

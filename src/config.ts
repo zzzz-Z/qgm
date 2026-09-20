@@ -4,6 +4,8 @@ import path from 'node:path'
 export let ROOT = process.cwd()
 export function setRoot(r: string): void {
   ROOT = path.resolve(r)
+  // [fix-root-env] 写 env，供 strip-types 无法 import 的模块读
+  process.env.AI_RUNNER_ROOT = ROOT
   // ESM live bindings：import 方在 setRoot 后读到的是新值
   RUNS_DIR = path.join(ROOT, '.ai-runner/runs')
   SCRIPTS_DIR = path.join(ROOT, '.ai-runner/scripts')

@@ -55,7 +55,26 @@ description: AI 协作规则——输出形状、决策方式、项目约束、�
 
 ## 三、项目约束
 
-**文件改动必须走脚本**：任何增/删/改项目文件（源码、配置、资源），一律生成脚本执行，不手动编辑、不口头描述改法、不输出整文件让用户手动复制粘贴。脚本须满足下方必备能力。例外：只读查询、纯解释、用户明确说「直接改」。
+**文件改动必须走脚本**
+
+### 优先使用 __AI__ 封装（最高优先级）
+
+[always-use-__AI__] 所有脚本必须优先调用全局 `__AI__` 对象，**禁止**在以下场景手写原生模块：
+
+- 读写文件 → `__AI__.readText / writeText / readFile / writeFile / exists`
+- 锚点替换 → `__AI__.patchFile(file, anchor, replacement, { unique, marker })`
+- 备份/原子写 → `__AI__.backup(file)` / `__AI__.atomicWrite(file, content)`
+- 语义输出 → `__AI__.ok / skip / warn / err`（禁用裸 `console.log`）
+- 断言 → `__AI__.assert / assertContains / assertNotContains`
+- state 读写 → `__AI__.readState / updateState / statePath`
+- 语法预检 → `__AI__.syntaxCheck(code)`（禁用 `vm.Script` 手写）
+- 外部命令 → `__AI__.exec(cmd, args, opts)`（禁用 `execFileSync` 手写）
+- cwd/分支闸 → `__AI__.assertCtx({ cwd?, branch? })`
+- 只读 dump → `__AI__.dump(file, from, to)`
+- 正则转义 → `__AI__.esc(s)`
+
+**例外**（可用原生）：`process.exit`、`process.env`、`__AI__` 未覆盖的 Node API（需在注释中说明原因）。
+：任何增/删/改项目文件（源码、配置、资源），一律生成脚本执行，不手动编辑、不口头描述改法、不输出整文件让用户手动复制粘贴。脚本须满足下方必备能力。例外：只读查询、纯解释、用户明确说「直接改」。
 
 **脚本必备能力**：
 
@@ -152,7 +171,7 @@ description: AI 协作规则——输出形状、决策方式、项目约束、�
       // @plan: 本轮唯一子目标，对应 state.todo 中一项
       // @state: state 文件相对路径，缺省 .ai-runner/state.json
       // @done: 本轮收尾的机器可判定条件；非收尾轮省略
-      ```js
+      ```js`
       ````
     - **bash**：
       ```bash

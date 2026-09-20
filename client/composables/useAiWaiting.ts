@@ -1,43 +1,67 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
-/**
- * 跨组件共享的「等待 AI 回复」状态
- *
- * 使用场景：
- * - 用户点击「发送给 AI」按钮（copyOutput / copyPrompt / askAi）后，按钮进入 loading
- * - AI 回复通过 Tampermonkey → postMessage(`ai-runner:reply`) 到达 App.vue，此时复位
- * - 90 秒安全兜底：若 AI 一直未回复（窗口关闭 / 网络异常），自动复位避免永久卡死
- *
- * 单例模式：模块级 ref，所有调用方共享同一状态
- */
+/** 跨组件共享的「等待 AI 回复」 + 牛马模式守夜（单一数据源） */
 
 const waiting = ref(false)
-let safetyTimer: ReturnType<typeof setTimeout> | null = null
-/** 安全兜底超时：与 auto-loop 单轮 90s 对齐 */
-const SAFETY_TIMEOUT_MS = 90_000
 
-function clearSafety() {
-  if (safetyTimer) {
-    clearTimeout(safetyTimer)
-    safetyTimer = null
-  }
+// [ai-watchdog] 3 分钟无回复则：若牛马模式开 → 重发「继续工作」并续订；否则仅复位 waiting
+const WATCHDOG_MS = 180_000
+const NIumaKey = '__ai_niuma_mode'
+const niumaMode = ref(false)
+// [niuma-observe] 可观测状态
+const fireCount = ref(0)
+const lastFiredAt = ref(0)
+const nextFireAt = ref(0)
+try { niumaMode.value = localStorage.getItem(NIumaKey) === '1' } catch { /* ignore */ }
+watch(niumaMode, (v) => {
+  try { localStorage.setItem(NIumaKey, v ? '1' : '0') } catch { /* ignore */ }
+})
+
+let watchdogTimer: ReturnType<typeof setTimeout> | null = null
+let resendHandler: (() => Promise<void> | void) | null = null
+
+export function setAiWaitingWatchdog(fn: () => Promise<void> | void): void {
+  resendHandler = fn
+}
+
+function clearWatchdog(): void {
+  if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null }
+}
+
+function armWatchdog(): void {
+  nextFireAt.value = Date.now() + WATCHDOG_MS
+  clearWatchdog()
+  watchdogTimer = setTimeout(async () => {
+    watchdogTimer = null
+    if (!waiting.value) return
+    if (niumaMode.value) {
+      try {
+        if (resendHandler) await resendHandler()
+        fireCount.value += 1
+        lastFiredAt.value = Date.now()
+      } catch { /* ignore */ }
+      if (waiting.value) armWatchdog()
+    } else {
+      // 未开牛马：只复位，避免永久卡死
+      waiting.value = false
+    }
+  }, WATCHDOG_MS)
 }
 
 export function useAiWaiting() {
   return {
     waiting,
-    /** 发送 prompt 后调用：进入 loading，启动 90s 兜底 */
+    niumaMode,
+    fireCount,
+    lastFiredAt,
+    nextFireAt,
     startWaiting() {
       waiting.value = true
-      clearSafety()
-      safetyTimer = setTimeout(() => {
-        waiting.value = false
-      }, SAFETY_TIMEOUT_MS)
+      armWatchdog()
     },
-    /** 收到 AI 回复后调用：退出 loading，清除兜底计时器 */
     stopWaiting() {
       waiting.value = false
-      clearSafety()
+      clearWatchdog()
     },
   }
 }

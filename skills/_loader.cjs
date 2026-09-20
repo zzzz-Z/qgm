@@ -2,6 +2,7 @@
 // 动态加载器：扫描多根目录下的所有 .md skill
 // 支持 frontmatter: ---/name/description/---
 // 无 frontmatter 时用相对路径（去 .md，/ 换 -）作为 key
+// 支持 frontmatter 字段：name / description / keywords（逗号分隔，命中≥2 才注入）
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -13,14 +14,15 @@ const ROOT = path.dirname(__dirname)
 const HOME = os.homedir()
 
 // 搜索根目录（相对项目根），不存在则跳过
+// 根目录：项目内 skills/ 全量递归；外部 skill 库只扫主 SKILL.md（不递归 references/ 等子目录）
 const ROOTS = [
-  path.join(ROOT, 'skills'),
-  path.join(ROOT, '.agents/skills'),
-  path.join(ROOT, '.claude/skills'),
-  path.join(ROOT, '.cursor/skills'),
-  path.join(HOME, '.agents/skills'),
-  path.join(HOME, '.claude/skills'),
-  path.join(HOME, '.cursor/skills'),
+  { dir: path.join(ROOT, 'skills'), onlySkillFile: false },
+  { dir: path.join(ROOT, '.agents/skills'), onlySkillFile: true },
+  { dir: path.join(ROOT, '.claude/skills'), onlySkillFile: true },
+  { dir: path.join(ROOT, '.cursor/skills'), onlySkillFile: true },
+  { dir: path.join(HOME, '.agents/skills'), onlySkillFile: true },
+  { dir: path.join(HOME, '.claude/skills'), onlySkillFile: true },
+  { dir: path.join(HOME, '.cursor/skills'), onlySkillFile: true },
 ]
 
 // 语义分组：key 匹配 rel 前缀或 key 前缀
@@ -47,7 +49,7 @@ const ALWAYS_KEYS = ['core-behavior', 'core-gen-rules', 'script-standards', 'env
 function isDefault(key) { return ALWAYS_KEYS.includes(key) }
 
 function parseFrontmatter(text) {
-  const m = /^---\s*\n([\s\S]*?)\n---\s*\n/.exec(text)
+  const m = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*\n/.exec(text)
   if (!m) return { meta: {}, body: text }
   const meta = {}
   for (const line of m[1].split('\n')) {
@@ -58,33 +60,131 @@ function parseFrontmatter(text) {
   return { meta, body: text.slice(m[0].length) }
 }
 
-function walk(dir) {
+function walk(dir, opts, depth) {
+  const onlySkillFile = !!(opts && opts.onlySkillFile)
+  const d = typeof depth === 'number' ? depth : 0
   const out = []
   let ents
   try { ents = fs.readdirSync(dir, { withFileTypes: true }) } catch { return out }
   for (const e of ents) {
     const p = path.join(dir, e.name)
-    if (e.isDirectory()) out.push(...walk(p))
-    else if (e.name.endsWith('.md') && e.name !== 'INDEX.md') out.push(p)
+    if (e.isDirectory()) {
+      // [depthCap] onlySkillFile 模式下只下探到 skill 根目录下第一层，再深不再进
+      if (onlySkillFile && d >= 1) continue
+      out.push(...walk(p, opts, d + 1))
+    } else if (e.name.endsWith('.md') && e.name !== 'INDEX.md') {
+      if (onlySkillFile && e.name !== 'SKILL.md') continue
+      out.push(p)
+    }
   }
   return out
+}
+
+// [deriveKwFromDesc] 无 keywords 时从 description 派生：
+//   - 反引号包裹的标识符
+//   - 含点号的文件名 token
+//   - 长度 >= 4 的英文词（去停用词）
+const DESC_STOP = new Set([
+  'the',
+  'and',
+  'for',
+  'use',
+  'with',
+  'when',
+  'are',
+  'this',
+  'that',
+  'from',
+  'into',
+  'your',
+  'you',
+  'any',
+  'all',
+  'can',
+  'has',
+  'was',
+  'will',
+  'not',
+  'but',
+  'via',
+  'off',
+  'one',
+  'two',
+  'its',
+  'our',
+  'out',
+  'per',
+  'may',
+  'also',
+  'such',
+  'like',
+  'more',
+  'less',
+  'than',
+  'each',
+  'over',
+  'only',
+  'just',
+  'have',
+  'been',
+  'were',
+  'they',
+  'them',
+  'their',
+  'there',
+  'then',
+  'does',
+  'done',
+  'must',
+  'should',
+  'would',
+  'could',
+  'about',
+  'across',
+  'between',
+])
+
+function deriveKwFromDesc(desc) {
+  const s = String(desc || '')
+  const out = new Set()
+  for (const m of s.matchAll(/`([^`]+)`/g)) {
+    const v = m[1].trim().toLowerCase()
+    if (v && v.length <= 40) out.add(v)
+  }
+  for (const m of s.matchAll(/\b([\w-]+\.[\w.-]+)\b/g)) {
+    out.add(m[1].toLowerCase())
+  }
+  for (const m of s.matchAll(/\b([A-Z][\w-]{3,})\b/gi)) {
+    const v = m[1].toLowerCase()
+    if (!DESC_STOP.has(v)) out.add(v)
+  }
+  return [...out].slice(0, 24)
 }
 
 const REGISTRY = new Map()
 
 function scan() {
   REGISTRY.clear()
-  for (const abs of ROOTS) {
+  for (const r of ROOTS) {
+    const abs = r.dir
     if (!fs.existsSync(abs)) continue
-    for (const p of walk(abs)) {
+    for (const p of walk(abs, { onlySkillFile: r.onlySkillFile })) {
       const rel = path.relative(abs, p).replace(/\\/g, '/')
       const text = fs.readFileSync(p, 'utf8')
       const { meta } = parseFrontmatter(text)
+      let kw = meta.keywords ? String(meta.keywords).split(',').map(s => s.trim()).filter(Boolean) : []
+      if (!kw.length) kw = deriveKwFromDesc(meta.description)
+      // [nameAlwaysKw] name 永远算作关键词（解决短名如 vue 被长度阈值剔除）
+      if (meta.name) {
+        const nv = String(meta.name).trim().toLowerCase()
+        if (nv && !kw.includes(nv)) kw = [nv, ...kw]
+      }
       const key = rel.replace(/\.md$/, '').replace(/\//g, '-')
       REGISTRY.set(key, {
         key,
         name: meta.name || key,
         desc: meta.description || '',
+        kw,
         file: p,
         rel: `${abs.startsWith(HOME) ? `~${abs.slice(HOME.length)}` : path.relative(ROOT, abs).replace(/\\/g, '/')}/${rel}`,
         text,
@@ -115,21 +215,64 @@ function load(keys) {
 function loadFor(task) {
   const t = String(task || '').toLowerCase()
   const hits = new Set(ALWAYS_KEYS)
+
+  // 1. frontmatter keywords 打分：命中数 >= 1 即注入
+  for (const [k, v] of REGISTRY) {
+    const kws = Array.isArray(v.kw) ? v.kw : []
+    if (!kws.length) continue
+    const score = kws.filter((w) => {
+      const s = String(w).toLowerCase()
+      if (!s) return false
+      if (/^[a-z0-9_.-]+$/.test(s)) {
+        const esc = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        return new RegExp(`(^|[^a-z0-9_])${esc}([^a-z0-9_]|$)`, 'i').test(t)
+      }
+      return t.includes(s)
+    }).length
+    if (score >= 1) hits.add(k)
+  }
+
+  // 2. 兜底：无 keywords 的 skill 走硬编码 KEYWORDS 分组
   for (const [k, kws] of Object.entries(KEYWORDS)) {
     if (kws.some(kw => t.includes(kw.toLowerCase()))) hits.add(k)
   }
+
   return load([...hits])
 }
 
 scan()
 
-module.exports = { load, loadFor, list, scan, REGISTRY, GROUPS, KEYWORDS, ROOTS, ALWAYS_KEYS, isDefault }
+function loadForMeta(task) {
+  const t = String(task || '').toLowerCase()
+  const hits = new Set(ALWAYS_KEYS)
+  for (const [k, v] of REGISTRY) {
+    const kws = Array.isArray(v.kw) ? v.kw : []
+    if (!kws.length) continue
+    const score = kws.filter((w) => {
+      const s = String(w).toLowerCase()
+      if (!s) return false
+      if (/^[a-z0-9_.-]+$/.test(s)) {
+        const esc = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        return new RegExp(`(^|[^a-z0-9_])${esc}([^a-z0-9_]|$)`, 'i').test(t)
+      }
+      return t.includes(s)
+    }).length
+    if (score >= 1) hits.add(k)
+  }
+  for (const [k, kws] of Object.entries(KEYWORDS)) {
+    if (kws.some(kw => t.includes(kw.toLowerCase()))) hits.add(k)
+  }
+  const keys = [...hits]
+  return { content: load(keys), keys }
+}
+
+module.exports = { load, loadFor, loadForMeta, list, scan, REGISTRY, GROUPS, KEYWORDS, ROOTS, ALWAYS_KEYS, isDefault }
 
 if (require.main === module) {
   const a = process.argv[2]
   if (!a || a === '--list') {
-    const active = ROOTS.filter(r => fs.existsSync(r))
-    console.log(`根目录: ${active.join(', ')}`)
+    const active = ROOTS.filter(r => fs.existsSync(r.dir))
+    console.log(`根目录: ${active.map(r => r.dir).join(', ')}`)
     console.log(`发现 ${REGISTRY.size} 个 skill:`)
     for (const k of list()) {
       const v = REGISTRY.get(k)

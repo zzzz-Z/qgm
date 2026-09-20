@@ -6,6 +6,10 @@ import type { FileNode } from '../types'
 
 defineOptions({ name: 'FileTree' })
 
+const emit = defineEmits<{
+  addProject: []
+}>()
+
 const props = defineProps<{
   nodes?: FileNode[]
   depth?: number
@@ -15,7 +19,57 @@ const props = defineProps<{
 
 const { tree, loading, copiedPath, load, loadChildren, getChildren, isChildrenLoading, copyPath } = useFileTree()
 
-if (props.root) onMounted(load)
+const projectName = ref('工作区')
+
+if (props.root) {
+  onMounted(async () => {
+    await load()
+    // [ensure-project-name] 尝试从 package.json 获取项目名
+    if (projectName.value === '工作区') {
+      const pkgNode = tree.value.find(n => n.name === 'package.json')
+      if (pkgNode) {
+        try {
+          const res = await fetch('/__ai/files/read', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ paths: [pkgNode.path] })
+          })
+          if (res.ok) {
+            const j = await res.json() as Record<string, unknown>
+            const arr = Array.isArray((j as any).files) ? (j as any).files : (Array.isArray(j) ? j : [])
+            const hit = arr.find((x: any) => x && x.path === pkgNode.path) || arr[0] || {}
+            if (hit.content) {
+              const parsed = JSON.parse(hit.content)
+              if (parsed.name) projectName.value = String(parsed.name).split('/').pop() || String(parsed.name)
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+    try {
+      const res = await fetch('/__ai/files/read', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ paths: ['package.json'] })
+      })
+      if (res.ok) {
+        const j = await res.json() as Record<string, unknown>
+        const arr = Array.isArray((j as any).files) ? (j as any).files : (Array.isArray(j) ? j : [])
+        const hit = arr.find((x: any) => x && x.path === 'package.json') || arr[0] || {}
+        if (hit.content) {
+          const parsed = JSON.parse(hit.content)
+          if (parsed.name) {
+            projectName.value = String(parsed.name).split('/').pop() || String(parsed.name)
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  })
+}
 
 const list = () => props.root ? tree.value : (props.nodes || [])
 const level = () => props.depth || 0
@@ -33,18 +87,35 @@ function toggle(p: string) {
 
 const isOpen = (p: string) => expanded.has(p)
 
+const rootPath = computed(() => {
+  if (!tree.value.length) return '.'
+  const first = String(tree.value[0].path || '')
+  if (!first.startsWith('/')) return '.'
+  const idx = first.lastIndexOf('/')
+  return idx > 0 ? first.slice(0, idx) : '.'
+})
+
+const rootNode = computed(() => {
+  if (!props.root) return null
+  return {
+    name: projectName.value,
+    path: rootPath.value,
+    type: 'directory'
+  } as FileNode
+})
+
 // ---------- SVG 图标系统 ----------
 function getFileIcon(name: string): string {
   const n = name.toLowerCase()
   if (n.endsWith('.vue')) return 'vue'
   if (n.endsWith('.ts') || n.endsWith('.tsx')) return 'ts'
   if (n.endsWith('.js') || n.endsWith('.jsx') || n.endsWith('.mjs') || n.endsWith('.cjs')) return 'js'
-  if (/.(css|scss|sass|less)$/.test(n)) return 'style'
+  if (/.(?:css|scss|sass|less)$/.test(n)) return 'style'
   if (n.endsWith('.json')) return 'json'
   if (n.endsWith('.md')) return 'md'
-  if (/.(html?)$/.test(n)) return 'html'
-  if (/.(png|jpg|jpeg|gif|svg|webp|ico)$/.test(n)) return 'image'
-  if (/.(yaml|yml)$/.test(n)) return 'config'
+  if (/.html?$/.test(n)) return 'html'
+  if (/.(?:png|jpg|jpeg|gif|svg|webp|ico)$/.test(n)) return 'image'
+  if (/.(?:yaml|yml)$/.test(n)) return 'config'
   if (n === 'package.json' || n === 'pnpm-lock.yaml') return 'pkg'
   if (n.startsWith('.') || n === 'tsconfig.json' || n === 'vite.config.ts' || n === 'eslint.config.ts') return 'config'
   return 'file'
@@ -136,6 +207,14 @@ function lockPage() {
 }
 function unlockPage() {
   document.documentElement.classList.remove('ai-runner-dragging')
+}
+
+function onRootPointerDown(e: PointerEvent) {
+  if (!props.draggable) return
+  if (e.button !== 0) return
+  const node = rootNode.value
+  if (!node) return
+  onPointerDown(e, node as FileNode)
 }
 
 function onPointerDown(e: PointerEvent, node: FileNode) {
@@ -284,8 +363,16 @@ const fileDialogHtml = computed(() => {
 <template>
   <div class="tree" :class="{ 'is-root': props.root }">
     <div v-if="props.root" class="tree-head">
-      <span class="title">项目结构</span>
-      <span v-if="props.draggable" class="tip">拖拽 → 左侧</span>
+      <div
+        v-if="rootNode"
+        v-tooltip="props.draggable ? `拖动到左侧：${rootNode.path}` : rootNode.path"
+        class="row dir root-row"
+        :class="{ 'is-draggable': props.draggable }"
+        @pointerdown="onRootPointerDown"
+      >
+        <span class="icon" v-html="iconSvg('folder')" />
+        <span class="name">{{ rootNode.name }}</span>
+      </div>
       <button v-tooltip="loading ? '正在刷新…' : '重新拉取文件树（清空懒加载缓存）'" class="refresh" aria-label="刷新文件树" :disabled="loading" @click="load">
         <svg class="ft-icon refresh-svg" viewBox="0 0 24 24"><path fill="currentColor" d="M17.65 6.35A7.96 7.96 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" /></svg>
       </button>
@@ -295,8 +382,17 @@ const fileDialogHtml = computed(() => {
       <svg class="ft-icon empty-icon spin" viewBox="0 0 24 24"><path fill="currentColor" d="M12 4V2A10 10 0 002 12h2a8 8 0 018-8z" /></svg>
       <span>加载中…</span>
     </div>
-    <div v-else-if="props.root && !tree.length" class="empty">
-      <span>无文件</span>
+    <!-- [fix-tree-title] 空工作区：添加项目 -->
+    <div v-else-if="props.root && !tree.length" class="empty empty-workspace">
+      <svg class="empty-workspace-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        <line x1="12" y1="11" x2="12" y2="17" />
+        <line x1="9" y1="14" x2="15" y2="14" />
+      </svg>
+      <span class="empty-workspace-text">还没有添加项目</span>
+      <button class="empty-workspace-btn" type="button" @click="emit('addProject')">
+        添加项目到工作区
+      </button>
     </div>
 
     <ul v-else class="list">
@@ -408,7 +504,52 @@ const fileDialogHtml = computed(() => {
   padding: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
-.tree.is-root > .tree-head {
+.tree.is-root > /* [fix-tree-title-css] 工作区标题 + 空态 */
+.tree-head .subtitle {
+  font-size: 10px;
+  color: var(--text-3);
+  opacity: 0.7;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  margin-left: 4px;
+}
+.empty-workspace {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 20px;
+  color: var(--text-3);
+}
+.empty-workspace-icon {
+  width: 48px;
+  height: 48px;
+  opacity: 0.4;
+}
+.empty-workspace-text {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.empty-workspace-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-6);
+  background: transparent;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.empty-workspace-btn:hover {
+  background: var(--primary-bg);
+}
+.tree-head {
   border-bottom: 0;
   margin-bottom: 2px;
   padding: 4px 6px 6px;
@@ -1011,6 +1152,19 @@ html.ai-runner-dragging body {
 }
 
 /* [ft-hljs] 弹窗内容 hljs 颜色（与 DiffViewer 一致） */
+.tree-head .refresh {
+  margin-left: auto;
+}
+/* [root-row-style] */
+.tree-head .root-row {
+  padding: 0;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.tree-head .root-row .name {
+  font-weight: 600;
+}
 </style>
 <!-- tooltip-audit -->
 

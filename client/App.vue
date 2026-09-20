@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ScriptPanel from './components/ScriptPanel.vue'
 import GeneratePanel from './components/GeneratePanel.vue'
-import { DEFAULT_URL, getWindowBySid, listWindows, MODELS, openDeepseek, removeWindowBySid, setActiveWinSid, useDeepseekUrl } from './composables/useDeepseekUrl'
+import { copyAndFill, DEFAULT_URL, getWindowBySid, listWindows, MODELS, openDeepseek, removeWindowBySid, setActiveWinSid, useDeepseekUrl } from './composables/useDeepseekUrl'
 import { useScriptInbox } from './composables/useScriptInbox'
 import {
   autoRotateSession,
@@ -28,14 +28,17 @@ import { useToast } from './composables/useToast'
 import { useTraceLog } from './composables/useTraceLog'
 import { useCodeCleaner } from './composables/useCodeCleaner'
 import { useRunner } from './composables/useRunner'
-import { useAiWaiting } from './composables/useAiWaiting'
+import { setAiWaitingWatchdog, useAiWaiting } from './composables/useAiWaiting'
 import { emit as emitBus, takePendingAskKey } from './composables/useEventStream'
+import { getTransport } from './composables/useAiTransport' // [fix-headless-reply]
 import type { EventKind } from './composables/useEventStream'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
 import KeyboardHelp from './components/KeyboardHelp.vue'
 
 const autoTakeover = useAutoTakeover()
+// [ask-count-merge] 与 useSessionManager 共享同一 askCount 数据源
+const { askCount, resetAskCount } = useSessionManager()
 const SESSION_HISTORY_KEY = '__ai_session_history'
 /** mock 通道（v6 §13.2 ?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
 const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
@@ -49,15 +52,7 @@ function saveHistory(h: SessionEntry[]) {
 const sessionHistory = ref<SessionEntry[]>(loadHistory())
 // [ask-count] 当前会话收到的 AI 回复次数（每 reply +1）
 // [ask-count-persist] 提问次数持久化到 localStorage，刷新不重置
-const ASK_COUNT_KEY = '__ai_ask_count'
-function loadAskCount(): number {
-  try { return Math.max(0, Number(localStorage.getItem(ASK_COUNT_KEY)) || 0) } catch { return 0 }
-}
-const askCount = ref(loadAskCount())
-function setAskCount(v: number): void {
-  askCount.value = Math.max(0, Math.floor(v) || 0)
-  try { localStorage.setItem(ASK_COUNT_KEY, String(askCount.value)) } catch {}
-}
+
 const ACTIVE_SESSION_KEY = '__ai_active_session_id'
 function loadActiveSessionId(): string {
   try { return localStorage.getItem(ACTIVE_SESSION_KEY) || '' } catch { return '' }
@@ -288,11 +283,20 @@ function saveUrl() {
     try { toast('URL 格式不合法', 'error') } catch { /* ignore */ }
     return
   }
+  // [url-edit-v2] 同步当前活动会话 url，避免 headerUrl 从 sessionHistory 读到旧值回退
+  try {
+    const sid = activeSessionId.value
+    if (sid) {
+      sessionHistory.value = sessionHistory.value.map(x => x.id === sid ? { ...x, url: v } : x)
+      saveHistory(sessionHistory.value)
+    }
+  } catch { /* ignore */ }
   urlEditing.value = false
   urlDraft.value = ''
 }
+// [url-edit] blur 自动保存
 function onUrlBlur() {
-  cancelUrl()
+  if (urlEditing.value) saveUrl()
 }
 
 function onSessionIdMessage(e: MessageEvent) {
@@ -305,11 +309,9 @@ function onSessionIdMessage(e: MessageEvent) {
   // 安全约束（v6 §3.4）：origin 必须落在已知 AI 站点；source 优先比对 getActiveWin()
   // ============================================================================
   if (d.type === 'ai-runner:reply') {
-    // [ask-count] 收到一次 AI 回复 → 提问计数 +1
-    setAskCount(askCount.value + 1)
     // [auto-handoff-at-10] 累计 10 次提问 → 自动轮转会话（总结 + 开新会话 + 续跑）
     if (askCount.value >= 10 && isLoopActive.value) {
-      setAskCount(0)
+      resetAskCount()
       void startHandoff()
       return
     }
@@ -457,8 +459,18 @@ function onSessionIdMessage(e: MessageEvent) {
       const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
       addSessionToHistory(id, url, `轮转 · ${hhmm}`)
       activeSessionId.value = id
+      // [auto-new-session] 新会话建立 → 立即回写完整 URL 到工作台
+      setDeepseekUrl(url)
     }
+    // [reset-askcount-new-session] 新会话建立 → URL 旁提问计数清零
+    resetAskCount()
     void onNewSessionCreated(url, id)
+    return
+  }
+  if (d.type === 'ai-runner:url-updated') {
+    // [url-updated] 油猴发送后回传完整 URL，写入工作台
+    const u = String(d.url || '')
+    if (u && u !== deepseekUrl.value) setDeepseekUrl(u)
     return
   }
   if (d.type !== 'ai-runner:session-id' || !d.id) return
@@ -478,6 +490,8 @@ function onSessionIdMessage(e: MessageEvent) {
 
 /** 油猴来源校验：origin 必须落在已知 AI 站点；source 优先比对 getActiveWin()，为 null 时降级只校验 origin */
 function isFromActiveAiSite(e: MessageEvent): boolean {
+  // [fix-headless-reply] 无头模式：WS 内部消息，跳过 origin/source 校验
+  if ((() => { try { return localStorage.getItem('__ai_transport') === 'headless' } catch { return false } })()) return true
   // mock 模式：跳过来源校验，让合成 MessageEvent 直走完整链路
   if (MOCK_MODE) return true
   const AI_ORIGINS = MODELS
@@ -504,13 +518,25 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
   }
   return true
 }
-function onOpenAiWin() {
+async function onOpenAiWin() {
   const at = headerUrl.value || deepseekUrl.value
-  const w = openDeepseek(at)
-  if (w) {
-    toast('已打开 / 激活 AI 窗口', 'success', 2000)
-  } else {
+  // [auto-new-session] URL 无会话 ID 时，打开新会话并预填「开始聊天」
+  const hasSession = /\/a\/chat\/s\/[\w-]{8,}/.test(at)
+  const w = openDeepseek(hasSession ? at : DEFAULT_URL)
+  if (!w) {
     toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
+    return
+  }
+  if (hasSession) {
+    toast('已打开 / 激活 AI 窗口', 'success', 2000)
+    return
+  }
+  toast('已打开新会话，正在发送「开始聊天」…', 'info', 2000)
+  const r = await copyAndFill('新会话，不需要回复')
+  if (r === 'sent' || r === 'opened') {
+    toast('已发送「开始聊天」，等待会话地址回写', 'success', 2500)
+  } else {
+    toast('发送失败，请检查 AI 窗口是否就绪', 'warn', 4000)
   }
 }
 function onEscClose(e: KeyboardEvent) {
@@ -533,6 +559,32 @@ function onShiftQuestion(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('message', onSessionIdMessage)
+  // [fix-headless-reply] 无头模式：订阅 transport.onReply，转成 MessageEvent 格式喂给同一处理器
+  try {
+    if (localStorage.getItem('__ai_transport') === 'headless') {
+      const t = getTransport()
+      t.onReply((reply: any, sid: string) => {
+        const item = reply && reply.item ? reply.item : null
+        const fake = {
+          data: {
+            type: 'ai-runner:reply',
+            kind: reply && reply.kind ? reply.kind : 'plain',
+            code: item ? item.code : undefined,
+            lang: item ? item.lang : undefined,
+            hash: item ? item.hash : undefined,
+            text: reply && reply.text !== undefined ? reply.text : undefined,
+            count: reply && reply.count !== undefined ? reply.count : undefined,
+            sessionId: sid,
+            site: 'headless',
+          },
+          origin: 'ws://headless',
+          source: null,
+        } as unknown as MessageEvent
+        try { onSessionIdMessage(fake) } catch (e) { console.error('[headless-reply] 处理失败:', e) }
+      })
+      console.log('[ai-runner] 无头 reply 订阅已注册')
+    }
+  } catch (e) { console.error('[headless-reply] 订阅失败:', e) }
   window.addEventListener('keydown', onEscClose)
   window.addEventListener('keydown', onShiftQuestion)
   // 注入 activeSessionId 读取器：循环启动时取当前活动会话 id 绑定到 loopSessionId
@@ -556,6 +608,20 @@ const scriptInbox = useScriptInbox()
 const runner = useRunner()
 const { addTrace } = useTraceLog()
 const { stopWaiting: stopAiWaiting } = useAiWaiting()
+// [ai-watchdog] auto resend after 3 min no reply
+setAiWaitingWatchdog(async () => {
+  // [niuma-trace] 每次自动发送写 trace
+  const t0 = Date.now()
+  const r = await copyAndFill('继续工作')
+  try {
+    addTrace({
+      kind: 'ask',
+      summary: r === 'failed' ? '牛马模式：发送失败' : '牛马模式：自动发送 继续工作',
+      payload: { auto: true, result: r, latencyMs: Date.now() - t0 },
+    })
+  } catch { /* ignore */ }
+  if (r === 'failed') console.warn('[niuma] 发送失败：找不到 AI 窗口')
+})
 // 注意：getActiveWin 是 useDeepseekUrl 模块级导出，已在 import 中带入；这里无需再解构
 
 // 传输层切换：__ai_transport = 'tampermonkey' | 'headless'
@@ -578,18 +644,6 @@ function onTransportChange(e: Event) {
     </div>
     <div class="hdr-right">
       <button
-        v-tooltip="'打开 / 激活 AI 窗口（点此建立工作台与 AI 站的连接）'"
-        aria-label="打开 AI 窗口"
-        class="open-ai-toggle"
-        @click="onOpenAiWin"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-          <polyline points="15 3 21 3 21 9" />
-          <line x1="10" y1="14" x2="21" y2="3" />
-        </svg>
-      </button>
-      <button
         v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
         class="theme-toggle" aria-label="切换主题"
         @click="theme = theme === 'dark' ? 'light' : 'dark'"
@@ -611,6 +665,7 @@ function onTransportChange(e: Event) {
           class="ds-input"
           spellcheck="false"
           placeholder="https://..."
+          :size="Math.max(30, urlDraft.length + 2)"
           @keydown.enter.prevent="saveUrl"
           @keydown.esc.prevent="cancelUrl"
           @blur="onUrlBlur"
@@ -622,6 +677,18 @@ function onTransportChange(e: Event) {
           @click="openUrlEdit"
         >{{ headerUrl || '（点击输入 URL）' }}</span>
         <span v-tooltip="'当前会话提问次数'" class="ask-count">{{ askCount }} 次</span>
+        <button
+          v-tooltip="'打开 / 激活 AI 窗口（点此建立工作台与 AI 站的连接）'"
+          aria-label="打开 AI 窗口"
+          class="open-ai-toggle"
+          @click="onOpenAiWin"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+        </button>
       </div>
       <label class="transport-switch" title="AI 传输链路（切换后自动刷新）">
         <select :value="transportKind" aria-label="AI 传输链路" @change="onTransportChange">
@@ -1368,10 +1435,13 @@ function onTransportChange(e: Event) {
   background: var(--surface-2) !important;
   border: 1px solid var(--border) !important;
   border-radius: var(--radius-6) !important;
-  min-width: 320px !important;
-  max-width: 480px !important;
-  flex: 1 1 auto !important;
+  /* [url-edit-v9] max-content 破除父-子循环依赖 */
+  width: max-content !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  flex: 0 0 auto !important;
   transition: border-color 0.15s !important;
+  overflow: visible !important;
 }
 
 .ds-url:hover,
@@ -1380,14 +1450,18 @@ function onTransportChange(e: Event) {
 }
 
 .ds-value-static {
-  flex: 1 1 auto !important;
+  /* [url-edit-v6] 内容决定宽度 */
+  flex: 0 0 auto !important;
   color: var(--text-2) !important;
   font-size: 12px !important;
   font-family: var(--mono, monospace) !important;
   cursor: pointer !important;
+  /* [url-edit-v5] 单行展示，不换行，不加省略 */
   white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
+  /* [url-edit-v7] 覆盖旧块 max-width/overflow/text-overflow 裁剪 */
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
 }
 
 .ds-input {
@@ -1399,6 +1473,10 @@ function onTransportChange(e: Event) {
   font-size: 12px !important;
   font-family: var(--mono, monospace) !important;
   outline: 0 !important;
+  /* [url-edit-v9] 输入框宽度交给父级 max-content 撑开 */
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
 }
 
 .ask-count {

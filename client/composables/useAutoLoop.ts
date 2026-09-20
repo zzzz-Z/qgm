@@ -23,6 +23,12 @@ import {
   LOOP_TOLERANCE_BUDGET,
 } from './loopLogic'
 
+import { onNewSessionCreated, onSummary, startHandoff, SUMMARY_INSTRUCTION } from './auto-loop/handoff.js'
+import { bindKeyboard, unbindKeyboard } from './auto-loop/keyboard.js'
+import { runHook } from './auto-loop/hooks.js'
+
+import { autoRotateSession, setTokenEstimate } from './auto-loop/token-rotate.js'
+
 // 传输层分流：tampermonkey | headless（见 useAiTransport.ts）
 const transport = getTransport()
 
@@ -166,7 +172,7 @@ const singletonView: LoopInstance = {
 }
 
 /** 当前激活循环实例（单例视图，computed 维持响应式依赖） */
-const activeLoop = computed<LoopInstance | null>(() => singletonView)
+export const activeLoop = computed<LoopInstance | null>(() => singletonView)
 
 let getActiveSessionId: () => string = () => ''
 
@@ -174,7 +180,6 @@ function resolveInst(_sid?: string): LoopInstance | null {
   return activeLoop.value
 }
 
-let keyboardBound = false
 let originalTitle = ''
 
 const { addTrace } = useTraceLog()
@@ -200,7 +205,7 @@ interface PersistShape {
   state: LoopState
 }
 
-function persist(inst: LoopInstance) {
+export function persist(inst: LoopInstance) {
   if (inst.state.value === 'idle') {
     try { sessionStorage.removeItem(STORAGE_KEY) } catch { }
     return
@@ -374,7 +379,7 @@ export async function startTakeover(): Promise<void> {
   persist(inst)
   enterWaiting(inst)
 }
-function enterWaiting(inst: LoopInstance) {
+export function enterWaiting(inst: LoopInstance) {
   inst.state.value = 'waiting'
   persist(inst)
   if (inst.roundTimer) clearTimeout(inst.roundTimer)
@@ -515,27 +520,6 @@ async function toleranceFail(inst: LoopInstance, detail: string): Promise<void> 
 // ============================================================================
 // 执行
 // ============================================================================
-
-type HookEvent = 'BeforeFill' | 'BeforeScript' | 'AfterScript' | 'AfterResult' | 'LoopStop'
-interface HookResult {
-  event: HookEvent
-  action: 'ok' | 'reject'
-  reason?: string
-  hooksRun: number
-}
-async function runHook(event: HookEvent, payload: unknown): Promise<HookResult> {
-  try {
-    const res = await fetch('/__ai/hooks/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event, payload }),
-    })
-    if (!res.ok) return { event, action: 'ok', hooksRun: 0 }
-    return await res.json() as HookResult
-  } catch {
-    return { event, action: 'ok', hooksRun: 0 }
-  }
-}
 
 async function executeItem(inst: LoopInstance, item: InboxItem): Promise<void> {
   inst.state.value = 'executing'
@@ -855,7 +839,7 @@ function ackFill(inst: LoopInstance, label: string): void {
 // ============================================================================
 
 /** Esc 软暂停：当前轮跑完即停，不发下一轮 */
-function requestPause() {
+export function requestPause() {
   // [hardpause] 完全中断：向 AI 发停止命令 + 静音消息监听 + 立即停止
   const t = getTransport()
   try { t.sendStop('') } catch { /* ignore */ }
@@ -881,7 +865,7 @@ export async function killCurrent(): Promise<void> {
 }
 
 /** Ctrl+Esc 停止并回滚：abort + git reset 到循环起点 */
-async function stopAndRollback(): Promise<void> {
+export async function stopAndRollback(): Promise<void> {
   const inst = activeLoop.value
   if (!inst || !isLoopActive.value) return
   inst.stopRequest.value = 'rollback'
@@ -994,64 +978,6 @@ async function finish(inst: LoopInstance, reason: string, detail?: string): Prom
 // ============================================================================
 // token 估算（App.vue 桥接）
 // ============================================================================
-const KEY_AUTO_ROTATE = '__ai_auto_rotate_session'
-const LOOP_ROTATE_THRESHOLD = 40000
-function loadBoolSetting(key: string, fallback: boolean): boolean {
-  try {
-    const v = localStorage.getItem(key)
-    return v === null ? fallback : v === '1'
-  } catch { return fallback }
-}
-export const autoRotateSession = ref<boolean>(loadBoolSetting(KEY_AUTO_ROTATE, true))
-watch(autoRotateSession, (v) => {
-  try { localStorage.setItem(KEY_AUTO_ROTATE, v ? '1' : '0') } catch { }
-})
-
-export function setTokenEstimate(n: number): void {
-  const v = Math.max(0, Number(n) || 0)
-  const inst = activeLoop.value
-  if (!inst) return
-  inst.latestTokens.value = v
-  if (!autoRotateSession.value) return
-  if (!isLoopActive.value) return
-  if (inst.state.value === 'handoff') return
-  if (inst.state.value !== 'waiting') return
-  if (v < LOOP_ROTATE_THRESHOLD) return
-  addTrace({
-    kind: 'loop',
-    summary: `⚠ token 达 ${(v / 1000).toFixed(1)}k ≥ ${LOOP_ROTATE_THRESHOLD / 1000}k，自动触发轮转`,
-    payload: { loopId: inst.id.value, loopRound: inst.round.value },
-  })
-  void startHandoff()
-}
-
-// ============================================================================
-// 键盘：Esc 暂停 / Ctrl+Esc 回滚（v6 §6.6）
-// 键盘绑定是全局的（每页一份），onKeydown 从 activeLoop 取当前实例
-// ============================================================================
-function onKeydown(e: KeyboardEvent) {
-  const inst = activeLoop.value
-  if (!inst || !isLoopActive.value) return
-  if (e.key === 'Escape') {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault()
-      void stopAndRollback()
-    } else {
-      e.preventDefault()
-      requestPause()
-    }
-  }
-}
-function bindKeyboard() {
-  if (keyboardBound) return
-  keyboardBound = true
-  window.addEventListener('keydown', onKeydown)
-}
-function unbindKeyboard() {
-  if (!keyboardBound) return
-  keyboardBound = false
-  window.removeEventListener('keydown', onKeydown)
-}
 
 /** 当前循环上下文（ScriptPanel 记 run trace 时盖 loopId/loopRound 用） */
 export function currentLoopContext(): { loopId?: string, loopRound?: number } {
@@ -1081,102 +1007,6 @@ export function isFromCurrentLoop(sessionId: string): boolean {
   const sid = String(sessionId || '')
   if (!sid) return true
   return true
-}
-
-const SUMMARY_INSTRUCTION = [
-  '请将本次会话总结为以下格式，供新会话继续工作：',
-  '',
-  '# 任务',
-  '<当前任务目标>',
-  '',
-  '# 已完成',
-  '<已完成的工作要点>',
-  '',
-  '# 当前状态',
-  '<最后的工作状态 / 最近的执行结果>',
-  '',
-  '# 下一步',
-  '<待完成的工作>',
-  '',
-  '# 关键文件',
-  '<涉及的路径列表>',
-  '',
-  '只输出上述结构，不加其他文字、不加代码块。',
-].join('\n')
-export async function startHandoff(): Promise<void> {
-  const inst = activeLoop.value
-  if (!inst || !isLoopActive.value) { toast('没有进行中的循环', 'warn'); return }
-  if (inst.state.value === 'handoff') { toast('已在轮转中', 'warn'); return }
-  inst.state.value = 'handoff'
-  persist(inst)
-  addTrace({ kind: 'loop', summary: '🔄 开始轮转 · 请求 AI 总结当前会话', payload: { loopId: inst.id.value, loopRound: inst.round.value } })
-  const okSent = transport.sendRotate('', { instruction: SUMMARY_INSTRUCTION })
-  if (!okSent) { handoffFail(inst, '发送 rotate 失败（窗口已关？）'); return }
-  handoffArm(inst, '总结请求超时（30s）')
-}
-export async function onSummary(text: string, sessionId: string, degraded: boolean): Promise<void> {
-  const inst = activeLoop.value
-  if (!inst || inst.state.value !== 'handoff') return
-  handoffDisarm(inst)
-  const t = String(text || '').trim()
-  const finalSummary = t || localFallbackSummary(inst)
-  const wasDegraded = degraded || !t
-  addTrace({
-    kind: 'loop',
-    summary: wasDegraded ? '⚠ 摘要降级为本地拼' : `✓ 已收到 AI 总结（${t.length} 字）`,
-    payload: { loopId: inst.id.value, loopRound: inst.round.value, summary: finalSummary.slice(0, 2000) },
-  })
-  const okSent = transport.sendNewSession('', { summary: finalSummary })
-  if (!okSent) { handoffFail(inst, '发送 new-session 失败'); return }
-  handoffArm(inst, '新会话创建超时（30s）')
-}
-export async function onNewSessionCreated(url: string, id: string): Promise<void> {
-  const inst = activeLoop.value
-  if (!inst || inst.state.value !== 'handoff') return
-  handoffDisarm(inst)
-  inst.latestTokens.value = 0
-  addTrace({
-    kind: 'loop',
-    summary: `✓ 已切到新会话 · ${id || url}`,
-    payload: { loopId: inst.id.value, loopRound: inst.round.value },
-  })
-  inst.stopRequest.value = 'none'
-  inst.state.value = 'waiting'
-  persist(inst)
-  enterWaiting(inst)
-  toast(`✓ 已切到新会话 · ${id || url}`, 'success', 5000)
-}
-function localFallbackSummary(inst: LoopInstance): string {
-  const lines = [
-    '# 任务',
-    inst.goal.value || '（无）',
-    '',
-    '# 当前状态',
-    `已完成 ${inst.round.value} 轮；最后执行：${inst.lastExec.value ? JSON.stringify(inst.lastExec.value) : '无'}`,
-    '',
-    '# 下一步',
-    '继续推进目标',
-  ]
-  return lines.join('\n')
-}
-function handoffArm(inst: LoopInstance, msg: string) {
-  handoffDisarm(inst)
-  inst.handoffTimer = setTimeout(() => { handoffFail(inst, msg) }, 30_000)
-}
-function handoffDisarm(inst: LoopInstance) {
-  if (inst.handoffTimer) { clearTimeout(inst.handoffTimer); inst.handoffTimer = null }
-}
-function handoffFail(inst: LoopInstance, reason: string) {
-  handoffDisarm(inst)
-  inst.stopReason.value = reason
-  inst.state.value = 'stopped'
-  persist(inst)
-  transport.sendStop('')
-  unbindKeyboard()
-  // loopRegistry 已删（PLAN #17 单例回退）
-  // if (inst.id.value) loopRegistry.unregister(inst.id.value)
-  addTrace({ kind: 'loop', summary: `✗ 轮转失败 · ${reason}`, payload: { loopId: inst.id.value, loopRound: inst.round.value } })
-  toast(`✗ 轮转失败：${reason}`, 'error', 6000)
 }
 
 // [multi-loop-step1]
@@ -1268,3 +1098,9 @@ function submitDecision(id: string, customText?: string): void {
     }
   }
 }
+export { onNewSessionCreated, onSummary, startHandoff, SUMMARY_INSTRUCTION }
+export { autoRotateSession, setTokenEstimate }
+
+export type { HookEvent, HookResult } from './auto-loop/hooks.js'
+
+export { bindKeyboard, unbindKeyboard } from './auto-loop/keyboard.js'

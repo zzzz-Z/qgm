@@ -582,17 +582,20 @@ if (P) {
   }
 }
 
-let dumped = false
+// [fix-dump-timing] 快照对比代替一次性 dumped；exit 不再关 TOOL_FD
+let _lastSnapshot = ''
 function dump() {
-  if (dumped || !OVERLAY_FILE) return
-  dumped = true
+  if (!OVERLAY_FILE) return
   const out = {}
   for (const [abs, v] of overlay) {
     out[abs] = { op: v.op, data: v.data ? b64(v.data) : null, dir: Boolean(v.dir) }
   }
-  try { orig.writeFileSync(OVERLAY_FILE, JSON.stringify(out)) } catch {}
+  const s = JSON.stringify(out)
+  if (s === _lastSnapshot) return
+  _lastSnapshot = s
+  try { orig.writeFileSync(OVERLAY_FILE, s) } catch {}
 }
-process.on('exit', () => { dump(); if (TOOL_FD >= 0) try { fs.closeSync(TOOL_FD) } catch {} })
+process.on('exit', () => { dump() })
 process.on('beforeExit', dump)
 process.on('uncaughtException', (e) => { dump(); throw e })
 process.on('unhandledRejection', (e) => { dump(); throw e })

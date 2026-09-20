@@ -1,0 +1,46 @@
+// [refactor-post-run] 子进程脚本执行（overlay 沙盒）
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+import { getRoot } from '../config.js'
+import { runProcess } from '../proc.js'
+
+export interface RunResult {
+  code: number
+  stdout: string
+  stderr: string
+}
+
+export async function runScript(scriptPath: string, timeoutMs = 60_000, signal?: AbortSignal, overlayPath?: string, toolLogPath?: string, onChunk?: (stream: 'stdout' | 'stderr', data: string) => void, sandbox?: string): Promise<RunResult> {
+  // 全局错误捕获 wrapper（console 走原生输出，拦截器负责文件 API，无需包裹）
+  const wrapperCode = `
+    process.on('uncaughtException', (e) => {
+      console.error('[uncaughtException]', e?.stack || e);
+      process.exitCode = 1;
+    });
+    process.on('unhandledRejection', (e) => {
+      console.error('[unhandledRejection]', e?.stack || e);
+      process.exitCode = 1;
+    });
+    try { require(${JSON.stringify(scriptPath)}); }
+    catch(e) { console.error('[script error]', e?.stack || e); process.exitCode = 1; }
+  `
+  // [fix-interceptor-path] src/post-run/ 或 dist/post-run/ 都回 ../../
+  const interceptorCjs = fileURLToPath(new URL('../interceptor.cjs', import.meta.url))
+  const helpersCjs = fileURLToPath(new URL('../helpers.cjs', import.meta.url))
+  const r = await runProcess(process.execPath, {
+    // [F7] semi-space 调小（64MB），GC 更频繁，防大对象堆积；总堆仍 512MB
+    args: ['--max-old-space-size=512', '--max-semi-space-size=64', '-r', interceptorCjs, '-r', helpersCjs, '-e', wrapperCode],
+    cwd: getRoot(),
+    env: {
+      ...process.env,
+      AI_RUNNER_OVERLAY: overlayPath || '',
+      AI_RUNNER_TOOL_LOG: toolLogPath || '',
+      AI_RUNNER_SANDBOX: sandbox || 'read-only',
+    },
+    timeoutMs,
+    signal,
+    onChunk,
+  })
+  return { code: r.code, stdout: r.stdout, stderr: r.stderr }
+}

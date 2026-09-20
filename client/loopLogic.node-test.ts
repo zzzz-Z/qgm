@@ -9,6 +9,7 @@ import {
   isStrictDone,
   LOOP_FEEDBACK_TAIL,
   LOOP_MAX_ROUNDS,
+  LOOP_ROTATE_THRESHOLD,
   LOOP_TOKEN_BUDGET,
   LOOP_TOKEN_HARD_LIMIT,
   tailClip,
@@ -218,6 +219,15 @@ it('回填：无 userNote 时无用户补充行', () => {
   assert.ok(!f.includes('【用户补充】'))
 })
 
+// [fix-rotate-threshold-test] ROTATE_THRESHOLD 边界锁定
+it('ROTATE_THRESHOLD: 值等于 40_000', () => {
+  assert.equal(LOOP_ROTATE_THRESHOLD, 40_000)
+})
+
+it('ROTATE_THRESHOLD: 大于 WARN 且大于 HARD_LIMIT', () => {
+  assert.ok(LOOP_ROTATE_THRESHOLD > LOOP_TOKEN_BUDGET)
+  assert.ok(LOOP_ROTATE_THRESHOLD > LOOP_TOKEN_HARD_LIMIT)
+})
 it('回填：末尾必含推进指令与 DONE 出口', () => {
   const f = buildFeedback(cjsOutcome(), { nextRound: 2, tokenDelta: 0 })
   assert.ok(f.includes('勿重复上轮脚本'))

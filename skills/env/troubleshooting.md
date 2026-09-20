@@ -1,3 +1,9 @@
+---
+name: env-troubleshooting
+description: 环境与工具链踩坑库（cwd/dev server/overlay/bash-guard）
+keywords: 踩坑, 故障, 排错, cwd, dev server, overlay, bash-guard, worktree, timeout
+---
+
 # 环境自检与踩坑库
 
 ## 会话首条自检清单

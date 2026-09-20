@@ -11,7 +11,7 @@ export function buildLauncher(): string {
     + '  style.textContent = [\n'
     + '    ":host{all:initial}",\n'
     + '    "*{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,sans-serif}",\n'
-    + '    ".fab{position:fixed;right:20px;bottom:20px;width:44px;height:44px;border-radius:50%;background:#2563eb;color:#fff;border:0;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;box-shadow:0 4px 14px rgba(37,99,235,0.42);transition:transform 0.18s,background 0.18s;user-select:none}",\n'
+    + '    ".fab{position:fixed;right:16px;bottom:16px;width:32px;height:32px;border-radius:50%;background:#2563eb;color:#fff;border:0;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;box-shadow:0 2px 8px rgba(37,99,235,0.38);transition:transform 0.18s,background 0.18s;user-select:none}",\n'
     + '    ".fab:hover{transform:scale(1.08);background:#1d4ed8}",\n'
     + '    ".fab.open{background:#ef4444;box-shadow:0 4px 14px rgba(239,68,68,0.42)}",\n'
     + '    ".panel{position:fixed;inset:0 0 0 auto;width:min(1100px,90vw);background:#fff;box-shadow:-8px 0 32px rgba(15,30,60,0.18);transform:translateX(100%);transition:transform 0.25s cubic-bezier(0.4,0,0.2,1);display:flex;flex-direction:column}",\n'
@@ -42,7 +42,9 @@ export function buildLauncher(): string {
     + '    fab.title = isOpen ? "关闭 AI Runner" : "打开 AI Runner (Ctrl+Shift+A)"\n'
     + '    if (isOpen && frame.getAttribute("src") === "about:blank") {\n'
     + '      frame.setAttribute("src", "/__ai/")\n'
+    + '      frame.addEventListener("load", function () { window.focus() }, { once: true })\n'
     + '    }\n'
+    + '    if (isOpen) window.focus()\n' // [fix-focus-back]
     + '  }\n'
     + '  fab.addEventListener("click", toggle)\n'
     + '  window.addEventListener("message", function (e) {\n'

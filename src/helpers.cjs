@@ -7,7 +7,7 @@ function safeReaddir(p) {
   const names = fs.readdirSync(p)
   return names.map((n) => {
     let st = null
-    try { st = fs.statSync(path.join(p, n)) } catch (e) {}
+    try { st = fs.statSync(path.join(p, n)) } catch { /* ignore */ }
     return {
       name: n,
       isDirectory() { return st ? st.isDirectory() : false },
@@ -153,6 +153,134 @@ const __AI__ = {
   exitNeedFiles(paths) {
     console.log(`__AI_NEED_FILES__${JSON.stringify({ paths: Array.isArray(paths) ? paths : [paths] })}`)
     process.exit(4)
+  },
+
+  // [common-helpers] 语义输出 + 文件安全 + 断言
+  ok(msg) { console.log(`\x1B[32m✓\x1B[0m ${msg}`) },
+  skip(msg) { console.log(`\x1B[33m!\x1B[0m ${msg}`) },
+  warn(msg) { console.log(`\x1B[33m⚠\x1B[0m ${msg}`) },
+  err(msg) { console.error(`\x1B[31m✗\x1B[0m ${msg}`) },
+  backup(file) {
+    const root = process.cwd()
+    const rel = path.relative(root, file)
+    if (rel.indexOf('..') === 0) throw new Error('backup: 文件不在项目内')
+    const target = path.join(root, '.ai-runner/backup', rel)
+    if (fs.existsSync(target)) return target
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.copyFileSync(file, target)
+    return target
+  },
+  patchFile(file, anchor, replacement, opts) {
+    opts = opts || {}
+    const src = fs.readFileSync(file, 'utf8')
+    if (opts.marker && src.includes(opts.marker)) return { ok: true, skipped: true, reason: 'marker present' }
+    const count = src.split(anchor).length - 1
+    if (count === 0) throw new Error(`patchFile: anchor not found in ${file}`)
+    if (opts.unique && count > 1) throw new Error(`patchFile: anchor not unique (${count})`)
+    __AI__.backup(file)
+    const next = src.split(anchor).join(replacement)
+    fs.writeFileSync(file, next, 'utf8')
+    const check = fs.readFileSync(file, 'utf8')
+    if (check !== next) throw new Error('patchFile: readback mismatch')
+    return { ok: true, replaced: count }
+  },
+  assertContains(file, anchor) {
+    const s = fs.readFileSync(file, 'utf8')
+    if (!s.includes(anchor)) { console.error(`[assertContains] ${file} missing: ${anchor}`); process.exit(1) }
+  },
+  assertNotContains(file, anchor) {
+    const s = fs.readFileSync(file, 'utf8')
+    if (s.includes(anchor)) { console.error(`[assertNotContains] ${file} has: ${anchor}`); process.exit(1) }
+  },
+  // [common-helpers-v2] state / esc / dump / cwd / 原子写
+  statePath() {
+    return path.join(process.cwd(), '.ai-runner/state.json')
+  },
+  readState() {
+    const p = __AI__.statePath()
+    try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return null }
+  },
+  updateState(fn) {
+    const p = __AI__.statePath()
+    if (!fs.existsSync(p)) throw new Error(`state.json missing: ${p}`)
+    const st = JSON.parse(fs.readFileSync(p, 'utf8'))
+    if (typeof fn === 'function') fn(st)
+    st.round = (st.round || 0) + 1
+    fs.writeFileSync(p, JSON.stringify(st, null, 2), 'utf8')
+    return st
+  },
+  esc(s) {
+    const meta = '.*+?^${}()|[]\\'
+    let out = ''
+    for (const c of String(s)) out += meta.includes(c) ? `\\${c}` : c
+    return out
+  },
+  dump(file, from, to) {
+    const lines = fs.readFileSync(file, 'utf8').split('\n')
+    const s = Math.max(1, from | 0)
+    const e = Math.min(lines.length, (to | 0) || lines.length)
+    const out = []
+    for (let i = s - 1; i < e; i++) out.push(`${i + 1}: ${lines[i]}`)
+    return out.join('\n')
+  },
+  cwdMust(expected) {
+    const cwd = process.cwd()
+    if (cwd !== expected) {
+      __AI__.err(`cwd mismatch: expected=${expected} actual=${cwd}`)
+      process.exit(2)
+    }
+    return true
+  },
+  atomicWrite(file, content) {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const tmp = `${file}.tmp-${process.pid}-${Date.now()}`
+    fs.writeFileSync(tmp, content, 'utf8')
+    fs.renameSync(tmp, file)
+    return true
+  },
+  // [ai-helper-v3] syntaxCheck / exec / assertCtx
+  syntaxCheck(code, filename) {
+    const vm = require('node:vm')
+    try {
+      const compiled = new vm.Script(String(code), { filename: filename || 'script.cjs' })
+      void compiled
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e.message }
+    }
+  },
+  exec(cmd, args, opts) {
+    const { execFileSync } = require('node:child_process')
+    opts = opts || {}
+    try {
+      const out = execFileSync(cmd, args || [], {
+        cwd: opts.cwd || process.cwd(),
+        encoding: 'utf8',
+        shell: opts.shell || false,
+        stdio: opts.stdio || ['ignore', 'pipe', 'pipe'],
+      })
+      return { ok: true, stdout: String(out || '') }
+    } catch (e) {
+      return { ok: false, stdout: String(e.stdout || ''), stderr: String(e.stderr || ''), code: e.status }
+    }
+  },
+  assertCtx(spec) {
+    spec = spec || {}
+    const cwd = process.cwd()
+    if (spec.cwd && cwd !== spec.cwd) {
+      __AI__.err(`assertCtx: cwd 期望 ${spec.cwd}，实际 ${cwd}`)
+      process.exit(2)
+    }
+    if (spec.branch) {
+      const r = __AI__.exec('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
+      if (!r.ok) { __AI__.err('assertCtx: git 命令失败'); process.exit(2) }
+      const b = String(r.stdout || '').trim()
+      if (b !== spec.branch) {
+        __AI__.err(`assertCtx: 分支期望 ${spec.branch}，实际 ${b}`)
+        process.exit(2)
+      }
+    }
+    return true
   },
 }
 global.__AI__ = __AI__

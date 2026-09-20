@@ -49,3 +49,24 @@ export interface TransportMessage {
   type: string
   [k: string]: unknown
 }
+// [fix-protocol-types] WS 消息联合类型（ws-server ↔ useAiTransport 共享）
+
+export type ClientMessage
+  = | { t: 'headless:open', sid: string, url?: string }
+    | { t: 'headless:close', sid: string }
+    | { t: 'headless:list' }
+    | { t: 'headless:fill', sid: string, prompt: string, context?: string }
+    | { t: 'headless:stop', sid: string }
+    | { t: 'headless:rotate', sid: string, instruction: string }
+    | { t: 'headless:new-session', sid: string, summary: string }
+
+export type ServerMessage
+  = | { t: 'hello', version: number }
+    | { t: 'headless:reply', sid: string, reply: AiReplyDto }
+    | { t: 'headless:script', sid: string, item: InboxItemDto }
+    | { t: 'headless:state', sid: string, state: TransportState, detail?: string }
+    | { t: 'headless:token-estimate', sid: string, tokens: number }
+    | { t: 'headless:new-session-created', sid: string, url: string, id: string }
+    | { t: 'headless:summary', sid: string, text: string, degraded: boolean }
+    | { t: 'headless:list', sessions: unknown[] }
+    | { t: 'headless:error', error: string }

@@ -2,7 +2,7 @@
   <div ref="paneRef" class="bg-\[var\(--bg\)\] flex pane h-screen overflow-hidden" :class="{ 'is-resizing-side': resizingSide }">
     <!-- 左侧主区域 -->
     <div
-      ref="mainRef" class="flex flex-col pane-main flex-1 min-w-0 overflow-hidden" :class="{ 'is-dragging': fileDragging, 'is-success': fileSuccess }"
+      ref="mainRef" class="flex flex-col pane-main flex-1 min-w-0 overflow-hidden" :class="{ 'is-success': fileSuccess }"
       @dragover="onHtmlDragOver" @drop="onHtmlDrop"
     >
       <!-- 自动化循环控制条（P2） -->
@@ -16,6 +16,12 @@
       <section class="terminal">
         <!-- [flow-timeline] 全流程时间线 -->
         <div class="flow-timeline">
+          <!-- [fix-waiting-bar] 全程等待提示 -->
+          <div v-if="aiWaiting" class="waiting-bar">
+            <span class="waiting-spinner" />
+            <span class="waiting-text">AI 处理中，请稍候…</span>
+            <span class="waiting-dots"><span /><span /><span /></span>
+          </div>
           <div class="script-header">
             <span v-if="scriptMeta.desc" class="sm-item"><b>desc</b><em>{{ scriptMeta.desc }}</em></span>
             <span v-if="scriptMeta.why" class="sm-item"><b>why</b><em>{{ scriptMeta.why }}</em></span>
@@ -65,8 +71,9 @@
         </div>
       </section>
       <!-- 编辑器 (下方) -->
-      <section class="editor card" :class="{ 'is-running': running, 'is-dragging': fileDragging }">
+      <section class="editor card" :class="{ 'is-running': running }">
         <div class="tpl-bar">
+          <!-- [fix-restore-templates] 模板按钮（删 draft-toolbar 时误删） -->
           <button
             v-for="t in TEMPLATES" :key="t.id" v-tooltip="`模板：${t.label} — ${t.title}`" class="tpl-chip"
             @click="applyTemplate(t.code)"
@@ -122,21 +129,14 @@
             </svg>
             <span>清空</span>
           </button>
-          <button
-            v-tooltip="'把全项目文件路径（@path）插入到编辑器'"
-            aria-label="把全项目文件路径（@path）插入到编辑器" class="primary-btn ghost head-run" :disabled="addingAllToEditor"
-            @click="onAddAllClick"
+          <!-- [niuma-mode] 牛马模式 -->
+          <label
+            v-tooltip="'牛马模式：勾选后每 3 分钟自动发「继续工作」到 AI'"
+            class="niuma-toggle"
           >
-            <svg
-              class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-            >
-              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
-              <line x1="12" y1="11" x2="12" y2="17" />
-              <line x1="9" y1="14" x2="15" y2="14" />
-            </svg>
-            <span>{{ addingAllToEditor ? '添加中…' : '添加全部' }}</span>
-          </button>
+            <input v-model="niumaMode" type="checkbox">
+            <span>牛马</span>
+          </label>
           <button
             v-if="running || isLoopActive || autoTakeoverEnabled"
             v-tooltip="'暂停：停止当前执行并关闭自动接管'" aria-label="暂停：停止当前执行并关闭自动接管"
@@ -176,40 +176,6 @@
             </button>
           </div>
         </div>
-        <!-- [P2-2b2] draft slots toolbar -->
-        <div class="draft-toolbar">
-          <select
-            v-tooltip="'切换草稿槽位'"
-            class="draft-select"
-            :value="activeDraftId"
-            @change="switchDraftSlot(($event.target as HTMLSelectElement).value)"
-          >
-            <option v-for="s in draftSlots" :key="s.id" :value="s.id">
-              {{ s.name }}<template v-if="s.text">
-                ({{ s.text.length }})
-              </template>
-            </option>
-          </select>
-          <button
-            v-tooltip="'新建草稿槽位'"
-            aria-label="新建草稿槽位"
-            class="ghost-btn draft-btn"
-            type="button"
-            @click="newDraftSlot"
-          >
-            ＋
-          </button>
-          <button
-            v-tooltip="'删除当前草稿槽位'"
-            aria-label="删除当前草稿槽位"
-            class="ghost-btn draft-btn"
-            type="button"
-            :disabled="activeDraftId === 'default'"
-            @click="deleteDraftSlot(activeDraftId)"
-          >
-            ×
-          </button>
-        </div>
         <div class="editor-body" @paste.capture="onEditorPaste" @dragover.prevent @drop="onDesktopDrop">
           <!-- @FILE_PICKER_V1 -->
           <div v-if="pickerOpen" ref="pickerRef" class="file-picker" :style="pickerStyle">
@@ -232,17 +198,7 @@
           </div>
           <div ref="cmHost" class="cm-host" tabindex="0" />
         </div>
-        <!-- [script-meta-row] [meta-row-bottom] 当前脚本元信息（desc/why/plan/done） -->
-        <div v-if="hasScriptMeta" class="meta-row">
-          <span v-if="scriptMeta.desc" class="meta-item"><b>desc</b><span :title="scriptMeta.desc">{{ scriptMeta.desc
-          }}</span></span>
-          <span v-if="scriptMeta.why" class="meta-item"><b>why</b><span :title="scriptMeta.why">{{ scriptMeta.why
-          }}</span></span>
-          <span v-if="scriptMeta.plan" class="meta-item"><b>plan</b><span :title="scriptMeta.plan">{{ scriptMeta.plan
-          }}</span></span>
-          <span v-if="scriptMeta.done" class="meta-item"><b>done</b><span :title="scriptMeta.done">{{ scriptMeta.done
-          }}</span></span>
-        </div>
+
         <footer class="editor-foot">
           <span v-if="persistWarning" v-tooltip="persistWarning" class="persist-warning">⚠ 会话存储已满</span>
           <div class="foot-spacer" />
@@ -259,17 +215,6 @@
         </footer>
       </section>
 
-      <!-- 拖拽浮层 -->
-      <div v-if="fileDragging" class="overlay drop">
-        <div class="overlay-card drop">
-          <div class="overlay-icon">
-            📥
-          </div>
-          <div class="overlay-text">
-            松开插入路径
-          </div>
-        </div>
-      </div>
       <div v-if="fileSuccess" class="overlay success">
         <div class="overlay-card success">
           <div class="overlay-icon">
@@ -322,11 +267,16 @@ import SidePane from './SidePane.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRunner } from '../composables/useRunner'
 import { currentLoopContext, useAutoLoop } from '../composables/useAutoLoop'
-import { copyAndFill } from '../composables/useDeepseekUrl'
+import { copyAndFill, sendNewSession } from '../composables/useDeepseekUrl'
 import { useAiWaiting } from '../composables/useAiWaiting'
 import { useAutoTakeover } from '../composables/useAutoTakeover'
 import { emit, setPendingAskKey, useEventBus } from '../composables/useEventStream'
 import { useCodeCleaner } from '../composables/useCodeCleaner'
+import { useSessionManager } from '../composables/useSessionManager'
+import { fmtSize, readAsText } from '../utils/format'
+import { detectLang, parseScriptMeta } from '../utils/scriptMeta'
+import { LS_BASH_POLICY_KEY, LS_CMD_HISTORY_KEY, LS_DRAFT_ACTIVE_KEY, LS_DRAFT_SLOTS_KEY, LS_SIDE_WIDTH_KEY, LS_SKILLS_KEY } from '../utils/storage'
+import { isReadonlyResult, shouldIncludeChanges } from '../composables/useRunFeedback'
 import { buildErrorContext, enforceBudget, parseErrorLocations } from '../utils/contextBuilder'
 import { readNdjson } from '../utils/stream'
 import { fnv1a8 } from '../utils/hash'
@@ -334,7 +284,6 @@ import { useToast } from '../composables/useToast'
 import { useTraceLog } from '../composables/useTraceLog'
 import type { TraceEntry } from '../composables/useTraceLog'
 import { setLastAutoFilled } from '../composables/useScriptInbox'
-import type { Change, RunResponse } from '../types'
 
 defineOptions({ name: 'ScriptPanel' })
 
@@ -417,7 +366,7 @@ const {
   userNote,
 } = useAutoLoop()
 const lastRunScript = ref('')
-const SKILLS_KEY = '__ai_selected_skills'
+const SKILLS_KEY = LS_SKILLS_KEY
 interface SkillInfo { name: string, content?: string, source?: 'base' | 'user' | 'agents' }
 const skillsList = ref<SkillInfo[]>([])
 const skillsLoading = ref(false)
@@ -490,8 +439,9 @@ function pauseAll() {
 const mainRef = ref<HTMLElement | null>(null)
 
 const copied = ref(false)
-const fileDragging = ref(false)
 const fileSuccess = ref(false)
+const { maybeRotateSession, trackMessage } = useSessionManager()
+
 /* [attachments] 附件：粘贴图片 / 拖文件 → tag 展示；发送时文本内容拼入脚本 */
 interface AttachedFile {
   id: string
@@ -503,19 +453,6 @@ interface AttachedFile {
 }
 const attachedFiles = ref<AttachedFile[]>([])
 const MAX_ATTACH_BYTES = 500 * 1024 // 单文件 500KB
-function fmtSize(n: number): string {
-  if (n < 1024) return `${n}B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`
-  return `${(n / 1024 / 1024).toFixed(2)}MB`
-}
-function readAsText(file: File): Promise<string> {
-  return new Promise((res, rej) => {
-    const r = new FileReader()
-    r.onload = () => res(String(r.result || ''))
-    r.onerror = rej
-    r.readAsText(file)
-  })
-}
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((res, rej) => {
     const r = new FileReader()
@@ -539,8 +476,8 @@ async function addAttachedFile(file: File): Promise<void> {
       kind: isImage ? 'image' : 'text',
       content,
     })
-  } catch (e) {
-    toast(`附件读取失败：${String(e)}`, 'error', 4000)
+  } catch {
+    /* ignore */
   }
 }
 function removeAttach(id: string): void {
@@ -609,7 +546,6 @@ async function addTreePaths(paths: string[]): Promise<void> {
         content: '',
         paths: tree,
       })
-      toast(`已附加文件夹 ${p}（${tree.length} 个文件）`, 'success', 2000)
       continue
     }
     // 单文件：直接读源码
@@ -623,7 +559,6 @@ async function addTreePaths(paths: string[]): Promise<void> {
       const f = (data.files || [])[0]
       if (!f) continue
       if (f.error) {
-        toast(`附件 ${p} 读取失败：${f.error}`, 'warn', 4000)
         continue
       }
       const content = String(f.content || '')
@@ -634,29 +569,19 @@ async function addTreePaths(paths: string[]): Promise<void> {
         kind: 'text',
         content,
       })
-      toast(`已附加 ${p}`, 'success', 1500)
-    } catch (e) {
-      toast(`附件读取失败：${String(e)}`, 'error', 4000)
+    } catch {
+      /* ignore */
     }
   }
 }
-function onTreeDrag(e: Event) {
-  const d = (e as CustomEvent).detail as { x: number, y: number }
-  if (!d) return
-  fileDragging.value = isInEditor(d.x, d.y)
-}
-function onTreeDragCancel() {
-  fileDragging.value = false
-}
 function onTreeDrop(e: Event) {
   const d = (e as CustomEvent).detail as { paths: string[], x: number, y: number }
-  fileDragging.value = false
   if (!d || !isInEditor(d.x, d.y)) return
   void addTreePaths(d.paths || [])
 }
 function isBashScript(scriptText: string): boolean {
   const first = (scriptText.split('\n', 1)[0] || '').trim()
-  return /^#!\s*\/usr\/bin\/(env\s+)?bash\b/.test(first)
+  return /^#!\s*\/usr\/bin\/(?:env\s+)?bash\b/.test(first)
 }
 async function fetchFolderContents(paths: string[]): Promise<Array<{ path: string, content: string }>> {
   try {
@@ -697,7 +622,7 @@ const statusText = ref('')
 const statusClass = ref('')
 
 // [user-run-wait] 点运行 → 立即置“等待 AI 回复”loading
-const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
+const { waiting: aiWaiting, niumaMode, startWaiting: startAiWaiting } = useAiWaiting()
 
 // [loop-loading] 循环态统一触发等待 loading，确保从发问起有「等待 AI」提示
 watch(loopState, (v, old) => {
@@ -709,7 +634,7 @@ watch(loopState, (v, old) => {
 // 分栏比例（终端占比）
 
 // 右侧面板宽度
-const SIDE_WIDTH_KEY = '__ai_runner_side_width'
+const SIDE_WIDTH_KEY = LS_SIDE_WIDTH_KEY
 const SIDE_WIDTH_DEFAULT = 320
 const SIDE_WIDTH_DIFF = 560
 const paneRef = ref<HTMLElement | null>(null)
@@ -733,63 +658,7 @@ const previewBefore = ref<string | null>(null)
 const previewAfter = ref<string>('')
 
 const { events: busEvents } = useEventBus()
-
-// [flow-timeline] 全流程时间线计算
-// [flow-tag-v3] 生命周期状态 → 中文字面
-function statusOf(s: string): string {
-  if (s === 'run') return '进行中'
-  if (s === 'ok') return '已完成'
-  if (s === 'err') return '失败'
-  return '待开始'
-}
-const flowStages = computed(() => {
-  const ev = (busEvents && busEvents.value) || []
-  let startIdx = -1
-  for (let i = ev.length - 1; i >= 0; i--) { if (ev[i].kind === 'run:start') { startIdx = i; break }
-  }
-  const stageEvts: Array<{ payload?: Record<string, unknown> }> = []
-  let endEvt: { payload?: Record<string, unknown> } | null = null
-  if (startIdx >= 0) {
-    for (let i = startIdx + 1; i < ev.length; i++) {
-      const k = ev[i].kind
-      if (k === 'run:stage') { stageEvts.push(ev[i] as { payload?: Record<string, unknown> })
-      }
-      else if (k === 'run:end' || k === 'run:error') { endEvt = ev[i] as { payload?: Record<string, unknown> }; break }
-    }
-  }
-  const s = String(loopState.value || 'idle')
-  const isWait = s === 'waiting' || s === 'running' || s === 'feedback' || running.value || aiWaiting.value
-  const isParse = s === 'parsing'
-  const isExec = s === 'executing'
-  const isFinal = s === 'stopped' || s === 'done' || s === 'budget-limited' || s === 'interrupted' || s === 'handoff'
-  let waitState = 'idle'
-  if (isWait && !isParse && !isExec && !isFinal) waitState = 'run'
-  else if (isParse || isExec || isFinal) waitState = 'ok'
-  const waitDetail = s === 'waiting' ? '等待回复中' : (s === 'feedback' ? '已发反馈' : '')
-  let parseState = 'idle'
-  if (isParse) parseState = 'run'
-  else if (isExec || isFinal) parseState = 'ok'
-  let execState = 'idle'
-  if (isExec) execState = 'run'
-  else if (isFinal && result.value && result.value.ok === false) execState = 'err'
-  else if (isFinal && result.value && result.value.ok === true) execState = 'ok'
-  const execDetail = stageEvts.length
-    ? stageEvts.slice(-5).map(e => String((e.payload && e.payload.name) || '')).filter(Boolean).join(' · ')
-    : ''
-  let resState = 'idle'
-  let resDetail = ''
-  if (isFinal || endEvt) {
-    const okFlag = result.value ? result.value.ok === true : (endEvt && endEvt.payload ? endEvt.payload.ok === true : false)
-    if (okFlag) { resState = 'ok'; resDetail = '成功' }
-    else { resState = 'err'; resDetail = (result.value && result.value.error) || '失败' }
-  }
-  return [
-    { key: 'wait', icon: '💬', label: '等待 AI 回复', state: waitState, detail: waitDetail, status: statusOf(waitState) },
-    { key: 'parse', icon: '📝', label: '脚本准备', state: parseState, detail: '', status: statusOf(parseState) },
-    { key: 'exec', icon: '⚙', label: '执行', state: execState, detail: execDetail, status: statusOf(execState) },
-    { key: 'result', icon: '✓', label: '结果', state: resState, detail: resDetail, status: statusOf(resState) },
-  ]
-})
+const { stripComments, stripBlankLines } = useCodeCleaner()
 
 // [single-stage] 只显示当前活跃阶段
 
@@ -866,30 +735,6 @@ async function onRollbackAll() {
   previewFile.value = null
 }
 
-function shouldIncludeChanges(
-  changes: Change[],
-  errorLocs: Map<string, Set<number>>,
-): boolean {
-  if (!changes.length) return true
-  if (changes.length > 1) return true
-  const c = changes[0]
-  const locs = errorLocs.get(c.path) || errorLocs.get(`./${c.path}`)
-  if (locs && locs.size > 0) {
-    const total = c.afterLines ?? 0
-    for (const n of locs) {
-      if (n <= total + 200) return false
-    }
-  }
-  return true
-}
-function isReadonlyResult(r: RunResponse | null): boolean {
-  if (!r || !r.ok) return false
-  if (r.runId === '') return false
-  if ((r.changes || []).length > 0) return false
-  if (isLoopActive.value) return false
-  return true
-}
-
 async function buildAiPrompt() {
   if (!result.value) return ''
   const errorLocs = parseErrorLocations(`${result.value.stderr || ''}\n${result.value.stdout || ''}`)
@@ -932,37 +777,35 @@ async function buildAiPrompt() {
   // [fix-issues-okline-v1] 声明累积数组
   const issues = []
   const okLine = []
-  {
-    // 行为层（优先级最高）
-    if (result.value.test?.ran) {
-      if (!result.value.test.ok) issues.push('行为层: 单测失败（见下 # 单元测试）')
-      else okLine.push('test ✓')
-    }
-    if (result.value.smoke?.ran && !result.value.smoke.ok) issues.push('行为层: 冒烟失败（见下 # 页面冒烟）')
-    if (result.value.dryRunFailed) issues.push('行为层: 脚本运行中断，磁盘零改动')
-    if (result.value.code !== 0 && !result.value.dryRunFailed && result.value.code !== -1) {
-      issues.push(`行为层: 退出码 ${result.value.code}`)
-    }
-    // 类型层
-    if (result.value.tsc) {
-      if (result.value.tsc.ok === false) issues.push('类型层: tsc 报错（见下 # 类型检查）')
-      else okLine.push('tsc ✓')
-    }
-    // 代码层
-    if (result.value.lint?.ran) {
-      if (!result.value.lint.ok) issues.push('代码层: eslint 报错（见下 # 代码格式化）')
-      else okLine.push('lint ✓')
-    }
-    p.push('# 三层反馈摘要')
-    if (issues.length === 0) {
-      p.push(`✓ 无阻塞问题${okLine.length ? `（${okLine.join(' / ')}）` : ''}`)
-    } else {
-      p.push('按优先级：')
-      for (const i of issues) p.push(`- ${i}`)
-      if (okLine.length) p.push(`已通过：${okLine.join(' / ')}`)
-    }
-    p.push('')
+  // 行为层（优先级最高）
+  if (result.value.test?.ran) {
+    if (!result.value.test.ok) issues.push('行为层: 单测失败（见下 # 单元测试）')
+    else okLine.push('test ✓')
   }
+  if (result.value.smoke?.ran && !result.value.smoke.ok) issues.push('行为层: 冒烟失败（见下 # 页面冒烟）')
+  if (result.value.dryRunFailed) issues.push('行为层: 脚本运行中断，磁盘零改动')
+  if (result.value.code !== 0 && !result.value.dryRunFailed && result.value.code !== -1) {
+    issues.push(`行为层: 退出码 ${result.value.code}`)
+  }
+  // 类型层
+  if (result.value.tsc) {
+    if (result.value.tsc.ok === false) issues.push('类型层: tsc 报错（见下 # 类型检查）')
+    else okLine.push('tsc ✓')
+  }
+  // 代码层
+  if (result.value.lint?.ran) {
+    if (!result.value.lint.ok) issues.push('代码层: eslint 报错（见下 # 代码格式化）')
+    else okLine.push('lint ✓')
+  }
+  p.push('# 三层反馈摘要')
+  if (issues.length === 0) {
+    p.push(`✓ 无阻塞问题${okLine.length ? `（${okLine.join(' / ')}）` : ''}`)
+  } else {
+    p.push('按优先级：')
+    for (const i of issues) p.push(`- ${i}`)
+    if (okLine.length) p.push(`已通过：${okLine.join(' / ')}`)
+  }
+  p.push('')
   if (changes.value.length) {
     p.push('# 变更')
     p.push('```')
@@ -1045,9 +888,9 @@ async function buildAiPrompt() {
       p.push(`实际：${cm.actual.join(', ') || '（无）'}`)
       const instruction = !result.value.ok
         ? '结合上方源码和错误信息诊断根因，给出最小修复方案，生成脚本。不要回退无关代码。'
-        : isReadonlyResult(result.value)
+        : isReadonlyResult(result.value, isLoopActive.value)
           ? '这是只读诊断脚本的输出。基于上方 stdout 分析现状，给出下一步建议或修改脚本。'
-          : '确认改动。'
+          : '继续工作'
       p.push('# 指令', instruction)
       if (cm.extra.length) p.push(`⚠ 未声明但改动：${cm.extra.join(', ')}`)
       if (!cm.actual.length) p.push('⚠ 脚本未产生任何文件改动')
@@ -1056,7 +899,7 @@ async function buildAiPrompt() {
   }
   if (result.value.stderr) { p.push('# 错误输出 (stderr)', '```', result.value.stderr.slice(-3000), '```', '') }
   if (result.value.stdout) { p.push('# Stdout', '```', result.value.stdout.slice(-3000), '```', '') }
-  p.push('# 指令', result.value.ok ? '确认改动。' : '结合上方源码和错误信息诊断根因，给出最小修复方案，生成脚本。不要回退无关代码。')
+  p.push('# 指令', result.value.ok ? '继续工作' : '结合上方源码和错误信息诊断根因，给出最小修复方案，生成脚本。不要回退无关代码。')
   let text = p.join('\n')
   const budget = enforceBudget(text)
   if (!budget.ok) {
@@ -1088,7 +931,6 @@ async function buildAiPrompt() {
 /* __ai_removed: DEEPSEEK_URL_MAX */
 // URL 从全局 composable 读，在 App.vue 的 header 里配置
 /* __ai_removed: deepseekUrl ref */
-const { stripComments, stripBlankLines } = useCodeCleaner()
 const { addTrace } = useTraceLog()
 
 const TEMPLATES = [
@@ -1124,7 +966,7 @@ function applyTemplate(code: string) {
   script.value = code
 }
 
-const CMD_HISTORY_KEY = '__ai_cmd_history'
+const CMD_HISTORY_KEY = LS_CMD_HISTORY_KEY
 function loadCmdHistory(): string[] {
   try {
     const raw = localStorage.getItem(CMD_HISTORY_KEY)
@@ -1180,8 +1022,8 @@ async function runSmart(opts?: { bypassAutoGuard?: boolean }) {
   if (!rawScript) return
   const text = attachedFiles.value.length ? await buildScriptWithAttachments(rawScript, attachedFiles.value) : rawScript
   const firstLine = text.split('\n', 1)[0].trim()
-  const isNode = /^#!\s*\/usr\/bin\/(env\s+)?node\b/.test(firstLine)
-  const isBash = /^#!\s*\/usr\/bin\/(env\s+)?bash\b/.test(firstLine)
+  const isNode = /^#!\s*\/usr\/bin\/(?:env\s+)?node\b/.test(firstLine)
+  const isBash = /^#!\s*\/usr\/bin\/(?:env\s+)?bash\b/.test(firstLine)
   if (isNode || isBash) {
     runningCommand.value = ''
     lastRunScript.value = text
@@ -1197,26 +1039,45 @@ async function runSmart(opts?: { bypassAutoGuard?: boolean }) {
   void askAi(text)
 }
 
-async function loadSkillsForAsk(): Promise<string> {
+// [ask-auto-skills] 用户手选 + 后端按 question 自动匹配
+async function loadSkillsForAsk(question: string): Promise<string> {
+  const parts: string[] = []
+
+  // 1. 用户手选
   let selected: string[] = ['gen-script-rules']
   try {
-    const raw = localStorage.getItem('__ai_selected_skills')
+    const raw = localStorage.getItem(LS_SKILLS_KEY)
     if (raw) {
       const arr = JSON.parse(raw)
       if (Array.isArray(arr)) selected = arr
     }
   } catch { }
-  if (!selected.length) return ''
-  try {
-    const res = await fetch('/__ai/skills')
-    const all = await res.json()
-    if (!Array.isArray(all)) return ''
-    const picked = all.filter((s: any) => selected.includes(s.name))
-    if (!picked.length) return ''
-    return picked.map((s: any) => s.content).join('\n\n---\n\n')
-  } catch {
-    return ''
+  if (selected.length) {
+    try {
+      const res = await fetch('/__ai/skills')
+      const all = await res.json()
+      if (Array.isArray(all)) {
+        const picked = all.filter((s: any) => selected.includes(s.name))
+        if (picked.length) parts.push(picked.map((s: any) => s.content).join('\n\n---\n\n'))
+      }
+    } catch { }
   }
+
+  // 2. 后端按 question 自动匹配（常驻 4 条 + 关键词命中）
+  try {
+    const res = await fetch('/__ai/skills/load', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task: question }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      const auto = String(data?.content || '').trim()
+      if (auto) parts.push(auto)
+    }
+  } catch { }
+
+  return parts.join('\n\n---\n\n')
 }
 
 async function expandAtRefs(text: string): Promise<string> {
@@ -1250,7 +1111,7 @@ async function expandAtRefs(text: string): Promise<string> {
 async function askAi(question: string) {
   startAiWaiting()
   if (!question) { toast('@ 后没有内容', 'warn'); return }
-  const skills = await loadSkillsForAsk()
+  const skills = await loadSkillsForAsk(question)
   const fileBlocks = await expandAtRefs(question)
   const cleanQuestion = question.replace(/(?:^|\n)[ \t]*@[\w./-]+[ \t]*/g, '').trim()
   const segs: string[] = []
@@ -1264,6 +1125,18 @@ async function askAi(question: string) {
     return
   }
   const askKey = `ask-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+  // [sp-rotate] 计入提问 + 阈值轮转
+  trackMessage('user', prompt)
+  {
+    const rr = maybeRotateSession(summary => sendNewSession({ summary }))
+    if (rr.fired) {
+      if (rr.sent) {
+        toast(`已达 ${rr.overCount} 次提问，已请求开启新对话`, 'info', 4000)
+      } else {
+        toast(`已达 ${rr.overCount} 次提问，但 AI 窗口未就绪（请点右上角「打开 AI 窗口」）`, 'warn', 6000)
+      }
+    }
+  }
   setPendingAskKey(askKey)
   emit('ai:ask', question.slice(0, 100), { payload: { question, prompt, phase: 'pending' }, updateKey: askKey })
   statusText.value = '✅ 已发送'
@@ -1299,7 +1172,7 @@ async function execCmd(text: string) {
     const res = await fetch('/__ai/exec', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cmd, bashPolicy: execPolicyOverride || (() => { try { return localStorage.getItem('__ai_bash_policy') || 'on-request' } catch { return 'on-request' } })() }),
+      body: JSON.stringify({ cmd, bashPolicy: execPolicyOverride || (() => { try { return localStorage.getItem(LS_BASH_POLICY_KEY) || 'on-request' } catch { return 'on-request' } })() }),
     })
     if (!res.ok || !res.body) {
       let approval = null
@@ -1607,8 +1480,8 @@ watch(isLoopActive, (v) => {
   cmView.dispatch({ effects: editableComp.reconfigure(CM.EditorView.editable.of(!v)) })
 })
 // [P2-2b] draft slots API
-const DRAFT_SLOTS_KEY = '__ai_script_drafts'
-const DRAFT_ACTIVE_KEY = '__ai_script_draft_active'
+const DRAFT_SLOTS_KEY = LS_DRAFT_SLOTS_KEY
+const DRAFT_ACTIVE_KEY = LS_DRAFT_ACTIVE_KEY
 interface DraftSlot { id: string, text: string, ts: number, name: string }
 const draftSlots = ref<DraftSlot[]>([])
 const activeDraftId = ref<string>('default')
@@ -1636,33 +1509,6 @@ function upsertDraftSlot(id: string, text: string, name?: string): void {
   else draftSlots.value.push(item)
   persistDraftSlots()
 }
-function switchDraftSlot(id: string): void {
-  if (id === activeDraftId.value) return
-  upsertDraftSlot(activeDraftId.value, script.value)
-  const next = draftSlots.value.find(s => s.id === id)
-  activeDraftId.value = id
-  script.value = next ? next.text : ''
-  persistDraftSlots()
-}
-function deleteDraftSlot(id: string): void {
-  if (id === 'default') return
-  draftSlots.value = draftSlots.value.filter(s => s.id !== id)
-  if (activeDraftId.value === id) {
-    activeDraftId.value = 'default'
-    const d = draftSlots.value.find(s => s.id === 'default')
-    script.value = d ? d.text : ''
-  }
-  persistDraftSlots()
-}
-function newDraftSlot(): void {
-  upsertDraftSlot(activeDraftId.value, script.value)
-  const id = `draft-${Date.now().toString(36)}`
-  draftSlots.value.push({ id, text: '', ts: Date.now(), name: id })
-  activeDraftId.value = id
-  // [P2-2c] 保留编辑器内容（不清空）：script.value = ''
-  persistDraftSlots()
-}
-
 // [P2-2b] auto-persist active slot（debounce 400ms）
 let draftPersistTimer: ReturnType<typeof setTimeout> | null = null
 watch(script, (v) => {
@@ -1772,9 +1618,7 @@ onMounted(() => {
   scrollTermToBottom()
   window.addEventListener('ai-runner:auto-run', onAutoRun)
   window.addEventListener('keydown', onGlobalKey)
-  window.addEventListener('ai-runner:drag', onTreeDrag)
   window.addEventListener('ai-runner:drop', onTreeDrop)
-  window.addEventListener('ai-runner:drag-cancel', onTreeDragCancel)
 })
 
 onBeforeUnmount(() => {
@@ -1784,9 +1628,7 @@ onBeforeUnmount(() => {
 
   window.removeEventListener('ai-runner:auto-run', onAutoRun)
   window.removeEventListener('keydown', onGlobalKey)
-  window.removeEventListener('ai-runner:drag', onTreeDrag)
   window.removeEventListener('ai-runner:drop', onTreeDrop)
-  window.removeEventListener('ai-runner:drag-cancel', onTreeDragCancel)
   cmView?.destroy()
   cmView = null
 })
@@ -1823,8 +1665,7 @@ watch(running, (v) => {
       statusText.value = result.value.ok ? '✅ 成功' : '❌ 失败'
       statusClass.value = result.value.ok ? 'ok' : 'err'
       // autoAskOnResult: 失败或只读诊断（成功无改动、非循环）时延迟 3s 自动复制并发给 AI（主动停止除外）
-      const isReadonlyProbe = isReadonlyResult(result.value)
-      const AUTO_ASK_DELAY_MS = 0 // [hardpause] 立即执行
+      const isReadonlyProbe = isReadonlyResult(result.value, isLoopActive.value)
       const forceFeedback = autoFeedbackRequested.value
       const shouldAutoAsk
         = forceFeedback
@@ -1845,11 +1686,10 @@ watch(running, (v) => {
       setLastAutoFilled(scriptSnapshot)
       const r = result.value
       // 兼容旧脚本只写 // @desc；新脚本可能 // 或 #，从 result.value.scriptDesc/scriptWhy 拿（server 已解析）
-      const descMatch = scriptSnapshot.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
-      const desc = r.scriptDesc || (descMatch ? descMatch[1].trim() : '')
-      const whyMatch = scriptSnapshot.match(/^\s*(?:\/\/|#)\s*@why\s*:\s*(.+)$/m)
-      const why = r.scriptWhy || (whyMatch ? whyMatch[1].trim() : '')
-      const lang: 'js' | 'bash' = /^\s*#\s*(@desc|@why)/m.test(scriptSnapshot) ? 'bash' : 'js'
+      const sm = parseScriptMeta(scriptSnapshot)
+      const desc = r.scriptDesc || sm.desc
+      const why = r.scriptWhy || sm.why
+      const lang = detectLang(scriptSnapshot)
       // 计算 hash（与油猴脚本一致：FNV-1a 8 hex）
       const hash = fnv1a8(scriptSnapshot)
       addTrace({
@@ -1876,11 +1716,9 @@ watch(running, (v) => {
 // ---------- 文件拖入 ----------
 function onHtmlDragOver(e: DragEvent) {
   e.preventDefault()
-  fileDragging.value = true
 }
 function onHtmlDrop(e: DragEvent) {
   e.preventDefault()
-  fileDragging.value = false
   const files = Array.from(e.dataTransfer?.files || [])
   if (!files.length) return
   const text = files.map(f => `// 📄 ${(f as any).path || f.name}`).join('\n')
@@ -1897,38 +1735,6 @@ function onHtmlDrop(e: DragEvent) {
   }
   fileSuccess.value = true
   setTimeout(() => { fileSuccess.value = false }, 1500)
-}
-
-const addingAllToEditor = ref(false)
-async function onAddAllClick() {
-  if (!cmView) { toast('编辑器未就绪', 'warn'); return }
-  if (addingAllToEditor.value) return
-  addingAllToEditor.value = true
-  try {
-    const res = await fetch('/__ai/files?depth=6')
-    const data = await res.json()
-    if (data.error) { toast(`加载失败：${data.error}`, 'error'); return }
-    const paths: string[] = []
-    const walk = (nodes: any[]) => {
-      for (const n of nodes || []) {
-        if (n.type === 'file') paths.push(n.path)
-        else if (n.children?.length) walk(n.children)
-      }
-    }
-    walk(data.tree || [])
-    const filtered = paths.filter(p => /\.(ts|tsx|vue|js|jsx|mjs|cjs|md|json|css|scss|html)$/i.test(p))
-    if (!filtered.length) { toast('未找到可插入的文件', 'warn'); return }
-    const insert = `${filtered.map(p => `@${p} `).join('\n')}\n`
-    const view = cmView
-    const pos = view.state.selection.main.head
-    view.dispatch({ changes: { from: pos, insert }, selection: { anchor: pos + insert.length } })
-    view.focus()
-    toast(`已插入 ${filtered.length} 个文件路径`, 'success', 3000)
-  } catch (e) {
-    toast(`插入失败：${String(e)}`, 'error')
-  } finally {
-    addingAllToEditor.value = false
-  }
 }
 
 // [live-typewriter] 打字机式实时输出（terminal 内）
@@ -1958,20 +1764,7 @@ watch(liveStderr, twKick)
 onBeforeUnmount(() => { if (twRaf !== null) cancelAnimationFrame(twRaf) })
 
 // [script-meta-row] 从当前脚本内容解析 @desc/@why/@plan/@done
-const scriptMeta = computed(() => {
-  const code = String((script && script.value) || '')
-  const pick = (name: string): string => {
-    const re = new RegExp(`^[ \\t]*(?://|#)[ \\t]*@${name}[ \\t]*:[ \\t]*(.+)$`, 'm')
-    const m = code.match(re)
-    return m ? m[1].trim() : ''
-  }
-  return {
-    desc: pick('desc'),
-    why: pick('why'),
-    plan: pick('plan'),
-    done: pick('done'),
-  }
-})
+const scriptMeta = computed(() => parseScriptMeta(String((script && script.value) || '')))
 const twLines = computed(() => (twStdout.value || '').split('\n'))
 const twErrLines = computed(() => (twStderr.value || '').split('\n'))
 function lineClass(line: string): string {
@@ -1983,11 +1776,6 @@ function lineClass(line: string): string {
   if (t.startsWith('⚠')) return 'out-warn'
   return ''
 }
-const hasScriptMeta = computed(() => {
-  const m = scriptMeta.value
-  return !!(m.desc || m.why || m.plan || m.done)
-})
-
 // [latest-tokens-fix] ts-bar 引用 latestTokens，此处补解构（useAutoLoop 返回 computed）
 const { latestTokens } = useAutoLoop()
 </script>
@@ -4229,35 +4017,85 @@ const { latestTokens } = useAutoLoop()
 }
 
 /* ═══════════════════════════════════════════════════════════
-   [fix-run-btn] 最后生效：运行按钮各态锁死 + 取消按钮图标显式
+   [fix-run-btn-v2] 运行按钮 CTA 实底（覆盖旧描边锁定）
    ═══════════════════════════════════════════════════════════ */
 
-/* 运行按钮（takeover / run / head-run）：全部锁死为透明底 + 橙描边 */
-.pane-main .editor .primary-btn.head-run,
+/* 运行按钮（takeover / run / head-run）：暖橙实底 CTA */
+/* [run-btn-compact] 运行按钮：紧凑暖橙 CTA */
 .pane-main .editor .primary-btn.takeover,
+.pane-main .editor .primary-btn.run {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  padding: 4px 12px !important;
+  min-height: 28px !important;
+  background: var(--primary) !important;
+  color: #fff !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  letter-spacing: 0.2px !important;
+  line-height: 1 !important;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 20%) !important;
+  transition:
+    background 0.12s ease,
+    box-shadow 0.12s ease,
+    transform 0.06s ease !important;
+}
 
-.pane-main .editor .primary-btn.head-run:hover:not(:disabled),
 .pane-main .editor .primary-btn.takeover:hover:not(:disabled),
-.pane-main .editor .primary-btn.run:hover:not(:disabled),
-.pane-main .editor .primary-btn.head-run:focus-visible,
-.pane-main .editor .primary-btn.takeover:focus-visible,
+.pane-main .editor .primary-btn.run:hover:not(:disabled) {
+  background: var(--primary-hover) !important;
+  box-shadow: 0 2px 8px rgb(217 119 87 / 35%) !important;
+}
 
-/* 按钮里 icon 和文字保持可见 */
-.pane-main .editor .primary-btn.head-run .ico-svg,
+.pane-main .editor .primary-btn.takeover:active:not(:disabled),
+.pane-main .editor .primary-btn.run:active:not(:disabled) {
+  transform: translateY(1px) !important;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 25%) !important;
+}
+
+.pane-main .editor .primary-btn.takeover:focus-visible,
+.pane-main .editor .primary-btn.run:focus-visible {
+  outline: 0 !important;
+  box-shadow: 0 0 0 2px rgb(217 119 87 / 45%) !important;
+}
+
 .pane-main .editor .primary-btn.takeover .ico-svg,
-.pane-main .editor .primary-btn.run .ico-svg,
-.pane-main .editor .primary-btn.head-run span,
+.pane-main .editor .primary-btn.run .ico-svg {
+  width: 12px !important;
+  height: 12px !important;
+  color: #fff !important;
+}
+
 .pane-main .editor .primary-btn.takeover span,
+.pane-main .editor .primary-btn.run span {
+  color: #fff !important;
+}
 
 /* 暂停（stop 态）：红描边 */
-.pane-main .editor .primary-btn.stop,
+.pane-main .editor .primary-btn.stop {
+  background: transparent !important;
+  color: var(--danger) !important;
+  border: 1px solid var(--danger) !important;
+  border-radius: 10px !important;
+  padding: 8px 20px !important;
+  font-weight: 600 !important;
+}
 
-.pane-main .editor .primary-btn.stop .ico-svg,
+.pane-main .editor .primary-btn.stop:hover:not(:disabled) {
+  background: rgb(224 108 117 / 14%) !important;
+  color: #fff !important;
+}
 
-/* 禁用态：稍微降不透明度，仍可读 */
+/* 禁用态 */
 .pane-main .editor .primary-btn.head-run:disabled,
 .pane-main .editor .primary-btn.takeover:disabled,
-.pane-main .editor .primary-btn.run:disabled,
+.pane-main .editor .primary-btn.run:disabled {
+  opacity: 0.4 !important;
+  cursor: not-allowed !important;
+}
 
 /* 取消按钮图标显式可见 */
 /* ═══════════════════════════════════════════════════════════
@@ -4296,16 +4134,6 @@ const { latestTokens } = useAutoLoop()
     transform: rotate(360deg);
   }
 }
-
-/* [script-meta-row] 脚本元信息第二行 */
-
-/* [flow-spinner-v2] 流程 loading 视觉优化 */
-
-.meta-row:empty,
-
-/* [flow-tag-v3] flow-timeline 去底、去边框；tag 显"阶段名 + 状态" */
-
-/* [meta-row-v2] 脚本元信息卡片美化 */
 
 /* ─── 拖拽条：极细 + hover 显色 ─── */
 .side-resize-handle {
@@ -4616,6 +4444,77 @@ const { latestTokens } = useAutoLoop()
 }
 
 /* ── 顶部 flow-timeline（步骤条） ────────────────────────── */
+/* [fix-waiting-css] 全程等待提示 */
+.waiting-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin: 0 0 8px;
+  background: var(--primary-bg);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-6);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 500;
+  animation: waiting-pulse 1.8s ease-in-out infinite;
+}
+.waiting-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: waiting-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+.waiting-text {
+  flex-shrink: 0;
+}
+.waiting-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+.waiting-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: waiting-bounce 1.4s ease-in-out infinite;
+}
+.waiting-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.waiting-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes waiting-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes waiting-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+@keyframes waiting-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
 .flow-timeline {
   display: flex !important;
   flex-wrap: wrap !important;
@@ -6074,5 +5973,34 @@ const { latestTokens } = useAutoLoop()
   padding: 0 6px !important;
   border-radius: var(--radius-6) !important;
   font-size: 12px !important;
+}
+
+/* [niuma-mode] 牛马模式开关 */
+.tpl-bar .niuma-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-3);
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--radius-6);
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.tpl-bar .niuma-toggle:hover {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.tpl-bar .niuma-toggle input {
+  accent-color: var(--primary);
+  cursor: pointer;
+  margin: 0;
+}
+.tpl-bar .niuma-toggle input:checked + span {
+  color: var(--primary);
+  font-weight: 600;
 }
 </style>
