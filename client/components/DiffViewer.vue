@@ -1,14 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import * as hljsNs from 'highlight.js/lib/core'
-const hljs: any = (hljsNs as any).default ?? hljsNs
-import * as javascriptNs from 'highlight.js/lib/languages/javascript'
-const javascript: any = (javascriptNs as any).default ?? javascriptNs
-import * as typescriptNs from 'highlight.js/lib/languages/typescript'
-const typescript: any = (typescriptNs as any).default ?? typescriptNs
-
-hljs.registerLanguage('javascript', javascript)
-hljs.registerLanguage('typescript', typescript)
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { highlightToHtml } from '../composables/useHljs'
+import { diffLines as diffLinesLib } from 'diff'
+import { DEFAULT_HIGHLIGHT_HEAD, DEFAULT_HIGHLIGHT_TAIL } from './DiffViewer.constants'
 
 const props = defineProps<{
   before: string
@@ -36,48 +30,63 @@ function escapeHtml(s: string): string {
     '\'': '&#39;',
   }[ch] as string))
 }
-function renderCode(text: string): string {
-  if (!text) return ''
-  try {
-    return hljs.highlightAuto(text, ['javascript', 'typescript']).value
-  } catch {
-    return escapeHtml(text)
+const HIGHLIGHT_HEAD = DEFAULT_HIGHLIGHT_HEAD
+const HIGHLIGHT_TAIL = DEFAULT_HIGHLIGHT_TAIL
+const HIGHLIGHT_THRESHOLD = 400
+function highlightToLines(text: string): string[] {
+  if (!text) return []
+  const lines = text.split('\n')
+  if (lines.length <= HIGHLIGHT_THRESHOLD) {
+    try { return highlightToHtml(text).split('\n') }
+    catch { return lines.map(escapeHtml) }
   }
+  const headText = lines.slice(0, HIGHLIGHT_HEAD).join('\n')
+  const tailText = lines.slice(-HIGHLIGHT_TAIL).join('\n')
+  let headHtml: string[]
+  let tailHtml: string[]
+  try { headHtml = highlightToHtml(headText).split('\n') }
+  catch { headHtml = lines.slice(0, HIGHLIGHT_HEAD).map(escapeHtml) }
+  try { tailHtml = highlightToHtml(tailText).split('\n') }
+  catch { tailHtml = lines.slice(-HIGHLIGHT_TAIL).map(escapeHtml) }
+  const mid = lines.slice(HIGHLIGHT_HEAD, -HIGHLIGHT_TAIL).map(escapeHtml)
+  return [...headHtml, ...mid, ...tailHtml]
 }
-function lcsDiff(a: string[], b: string[]): DiffLine[] {
-  const N = a.length
-  const M = b.length
-  if (N * M > 4_000_000) {
-    const out: DiffLine[] = []
-    a.forEach((t, i) => out.push({ type: 'del', text: t, oldLine: i + 1 }))
-    b.forEach((t, i) => out.push({ type: 'add', text: t, newLine: i + 1 }))
-    return out
-  }
-  const dp: number[][] = Array.from({ length: N + 1 }, () => new Array(M + 1).fill(0))
-  for (let i = N - 1; i >= 0; i--) {
-    for (let j = M - 1; j >= 0; j--) {
-      if (a[i] === b[j]) dp[i][j] = dp[i + 1][j + 1] + 1
-      else dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1])
-    }
-  }
+function computeDiff(a: string[], b: string[]): DiffLine[] {
+  const changes = diffLinesLib(a.join('\n'), b.join('\n'))
   const out: DiffLine[] = []
-  let i = 0; let j = 0
-  while (i < N && j < M) {
-    if (a[i] === b[j]) {
-      out.push({ type: 'same', text: a[i], oldLine: i + 1, newLine: j + 1 })
-      i++; j++
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      out.push({ type: 'del', text: a[i], oldLine: i + 1 })
-      i++
-    } else {
-      out.push({ type: 'add', text: b[j], newLine: j + 1 })
-      j++
+  let oldLine = 1
+  let newLine = 1
+  for (const ch of changes) {
+    const text = ch.value.endsWith('\n') ? ch.value.slice(0, -1) : ch.value
+    for (const line of text.split('\n')) {
+      if (ch.added) out.push({ type: 'add', text: line, newLine: newLine++ })
+      else if (ch.removed) out.push({ type: 'del', text: line, oldLine: oldLine++ })
+      else out.push({ type: 'same', text: line, oldLine: oldLine++, newLine: newLine++ })
     }
   }
-  while (i < N) { out.push({ type: 'del', text: a[i], oldLine: i + 1 }); i++ }
-  while (j < M) { out.push({ type: 'add', text: b[j], newLine: j + 1 }); j++ }
   return out
 }
+
+const beforeLines = ref<string[]>([])
+const afterLines = ref<string[]>([])
+let idleHandle: number | ReturnType<typeof setTimeout> | null = null
+function clearIdle() {
+  if (idleHandle === null) return
+  if (typeof idleHandle === 'number' && typeof cancelIdleCallback === 'function') cancelIdleCallback(idleHandle)
+  else clearTimeout(idleHandle as ReturnType<typeof setTimeout>)
+  idleHandle = null
+}
+function scheduleHighlight() {
+  clearIdle()
+  const run = () => {
+    idleHandle = null
+    beforeLines.value = highlightToLines(props.before)
+    afterLines.value = highlightToLines(props.after)
+  }
+  if (typeof requestIdleCallback === 'function') idleHandle = requestIdleCallback(run)
+  else idleHandle = setTimeout(run, 0)
+}
+watch(() => [props.before, props.after] as const, scheduleHighlight, { immediate: true })
 
 const diffLines = computed((): DiffLine[] => {
   if (props.changeType === 'added') {
@@ -86,7 +95,47 @@ const diffLines = computed((): DiffLine[] => {
   if (props.changeType === 'deleted') {
     return props.before.split('\n').map((line, i) => ({ type: 'del' as const, text: line, oldLine: i + 1 }))
   }
-  return lcsDiff(props.before.split('\n'), props.after.split('\n'))
+  return computeDiff(props.before.split('\n'), props.after.split('\n'))
+})
+
+function renderLine(line: DiffLine): string {
+  if (line.type === 'add' && line.newLine !== undefined) return afterLines.value[line.newLine - 1] ?? escapeHtml(line.text)
+  if (line.type === 'del' && line.oldLine !== undefined) return beforeLines.value[line.oldLine - 1] ?? escapeHtml(line.text)
+  if (line.type === 'same') return afterLines.value[(line.newLine ?? 1) - 1] ?? escapeHtml(line.text)
+  return escapeHtml(line.text)
+}
+
+const ROW_HEIGHT = 22
+const BUFFER = 20
+const diffBodyRef = ref<HTMLElement | null>(null)
+const scrollTop = ref(0)
+const viewportHeight = ref(600)
+const visibleRange = computed(() => {
+  const start = Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - BUFFER)
+  const end = Math.min(diffLines.value.length, Math.ceil((scrollTop.value + viewportHeight.value) / ROW_HEIGHT) + BUFFER)
+  return { start, end }
+})
+const visibleLines = computed(() => diffLines.value.slice(visibleRange.value.start, visibleRange.value.end))
+const spacerTop = computed(() => visibleRange.value.start * ROW_HEIGHT)
+const spacerBottom = computed(() => Math.max(0, diffLines.value.length - visibleRange.value.end) * ROW_HEIGHT)
+function onScroll(e: Event) {
+  const el = e.target as HTMLElement
+  scrollTop.value = el.scrollTop
+}
+let resizeObs: ResizeObserver | null = null
+onMounted(() => {
+  if (!diffBodyRef.value) return
+  viewportHeight.value = diffBodyRef.value.clientHeight
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObs = new ResizeObserver(() => {
+      if (diffBodyRef.value) viewportHeight.value = diffBodyRef.value.clientHeight
+    })
+    resizeObs.observe(diffBodyRef.value)
+  }
+})
+onBeforeUnmount(() => {
+  clearIdle()
+  if (resizeObs) { resizeObs.disconnect(); resizeObs = null }
 })
 
 const stats = computed(() => {
@@ -110,14 +159,22 @@ const stats = computed(() => {
         <span v-if="stats.del" class="stat-del">-{{ stats.del }}</span>
       </span>
     </div>
-    <div class="diff-body">
-      <div v-for="(line, i) in diffLines" :key="i" class="diff-line" :class="line.type">
-        <!-- [5.4] 只显 newLine，坐标统一到 after 系统，与 prompt 一致 -->
-        <span class="line-num new">{{ line.newLine ?? '' }}</span>
-        <span class="line-prefix">{{ line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ' }}</span>
-        <pre class="line-text" v-html="renderCode(line.text)" />
-      </div>
-      <div v-if="diffLines.length === 0" class="diff-empty">
+    <div ref="diffBodyRef" class="diff-body" @scroll.passive="onScroll">
+      <template v-if="diffLines.length">
+        <div :style="{ height: `${spacerTop}px` }" />
+        <div
+          v-for="(line, i) in visibleLines"
+          :key="visibleRange.start + i"
+          class="diff-line"
+          :class="line.type"
+        >
+          <span class="line-num new">{{ line.newLine ?? '' }}</span>
+          <span class="line-prefix">{{ line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ' }}</span>
+          <pre class="line-text" v-html="renderLine(line)" />
+        </div>
+        <div :style="{ height: `${spacerBottom}px` }" />
+      </template>
+      <div v-else class="diff-empty">
         无内容变更
       </div>
     </div>
@@ -160,7 +217,7 @@ const stats = computed(() => {
 .diff-badge {
   font-size: 10px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   font-weight: 700;
   text-transform: uppercase;
   flex-shrink: 0;
@@ -317,14 +374,5 @@ const stats = computed(() => {
 .diff-body :deep(.hljs-built_in),
 .diff-body :deep(.hljs-type) {
   color: #4ec9b0;
-}
-
-/* ---------- 空状态 ---------- */
-.diff-empty {
-  padding: 40px 16px;
-  text-align: center;
-  color: var(--text-3, #9ca3af);
-  font-style: italic;
-  font-size: 12px;
 }
 </style>

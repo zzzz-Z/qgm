@@ -63,7 +63,9 @@ function report() {
 
 function append(cat, note) {
   ensureFile()
-  const date = new Date().toISOString().slice(0, 10)
+  // [F4] 本地时区
+  const _d = new Date()
+  const date = `${_d.getFullYear()}-${String(_d.getMonth() + 1).padStart(2, '0')}-${String(_d.getDate()).padStart(2, '0')}`
   fs.appendFileSync(SIGNALS, `- ${date} [${cat}] ${note || ''}\n`, 'utf8')
   ok(`已记录：${cat} - ${note || '(无备注)'}`)
 }

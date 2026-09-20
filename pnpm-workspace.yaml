@@ -1,3 +1,7 @@
+minimumReleaseAgeExcludePrune: true
+trustPolicy: no-downgrade
+shellEmulator: true
+
 allowBuilds:
   '@ast-grep/cli': true
   '@parcel/watcher': true

@@ -16,3 +16,8 @@ dist/
 .ai-runner/plans/
 PROJECT-NOTES.md
 .ai-runner/baseline.json
+client/test-results/
+.ai-runner/headless-profile/
+a.cjs
+a.sh
+.ai-runner/state.json

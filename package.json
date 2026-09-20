@@ -1,12 +1,45 @@
 {
   "name": "@zcc/vite-plugin-ai-runner",
+  "type": "module",
   "version": "0.1.0",
   "description": "Vite dev-only AI 辅助开发工作台：脚本沙盒执行 / diff 回滚 / prompt 组装",
-  "type": "module",
   "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json",
+    "./protocol": {
+      "types": "./dist/protocol.d.ts",
+      "import": "./dist/protocol.js",
+      "require": "./dist/protocol.cjs"
+    }
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "air-ask": "./bin/ai-ask.cjs",
+    "air-check": "./bin/check-status.cjs",
+    "air-log": "./bin/log-signal.cjs",
+    "air-recover": "./bin/recover.cjs",
+    "air-run-all": "./bin/run-all.cjs",
+    "air-notes": "./bin/gen-notes.cjs",
+    "air-compliance": "./bin/compliance-report.cjs",
+    "air-check-regression": "./bin/check-regression.cjs",
+    "air-server": "./bin/air-server.cjs"
+  },
+  "files": [
+    "README.md",
+    "bin",
+    "client",
+    "dist",
+    "skills"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json && node -e \"require('fs').copyFileSync('src/interceptor.cjs','dist/interceptor.cjs')\"",
@@ -19,33 +52,19 @@
     "test:e2e": "playwright test --config client/playwright.config.ts",
     "run-all": "node bin/run-all.cjs",
     "recover": "node bin/recover.cjs",
-    "check-regression": "node bin/check-regression.cjs check"
+    "check-regression": "node bin/check-regression.cjs check",
+    "start": "node bin/air-server.cjs"
   },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./package.json": "./package.json"
+  "peerDependencies": {
+    "vite": ">=5"
   },
-  "files": [
-    "dist",
-    "client",
-    "skills",
-    "bin",
-    "README.md"
-  ],
-  "bin": {
-    "air-ask": "./bin/ai-ask.cjs",
-    "air-check": "./bin/check-status.cjs",
-    "air-log": "./bin/log-signal.cjs",
-    "air-recover": "./bin/recover.cjs",
-    "air-run-all": "./bin/run-all.cjs",
-    "air-notes": "./bin/gen-notes.cjs",
-    "air-compliance": "./bin/compliance-report.cjs",
-    "air-check-regression": "./bin/check-regression.cjs"
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": false
+    }
   },
   "dependencies": {
+    "@antfu/eslint-config": "^9.5.1",
     "@ast-grep/cli": "^0.28.0",
     "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/state": "^6.7.4",
@@ -56,30 +75,24 @@
     "diff": "^7.0.0",
     "gpt-tokenizer": "^3.0.0",
     "highlight.js": "^11.12.0",
-    "vue": "^3.5.42"
-  },
-  "peerDependencies": {
-    "vite": ">=5"
-  },
-  "peerDependenciesMeta": {
-    "vite": {
-      "optional": false
-    }
-  },
-  "engines": {
-    "node": ">=20.19.0"
+    "unocss": "^66.10.5",
+    "vue": "^3.5.42",
+    "ws": "^8.21.3"
   },
   "publishConfig": {
     "access": "public"
   },
   "optionalDependencies": {
-    "playwright": "^1.63.0"
+    "playwright": "^1.63.0",
+    "@zcc/cloak-browser": "^0.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
     "@types/diff": "^7.0.0",
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "@unocss/eslint-plugin": "^66.10.5",
     "@vitejs/plugin-vue": "^6.0.9",
     "eslint": "^9.39.4",
     "eslint-plugin-vue": "^10.11.0",

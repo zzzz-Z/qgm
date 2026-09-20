@@ -60,9 +60,9 @@ test('timeout：到点 SIGTERM，宽限期到点 SIGKILL 升级', async () => {
     timeoutLabel: '单测超时',
   })
   const dt = Date.now() - t0
-  assert.ok(dt >= 300 && dt < 3000, '应被超时中止，实际 ' + dt + 'ms')
+  assert.ok(dt >= 300 && dt < 3000, `应被超时中止，实际 ${dt}ms`)
   assert.equal(r.killed, true)
-  assert.ok(r.stderr.indexOf('单测超时') >= 0, 'stderr 应带超时标签，实际: ' + r.stderr)
+  assert.ok(r.stderr.includes('单测超时'), `stderr 应带超时标签，实际: ${r.stderr}`)
 })
 
 test('signal.abort 立即 SIGKILL，不等待宽限', async () => {
@@ -75,13 +75,13 @@ test('signal.abort 立即 SIGKILL，不等待宽限', async () => {
     signal: ac.signal,
   })
   const dt = Date.now() - t0
-  assert.ok(dt < 2000, 'abort 应尽快结束，实际 ' + dt + 'ms')
+  assert.ok(dt < 2000, `abort 应尽快结束，实际 ${dt}ms`)
   assert.equal(r.killed, true)
 })
 
 test('命令不存在：code -1，stderr 非空', async () => {
   const { runProcess } = await loadProc()
-  const r = await runProcess('definitely-not-a-real-cmd-' + Date.now())
+  const r = await runProcess(`definitely-not-a-real-cmd-${Date.now()}`)
   assert.equal(r.code, -1)
   assert.ok(r.stderr.length > 0)
 })
@@ -100,7 +100,7 @@ test('shell:true 支持 shell 语法', async () => {
   const { runProcess } = await loadProc()
   const r = await runProcess('echo hello-shell', { shell: true })
   assert.equal(r.code, 0)
-  assert.ok(r.stdout.indexOf('hello-shell') >= 0)
+  assert.ok(r.stdout.includes('hello-shell'))
 })
 
 test('detectPackageManager：pnpm-lock.yaml 优先于 yarn.lock', async () => {

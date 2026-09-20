@@ -1,13 +1,13 @@
-import { MODELS, getActiveWin } from './useDeepseekUrl'
+import { getActiveWin, MODELS } from './useDeepseekUrl'
 import { ref } from 'vue'
 
-export type EventKind =
-  | 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary'
-  | 'ai:ask' | 'ai:feedback'
-  | 'ai:token' | 'ai:decision' | 'ai:need-files' | 'ai:stream'
-  | 'run:start' | 'run:end' | 'run:error' | 'run:stage'
-  | 'loop:round' | 'loop:static' | 'loop:finish'
-  | 'rules:changed'
+export type EventKind
+  = | 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary'
+    | 'ai:ask' | 'ai:feedback'
+    | 'ai:token' | 'ai:decision' | 'ai:need-files' | 'ai:stream'
+    | 'run:start' | 'run:end' | 'run:error' | 'run:stage'
+    | 'loop:round' | 'loop:static' | 'loop:finish'
+    | 'rules:changed'
 
 export interface StreamEvent {
   id: number
@@ -108,7 +108,7 @@ export function useEventStream(cb: EventStreamCallbacks) {
   function isFromActiveAiSite(e: MessageEvent): boolean {
     if (cb.isMockMode && cb.isMockMode()) return true
     const AI_ORIGINS = MODELS
-      .map(m => { try { return new URL(m.url).origin } catch { return '' } })
+      .map((m) => { try { return new URL(m.url).origin } catch { return '' } })
       .filter(Boolean)
     if (!AI_ORIGINS.includes(e.origin)) {
       console.warn('[ai-runner] 来源 origin 非 AI 站点，已忽略', e.origin)
@@ -150,7 +150,6 @@ export function useEventStream(cb: EventStreamCallbacks) {
     }
     if (type === 'ai-runner:summary') {
       cb.onSummary(String(d.text || ''), String(d.sessionId || ''), Boolean(d.degraded))
-      return
     }
   }
 

@@ -1,7 +1,7 @@
 import { ref, watch } from 'vue'
 import { readNdjson } from '../utils/stream'
 import { emit } from './useEventStream'
-import type { Change, RunResponse } from '../types'
+import type { Change, DecisionPayload, RunResponse } from '../types'
 
 const STORAGE_KEY_SCRIPT = '__ai_runner_script'
 const STORAGE_KEY_RESULT = '__ai_runner_result'
@@ -24,6 +24,8 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 // 每次 useRunner() 返回同一份 ref，避免 useAutoLoop 与 ScriptPanel 拿到两份不同的状态
 // ============================================================================
 const script = ref(loadFromStorage<string>(STORAGE_KEY_SCRIPT, ''))
+// [last-run-code] 保存最近一次运行的脚本，script.value 被清空后仍可追溯
+const lastRunCode = ref('')
 const running = ref(false)
 const result = ref<RunResponse | null>(loadFromStorage<RunResponse | null>(STORAGE_KEY_RESULT, null))
 // DEDUP_LAST_RUN: 按 path 去重，只保留最近一次每文件的变更记录
@@ -92,6 +94,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   if (opts?.autoFeedback) autoFeedbackRequested.value = true
   const code = (opts?.script ?? script.value).trim()
   if (!code || running.value) return
+  lastRunCode.value = code
   running.value = true
   result.value = null
   changes.value = []
@@ -101,10 +104,10 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   const metaM = code.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
   const desc = metaM ? metaM[1].trim().slice(0, 80) : '执行脚本'
   // [run-uk-unique] 每次运行唯一 key，避免同 key 覆盖历史事件导致位置错乱
-  const UK = opts?.runKey || ('run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6))
+  const UK = opts?.runKey || (`run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`)
   let lastStage = ''
   const titleOf = () => {
-    const combined = (liveStdout.value + '\n' + liveStderr.value).trim()
+    const combined = (`${liveStdout.value}\n${liveStderr.value}`).trim()
     const lines = combined.split('\n').filter(Boolean)
     const tail = (lines[lines.length - 1] || '').trim()
     const parts = [desc]
@@ -120,9 +123,9 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
     })
   }
   // [lifecycle] 记录本次执行的所有 stage（用于展开区时间线）
-  let stageHistory: Array<{ name: string; status: string; ts: number; ms?: number; ok?: boolean; files?: number; tscOk?: boolean; testOk?: boolean }> = []
+  const stageHistory: Array<{ name: string, status: string, ts: number, ms?: number, ok?: boolean, files?: number, tscOk?: boolean, testOk?: boolean }> = []
   const runStartedAt = Date.now()
-  let finalPhase: 'running' | 'done' | 'error' = 'running'  // [loading-fix]
+  let finalPhase: 'running' | 'done' | 'error' = 'running' // [loading-fix]
   const wrappedEmitStep = (phase: string, over: Record<string, unknown> = {}) => {
     if (phase === 'done' || phase === 'error') finalPhase = phase as any
     emitStep(phase, over)
@@ -164,15 +167,27 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       return
     }
     const frames: Record<string, unknown>[] = []
+    // [P3-2c] summary 帧消费
+    let _summaryDecision: DecisionPayload | null = null
+    let _summaryNeedFiles: string[] | null = null
     await readNdjson<Record<string, unknown>>(res.body, (frame) => {
-      if (frame.type === 'chunk') {
+      if (frame.type === 'summary') {
+        if (frame.decision && typeof frame.decision === 'object') {
+          _summaryDecision = frame.decision as DecisionPayload
+        }
+        if (Array.isArray(frame.needFiles)) {
+          _summaryNeedFiles = frame.needFiles as string[]
+        }
+        // [fix-summary-push] summary 帧必须 push，否则 frames[last] 拿不到 summary
+        frames.push(frame)
+      } else if (frame.type === 'chunk') {
         if (frame.stream === 'stdout') liveStdout.value += String(frame.data || '')
         else if (frame.stream === 'stderr') liveStderr.value += String(frame.data || '')
         flushChunk()
       } else if (frame.type === 'stage') {
         const name = String(frame.name || 'stage')
         const status = String(frame.status || '')
-        const ok = frame.ok
+        const ok = typeof frame.ok === 'boolean' ? frame.ok : undefined
         const ms = typeof frame.ms === 'number' ? frame.ms : undefined
         const files = typeof frame.files === 'number' ? frame.files : undefined
         const tscOk = typeof frame.tscOk === 'boolean' ? frame.tscOk : undefined
@@ -191,7 +206,6 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
           startedAt: runStartedAt,
           elapsedMs: Date.now() - runStartedAt,
         })
-      } else if (frame.type === 'summary') {
         frames.push(frame)
       }
     }, abortController.signal)
@@ -241,6 +255,8 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         stdout: liveStdout.value,
         stderr: liveStderr.value || '未收到 summary 帧',
         changes: [],
+        decision: _summaryDecision,
+        needFiles: _summaryNeedFiles,
       }
       wrappedEmitStep('error', { reason: '未收到 summary 帧' })
     }
@@ -318,6 +334,7 @@ async function save() {
 export function useRunner() {
   return {
     script,
+    lastRunCode,
     running,
     result,
     changes,

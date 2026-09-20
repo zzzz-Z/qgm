@@ -1,7 +1,8 @@
 <script setup lang="ts">
-defineOptions({ name: 'LintBlock' })
 import { computed } from 'vue'
 import type { LintResult } from '../types'
+
+defineOptions({ name: 'LintBlock' })
 
 const props = defineProps<{
   lint: LintResult
@@ -57,7 +58,7 @@ const summary = computed(() => {
   justify-content: center;
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   font-size: 9px;
   font-weight: 700;
 }

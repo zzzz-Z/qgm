@@ -1,3 +1,9 @@
+export interface DecisionPayload {
+  question: string
+  options: Array<{ id: string, label: string }>
+  default?: string
+}
+
 export type ChangeType = 'added' | 'modified' | 'deleted'
 
 export interface Change {
@@ -62,8 +68,14 @@ export interface RunResponse {
   tools?: ToolCall[]
   smoke?: SmokeResult | null
   claimMismatch?: ClaimMismatch | null
+  /** [P3-2c] 决策点（helpers.cjs exitNeedInput / exit 2） */
+  decision?: DecisionPayload | null
+  /** [P3-2c] 需要补全的源文件（helpers.cjs exitNeedFiles / exit 4） */
+  needFiles?: string[] | null
   /** 本次执行时用到的基准 runId（run() 里在覆盖全局 baseline 之前写入） */
   baselineRunId?: string
+  /** [P3-2e] 脚本头 @mode 值；diff = 只读预览模式（不自动 AI 回填） */
+  scriptMode?: string
 }
 
 export interface ContextResponse {

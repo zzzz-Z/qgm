@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { highlightToHtml } from '../composables/useHljs'
 import { useFileTree } from '../composables/useFileTree'
 import type { FileNode } from '../types'
 
@@ -234,6 +235,50 @@ onBeforeUnmount(() => {
   cleanup()
   drag = null
 })
+
+// [file-dialog] 双击文件弹窗查看详情 + 复制
+const fileDialog = ref<{ path: string, content: string } | null>(null)
+const fileLoading = ref(false)
+const fileError = ref('')
+async function onFileDblClick(node: { type?: string, path: string }) {
+  if (!node || node.type === 'directory') return
+  fileDialog.value = { path: node.path, content: '' }
+  fileLoading.value = true
+  fileError.value = ''
+  try {
+    const r = await fetch('/__ai/files/read', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ paths: [node.path] }),
+    })
+    if (!r.ok) { fileError.value = `HTTP ${r.status}`; return }
+    const j = await r.json() as Record<string, unknown>
+    const arr = Array.isArray((j as any).files) ? (j as any).files : (Array.isArray(j) ? j : [])
+    const hit = arr.find((x: any) => x && x.path === node.path) || arr[0] || {}
+    fileDialog.value = { path: node.path, content: String((hit as any).content || '') }
+  } catch (e) {
+    fileError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    fileLoading.value = false
+  }
+}
+function closeFileDialog() { fileDialog.value = null }
+async function copyFileContent() {
+  if (!fileDialog.value) return
+  try { await navigator.clipboard.writeText(fileDialog.value.content) } catch { /* ignore */ }
+}
+function onDialogKey(e: KeyboardEvent) { if (e.key === 'Escape') closeFileDialog() }
+
+// [ft-hljs] 弹窗内容按 hljs 高亮（与 DiffViewer 同款）
+const fileDialogHtml = computed(() => {
+  const c = fileDialog.value?.content || ''
+  if (!c) return ''
+  try {
+    return highlightToHtml(c)
+  } catch {
+    return c.replace(/[&<>]/g, m => (m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;'))
+  }
+})
 </script>
 
 <template>
@@ -241,7 +286,7 @@ onBeforeUnmount(() => {
     <div v-if="props.root" class="tree-head">
       <span class="title">项目结构</span>
       <span v-if="props.draggable" class="tip">拖拽 → 左侧</span>
-      <button v-tooltip="loading ? '正在刷新…' : '重新拉取文件树（清空懒加载缓存）'" class="refresh" :disabled="loading" @click="load">
+      <button v-tooltip="loading ? '正在刷新…' : '重新拉取文件树（清空懒加载缓存）'" class="refresh" aria-label="刷新文件树" :disabled="loading" @click="load">
         <svg class="ft-icon refresh-svg" viewBox="0 0 24 24"><path fill="currentColor" d="M17.65 6.35A7.96 7.96 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" /></svg>
       </button>
     </div>
@@ -293,6 +338,7 @@ onBeforeUnmount(() => {
           class="row file"
           :class="{ 'is-draggable': props.draggable }"
           :style="{ '--depth': level() }"
+          @dblclick="onFileDblClick(node)"
           @pointerdown="onPointerDown($event, node)"
         >
           <span v-for="i in level()" :key="i" class="guide" :style="{ '--i': i }" />
@@ -304,6 +350,30 @@ onBeforeUnmount(() => {
       </li>
     </ul>
   </div>
+  <Teleport to="body">
+    <div v-if="fileDialog" class="ft-mask" tabindex="-1" @click.self="closeFileDialog" @keydown="onDialogKey">
+      <div class="ft-card" role="dialog" aria-modal="true">
+        <div class="ft-head">
+          <span class="ft-path" :title="fileDialog.path">{{ fileDialog.path }}</span>
+          <button v-tooltip="'复制到剪贴板'" class="ft-btn" @click="copyFileContent">
+            复制
+          </button>
+          <button class="ft-btn ft-close" aria-label="关闭" @click="closeFileDialog">
+            ×
+          </button>
+        </div>
+        <div class="ft-body">
+          <div v-if="fileLoading" class="ft-loading">
+            加载中…
+          </div>
+          <div v-else-if="fileError" class="ft-error">
+            {{ fileError }}
+          </div>
+          <pre v-else class="ft-pre" v-html="fileDialogHtml" />
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped lang="scss">
@@ -344,7 +414,6 @@ onBeforeUnmount(() => {
   padding: 4px 6px 6px;
 }
 
-
 /* ========== Header ========== */
 .tree-head {
   display: flex;
@@ -356,14 +425,14 @@ onBeforeUnmount(() => {
   margin-bottom: 4px;
 }
 .title {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-3);
   text-transform: uppercase;
   letter-spacing: 0.8px;
 }
 .tip {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-3);
   margin-left: auto;
   opacity: 0.7;
@@ -375,7 +444,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
@@ -410,7 +479,7 @@ onBeforeUnmount(() => {
   gap: 2px;
   /* tighten-spacing */
   padding: 1px 8px 1px calc(var(--depth) * 16px + 8px);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 20px;
   cursor: pointer;
   user-select: none;
@@ -506,18 +575,6 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-/* ========== Copied Badge ========== */
-.copied-badge {
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--success);
-  background: var(--success-bg);
-  padding: 1px 5px;
-  border-radius: 3px;
-  letter-spacing: 0.3px;
-  flex-shrink: 0;
-  animation: badge-in 0.2s ease-out;
-}
 @keyframes badge-in {
   from {
     opacity: 0;
@@ -537,7 +594,7 @@ onBeforeUnmount(() => {
   gap: 8px;
   padding: 28px 12px;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: 13px;
 }
 .empty-icon {
   width: 16px;
@@ -545,7 +602,7 @@ onBeforeUnmount(() => {
 }
 .loading-children {
   padding: 4px 10px 4px calc((var(--depth)) * 18px + 30px);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-3);
   font-style: italic;
 }
@@ -563,12 +620,12 @@ onBeforeUnmount(() => {
 <style>
 html.ai-runner-dragging,
 html.ai-runner-dragging * {
-  cursor: grabbing !important;
-  user-select: none !important;
+  cursor: grabbing;
+  user-select: none;
 }
 html.ai-runner-dragging,
 html.ai-runner-dragging body {
-  overflow: hidden !important;
+  overflow: hidden;
   overscroll-behavior: none;
 }
 
@@ -585,11 +642,11 @@ html.ai-runner-dragging body {
   padding: 7px 14px;
   background: var(--surface);
   border: 1px solid rgb(37 99 235 / 30%);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   box-shadow:
     0 8px 24px rgb(15 30 60 / 18%),
     0 0 0 3px rgb(37 99 235 / 8%);
-  backdrop-filter: blur(8px);
+  /* P2-1 移除 backdrop-filter（GPU 性能负债）：backdrop-filter: blur(8px); */
   color: var(--text);
   font:
     12px/1.4 ui-monospace,
@@ -621,197 +678,369 @@ html.ai-runner-dragging body {
 
 /* ——— 次按钮：透明底 + 细边框，hover 时淡淡提亮 ——— */
 .ghost-btn {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  padding: 4px 10px !important;
-  font-size: var(--font-12) !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  border-radius: var(--radius-6);
+  padding: 4px 10px;
+  font-size: var(--font-12);
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
 }
 .ghost-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 8%) !important;
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 8%);
 }
-.ghost-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
+.ghost-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 /* ——— 终端内按钮 ——— */
 .term-btn {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 8%);
+  color: var(--text-2);
+  border-radius: var(--radius-6);
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
 }
 .term-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 14%);
 }
-.term-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
-.term-btn.copy, .term-btn.ask-panel { color: var(--text-2) !important; border-color: rgb(255 255 255 / 8%) !important; }
-.term-btn.copy:hover:not(:disabled), .term-btn.ask-panel:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; border-color: rgb(255 255 255 / 14%) !important;
+.term-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.term-btn.copy,
+.term-btn.ask-panel {
+  color: var(--text-2);
+  border-color: rgb(255 255 255 / 8%);
+}
+.term-btn.copy:hover:not(:disabled),
+.term-btn.ask-panel:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 14%);
 }
 
 /* ——— 芯片 / 下拉 / tab ——— */
 .tpl-chip {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 8%);
+  color: var(--text-2);
+  border-radius: var(--radius-6);
 }
 .tpl-chip:hover {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 14%);
 }
 .draft-select {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 8%);
+  color: var(--text-2);
+  border-radius: var(--radius-6);
 }
-.draft-select:hover { border-color: rgb(255 255 255 / 14%) !important; }
+.draft-select:hover {
+  border-color: rgb(255 255 255 / 14%);
+}
 
 /* ——— primary 系列（运行/主操作）：暖橙实底 ——— */
 .primary-btn.run {
-  background: var(--primary) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-  border: 0 !important;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: none;
+  border: 0;
 }
-.primary-btn.run:hover:not(:disabled) { background: var(--primary-hover) !important; box-shadow: none !important; }
+.primary-btn.run:hover:not(:disabled) {
+  background: var(--primary-hover);
+  box-shadow: none;
+}
 
 /* 运行按钮（takeover 态）：暖橙描边，非实心，更克制 */
 .primary-btn.takeover {
-  background: transparent !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  box-shadow: none;
 }
 .primary-btn.takeover:hover:not(:disabled) {
-  background: rgb(217 119 87 / 12%) !important;
-  color: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
+  background: rgb(217 119 87 / 12%);
+  color: var(--primary-hover);
+  border-color: var(--primary-hover);
 }
 
 /* 停止 / 暂停：柔和红描边 */
 .primary-btn.stop {
-  background: transparent !important;
-  color: var(--danger) !important;
-  border: 1px solid var(--danger) !important;
-  box-shadow: none !important;
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  box-shadow: none;
 }
 .primary-btn.stop:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  color: #fff !important;
-  border-color: var(--danger) !important;
+  background: rgb(224 108 117 / 14%);
+  color: #fff;
+  border-color: var(--danger);
 }
 
 /* ——— loop-btn 系列 ——— */
 .loop-btn {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  box-shadow: none !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 8%);
+  color: var(--text-2);
+  border-radius: var(--radius-6);
+  box-shadow: none;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
 }
 .loop-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 14%);
 }
-.loop-btn:active:not(:disabled) { box-shadow: none !important; }
-.loop-btn:focus-visible { outline: 0 !important; box-shadow: 0 0 0 2px rgb(217 119 87 / 30%) !important; }
-.loop-btn:disabled { opacity: 0.4 !important; background: transparent !important; color: var(--text-3) !important; }
+.loop-btn:active:not(:disabled) {
+  box-shadow: none;
+}
+.loop-btn:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px rgb(217 119 87 / 30%);
+}
+.loop-btn:disabled {
+  opacity: 0.4;
+  background: transparent;
+  color: var(--text-3);
+}
 
 .loop-btn.primary {
-  background: var(--primary) !important;
-  border-color: var(--primary) !important;
-  color: #fff !important;
-  box-shadow: none !important;
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  box-shadow: none;
 }
 .loop-btn.primary:hover:not(:disabled) {
-  background: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-  color: #fff !important;
-  box-shadow: none !important;
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+  color: #fff;
+  box-shadow: none;
 }
-.loop-btn.kill, .loop-btn.rollback {
-  background: transparent !important;
-  border-color: rgb(224 108 117 / 55%) !important;
-  color: var(--danger) !important;
-  box-shadow: none !important;
+.loop-btn.kill,
+.loop-btn.rollback {
+  background: transparent;
+  border-color: rgb(224 108 117 / 55%);
+  color: var(--danger);
+  box-shadow: none;
 }
-.loop-btn.kill:hover:not(:disabled), .loop-btn.rollback:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  border-color: var(--danger) !important;
-  color: #fff !important;
-  box-shadow: none !important;
+.loop-btn.kill:hover:not(:disabled),
+.loop-btn.rollback:hover:not(:disabled) {
+  background: rgb(224 108 117 / 14%);
+  border-color: var(--danger);
+  color: #fff;
+  box-shadow: none;
 }
 
 /* ——— 决策按钮 ——— */
 .decision-btn {
-  background: rgb(217 119 87 / 12%) !important;
-  color: var(--primary) !important;
-  border-color: var(--primary) !important;
-  font-weight: 600 !important;
+  background: rgb(217 119 87 / 12%);
+  color: var(--primary);
+  border-color: var(--primary);
+  font-weight: 600;
 }
 .decision-btn:hover:not(:disabled) {
-  background: var(--primary) !important;
-  color: #fff !important;
-  border-color: var(--primary) !important;
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
 }
 
 /* ——— 焦点环统一暖橙 ——— */
-.primary-btn:focus-visible, .term-btn:focus-visible, .ghost-btn:focus-visible, .tpl-chip:focus-visible, .draft-select:focus-visible {
-  outline: 0 !important;
-  box-shadow: 0 0 0 2px rgb(217 119 87 / 35%) !important;
+.primary-btn:focus-visible,
+.term-btn:focus-visible,
+.ghost-btn:focus-visible,
+.tpl-chip:focus-visible,
+.draft-select:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px rgb(217 119 87 / 35%);
 }
 
 /* ——— 图标按钮（App 头部）——— */
-.theme-toggle, .trace-toggle, .settings-toggle, .ask-toggle, .timeline-toggle {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--text-2) !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+.theme-toggle,
+.trace-toggle,
+.settings-toggle,
+.ask-toggle,
+.timeline-toggle {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
 }
-.theme-toggle:hover, .trace-toggle:hover, .settings-toggle:hover, .ask-toggle:hover, .timeline-toggle:hover {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 10%) !important;
+.theme-toggle:hover,
+.trace-toggle:hover,
+.settings-toggle:hover,
+.ask-toggle:hover,
+.timeline-toggle:hover {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 10%);
 }
 
 /* ——— 主色大按钮（FileList.save-btn / GeneratePanel.btn-primary）——— */
-.save-btn, .btn-primary {
-  background: var(--primary) !important;
-  color: #fff !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  border-radius: 6px !important;
+.save-btn,
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+  border: 0;
+  box-shadow: none;
+  border-radius: var(--radius-6);
 }
-.save-btn:hover:not(:disabled), .btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover) !important;
-  box-shadow: none !important;
+.save-btn:hover:not(:disabled),
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  box-shadow: none;
 }
 
 /* ——— FileList 撤回按钮 ——— */
 .undo-btn {
-  background: transparent !important;
-  border: 0 !important;
-  color: var(--text-3) !important;
+  background: transparent;
+  border: 0;
+  color: var(--text-3);
 }
 .undo-btn:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  color: var(--danger) !important;
+  background: rgb(224 108 117 / 14%);
+  color: var(--danger);
 }
 
 /* ——— FileTree 刷新 ——— */
-.refresh { background: transparent !important; border: 0 !important; color: var(--text-3) !important; }
-.refresh:hover:not(:disabled) { background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; }
+.refresh {
+  background: transparent;
+  border: 0;
+  color: var(--text-3);
+}
+.refresh:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+}
 
+/* [file-dialog] 双击文件详情弹窗 */
+.ft-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(0 0 0 / 55%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ft-card {
+  width: min(880px, 92vw);
+  max-height: 82vh;
+  background: var(--surface, #1b1b1b);
+  border: 1px solid var(--border, #333);
+  border-radius: var(--radius-10);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 40%);
+}
+.ft-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, #333);
+}
+.ft-path {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-2, #aaa);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ft-btn {
+  background: transparent;
+  color: var(--text-2, #aaa);
+  border: 1px solid var(--border, #333);
+  border-radius: var(--radius-6);
+  font-size: 13px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.ft-btn:hover {
+  color: var(--text-1, #fff);
+  border-color: var(--text-3, #666);
+  background: rgb(255 255 255 / 6%);
+}
+.ft-close {
+  padding: 3px 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+.ft-body {
+  padding: 8px 12px 12px;
+  overflow: auto;
+}
+.ft-loading,
+.ft-error {
+  font-size: 13px;
+  color: var(--text-3, #888);
+  padding: 12px 0;
+}
+.ft-error {
+  color: #ef4444;
+}
+.ft-pre {
+  margin: 0;
+  white-space: pre;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-1, inherit);
+}
+
+/* [ft-hljs] 弹窗内容 hljs 颜色（与 DiffViewer 一致） */
 </style>
 <!-- tooltip-audit -->
+
+<style>
+/* [ft-hljs-global] FileTree 弹窗高亮颜色（全局，避免 Teleport + scoped :deep 失配） */
+.ft-pre .hljs-keyword,
+.ft-pre .hljs-literal {
+  color: #569cd6;
+}
+.ft-pre .hljs-string {
+  color: #ce9178;
+}
+.ft-pre .hljs-number {
+  color: #b5cea8;
+}
+.ft-pre .hljs-comment {
+  color: #6a9955;
+  font-style: italic;
+}
+.ft-pre .hljs-function,
+.ft-pre .hljs-title {
+  color: #dcdcaa;
+}
+.ft-pre .hljs-variable,
+.ft-pre .hljs-params,
+.ft-pre .hljs-attr {
+  color: #9cdcfe;
+}
+.ft-pre .hljs-built_in,
+.ft-pre .hljs-type {
+  color: #4ec9b0;
+}
+</style>

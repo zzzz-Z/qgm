@@ -1,16 +1,16 @@
 import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  LOOP_FEEDBACK_TAIL,
-  LOOP_MAX_ROUNDS,
-  LOOP_TOKEN_BUDGET,
-  LOOP_TOKEN_HARD_LIMIT,
   buildFeedback,
   buildInitialPrompt,
   buildRetryPrompt,
   checkRoundBreak,
   decideTolerance,
   isStrictDone,
+  LOOP_FEEDBACK_TAIL,
+  LOOP_MAX_ROUNDS,
+  LOOP_TOKEN_BUDGET,
+  LOOP_TOKEN_HARD_LIMIT,
   tailClip,
 } from './composables/loopLogic.ts'
 import type { FeedbackOutcome } from './composables/loopLogic.ts'
@@ -92,7 +92,7 @@ it('tailClip：超长只保留尾部，长度恰为上限', () => {
 })
 
 it('tailClip：保留尾部、丢弃头部（头尾各带独特标记）', () => {
-  const s = 'HEAD_TOKEN_' + 'a'.repeat(4000) + 'TAIL_MARK'
+  const s = `HEAD_TOKEN_${'a'.repeat(4000)}TAIL_MARK`
   const r = tailClip(s)
   assert.equal(r.length, LOOP_FEEDBACK_TAIL)
   assert.ok(r.endsWith('TAIL_MARK'))
@@ -181,7 +181,7 @@ it('回填：无 desc 时不出现「说明:」行', () => {
 })
 
 it('回填：超长 stdout 截断到尾部 3000 字', () => {
-  const longOut = 'HEAD'.repeat(2000) + '\nUNIQUE_END_TOKEN'
+  const longOut = `${'HEAD'.repeat(2000)}\nUNIQUE_END_TOKEN`
   const f = buildFeedback(cjsOutcome({ stdout: longOut }), { nextRound: 2, tokenDelta: 0 })
   assert.ok(f.includes('UNIQUE_END_TOKEN'))
   // 头部被截掉：'HEADHEAD...' 重复串不应完整保留 8000 字符

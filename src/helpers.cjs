@@ -5,13 +5,13 @@ const { execFileSync } = require('node:child_process')
 
 function safeReaddir(p) {
   const names = fs.readdirSync(p)
-  return names.map(function (n) {
+  return names.map((n) => {
     let st = null
     try { st = fs.statSync(path.join(p, n)) } catch (e) {}
     return {
       name: n,
-      isDirectory: function () { return st ? st.isDirectory() : false },
-      isFile: function () { return st ? st.isFile() : false },
+      isDirectory() { return st ? st.isDirectory() : false },
+      isFile() { return st ? st.isFile() : false },
     }
   })
 }
@@ -27,17 +27,17 @@ function globToRe(glob) {
     }
     if (ch === '*') { re += '[^/]*'; i++; continue }
     if (ch === '?') { re += '[^/]'; i++; continue }
-    if ('\\^$.|?*+()[]{}'.includes(ch)) re += '\\' + ch
+    if ('\\^$.|?*+()[]{}'.includes(ch)) re += `\\${ch}`
     else re += ch
     i++
   }
-  return new RegExp('^' + re + '$')
+  return new RegExp(`^${re}$`)
 }
 
 const __AI__ = {
   readJSON(p) {
     try { return JSON.parse(fs.readFileSync(p, 'utf8')) }
-    catch (e) { throw new Error(p + ': ' + e.message) }
+    catch (e) { throw new Error(`${p}: ${e.message}`) }
   },
   readText(p) { return fs.readFileSync(p, 'utf8') },
   writeText(p, s) {
@@ -61,7 +61,7 @@ const __AI__ = {
   exists(p) { return fs.existsSync(p) },
   listDir(p) {
     try {
-      return safeReaddir(p).map(function (e) {
+      return safeReaddir(p).map((e) => {
         return { name: e.name, isDir: e.isDirectory(), isFile: e.isFile() }
       })
     } catch { return [] }
@@ -72,12 +72,12 @@ const __AI__ = {
     const newString = opts.newString
     const unique = opts.unique
     if (typeof oldString !== 'string' || typeof newString !== 'string') {
-      throw new Error('replaceInFile: oldString/newString 必填')
+      throw new TypeError('replaceInFile: oldString/newString 必填')
     }
     const src = fs.readFileSync(p, 'utf8')
     const count = src.split(oldString).length - 1
-    if (count === 0) throw new Error('replaceInFile: oldString 未出现于 ' + p)
-    if (unique && count > 1) throw new Error('replaceInFile: oldString 在 ' + p + ' 出现 ' + count + ' 次，非唯一')
+    if (count === 0) throw new Error(`replaceInFile: oldString 未出现于 ${p}`)
+    if (unique && count > 1) throw new Error(`replaceInFile: oldString 在 ${p} 出现 ${count} 次，非唯一`)
     fs.writeFileSync(p, src.split(oldString).join(newString))
     return { replaced: count }
   },
@@ -91,7 +91,8 @@ const __AI__ = {
       for (const ent of entries) {
         if (ent.name.startsWith('.') || ent.name === 'node_modules') continue
         const full = path.join(dir, ent.name)
-        if (ent.isDirectory()) walk(full)
+        if (ent.isDirectory()) { walk(full)
+        }
         else if (ent.isFile()) {
           const rel = path.relative(root, full).replace(/\\/g, '/')
           if (re.test(rel)) out.push(full)
@@ -112,7 +113,7 @@ const __AI__ = {
   },
   assertVueHasName(file) {
     const s = __AI__.readText(file)
-    __AI__.assert(/defineOptions\s*\(\s*{/.test(s), file + ' 缺 defineOptions')
+    __AI__.assert(/defineOptions\s*\(\s*\{/.test(s), `${file} 缺 defineOptions`)
   },
   lint(files) {
     const cwd = process.cwd()
@@ -121,7 +122,7 @@ const __AI__ = {
     if (!fs.existsSync(bin)) return { ok: false, output: '未找到 node_modules/.bin/eslint' }
     const args = Array.isArray(files) && files.length ? files : ['.']
     try {
-      return { ok: true, output: execFileSync(bin, args, { cwd: cwd, encoding: 'utf8', shell: isWin }) }
+      return { ok: true, output: execFileSync(bin, args, { cwd, encoding: 'utf8', shell: isWin }) }
     } catch (e) {
       return { ok: false, output: String(e.stdout || '') + String(e.stderr || '') }
     }
@@ -134,18 +135,23 @@ const __AI__ = {
     const bin = fs.existsSync(vueTsc) ? vueTsc : (fs.existsSync(tsc) ? tsc : null)
     if (!bin) return { ok: false, output: '未找到 node_modules/.bin/vue-tsc 或 tsc' }
     try {
-      return { ok: true, output: execFileSync(bin, ['--noEmit'], { cwd: cwd, encoding: 'utf8', shell: isWin }) }
+      return { ok: true, output: execFileSync(bin, ['--noEmit'], { cwd, encoding: 'utf8', shell: isWin }) }
     } catch (e) {
       return { ok: false, output: String(e.stdout || '') + String(e.stderr || '') }
     }
   },
-  writeReport(obj) { console.log('__AI_REPORT__' + JSON.stringify(obj)) },
+  writeReport(obj) { console.log(`__AI_REPORT__${JSON.stringify(obj)}`) },
+  // [P3-2d] @mode: diff 显式声明：脚本用它标记本次为只读预览（服务端强制 read-only 沙盒）
+  writeDiffReport(obj) {
+    console.log(`__AI_MODE_DIFF__${JSON.stringify(obj || {})}`)
+    process.exit(0)
+  },
   exitNeedInput(question, options, defaultId) {
-    console.log('__AI_RUNNER_DECISION__' + JSON.stringify({ question: question, options: options, default: defaultId }))
+    console.log(`__AI_RUNNER_DECISION__${JSON.stringify({ question, options, default: defaultId })}`)
     process.exit(2)
   },
   exitNeedFiles(paths) {
-    console.log('__AI_NEED_FILES__' + JSON.stringify({ paths: Array.isArray(paths) ? paths : [paths] }))
+    console.log(`__AI_NEED_FILES__${JSON.stringify({ paths: Array.isArray(paths) ? paths : [paths] })}`)
     process.exit(4)
   },
 }

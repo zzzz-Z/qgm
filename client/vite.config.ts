@@ -1,5 +1,5 @@
-// web/vite.config.ts —— 自托管：跑 web dev 时挂自家插件（root=包根）
 import { defineConfig } from 'vite'
+import UnoCSS from 'unocss/vite'
 import vue from '@vitejs/plugin-vue'
 import path from 'node:path'
 import { aiRunner } from '../src/index.js'
@@ -13,6 +13,7 @@ export default defineConfig({
     fs: { allow: [PKG_ROOT] },
   },
   plugins: [
+    UnoCSS({ configFile: path.resolve(__dirname, 'uno.config.ts') }),
     vue(),
     aiRunner({ root: PKG_ROOT }),
   ],

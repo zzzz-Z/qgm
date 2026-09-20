@@ -27,7 +27,7 @@ import { aiRunner } from '@zcc/vite-plugin-ai-runner'
 
 export default defineConfig({
   plugins: [
-    aiRunner(),          // 默认 root = process.cwd()
+    aiRunner(), // 默认 root = process.cwd()
     // aiRunner({ root: '/path/to/project' }), // 也可显式指定项目根
   ],
 })
@@ -66,11 +66,11 @@ export DEEPSEEK_API_KEY=sk-xxxx
 
 ## 二、三个标签页
 
-| 标签 | 面板组件 | 用途 |
-| --- | --- | --- |
-| 运行脚本 | `ScriptPanel.vue` | 写 Node 脚本 / shell 命令 → 在项目根执行 → 看分段输出与 diff → 回滚 |
-| 问 AI | `GeneratePanel.vue` | 拖文件 + `@` 提及 + 写问题 → 清洗 / 拼 prompt → 直连或跳转 AI 会话 |
-| 会话记录 | `TracePanel.vue` | 查看脚本运行历史（`.ai-runner/logs`）与会话交接记录 |
+| 标签     | 面板组件            | 用途                                                                |
+| -------- | ------------------- | ------------------------------------------------------------------- |
+| 运行脚本 | `ScriptPanel.vue`   | 写 Node 脚本 / shell 命令 → 在项目根执行 → 看分段输出与 diff → 回滚 |
+| 问 AI    | `GeneratePanel.vue` | 拖文件 + `@` 提及 + 写问题 → 清洗 / 拼 prompt → 直连或跳转 AI 会话  |
+| 会话记录 | `TracePanel.vue`    | 查看脚本运行历史（`.ai-runner/logs`）与会话交接记录                 |
 
 ---
 
@@ -141,25 +141,25 @@ export DEEPSEEK_API_KEY=sk-xxxx
 
 全部挂在 `/__ai` 前缀下，由 [src/index.ts](./src/index.ts) 的 `handle()` 处理。
 
-| Method | Path | 说明 |
-| --- | --- | --- |
-| GET | `/` | 工作台页面壳（挂载 Vue SPA） |
-| GET | `/launcher.js` | 注入业务页面的悬浮球脚本 |
-| POST | `/run` | 执行 node 沙盒脚本或 shell（NDJSON 流式：chunk / summary） |
-| POST | `/exec` | 执行任意 shell 命令（NDJSON 流式） |
-| POST | `/ask` | DeepSeek Chat Completions 代理（SSE 流式） |
-| POST | `/rollback` | 单文件回滚 |
-| POST | `/rollback-all` | 整次运行全部回滚 |
-| POST | `/save` | 确认改动，丢弃当次快照 |
-| POST | `/files/before` | 读取变更前文件快照内容 |
-| POST | `/diff-from-baseline` | 相对历史运行的跨轮 diff |
-| POST | `/script/save` | 脚本草稿落盘 `.ai-runner/scripts/draft-*.cjs` |
-| GET | `/files` | 项目文件树（depth ≤ 6） |
-| GET | `/files/tree` | 指定目录子树 |
-| GET | `/files/children` | 指定目录单层子节点 |
-| POST | `/files/read` | 批量读文件（越界 / 大小 / 二进制校验） |
-| POST | `/search` | glob 文件名检索 + 正则内容 grep |
-| GET / POST / DELETE | `/skills` | 列出 / 新建 / 删除用户 skill |
+| Method              | Path                  | 说明                                                       |
+| ------------------- | --------------------- | ---------------------------------------------------------- |
+| GET                 | `/`                   | 工作台页面壳（挂载 Vue SPA）                               |
+| GET                 | `/launcher.js`        | 注入业务页面的悬浮球脚本                                   |
+| POST                | `/run`                | 执行 node 沙盒脚本或 shell（NDJSON 流式：chunk / summary） |
+| POST                | `/exec`               | 执行任意 shell 命令（NDJSON 流式）                         |
+| POST                | `/ask`                | DeepSeek Chat Completions 代理（SSE 流式）                 |
+| POST                | `/rollback`           | 单文件回滚                                                 |
+| POST                | `/rollback-all`       | 整次运行全部回滚                                           |
+| POST                | `/save`               | 确认改动，丢弃当次快照                                     |
+| POST                | `/files/before`       | 读取变更前文件快照内容                                     |
+| POST                | `/diff-from-baseline` | 相对历史运行的跨轮 diff                                    |
+| POST                | `/script/save`        | 脚本草稿落盘 `.ai-runner/scripts/draft-*.cjs`              |
+| GET                 | `/files`              | 项目文件树（depth ≤ 6）                                    |
+| GET                 | `/files/tree`         | 指定目录子树                                               |
+| GET                 | `/files/children`     | 指定目录单层子节点                                         |
+| POST                | `/files/read`         | 批量读文件（越界 / 大小 / 二进制校验）                     |
+| POST                | `/search`             | glob 文件名检索 + 正则内容 grep                            |
+| GET / POST / DELETE | `/skills`             | 列出 / 新建 / 删除用户 skill                               |
 
 ---
 
@@ -167,28 +167,28 @@ export DEEPSEEK_API_KEY=sk-xxxx
 
 包安装后提供 5 个 bin：
 
-| 命令 | 脚本 | 用途 |
-| --- | --- | --- |
-| `air-ask` | [bin/ai-ask.cjs](./bin/ai-ask.cjs) | 命令行直连 DeepSeek（参数或 stdin 传入 prompt，流式输出） |
-| `air-check` | [bin/check-status.cjs](./bin/check-status.cjs) | 工程化自检：阶段产物、package scripts、阈值检查 |
-| `air-log` | [bin/log-signal.cjs](./bin/log-signal.cjs) | 记录触发信号 |
-| `air-recover` | [bin/recover.cjs](./bin/recover.cjs) | 交互式从 `.ai-runner/runs` 选择快照恢复 |
-| `air-run-all` | [bin/run-all.cjs](./bin/run-all.cjs) | 全量回归（typecheck / 单测 / e2e / 冒烟） |
+| 命令          | 脚本                                           | 用途                                                      |
+| ------------- | ---------------------------------------------- | --------------------------------------------------------- |
+| `air-ask`     | [bin/ai-ask.cjs](./bin/ai-ask.cjs)             | 命令行直连 DeepSeek（参数或 stdin 传入 prompt，流式输出） |
+| `air-check`   | [bin/check-status.cjs](./bin/check-status.cjs) | 工程化自检：阶段产物、package scripts、阈值检查           |
+| `air-log`     | [bin/log-signal.cjs](./bin/log-signal.cjs)     | 记录触发信号                                              |
+| `air-recover` | [bin/recover.cjs](./bin/recover.cjs)           | 交互式从 `.ai-runner/runs` 选择快照恢复                   |
+| `air-run-all` | [bin/run-all.cjs](./bin/run-all.cjs)           | 全量回归（typecheck / 单测 / e2e / 冒烟）                 |
 
 ---
 
 ## 六、数据目录（项目根 `.ai-runner/`）
 
-| 路径 | 作用 | 清理策略 |
-| --- | --- | --- |
-| `runs/<runId>/` | 单次运行：`_manifest.json` + 各改动文件的 `.before` 快照 + 文件索引 | 保留最近 20 次 |
-| `scripts/draft-*.cjs` | 编辑器保存的脚本草稿 | 手动管理 |
-| `logs/YYYY-MM-DD.jsonl` | 每次运行的结构化日志（desc / exit / 耗时 / changes / errorFiles） | 保留 30 天 |
-| `skills/*.md` | 用户自定义 skill（同名覆盖内置） | — |
-| `backup/` | 改动脚本按规则镜像备份 | — |
-| `tmp/<runId>-overlay.json` | overlay 临时 dump | 运行后即删 |
-| `tmp/<runId>-tools.jsonl` | 沙盒内 fs 工具调用日志 | 运行后即删 |
-| `config.json` | DeepSeek key / baseUrl / model 配置 | — |
+| 路径                       | 作用                                                                | 清理策略       |
+| -------------------------- | ------------------------------------------------------------------- | -------------- |
+| `runs/<runId>/`            | 单次运行：`_manifest.json` + 各改动文件的 `.before` 快照 + 文件索引 | 保留最近 20 次 |
+| `scripts/draft-*.cjs`      | 编辑器保存的脚本草稿                                                | 手动管理       |
+| `logs/YYYY-MM-DD.jsonl`    | 每次运行的结构化日志（desc / exit / 耗时 / changes / errorFiles）   | 保留 30 天     |
+| `skills/*.md`              | 用户自定义 skill（同名覆盖内置）                                    | —              |
+| `backup/`                  | 改动脚本按规则镜像备份                                              | —              |
+| `tmp/<runId>-overlay.json` | overlay 临时 dump                                                   | 运行后即删     |
+| `tmp/<runId>-tools.jsonl`  | 沙盒内 fs 工具调用日志                                              | 运行后即删     |
+| `config.json`              | DeepSeek key / baseUrl / model 配置                                 | —              |
 
 ---
 
@@ -233,18 +233,18 @@ tampermonkey-session-id.user.js  # 可选：AI 站点会话 ID / token 回传油
 
 ## 八、安全边界
 
-| 项 | 措施 |
-| --- | --- |
-| 写盘安全 | 沙盒内全部 fs 写删走内存 overlay，exit 0 才 flush；失败零改动 |
-| 路径穿越 | 所有文件 API `path.resolve` + `realpathSync` 双重校验，越界 / 软链接逃逸拒绝 |
-| CSRF 防护 | POST 强制 `Content-Type: application/json`（415 拒绝跨域简单请求）；Origin 与 Host 同源校验（403）；非 loopback Host 禁用 `/exec`、`/run`（`allowRemote: true` 可放开） |
-| 资源限制 | 子进程 512MB 堆上限、60s 超时（SIGTERM→5s→SIGKILL 升级）；eslint 60s、tsc 120s、单测 30s |
-| 回滚保护 | 落盘前保存 `.before` 快照，可单文件 / 整次回滚；可选 git 运行前 `stash create` 保存工作区（不动 HEAD/工作区） |
-| 请求限制 | HTTP body 上限 5MB；读文件单文件 ≤ 200KB，含 NUL 字节判为二进制拒绝 |
-| 快照范围 | 跳过 `node_modules` / `.git` / `dist` / `.vite` 等、点开头目录、>500KB 文件与二进制后缀 |
-| API key | 推荐走服务端环境变量 / 本地 config，`/ask` 在 Node 侧代理，不暴露给浏览器 |
-| shell 沙盒外 | `!命令` 与首行非 `#!/usr/bin/env node` 的脚本走 shell，**不经过 overlay、无快照、无回滚**，直接对真实磁盘操作 |
-| fd 级写盘 | `openSync`（写模式）/ `writeSync` / `writevSync` / `closeSync` / `fstatSync` / `fsyncSync` / `ftruncateSync` 全部走虚拟 fd overlay；`createWriteStream` 也拦截（finish 后汇入 overlay）；`cpSync`/`cp` 递归拦截；callback 风格 API + `fs.promises.open` FileHandle-like 均覆盖；`rmSync` 记录 `dir` 标志用于整目录回滚 |
+| 项           | 措施                                                                                                                                                                                                                                                                                                                   |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 写盘安全     | 沙盒内全部 fs 写删走内存 overlay，exit 0 才 flush；失败零改动                                                                                                                                                                                                                                                          |
+| 路径穿越     | 所有文件 API `path.resolve` + `realpathSync` 双重校验，越界 / 软链接逃逸拒绝                                                                                                                                                                                                                                           |
+| CSRF 防护    | POST 强制 `Content-Type: application/json`（415 拒绝跨域简单请求）；Origin 与 Host 同源校验（403）；非 loopback Host 禁用 `/exec`、`/run`（`allowRemote: true` 可放开）                                                                                                                                                |
+| 资源限制     | 子进程 512MB 堆上限、60s 超时（SIGTERM→5s→SIGKILL 升级）；eslint 60s、tsc 120s、单测 30s                                                                                                                                                                                                                               |
+| 回滚保护     | 落盘前保存 `.before` 快照，可单文件 / 整次回滚；可选 git 运行前 `stash create` 保存工作区（不动 HEAD/工作区）                                                                                                                                                                                                          |
+| 请求限制     | HTTP body 上限 5MB；读文件单文件 ≤ 200KB，含 NUL 字节判为二进制拒绝                                                                                                                                                                                                                                                    |
+| 快照范围     | 跳过 `node_modules` / `.git` / `dist` / `.vite` 等、点开头目录、>500KB 文件与二进制后缀                                                                                                                                                                                                                                |
+| API key      | 推荐走服务端环境变量 / 本地 config，`/ask` 在 Node 侧代理，不暴露给浏览器                                                                                                                                                                                                                                              |
+| shell 沙盒外 | `!命令` 与首行非 `#!/usr/bin/env node` 的脚本走 shell，**不经过 overlay、无快照、无回滚**，直接对真实磁盘操作                                                                                                                                                                                                          |
+| fd 级写盘    | `openSync`（写模式）/ `writeSync` / `writevSync` / `closeSync` / `fstatSync` / `fsyncSync` / `ftruncateSync` 全部走虚拟 fd overlay；`createWriteStream` 也拦截（finish 后汇入 overlay）；`cpSync`/`cp` 递归拦截；callback 风格 API + `fs.promises.open` FileHandle-like 均覆盖；`rmSync` 记录 `dir` 标志用于整目录回滚 |
 
 ---
 

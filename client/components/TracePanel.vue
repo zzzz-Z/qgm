@@ -1,20 +1,55 @@
 <script setup lang="ts">
-defineOptions({ name: 'TracePanel' })
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useTraceLog } from '../composables/useTraceLog'
+
+defineOptions({ name: 'TracePanel' })
+const PRE_LIMIT = 1500
+const expandedPre = ref<Set<number>>(new Set())
+function preKey(id: number, field: string): number {
+  let h = 0
+  const s = `${id}:${field}`
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0
+  return h
+}
+function trimPre(text: string, id: number, field: string): string {
+  if (!text) return ''
+  const k = preKey(id, field)
+  if (text.length <= PRE_LIMIT || expandedPre.value.has(k)) return text
+  return `${text.slice(0, PRE_LIMIT)}\n… 剩余 ${text.length - PRE_LIMIT} 字符（点击展开）`
+}
+function togglePre(id: number, field: string): void {
+  const k = preKey(id, field)
+  const s = new Set(expandedPre.value)
+  if (s.has(k)) s.delete(k); else s.add(k)
+  expandedPre.value = s
+}
+function preTruncated(text: string, id: number, field: string): boolean {
+  if (!text) return false
+  return text.length > PRE_LIMIT && !expandedPre.value.has(preKey(id, field))
+}
 
 const { entries, removeTrace, clearTraces, MAX_ENTRIES } = useTraceLog()
 const expanded = ref<Set<number>>(new Set())
+// [default-expand-first] 首条进入自动展开；用户手动操作过则不覆盖
+watch(
+  () => entries.value[0]?.id,
+  (id) => {
+    if (id === undefined) return
+    if (expanded.value.size > 0) return
+    expanded.value = new Set([id])
+  },
+  { immediate: true },
+)
 /** 折叠的循环分组（key = loopId） */
 const collapsedLoops = ref<Set<string>>(new Set())
-const filter = ref<'all' | 'ask' | 'run' | 'loop'>('all')
+const filter = ref<'all' | 'success' | 'fail'>('all')
 
 const filtered = computed(() => {
-  if (filter.value === 'all') return entries.value
-  if (filter.value === 'loop') {
-    return entries.value.filter(e => e.kind === 'loop' || e.kind === 'script' || Boolean(e.payload.loopId))
-  }
-  return entries.value.filter(e => e.kind === filter.value)
+  // 只保留脚本执行记录（kind === 'run'）；展示所有
+  const runs = entries.value.filter(e => e.kind === 'run')
+  if (filter.value === 'success') return runs.filter(e => e.payload.ok === true)
+  if (filter.value === 'fail') return runs.filter(e => e.payload.ok === false)
+  return runs
 })
 
 interface TraceGroup {
@@ -52,6 +87,50 @@ const groups = computed<TraceGroup[]>(() => {
   }
   return out
 })
+const expandedFiles = ref<Set<string>>(new Set())
+const fileContents = ref<Map<string, string>>(new Map())
+const fileLoading = ref<Set<string>>(new Set())
+async function toggleFilePreview(path: string) {
+  const s = new Set(expandedFiles.value)
+  if (s.has(path)) {
+    s.delete(path)
+    expandedFiles.value = s
+    return
+  }
+  s.add(path)
+  expandedFiles.value = s
+  if (fileContents.value.has(path)) return
+  const l = new Set(fileLoading.value)
+  l.add(path)
+  fileLoading.value = l
+  try {
+    const res = await fetch('/__ai/files/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: [path] }),
+    })
+    const data = await res.json()
+    const f = data.files && data.files[0]
+    const next = new Map(fileContents.value)
+    next.set(path, f?.error ? `[错误] ${f.error}` : (f?.content || ''))
+    fileContents.value = next
+  } catch (e) {
+    const next = new Map(fileContents.value)
+    next.set(path, `[读取失败] ${String(e)}`)
+    fileContents.value = next
+  } finally {
+    const l = new Set(fileLoading.value)
+    l.delete(path)
+    fileLoading.value = l
+  }
+}
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+const PAGE_SIZE = ref(20)
+const page = ref(1)
+const visibleGroups = computed(() => groups.value.slice(0, page.value * PAGE_SIZE.value))
+const hasMore = computed(() => visibleGroups.value.length < groups.value.length)
+watch(filter, () => { page.value = 1 })
 
 function toggleLoop(loopId: string) {
   const s = new Set(collapsedLoops.value)
@@ -60,24 +139,57 @@ function toggleLoop(loopId: string) {
   collapsedLoops.value = s
 }
 
+function displayTitle(e: typeof entries.value[0]): string {
+  // 1. payload.desc 优先
+  const d = String(e.payload?.desc || '').trim()
+  if (d) return d
+  // 2. 从 payload.script 提取
+  const src = String(e.payload?.script || '')
+  if (src) {
+    // 2a. @desc 注释
+    const dm = src.match(/^\s*(?:\/\/|#)\s*@desc\s*:\s*(.+)$/m)
+    if (dm && dm[1].trim()) return dm[1].trim().slice(0, 100)
+    // 2b. shebang 后第一条注释
+    const lines = src.split('\n')
+    let seenShebang = false
+    for (const raw of lines) {
+      const t = raw.trim()
+      if (!t) continue
+      if (t.startsWith('#!')) { seenShebang = true; continue }
+      if (t.startsWith('//')) {
+        const c = t.slice(2).trim()
+        if (c && !c.startsWith('@')) return c.slice(0, 100)
+        continue
+      }
+      if (t.startsWith('#')) {
+        const c = t.slice(1).trim()
+        if (c && !c.startsWith('@')) return c.slice(0, 100)
+        continue
+      }
+      // 非注释行即止（shebang 后第一条非注释不算标题）
+      if (seenShebang) break
+    }
+  }
+  // 3. 兜底
+  return e.summary
+}
+
 function kindLabel(kind: string): string {
-  if (kind === 'ask') return 'ASK'
-  if (kind === 'run') return 'RUN'
+  if (kind === 'ask') return '💬'
+  if (kind === 'run') return '▶'
   if (kind === 'script') return '📥'
   if (kind === 'loop') return '⟳'
-  return kind.toUpperCase()
+  return '·'
 }
 
 const counts = computed(() => {
-  let ask = 0; let run = 0; let loopCount = 0
-  const loopIds = new Set<string>()
+  let success = 0; let fail = 0
   for (const e of entries.value) {
-    if (e.kind === 'ask') ask++
-    else if (e.kind === 'run') run++
-    if (e.payload.loopId) loopIds.add(e.payload.loopId)
+    if (e.kind !== 'run') continue
+    if (e.payload.ok === true) success++
+    else if (e.payload.ok === false) fail++
   }
-  loopCount = loopIds.size
-  return { ask, run, loopCount, total: entries.value.length }
+  return { success, fail, total: success + fail }
 })
 
 function toggle(id: number) {
@@ -90,7 +202,7 @@ function toggle(id: number) {
 function fmtTime(ts: number): string {
   const d = new Date(ts)
   const p = (n: number) => String(n).padStart(2, '0')
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 async function copyText(t: string) {
@@ -111,24 +223,20 @@ function confirmClear() {
         <span class="trace-title">会话记录</span>
         <span class="trace-total">{{ counts.total }} / {{ MAX_ENTRIES }}</span>
         <span class="trace-breakdown">
-          <span class="t-pill ask">问 AI {{ counts.ask }}</span>
-          <span class="t-pill run">运行 {{ counts.run }}</span>
-          <span class="t-pill loop">循环 {{ counts.loopCount }}</span>
+          <span class="t-pill run">成功 {{ counts.success }}</span>
+          <span class="t-pill fail">失败 {{ counts.fail }}</span>
         </span>
       </div>
       <div class="trace-actions">
         <div class="trace-tabs">
-          <button v-tooltip="'显示全部记录'" :class="{ active: filter === 'all' }" @click="filter = 'all'">
+          <button v-tooltip="'显示全部脚本执行记录'" :class="{ active: filter === 'all' }" @click="filter = 'all'">
             全部
           </button>
-          <button v-tooltip="'只看「问 AI」记录'" :class="{ active: filter === 'ask' }" @click="filter = 'ask'">
-            问 AI
+          <button v-tooltip="'只看成功的执行'" :class="{ active: filter === 'success' }" @click="filter = 'success'">
+            成功
           </button>
-          <button v-tooltip="'只看「运行脚本」记录'" :class="{ active: filter === 'run' }" @click="filter = 'run'">
-            运行脚本
-          </button>
-          <button v-tooltip="'只看自动化循环的决策链记录'" :class="{ active: filter === 'loop' }" @click="filter = 'loop'">
-            循环
+          <button v-tooltip="'只看失败的执行'" :class="{ active: filter === 'fail' }" @click="filter = 'fail'">
+            失败
           </button>
         </div>
         <button v-tooltip="entries.length ? `清空全部 ${entries.length} 条记录` : '没有可清空的记录'" class="trace-clear" :disabled="!entries.length" @click="confirmClear">
@@ -145,10 +253,10 @@ function confirmClear() {
           还没有记录
         </div>
         <div class="trace-empty-hint">
-          运行脚本或复制 prompt 后自动记录
+          运行脚本后自动记录，按成功/失败分类
         </div>
       </div>
-      <div v-for="g in groups" :key="g.key" class="trace-group">
+      <div v-for="g in visibleGroups" :key="g.key" class="trace-group">
         <!-- 循环分组头（v6 §3.2 LoopEntry） -->
         <div v-if="g.isLoop" class="loop-group-head" @click="g.loopId && toggleLoop(g.loopId)">
           <span class="loop-group-caret" :class="{ open: g.loopId ? !collapsedLoops.has(g.loopId) : false }">▾</span>
@@ -157,87 +265,113 @@ function confirmClear() {
           <span class="loop-group-meta">{{ g.items.length }} 条决策 · {{ g.maxRound }} 轮</span>
         </div>
         <template v-if="!g.isLoop || (g.loopId && !collapsedLoops.has(g.loopId))">
-      <div v-for="e in g.items" :key="e.id" class="trace-card" :class="[e.kind, { err: e.kind === 'run' && e.payload.ok === false }]">
-        <div class="trace-head" @click="toggle(e.id)">
-          <span class="trace-badge" :class="e.kind">{{ kindLabel(e.kind) }}</span>
-          <span v-if="e.payload.loopRound" class="round-pill">R{{ e.payload.loopRound }}</span>
-          <span class="trace-summary">{{ e.summary }}</span>
-          <span class="trace-time">{{ fmtTime(e.ts) }}</span>
-          <button v-tooltip="'删除这条记录'" class="trace-del" @click.stop="removeTrace(e.id)">
-            ×
-          </button>
-          <span class="trace-caret" :class="{ open: expanded.has(e.id) }">▾</span>
-        </div>
-        <div v-if="expanded.has(e.id)" class="trace-body">
-          <template v-if="e.kind === 'ask'">
-            <div v-if="e.payload.question" class="trace-section">
-              <div class="trace-label">
-                <span>问题</span><button class="trace-mini" @click="copyText(e.payload.question || '')">
-                  复制
-                </button>
-              </div>
-              <pre class="trace-pre">{{ e.payload.question }}</pre>
+          <div v-for="e in g.items" :key="e.id" class="trace-card" :class="[e.kind, { err: e.kind === 'run' && e.payload.ok === false }]">
+            <div class="trace-head" @click="toggle(e.id)">
+              <span class="trace-badge" :class="e.kind">{{ kindLabel(e.kind) }}</span>
+              <span v-if="e.payload.loopRound" class="round-pill">R{{ e.payload.loopRound }}</span>
+              <span class="trace-summary">{{ displayTitle(e) }}</span>
+              <span class="trace-time">{{ fmtTime(e.ts) }}</span>
+              <button v-tooltip="'删除这条记录'" class="trace-del" aria-label="删除记录" @click.stop="removeTrace(e.id)">
+                ×
+              </button>
+              <span class="trace-caret" :class="{ open: expanded.has(e.id) }">▾</span>
             </div>
-            <div v-if="e.payload.files && e.payload.files.length" class="trace-section">
-              <div class="trace-label">
-                <span>附加文件（{{ e.payload.files.length }}）</span>
-              </div>
-              <ul class="trace-files">
-                <li v-for="p in e.payload.files" :key="p">
-                  {{ p }}
-                </li>
-              </ul>
+            <div v-if="expanded.has(e.id)" class="trace-body">
+              <template v-if="e.kind === 'ask'">
+                <div v-if="e.payload.question" class="trace-section">
+                  <div class="trace-label">
+                    <span>问题</span><button class="trace-mini" @click="copyText(e.payload.question || '')">
+                      复制
+                    </button>
+                  </div>
+                  <pre class="trace-pre" :style="{ cursor: preTruncated(e.payload.question || '', e.id, 'question') ? 'pointer' : 'auto' }" @click="preTruncated(e.payload.question || '', e.id, 'question') && togglePre(e.id, 'question')">{{ trimPre(e.payload.question || '', e.id, 'question') }}</pre>
+                </div>
+                <div v-if="e.payload.files && e.payload.files.length" class="trace-section">
+                  <div class="trace-label">
+                    <span>附加文件（{{ e.payload.files.length }}）</span>
+                  </div>
+                  <ul class="trace-files">
+                    <li v-for="p in e.payload.files" :key="p">
+                      {{ p }}
+                    </li>
+                  </ul>
+                </div>
+                <div v-if="e.payload.prompt" class="trace-section">
+                  <div class="trace-label">
+                    <span>完整 prompt</span><button class="trace-mini" @click="copyText(e.payload.prompt || '')">
+                      复制
+                    </button>
+                  </div>
+                  <pre class="trace-pre" :style="{ cursor: preTruncated(e.payload.prompt || '', e.id, 'prompt') ? 'pointer' : 'auto' }" @click="preTruncated(e.payload.prompt || '', e.id, 'prompt') && togglePre(e.id, 'prompt')">{{ trimPre(e.payload.prompt || '', e.id, 'prompt') }}</pre>
+                </div>
+              </template>
+              <template v-else>
+                <div v-if="e.payload.script" class="trace-section">
+                  <div class="trace-label">
+                    <span>脚本</span><button class="trace-mini" @click="copyText(e.payload.script || '')">
+                      复制
+                    </button>
+                  </div>
+                  <pre class="trace-pre" :style="{ cursor: preTruncated(e.payload.script || '', e.id, 'script') ? 'pointer' : 'auto' }" @click="preTruncated(e.payload.script || '', e.id, 'script') && togglePre(e.id, 'script')">{{ trimPre(e.payload.script || '', e.id, 'script') }}</pre>
+                </div>
+                <div v-if="e.payload.changes && e.payload.changes.length" class="trace-section">
+                  <div class="trace-label">
+                    <span>变更（{{ e.payload.changes.length }}）</span>
+                  </div>
+                  <ul class="trace-changes">
+                    <li v-for="c in e.payload.changes" :key="c.path">
+                      <div class="chg-row" :class="{ 'is-open': expandedFiles.has(c.path) }" @click="toggleFilePreview(c.path)">
+                        <span class="chg" :class="c.type">{{ c.type.charAt(0).toUpperCase() }}</span>
+                        <span class="chg-path">{{ c.path }}</span>
+                        <span class="chg-caret">▾</span>
+                      </div>
+                      <div v-if="expandedFiles.has(c.path)" class="chg-preview">
+                        <div v-if="fileLoading.has(c.path)" class="chg-loading">
+                          加载中…
+                        </div>
+                        <pre v-else class="chg-content">{{ fileContents.get(c.path) || '(空文件)' }}</pre>
+                      </div>
+                    </li>
+                  </ul>
+                </div>
+                <div v-if="e.payload.stdout" class="trace-section">
+                  <div class="trace-label">
+                    <span>stdout</span><button class="trace-mini" @click="copyText(e.payload.stdout || '')">
+                      复制
+                    </button>
+                  </div>
+                  <pre class="trace-pre" :style="{ cursor: preTruncated(e.payload.stdout || '', e.id, 'stdout') ? 'pointer' : 'auto' }" @click="preTruncated(e.payload.stdout || '', e.id, 'stdout') && togglePre(e.id, 'stdout')">{{ trimPre(e.payload.stdout || '', e.id, 'stdout') }}</pre>
+                </div>
+                <div v-if="e.payload.stderr" class="trace-section">
+                  <div class="trace-label">
+                    <span>stderr</span><button class="trace-mini" @click="copyText(e.payload.stderr || '')">
+                      复制
+                    </button>
+                  </div>
+                  <pre class="trace-pre err" :style="{ cursor: preTruncated(e.payload.stderr || '', e.id, 'stderr') ? 'pointer' : 'auto' }" @click="preTruncated(e.payload.stderr || '', e.id, 'stderr') && togglePre(e.id, 'stderr')">{{ trimPre(e.payload.stderr || '', e.id, 'stderr') }}</pre>
+                </div>
+              </template>
             </div>
-            <div v-if="e.payload.prompt" class="trace-section">
-              <div class="trace-label">
-                <span>完整 prompt</span><button class="trace-mini" @click="copyText(e.payload.prompt || '')">
-                  复制
-                </button>
-              </div>
-              <pre class="trace-pre">{{ e.payload.prompt }}</pre>
-            </div>
-          </template>
-          <template v-else>
-            <div v-if="e.payload.script" class="trace-section">
-              <div class="trace-label">
-                <span>脚本</span><button class="trace-mini" @click="copyText(e.payload.script || '')">
-                  复制
-                </button>
-              </div>
-              <pre class="trace-pre">{{ e.payload.script }}</pre>
-            </div>
-            <div v-if="e.payload.changes && e.payload.changes.length" class="trace-section">
-              <div class="trace-label">
-                <span>变更（{{ e.payload.changes.length }}）</span>
-              </div>
-              <ul class="trace-changes">
-                <li v-for="c in e.payload.changes" :key="c.path">
-                  <span class="chg" :class="c.type">{{ c.type.charAt(0).toUpperCase() }}</span>{{ c.path }}
-                </li>
-              </ul>
-            </div>
-            <div v-if="e.payload.stdout" class="trace-section">
-              <div class="trace-label">
-                <span>stdout</span><button class="trace-mini" @click="copyText(e.payload.stdout || '')">
-                  复制
-                </button>
-              </div>
-              <pre class="trace-pre">{{ e.payload.stdout }}</pre>
-            </div>
-            <div v-if="e.payload.stderr" class="trace-section">
-              <div class="trace-label">
-                <span>stderr</span><button class="trace-mini" @click="copyText(e.payload.stderr || '')">
-                  复制
-                </button>
-              </div>
-              <pre class="trace-pre err">{{ e.payload.stderr }}</pre>
-            </div>
-          </template>
-        </div>
-      </div>
+          </div>
         </template>
       </div>
     </div>
+  </div>
+  <div v-if="groups.length" class="trace-pager">
+    <div class="trace-pager-info">
+      已显示 {{ visibleGroups.length }} / {{ groups.length }}
+    </div>
+    <select v-model.number="PAGE_SIZE" class="trace-pager-size" @change="page = 1">
+      <option v-for="n in PAGE_SIZE_OPTIONS" :key="n" :value="n">
+        每页 {{ n }}
+      </option>
+    </select>
+    <button v-if="hasMore" class="trace-more" @click="page += 1">
+      加载下一页
+    </button>
+    <button v-else class="trace-more trace-more-end" disabled>
+      已到底
+    </button>
   </div>
 </template>
 
@@ -257,10 +391,12 @@ function confirmClear() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: 8px;
+  padding: 8px 12px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 .trace-title-row {
   display: flex;
@@ -282,7 +418,7 @@ function confirmClear() {
 }
 .t-pill {
   padding: 1px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   font-size: 10px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -294,6 +430,10 @@ function confirmClear() {
 .t-pill.run {
   background: var(--success-bg);
   color: var(--success);
+}
+.t-pill.fail {
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 .t-pill.loop {
   background: var(--warning-bg, rgba(230, 162, 60, 0.12));
@@ -310,12 +450,12 @@ function confirmClear() {
   padding: 2px;
   background: var(--surface);
   border: 1px solid var(--border-2);
-  border-radius: 6px;
+  border-radius: var(--radius-6);
 }
 .trace-tabs button {
   padding: 3px 10px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   background: transparent;
   color: var(--text-2);
   font-size: 11px;
@@ -329,7 +469,7 @@ function confirmClear() {
 .trace-clear {
   padding: 4px 12px;
   border: 1px solid var(--border-2);
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   background: var(--surface);
   color: var(--text-2);
   font-size: 12px;
@@ -349,13 +489,14 @@ function confirmClear() {
   min-height: 0;
   overflow-y: auto;
   padding: 8px 12px 16px;
+  contain: layout style paint;
 }
 .trace-list::-webkit-scrollbar {
   width: 8px;
 }
 .trace-list::-webkit-scrollbar-thumb {
   background: var(--border-2);
-  border-radius: 4px;
+  border-radius: var(--radius-4);
 }
 .trace-empty {
   display: flex;
@@ -380,8 +521,10 @@ function confirmClear() {
   opacity: 0.8;
 }
 .trace-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--surface);
   margin-top: 8px;
   overflow: hidden;
@@ -412,7 +555,7 @@ function confirmClear() {
 .round-pill {
   flex-shrink: 0;
   padding: 1px 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--surface-2);
   border: 1px solid var(--border-2);
   font-size: 10px;
@@ -429,7 +572,7 @@ function confirmClear() {
   gap: 8px;
   padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--surface-2);
   cursor: pointer;
   user-select: none;
@@ -448,7 +591,7 @@ function confirmClear() {
 .loop-group-badge {
   flex-shrink: 0;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   font-size: 10px;
   font-weight: 700;
   background: var(--warning-bg, rgba(230, 162, 60, 0.12));
@@ -487,7 +630,7 @@ function confirmClear() {
 .trace-badge {
   flex-shrink: 0;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.4px;
@@ -520,7 +663,7 @@ function confirmClear() {
   width: 18px;
   height: 18px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
@@ -566,7 +709,7 @@ function confirmClear() {
 .trace-mini {
   padding: 1px 8px;
   border: 1px solid var(--border-2);
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   background: var(--surface);
   color: var(--text-2);
   font-size: 10px;
@@ -581,7 +724,7 @@ function confirmClear() {
   padding: 8px 10px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   font: 11px/1.55 var(--mono);
   color: var(--text);
   white-space: pre-wrap;
@@ -600,7 +743,7 @@ function confirmClear() {
   font: 11px/1.6 var(--mono);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   max-height: 200px;
   overflow: auto;
 }
@@ -610,22 +753,6 @@ function confirmClear() {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-2);
-}
-.chg {
-  display: inline-block;
-  width: 14px;
-  text-align: center;
-  font-weight: 700;
-  margin-right: 4px;
-}
-.chg.added {
-  color: var(--success);
-}
-.chg.modified {
-  color: var(--warning);
-}
-.chg.deleted {
-  color: var(--danger);
 }
 </style>
 <!-- tooltip-audit -->

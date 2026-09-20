@@ -1,30 +1,121 @@
 :root {
-  --bg: #f6f8fb;
-  --surface: #fff;
-  --surface-2: #f8fafc;
-  --border: #e3e8ef;
-  --border-2: #cbd5e1;
-  --text: #0f172a;
-  --text-2: #475569;
-  --text-3: #94a3b8;
-  --primary: #c96442;
-  --primary-hover: #b3553a;
-  --primary-bg: rgb(201 100 66 / 12%);
-  --success: #059669;
-  --success-bg: #ecfdf5;
-  --warning: #d97706;
-  --warning-bg: #fffbeb;
-  --danger: #dc2626;
-  --danger-bg: #fef2f2;
-  --code-bg: #0f172a;
-  --code-text: #e2e8f0;
-  --radius: 10px;
-  --radius-sm: 8px;
-  --shadow: 0 1px 2px rgb(15 23 42 / 4%), 0 1px 3px rgb(15 23 42 / 6%);
-  --shadow-md: 0 4px 12px rgb(15 23 42 / 8%);
-  --shadow-lg: 0 12px 32px rgb(15 23 42 / 12%);
+  /* ═══ DeepSeek 灰黑 + 外层加深 ═══ */
+  --bg: #0f0f0f;
+  --surface: #1a1a1a;
+  --surface-2: #252525;
+  --surface-3: #2f2f2f;
+  --surface-4: #3a3a3a;
+  --border: #2a2a2a;
+  --border-2: #333333;
+  --border-strong: #404040;
+
+  --text: #ececec;
+  --text-2: #c5c5c5;
+  --text-3: #9a9a9a;
+  --text-4: #7a7a7a;
+  --text-5: #5a5a5a;
+
+  --primary: #4d6bfe;
+  --primary-hover: #6b83ff;
+  --primary-bg: rgb(77 107 254 / 15%);
+
+  --success: #4ade80;
+  --success-bg: rgb(74 222 128 / 12%);
+  --warning: #fbbf24;
+  --warning-bg: rgb(251 191 36 / 12%);
+  --danger: #f87171;
+  --danger-bg: rgb(248 113 113 / 12%);
+
+  --code-bg: #252525;
+  --code-text: #ececec;
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-4: 4px;
+  --radius-6: 6px;
+  --radius-8: 8px;
+  --radius-10: 10px;
+  --radius-2: 2px;
+  --radius-12: 12px;
+  --radius-full: 9999px;
+
+  --font-11: 11px;
+  --font-12: 12px;
+  --font-13: 13px;
+  --font-14: 14px;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 20%);
+  --shadow: 0 1px 3px rgb(0 0 0 / 25%);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 30%);
+  --shadow-lg: 0 8px 24px rgb(0 0 0 / 40%);
+  --shadow-focus: 0 0 0 3px rgb(77 107 254 / 20%);
+
+  --transition-fast: 0.12s ease;
+  --transition-base: 0.18s ease;
+
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  /* 终端区变量（浅色主题） */
+
+  --term-bg: #0f0f0f;
+  --term-bar-bg: #1a1a1a;
+  --term-border: #2a2a2a;
+  --term-sep: #252525;
+  --term-text: #ececec;
+  --term-text-2: #c5c5c5;
+  --term-text-3: #9a9a9a;
+  --term-code-color: #6b83ff;
+  --term-chip-bg: rgb(255 255 255 / 4%);
+  --term-chip-bg-2: rgb(255 255 255 / 6%);
+  --term-chip-hover: rgb(255 255 255 / 8%);
+  --term-chip-border: rgb(255 255 255 / 8%);
+  --term-chip-border-2: rgb(255 255 255 / 12%);
+  --term-think-bg: rgb(255 255 255 / 4%);
+  --term-code-bg: rgb(255 255 255 / 5%);
+  --term-accent: #4d6bfe;
+  --term-shadow: rgb(0 0 0 / 30%);
+  --term-user-bg: rgb(77 107 254 / 12%);
+  --term-user-border: rgb(77 107 254 / 30%);
+  --term-ai-bg: rgb(255 255 255 / 3%);
+  --term-ai-border: rgb(255 255 255 / 8%);
+}
+/* ═══════════════════════════════════════════════════════════
+   [theme-light] 浅色主题变量（GitHub Light）
+   ═══════════════════════════════════════════════════════════ */
+[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f6f8fa;
+  --surface-2: #eaeef2;
+  --surface-3: #dfe3e8;
+  --surface-4: #d0d7de;
+  --border: #d0d7de;
+  --border-2: #afb8c1;
+  --border-strong: #8c959f;
+
+  --text: #1f2328;
+  --text-2: #32383f;
+  --text-3: #656d76;
+  --text-4: #8c959f;
+  --text-5: #afb8c1;
+
+  --primary: #0969da;
+  --primary-hover: #0550ae;
+  --primary-bg: rgb(9 105 218 / 10%);
+
+  --success: #1a7f37;
+  --success-bg: rgb(26 127 55 / 10%);
+  --warning: #9a6700;
+  --warning-bg: rgb(154 103 0 / 10%);
+  --danger: #cf222e;
+  --danger-bg: rgb(207 34 46 / 10%);
+
+  --code-bg: #f6f8fa;
+  --code-text: #1f2328;
+
+  --shadow-sm: 0 1px 2px rgb(31 35 40 / 8%);
+  --shadow: 0 1px 3px rgb(31 35 40 / 10%), 0 1px 2px rgb(31 35 40 / 6%);
+  --shadow-md: 0 4px 12px rgb(31 35 40 / 12%);
+  --shadow-lg: 0 8px 24px rgb(31 35 40 / 15%);
+  --shadow-focus: 0 0 0 3px rgb(9 105 218 / 15%);
+
   --term-bg: #f6f8fa;
   --term-bar-bg: #eaeef3;
   --term-border: #d0d7de;
@@ -42,26 +133,40 @@
   --term-code-bg: rgb(31 35 40 / 5%);
   --term-accent: #0969da;
   --term-shadow: rgb(31 35 40 / 8%);
-  --term-user-bg: linear-gradient(180deg, rgb(79 70 229 / 12%), rgb(79 70 229 / 8%));
-  --term-user-border: rgb(79 70 229 / 28%);
+  --term-user-bg: rgb(9 105 218 / 10%);
+  --term-user-border: rgb(9 105 218 / 28%);
   --term-ai-bg: rgb(31 35 40 / 3%);
   --term-ai-border: rgb(31 35 40 / 10%);
 }
 
-* { box-sizing: border-box; }
-button { font-family: inherit; }
+
+* {
+  box-sizing: border-box;
+}
+button {
+  font-family: inherit;
+}
 
 /* ---- LAYOUT-FIX: full-viewport, no page scroll ---- */
 html,
 body {
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
+  font:
+    13px/1.55 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
 }
 
 body {
-  font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  font:
+    13px/1.55 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    sans-serif;
   background: var(--bg);
   color: var(--text);
 }
@@ -73,50 +178,108 @@ body {
   overflow: hidden;
 }
 
-html { color-scheme: light; }
-html[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #0d0d0d;
-  --surface: #141414;
-  --surface-2: #1a1a1a;
-  --border: #262626;
-  --border-2: #333333;
-  --text: #e6e6e6;
-  --text-2: #a3a3a3;
-  --text-3: #6b6b6b;
-  --primary: #a78bfa;
-  --primary-hover: #c4b5fd;
-  --primary-bg: rgb(167 139 250 / 12%);
-  --success: #4ade80;
-  --success-bg: rgb(74 222 128 / 12%);
-  --warning: #fbbf24;
-  --warning-bg: rgb(251 191 36 / 12%);
-  --danger: #f87171;
-  --danger-bg: rgb(248 113 113 / 12%);
-  --code-bg: #0a0a0a;
-  --code-text: #e6e6e6;
-  --shadow: 0 1px 2px rgb(0 0 0 / 40%);
-  --shadow-md: 0 4px 12px rgb(0 0 0 / 40%);
-  --shadow-lg: 0 12px 32px rgb(0 0 0 / 50%);
-  --term-bg: #0d0d0d;
-  --term-bar-bg: #141414;
-  --term-border: #262626;
-  --term-sep: #1f1f1f;
-  --term-text: #e6e6e6;
-  --term-text-2: #a3a3a3;
-  --term-text-3: #6b6b6b;
-  --term-code-color: #c4b5fd;
-  --term-chip-bg: rgb(255 255 255 / 2%);
-  --term-chip-bg-2: rgb(255 255 255 / 4%);
-  --term-chip-hover: rgb(255 255 255 / 5%);
-  --term-chip-border: rgb(255 255 255 / 6%);
-  --term-chip-border-2: rgb(255 255 255 / 10%);
-  --term-think-bg: rgb(255 255 255 / 2%);
-  --term-code-bg: rgb(255 255 255 / 3%);
-  --term-accent: #a78bfa;
-  --term-shadow: rgb(0 0 0 / 40%);
-  --term-user-bg: rgb(255 255 255 / 2%);
-  --term-user-border: rgb(255 255 255 / 8%);
-  --term-ai-bg: rgb(167 139 250 / 4%);
-  --term-ai-border: rgb(167 139 250 / 14%);
+html {
+  color-scheme: light;
+}
+
+/* ─── 全局隐藏滚动条（保留滚动）─── */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   [ui-enhance] 视觉层次增强
+   ═══════════════════════════════════════════════════════════ */
+
+/* 滚动条美化 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* 焦点环：只对交互元素生效（不含容器） */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* 容器元素强制去掉 focus outline */
+.terminal:focus,
+.terminal:focus-visible,
+.pane-main:focus,
+.pane-main:focus-visible,
+.cm-host:focus,
+.cm-host:focus-visible,
+.pane:focus,
+.pane:focus-visible,
+.editor:focus,
+.editor:focus-visible,
+.side-tree:focus,
+.side-tree:focus-visible,
+.side-changes:focus,
+.side-changes:focus-visible,
+.chat-list:focus,
+.chat-list:focus-visible,
+.term-body:focus,
+.term-body:focus-visible {
+  outline: none !important;
+}
+
+/* 选中文字 */
+::selection {
+  background: rgb(88 166 255 / 30%);
+  color: var(--text);
+}
+
+/* 按钮基础过渡 */
+button {
+  transition: background var(--transition-fast),
+              color var(--transition-fast),
+              border-color var(--transition-fast),
+              box-shadow var(--transition-fast);
+}
+
+/* 卡片 hover 微动效 */
+[class*="card"]:hover {
+  box-shadow: var(--shadow-md);
+}
+
+/* [P2-3a] global :focus-visible */
+/* 键盘导航兜底：仅交互元素（不用 * 通配，避免容器 focus 时整块高亮） */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--accent, rgb(88 166 255 / 90%));
+  outline-offset: 2px;
+}
+
+/* 已自带 outline 的容器不重复加 */
+button:focus-visible:where([class*="ghost"]),
+button:focus-visible:where([class*="chip"]) {
+  outline-offset: 1px;
 }

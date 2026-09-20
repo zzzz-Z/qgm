@@ -71,4 +71,5 @@ export interface RunLogEntry {
   changeCount: number
   changes: Change[]
   errorFiles: string[]
+  fingerprints?: Array<{ file: string, line: number, symbol: string, kind: string }>
 }

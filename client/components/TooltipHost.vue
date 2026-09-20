@@ -19,8 +19,8 @@ import { ref, watch } from 'vue'
 import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/vue'
 import { useTooltip } from '../composables/useTooltip'
 
-type VirtualElement = {
-  getBoundingClientRect(): {
+interface VirtualElement {
+  getBoundingClientRect: () => {
     x: number
     y: number
     top: number
@@ -86,7 +86,7 @@ watch(
   padding: 6px 10px;
   background: rgb(15 23 42 / 96%);
   color: #f8fafc;
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   font:
     12px/1.5 -apple-system,
     BlinkMacSystemFont,
@@ -97,15 +97,7 @@ watch(
   pointer-events: none;
   word-break: break-word;
   white-space: normal;
-  backdrop-filter: blur(6px);
-}
-.tt-fade-enter-active,
-.tt-fade-leave-active {
-  transition: opacity 0.12s ease;
-}
-.tt-fade-enter-from,
-.tt-fade-leave-to {
-  opacity: 0;
+  /* P2-1 移除 backdrop-filter（GPU 性能负债）：backdrop-filter: blur(6px); */
 }
 html[data-theme='dark'] .tt-host {
   background: rgb(36 45 58 / 96%);

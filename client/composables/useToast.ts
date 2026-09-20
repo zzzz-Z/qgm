@@ -4,12 +4,15 @@ export type ToastType = 'info' | 'success' | 'warn' | 'error'
 
 export interface ToastItem {
   id: number
-  /** 稳定 key：相同 key 的 toast 不新增，原地更新内容并续期计时器
-   *  用于流式输出期间频繁触发的提示（如 token-estimate），防 MutationObserver 风暴 */
+  /**
+   * 稳定 key：相同 key 的 toast 不新增，原地更新内容并续期计时器
+   *  用于流式输出期间频繁触发的提示（如 token-estimate），防 MutationObserver 风暴
+   */
   key?: string
   msg: string
   type: ToastType
   icon: string
+  traceId?: number
 }
 
 const ICONS: Record<ToastType, string> = {
@@ -36,7 +39,8 @@ function evict() {
     if (oldest) {
       clearTimer(oldest.id)
       toasts.value.shift()
-    } else break
+    } else { break
+    }
   }
 }
 

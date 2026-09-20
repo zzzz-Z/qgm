@@ -1,6 +1,4 @@
 <script setup lang="ts">
-defineOptions({ name: 'GeneratePanel' })
-const emit = defineEmits<{ sent: [] }>()
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FileTree from './FileTree.vue'
 import { copyAndFill } from '../composables/useDeepseekUrl'
@@ -11,6 +9,9 @@ import { useToast } from '../composables/useToast'
 import { useTraceLog } from '../composables/useTraceLog'
 import { useSessionManager } from '../composables/useSessionManager'
 import type { FilesReadResponse } from '../types'
+
+defineOptions({ name: 'GeneratePanel' })
+const emit = defineEmits<{ sent: [] }>()
 
 interface FileEntry {
   path: string
@@ -636,11 +637,13 @@ async function copyPrompt() {
     }
     trackMessage('user', text)
     emit('sent')
-  } catch {  }
+  } catch { }
 }
 
 // ---------- 生命周期 ----------
 onMounted(() => {
+  window.addEventListener('keydown', onAddAllHotkey)
+
   window.addEventListener('ai-runner:drag', onGlobalDrag)
   window.addEventListener('ai-runner:drop', onGlobalDrop)
   window.addEventListener('ai-runner:drag-cancel', onGlobalDragCancel)
@@ -654,10 +657,21 @@ onMounted(() => {
   loadTree()
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onAddAllHotkey)
+
   window.removeEventListener('ai-runner:drag', onGlobalDrag)
   window.removeEventListener('ai-runner:drop', onGlobalDrop)
   window.removeEventListener('ai-runner:drag-cancel', onGlobalDragCancel)
 })
+
+function onAddAllHotkey(e: KeyboardEvent) {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+  const k = String(e.key || '').toLowerCase()
+  if (k !== 'a') return
+  if (addingAll.value) return
+  e.preventDefault()
+  void addAllFiles()
+}
 </script>
 
 <template>
@@ -719,7 +733,7 @@ onBeforeUnmount(() => {
             </button>
             <button
               v-tooltip="aiWaiting ? '等待 AI 回复…' : copied ? '已发送' : '把问题 + 规则 + 项目结构 + 相关文件拼成 prompt 复制并发给 DeepSeek'"
-              class="btn btn-primary btn-cta"
+              class="btn btn-cta btn-primary"
               :class="{ loading: aiWaiting }"
               :disabled="!canCopy || aiWaiting"
               @click="copyPrompt"
@@ -814,7 +828,7 @@ onBeforeUnmount(() => {
         <div v-if="showSkills" class="skills-panel">
           <div class="skills-header">
             <span class="skills-title">Skills（{{ selectedSkills.length }} / {{ skills.length }} 启用）</span>
-            <button v-tooltip="'收起'" class="skills-close" @click="showSkills = false">
+            <button v-tooltip="'收起'" aria-label="收起" class="skills-close" @click="showSkills = false">
               ×
             </button>
           </div>
@@ -884,9 +898,15 @@ onBeforeUnmount(() => {
               @keydown.enter="runSearch"
             >
             <select v-model="searchMode" class="search-mode">
-              <option value="content">文本</option>
-              <option value="file">文件名</option>
-              <option value="ast">AST</option>
+              <option value="content">
+                文本
+              </option>
+              <option value="file">
+                文件名
+              </option>
+              <option value="ast">
+                AST
+              </option>
             </select>
             <input
               v-if="searchMode === 'ast'"
@@ -895,7 +915,7 @@ onBeforeUnmount(() => {
               spellcheck="false"
               placeholder="typescript / javascript / vue"
             >
-            <button v-tooltip="searching ? '正在搜索…' : '按关键字 / 正则搜索（Enter）'" class="btn btn-primary btn-mini" :disabled="searching || !searchQuery.trim()" @click="runSearch">
+            <button v-tooltip="searching ? '正在搜索…' : '按关键字 / 正则搜索（Enter）'" class="btn btn-mini btn-primary" :disabled="searching || !searchQuery.trim()" @click="runSearch">
               {{ searching ? '搜索中…' : '搜索' }}
             </button>
           </div>
@@ -908,7 +928,7 @@ onBeforeUnmount(() => {
               :key="`${r.path}-${r.line ?? 0}-${i}`"
               class="search-row"
             >
-              <button v-tooltip="'添加到相关文件'" class="search-add" @click="addSearchResult(r.path)">
+              <button v-tooltip="'添加到相关文件'" aria-label="添加到相关文件" class="search-add" @click="addSearchResult(r.path)">
                 +
               </button>
               <span class="search-path">{{ r.path }}</span>
@@ -959,15 +979,6 @@ onBeforeUnmount(() => {
 .pane-main.is-success {
   box-shadow: 0 0 0 3px rgb(16 185 129 / 35%);
 }
-.pane-side {
-  /* tighten-spacing */
-  width: 232px;
-  flex-shrink: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
 /* Card */
 .card {
   background: var(--surface);
@@ -975,119 +986,6 @@ onBeforeUnmount(() => {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   overflow: hidden;
-}
-
-/* ========== Smart Editor ========== */
-.smart-editor {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-.editor-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  /* tighten-spacing */
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
-  flex-shrink: 0;
-}
-.editor-head h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-.head-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-/* Tags Area */
-.tags-area {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  /* tighten-spacing */
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
-  min-height: 42px;
-  max-height: 140px;
-  overflow-y: auto;
-  align-items: flex-start;
-  align-content: flex-start;
-}
-.file-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px 3px 6px;
-  border-radius: 6px;
-  background: var(--primary-bg);
-  color: var(--primary);
-  font-size: 11px;
-  font-family: var(--mono);
-  max-width: 280px;
-  animation: tag-in 0.25s ease-out;
-}
-.file-tag.err {
-  background: var(--danger-bg);
-  color: var(--danger);
-}
-.file-tag.loading {
-  opacity: 0.7;
-}
-.tag-icon {
-  font-size: 11px;
-  flex-shrink: 0;
-}
-.tag-name {
-  font-weight: 600;
-  white-space: nowrap;
-}
-.tag-dir {
-  color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 120px;
-}
-.tag-remove {
-  width: 16px;
-  height: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  opacity: 0.6;
-  transition: 0.12s;
-  flex-shrink: 0;
-}
-.tags-area::-webkit-scrollbar {
-  width: 6px;
-}
-.tags-area::-webkit-scrollbar-thumb {
-  background: var(--border-2);
-  border-radius: 3px;
-}
-.tags-area::-webkit-scrollbar-thumb:hover {
-  background: var(--text-3);
-}
-.tag-remove:hover {
-  opacity: 1;
-  background: var(--primary-bg);
-}
-.file-tag.err .tag-remove:hover {
-  background: var(--danger-bg);
 }
 
 @keyframes tag-in {
@@ -1100,502 +998,11 @@ onBeforeUnmount(() => {
     transform: scale(1) translateY(0);
   }
 }
-.tag-enter-active {
-  animation: tag-in 0.25s ease-out;
-}
-.tag-leave-active {
-  animation: tag-in 0.15s ease-in reverse;
-}
-
-/* ContentEditable */
-.editor-content {
-  flex: 1;
-  min-height: 80px;
-  /* tighten-spacing */
-  padding: 10px 12px;
-  font:
-    13px/1.7 -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    'PingFang SC',
-    sans-serif;
-  color: var(--text);
-  outline: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  cursor: text;
-
-  overflow-y: auto;
-}
-.editor-content:empty::before {
-  content: attr(data-placeholder);
-  color: var(--text-3);
-  pointer-events: none;
-}
-.editor-content:focus {
-  background: var(--surface);
-}
-
-/* ============ @ 提及弹窗 ============ */
-.at-popover {
-  position: fixed;
-  z-index: 1000;
-  min-width: 280px;
-  max-width: 480px;
-  background: var(--surface);
-  border: 1px solid var(--border, #e5e9f0);
-  border-radius: 8px;
-  box-shadow: 0 8px 28px rgb(15 30 60 / 16%);
-  overflow: hidden;
-  font-size: 12px;
-}
-.at-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border, #e5e9f0);
-  color: var(--text-3, #8592a6);
-}
-.at-sigil {
-  color: var(--primary, #2563eb);
-  font-weight: 700;
-}
-.at-q {
-  color: var(--text, #1f2d3d);
-  font-family: var(--mono, monospace);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.at-spinner {
-  margin-left: auto;
-  width: 10px;
-  height: 10px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: at-spin 0.7s linear infinite;
-}
 @keyframes at-spin {
   to {
     transform: rotate(360deg);
   }
 }
-.at-list {
-  max-height: 260px;
-  overflow-y: auto;
-  padding: 4px 0;
-}
-.at-item {
-  padding: 5px 12px;
-  cursor: pointer;
-  font-family: var(--mono, monospace);
-  color: var(--text, #1f2d3d);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.at-item.active {
-  background: var(--primary-bg);
-  color: var(--primary);
-}
-.at-item:hover {
-  background: var(--surface-2);
-}
-.at-empty {
-  padding: 16px 12px;
-  text-align: center;
-  color: var(--text-3, #8592a6);
-  font-style: italic;
-}
-.at-footer {
-  padding: 5px 12px;
-  border-top: 1px solid var(--border, #e5e9f0);
-  background: var(--surface-2);
-  color: var(--text-3, #8592a6);
-  font-size: 10px;
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-.at-footer kbd {
-  display: inline-block;
-  padding: 1px 5px;
-  background: var(--surface);
-  border: 1px solid var(--border-2, #d0d7de);
-  border-bottom-width: 2px;
-  border-radius: 3px;
-  font: 10px/1 var(--mono, monospace);
-  color: var(--text-2, #56667c);
-}
-
-/* Footer */
-.editor-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  /* tighten-spacing */
-  padding: 6px 12px;
-  border-top: 1px solid var(--border);
-  background: var(--surface-2);
-  flex-shrink: 0;
-}
-.search-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: 12px;
-  cursor: pointer;
-  transition: 0.15s;
-}
-.search-trigger:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-.search-trigger.active {
-  background: var(--primary-bg);
-  color: var(--primary);
-  border-color: var(--primary);
-}
-.plan-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: 12px;
-  cursor: pointer;
-  user-select: none;
-  transition: 0.15s;
-}
-.plan-toggle:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-.plan-toggle.active {
-  background: var(--primary-bg);
-  color: var(--primary);
-  border-color: var(--primary);
-}
-.plan-toggle input {
-  margin: 0;
-  accent-color: var(--primary);
-}
-.file-count {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--text-3);
-}
-
-/* ========== Search Panel ========== */
-.search-panel {
-  display: flex;
-  flex-direction: column;
-}
-.search-bar {
-  display: flex;
-  gap: 8px;
-  /* tighten-spacing */
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-}
-.search-input,
-.search-glob {
-  min-width: 0;
-  padding: 6px 10px;
-  font: 12px/1.5 var(--mono);
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-sm);
-  outline: 0;
-}
-
-.search-mode {
-  flex: 0 0 96px;
-  padding: 6px 8px;
-  font: 12px/1.5 var(--mono);
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-sm);
-  outline: 0;
-  cursor: pointer;
-}
-.search-lang {
-  flex: 0 0 140px;
-  padding: 6px 10px;
-  font: 12px/1.5 var(--mono);
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-sm);
-  outline: 0;
-}
-.search-lang:focus,
-.search-mode:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px var(--primary-bg);
-}
-.search-input {
-  flex: 1;
-}
-.search-glob {
-  flex: 0 0 180px;
-}
-.search-input:focus,
-.search-glob:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px var(--primary-bg);
-}
-.search-error {
-  padding: 10px 16px;
-  color: var(--danger);
-  font-size: 12px;
-}
-.search-results {
-  max-height: 260px;
-  overflow-y: auto;
-  padding: 4px 0;
-}
-.search-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 12px;
-  font: 12px/1.5 var(--mono);
-  transition: background 0.1s;
-}
-.search-row:hover {
-  background: var(--surface-2);
-}
-.search-add {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 4px;
-  background: var(--primary-bg);
-  color: var(--primary);
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.search-add:hover {
-  background: var(--primary);
-  color: #fff;
-}
-.search-path {
-  color: var(--text-2);
-}
-.search-line {
-  color: var(--primary);
-  font-weight: 600;
-}
-.search-text {
-  flex: 1;
-  min-width: 0;
-  color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.search-empty {
-  padding: 20px 16px;
-  text-align: center;
-  color: var(--text-3);
-  font-size: 12px;
-  font-style: italic;
-}
-
-/* Slide transition */
-/* ========== Skills ========== */
-.skills-panel {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
-}
-.skills-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-.skills-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-2);
-}
-.skills-close {
-  width: 20px;
-  height: 20px;
-  border: 0;
-  background: transparent;
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-}
-.skills-close:hover {
-  color: var(--danger);
-}
-.skills-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-.skill-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border: 1px solid var(--border-2);
-  border-radius: 6px;
-  background: var(--surface);
-  font-size: 12px;
-  cursor: pointer;
-  user-select: none;
-}
-.skill-item:hover {
-  background: var(--surface-2);
-}
-.skill-item input {
-  margin: 0;
-}
-.skill-name {
-  font-family: var(--mono);
-  color: var(--text);
-}
-.skill-source-tag {
-  padding: 0 5px;
-  margin-left: 2px;
-  background: var(--primary-bg);
-  color: var(--primary);
-  border-radius: 3px;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-}
-.skill-delete {
-  width: 16px;
-  height: 16px;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  opacity: 0;
-  transition: 0.12s;
-}
-.skill-item:hover .skill-delete {
-  opacity: 0.6;
-}
-.skill-delete:hover {
-  opacity: 1 !important;
-  color: var(--danger);
-  background: var(--danger-bg);
-}
-.skills-empty {
-  padding: 8px 0;
-  font-size: 11px;
-  color: var(--text-3);
-  font-style: italic;
-}
-.skills-empty code {
-  padding: 1px 4px;
-  background: var(--surface-2);
-  border-radius: 3px;
-  font-family: var(--mono);
-  font-style: normal;
-}
-.skill-new {
-  margin-top: 4px;
-  font-size: 12px;
-}
-.skill-new summary {
-  cursor: pointer;
-  color: var(--primary);
-  user-select: none;
-}
-.skill-input,
-.skill-textarea {
-  display: block;
-  width: 100%;
-  margin-top: 6px;
-  padding: 6px 8px;
-  font-family: var(--mono);
-  font-size: 12px;
-  border: 1px solid var(--border-2);
-  border-radius: 6px;
-  background: var(--surface);
-  outline: 0;
-  box-sizing: border-box;
-}
-.skill-input:focus,
-.skill-textarea:focus {
-  border-color: var(--primary);
-}
-.skill-textarea {
-  resize: vertical;
-}
-.skill-save {
-  margin-top: 6px;
-  padding: 4px 12px;
-  border: 0;
-  border-radius: 5px;
-  background: var(--primary);
-  color: #fff;
-  font-size: 12px;
-  cursor: pointer;
-}
-.skill-save:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.skill-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
-  margin-left: 4px;
-  background: var(--primary);
-  color: #fff;
-  border-radius: 8px;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.slide-enter-active {
-  transition: all 0.2s ease-out;
-}
-.slide-leave-active {
-  transition: all 0.15s ease-in;
-}
-.slide-enter-from,
-.slide-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
-}
-
 /* ========== Overlays ========== */
 .drop-overlay,
 .success-overlay {
@@ -1610,11 +1017,6 @@ onBeforeUnmount(() => {
 }
 .drop-overlay {
   background: rgb(37 99 235 / 8%);
-}
-.success-overlay {
-  background: rgb(16 185 129 / 10%);
-  z-index: 11;
-  animation: fade-in 0.15s ease-out;
 }
 .drop-card,
 .success-card {
@@ -1632,12 +1034,6 @@ onBeforeUnmount(() => {
   border: 2px dashed var(--primary);
   background: var(--surface);
 }
-.success-card {
-  border: 2px solid var(--success);
-  background: var(--surface);
-  box-shadow: 0 4px 20px rgb(16 185 129 / 25%);
-  animation: pop-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
 .drop-icon {
   font-size: 28px;
 }
@@ -1645,23 +1041,6 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 600;
   color: var(--primary);
-}
-.success-icon {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--success-bg);
-  color: var(--success);
-  font-size: 20px;
-  font-weight: 700;
-}
-.success-text {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--success);
 }
 @keyframes pop-in {
   from {
@@ -1682,341 +1061,17 @@ onBeforeUnmount(() => {
   }
 }
 
-/* Buttons */
-.btn {
-  padding: 7px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  border: 1px solid var(--border-2);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
-  transition: all 0.18s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  box-shadow: 0 1px 2px rgb(15 30 60 / 4%);
-}
-.btn:hover:not(:disabled) {
-  background: var(--surface-2);
-  border-color: var(--primary);
-  color: var(--primary);
-  transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgb(37 99 235 / 12%);
-}
-.btn:active:not(:disabled) {
-  transform: translateY(0);
-  box-shadow: 0 1px 2px rgb(15 30 60 / 4%);
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.btn-primary {
-  background: var(--primary);
-  color: #fff;
-  border-color: transparent;
-  box-shadow: 0 2px 6px rgb(37 99 235 / 28%);
-}
-.btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover);
-  color: #fff;
-  box-shadow: 0 6px 16px rgb(37 99 235 / 32%);
-  transform: translateY(-1px);
-}
-.btn-primary:active:not(:disabled) {
-  transform: translateY(0);
-  box-shadow: 0 2px 6px rgb(37 99 235 / 28%);
-}
-.btn-mini {
-  padding: 4px 12px;
-  font-size: 12px;
-}
-.btn-ico {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-.btn-ghost-danger:hover:not(:disabled) {
-  border-color: var(--danger);
-  color: var(--danger);
-  background: rgb(239 68 68 / 6%);
-}
-.btn-cta {
-  padding: 5px 12px;
-  font-size: 12px;
-}
-.btn-cta .btn-ico {
-  width: 13px;
-  height: 13px;
-}
-.btn-cta.loading {
-  cursor: progress;
-}
-.btn-ico.spin {
-  animation: at-spin 0.9s linear infinite;
-}
-
-.strip-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-2);
-  cursor: pointer;
-  user-select: none;
-}
-.strip-toggle input {
-  margin: 0;
-}
-
 @media (max-width: 1100px) {
   .pane {
     flex-direction: column;
   }
-  .pane-side {
-    width: 100%;
-    max-height: 46vh;
-    position: static;
-  }
 }
 @media (max-width: 720px) {
-  .editor-head {
-    padding: 8px 10px;
-  }
-  .editor-footer {
-    padding: 6px 10px;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .search-bar {
-    flex-wrap: wrap;
-  }
-  .search-glob {
-    flex: 0 0 100%;
-  }
-  .tags-area {
-    padding: 8px 10px;
-  }
-  .file-tag {
-    max-width: 100%;
-  }
 }
 
 /* ═══════════════════════════════════════════════════════════
    [button-theme] 按钮配色重做：暖橙强调 + 灰阶次按钮
    参考 Claude Code / Codex 克制配色
    ═══════════════════════════════════════════════════════════ */
-
-/* ——— 次按钮：透明底 + 细边框，hover 时淡淡提亮 ——— */
-.ghost-btn {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  padding: 4px 10px !important;
-  font-size: var(--font-12) !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.ghost-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 8%) !important;
-}
-.ghost-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
-
-/* ——— 终端内按钮 ——— */
-.term-btn {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.term-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
-}
-.term-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
-.term-btn.copy, .term-btn.ask-panel { color: var(--text-2) !important; border-color: rgb(255 255 255 / 8%) !important; }
-.term-btn.copy:hover:not(:disabled), .term-btn.ask-panel:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; border-color: rgb(255 255 255 / 14%) !important;
-}
-
-/* ——— 芯片 / 下拉 / tab ——— */
-.tpl-chip {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-}
-.tpl-chip:hover {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
-}
-.draft-select {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-}
-.draft-select:hover { border-color: rgb(255 255 255 / 14%) !important; }
-
-/* ——— primary 系列（运行/主操作）：暖橙实底 ——— */
-.primary-btn.run {
-  background: var(--primary) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-  border: 0 !important;
-}
-.primary-btn.run:hover:not(:disabled) { background: var(--primary-hover) !important; box-shadow: none !important; }
-
-/* 运行按钮（takeover 态）：暖橙描边，非实心，更克制 */
-.primary-btn.takeover {
-  background: transparent !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
-}
-.primary-btn.takeover:hover:not(:disabled) {
-  background: rgb(217 119 87 / 12%) !important;
-  color: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-}
-
-/* 停止 / 暂停：柔和红描边 */
-.primary-btn.stop {
-  background: transparent !important;
-  color: var(--danger) !important;
-  border: 1px solid var(--danger) !important;
-  box-shadow: none !important;
-}
-.primary-btn.stop:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  color: #fff !important;
-  border-color: var(--danger) !important;
-}
-
-/* ——— loop-btn 系列 ——— */
-.loop-btn {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  box-shadow: none !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.loop-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
-}
-.loop-btn:active:not(:disabled) { box-shadow: none !important; }
-.loop-btn:focus-visible { outline: 0 !important; box-shadow: 0 0 0 2px rgb(217 119 87 / 30%) !important; }
-.loop-btn:disabled { opacity: 0.4 !important; background: transparent !important; color: var(--text-3) !important; }
-
-.loop-btn.primary {
-  background: var(--primary) !important;
-  border-color: var(--primary) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-.loop-btn.primary:hover:not(:disabled) {
-  background: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-.loop-btn.kill, .loop-btn.rollback {
-  background: transparent !important;
-  border-color: rgb(224 108 117 / 55%) !important;
-  color: var(--danger) !important;
-  box-shadow: none !important;
-}
-.loop-btn.kill:hover:not(:disabled), .loop-btn.rollback:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  border-color: var(--danger) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-
-/* ——— 决策按钮 ——— */
-.decision-btn {
-  background: rgb(217 119 87 / 12%) !important;
-  color: var(--primary) !important;
-  border-color: var(--primary) !important;
-  font-weight: 600 !important;
-}
-.decision-btn:hover:not(:disabled) {
-  background: var(--primary) !important;
-  color: #fff !important;
-  border-color: var(--primary) !important;
-}
-
-/* ——— 焦点环统一暖橙 ——— */
-.primary-btn:focus-visible, .term-btn:focus-visible, .ghost-btn:focus-visible, .tpl-chip:focus-visible, .draft-select:focus-visible {
-  outline: 0 !important;
-  box-shadow: 0 0 0 2px rgb(217 119 87 / 35%) !important;
-}
-
-/* ——— 图标按钮（App 头部）——— */
-.theme-toggle, .trace-toggle, .settings-toggle, .ask-toggle, .timeline-toggle {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--text-2) !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.theme-toggle:hover, .trace-toggle:hover, .settings-toggle:hover, .ask-toggle:hover, .timeline-toggle:hover {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 10%) !important;
-}
-
-/* ——— 主色大按钮（FileList.save-btn / GeneratePanel.btn-primary）——— */
-.save-btn, .btn-primary {
-  background: var(--primary) !important;
-  color: #fff !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  border-radius: 6px !important;
-}
-.save-btn:hover:not(:disabled), .btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover) !important;
-  box-shadow: none !important;
-}
-
-/* ——— FileList 撤回按钮 ——— */
-.undo-btn {
-  background: transparent !important;
-  border: 0 !important;
-  color: var(--text-3) !important;
-}
-.undo-btn:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  color: var(--danger) !important;
-}
-
-/* ——— FileTree 刷新 ——— */
-.refresh { background: transparent !important; border: 0 !important; color: var(--text-3) !important; }
-.refresh:hover:not(:disabled) { background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; }
-
-
-/* [button-theme-v2] 主按钮去实底 */
-.save-btn, .btn-primary {
-  background: transparent !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
-}
-.save-btn:hover:not(:disabled), .btn-primary:hover:not(:disabled) {
-  background: var(--primary-bg) !important;
-  color: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-  box-shadow: none !important;
-}
-
 </style>
 <!-- tooltip-audit -->

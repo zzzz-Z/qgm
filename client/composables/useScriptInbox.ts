@@ -31,7 +31,7 @@ function normalizeForHash(code: string): string {
   return String(code ?? '')
     .split('\n')
     .map(l => l.trim())
-    .filter(l => {
+    .filter((l) => {
       if (!l) return false
       // shebang 行
       if (l.startsWith('#!')) return false

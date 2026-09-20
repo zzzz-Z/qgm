@@ -35,7 +35,7 @@ function readLogs() {
 function fmtDate(ts) {
   const d = new Date(ts)
   const p = n => String(n).padStart(2, '0')
-  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
 function buildRecent(logs) {
@@ -45,11 +45,11 @@ function buildRecent(logs) {
     .sort((a, b) => (b.ts || 0) - (a.ts || 0))
     .slice(0, MAX_ROWS)
   if (!recent.length) return ['- （最近 30 天无记录）']
-  return recent.map(r => {
+  return recent.map((r) => {
     const date = fmtDate(r.ts || 0)
-    const desc = String(r.desc || '').slice(0, 60) || ('exit ' + r.exit)
+    const desc = String(r.desc || '').slice(0, 60) || (`exit ${r.exit}`)
     const files = Array.isArray(r.changes) ? r.changes.length : (r.changeCount || 0)
-    return '- ' + date + ' · `' + (r.runId || '') + '` · ' + files + ' 文件 · ' + desc
+    return `- ${date} · \`${r.runId || ''}\` · ${files} 文件 · ${desc}`
   })
 }
 
@@ -61,7 +61,7 @@ function buildDecisions(logs) {
     if (!why || why.length < 6) continue
     if (seen.has(why)) continue
     seen.add(why)
-    out.push('- ' + why.slice(0, 120))
+    out.push(`- ${why.slice(0, 120)}`)
     if (out.length >= 15) break
   }
   if (!out.length) return ['- （暂无记录）']
@@ -85,7 +85,7 @@ console.log('  日志条数:', logs.length)
 const md = [
   '# PROJECT-NOTES',
   '',
-  '> 自动生成于 ' + new Date().toISOString(),
+  `> 自动生成于 ${new Date().toISOString()}`,
   '',
   '## Recent Changes（30 天滚动）',
   '',
@@ -102,5 +102,5 @@ const md = [
 ].join('\n')
 
 fs.writeFileSync(OUT, md)
-ok('已生成 ' + path.relative(ROOT, OUT))
-console.log('  行数: ' + md.split('\n').length)
+ok(`已生成 ${path.relative(ROOT, OUT)}`)
+console.log(`  行数: ${md.split('\n').length}`)

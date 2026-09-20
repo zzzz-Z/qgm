@@ -1,5 +1,22 @@
 import { computed, ref } from 'vue'
-
+// [headless] 传输层路由：__ai_transport='headless' 时走 useAiTransport；默认 tampermonkey 保字节级一致
+let _transportMod: Promise<typeof import('./useAiTransport.js')> | null = null
+function _loadTransport() {
+  if (!_transportMod) _transportMod = import('./useAiTransport.js')
+  return _transportMod
+}
+function _isHeadless() {
+  try { return typeof localStorage !== 'undefined' && localStorage.getItem('__ai_transport') === 'headless' } catch { return false }
+}
+function _headlessSend(fn: string, ...args: unknown[]) {
+  void _loadTransport().then((mod) => {
+    try {
+      const t = mod.useAiTransport()
+      const f = (t.transport as unknown as Record<string, (...a: unknown[]) => unknown>)[fn]
+      if (typeof f === 'function') void f.apply(t.transport, args)
+    } catch {}
+  })
+}
 export interface ModelOption {
   id: string
   label: string
@@ -156,14 +173,14 @@ function targetOrigin(): string {
  * @param atUrl 可选；不传则用当前 url.value
  */
 function windowName(sid: string): string {
-  return sid === 'default' ? 'ai-runner-deepseek' : 'ai-runner-deepseek-' + sid
+  return sid === 'default' ? 'ai-runner-deepseek' : `ai-runner-deepseek-${sid}`
 }
 // [multi-loop-step5-url] 把 sid 拼进 hash，供油猴读取（AI 站点忽略未知 hash）
 function withSidHash(u: string, sid: string): string {
   try {
     const parsed = new URL(u)
     const parts = parsed.hash.replace(/^#/, '').split('&').filter(p => p && !p.startsWith('sid='))
-    parts.push('sid=' + encodeURIComponent(sid))
+    parts.push(`sid=${encodeURIComponent(sid)}`)
     parsed.hash = parts.join('&')
     return parsed.toString()
   } catch {
@@ -206,6 +223,7 @@ export function sendFillTo(sid: string, payload: FillPayload): boolean {
   }
 }
 export function sendFill(payload: FillPayload): boolean {
+  if (_isHeadless()) { _headlessSend('sendFill', activeWinSid.value, payload); return true }
   return sendFillTo(activeWinSid.value, payload)
 }
 
@@ -223,6 +241,7 @@ export function sendStopTo(sid: string): boolean {
   }
 }
 export function sendStop(): boolean {
+  if (_isHeadless()) { _headlessSend('sendStop', activeWinSid.value); return true }
   return sendStopTo(activeWinSid.value)
 }
 
@@ -238,6 +257,7 @@ export function sendRotateTo(sid: string, payload: RotatePayload): boolean {
   } catch { return false }
 }
 export function sendRotate(payload: RotatePayload): boolean {
+  if (_isHeadless()) { _headlessSend('sendRotate', activeWinSid.value, payload); return true }
   return sendRotateTo(activeWinSid.value, payload)
 }
 export interface NewSessionPayload { summary: string }
@@ -252,6 +272,7 @@ export function sendNewSessionTo(sid: string, payload: NewSessionPayload): boole
   } catch { return false }
 }
 export function sendNewSession(payload: NewSessionPayload): boolean {
+  if (_isHeadless()) { _headlessSend('sendNewSession', activeWinSid.value, payload); return true }
   return sendNewSessionTo(activeWinSid.value, payload)
 }
 
@@ -288,7 +309,7 @@ export async function copyAndFill(prompt: string): Promise<FillResult> {
   // 3. 都失败 → 尝试开新窗口（可能被 popup blocker 拦截）
   const w = openDeepseek()
   if (w) {
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await new Promise(resolve => setTimeout(resolve, 1500))
     return sendFill({ prompt }) ? 'opened' : 'failed'
   }
 

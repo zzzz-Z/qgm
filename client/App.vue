@@ -2,25 +2,27 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ScriptPanel from './components/ScriptPanel.vue'
 import GeneratePanel from './components/GeneratePanel.vue'
-import TracePanel from './components/TracePanel.vue'
-import { DEFAULT_URL, MODELS, getActiveWin, getWindowBySid, listWindows, openDeepseek, removeWindowBySid, setActiveWinSid, useDeepseekUrl } from './composables/useDeepseekUrl'
+import { DEFAULT_URL, getWindowBySid, listWindows, MODELS, openDeepseek, removeWindowBySid, setActiveWinSid, useDeepseekUrl } from './composables/useDeepseekUrl'
 import { useScriptInbox } from './composables/useScriptInbox'
 import {
-    currentLoopContext,
-    isLoopActive,
-    isInstActive,
-    getLoopBySessionId,
-    onNonScriptReply,
-    onScriptArrival,
-    setActiveLoopSessionId,
-    createLoopInstanceFor,
-    removeLoopInstance,
-    setActiveSessionIdGetter,
-    setTokenEstimate,
-    onSummary,
-    onNewSessionCreated,
   autoRotateSession,
+  createLoopInstanceFor,
+  currentLoopContext,
+  getLoopBySessionId,
+  isInstActive,
+  isLoopActive,
+  killCurrent,
+  onNewSessionCreated,
+  onNonScriptReply,
+  onScriptArrival,
+  onSummary,
+  removeLoopInstance,
+  setActiveLoopSessionId,
+  setActiveSessionIdGetter,
+  setTokenEstimate,
+  startHandoff,
 } from './composables/useAutoLoop'
+import { useAutoTakeover } from './composables/useAutoTakeover'
 import { useSessionManager } from './composables/useSessionManager'
 import { useToast } from './composables/useToast'
 import { useTraceLog } from './composables/useTraceLog'
@@ -28,9 +30,12 @@ import { useCodeCleaner } from './composables/useCodeCleaner'
 import { useRunner } from './composables/useRunner'
 import { useAiWaiting } from './composables/useAiWaiting'
 import { emit as emitBus, takePendingAskKey } from './composables/useEventStream'
+import type { EventKind } from './composables/useEventStream'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
+import KeyboardHelp from './components/KeyboardHelp.vue'
 
+const autoTakeover = useAutoTakeover()
 const SESSION_HISTORY_KEY = '__ai_session_history'
 /** mock 通道（v6 §13.2 ?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
 const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
@@ -42,6 +47,17 @@ function saveHistory(h: SessionEntry[]) {
   try { localStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify(h)) } catch {}
 }
 const sessionHistory = ref<SessionEntry[]>(loadHistory())
+// [ask-count] 当前会话收到的 AI 回复次数（每 reply +1）
+// [ask-count-persist] 提问次数持久化到 localStorage，刷新不重置
+const ASK_COUNT_KEY = '__ai_ask_count'
+function loadAskCount(): number {
+  try { return Math.max(0, Number(localStorage.getItem(ASK_COUNT_KEY)) || 0) } catch { return 0 }
+}
+const askCount = ref(loadAskCount())
+function setAskCount(v: number): void {
+  askCount.value = Math.max(0, Math.floor(v) || 0)
+  try { localStorage.setItem(ASK_COUNT_KEY, String(askCount.value)) } catch {}
+}
 const ACTIVE_SESSION_KEY = '__ai_active_session_id'
 function loadActiveSessionId(): string {
   try { return localStorage.getItem(ACTIVE_SESSION_KEY) || '' } catch { return '' }
@@ -52,7 +68,7 @@ watch(activeSessionId, (v) => {
     if (v) localStorage.setItem(ACTIVE_SESSION_KEY, v)
     else localStorage.removeItem(ACTIVE_SESSION_KEY)
   } catch { }
-// [multi-loop-step4-app] 同步到 loop 实例表与窗口表（多循环并发的前提）
+  // [multi-loop-step4-app] 同步到 loop 实例表与窗口表（多循环并发的前提）
   const sid = v || 'default'
   setActiveLoopSessionId(sid)
   createLoopInstanceFor(sid)
@@ -77,7 +93,7 @@ function removeSessionFromHistory(id: string) {
   sessionHistory.value = sessionHistory.value.filter(s => s.id !== id)
   saveHistory(sessionHistory.value)
   if (activeSessionId.value === id) activeSessionId.value = ''
-// [multi-loop-step7-app] 同步清理循环实例与窗口表
+  // [multi-loop-step7-app] 同步清理循环实例与窗口表
   removeLoopInstance(id)
   removeWindowBySid(id)
 }
@@ -227,7 +243,6 @@ function selectSession(s: SessionEntry) {
 }
 
 const askOpen = ref(false)
-const traceOpen = ref(false)
 const isEmbedded = typeof window !== 'undefined' && window.parent !== window
 function collapsePanel() {
   if (!isEmbedded) return
@@ -290,6 +305,14 @@ function onSessionIdMessage(e: MessageEvent) {
   // 安全约束（v6 §3.4）：origin 必须落在已知 AI 站点；source 优先比对 getActiveWin()
   // ============================================================================
   if (d.type === 'ai-runner:reply') {
+    // [ask-count] 收到一次 AI 回复 → 提问计数 +1
+    setAskCount(askCount.value + 1)
+    // [auto-handoff-at-10] 累计 10 次提问 → 自动轮转会话（总结 + 开新会话 + 续跑）
+    if (askCount.value >= 10 && isLoopActive.value) {
+      setAskCount(0)
+      void startHandoff()
+      return
+    }
     if (!isFromActiveAiSite(e)) return
     // 收到 AI 回复，清除「发送给 AI」按钮的 loading 状态
     stopAiWaiting()
@@ -311,14 +334,14 @@ function onSessionIdMessage(e: MessageEvent) {
         const planM = code.match(/^\s*(?:\/\/|#)\s*@plan\s*:\s*(.+)$/m)
         const plan = planM ? planM[1].trim().slice(0, 200) : ''
         // 若用户刚发过提问，复用那条等待卡的 key —— 原地替换为执行卡
-        const runKey = takePendingAskKey() || ('run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6))
+        const runKey = takePendingAskKey() || (`run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`)
         try {
           emitBus('run:start', `等待执行：${item.desc || '脚本'}`, { payload: { desc: item.desc, why: item.why, plan, lang, lineCount, hash: item.hash, phase: 'pending', runKey, ...currentLoopContext() }, updateKey: runKey })
         } catch (e) { console.error('[run:start pending] failed:', e) }
         // 决策链路：脚本到达事件入 TraceLog（v6 §3.2），循环中盖 loopId/loopRound
         addTrace({
           kind: 'script',
-          summary: `📥 脚本到达 · ${lang} · ${lineCount} 行${item.desc ? ' · ' + item.desc : ''}`,
+          summary: `📥 脚本到达 · ${lang} · ${lineCount} 行${item.desc ? ` · ${item.desc}` : ''}`,
           payload: {
             script: code.slice(0, 4000),
             desc: item.desc,
@@ -352,7 +375,7 @@ function onSessionIdMessage(e: MessageEvent) {
     }
     const text = d.text !== undefined ? String(d.text) : ''
     if (kind === 'plain' || kind === 'multi' || (kind === 'done' && text.trim() && text.trim() !== 'DONE')) {
-      emitBus('ai:' + kind, `AI 回复 · ${kind}`, { payload: { kind, text, count: Number(d.count) || 0 } })
+      emitBus((`ai:${kind}`) as EventKind, `AI 回复 · ${kind}`, { payload: { kind, text, count: Number(d.count) || 0 } })
     } else if (kind === 'done') {
       emitBus('ai:done', 'AI 回复 DONE', { payload: { kind: 'done', text: 'DONE' } })
     }
@@ -385,7 +408,7 @@ function onSessionIdMessage(e: MessageEvent) {
         void onScriptArrival(item, sid)
       } else {
         // v1.2 兜底通道：延迟执行
-        const runKey = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
+        const runKey = `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
         const delayMs = 3000 + Math.random() * 4000
         setTimeout(() => { void runScript({ script: code, runKey, autoFeedback: true }) }, delayMs)
       }
@@ -405,8 +428,6 @@ function onSessionIdMessage(e: MessageEvent) {
     }
     const tokens = Number(d.tokens) || 0
     if (tokens > 0) {
-      const k = Math.max(0, tokens / 1000).toFixed(1)
-      toast(`会话 token 约 ${k}k`, 'info', 3000, { key: 'ai-runner:token-estimate' })
       // 喂给循环状态机做 30k 增量熔断（v6 §6.9 第 4 条）
       setTokenEstimate(tokens)
     }
@@ -460,7 +481,7 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
   // mock 模式：跳过来源校验，让合成 MessageEvent 直走完整链路
   if (MOCK_MODE) return true
   const AI_ORIGINS = MODELS
-    .map(m => { try { return new URL(m.url).origin } catch { return '' } })
+    .map((m) => { try { return new URL(m.url).origin } catch { return '' } })
     .filter(Boolean)
   if (!AI_ORIGINS.includes(e.origin)) {
     console.warn('[ai-runner] 来源 origin 非 AI 站点，已忽略', e.origin)
@@ -468,7 +489,7 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
   }
   // e.source 可能为 null（窗口已关 / 跨域限制）；只在非 null 时比对
   if (e.source !== null) {
-// [multi-loop-step4-app] 接受任一已注册 AI 窗口（多循环并发）
+    // [multi-loop-step4-app] 接受任一已注册 AI 窗口（多循环并发）
     const wins = listWindows()
     if (wins.length === 0) return true
     let matched = false
@@ -495,11 +516,25 @@ function onOpenAiWin() {
 function onEscClose(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
   if (askOpen.value) askOpen.value = false
-  if (traceOpen.value) traceOpen.value = false
 }
+
+const keyboardHelpOpen = ref(false)
+function onShiftQuestion(e: KeyboardEvent) {
+  if (e.key === '?' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const t = e.target as HTMLElement | null
+    const tag = t?.tagName?.toLowerCase()
+    if (tag === 'input' || tag === 'textarea' || (t as { isContentEditable?: boolean })?.isContentEditable) return
+    e.preventDefault()
+    keyboardHelpOpen.value = !keyboardHelpOpen.value
+  } else if (e.key === 'Escape' && keyboardHelpOpen.value) {
+    keyboardHelpOpen.value = false
+  }
+}
+
 onMounted(() => {
   window.addEventListener('message', onSessionIdMessage)
   window.addEventListener('keydown', onEscClose)
+  window.addEventListener('keydown', onShiftQuestion)
   // 注入 activeSessionId 读取器：循环启动时取当前活动会话 id 绑定到 loopSessionId
   setActiveSessionIdGetter(() => activeSessionId.value)
   if (!activeSessionId.value) return
@@ -511,6 +546,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('message', onSessionIdMessage)
   window.removeEventListener('keydown', onEscClose)
+  window.removeEventListener('keydown', onShiftQuestion)
 })
 const { sessionId, resetSession, generateHandoffSummary } = useSessionManager()
 const { toast } = useToast()
@@ -521,12 +557,22 @@ const runner = useRunner()
 const { addTrace } = useTraceLog()
 const { stopWaiting: stopAiWaiting } = useAiWaiting()
 // 注意：getActiveWin 是 useDeepseekUrl 模块级导出，已在 import 中带入；这里无需再解构
+
+// 传输层切换：__ai_transport = 'tampermonkey' | 'headless'
+const transportKind = ref<'tampermonkey' | 'headless'>(
+  (() => { try { return localStorage.getItem('__ai_transport') === 'headless' ? 'headless' : 'tampermonkey' } catch { return 'tampermonkey' } })()
+)
+function onTransportChange(e: Event) {
+  const v = (e.target as HTMLSelectElement).value
+  try { localStorage.setItem('__ai_transport', v === 'headless' ? 'headless' : 'tampermonkey') } catch {}
+  window.location.reload()
+}
 </script>
 
 <template>
   <header class="hdr">
     <div class="title">
-      <span class="logo">⚡</span>
+      <span class="logo" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 2L4.5 13.5h6l-1 8.5L18.5 10.5h-6l1-8.5z" fill="url(#ai-runner-grad)" stroke="#4d8bff" stroke-width="1.2" stroke-linejoin="round" /><defs><linearGradient id="ai-runner-grad" x1="4" y1="2" x2="19" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#6b83ff" /><stop offset="100%" stop-color="#4d6bfe" /></linearGradient></defs></svg></span>
       <h1>AI Runner</h1>
       <span class="env">dev</span>
     </div>
@@ -545,19 +591,13 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
       </button>
       <button
         v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
-        class="theme-toggle"
+        class="theme-toggle" aria-label="切换主题"
         @click="theme = theme === 'dark' ? 'light' : 'dark'"
       >
         <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
         <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
       </button>
-      <button v-tooltip="traceOpen ? '关闭会话记录' : '打开会话记录'" class="trace-toggle" @click="traceOpen = !traceOpen">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7v5l3 2" />
-        </svg>
-      </button>
-      <button v-tooltip="settingsOpen ? '关闭设置' : '打开设置（去注释 / 去空行）'" class="settings-toggle" @click="settingsOpen = !settingsOpen">
+      <button v-tooltip="settingsOpen ? '关闭设置' : '打开设置（去注释 / 去空行）'" class="settings-toggle" aria-label="设置" @click="settingsOpen = !settingsOpen">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -581,7 +621,14 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
           class="ds-value-static"
           @click="openUrlEdit"
         >{{ headerUrl || '（点击输入 URL）' }}</span>
+        <span v-tooltip="'当前会话提问次数'" class="ask-count">{{ askCount }} 次</span>
       </div>
+      <label class="transport-switch" title="AI 传输链路（切换后自动刷新）">
+        <select :value="transportKind" aria-label="AI 传输链路" @change="onTransportChange">
+          <option value="tampermonkey">油猴</option>
+          <option value="headless">无头</option>
+        </select>
+      </label>
     </div>
   </header>
 
@@ -589,7 +636,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
     <div class="settings-card">
       <div class="settings-head">
         <span class="settings-title">设置</span>
-        <button v-tooltip="'关闭设置'" class="settings-close" @click="settingsOpen = false">
+        <button v-tooltip="'关闭设置'" aria-label="关闭设置" class="settings-close" @click="settingsOpen = false">
           ×
         </button>
       </div>
@@ -634,7 +681,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
     </div>
   </div>
   <div class="layout-row">
-<div class="layout-main">
+    <div class="layout-main">
       <main class="main">
         <ScriptPanel @open-ask="askOpen = true" />
       </main>
@@ -646,7 +693,9 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
         <div class="ask-modal-card">
           <div class="ask-modal-head">
             <span class="ask-modal-title">问 AI</span>
-            <button v-tooltip="'关闭（Esc）'" class="ask-modal-close" @click="askOpen = false">×</button>
+            <button v-tooltip="'关闭（Esc）'" aria-label="关闭（Esc）" class="ask-modal-close" @click="askOpen = false">
+              ×
+            </button>
           </div>
           <div class="ask-modal-body">
             <GeneratePanel v-if="askOpen" @sent="askOpen = false" />
@@ -655,26 +704,12 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
       </div>
     </Transition>
   </Teleport>
-  <Teleport to="body">
-    <Transition name="ask-modal">
-      <div v-if="traceOpen" class="ask-modal-mask" @click.self="traceOpen = false">
-        <div class="ask-modal-card">
-          <div class="ask-modal-head">
-            <span class="ask-modal-title">会话记录</span>
-            <button v-tooltip="'关闭（Esc）'" class="ask-modal-close" @click="traceOpen = false">×</button>
-          </div>
-          <div class="ask-modal-body trace-modal-body">
-            <TracePanel v-if="traceOpen" />
-          </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+  <KeyboardHelp v-if="keyboardHelpOpen" @close="keyboardHelpOpen = false" />
   <ToastHost />
   <TooltipHost />
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 /* LAYOUT-FIX: 顶部栏和 tab 固定，内容区撑满剩余空间 */
 .hdr {
   flex-shrink: 0;
@@ -703,7 +738,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
 }
 .env {
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--surface-2);
   color: var(--text-3);
   font-size: 11px;
@@ -745,168 +780,10 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   background: var(--surface-2);
 }
 
-.session-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border: 1px solid var(--border-2);
-  border-radius: 6px;
-  background: var(--surface);
-  font-size: 11px;
-  font-family: var(--mono, monospace);
-  color: var(--text-2);
-  cursor: pointer;
-  transition: 0.15s;
-}
-.session-badge:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-.session-badge.warn {
-  border-color: var(--warning, #f59e0b);
-  color: var(--warning, #f59e0b);
-}
-.session-badge.limit {
-  border-color: var(--danger, #ef4444);
-  color: var(--danger, #ef4444);
-  background: var(--danger-bg, #fef2f2);
-}
-.sess-id {
-  font-weight: 600;
-}
-.sess-tok {
-  color: var(--text-3);
-}
-.sess-flag {
-  font-weight: 700;
-}
-.session-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 2147483646;
-  background: rgb(15 30 60 / 32%);
-  backdrop-filter: blur(2px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.session-card {
-  width: 480px;
-  max-width: calc(100vw - 40px);
-  background: var(--surface);
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgb(15 30 60 / 24%);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.session-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.session-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-.session-close {
-  width: 24px;
-  height: 24px;
-  border: 0;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 18px;
-  cursor: pointer;
-}
-.session-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-}
-.session-label {
-  flex: 0 0 90px;
-  color: var(--text-3);
-}
-.session-val {
-  flex: 1;
-  font-family: var(--mono, monospace);
-  color: var(--text);
-  word-break: break-all;
-}
-.session-input {
-  flex: 1;
-  padding: 4px 8px;
-  font: 12px/1.4 var(--mono, monospace);
-  border: 1px solid var(--border-2);
-  border-radius: 4px;
-  outline: 0;
-}
-.session-input:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgb(37 99 235 / 15%);
-}
-.session-warn {
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: var(--warning-bg, #fffbeb);
-  color: var(--warning, #f59e0b);
-  font-size: 12px;
-}
-.session-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 6px;
-}
-.session-btn {
-  flex: 1;
-  padding: 8px 14px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: 0.15s;
-  border: 1px solid var(--border-2);
-  background: var(--surface);
-  color: var(--text);
-}
-.session-btn.ghost:hover {
-  background: var(--surface-2);
-}
-.session-btn.primary {
-  background: var(--primary);
-  color: #fff;
-  border-color: transparent;
-  box-shadow: 0 2px 6px rgb(37 99 235 / 28%);
-}
-.session-btn.primary:hover {
-  transform: translateY(-1px);
-}
-.session-hint {
-  font-size: 11px;
-  color: var(--text-3);
-  text-align: center;
-}
 .hdr-right {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.clean-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-2);
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-.clean-toggle input {
-  margin: 0;
 }
 
 /* ---------- DeepSeek URL 配置 ---------- */
@@ -930,12 +807,6 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
 .ds-url.editing {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgb(37 99 235 / 15%);
-}
-.ds-label {
-  color: var(--text-3);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.2px;
 }
 .ds-value {
   padding: 0;
@@ -961,22 +832,6 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   color: var(--text);
   font: 12px/1.4 var(--mono);
 }
-.ds-session {
-  width: 180px;
-  padding: 2px 6px;
-  border: 0;
-  border-left: 1px solid var(--border-2);
-  outline: 0;
-  background: transparent;
-  color: var(--text);
-  font: 12px/1.4 var(--mono);
-}
-.ds-session:focus {
-  background: var(--surface-2);
-}
-.ds-session::placeholder {
-  color: var(--text-3);
-}
 .theme-toggle {
   width: 26px;
   height: 26px;
@@ -985,7 +840,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   justify-content: center;
   padding: 0;
   border: 1px solid var(--border-2);
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   background: var(--surface);
   color: var(--text-2);
   cursor: pointer;
@@ -998,7 +853,6 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   border-color: var(--primary);
   background: var(--primary-bg);
 }
-.trace-toggle,
 .settings-toggle {
   width: 26px;
   height: 26px;
@@ -1007,13 +861,12 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   justify-content: center;
   padding: 0;
   border: 1px solid var(--border-2);
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   background: var(--surface);
   color: var(--text-2);
   cursor: pointer;
   transition: 0.15s;
 }
-.trace-toggle:hover,
 .settings-toggle:hover {
   color: var(--primary);
   border-color: var(--primary);
@@ -1024,7 +877,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   inset: 0;
   z-index: 2147483646;
   background: rgb(15 30 60 / 32%);
-  backdrop-filter: blur(2px);
+  /* P2-1 移除 backdrop-filter（GPU 性能负债）：backdrop-filter: blur(2px); */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1033,7 +886,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   width: 320px;
   max-width: calc(100vw - 40px);
   background: var(--surface);
-  border-radius: 12px;
+  border-radius: var(--radius-12);
   box-shadow: 0 20px 60px rgb(15 30 60 / 24%);
   padding: 16px 18px 18px;
   display: flex;
@@ -1073,7 +926,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   align-items: center;
   justify-content: space-between;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   cursor: pointer;
   user-select: none;
   transition: background 0.12s;
@@ -1089,7 +942,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
 .settings-select {
   padding: 3px 8px;
   border: 1px solid var(--border-2);
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   background: var(--surface);
   color: var(--text);
   font: 12px/1.4 var(--mono);
@@ -1118,461 +971,6 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   flex-direction: column;
   overflow: hidden;
 }
-.session-sidebar {
-  /* tighten-spacing */
-  width: 236px;
-  flex-shrink: 0;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.sidebar-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  /* tighten-spacing */
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
-  flex-shrink: 0;
-}
-.sidebar-title {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-}
-.sidebar-count {
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: var(--primary-bg);
-  color: var(--primary);
-  font-size: 10px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.sidebar-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.sidebar-icon-btn {
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--border-2);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text-2);
-  cursor: pointer;
-  transition: 0.12s;
-}
-.sidebar-icon-btn:hover {
-  border-color: var(--danger);
-  color: var(--danger);
-  background: var(--danger-bg);
-}
-.sidebar-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 0 8px;
-}
-.sidebar-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-.sidebar-list::-webkit-scrollbar {
-  width: 6px;
-}
-.sidebar-list::-webkit-scrollbar-thumb {
-  background: var(--border-2);
-  border-radius: 3px;
-}
-.sidebar-list::-webkit-scrollbar-thumb:hover {
-  background: var(--text-3);
-}
-.sidebar-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  /* tighten-spacing */
-  padding: 5px 8px 5px 10px;
-  margin: 1px 4px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.1s;
-  position: relative;
-}
-.sidebar-item:hover {
-  background: var(--surface-2);
-}
-.sidebar-item:hover .sidebar-item-del,
-.sidebar-item:hover .sidebar-item-open,
-.sidebar-item:hover .sidebar-item-handoff,
-.sidebar-item.is-active .sidebar-item-del,
-.sidebar-item.is-active .sidebar-item-open,
-.sidebar-item.is-active .sidebar-item-handoff {
-  opacity: 1;
-}
-.sidebar-item-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.sidebar-item-title-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-}
-.sidebar-item-title {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sidebar-item-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  color: var(--text-3);
-  margin-top: 2px;
-}
-.sidebar-item-id {
-  font-family: var(--mono, monospace);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  flex: 1;
-}
-.sidebar-item-time-row {
-  display: flex;
-  align-items: center;
-  margin-top: 2px;
-}
-.sidebar-item-time {
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-  font-size: 10px;
-  color: var(--text-3);
-  opacity: 0.85;
-}
-.sidebar-item-tokens {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: var(--primary-bg);
-  color: var(--primary);
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  font-size: 10px;
-}
-.sidebar-item-tokens.warn {
-  background: var(--warning-bg);
-  color: var(--warning);
-}
-.sidebar-item-tokens.over {
-  background: var(--danger-bg);
-  color: var(--danger);
-}
-.tok-bar {
-  display: inline-block;
-  width: 24px;
-  height: 3px;
-  border-radius: 2px;
-  background: currentColor;
-  opacity: 0.22;
-  overflow: hidden;
-  position: relative;
-}
-.tok-fill {
-  display: block;
-  height: 100%;
-  background: currentColor;
-  border-radius: 2px;
-  transition: width 0.2s ease;
-}
-.tok-num {
-  line-height: 1;
-}
-.sidebar-item.is-active {
-  background: var(--surface);
-  border-color: var(--primary);
-  box-shadow:
-    0 4px 12px rgb(79 70 229 / 14%),
-    0 0 0 1px var(--primary);
-}
-.sidebar-item.handed-off {
-  opacity: 0.55;
-}
-.handed-off-badge {
-  margin-left: 6px;
-  padding: 1px 6px;
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-3);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  letter-spacing: 0.3px;
-}
-
-.sidebar-item.is-active .sidebar-item-title {
-  color: var(--primary);
-  font-weight: 600;
-}
-.sidebar-item-open {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-3);
-  cursor: pointer;
-  opacity: 0;
-  transition: 0.12s;
-  padding: 0;
-}
-.sidebar-item-open:hover {
-  color: var(--primary);
-  background: var(--primary-bg);
-}
-.sidebar-item-handoff {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-3);
-  cursor: pointer;
-  opacity: 0;
-  transition: 0.12s;
-  padding: 0;
-}
-.sidebar-item-handoff:hover {
-  color: var(--primary);
-  background: var(--primary-bg);
-}
-.sidebar-item-del {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 14px;
-  cursor: pointer;
-  opacity: 0;
-  transition: 0.12s;
-}
-.sidebar-item-del:hover {
-  color: var(--danger);
-  background: var(--danger-bg);
-}
-.sidebar-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: var(--text-3);
-  font-size: 12px;
-  padding: 24px 12px;
-  text-align: center;
-}
-.sidebar-empty-icon {
-  font-size: 24px;
-  opacity: 0.5;
-  margin-bottom: 2px;
-}
-.sidebar-empty-title {
-  font-size: 12px;
-  color: var(--text-2);
-  font-weight: 500;
-}
-.sidebar-empty-hint {
-  font-size: 11px;
-  color: var(--text-3);
-  opacity: 0.8;
-}
-.sidebar-new-btn {
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--border-2);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: 14px;
-  line-height: 1;
-  font-weight: 700;
-  cursor: pointer;
-  transition: 0.12s;
-  font-family: inherit;
-}
-.sidebar-new-btn:hover {
-  background: var(--primary-bg);
-  border-color: var(--primary);
-  color: var(--primary);
-}
-.ns-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 2147483646;
-  background: rgb(15 30 60 / 32%);
-  backdrop-filter: blur(2px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.ns-card {
-  width: 460px;
-  max-width: calc(100vw - 40px);
-  background: var(--surface);
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgb(15 30 60 / 24%);
-  padding: 18px 20px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.ns-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.ns-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-.ns-close {
-  width: 24px;
-  height: 24px;
-  border: 0;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 18px;
-  cursor: pointer;
-  line-height: 1;
-}
-.ns-close:hover {
-  color: var(--danger);
-}
-.ns-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.ns-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.ns-label {
-  font-size: 11px;
-  color: var(--text-3);
-  font-weight: 500;
-}
-.ns-input,
-.ns-select {
-  width: 100%;
-  padding: 6px 10px;
-  font: 12px/1.4 var(--mono, monospace);
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border-2);
-  border-radius: 6px;
-  outline: 0;
-  box-sizing: border-box;
-}
-.ns-select {
-  font-family: inherit;
-  cursor: pointer;
-}
-.ns-input:focus,
-.ns-select:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgb(37 99 235 / 15%);
-}
-.ns-hint {
-  font-size: 11px;
-  color: var(--text-3);
-  line-height: 1.6;
-  padding: 8px 10px;
-  background: var(--surface-2);
-  border-radius: 6px;
-}
-.ns-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.ns-btn {
-  padding: 7px 16px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: 0.15s;
-  font-family: inherit;
-}
-.ns-btn.ghost {
-  border: 1px solid var(--border-2);
-  background: var(--surface);
-  color: var(--text);
-}
-.ns-btn.ghost:hover {
-  background: var(--surface-2);
-}
-.ns-btn.primary {
-  border: 0;
-  background: var(--primary);
-  color: #fff;
-  box-shadow: 0 2px 6px rgb(37 99 235 / 28%);
-}
-.ns-btn.primary:hover:not(:disabled) {
-  background: var(--primary-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgb(37 99 235 / 32%);
-}
-.ns-btn.primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 .ds-value-static {
   padding: 0 2px;
   color: var(--text);
@@ -1583,37 +981,6 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   white-space: nowrap;
   cursor: default;
   user-select: text;
-}
-/* ============ 响应式布局 ============ */
-.tabs-burger {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  margin: 5px 6px 5px 0;
-  padding: 0;
-  border: 1px solid var(--border-2);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text-2);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: 0.15s;
-}
-.tabs-burger:hover {
-  background: var(--primary-bg);
-  color: var(--primary);
-  border-color: var(--primary);
-}
-.sidebar-mask {
-  display: none;
-  position: absolute;
-  inset: 0;
-  z-index: 19;
-  background: rgb(15 30 60 / 34%);
-  backdrop-filter: blur(2px);
-  animation: sbMaskIn 0.18s ease-out;
 }
 @keyframes sbMaskIn {
   from {
@@ -1632,9 +999,6 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   }
 }
 @media (max-width: 1100px) {
-  .clean-toggle {
-    display: none;
-  }
   .ds-url {
     max-width: calc(100vw - 320px);
   }
@@ -1643,27 +1007,8 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   }
 }
 @media (max-width: 1024px) {
-  .tabs { display: flex; }
-  .tabs-burger {
-    display: inline-flex;
-  }
-  .session-sidebar {
-    position: absolute;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    z-index: 20;
-    width: 260px;
-    max-width: 82vw;
-    transform: translateX(-100%);
-    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 4px 0 24px rgb(15 30 60 / 20%);
-  }
-  .session-sidebar.is-open {
-    transform: translateX(0);
-  }
-  .sidebar-mask.is-open {
-    display: block;
+  .tabs {
+    display: flex;
   }
   .main {
     padding: 12px 14px;
@@ -1685,44 +1030,13 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   .tabs {
     padding: 0 10px;
   }
-  .session-card,
-  .ns-card {
-    width: calc(100vw - 24px);
-    max-width: 100%;
-  }
 }
-.collapse-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 4px;
-  padding: 3px 10px;
-  border: 1px solid var(--border-2);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: 0.15s;
-  font-family: inherit;
-}
-.collapse-btn:hover {
-  background: var(--surface-2);
-  color: var(--text);
-  border-color: var(--text-3);
-}
-.collapse-btn svg {
-  flex-shrink: 0;
-}
-
-
 .ask-modal-mask {
   position: fixed;
   inset: 0;
   z-index: 2147483645;
   background: rgb(15 30 60 / 38%);
-  backdrop-filter: blur(4px);
+  /* P2-1 移除 backdrop-filter（GPU 性能负债）：backdrop-filter: blur(4px); */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1732,7 +1046,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   width: min(1100px, 94vw);
   height: min(720px, 88vh);
   background: var(--surface);
-  border-radius: 14px;
+  border-radius: var(--radius-12);
   border: 1px solid var(--border);
   box-shadow:
     0 24px 64px rgb(15 30 60 / 22%),
@@ -1764,7 +1078,7 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   content: '';
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   background: var(--primary);
   box-shadow: 0 0 0 3px var(--primary-bg);
 }
@@ -1775,13 +1089,15 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   background: transparent;
   color: var(--text-3);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
-  transition: color 0.12s, background 0.12s;
+  transition:
+    color 0.12s,
+    background 0.12s;
 }
 .ask-modal-close:hover {
   color: var(--danger);
@@ -1801,21 +1117,15 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
   min-width: 0;
 }
 
-.trace-modal-body {
-  padding: 0;
-  gap: 0;
-}
-.ask-modal-enter-active,
-.ask-modal-leave-active {
-  transition: opacity 0.18s ease;
-}
-.ask-modal-enter-from,
-.ask-modal-leave-to {
-  opacity: 0;
-}
 @keyframes ask-modal-in {
-  from { transform: scale(0.97); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
+  from {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 /* [button-icons] 主题按钮 SVG 基线 */
@@ -1828,256 +1138,412 @@ const { stopWaiting: stopAiWaiting } = useAiWaiting()
    参考 Claude Code / Codex 克制配色
    ═══════════════════════════════════════════════════════════ */
 
-/* ——— 次按钮：透明底 + 细边框，hover 时淡淡提亮 ——— */
-.ghost-btn {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  padding: 4px 10px !important;
-  font-size: var(--font-12) !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.ghost-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 8%) !important;
-}
-.ghost-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
-
-/* ——— 终端内按钮 ——— */
-.term-btn {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.term-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
-}
-.term-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
-.term-btn.copy, .term-btn.ask-panel { color: var(--text-2) !important; border-color: rgb(255 255 255 / 8%) !important; }
-.term-btn.copy:hover:not(:disabled), .term-btn.ask-panel:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; border-color: rgb(255 255 255 / 14%) !important;
-}
-
-/* ——— 芯片 / 下拉 / tab ——— */
-.tpl-chip {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-}
-.tpl-chip:hover {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
-}
-.draft-select {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-}
-.draft-select:hover { border-color: rgb(255 255 255 / 14%) !important; }
-
-/* ——— primary 系列（运行/主操作）：暖橙实底 ——— */
-.primary-btn.run {
-  background: var(--primary) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-  border: 0 !important;
-}
-.primary-btn.run:hover:not(:disabled) { background: var(--primary-hover) !important; box-shadow: none !important; }
-
-/* 运行按钮（takeover 态）：暖橙描边，非实心，更克制 */
-.primary-btn.takeover {
-  background: transparent !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
-}
-.primary-btn.takeover:hover:not(:disabled) {
-  background: rgb(217 119 87 / 12%) !important;
-  color: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-}
-
-/* 停止 / 暂停：柔和红描边 */
-.primary-btn.stop {
-  background: transparent !important;
-  color: var(--danger) !important;
-  border: 1px solid var(--danger) !important;
-  box-shadow: none !important;
-}
-.primary-btn.stop:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  color: #fff !important;
-  border-color: var(--danger) !important;
-}
-
-/* ——— loop-btn 系列 ——— */
-.loop-btn {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  box-shadow: none !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.loop-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
-}
-.loop-btn:active:not(:disabled) { box-shadow: none !important; }
-.loop-btn:focus-visible { outline: 0 !important; box-shadow: 0 0 0 2px rgb(217 119 87 / 30%) !important; }
-.loop-btn:disabled { opacity: 0.4 !important; background: transparent !important; color: var(--text-3) !important; }
-
-.loop-btn.primary {
-  background: var(--primary) !important;
-  border-color: var(--primary) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-.loop-btn.primary:hover:not(:disabled) {
-  background: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-.loop-btn.kill, .loop-btn.rollback {
-  background: transparent !important;
-  border-color: rgb(224 108 117 / 55%) !important;
-  color: var(--danger) !important;
-  box-shadow: none !important;
-}
-.loop-btn.kill:hover:not(:disabled), .loop-btn.rollback:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  border-color: var(--danger) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-
-/* ——— 决策按钮 ——— */
-.decision-btn {
-  background: rgb(217 119 87 / 12%) !important;
-  color: var(--primary) !important;
-  border-color: var(--primary) !important;
-  font-weight: 600 !important;
-}
-.decision-btn:hover:not(:disabled) {
-  background: var(--primary) !important;
-  color: #fff !important;
-  border-color: var(--primary) !important;
-}
-
-/* ——— 焦点环统一暖橙 ——— */
-.primary-btn:focus-visible, .term-btn:focus-visible, .ghost-btn:focus-visible, .tpl-chip:focus-visible, .draft-select:focus-visible {
-  outline: 0 !important;
-  box-shadow: 0 0 0 2px rgb(217 119 87 / 35%) !important;
-}
-
 /* ——— 图标按钮（App 头部）——— */
-.theme-toggle, .trace-toggle, .settings-toggle, .ask-toggle, .timeline-toggle {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--text-2) !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+.theme-toggle,
+.settings-toggle,
+.ask-toggle,
+.timeline-toggle,
+.open-ai-toggle {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
 }
-.theme-toggle:hover, .trace-toggle:hover, .settings-toggle:hover, .ask-toggle:hover, .timeline-toggle:hover {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 10%) !important;
+.theme-toggle:hover,
+.settings-toggle:hover,
+.ask-toggle:hover,
+.timeline-toggle:hover,
+.open-ai-toggle:hover {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 10%);
 }
-
-/* ——— 主色大按钮（FileList.save-btn / GeneratePanel.btn-primary）——— */
-.save-btn, .btn-primary {
-  background: var(--primary) !important;
-  color: #fff !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  border-radius: 6px !important;
-}
-.save-btn:hover:not(:disabled), .btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover) !important;
-  box-shadow: none !important;
-}
-
-/* ——— FileList 撤回按钮 ——— */
-.undo-btn {
-  background: transparent !important;
-  border: 0 !important;
-  color: var(--text-3) !important;
-}
-.undo-btn:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  color: var(--danger) !important;
-}
-
-/* ——— FileTree 刷新 ——— */
-.refresh { background: transparent !important; border: 0 !important; color: var(--text-3) !important; }
-.refresh:hover:not(:disabled) { background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; }
-
 
 /* ═══════════════════════════════════════════════════════════
    [button-theme-v2] 静默全灰阶，橙色只 hover / 主操作
    ═══════════════════════════════════════════════════════════ */
 
 /* 主题/图标按钮：纯灰阶 */
-.theme-toggle, .trace-toggle, .settings-toggle, .ask-toggle, .timeline-toggle {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--text-3) !important;
+.theme-toggle,
+.settings-toggle,
+.ask-toggle,
+.timeline-toggle,
+.open-ai-toggle {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-3);
 }
-.theme-toggle:hover, .trace-toggle:hover, .settings-toggle:hover, .ask-toggle:hover, .timeline-toggle:hover {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 8%) !important;
+.theme-toggle:hover,
+.settings-toggle:hover,
+.ask-toggle:hover,
+.timeline-toggle:hover,
+.open-ai-toggle:hover {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 8%);
 }
-
-/* 主按钮（FileList / GeneratePanel）：透明底 + 橙描边，不实底 */
-.save-btn, .btn-primary {
-  background: transparent !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
-  border-radius: 6px !important;
-}
-.save-btn:hover:not(:disabled), .btn-primary:hover:not(:disabled) {
-  background: var(--primary-bg) !important;
-  color: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-}
-
-/* 对话框主按钮同样处理 */
-.ns-btn.primary {
-  background: transparent !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
-}
-.ns-btn.primary:hover:not(:disabled) {
-  background: var(--primary-bg) !important;
-  border-color: var(--primary-hover) !important;
-  color: var(--primary-hover) !important;
-}
-
 
 /* [tight-margin] 外层容器边距收窄 */
 .main {
-  padding: 4px 6px !important;
+  padding: 8px;
 }
 .layout-row {
-  padding: 0 !important;
+  padding: 8px;
 }
 .layout-main {
+  padding: 0;
+}
+
+.transport-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-left: 4px;
+}
+.transport-switch select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-6);
+  padding: 4px 22px 4px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  outline: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+.transport-switch select:hover {
+  color: var(--text-1, inherit);
+  border-color: var(--text-3, currentColor);
+}
+.transport-switch select:focus-visible {
+  outline: 2px solid var(--primary, #6366f1);
+  outline-offset: 2px;
+}
+.transport-switch select option {
+  background: var(--surface, #1a1a1a);
+  color: var(--text-1, inherit);
+}
+
+/* [icon-cursor] 图标按钮统一 pointer */
+.theme-toggle,
+.settings-toggle,
+.ask-toggle,
+.timeline-toggle,
+.open-ai-toggle {
+  cursor: pointer;
+}
+.theme-toggle:disabled,
+.settings-toggle:disabled,
+.open-ai-toggle:disabled {
+  cursor: not-allowed;
+}
+
+/* [ask-count] URL 旁提问次数 */
+.ask-count {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+  opacity: 0.75;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   [app-unify] App.vue 主框架权威样式
+   设计语言：Trae / Cursor 深色
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── 全局 ───────────────────────────────────────────────── */
+:global(#app) {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+/* ── header（顶栏） ─────────────────────────────────────── */
+.hdr {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 8px 16px !important;
+  min-height: 48px !important;
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border) !important;
+  flex-shrink: 0 !important;
+  gap: 16px !important;
+}
+
+.hdr .title {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex-shrink: 0 !important;
+}
+
+.hdr .logo {
+  font-size: 18px !important;
+  line-height: 1 !important;
+}
+
+.hdr h1 {
+  margin: 0 !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--text) !important;
+  letter-spacing: -0.01em !important;
+}
+
+.hdr .env {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 2px 8px !important;
+  border-radius: var(--radius-10) !important;
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text-3) !important;
+  font-size: 10px !important;
+  font-family: var(--mono, monospace) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  line-height: 1.4 !important;
+}
+
+.hdr-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+/* ── 图标按钮（header 上的） ───────────────────────────── */
+.hdr button:not(.btn),
+.hdr .icon-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-6) !important;
+  background: transparent !important;
+  color: var(--text-3) !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.hdr button:not(.btn):hover,
+.hdr .icon-btn:hover {
+  color: var(--text) !important;
+  background: var(--surface-2) !important;
+  border-color: var(--border-2) !important;
+}
+
+.hdr button svg {
+  width: 14px !important;
+  height: 14px !important;
+  stroke-width: 2 !important;
+}
+
+/* ── URL 编辑区 ────────────────────────────────────────── */
+.ds-url {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 4px 12px !important;
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-6) !important;
+  min-width: 320px !important;
+  max-width: 480px !important;
+  flex: 1 1 auto !important;
+  transition: border-color 0.15s !important;
+}
+
+.ds-url:hover,
+.ds-url.editing {
+  border-color: var(--primary) !important;
+}
+
+.ds-value-static {
+  flex: 1 1 auto !important;
+  color: var(--text-2) !important;
+  font-size: 12px !important;
+  font-family: var(--mono, monospace) !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.ds-input {
+  flex: 1 1 auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--text) !important;
+  font-size: 12px !important;
+  font-family: var(--mono, monospace) !important;
+  outline: 0 !important;
+}
+
+.ask-count {
+  flex-shrink: 0 !important;
+  padding: 2px 6px !important;
+  background: var(--primary-bg) !important;
+  color: var(--primary) !important;
+  border-radius: var(--radius-4) !important;
+  font-size: 10px !important;
+  font-family: var(--mono, monospace) !important;
+  font-weight: 600 !important;
+  line-height: 1.4 !important;
+}
+
+/* ── 传输切换（油猴/无头） ─────────────────────────────── */
+.transport-switch {
+  display: inline-flex !important;
+  align-items: center !important;
+  flex-shrink: 0 !important;
+}
+
+.transport-switch select {
+  appearance: none !important;
+  padding: 4px 24px 4px 10px !important;
+  background: var(--surface-2) !important;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 8px center !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-6) !important;
+  color: var(--text-2) !important;
+  font-size: 12px !important;
+  font-family: var(--mono, monospace) !important;
+  cursor: pointer !important;
+  transition: all 0.15s !important;
+  outline: 0 !important;
+}
+
+.transport-switch select:hover {
+  border-color: var(--border-2) !important;
+  color: var(--text) !important;
+}
+
+.transport-switch select:focus {
+  border-color: var(--primary) !important;
+}
+
+/* ── 主布局 ─────────────────────────────────────────────── */
+.layout-row {
+  display: flex !important;
+  flex-direction: row !important;
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  gap: 0 !important;
+}
+
+.layout-main {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
   padding: 0 !important;
 }
 
+.main {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  background: var(--bg) !important;
+}
+
+/* ── tabs（顶部 tab 栏，若显示） ───────────────────────── */
+.tabs {
+  display: flex !important;
+  gap: 4px !important;
+  padding: 6px 16px !important;
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border) !important;
+  flex-shrink: 0 !important;
+}
+
+/* [theme-toggle] 主题切换按钮 */
+.theme-toggle {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  color: var(--text-3) !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+.theme-toggle:hover {
+  color: var(--text) !important;
+  background: var(--surface-2) !important;
+}
+
+/* [logo-svg] DeepSeek 风格 logo */
+.logo {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 24px !important;
+  height: 24px !important;
+  flex-shrink: 0 !important;
+  line-height: 0 !important;
+}
+.logo svg {
+  display: block !important;
+  width: 20px !important;
+  height: 20px !important;
+  filter: drop-shadow(0 0 6px rgb(77 107 254 / 35%)) !important;
+}
+
+/* [ui-opt-p0] header 呼吸感 */
+/* header 高度与内边距微调：视觉更呼吸 */
+.hdr {
+  padding: 8px 14px !important;
+  gap: 10px;
+}
+.hdr .title {
+  gap: 8px !important;
+}
+.hdr .title h1 {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.3px;
+}
+.hdr .env {
+  padding: 1px 6px !important;
+  font-size: 10px !important;
+  letter-spacing: 0.5px;
+}
+/* 主区留白收紧：编辑器占据更多 */
+.main {
+  padding: 8px 10px !important;
+}
 </style>
 <!-- tooltip-audit -->
-

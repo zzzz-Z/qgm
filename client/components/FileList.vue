@@ -1,7 +1,8 @@
 <script setup lang="ts">
-defineOptions({ name: 'FileList' })
 import { computed } from 'vue'
 import type { Change, ChangeType } from '../types'
+
+defineOptions({ name: 'FileList' })
 
 const props = defineProps<{
   changes: Change[]
@@ -97,7 +98,7 @@ function splitPath(p: string) {
 .changes {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   box-shadow: 0 1px 2px rgb(15 30 60 / 4%);
   overflow: hidden;
 }
@@ -132,7 +133,7 @@ function splitPath(p: string) {
   padding: 0 7px;
   background: var(--primary-bg);
   color: var(--primary);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -146,7 +147,7 @@ function splitPath(p: string) {
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   font-size: 11px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -154,7 +155,7 @@ function splitPath(p: string) {
 .s-pill .s-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   background: currentColor;
 }
 .s-pill.modified {
@@ -179,7 +180,7 @@ function splitPath(p: string) {
   padding: 4px 10px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   color: var(--text-2);
   font-size: 12px;
   cursor: pointer;
@@ -200,7 +201,7 @@ function splitPath(p: string) {
   background: var(--primary);
   color: #fff;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-4);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -226,7 +227,7 @@ function splitPath(p: string) {
 }
 .file-list::-webkit-scrollbar-thumb {
   background: var(--border-2);
-  border-radius: 4px;
+  border-radius: var(--radius-4);
 }
 .file-list::-webkit-scrollbar-thumb:hover {
   background: var(--text-3);
@@ -259,7 +260,7 @@ function splitPath(p: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   font: 11px/1 var(--mono);
   font-weight: 700;
 }
@@ -299,7 +300,7 @@ function splitPath(p: string) {
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
@@ -314,7 +315,7 @@ function splitPath(p: string) {
   background: var(--danger-bg);
 }
 .undo-btn:disabled {
-  opacity: 0.5 !important;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
@@ -326,7 +327,7 @@ function splitPath(p: string) {
 .spinner-mini {
   width: 10px;
   height: 10px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   border: 2px solid currentColor;
   border-right-color: transparent;
   animation: spin 0.7s linear infinite;
@@ -337,11 +338,6 @@ function splitPath(p: string) {
   }
 }
 
-.file-item.is-active,
-[class*='file'].is-active {
-  background: rgb(37 99 235 / 8%);
-  border-color: var(--primary, #2563eb);
-}
 [class*='file']:hover:not(.is-active) {
   background: var(--surface-2, #f9fafb);
 }
@@ -353,212 +349,67 @@ function splitPath(p: string) {
 
 /* ——— 次按钮：透明底 + 细边框，hover 时淡淡提亮 ——— */
 .ghost-btn {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  padding: 4px 10px !important;
-  font-size: var(--font-12) !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  border-radius: var(--radius-6);
+  padding: 4px 10px;
+  font-size: var(--font-12);
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
 }
 .ghost-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 8%) !important;
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 8%);
 }
-.ghost-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
-
-/* ——— 终端内按钮 ——— */
-.term-btn {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.term-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
-}
-.term-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
-.term-btn.copy, .term-btn.ask-panel { color: var(--text-2) !important; border-color: rgb(255 255 255 / 8%) !important; }
-.term-btn.copy:hover:not(:disabled), .term-btn.ask-panel:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; border-color: rgb(255 255 255 / 14%) !important;
-}
-
-/* ——— 芯片 / 下拉 / tab ——— */
-.tpl-chip {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-}
-.tpl-chip:hover {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
-}
-.draft-select {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-}
-.draft-select:hover { border-color: rgb(255 255 255 / 14%) !important; }
-
-/* ——— primary 系列（运行/主操作）：暖橙实底 ——— */
-.primary-btn.run {
-  background: var(--primary) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-  border: 0 !important;
-}
-.primary-btn.run:hover:not(:disabled) { background: var(--primary-hover) !important; box-shadow: none !important; }
-
-/* 运行按钮（takeover 态）：暖橙描边，非实心，更克制 */
-.primary-btn.takeover {
-  background: transparent !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
-}
-.primary-btn.takeover:hover:not(:disabled) {
-  background: rgb(217 119 87 / 12%) !important;
-  color: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-}
-
-/* 停止 / 暂停：柔和红描边 */
-.primary-btn.stop {
-  background: transparent !important;
-  color: var(--danger) !important;
-  border: 1px solid var(--danger) !important;
-  box-shadow: none !important;
-}
-.primary-btn.stop:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  color: #fff !important;
-  border-color: var(--danger) !important;
-}
-
-/* ——— loop-btn 系列 ——— */
-.loop-btn {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  box-shadow: none !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.loop-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
-}
-.loop-btn:active:not(:disabled) { box-shadow: none !important; }
-.loop-btn:focus-visible { outline: 0 !important; box-shadow: 0 0 0 2px rgb(217 119 87 / 30%) !important; }
-.loop-btn:disabled { opacity: 0.4 !important; background: transparent !important; color: var(--text-3) !important; }
-
-.loop-btn.primary {
-  background: var(--primary) !important;
-  border-color: var(--primary) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-.loop-btn.primary:hover:not(:disabled) {
-  background: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-.loop-btn.kill, .loop-btn.rollback {
-  background: transparent !important;
-  border-color: rgb(224 108 117 / 55%) !important;
-  color: var(--danger) !important;
-  box-shadow: none !important;
-}
-.loop-btn.kill:hover:not(:disabled), .loop-btn.rollback:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  border-color: var(--danger) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-
-/* ——— 决策按钮 ——— */
-.decision-btn {
-  background: rgb(217 119 87 / 12%) !important;
-  color: var(--primary) !important;
-  border-color: var(--primary) !important;
-  font-weight: 600 !important;
-}
-.decision-btn:hover:not(:disabled) {
-  background: var(--primary) !important;
-  color: #fff !important;
-  border-color: var(--primary) !important;
-}
-
-/* ——— 焦点环统一暖橙 ——— */
-.primary-btn:focus-visible, .term-btn:focus-visible, .ghost-btn:focus-visible, .tpl-chip:focus-visible, .draft-select:focus-visible {
-  outline: 0 !important;
-  box-shadow: 0 0 0 2px rgb(217 119 87 / 35%) !important;
-}
-
-/* ——— 图标按钮（App 头部）——— */
-.theme-toggle, .trace-toggle, .settings-toggle, .ask-toggle, .timeline-toggle {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--text-2) !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.theme-toggle:hover, .trace-toggle:hover, .settings-toggle:hover, .ask-toggle:hover, .timeline-toggle:hover {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 10%) !important;
+.ghost-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* ——— 主色大按钮（FileList.save-btn / GeneratePanel.btn-primary）——— */
-.save-btn, .btn-primary {
-  background: var(--primary) !important;
-  color: #fff !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  border-radius: 6px !important;
+.save-btn,
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+  border: 0;
+  box-shadow: none;
+  border-radius: var(--radius-6);
 }
-.save-btn:hover:not(:disabled), .btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover) !important;
-  box-shadow: none !important;
+.save-btn:hover:not(:disabled),
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  box-shadow: none;
 }
 
 /* ——— FileList 撤回按钮 ——— */
 .undo-btn {
-  background: transparent !important;
-  border: 0 !important;
-  color: var(--text-3) !important;
+  background: transparent;
+  border: 0;
+  color: var(--text-3);
 }
 .undo-btn:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  color: var(--danger) !important;
+  background: rgb(224 108 117 / 14%);
+  color: var(--danger);
 }
-
-/* ——— FileTree 刷新 ——— */
-.refresh { background: transparent !important; border: 0 !important; color: var(--text-3) !important; }
-.refresh:hover:not(:disabled) { background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; }
-
 
 /* [button-theme-v2] 主按钮去实底 */
-.save-btn, .btn-primary {
-  background: transparent !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
+.save-btn,
+.btn-primary {
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  box-shadow: none;
 }
-.save-btn:hover:not(:disabled), .btn-primary:hover:not(:disabled) {
-  background: var(--primary-bg) !important;
-  color: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-  box-shadow: none !important;
+.save-btn:hover:not(:disabled),
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-bg);
+  color: var(--primary-hover);
+  border-color: var(--primary-hover);
+  box-shadow: none;
 }
-
 </style>
 <!-- tooltip-audit -->

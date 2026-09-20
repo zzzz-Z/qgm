@@ -1,6 +1,7 @@
 <script setup lang="ts">
-defineOptions({ name: 'ToastHost' })
 import { useToast } from '../composables/useToast'
+
+defineOptions({ name: 'ToastHost' })
 
 const { toasts, confirmState, dismissToast, resolveConfirm } = useToast()
 function onToastClick(t: { id: number, traceId?: number }) {
@@ -84,7 +85,7 @@ function onToastClick(t: { id: number, traceId?: number }) {
   max-width: 380px;
   background: var(--surface);
   border: 1px solid var(--border, #e5e9f0);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   box-shadow: 0 8px 24px rgb(15 30 60 / 14%);
   font-size: 13px;
   cursor: pointer;
@@ -105,7 +106,7 @@ function onToastClick(t: { id: number, traceId?: number }) {
 .toast-icon {
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -136,24 +137,12 @@ function onToastClick(t: { id: number, traceId?: number }) {
   color: var(--text, #1f2d3d);
   line-height: 1.5;
 }
-.toast-enter-active,
-.toast-leave-active {
-  transition: all 0.25s ease;
-}
-.toast-enter-from {
-  opacity: 0;
-  transform: translateX(24px);
-}
-.toast-leave-to {
-  opacity: 0;
-  transform: translateX(24px);
-}
 .modal-mask {
   position: fixed;
   inset: 0;
   z-index: 2147483646;
   background: rgb(15 30 60 / 32%);
-  backdrop-filter: blur(2px);
+  /* P2-1 移除 backdrop-filter（GPU 性能负债）：backdrop-filter: blur(2px); */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -162,7 +151,7 @@ function onToastClick(t: { id: number, traceId?: number }) {
   min-width: 320px;
   max-width: 460px;
   background: var(--surface);
-  border-radius: 12px;
+  border-radius: var(--radius-12);
   box-shadow: 0 20px 60px rgb(15 30 60 / 24%);
   overflow: hidden;
   animation: modal-in 0.18s ease-out;
@@ -186,7 +175,7 @@ function onToastClick(t: { id: number, traceId?: number }) {
 .modal-icon {
   width: 32px;
   height: 32px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -226,7 +215,7 @@ function onToastClick(t: { id: number, traceId?: number }) {
 }
 .modal-btn {
   padding: 7px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   border: 1px solid var(--border-2, #d0d7de);
   background: var(--surface);
   color: var(--text, #1f2d3d);
@@ -255,18 +244,12 @@ function onToastClick(t: { id: number, traceId?: number }) {
 .modal-btn.primary.danger:hover {
   box-shadow: 0 6px 16px rgb(239 68 68 / 32%);
 }
-.modal-enter-active,
-.modal-leave-active {
-  transition: opacity 0.18s ease;
-}
-.modal-enter-from,
-.modal-leave-to {
-  opacity: 0;
-}
-
 /* [toast-trace] 有 traceId 的 toast 提示可点 */
-.toast.has-trace { cursor: pointer; }
-.toast.has-trace:hover { border-color: rgb(167 139 250 / 40%); }
-
+.toast.has-trace {
+  cursor: pointer;
+}
+.toast.has-trace:hover {
+  border-color: rgb(167 139 250 / 40%);
+}
 </style>
 <!-- tooltip-audit -->

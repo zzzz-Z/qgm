@@ -15,10 +15,10 @@ if (TOOL_LOG) {
   try { TOOL_FD = fs.openSync(TOOL_LOG, 'a') } catch { TOOL_FD = -1 }
 }
 
-const norm = (p) => {
+function norm(p) {
   try { return path.resolve(String(p)) } catch { return String(p) }
 }
-const b64 = (b) => b.toString('base64')
+const b64 = b => b.toString('base64')
 
 const SANDBOX = process.env.AI_RUNNER_SANDBOX || 'read-only'
 const __SANDBOX_ROOT = process.cwd()
@@ -74,7 +74,7 @@ function logTool(op, p, size) {
     try { return path.relative(process.cwd(), norm(p)).replace(/\\/g, '/') }
     catch { return String(p) }
   })()
-  const line = JSON.stringify({ ts: Date.now(), op, path: rel, size }) + '\n'
+  const line = `${JSON.stringify({ ts: Date.now(), op, path: rel, size })}\n`
   try { fs.writeSync(TOOL_FD, line) } catch {}
 }
 
@@ -83,13 +83,17 @@ function logTool(op, p, size) {
 // 命中即抛 EACCES；existsSync 静默返回 false（不暴露存在性）
 // ----------------------------------------------------------------------------
 const READ_BLACKLIST = [
-  /(^|[/\\])\.env(\.[\w-]+)?$/i,                  // .env / .env.local / .env.production
-  /(^|[/\\])\.ai-runner[/\\]config\.json$/i,     // ai-runner 配置
-  /(^|[/\\])\.git[/\\]config$/i,                  // git 凭证/远程
-  /\.pem$/i,                                       // TLS 私钥
-  /\.key$/i,                                       // 各类私钥
-  /(^|[/\\])id_rsa[\w-]*$/i,                      // SSH 默认私钥
-  /(^|[/\\])id_ed25519[\w-]*$/i,                   // SSH ed25519 私钥
+  /(^|[/\\])\.env(\.[\w-]+)?$/i, // .env / .env.local / .env.production
+  /(^|[/\\])\.ai-runner[/\\]config\.json$/i, // ai-runner 配置
+  /(^|[/\\])\.git[/\\]config$/i, // git 凭证/远程
+  /\.pem$/i, // TLS 私钥
+  /\.key$/i, // 各类私钥
+  /(^|[/\\])id_rsa[\w-]*$/i, // SSH 默认私钥
+  /(^|[/\\])id_ed25519[\w-]*$/i, // SSH ed25519 私钥
+  // [F2] registry 凭证
+  /(^|[/\\])\.npmrc$/i,
+  /(^|[/\\])\.pypirc$/i,
+  /(^|[/\\])\.docker[/\\]config\.json$/i,
 ]
 
 function isReadBlacklisted(p) {
@@ -102,7 +106,7 @@ function isReadBlacklisted(p) {
 }
 
 function eacces(p) {
-  const e = new Error("EACCES: permission denied, read '" + String(p) + "'")
+  const e = new Error(`EACCES: permission denied, read '${String(p)}'`)
   e.code = 'EACCES'
   return e
 }
@@ -142,7 +146,7 @@ function recordDelete(p, opts = {}) {
   logTool('delete', p, 0)
 }
 function enoent(p) {
-  const e = new Error("ENOENT: no such file or directory, open '" + String(p) + "'")
+  const e = new Error(`ENOENT: no such file or directory, open '${String(p)}'`)
   e.code = 'ENOENT'
   return e
 }
@@ -251,13 +255,23 @@ fs.statSync = function (p, opts) {
   if (isReadBlacklisted(p)) throw eacces(p)
   return orig.statSync(p, opts)
 }
-fs.lstatSync = fs.statSync
+// [F5] lstatSync 保留软链语义：overlay 命中时返回虚拟 stat，未命中走原生 lstat
+fs.lstatSync = function (p, opts) {
+  const entry = lookupWrite(p)
+  if (entry) {
+    if (entry.op === 'delete') throw enoent(p)
+    const size = entry.data ? entry.data.length : 0
+    return { size, isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false, mtimeMs: Date.now(), mode: 0o100644 }
+  }
+  if (isReadBlacklisted(p)) throw eacces(p)
+  return orig.lstatSync(p, opts)
+}
 fs.readdirSync = function (p, opts) {
   const dir = norm(p)
   const wantTypes = Boolean(opts && typeof opts === 'object' && opts.withFileTypes)
   const realList = orig.existsSync(dir) ? orig.readdirSync(dir, opts) : []
   const list = Array.isArray(realList) ? realList : [...realList]
-  const nameOf = (x) => wantTypes ? String(x && x.name) : String(x)
+  const nameOf = x => wantTypes ? String(x && x.name) : String(x)
   const filtered = list.filter((x) => {
     const entry = overlay.get(path.join(dir, nameOf(x)))
     return !(entry && entry.op === 'delete')
@@ -284,6 +298,44 @@ fs.readdirSync = function (p, opts) {
   }
   return out
 }
+// opendir：返回 overlay 感知的 Dir-like 对象（用已 patch 的 readdirSync）
+fs.opendirSync = function (p, opts) {
+  const list = fs.readdirSync(p, { withFileTypes: true })
+  let idx = 0
+  const dir = {
+    path: norm(p),
+    readSync() {
+      if (idx >= list.length) return null
+      return list[idx++]
+    },
+    read() { return Promise.resolve(this.readSync()) },
+    closeSync() {},
+    close() { return Promise.resolve() },
+    [Symbol.iterator]() {
+      return {
+        next: () => idx < list.length
+          ? { value: list[idx++], done: false }
+          : { value: undefined, done: true },
+      }
+    },
+  }
+  return dir
+}
+fs.opendir = function (p, opts, cb) {
+  const callback = typeof opts === 'function' ? opts : cb
+  if (!callback) return
+  try { callback(null, fs.opendirSync(p, opts)) } catch (e) { callback(e) }
+}
+
+// watch / watchFile：沙盒内禁用（脚本不该监听文件系统变化）
+function watchDisabled() {
+  const e = new Error('[ai-runner sandbox] fs.watch/fs.watchFile 被禁用')
+  e.code = 'ENOSYS'
+  throw e
+}
+fs.watch = watchDisabled
+fs.watchFile = watchDisabled
+
 fs.accessSync = function (p, mode) {
   const entry = lookupWrite(p)
   if (entry) { if (entry.op === 'delete') throw enoent(p); return }
@@ -336,7 +388,7 @@ fs.openSync = function (p, flags, mode) {
   return orig.openSync(p, flags, mode)
 }
 function writeAt(rec, data, position) {
-  const pos = position === undefined || position === null ? rec.pos : position
+  const pos = position ?? rec.pos
   if (pos + data.length > rec.buf.length) {
     const grown = Buffer.alloc(Math.max(rec.buf.length * 2, pos + data.length))
     rec.buf.copy(grown, 0)
@@ -395,7 +447,7 @@ fs.closeSync = function (fd) {
 fs.readSync = function (fd, buffer, offset, length, position) {
   const rec = fakeFds.get(fd)
   if (!rec) return orig.readSync(fd, buffer, offset, length, position)
-  const pos = position === undefined || position === null ? rec.pos : position
+  const pos = position ?? rec.pos
   const n = rec.buf.copy(buffer, offset, pos, pos + length)
   rec.pos = pos + n
   return n
@@ -493,17 +545,20 @@ const P = fs.promises
 if (P) {
   P.writeFile = async (p, d) => recordWrite(p, d)
   P.appendFile = async (p, d) => fs.appendFileSync(p, d)
-  P.unlink = async (p) => recordDelete(p)
+  P.unlink = async p => recordDelete(p)
   P.rm = async (p, opts) => recordDelete(p, { dir: Boolean(opts && opts.recursive) })
-  P.rmdir = async (p) => recordDelete(p, { dir: true })
+  P.rmdir = async p => recordDelete(p, { dir: true })
   P.mkdir = async () => {}
   P.rename = async (a, b) => fs.renameSync(a, b)
   P.copyFile = async (a, b) => fs.copyFileSync(a, b)
   P.cp = async (a, b, opts) => fs.cpSync(a, b, opts)
   P.readFile = async (p, o) => fs.readFileSync(p, o)
-  P.stat = async (p) => fs.statSync(p)
-  P.access = async (p) => fs.accessSync(p)
+  P.stat = async p => fs.statSync(p)
+  P.access = async p => fs.accessSync(p)
   P.readdir = async (p, o) => fs.readdirSync(p, o)
+  P.opendir = async (p, o) => fs.opendirSync(p, o)
+  P.watch = async () => watchDisabled()
+  P.watchFile = async () => watchDisabled()
   P.open = async (p, flags, mode) => {
     const fd = fs.openSync(p, flags, mode)
     const rec = () => fakeFds.get(fd)
@@ -515,11 +570,11 @@ if (P) {
       writeFile: async (d) => {
         if (rec()) recordWrite(p, d)
       },
-      appendFile: async (d) => fs.appendFileSync(p, d),
+      appendFile: async d => fs.appendFileSync(p, d),
       sync: async () => fs.fsyncSync(fd),
       datasync: async () => fs.fdatasyncSync(fd),
       stat: async () => fs.fstatSync(fd),
-      truncate: async (len) => fs.ftruncateSync(fd, len),
+      truncate: async len => fs.ftruncateSync(fd, len),
       chown: async () => {},
       chmod: async () => {},
       close: async () => fs.closeSync(fd),

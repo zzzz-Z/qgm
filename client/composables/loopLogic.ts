@@ -9,8 +9,10 @@
 export const LOOP_MAX_ROUNDS = 8
 /** 循环内 token 增量警告阈值（v6 §6.9 第 4 条），独立于会话累计 */
 export const LOOP_TOKEN_BUDGET = 30_000
-/** 循环内 token 增量熔断阈值：在警告基础上加 10% 缓冲，
- *  容忍 tokenEstimator 的启发式估算误差，避免误熔断 */
+/**
+ * 循环内 token 增量熔断阈值：在警告基础上加 10% 缓冲，
+ *  容忍 tokenEstimator 的启发式估算误差，避免误熔断
+ */
 export const LOOP_TOKEN_HARD_LIMIT = 33_000
 /** 宽容预算：格式错误 OR 纯文本 OR 重复脚本共享（v6 §6.9 第 2 条） */
 export const LOOP_TOLERANCE_BUDGET = 1
@@ -39,19 +41,19 @@ export function isStrictDone(text: string): boolean {
 // ----------------------------------------------------------------------------
 export type RoundBreak = 'round-limit' | 'token-budget' | 'token-warn' | 'continue'
 
-export function checkRoundBreak(round: number, tokenDelta: number): RoundBreak {
+export function checkRoundBreak(round: number, tokenDelta: number, maxRounds: number = LOOP_MAX_ROUNDS): RoundBreak {
   if (Math.max(0, tokenDelta) >= LOOP_TOKEN_HARD_LIMIT) return 'token-budget'
   if (Math.max(0, tokenDelta) >= LOOP_TOKEN_BUDGET) return 'token-warn'
-  if (round >= LOOP_MAX_ROUNDS) return 'round-limit'
+  if (round >= maxRounds) return 'round-limit'
   return 'continue'
 }
 
 // ----------------------------------------------------------------------------
 // 宽容预算判定：返回「重试（消耗一次）」或「熔断」
 // ----------------------------------------------------------------------------
-export type ToleranceResult =
-  | { action: 'retry', remaining: number }
-  | { action: 'break' }
+export type ToleranceResult
+  = | { action: 'retry', remaining: number }
+    | { action: 'break' }
 
 export function decideTolerance(leftBefore: number): ToleranceResult {
   if (leftBefore > 0) return { action: 'retry', remaining: leftBefore - 1 }
@@ -72,7 +74,7 @@ export function tailClip(text: string, max: number = LOOP_FEEDBACK_TAIL): string
 // 首轮 prompt：目标 + 输出契约（与 skills/gen-script-rules.md 第七节一致）
 // ----------------------------------------------------------------------------
 export function buildInitialPrompt(goal: string): string {
-  return String(goal).trim() + '\n' + [
+  return `${String(goal).trim()}\n${[
     '',
     '【输出契约（必须严格遵守）】',
     '1. 每次只回复一个代码块，语言标签只能是 js 或 bash（cjs 兼容，等价 js）',
@@ -80,7 +82,7 @@ export function buildInitialPrompt(goal: string): string {
     '3. 脚本内禁止出现三个反引号；bash 禁止 rm -rf/sudo/curl|sh/git push -f/git reset --hard 等破坏性命令',
     '4. 每轮必须推进，禁止重复上一轮脚本',
     `5. 最多 ${LOOP_MAX_ROUNDS} 轮；任务完成时只回复 DONE（严格大写、无其他字符）`,
-  ].join('\n')
+  ].join('\n')}`
 }
 
 // ----------------------------------------------------------------------------
@@ -142,7 +144,7 @@ export function buildFeedback(o: FeedbackOutcome, ctx: FeedbackContext): string 
     o.desc ? `说明: ${o.desc}` : '',
     `退出码: ${o.exit}（${o.ok ? '成功' : '失败'}）`,
     o.lang !== 'bash'
-      ? `变更: ${o.changeCount} 个文件${o.changedFiles.length ? '：' + o.changedFiles.slice(0, 10).join(', ') : ''}`
+      ? `变更: ${o.changeCount} 个文件${o.changedFiles.length ? `：${o.changedFiles.slice(0, 10).join(', ')}` : ''}`
       : '',
     o.stdout ? `输出(尾 ${LOOP_FEEDBACK_TAIL} 字):\n${tailClip(o.stdout)}` : '',
     o.stderr ? `错误(尾 ${LOOP_FEEDBACK_TAIL} 字):\n${tailClip(o.stderr)}` : '',

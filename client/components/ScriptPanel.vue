@@ -1,309 +1,226 @@
 <template>
-  <div ref="paneRef" class="pane" :class="{ 'is-resizing-side': resizingSide }">
+  <div ref="paneRef" class="bg-\[var\(--bg\)\] flex pane h-screen overflow-hidden" :class="{ 'is-resizing-side': resizingSide }">
     <!-- 左侧主区域 -->
     <div
-      ref="mainRef"
-      class="pane-main"
-      :class="{ 'is-dragging': fileDragging, 'is-success': fileSuccess }"
-      @dragover="onHtmlDragOver"
-      @drop="onHtmlDrop"
+      ref="mainRef" class="flex flex-col pane-main flex-1 min-w-0 overflow-hidden" :class="{ 'is-dragging': fileDragging, 'is-success': fileSuccess }"
+      @dragover="onHtmlDragOver" @drop="onHtmlDrop"
     >
       <!-- 自动化循环控制条（P2） -->
-      <section v-if="loopState !== 'idle'" class="loop-bar card" :class="`is-${loopState}`">
-<template v-if="loopState === 'budget-limited'">
-          <span class="loop-status">
-            <span>⏸</span>
-            预算已用尽 · 第 {{ loopRound }}/{{ maxRounds }} 轮
-          </span>
-          <span class="loop-goal-text" :title="loopGoal">{{ loopGoal.slice(0, 40) }}</span>
-          <div class="loop-actions">
-            <button v-tooltip="'从当前轮次继续（token 基线重置）'" class="loop-btn" @click="resumeLoop">▶ 继续</button>
-            <button v-tooltip="'急停并 git reset 到循环起点'" class="loop-btn rollback" @click="stopAndRollback">⏹ 停止并回滚</button>
-          </div>
-        </template>
-        <template v-else-if="loopState === 'waiting-input'">
-          <span class="loop-status">
-            <span>⏸</span>
-            决策点 · 第 {{ loopRound }}/{{ maxRounds }} 轮
-          </span>
-          <span class="loop-goal-text" :title="pendingDecision?.question">{{ pendingDecision?.question || '（缺问题文本）' }}</span>
-          <div class="loop-actions decision-actions">
-            <button
-              v-for="opt in (pendingDecision?.options || [])"
-              :key="opt.id"
-              v-tooltip="`选择「${opt.label}」并回填 AI`"
-              class="loop-btn decision-btn"
-              @click="submitDecision(opt.id)"
-            >
-{{ opt.label }}
-</button>
-            <button v-tooltip="'取消决策点，结束循环'" class="loop-btn" @click="submitDecision('__cancel__')"><svg class="ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg><span>取消</span></button>
-<button v-tooltip="'输入自定义答案'" class="loop-btn" @click="decisionCustomOpen = !decisionCustomOpen">✎ 自定义</button>
-          </div>
-          <div v-if="decisionCustomOpen" class="decision-custom">
-            <input
-              v-model="decisionCustomText"
-              class="decision-input"
-              placeholder="输入答案后回车发送"
-              @keydown.enter.prevent="submitDecisionCustom"
-            />
-            <button class="loop-btn primary" :disabled="!decisionCustomText.trim()" @click="submitDecisionCustom">发送</button>
-          </div>
-        </template>
-        <template v-else-if="isLoopActive">
-          <span class="loop-status">
-            <span class="loop-spin">{{ stateIcon }}</span>
-            <span class="loop-stage-badge" :class="stageClass">{{ stageLabel }}</span>
-            第 {{ loopRound }}/{{ maxRounds }} 轮 · {{ loopState }}
-            · tok {{ (tokenDelta / 1000).toFixed(1) }}k/{{ tokenBudget / 1000 }}k
-            <template v-if="loopCost !== null"> · {{ formatCost(loopCost) }}（{{ (loopUsage.prompt_tokens / 1000).toFixed(1) }}k / {{ (loopUsage.completion_tokens / 1000).toFixed(1) }}k）</template>
-            · 宽容 {{ toleranceLeft }}
-          </span>
-          <span v-if="loopState === 'waiting'" class="loop-waiting-progress" :title="`等待 AI 回复（已等 ${waitingElapsed}s / 总 ${Math.round(roundTimeoutMs / 1000)}s，超时即熔断）`">
-            <span class="loop-waiting-text">⏱ {{ waitingElapsed }}s / {{ Math.round(roundTimeoutMs / 1000) }}s</span>
-            <span class="loop-waiting-bar"><span class="loop-waiting-fill" :style="{ width: waitingPct + '%' }" /></span>
-          </span>
-          <span class="loop-round-bar" :title="`轮次 ${loopRound}/${maxRounds}`">
-            <span class="loop-round-fill" :style="{ width: roundPct + '%' }" />
-          </span>
-          <span class="loop-goal-text" :title="loopGoal">{{ loopGoal.slice(0, 40) }}</span>
-          <div class="loop-actions">
-            <button v-tooltip="'立即终止当前执行（不等本轮完成）'" class="loop-btn kill" @click="killCurrent">■ 停当前</button>
-            <button v-tooltip="'Esc：当前轮跑完即停，不再发下一轮'" class="loop-btn" disabled>⏸ 暂停(Esc)</button>
-            <button v-tooltip="'Ctrl+Esc：急停并 git reset 到循环起点'" class="loop-btn rollback" @click="stopAndRollback">⏹ 停止并回滚</button>
-            <button v-tooltip="'请求 AI 总结当前会话，切到新会话继续循环'" class="loop-btn" @click="startHandoff">🔄 轮转</button>
-            <button v-tooltip="'给 AI 补充说明（下一轮反馈时带上）'" class="loop-btn" @click="showUserNote = !showUserNote">📝 补充</button>
-          </div>
-        </template>
-        <template v-else>
-          <span class="loop-end-status">
-            {{ loopState === 'interrupted' ? '⏹ 已中断' : '■ 已停止' }} · 第 {{ loopRound }}/{{ maxRounds }} 轮
-            <em v-if="stopReason">（{{ stopReason }}）</em>
-          </span>
-          <button v-if="lastGoal" v-tooltip="`用相同目标重跑：${lastGoal.slice(0, 60)}`" class="loop-btn" @click="startLoop(lastGoal)">🔄 再来一次</button>
-          <button class="loop-btn" @click="loopState = 'idle'">收起</button>
-        </template>
-      </section>
-      <section v-if="showUserNote && isLoopActive" class="note-bar card">
-        <textarea
-          v-model="userNoteDraft"
-          class="note-input"
-          rows="2"
-          placeholder="给 AI 的补充说明（提交后下一轮反馈时带上，提交后清空）"
-        />
-        <div class="note-actions">
-          <button class="loop-btn" @click="showUserNote = false; userNoteDraft = ''"><svg class="ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg><span>取消</span></button>
-          <button class="loop-btn primary" :disabled="!userNoteDraft.trim()" @click="submitUserNote">保存</button>
-        </div>
-      </section>
+      <LoopBar v-model="showUserNote" />
+      <NoteBar
+        v-if="showUserNote && isLoopActive"
+        @submit="submitUserNote"
+        @cancel="showUserNote = false"
+      />
       <!-- 终端 (上方) -->
-      <section class="terminal card">
-        <header class="bar term-bar">
-          <div class="bar-actions">
-</div>
-        </header>
+      <section class="terminal">
+        <!-- [flow-timeline] 全流程时间线 -->
+        <div class="flow-timeline">
+          <div class="script-header">
+            <span v-if="scriptMeta.desc" class="sm-item"><b>desc</b><em>{{ scriptMeta.desc }}</em></span>
+            <span v-if="scriptMeta.why" class="sm-item"><b>why</b><em>{{ scriptMeta.why }}</em></span>
+            <span v-if="scriptMeta.plan" class="sm-item"><b>plan</b><em>{{ scriptMeta.plan }}</em></span>
+          </div>
 
-        <div ref="termBodyRef" class="term-body">
+          <div ref="termBodyRef" class="term-body">
+            <!-- [terminal-status] 循环状态条 -->
+            <div v-if="isLoopActive || (loopState && loopState !== 'idle')" class="ts-bar">
+              <span class="ts-chip" :class="{ 'is-active': isLoopActive }"><b>状态</b>{{ loopState }}</span>
+              <span class="ts-chip"><b>轮次</b>{{ loopRound }}/{{ maxRounds }}</span>
+              <span v-if="loopGoal" class="ts-chip"><b>目标</b>{{ loopGoal.slice(0, 40) }}</span>
+              <span v-if="stage" class="ts-chip"><b>阶段</b>{{ stage }}</span>
+              <span class="ts-chip"><b>token</b>{{ (latestTokens / 1000).toFixed(1) }}k（Δ{{ (tokenDelta
+                / 1000).toFixed(1)
+              }}k）</span>
+              <span v-if="toleranceLeft !== undefined" class="ts-chip"><b>宽容</b>{{ toleranceLeft }}</span>
+              <span v-if="stopReason" class="ts-chip"><b>结束</b>{{ stopReason }}</span>
+            </div>
+          </div>
           <div class="chat-list">
-            <template v-for="e in chatItems" :key="e.id">
-              <div
-                v-if="e.kind === 'ai:stream'"
-                class="chat-think"
-                @click="toggleTreeNode(e.id)"
-              >
-                <span class="think-icon">🧠</span>
-                <span class="think-label">已思考（{{ fmtTreeTime(e.ts) }}）</span>
-                <span class="think-caret" :class="{ open: treeExpanded.has(e.id) }">▸</span>
-              </div>
-              <div
-                v-if="e.kind === 'ai:stream' && treeExpanded.has(e.id)"
-                class="chat-bubble bubble-left bubble-think"
-                v-html="renderMarkdown(e.summary)"
-              />
-              <div v-else-if="e.role === 'user'" class="chat-msg chat-msg-user">
-                <div class="bubble-head"><span class="bubble-icon">👤</span><span class="bubble-name">我</span><span class="bubble-time">{{ fmtTreeTime(e.ts) }}</span></div>
-                <div class="bubble-body">
-                  <span class="bubble-text" v-html="renderUserBubble(e)" />
-                  <span v-if="aiWaiting && isLastUserMsg(e.id)" class="bubble-loading" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
-                      <circle cx="12" cy="12" r="9" opacity="0.25" />
-                      <path d="M21 12a9 9 0 0 0-9-9" />
-                    </svg>
-                  </span>
-                </div>
-              </div>
-              <div
-                v-else-if="e.role === 'step'"
-                class="chat-step"
-                :class="['state-' + stepStateOf(e), { expanded: treeExpanded.has(e.id) }]"
-                @click="toggleTreeNode(e.id)"
-              >
-                <span class="step-icon">{{ stepIconOf(e) }}</span>
-                <span class="step-title">{{ stepTitleOf(e) }}</span>
-                <span class="step-time">{{ fmtTreeTime(e.ts) }}</span>
-                <span v-if="stepStateOf(e) === 'running' || stepStateOf(e) === 'pending'" class="step-loading" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
-                    <circle cx="12" cy="12" r="9" opacity="0.25" />
-                    <path d="M21 12a9 9 0 0 0-9-9" />
-                  </svg>
-                </span>
-                <span class="step-state">{{ stepLabelOf(e) }}</span>
-                <span class="step-caret" :class="{ open: treeExpanded.has(e.id) }">▾</span>
-                <div v-if="treeExpanded.has(e.id)" class="step-detail" @click.stop>
-                  <!-- 1. 脚本声明 -->
-                  <template v-if="e.payload && e.payload.why">
-                    <div class="detail-row"><span class="detail-label">为什么</span><span class="detail-val">{{ e.payload.why }}</span></div>
-                  </template>
-                  <template v-if="e.payload && e.payload.plan">
-                    <div class="detail-row"><span class="detail-label">计划</span><span class="detail-val">{{ e.payload.plan }}</span></div>
-                  </template>
-
-                  <!-- 2. 生命周期时间线 -->
-                  <template v-if="e.payload && e.payload.stageHistory && e.payload.stageHistory.length">
-                    <div class="detail-row">
-                      <span class="detail-label">生命周期</span>
-                      <div class="detail-stages">
-                        <div v-for="(st, i) in e.payload.stageHistory" :key="st.name" class="stage-item">
-                          <span class="stage-idx">{{ i + 1 }}</span>
-                          <span class="stage-dot" :class="st.status === 'done' ? (st.ok === false ? 'err' : 'ok') : 'run'" />
-                          <span class="stage-name">{{ st.name }}</span>
-                          <span v-if="st.files !== undefined" class="stage-meta">{{ st.files }} 文件</span>
-                          <span v-if="st.ms !== undefined" class="stage-ms">{{ st.ms }}ms</span>
-                          <span v-if="st.tscOk === false" class="stage-tag err">tsc 失败</span>
-                          <span v-if="st.testOk === false" class="stage-tag err">test 失败</span>
-                          <span class="stage-status" :class="st.status === 'done' ? (st.ok === false ? 'err' : 'ok') : 'run'">
-                            {{ st.status === 'done' ? (st.ok === false ? '失败' : '完成') : '处理中' }}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </template>
-
-                  <!-- 3. 一级执行完输出（stdout） -->
-                  <template v-if="e.payload && e.payload.stdoutTail">
-                    <div class="detail-row">
-                      <span class="detail-label">输出</span>
-                      <pre class="detail-pre">{{ e.payload.stdoutTail }}</pre>
-                    </div>
-                  </template>
-
-                  <!-- 4. stderr -->
-                  <template v-if="e.payload && e.payload.stderrTail">
-                    <div class="detail-row">
-                      <span class="detail-label err">stderr</span>
-                      <pre class="detail-pre err">{{ e.payload.stderrTail }}</pre>
-                    </div>
-                  </template>
-
-                  <!-- 5. 结果摘要 -->
-                  <template v-if="e.payload && (e.payload.exit !== undefined || e.payload.elapsedMs !== undefined)">
-                    <div class="detail-row">
-                      <span class="detail-label">结果</span>
-                      <span class="detail-val">
-                        <template v-if="e.payload.exit !== undefined">exit {{ e.payload.exit }}</template>
-                        <template v-if="e.payload.changeCount"> · {{ e.payload.changeCount }} 文件</template>
-                        <template v-if="e.payload.elapsedMs !== undefined"> · 耗时 {{ (e.payload.elapsedMs / 1000).toFixed(2) }}s</template>
-                      </span>
-                    </div>
-                  </template>
-
-                  <div v-if="!e.payload || (!e.payload.why && !e.payload.plan && !e.payload.stdoutTail && !e.payload.stderrTail && !(e.payload.stageHistory && e.payload.stageHistory.length) && e.payload.exit === undefined)" class="detail-empty">无更多信息</div>
-                </div>
-              </div>
-              <div v-else-if="e.role === 'ai'" class="chat-msg chat-msg-ai">
-                <div class="bubble-head"><span class="bubble-icon">🤖</span><span class="bubble-name">AI</span><span class="bubble-time">{{ fmtTreeTime(e.ts) }}</span></div>
-                <div class="bubble-body" v-html="renderAiBubble(e)" />
-              </div>
-              <div v-else class="chat-sys">
-                <span class="sys-tag">{{ treeIcon(e.kind) }} {{ e.summary }}</span>
-                <span class="sys-time">{{ fmtTreeTime(e.ts) }}</span>
-              </div>
-            </template>
+            <!-- [live-typewriter] 当前脚本实时输出（打字机） -->
+            <div v-if="running || twStdout || twStderr" class="live-stream">
+              <pre v-if="twStdout" class="live-pre"><span v-for="(l, i) in twLines" :key="i" :class="lineClass(l)">{{ l }}{{ i < twLines.length - 1 ? '\n' : '' }}</span><span v-if="running" class="live-cursor" /></pre>
+              <pre v-if="twStderr" class="live-pre err"><span v-for="(l, i) in twErrLines" :key="i" :class="lineClass(l)">{{ l }}{{ i < twErrLines.length - 1 ? '\n' : '' }}</span><span v-if="running" class="live-cursor" /></pre>
+            </div>
 
             <div v-if="!chatItems.length" class="tree-empty">
-              <div class="empty-title">还没有会话记录</div>
-              <div class="empty-sub">点击「运行」开始自动化循环</div>
-          <div class="empty-cards">
-            <button
-              v-for="t in TEMPLATES"
-              :key="t.id"
-              v-tooltip="t.title"
-              class="empty-card"
-              @click="applyTemplate(t.code)"
-            >
-              <span class="empty-card-ico">{{ t.id === 'bash' ? '🖥' : t.id === 'ask' ? '💬' : '📝' }}</span>
-              <span class="empty-card-title">{{ t.label }}</span>
-              <span class="empty-card-desc">{{ t.title }}</span>
-            </button>
-          </div>
+              <div class="empty-title">
+                还没有会话记录
+              </div>
+              <div class="empty-sub">
+                点击「运行」开始自动化循环
+              </div>
+              <div class="empty-cards">
+                <button
+                  v-for="t in TEMPLATES" :key="t.id" v-tooltip="t.title" class="empty-card"
+                  @click="applyTemplate(t.code)"
+                >
+                  <span class="empty-card-ico">{{ t.id === 'bash' ? '🖥' : t.id === 'ask' ? '💬' : '📝' }}</span>
+                  <span class="empty-card-title">{{ t.label }}</span>
+                  <span class="empty-card-desc">{{ t.title }}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </section>
       <!-- 编辑器 (下方) -->
       <section class="editor card" :class="{ 'is-running': running, 'is-dragging': fileDragging }">
-<div class="tpl-bar">
+        <div class="tpl-bar">
           <button
-            v-for="t in TEMPLATES"
-            :key="t.id"
-            v-tooltip="`模板：${t.label} — ${t.title}`"
-            class="tpl-chip"
+            v-for="t in TEMPLATES" :key="t.id" v-tooltip="`模板：${t.label} — ${t.title}`" class="tpl-chip"
             @click="applyTemplate(t.code)"
           >
             {{ t.label }}
           </button>
           <div class="tpl-spacer" />
-          <button v-tooltip="'清空编辑器内容 + 全部附件'" class="ghost-btn" :disabled="running || (!script && !attachedFiles.length)" @click="clearAll">
-            <svg class="ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
+          <button
+            ref="skillTriggerRef"
+            v-tooltip="'选择要注入 AI 提示词的规则（skills）'" aria-label="选择要注入 AI 提示词的规则（skills）" data-skill-trigger class="skill-trigger"
+            @mousedown.prevent="toggleSkillMenu"
+          >
+            <span class="skill-trigger-label">📋 规则</span>
+            <span class="skill-badge" :class="{ 'skill-badge-empty': !selectedSkillNames.length }">{{
+              selectedSkillNames.length }}</span>
+            <span class="skill-count" :title="`可用规则共 ${skillsList.length} 个`">/{{ skillsList.length }}</span>
+          </button>
+          <Teleport to="body">
+            <div v-if="skillMenuOpen" data-skill-menu class="skill-menu-fixed" :style="skillMenuPos" @mousedown.stop>
+              <div class="skill-menu-head">
+                共 {{ skillsList.length }} 个可用规则
+              </div>
+              <div v-if="skillsLoading" class="skill-row skill-loading">
+                加载中…
+              </div>
+              <div v-else-if="!skillsList.length" class="skill-row skill-empty">
+                无可用规则
+              </div>
+              <label v-for="sk in skillsList" :key="sk.name" class="skill-row">
+                <input type="checkbox" :checked="selectedSkillNames.includes(sk.name)" @change="toggleSkill(sk.name)">
+                <span class="skill-name">{{ sk.name }}</span>
+                <span class="skill-src" :class="`src-${sk.source || 'base'}`">{{ sk.source === 'user' ? '用户'
+                  : (sk.source
+                    === 'agents' ? '全局' : '系统') }}</span>
+              </label>
+              <div class="skill-hint">
+                选择后，点「运行」发送给 AI 的 prompt 会带上这些规则
+              </div>
+            </div>
+          </Teleport>
+          <button
+            v-tooltip="'清空编辑器内容 + 全部附件'"
+            aria-label="清空编辑器内容 + 全部附件" class="ghost-btn"
+            :disabled="running || (!script && !attachedFiles.length)" @click="clearAll"
+          >
+            <svg
+              class="ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+            >
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
             <span>清空</span>
           </button>
           <button
-            v-if="running || isLoopActive || autoTakeoverEnabled"
-            v-tooltip="'暂停：停止当前执行并关闭自动接管'"
-            class="primary-btn stop head-run"
-            @click="pauseAll"
+            v-tooltip="'把全项目文件路径（@path）插入到编辑器'"
+            aria-label="把全项目文件路径（@path）插入到编辑器" class="primary-btn ghost head-run" :disabled="addingAllToEditor"
+            @click="onAddAllClick"
           >
-            <svg class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="9" y1="4" x2="9" y2="20" /><line x1="15" y1="4" x2="15" y2="20" /></svg>
-            <span>{{ autoTakeoverCountdown > 0 ? '暂停 · ' + autoTakeoverCountdown + 's' : '暂停' }}</span>
+            <svg
+              class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+            >
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+              <line x1="12" y1="11" x2="12" y2="17" />
+              <line x1="9" y1="14" x2="15" y2="14" />
+            </svg>
+            <span>{{ addingAllToEditor ? '添加中…' : '添加全部' }}</span>
+          </button>
+          <button
+            v-if="running || isLoopActive || autoTakeoverEnabled"
+            v-tooltip="'暂停：停止当前执行并关闭自动接管'" aria-label="暂停：停止当前执行并关闭自动接管"
+            class="primary-btn stop head-run" @click="pauseAll"
+          >
+            <svg
+              class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+            >
+              <line x1="9" y1="4" x2="9" y2="20" />
+              <line x1="15" y1="4" x2="15" y2="20" />
+            </svg>
+            <span>{{ autoTakeoverCountdown > 0 ? `暂停 · ${autoTakeoverCountdown}s` : '暂停' }}</span>
           </button>
           <button
             v-else
-            v-tooltip="'运行：执行脚本 → 结果自动发 AI → AI 回复后自动执行下一轮'"
-            class="primary-btn takeover head-run"
+            v-tooltip="'运行：执行脚本 → 结果自动发 AI → AI 回复后自动执行下一轮'" aria-label="运行：执行脚本 → 结果自动发 AI → AI 回复后自动执行下一轮" class="primary-btn takeover head-run"
             @click="toggleAutoTakeover"
           >
-            <svg class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4" /></svg><span>运行</span>
+            <svg
+              class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+            >
+              <polygon points="6 4 20 12 6 20 6 4" />
+            </svg><span>运行</span>
           </button>
         </div>
         <div v-if="attachedFiles.length" class="attach-bar">
-          <div v-for="f in attachedFiles" :key="f.id" class="attach-tag" :class="'kind-' + f.kind">
+          <div v-for="f in attachedFiles" :key="f.id" class="attach-tag" :class="`kind-${f.kind}`">
             <img v-if="f.kind === 'image'" :src="f.content" :alt="f.name" class="attach-img">
             <span v-else-if="f.kind === 'folder'" class="attach-ico">📁</span>
             <span v-else class="attach-ico">📄</span>
             <span class="attach-name" :title="f.name">{{ f.name }}</span>
-            <span class="attach-size">{{ f.kind === 'folder' ? f.size + ' 文件' : fmtSize(f.size) }}</span>
-            <button v-tooltip="'移除'" class="attach-del" @click="removeAttach(f.id)">×</button>
+            <span class="attach-size">{{ f.kind === 'folder' ? `${f.size} 文件` : fmtSize(f.size) }}</span>
+            <button v-tooltip="'移除'" aria-label="移除" class="attach-del" @click="removeAttach(f.id)">
+              ×
+            </button>
           </div>
+        </div>
+        <!-- [P2-2b2] draft slots toolbar -->
+        <div class="draft-toolbar">
+          <select
+            v-tooltip="'切换草稿槽位'"
+            class="draft-select"
+            :value="activeDraftId"
+            @change="switchDraftSlot(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="s in draftSlots" :key="s.id" :value="s.id">
+              {{ s.name }}<template v-if="s.text">
+                ({{ s.text.length }})
+              </template>
+            </option>
+          </select>
+          <button
+            v-tooltip="'新建草稿槽位'"
+            aria-label="新建草稿槽位"
+            class="ghost-btn draft-btn"
+            type="button"
+            @click="newDraftSlot"
+          >
+            ＋
+          </button>
+          <button
+            v-tooltip="'删除当前草稿槽位'"
+            aria-label="删除当前草稿槽位"
+            class="ghost-btn draft-btn"
+            type="button"
+            :disabled="activeDraftId === 'default'"
+            @click="deleteDraftSlot(activeDraftId)"
+          >
+            ×
+          </button>
         </div>
         <div class="editor-body" @paste.capture="onEditorPaste" @dragover.prevent @drop="onDesktopDrop">
           <!-- @FILE_PICKER_V1 -->
           <div v-if="pickerOpen" ref="pickerRef" class="file-picker" :style="pickerStyle">
             <input
-              ref="pickerInputRef"
-              v-model="pickerQuery"
-              class="fp-input"
-              placeholder="搜索文件，Enter 选择，Esc 取消"
-              @keydown.down.prevent="pickerMove(1)"
-              @keydown.up.prevent="pickerMove(-1)"
-              @keydown.enter.prevent="pickerConfirm"
-              @keydown.esc.prevent="pickerClose"
-            />
+              ref="pickerInputRef" v-model="pickerQuery" class="fp-input" placeholder="搜索文件，Enter 选择，Esc 取消"
+              @keydown.down.prevent="pickerMove(1)" @keydown.up.prevent="pickerMove(-1)"
+              @keydown.enter.prevent="pickerConfirm" @keydown.esc.prevent="pickerClose"
+            >
             <div class="fp-list">
               <div
-                v-for="(f, i) in pickerFiltered"
-                :key="f"
-                class="fp-item"
-                :class="{ active: i === pickerIndex }"
+                v-for="(f, i) in pickerFiltered" :key="f" class="fp-item" :class="{ active: i === pickerIndex }"
                 @mousedown.prevent="pickerPick(f)"
               >
                 {{ f }}
@@ -313,27 +230,27 @@
               </div>
             </div>
           </div>
-          <div
-            ref="cmHost"
-            class="cm-host"
-            tabindex="0"
-          />
-        </div><footer class="editor-foot">
+          <div ref="cmHost" class="cm-host" tabindex="0" />
+        </div>
+        <!-- [script-meta-row] [meta-row-bottom] 当前脚本元信息（desc/why/plan/done） -->
+        <div v-if="hasScriptMeta" class="meta-row">
+          <span v-if="scriptMeta.desc" class="meta-item"><b>desc</b><span :title="scriptMeta.desc">{{ scriptMeta.desc
+          }}</span></span>
+          <span v-if="scriptMeta.why" class="meta-item"><b>why</b><span :title="scriptMeta.why">{{ scriptMeta.why
+          }}</span></span>
+          <span v-if="scriptMeta.plan" class="meta-item"><b>plan</b><span :title="scriptMeta.plan">{{ scriptMeta.plan
+          }}</span></span>
+          <span v-if="scriptMeta.done" class="meta-item"><b>done</b><span :title="scriptMeta.done">{{ scriptMeta.done
+          }}</span></span>
+        </div>
+        <footer class="editor-foot">
           <span v-if="persistWarning" v-tooltip="persistWarning" class="persist-warning">⚠ 会话存储已满</span>
           <div class="foot-spacer" />
 
-          <span
-            v-if="result?.error"
-            v-tooltip="result.error"
-            class="req-err-badge"
-          >
+          <span v-if="result?.error" v-tooltip="result.error" class="req-err-badge">
             ⛔ 请求失败
           </span>
-          <span
-            v-if="result?.dryRunFailed"
-            v-tooltip="result.dryRunReason || '预检未通过，磁盘零改动'"
-            class="dry-badge"
-          >
+          <span v-if="result?.dryRunFailed" v-tooltip="result.dryRunReason || '预检未通过，磁盘零改动'" class="dry-badge">
             ⚠ 预检失败 · 未改动文件（本想改 {{ result.dryRunChangeCount ?? 0 }}）
           </span>
           <span v-if="result?.git?.after?.commit" v-tooltip="`已提交：${result.git.after.commit}`" class="git-after">
@@ -367,108 +284,62 @@
 
     <!-- 拖拽条：调整右侧面板宽度 -->
     <div
-      v-tooltip="'拖拽调整右侧面板宽度'"
-      class="side-resize-handle"
-      :class="{ active: resizingSide }"
+      v-tooltip="'拖拽调整右侧面板宽度'" class="side-resize-handle" :class="{ active: resizingSide }"
       @pointerdown="onSideDown"
     />
 
     <!-- 右侧：变更列表 & Diff -->
     <!-- SIDE_VIF_CHANGES -->
-    <button
-      v-tooltip="sideDrawerOpen ? '收起变更面板' : '展开变更面板'"
-      aria-label="切换变更面板"
-      class="side-drawer-toggle"
-      :class="{ 'drawer-open': sideDrawerOpen }"
-      @click="sideDrawerOpen = !sideDrawerOpen"
-    >
-{{ sideDrawerOpen ? '›' : '‹' }}
-</button>
-    <div v-if="sideDrawerOpen" class="side-drawer-backdrop" @click="sideDrawerOpen = false" />
-    <aside class="pane-side" :class="{ 'drawer-open': sideDrawerOpen }" :style="{ width: `${sideWidth}px` }">
-      <div class="side-tabs">
-        <button
-          :class="{ active: sideTab === 'tree' }"
-          class="side-tab"
-          @click="sideTab = 'tree'"
-        >
-<svg class="side-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
-</button>
-        <button
-          :class="{ active: sideTab === 'changes' }"
-          class="side-tab"
-          @click="sideTab = 'changes'"
-        >
-<svg class="side-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M9 13h6" /><path d="M9 17h6" /></svg><span v-if="changes.length" class="side-tab-badge">{{ changes.length }}</span>
-</button>
-      </div>
-      <div v-show="sideTab === 'tree'" class="side-tree">
-        <FileTree root draggable />
-      </div>
-      <div v-show="sideTab === 'changes'" class="side-changes">
-        <div v-if="!result && !changes.length" class="side-empty">
-          <div class="side-empty-icon">
-            📋
-          </div>
-          <div class="side-empty-text">
-            运行后显示变更
-          </div>
-        </div>
-        <FileList
-          v-if="changes.length"
-          :changes="changes"
-          :rolling="rolling"
-          :busy-all="busyAll"
-          :active-file="previewFile!"
-          @rollback="onRollback"
-          @rollback-all="onRollbackAll"
-          @save="save"
-          @preview="onPreviewFile"
-        />
-      </div>
-    </aside>
-    <div
+    <SidePane
+      v-model:side-drawer-open="sideDrawerOpen"
+      :side-width="sideWidth"
+      :changes="changes"
+      :rolling="rolling"
+      :busy-all="busyAll"
+      :preview-file="previewFile"
+      :result="result"
+      @rollback="onRollback"
+      @rollback-all="onRollbackAll"
+      @save="save"
+      @preview="onPreviewFile"
+    />
+    <DiffOverlay
       v-if="changes.length && previewFile && previewBefore !== null"
-      class="diff-overlay"
-      @click.self="previewFile = null"
-    >
-      <div class="diff-overlay-panel">
-        <button v-tooltip="'关闭 diff 预览（Esc）'" class="diff-overlay-close" @click="previewFile = null">
-          ×
-        </button>
-        <DiffViewer
-          :file-name="previewFile"
-          :before="previewBefore"
-          :after="previewAfter"
-          :change-type="getChangeType(previewFile)"
-        />
-      </div>
-    </div>
+      :file-name="previewFile"
+      :before="previewBefore"
+      :after="previewAfter"
+      :change-type="getChangeType(previewFile)"
+      @close="previewFile = null"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-defineOptions({ name: 'ScriptPanel' })
-import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
+import DiffOverlay from './DiffOverlay.vue'
+import LoopBar from './LoopBar.vue'
+import NoteBar from './NoteBar.vue'
+import SidePane from './SidePane.vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRunner } from '../composables/useRunner'
 import { currentLoopContext, useAutoLoop } from '../composables/useAutoLoop'
-import FileList from './FileList.vue'
-import DiffViewer from './DiffViewer.vue'
-import FileTree from './FileTree.vue'
 import { copyAndFill } from '../composables/useDeepseekUrl'
-import { formatCost } from '../utils/pricing'
 import { useAiWaiting } from '../composables/useAiWaiting'
 import { useAutoTakeover } from '../composables/useAutoTakeover'
-import { useEventBus, emit, setPendingAskKey } from '../composables/useEventStream'
+import { emit, setPendingAskKey, useEventBus } from '../composables/useEventStream'
 import { useCodeCleaner } from '../composables/useCodeCleaner'
 import { buildErrorContext, enforceBudget, parseErrorLocations } from '../utils/contextBuilder'
 import { readNdjson } from '../utils/stream'
 import { fnv1a8 } from '../utils/hash'
-import hljs from 'highlight.js/lib/common'
 import { useToast } from '../composables/useToast'
 import { useTraceLog } from '../composables/useTraceLog'
+import type { TraceEntry } from '../composables/useTraceLog'
 import { setLastAutoFilled } from '../composables/useScriptInbox'
 import type { Change, RunResponse } from '../types'
+
+defineOptions({ name: 'ScriptPanel' })
+
+// 组合式函数：toast 在 script 早段被使用，此处集中初始化
+const { toast, confirmDialog } = useToast()
 // U.3: CodeMirror 全家桶懒加载——首建编辑器时才 await import，CM 打进独立 chunk
 interface CMModule {
   EditorView: any
@@ -511,8 +382,7 @@ async function ensureCM(): Promise<CMModule> {
   return CM
 }
 
-
-const { script, running, result, changes, rolling, busyAll, persistWarning, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback } = useRunner()
+const { script, lastRunCode, running, result, changes, rolling, busyAll, persistWarning, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback } = useRunner()
 const { enabled: autoTakeoverEnabled, countdown: autoTakeoverCountdown, enable: enableAutoTakeover, disable: disableAutoTakeover, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
 function toggleAutoTakeover() {
   if (autoTakeoverEnabled.value) {
@@ -534,33 +404,78 @@ function toggleAutoTakeover() {
 
 // —— 自动化循环（P2 useAutoLoop）——
 const {
-  loopState, loopRound, loopGoal, stopReason, toleranceLeft, stage,
-  tokenDelta, maxRounds, tokenBudget,
-  roundTimeoutMs, waitingElapsed, isLoopActive,
-  loopUsage, loopCost,
-  killCurrent, stopAndRollback, startHandoff, resumeLoop,
-  startLoop, lastGoal, userNote,
-  pendingDecision, submitDecision,
+  loopState,
+  loopRound,
+  loopGoal,
+  stopReason,
+  toleranceLeft,
+  stage,
+  tokenDelta,
+  maxRounds,
+  isLoopActive,
+  killCurrent,
+  userNote,
 } = useAutoLoop()
-// 倒计时进度百分比：waitingElapsed / roundTimeoutMs
 const lastRunScript = ref('')
-const showUserNote = ref(false)
-const userNoteDraft = ref('')
-function submitUserNote() {
-  userNote.value = userNoteDraft.value.trim()
-  showUserNote.value = false
-  userNoteDraft.value = ''
-  if (userNote.value) toast('补充说明已记录，将在下一轮反馈带上', 'success', 3000)
+const SKILLS_KEY = '__ai_selected_skills'
+interface SkillInfo { name: string, content?: string, source?: 'base' | 'user' | 'agents' }
+const skillsList = ref<SkillInfo[]>([])
+const skillsLoading = ref(false)
+const skillTriggerRef = ref<HTMLElement | null>(null)
+const skillMenuPos = ref<{ top: string, left: string }>({ top: '0px', left: '0px' })
+const skillMenuOpen = ref(false)
+function toggleSkillMenu() {
+  const el = skillTriggerRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  skillMenuPos.value = { top: `${rect.bottom + 4}px`, left: `${rect.left}px` }
+  skillMenuOpen.value = !skillMenuOpen.value
+  if (skillMenuOpen.value && !skillsList.value.length && !skillsLoading.value) void loadSkillsList()
 }
-
-const decisionCustomOpen = ref(false)
-const decisionCustomText = ref('')
-function submitDecisionCustom() {
-  const t = decisionCustomText.value.trim()
-  if (!t) return
-  void submitDecision('__custom__', t)
-  decisionCustomOpen.value = false
-  decisionCustomText.value = ''
+function onGlobalMousedown(e: MouseEvent) {
+  if (!skillMenuOpen.value) return
+  const t = e.target as HTMLElement | null
+  if (t && (t.closest('[data-skill-menu]') || t.closest('[data-skill-trigger]'))) return
+  skillMenuOpen.value = false
+}
+onMounted(() => document.addEventListener('mousedown', onGlobalMousedown))
+onBeforeUnmount(() => document.removeEventListener('mousedown', onGlobalMousedown))
+function loadSelectedSkillNames(): string[] {
+  try {
+    const raw = localStorage.getItem(SKILLS_KEY)
+    if (raw === null) return ['gen-script-rules']
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr : []
+  } catch { return ['gen-script-rules'] }
+}
+const selectedSkillNames = ref<string[]>(loadSelectedSkillNames())
+watch(selectedSkillNames, (v) => {
+  try { localStorage.setItem(SKILLS_KEY, JSON.stringify(v)) } catch { }
+}, { deep: true })
+async function loadSkillsList(): Promise<void> {
+  skillsLoading.value = true
+  try {
+    const res = await fetch('/__ai/skills')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    skillsList.value = Array.isArray(data) ? data : []
+    ; (window as any).__ai_skills = skillsList.value
+  } catch (e) {
+    console.error('[ai-runner] loadSkillsList failed:', e)
+    skillsList.value = []
+  } finally { skillsLoading.value = false }
+}
+function toggleSkill(name: string): void {
+  const i = selectedSkillNames.value.indexOf(name)
+  if (i >= 0) selectedSkillNames.value = selectedSkillNames.value.filter(n => n !== name)
+  else selectedSkillNames.value = [...selectedSkillNames.value, name]
+}
+void loadSkillsList()
+const showUserNote = ref(false)
+function submitUserNote(text: string) {
+  userNote.value = text
+  showUserNote.value = false
+  if (userNote.value) toast('补充说明已记录，将在下一轮反馈带上', 'success', 3000)
 }
 
 function pauseAll() {
@@ -571,34 +486,6 @@ function pauseAll() {
     void killCurrent()
   }
 }
-
-const waitingPct = computed(() => {
-  if (loopState.value !== 'waiting' || !roundTimeoutMs.value) return 0
-  return Math.min(100, Math.round((waitingElapsed.value * 1000 / roundTimeoutMs.value) * 100))
-})
-
-const stageLabel = computed(() => {
-  const s = stage.value
-  if (s === 'plan') return '规划'
-  if (s === 'verify') return '验证'
-  return '实现'
-})
-const stageClass = computed(() => 'stage-' + (stage.value || 'plan'))
-const stateIcon = computed(() => {
-  const s = loopState.value
-  if (s === 'waiting') return '⏱'
-  if (s === 'executing') return '⚙'
-  if (s === 'feedback') return '📤'
-  if (s === 'parsing') return '🧩'
-  if (s === 'handoff') return '🔄'
-  if (s === 'budget-limited') return '💰'
-  if (s === 'waiting-input') return '⏸'
-  return '⟳'
-})
-const roundPct = computed(() => {
-  const max = maxRounds.value || 8
-  return Math.min(100, Math.round((loopRound.value / max) * 100))
-})
 
 const mainRef = ref<HTMLElement | null>(null)
 
@@ -612,14 +499,14 @@ interface AttachedFile {
   size: number
   kind: 'image' | 'text' | 'folder'
   content: string
-  paths?: string[]  // folder 专用：展开后的文件列表
+  paths?: string[] // folder 专用：展开后的文件列表
 }
 const attachedFiles = ref<AttachedFile[]>([])
-const MAX_ATTACH_BYTES = 500 * 1024  // 单文件 500KB
+const MAX_ATTACH_BYTES = 500 * 1024 // 单文件 500KB
 function fmtSize(n: number): string {
-  if (n < 1024) return n + 'B'
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + 'KB'
-  return (n / 1024 / 1024).toFixed(2) + 'MB'
+  if (n < 1024) return `${n}B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`
+  return `${(n / 1024 / 1024).toFixed(2)}MB`
 }
 function readAsText(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -646,7 +533,7 @@ async function addAttachedFile(file: File): Promise<void> {
   try {
     const content = isImage ? await readAsDataUrl(file) : await readAsText(file)
     attachedFiles.value.push({
-      id: 'at-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+      id: `at-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       name: file.name || (isImage ? 'pasted-image' : 'file'),
       size: file.size,
       kind: isImage ? 'image' : 'text',
@@ -672,7 +559,7 @@ async function onEditorPaste(e: ClipboardEvent): Promise<void> {
       if (f) images.push(f)
     }
   }
-  if (!images.length) return  // 普通文本粘贴交给 CodeMirror 处理
+  if (!images.length) return // 普通文本粘贴交给 CodeMirror 处理
   e.preventDefault()
   for (const f of images) await addAttachedFile(f)
 }
@@ -715,7 +602,7 @@ async function addTreePaths(paths: string[]): Promise<void> {
     if (tree.length) {
       // 文件夹：只加一个 tag，发送时展开
       attachedFiles.value.push({
-        id: 'at-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+        id: `at-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         name: p,
         size: tree.length,
         kind: 'folder',
@@ -741,7 +628,7 @@ async function addTreePaths(paths: string[]): Promise<void> {
       }
       const content = String(f.content || '')
       attachedFiles.value.push({
-        id: 'at-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+        id: `at-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         name: p,
         size: content.length,
         kind: 'text',
@@ -809,14 +696,8 @@ async function buildScriptWithAttachments(scriptText: string, files: AttachedFil
 const statusText = ref('')
 const statusClass = ref('')
 
+// [user-run-wait] 点运行 → 立即置“等待 AI 回复”loading
 const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
-function isLastUserMsg(id: number): boolean {
-  const list = chatItems.value
-  for (let i = list.length - 1; i >= 0; i--) {
-    if (list[i].role === 'user') return list[i].id === id
-  }
-  return false
-}
 
 // [loop-loading] 循环态统一触发等待 loading，确保从发问起有「等待 AI」提示
 watch(loopState, (v, old) => {
@@ -844,16 +725,74 @@ let elapsedTimer: ReturnType<typeof setInterval> | null = null
 let runStartAt = 0
 
 // Diff 预览
-const sideTab = ref<'tree' | 'changes'>('tree')
+const sideTab = ref<'tree' | 'changes' | 'trace' | 'tasks'>('tree')
 // U.12: 窄屏抽屉开合
 const sideDrawerOpen = ref(false)
 const previewFile = ref<string | null>(null)
 const previewBefore = ref<string | null>(null)
 const previewAfter = ref<string>('')
 
-const hasStdout = computed(() => !!result.value?.stdout?.trim())
-const hasStderr = computed(() => !!result.value?.stderr?.trim())
 const { events: busEvents } = useEventBus()
+
+// [flow-timeline] 全流程时间线计算
+// [flow-tag-v3] 生命周期状态 → 中文字面
+function statusOf(s: string): string {
+  if (s === 'run') return '进行中'
+  if (s === 'ok') return '已完成'
+  if (s === 'err') return '失败'
+  return '待开始'
+}
+const flowStages = computed(() => {
+  const ev = (busEvents && busEvents.value) || []
+  let startIdx = -1
+  for (let i = ev.length - 1; i >= 0; i--) { if (ev[i].kind === 'run:start') { startIdx = i; break }
+  }
+  const stageEvts: Array<{ payload?: Record<string, unknown> }> = []
+  let endEvt: { payload?: Record<string, unknown> } | null = null
+  if (startIdx >= 0) {
+    for (let i = startIdx + 1; i < ev.length; i++) {
+      const k = ev[i].kind
+      if (k === 'run:stage') { stageEvts.push(ev[i] as { payload?: Record<string, unknown> })
+      }
+      else if (k === 'run:end' || k === 'run:error') { endEvt = ev[i] as { payload?: Record<string, unknown> }; break }
+    }
+  }
+  const s = String(loopState.value || 'idle')
+  const isWait = s === 'waiting' || s === 'running' || s === 'feedback' || running.value || aiWaiting.value
+  const isParse = s === 'parsing'
+  const isExec = s === 'executing'
+  const isFinal = s === 'stopped' || s === 'done' || s === 'budget-limited' || s === 'interrupted' || s === 'handoff'
+  let waitState = 'idle'
+  if (isWait && !isParse && !isExec && !isFinal) waitState = 'run'
+  else if (isParse || isExec || isFinal) waitState = 'ok'
+  const waitDetail = s === 'waiting' ? '等待回复中' : (s === 'feedback' ? '已发反馈' : '')
+  let parseState = 'idle'
+  if (isParse) parseState = 'run'
+  else if (isExec || isFinal) parseState = 'ok'
+  let execState = 'idle'
+  if (isExec) execState = 'run'
+  else if (isFinal && result.value && result.value.ok === false) execState = 'err'
+  else if (isFinal && result.value && result.value.ok === true) execState = 'ok'
+  const execDetail = stageEvts.length
+    ? stageEvts.slice(-5).map(e => String((e.payload && e.payload.name) || '')).filter(Boolean).join(' · ')
+    : ''
+  let resState = 'idle'
+  let resDetail = ''
+  if (isFinal || endEvt) {
+    const okFlag = result.value ? result.value.ok === true : (endEvt && endEvt.payload ? endEvt.payload.ok === true : false)
+    if (okFlag) { resState = 'ok'; resDetail = '成功' }
+    else { resState = 'err'; resDetail = (result.value && result.value.error) || '失败' }
+  }
+  return [
+    { key: 'wait', icon: '💬', label: '等待 AI 回复', state: waitState, detail: waitDetail, status: statusOf(waitState) },
+    { key: 'parse', icon: '📝', label: '脚本准备', state: parseState, detail: '', status: statusOf(parseState) },
+    { key: 'exec', icon: '⚙', label: '执行', state: execState, detail: execDetail, status: statusOf(execState) },
+    { key: 'result', icon: '✓', label: '结果', state: resState, detail: resDetail, status: statusOf(resState) },
+  ]
+})
+
+// [single-stage] 只显示当前活跃阶段
+
 const termBodyRef = ref<HTMLElement | null>(null)
 
 type ChatRole = 'user' | 'ai' | 'sys' | 'step'
@@ -864,8 +803,8 @@ function chatRole(kind: string): ChatRole {
   return 'sys'
 }
 const chatItems = computed(() => busEvents.value
-  .filter((e) => e.kind !== 'ai:token')
-  .map((e) => ({ ...e, role: chatRole(e.kind) }))
+  .filter(e => e.kind !== 'ai:token')
+  .map(e => ({ ...e, payload: ((e.payload || {}) as TraceEntry['payload']), role: chatRole(e.kind) }))
   .filter((e) => {
     // 过滤无内容的 AI 气泡：脚本到达已由步骤条显示，纯文本空回复不显示
     if (e.role !== 'ai') return true
@@ -893,241 +832,9 @@ watch(lastStreamId, (id) => {
     treeExpanded.value = s2
   }
 })
-function toggleTreeNode(id: number) {
-  const s = new Set(treeExpanded.value)
-  if (s.has(id)) s.delete(id)
-  else s.add(id)
-  treeExpanded.value = s
-}
-function treeIcon(kind: string): string {
-  if (kind === 'ai:ask') return '👤'
-  if (kind === 'ai:feedback') return '📤'
-  if (kind === 'ai:script') return '📥'
-  if (kind === 'ai:done') return '✓'
-  if (kind === 'ai:plain' || kind === 'ai:multi') return '💬'
-  if (kind === 'ai:stream') return '🤖'
-  if (kind === 'ai:summary') return '📋'
-  if (kind === 'ai:token') return '🔢'
-  if (kind === 'ai:decision') return '⏸'
-  if (kind === 'ai:need-files') return '📂'
-  if (kind === 'run:start') return '▶'
-  if (kind === 'run:end') return '■'
-  if (kind === 'run:error') return '✗'
-  if (kind === 'run:stage') return '⚙'
-  if (kind === 'loop:round') return '⟳'
-  if (kind === 'loop:static') return '⚠'
-  if (kind === 'loop:finish') return '⏹'
-  return '·'
-}
-function stepStateOf(e: { kind: string, payload?: Record<string, unknown> }): 'pending' | 'running' | 'done' | 'error' {
-  if (e.kind === 'run:start') {
-    const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
-    if (phase === 'done') return 'done'
-    if (phase === 'error') return 'error'
-    return 'running'
-  }
-  if (e.kind === 'ai:ask') return 'running'
-  if (e.kind === 'run:error') return 'error'
-  if (e.kind === 'run:end') return e.payload && e.payload.ok === false ? 'error' : 'done'
-  if (e.kind === 'run:stage') {
-    const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
-    if (phase === 'done') return 'done'
-    if (phase === 'error') return 'error'
-    return 'running'
-  }
-  return 'pending'
-}
-function stepIconOf(e: { kind: string, payload?: Record<string, unknown> }): string {
-  if (e.kind === 'ai:ask') return '💬'
-  if (e.kind === 'ai:script') return '📥'
-  if (e.kind === 'run:start') {
-    const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
-    if (phase === 'done') return '■'
-    if (phase === 'error') return '✗'
-    return '▶'
-  }
-  if (e.kind === 'run:end') return '■'
-  if (e.kind === 'run:error') return '✗'
-  if (e.kind === 'run:stage') return '⚙'
-  return '·'
-}
-function stepTitleOf(e: { kind: string, summary?: string, payload?: Record<string, unknown> }): string {
-  const p = e.payload || {}
-  if (e.kind === 'ai:ask') {
-    const phase = String(p.phase || 'pending')
-    const q = String(p.question || '').trim()
-    if (phase === 'pending') return '正在等待 AI 回答' + (q ? '：' + q.slice(0, 60) : '')
-    return q || '提问'
-  }
-  if (e.kind === 'ai:script') return String(p.desc || '脚本到达')
-  if (e.kind === 'run:start') {
-    const desc = String(p.desc || '').trim() || '脚本'
-    return desc
-  }
-  if (e.kind === 'run:end') {
-    const exit = p.exit !== undefined ? ' · exit ' + p.exit : ''
-    const changes = Array.isArray(p.changes) ? p.changes.length : 0
-    const desc = String(p.desc || '').trim()
-    const head = desc ? '执行脚本：' + desc : '执行完成'
-    return head + exit + (changes ? ' · ' + changes + ' 文件' : '')
-  }
-  if (e.kind === 'run:error') return String(e.summary || '执行失败')
-  if (e.kind === 'run:stage') {
-    const p = e.payload || {}
-    const name = String(p.name || 'stage')
-    const ms = typeof p.ms === 'number' ? ' · ' + p.ms + 'ms' : ''
-    const files = typeof p.files === 'number' && p.files > 0 ? ' · ' + p.files + ' 文件' : ''
-    const extra: string[] = []
-    if (p.tscOk === false) extra.push('tsc 失败')
-    if (p.testOk === false) extra.push('test 失败')
-    return name + files + ms + (extra.length ? ' · ' + extra.join(' / ') : '')
-  }
-  return String(e.summary || '')
-}
-function stepLabelOf(e: { kind: string, payload?: Record<string, unknown> }): string {
-  if (e.kind === 'ai:ask') return '等待中'
-  if (e.kind === 'ai:script') return '待执行'
-  if (e.kind === 'run:start') {
-    const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
-    if (phase === 'pending') return '等待中'
-    if (phase === 'done') return '已完成'
-    if (phase === 'error') return '失败'
-    return '执行中'
-  }
-  if (e.kind === 'run:end') return e.payload && e.payload.ok === false ? '失败' : '已完成'
-  if (e.kind === 'run:error') return '失败'
-  if (e.kind === 'run:stage') {
-    const phase = String((e.payload && (e.payload as Record<string, unknown>).phase) || '')
-    if (phase === 'done') return '完成'
-    if (phase === 'error') return '失败'
-    return '处理中'
-  }
-  return ''
-}
 
-function fmtTreeTime(ts: number): string {
-  const d = new Date(ts)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
-}
-
-function escapeHtmlMd(s: string): string {
-  return String(s).replace(/[&<>"']/g, (ch) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[ch] as string))
-}
-
-/** 极简 markdown：代码块（折叠）/ 标题 / 列表 / 行内 code / 粗体 / 段落 */
-/** 用 highlight.js 着色；语言不可用则回退 auto，再失败转纯 escape */
-function highlightCode(code: string, lang: string): string {
-  const source = String(code ?? '')
-  const l = String(lang || '').toLowerCase()
-  try {
-    if (l && hljs.getLanguage(l)) return hljs.highlight(source, { language: l, ignoreIllegals: true }).value
-    return hljs.highlightAuto(source).value
-  } catch {
-    return escapeHtmlMd(source)
-  }
-}
-
-function renderMarkdown(text: string): string {
-  const s = String(text ?? '')
-  if (!s) return ''
-  const lines = s.split('\n')
-  const out: string[] = []
-  const inline = (t: string): string => escapeHtmlMd(t)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  let i = 0
-  while (i < lines.length) {
-    const l = lines[i]
-    const fence = l.match(/^\s*```(\w*)\s*$/)
-    if (fence) {
-      const lang = fence[1] || 'code'
-      const buf: string[] = []
-      i++
-      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { buf.push(lines[i]); i++ }
-      i++
-      const codeId = 'c' + Math.random().toString(36).slice(2, 8)
-      const body = highlightCode(buf.join('\n'), lang)
-      const bar = '<div class="md-code-bar"><span class="md-code-lang">' + escapeHtmlMd(lang) + ' · ' + buf.length + ' 行</span><span class="md-code-acts"><button class="md-code-copy" data-code-id="' + codeId + '" onclick="(function(b){var p=b.closest(\'.md-code\').querySelector(\'pre\');navigator.clipboard.writeText(p.textContent||\'\');b.textContent=\'已复制\';setTimeout(function(){b.textContent=\'复制\'},1200)})(this)">复制</button><button class="md-code-dl" data-code-id="' + codeId + '" onclick="(function(b){var p=b.closest(\'.md-code\').querySelector(\'pre\');var a=document.createElement(\'a\');a.href=URL.createObjectURL(new Blob([p.textContent||\'\'],{type:\'text/plain\'}));a.download=\'snippet.txt\';a.click();URL.revokeObjectURL(a.href)})(this)">下载</button></span></div>'
-      out.push('<details class="md-code" open><summary>' + bar + '</summary><pre>' + body + '</pre></details>')
-      continue
-    }
-    const h = l.match(/^(#{1,4})\s+(.+)$/)
-    if (h) {
-      const n = h[1].length + 2
-      out.push('<h' + n + ' class="md-h">' + escapeHtmlMd(h[2]) + '</h' + n + '>')
-      i++
-      continue
-    }
-    if (/^\s*[-*]\s+/.test(l)) {
-      const items: string[] = []
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
-        items.push('<li>' + inline(lines[i].replace(/^\s*[-*]\s+/, '')) + '</li>')
-        i++
-      }
-      out.push('<ul class="md-ul">' + items.join('') + '</ul>')
-      continue
-    }
-    if (/^\s*$/.test(l)) { i++; continue }
-    out.push('<p class="md-p">' + inline(l) + '</p>')
-    i++
-  }
-  return out.join('')
-}
-
-function renderUserBubble(e: { kind: string, payload?: Record<string, unknown> }): string {
-  if (!e.payload) return ''
-  if (e.kind === 'ai:ask' && e.payload.question) return renderMarkdown(String(e.payload.question))
-  if (e.kind === 'ai:feedback') {
-    const cnt = Array.isArray(e.payload.changes) ? e.payload.changes.length : 0
-    const exit = e.payload.exit ?? '?'
-    return renderMarkdown(`回传 AI · exit ${exit} · ${cnt} 文件`)
-  }
-  return ''
-}
-
-function renderAiBubble(e: { kind: string, payload?: Record<string, unknown>, summary?: string }): string {
-  if (!e.payload) return ''
-  if (e.kind === 'ai:script') {
-    const desc = String(e.payload.desc || '').trim()
-    const why = String(e.payload.why || '').trim()
-    const plan = String(e.payload.plan || '').trim()
-    const parts: string[] = []
-    if (desc) parts.push('**' + desc + '**')
-    if (why) parts.push('为什么：' + why)
-    if (plan) parts.push('计划：' + plan)
-    return parts.length ? renderMarkdown(parts.join('\n\n')) : ''
-  }
-  if (e.kind === 'ai:done' || e.kind === 'ai:plain' || e.kind === 'ai:multi') {
-    const text = e.payload.text !== undefined ? String(e.payload.text).trim() : ''
-    return text ? renderMarkdown(text) : ''
-  }
-  return ''
-}
-
-function renderPayload(p: unknown): string {
-  if (!p || typeof p !== 'object') return ''
-  const parts: string[] = []
-  for (const [k, v] of Object.entries(p as Record<string, unknown>)) {
-    if (v === null || v === undefined || v === '') continue
-    if (typeof v === 'string') {
-      parts.push('### ' + k + '\n\n' + v)
-    } else if (Array.isArray(v)) {
-      const ls = v.map((x) => typeof x === 'object' ? '- ' + JSON.stringify(x) : '- ' + String(x)).join('\n')
-      parts.push('### ' + k + '\n\n' + ls)
-    } else if (typeof v === 'object') {
-      parts.push('### ' + k + '\n\n```json\n' + JSON.stringify(v, null, 2) + '\n```')
-    } else {
-      parts.push('### ' + k + '\n\n' + String(v))
-    }
-  }
-  return renderMarkdown(parts.join('\n\n'))
-}
 /** 最新的 AI 流式文本（取最后一条 ai:stream 事件） */
 
-const hasAnyOutput = computed(() => hasStdout.value || hasStderr.value || (result.value?.tools?.length || 0) > 0 || !!result.value?.smoke?.ran || !!result.value?.tsc)
 function getChangeType(p: string) {
   const c = changes.value.find(x => x.path === p)
   return c ? c.type : 'modified'
@@ -1221,6 +928,41 @@ async function buildAiPrompt() {
     }
   }
 
+  // [P3-7] 三层反馈摘要：代码层（lint/结构）→ 类型层（tsc）→ 行为层（test/smoke/runtime）
+  // [fix-issues-okline-v1] 声明累积数组
+  const issues = []
+  const okLine = []
+  {
+    // 行为层（优先级最高）
+    if (result.value.test?.ran) {
+      if (!result.value.test.ok) issues.push('行为层: 单测失败（见下 # 单元测试）')
+      else okLine.push('test ✓')
+    }
+    if (result.value.smoke?.ran && !result.value.smoke.ok) issues.push('行为层: 冒烟失败（见下 # 页面冒烟）')
+    if (result.value.dryRunFailed) issues.push('行为层: 脚本运行中断，磁盘零改动')
+    if (result.value.code !== 0 && !result.value.dryRunFailed && result.value.code !== -1) {
+      issues.push(`行为层: 退出码 ${result.value.code}`)
+    }
+    // 类型层
+    if (result.value.tsc) {
+      if (result.value.tsc.ok === false) issues.push('类型层: tsc 报错（见下 # 类型检查）')
+      else okLine.push('tsc ✓')
+    }
+    // 代码层
+    if (result.value.lint?.ran) {
+      if (!result.value.lint.ok) issues.push('代码层: eslint 报错（见下 # 代码格式化）')
+      else okLine.push('lint ✓')
+    }
+    p.push('# 三层反馈摘要')
+    if (issues.length === 0) {
+      p.push(`✓ 无阻塞问题${okLine.length ? `（${okLine.join(' / ')}）` : ''}`)
+    } else {
+      p.push('按优先级：')
+      for (const i of issues) p.push(`- ${i}`)
+      if (okLine.length) p.push(`已通过：${okLine.join(' / ')}`)
+    }
+    p.push('')
+  }
   if (changes.value.length) {
     p.push('# 变更')
     p.push('```')
@@ -1238,16 +980,6 @@ async function buildAiPrompt() {
       if (result.value.wantChanges.length > 20) p.push(`  - ... 共 ${result.value.wantChanges.length} 个`)
     }
     p.push('- 请基于下方 stderr 定位根因，重新生成完整脚本；不要再给出会中途抛错的版本')
-    p.push('')
-  }
-  if (result.value.tools && result.value.tools.length) {
-    p.push('# 工具调用序列')
-    p.push('```')
-    for (const t of result.value.tools) {
-      const label = t.op === 'write' ? 'writeFile' : 'deleteFile'
-      p.push(`${label} ${t.path} (${t.size}B)`)
-    }
-    p.push('```')
     p.push('')
   }
   if (result.value.smoke?.ran) {
@@ -1357,7 +1089,6 @@ async function buildAiPrompt() {
 // URL 从全局 composable 读，在 App.vue 的 header 里配置
 /* __ai_removed: deepseekUrl ref */
 const { stripComments, stripBlankLines } = useCodeCleaner()
-const { toast, confirmDialog } = useToast()
 const { addTrace } = useTraceLog()
 
 const TEMPLATES = [
@@ -1454,7 +1185,7 @@ async function runSmart(opts?: { bypassAutoGuard?: boolean }) {
   if (isNode || isBash) {
     runningCommand.value = ''
     lastRunScript.value = text
-    script.value = ''
+    // [P2-2c] 保留编辑器内容（不清空）：script.value = ''
     run({ script: text })
     return
   }
@@ -1487,24 +1218,57 @@ async function loadSkillsForAsk(): Promise<string> {
     return ''
   }
 }
+
+async function expandAtRefs(text: string): Promise<string> {
+  const re = /(?:^|\n)\s*@([\w./-]+)/g
+  const paths: string[] = []
+  const seen = new Set<string>()
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    const p = m[1]
+    if (!seen.has(p)) { seen.add(p); paths.push(p) }
+  }
+  if (!paths.length) return ''
+  try {
+    const res = await fetch('/__ai/files/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths }),
+    })
+    const data = await res.json()
+    const parts: string[] = []
+    for (const f of data.files || []) {
+      if (f.error) parts.push(`<file path="${f.path}" error="${f.error}"></file>`)
+      else parts.push(`<file path="${f.path}">` + `\n${f.content}\n` + `</file>`)
+    }
+    return parts.join('\n\n')
+  } catch (e) {
+    return `（读取文件失败：${String(e)}）`
+  }
+}
+
 async function askAi(question: string) {
+  startAiWaiting()
   if (!question) { toast('@ 后没有内容', 'warn'); return }
   const skills = await loadSkillsForAsk()
-  const prompt = skills
-    ? `# 规则\n\n${skills}\n\n# 问题\n
-${question}`
-    : question
+  const fileBlocks = await expandAtRefs(question)
+  const cleanQuestion = question.replace(/(?:^|\n)[ \t]*@[\w./-]+[ \t]*/g, '').trim()
+  const segs: string[] = []
+  if (skills) segs.push(`# 规则\n\n${skills}`)
+  if (fileBlocks) segs.push(`# 相关文件\n\n${fileBlocks}`)
+  if (cleanQuestion) segs.push(`# 问题\n\n${cleanQuestion}`)
+  const prompt = segs.join('\n\n')
   const r = await copyAndFill(prompt)
   if (r === 'failed') {
     toast('发送失败，已复制到剪贴板', 'warn', 4000)
     return
   }
-  const askKey = 'ask-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
+  const askKey = `ask-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
   setPendingAskKey(askKey)
   emit('ai:ask', question.slice(0, 100), { payload: { question, prompt, phase: 'pending' }, updateKey: askKey })
   statusText.value = '✅ 已发送'
   statusClass.value = 'ok'
-  script.value = ''
+  // [P2-2c] 保留编辑器内容（不清空）：script.value = ''
   startAiWaiting()
   setTimeout(() => { statusText.value = ''; statusClass.value = '' }, 1500)
 }
@@ -1521,7 +1285,7 @@ async function execCmd(text: string) {
   const raw = text.trim()
   if (!raw || running.value) return
   if (!raw.startsWith('!')) return
-  script.value = ''
+  // [P2-2c] 保留编辑器内容（不清空）：script.value = ''
   pushCmdHistory(raw)
   runningCommand.value = raw
   const cmd = raw.slice(1).trim()
@@ -1604,10 +1368,6 @@ async function copyOutput(force = false) {
 // stderr 里把 file.ts:12:34 变成可点击（点击复制路径）
 // ponytail: 不做跨文件跳转（无 Monaco，行号可能失准），只复制路径。
 
-
-
-
-
 // ---------- 分栏拖拽 ----------
 
 // ---------- 右侧面板宽度拖拽 ----------
@@ -1626,7 +1386,7 @@ const pickerY = ref(0)
 const pickerRef = ref<HTMLDivElement | null>(null)
 const pickerInputRef = ref<HTMLInputElement | null>(null)
 const pickerFiles = ref<string[]>([])
-const pickerStyle = computed(() => ({ left: pickerX.value + 'px', top: pickerY.value + 'px' }))
+const pickerStyle = computed(() => ({ left: `${pickerX.value}px`, top: `${pickerY.value}px` }))
 
 async function pickerLoadFiles() {
   if (pickerFiles.value.length) return
@@ -1689,7 +1449,7 @@ function pickerConfirm() {
 function pickerPick(filePath: string) {
   if (!cmView) return
   pickerOpen.value = false
-  const insertText = '@' + filePath + ' '
+  const insertText = `@${filePath} `
   const from = pickerPos.value
   const to = cmView.state.selection.main.head
   cmView.dispatch({ changes: { from, to, insert: insertText }, selection: { anchor: from + insertText.length } })
@@ -1753,25 +1513,83 @@ async function createEditor() {
       editableComp.of(m.EditorView.editable.of(!isLoopActive.value)),
       m.placeholder('写脚本，或 !命令 走 shell · @问题 发给 AI · ⌘/Ctrl + ↵ 运行'),
       m.EditorView.theme({
-        '&': { height: '100%', fontSize: '12px' },
-        '.cm-scroller': { fontFamily: 'var(--mono, monospace)', lineHeight: '20px', overflowX: 'hidden', overflowY: 'auto' },
-        '.cm-content': { caretColor: '#528bff' },
-        '&.cm-focused': { outline: 'none' },
-      }),
+        '&': {
+          height: '100%',
+          fontSize: '12px',
+          backgroundColor: 'var(--surface)',
+          color: 'var(--text)',
+        },
+        '.cm-scroller': {
+          fontFamily: 'var(--mono, monospace)',
+          lineHeight: '20px',
+          overflowX: 'hidden',
+          overflowY: 'auto',
+        },
+        '.cm-content': {
+          caretColor: 'var(--primary)',
+          backgroundColor: 'var(--surface)',
+          color: 'var(--text)',
+        },
+        '.cm-line': {
+          color: 'var(--text)',
+        },
+        '.cm-gutters': {
+          backgroundColor: 'var(--surface)',
+          color: 'var(--text-3)',
+          borderRight: '1px solid var(--border)',
+        },
+        '.cm-gutterElement': {
+          color: 'var(--text-3)',
+        },
+        '.cm-lineNumbers .cm-gutterElement': {
+          color: 'var(--text-3)',
+        },
+        '.cm-activeLine': {
+          backgroundColor: 'rgb(88 166 255 / 5%)',
+        },
+        '.cm-activeLineGutter': {
+          backgroundColor: 'rgb(88 166 255 / 8%)',
+          color: 'var(--text-2)',
+        },
+        '.cm-cursor, .cm-dropCursor': {
+          borderLeftColor: 'var(--primary)',
+        },
+        '.cm-selectionBackground, ::selection': {
+          backgroundColor: 'rgb(88 166 255 / 25%)',
+        },
+        '&.cm-focused .cm-selectionBackground': {
+          backgroundColor: 'rgb(88 166 255 / 30%)',
+        },
+        '.cm-panels': {
+          backgroundColor: 'var(--surface-2)',
+          color: 'var(--text)',
+        },
+        '.cm-tooltip': {
+          backgroundColor: 'var(--surface-2)',
+          border: '1px solid var(--border)',
+          color: 'var(--text)',
+        },
+        '&.cm-focused': {
+          outline: 'none',
+        },
+      }, { dark: true }),
       m.Prec.highest(m.keymap.of([
         { key: 'Mod-Enter', preventDefault: true, run: () => { runSmart(); return true } },
         { key: 'Alt-r', preventDefault: true, run: () => { runSmart(); return true } },
         { key: 'Alt-ArrowUp', preventDefault: true, run: () => { cmdHistoryPrev(); return true } },
         { key: 'Alt-ArrowDown', preventDefault: true, run: () => { cmdHistoryNext(); return true } },
 
-        { key: 'Enter', run: () => {
-          const text = script.value.trim()
-          if (text.startsWith('!') && !text.includes('\n')) {
-            runSmart()
-            return true
+        {
+          key: 'Enter',
+          run: () => {
+            const text = script.value.trim()
+            if (text.startsWith('!') && !text.includes('\n')) {
+              runSmart()
+              return true
+            }
+            return false
           }
-          return false
-        } },
+        },
       ])),
       m.EditorView.updateListener.of((u: any) => {
         if (u.docChanged) {
@@ -1787,6 +1605,71 @@ async function createEditor() {
 watch(isLoopActive, (v) => {
   if (!cmView || !CM || !editableComp) return
   cmView.dispatch({ effects: editableComp.reconfigure(CM.EditorView.editable.of(!v)) })
+})
+// [P2-2b] draft slots API
+const DRAFT_SLOTS_KEY = '__ai_script_drafts'
+const DRAFT_ACTIVE_KEY = '__ai_script_draft_active'
+interface DraftSlot { id: string, text: string, ts: number, name: string }
+const draftSlots = ref<DraftSlot[]>([])
+const activeDraftId = ref<string>('default')
+function readDraftSlots(): DraftSlot[] {
+  try {
+    const raw = localStorage.getItem(DRAFT_SLOTS_KEY)
+    if (!raw) return []
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr)
+      ? arr.filter((s: unknown): s is DraftSlot => {
+          const o = s as Record<string, unknown>
+          return typeof o?.id === 'string' && typeof o?.text === 'string'
+        })
+      : []
+  } catch { return [] }
+}
+function persistDraftSlots(): void {
+  try { localStorage.setItem(DRAFT_SLOTS_KEY, JSON.stringify(draftSlots.value)) } catch { /* ignore */ }
+  try { localStorage.setItem(DRAFT_ACTIVE_KEY, activeDraftId.value) } catch { /* ignore */ }
+}
+function upsertDraftSlot(id: string, text: string, name?: string): void {
+  const i = draftSlots.value.findIndex(s => s.id === id)
+  const item: DraftSlot = { id, text, ts: Date.now(), name: name || (i >= 0 ? draftSlots.value[i].name : id) }
+  if (i >= 0) draftSlots.value[i] = item
+  else draftSlots.value.push(item)
+  persistDraftSlots()
+}
+function switchDraftSlot(id: string): void {
+  if (id === activeDraftId.value) return
+  upsertDraftSlot(activeDraftId.value, script.value)
+  const next = draftSlots.value.find(s => s.id === id)
+  activeDraftId.value = id
+  script.value = next ? next.text : ''
+  persistDraftSlots()
+}
+function deleteDraftSlot(id: string): void {
+  if (id === 'default') return
+  draftSlots.value = draftSlots.value.filter(s => s.id !== id)
+  if (activeDraftId.value === id) {
+    activeDraftId.value = 'default'
+    const d = draftSlots.value.find(s => s.id === 'default')
+    script.value = d ? d.text : ''
+  }
+  persistDraftSlots()
+}
+function newDraftSlot(): void {
+  upsertDraftSlot(activeDraftId.value, script.value)
+  const id = `draft-${Date.now().toString(36)}`
+  draftSlots.value.push({ id, text: '', ts: Date.now(), name: id })
+  activeDraftId.value = id
+  // [P2-2c] 保留编辑器内容（不清空）：script.value = ''
+  persistDraftSlots()
+}
+
+// [P2-2b] auto-persist active slot（debounce 400ms）
+let draftPersistTimer: ReturnType<typeof setTimeout> | null = null
+watch(script, (v) => {
+  if (draftPersistTimer) clearTimeout(draftPersistTimer)
+  draftPersistTimer = setTimeout(() => {
+    upsertDraftSlot(activeDraftId.value, String(v || ''))
+  }, 400)
 })
 watch(script, (v) => {
   if (!cmView) return
@@ -1831,6 +1714,17 @@ watch(
   },
 )
 
+watch(sideTab, (v) => {
+  if (resizingSide.value) return
+  if (v === 'trace') {
+    sideWidth.value = Math.max(sideWidthBase.value, SIDE_WIDTH_DIFF)
+  } else {
+    sideWidth.value = previewFile.value
+      ? Math.max(sideWidthBase.value, SIDE_WIDTH_DIFF)
+      : sideWidthBase.value
+  }
+})
+
 watch(previewFile, (v) => {
   if (resizingSide.value) return
   sideWidth.value = v
@@ -1849,6 +1743,20 @@ function scrollTermToBottom() {
 watch(busEvents, scrollTermToBottom)
 
 onMounted(() => {
+  // preload-skills-on-mount
+  void loadSkillsList()
+  // [P2-2b] 草稿槽位恢复
+  try {
+    draftSlots.value = readDraftSlots()
+    const activeSaved = localStorage.getItem(DRAFT_ACTIVE_KEY)
+    if (activeSaved) activeDraftId.value = activeSaved
+    const cur = draftSlots.value.find(s => s.id === activeDraftId.value)
+    if (cur && !script.value) script.value = cur.text
+    // 首启：当前 script 内容入 default 槽
+    if (!draftSlots.value.some(s => s.id === activeDraftId.value)) {
+      upsertDraftSlot(activeDraftId.value, script.value || '')
+    }
+  } catch { /* ignore */ }
   try {
     const savedW = localStorage.getItem(SIDE_WIDTH_KEY)
     if (savedW) {
@@ -1866,7 +1774,8 @@ onMounted(() => {
   window.addEventListener('keydown', onGlobalKey)
   window.addEventListener('ai-runner:drag', onTreeDrag)
   window.addEventListener('ai-runner:drop', onTreeDrop)
-  window.addEventListener('ai-runner:drag-cancel', onTreeDragCancel) })
+  window.addEventListener('ai-runner:drag-cancel', onTreeDragCancel)
+})
 
 onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onSideMove)
@@ -1879,7 +1788,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('ai-runner:drop', onTreeDrop)
   window.removeEventListener('ai-runner:drag-cancel', onTreeDragCancel)
   cmView?.destroy()
-  cmView = null })
+  cmView = null
+})
 
 // ---------- 运行时长 ----------
 watch(running, (v) => {
@@ -1908,29 +1818,29 @@ watch(running, (v) => {
         5000,
       )
       if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput(autoFeedbackRequested.value) })
-      else setTimeout(() => { void copyOutput(autoFeedbackRequested.value) }, 3000)
+      else void copyOutput(autoFeedbackRequested.value)
     } else {
       statusText.value = result.value.ok ? '✅ 成功' : '❌ 失败'
       statusClass.value = result.value.ok ? 'ok' : 'err'
       // autoAskOnResult: 失败或只读诊断（成功无改动、非循环）时延迟 3s 自动复制并发给 AI（主动停止除外）
       const isReadonlyProbe = isReadonlyResult(result.value)
-      const AUTO_ASK_DELAY_MS = 3000
+      const AUTO_ASK_DELAY_MS = 0 // [hardpause] 立即执行
       const forceFeedback = autoFeedbackRequested.value
-      const shouldAutoAsk =
-        forceFeedback ||
-        autoTakeoverEnabled.value ||
-        !result.value.ok ||
-        isReadonlyProbe ||
-        result.value.tsc?.ok === false ||
-        result.value.lint?.ok === false ||
-        result.value.test?.ok === false
+      const shouldAutoAsk
+        = forceFeedback
+          || autoTakeoverEnabled.value
+          || !result.value.ok
+          || isReadonlyProbe
+          || result.value.tsc?.ok === false
+          || result.value.lint?.ok === false
+          || result.value.test?.ok === false
       if (shouldAutoAsk && result.value.error !== '已取消') {
         if (forceFeedback) clearAutoFeedback()
         if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput(forceFeedback) })
-        else setTimeout(() => { void copyOutput(forceFeedback) }, AUTO_ASK_DELAY_MS)
+        else void copyOutput(forceFeedback)
       }
       // 清空编辑区模式：脚本快照从 lastRunScript 取（script 已清空）
-      const scriptSnapshot = lastRunScript.value || script.value
+      const scriptSnapshot = lastRunCode.value || lastRunScript.value || script.value
       // 把跑过的脚本记为「已消费」，让后续 AI 回填能直接覆盖（不误伤手动编辑）
       setLastAutoFilled(scriptSnapshot)
       const r = result.value
@@ -1944,9 +1854,7 @@ watch(running, (v) => {
       const hash = fnv1a8(scriptSnapshot)
       addTrace({
         kind: 'run',
-        summary: desc
-          ? `${desc} · ${r.ok ? '成功' : '失败'} exit ${r.code} · ${changes.value.length} 文件变更`
-          : `运行脚本 · ${r.ok ? '成功' : '失败'} exit ${r.code} · ${changes.value.length} 文件变更`,
+        summary: desc || `运行脚本 · exit ${r.code}`,
         payload: {
           script: scriptSnapshot.slice(0, 4000),
           stdout: (r.stdout || '').slice(-4000),
@@ -1990,174 +1898,123 @@ function onHtmlDrop(e: DragEvent) {
   fileSuccess.value = true
   setTimeout(() => { fileSuccess.value = false }, 1500)
 }
+
+const addingAllToEditor = ref(false)
+async function onAddAllClick() {
+  if (!cmView) { toast('编辑器未就绪', 'warn'); return }
+  if (addingAllToEditor.value) return
+  addingAllToEditor.value = true
+  try {
+    const res = await fetch('/__ai/files?depth=6')
+    const data = await res.json()
+    if (data.error) { toast(`加载失败：${data.error}`, 'error'); return }
+    const paths: string[] = []
+    const walk = (nodes: any[]) => {
+      for (const n of nodes || []) {
+        if (n.type === 'file') paths.push(n.path)
+        else if (n.children?.length) walk(n.children)
+      }
+    }
+    walk(data.tree || [])
+    const filtered = paths.filter(p => /\.(ts|tsx|vue|js|jsx|mjs|cjs|md|json|css|scss|html)$/i.test(p))
+    if (!filtered.length) { toast('未找到可插入的文件', 'warn'); return }
+    const insert = `${filtered.map(p => `@${p} `).join('\n')}\n`
+    const view = cmView
+    const pos = view.state.selection.main.head
+    view.dispatch({ changes: { from: pos, insert }, selection: { anchor: pos + insert.length } })
+    view.focus()
+    toast(`已插入 ${filtered.length} 个文件路径`, 'success', 3000)
+  } catch (e) {
+    toast(`插入失败：${String(e)}`, 'error')
+  } finally {
+    addingAllToEditor.value = false
+  }
+}
+
+// [live-typewriter] 打字机式实时输出（terminal 内）
+const twStdout = ref('')
+const twStderr = ref('')
+let twRaf: number | null = null
+function twStep() {
+  twRaf = null
+  const tOut = (liveStdout && liveStdout.value) || ''
+  const tErr = (liveStderr && liveStderr.value) || ''
+  let more = false
+  if (twStdout.value.length < tOut.length) {
+    const step = Math.max(1, Math.min(80, Math.ceil((tOut.length - twStdout.value.length) / 12)))
+    twStdout.value = tOut.slice(0, twStdout.value.length + step)
+    more = true
+  } else if (twStdout.value !== tOut) { twStdout.value = tOut }
+  if (twStderr.value.length < tErr.length) {
+    const step = Math.max(1, Math.min(80, Math.ceil((tErr.length - twStderr.value.length) / 12)))
+    twStderr.value = tErr.slice(0, twStderr.value.length + step)
+    more = true
+  } else if (twStderr.value !== tErr) { twStderr.value = tErr }
+  if (more) twRaf = requestAnimationFrame(twStep)
+}
+function twKick() { if (twRaf === null) twRaf = requestAnimationFrame(twStep) }
+watch(liveStdout, twKick)
+watch(liveStderr, twKick)
+onBeforeUnmount(() => { if (twRaf !== null) cancelAnimationFrame(twRaf) })
+
+// [script-meta-row] 从当前脚本内容解析 @desc/@why/@plan/@done
+const scriptMeta = computed(() => {
+  const code = String((script && script.value) || '')
+  const pick = (name: string): string => {
+    const re = new RegExp(`^[ \\t]*(?://|#)[ \\t]*@${name}[ \\t]*:[ \\t]*(.+)$`, 'm')
+    const m = code.match(re)
+    return m ? m[1].trim() : ''
+  }
+  return {
+    desc: pick('desc'),
+    why: pick('why'),
+    plan: pick('plan'),
+    done: pick('done'),
+  }
+})
+const twLines = computed(() => (twStdout.value || '').split('\n'))
+const twErrLines = computed(() => (twStderr.value || '').split('\n'))
+function lineClass(line: string): string {
+  const t = String(line).replace(/^\s+/, '')
+  if (t.startsWith('▶')) return 'out-step'
+  if (t.startsWith('✓')) return 'out-ok'
+  if (t.startsWith('✗')) return 'out-err'
+  if (t.startsWith('!')) return 'out-warn'
+  if (t.startsWith('⚠')) return 'out-warn'
+  return ''
+}
+const hasScriptMeta = computed(() => {
+  const m = scriptMeta.value
+  return !!(m.desc || m.why || m.plan || m.done)
+})
+
+// [latest-tokens-fix] ts-bar 引用 latestTokens，此处补解构（useAutoLoop 返回 computed）
+const { latestTokens } = useAutoLoop()
 </script>
 
 <style scoped lang="scss">
 /* ============ Layout ============ */
-.pane {
-  display: flex;
-  gap: 0;
-  height: 100%;
-  overflow: hidden;
-}
 
 /* 拖拽条：调整右侧面板宽度 */
-.side-resize-handle {
-  flex-shrink: 0;
-  width: 14px;
-  cursor: col-resize;
-  position: relative;
-  z-index: 1;
-}
+
 /* U.12: 窄屏抽屉 toggle 与 backdrop（桌面不显示） */
-.side-drawer-toggle {
-  display: none;
-  position: fixed;
-  right: 8px;
-  top: 50%;
-  z-index: 40;
-  width: 28px;
-  height: 44px;
-  transform: translateY(-50%);
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--border-2);
-  border-radius: 6px 0 0 6px;
-  background: var(--surface);
-  color: var(--text-2);
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-}
-.side-drawer-toggle.drawer-open {
-  right: 320px;
-  border-radius: 0 6px 6px 0;
-}
-.side-drawer-backdrop {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  background: rgb(15 30 60 / 35%);
-}
-.side-resize-handle::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 8px;
-  bottom: 8px;
-  width: 1px;
-  background: transparent;
-  transform: translateX(-50%);
-  transition:
-    background 0.15s,
-    width 0.15s;
-}
-.side-resize-handle:hover::after,
-.side-resize-handle.active::after {
-  background: var(--primary);
-  width: 2px;
-}
+
 .pane.is-resizing-side,
 .pane.is-resizing-side * {
   user-select: none !important;
   cursor: col-resize !important;
 }
-.side-tabs {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.side-tab {
-  flex: 1;
-  padding: 4px 8px;
-  border: 0;
-  background: transparent;
-  color: var(--text-2);
-  font-size: var(--font-12);
-  cursor: pointer;
-  border-radius: var(--radius-4);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  font-family: inherit;
-}
-.side-tab:hover {
-  background: var(--surface);
-  color: var(--text);
-}
-.side-tab.active {
-  background: var(--surface);
-  color: var(--primary);
-  font-weight: 600;
-}
-.side-tab-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  background: var(--primary-bg);
-  color: var(--primary);
-  border-radius: var(--radius-8);
-  font-size: var(--font-10);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.side-tree {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 6px;
-}
-.side-changes {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
 
-.pane-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  /* no-h-scroll */
-  overflow-x: hidden;
-  overflow-y: hidden;
-  position: relative;
-  gap: 0;
-}
-.pane-side {
-  position: relative;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  /* no-h-scroll */
-  overflow-x: hidden;
-  overflow-y: hidden;
-  transition: width 0.15s ease;
-  height: 100%;
-}
 .pane.is-resizing-side .pane-side {
   transition: none;
 }
+
 /* 变更列表：按内容伸缩，最多占 45% */
 .pane-side :deep(.changes) {
   flex: 1 1 auto;
   min-height: 100px;
 }
+
 /* Diff 查看器：撑满剩余空间 */
 .pane-side :deep(.diff-viewer) {
   flex: 1 1 auto;
@@ -2165,52 +2022,7 @@ function onHtmlDrop(e: DragEvent) {
 }
 
 /* @FILE_PICKER_V1 */
-.file-picker {
-  position: fixed;
-  z-index: 9999;
-  min-width: 260px;
-  max-width: 440px;
-  max-height: 320px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-8);
-  box-shadow: 0 8px 24px rgb(15 30 60 / 15%);
-}
-.fp-input {
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  padding: 8px 10px;
-  font: 12px var(--mono);
-  outline: none;
-  background: transparent;
-  color: var(--text);
-}
-.fp-list {
-  overflow-y: auto;
-  padding: 4px 0;
-}
-.fp-item {
-  padding: 5px 10px;
-  font: 11px/1.4 var(--mono);
-  color: var(--text-2);
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.fp-item.active {
-  background: var(--primary-bg);
-  color: var(--primary);
-}
-.fp-empty {
-  padding: 10px;
-  text-align: center;
-  color: var(--text-3);
-  font-size: var(--font-11);
-}
+
 :deep(.cm-file-tag) {
   background: var(--primary-bg);
   color: var(--primary);
@@ -2231,168 +2043,50 @@ function onHtmlDrop(e: DragEvent) {
 }
 
 /* ============ Bar (共用) ============ */
-.bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  /* tighten-spacing */
-  height: 34px;
-  padding: 0 10px;
-  flex-shrink: 0;
-}
-.editor-bar {
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-}
-.term-bar {
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-}
-.dots {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
+
 .dot {
   width: 11px;
   height: 11px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
 }
+
 .d-red {
   background: #ff5f57;
 }
+
 .d-yellow {
   background: #febc2e;
 }
+
 .d-green {
   background: #28c840;
 }
 
-.file-badge {
-  font: 12px/1 var(--mono, monospace);
-  color: var(--text);
-  font-weight: 600;
-  letter-spacing: 0.1px;
-}
-.term-title {
-  font-weight: 500;
-  color: var(--text-2);
-}
 .meta {
   font-size: var(--font-11);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
-.bar-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 
 /* ============ 编辑器 ============ */
 .editor {
-  flex: 4 1 0;
-  min-height: 100px;
+  flex: 1 1 300px;
+  min-height: 0;
   transition:
     border-color 0.15s,
     box-shadow 0.15s;
-}
-.editor:focus-within {
-  border-color: rgb(37 99 235 / 40%);
-  box-shadow: 0 0 0 3px rgb(37 99 235 / 8%);
-}
-.editor.is-running {
-  border-color: rgb(37 99 235 / 40%);
-}
-.editor-body {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-  background: var(--surface);
-}
-.cm-host {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  overflow: hidden;
-  /* editor-no-h-scroll */
-}
-.gutter {
-  width: 44px;
-  padding: 10px 0;
-  background: var(--surface-2);
-  border-right: 1px solid var(--border);
-  overflow: hidden;
-  user-select: none;
-  flex-shrink: 0;
-}
-.gutter-num {
-  padding: 0 8px 0 0;
-  font: 12px/20px var(--mono, monospace);
-  color: var(--text-3);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.editor-textarea {
-  flex: 1;
-  min-width: 0;
-  padding: 10px 14px;
-  font: 12px/20px var(--mono, monospace);
-  color: var(--text);
-  background: transparent;
-  border: 0;
-  outline: 0;
-  resize: none;
-  overflow: auto;
-  tab-size: 2;
-  caret-color: var(--primary);
-}
-.editor-textarea::placeholder {
-  color: var(--text-3);
-  opacity: 0.75;
+  background: var(--surface) !important;
+  border-top: 1px solid var(--border) !important;
 }
 
-.editor-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  /* tighten-spacing */
-  padding: 5px 10px;
-  background: var(--surface-2);
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
+.editor.is-running {
+  border-color: rgb(88 166 255 / 40%);
 }
+
 .foot-spacer {
   flex: 1;
 }
-.loc-link {
-  color: var(--success);
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  cursor: pointer;
-}
-.loc-link:hover {
-  color: var(--success);
-  background: rgb(5 150 105 / 10%);
-}
-.meta-running {
-  color: var(--success);
-  font-variant-numeric: tabular-nums;
-}
-.git-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--font-11);
-  color: var(--text-2);
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-.git-toggle input {
-  margin: 0;
-}
+
 .git-after {
   font-family: var(--mono, monospace);
   font-size: var(--font-11);
@@ -2400,12 +2094,14 @@ function onHtmlDrop(e: DragEvent) {
   margin-right: 8px;
   cursor: help;
 }
+
 .persist-warning {
   font-size: var(--font-11);
   color: var(--danger);
   margin-right: 8px;
   cursor: help;
 }
+
 .req-err-badge {
   padding: 2px 8px;
   border-radius: var(--radius-10);
@@ -2431,144 +2127,61 @@ function onHtmlDrop(e: DragEvent) {
   transition: 0.12s;
   color: #fff;
 }
+
 .primary-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
 .primary-btn .ico {
   font-size: var(--font-10);
   line-height: 1;
 }
 
-.primary-btn.run {
-  background: var(--primary, #2563eb);
-  box-shadow: 0 1px 2px rgb(37 99 235 / 30%);
-}
-.btn-kbd {
-  display: inline-block;
-  padding: 0 4px;
-  margin-left: 6px;
-  background: rgb(255 255 255 / 18%);
-  border: 1px solid rgb(255 255 255 / 28%);
-  border-bottom-width: 2px;
-  border-radius: var(--radius-3);
-  font: 10px/1.5 var(--mono, monospace);
-  color: rgb(255 255 255 / 92%);
-  vertical-align: middle;
-}
 .primary-btn.head-run {
   padding: 5px 14px;
   font-size: var(--font-12);
   font-weight: 600;
 }
-.primary-btn.takeover {
-  background: var(--surface);
-  color: var(--primary);
-  border: 1px solid var(--primary);
+
+.primary-btn.ghost {
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--border-2);
   box-shadow: none;
 }
-.primary-btn.takeover:hover:not(:disabled) {
-  background: var(--primary-bg);
-  color: var(--primary);
-}
-.primary-btn.run:hover:not(:disabled) {
-  background: var(--primary-hover, #1d4ed8);
-}
-.primary-btn.stop {
-  background: #ef4444;
-  box-shadow: 0 1px 2px rgb(239 68 68 / 30%);
-}
-.primary-btn.stop:hover:not(:disabled) {
-  background: #dc2626;
-}
-.term-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  border-radius: var(--radius-6);
-  border: 1px solid transparent;
-  background: transparent;
-  font-size: var(--font-12);
-  font-weight: 500;
-  cursor: pointer;
-  transition: 0.14s;
-  line-height: 1.3;
-  font-family: inherit;
-  white-space: nowrap;
-}
-.term-btn:disabled {
-  opacity: 0.38;
-  cursor: not-allowed;
-}
-.term-ico {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-}
-.term-btn.copy {
-  color: #60a5fa;
-  border-color: rgb(96 165 250 / 45%);
-}
-.term-btn.copy:hover:not(:disabled) {
-  background: rgb(96 165 250 / 14%);
-  border-color: #60a5fa;
-  color: #93c5fd;
-}
-.term-btn.copy.done {
-  color: var(--success);
-  border-color: rgb(5 150 105 / 50%);
-  background: rgb(5 150 105 / 12%);
-}
-.term-btn.copy.loading {
-  color: #60a5fa;
-  border-color: rgb(96 165 250 / 50%);
-  background: rgb(96 165 250 / 10%);
-  cursor: progress;
-}
-.term-ico.spin {
-  animation: loop-spin 0.9s linear infinite;
-}
 
-.term-btn.ask-panel {
-  color: var(--primary, #2563eb);
-  border-color: var(--primary, #2563eb);
-  background: var(--primary-bg, #eaf2ff);
-}
-.term-btn.ask-panel:hover:not(:disabled) {
-  background: var(--primary, #2563eb);
-  border-color: var(--primary, #2563eb);
-  color: #fff;
+.primary-btn.ghost:hover:not(:disabled) {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-bg);
 }
 
 .ghost-btn {
   padding: 4px 10px;
   background: transparent;
-  border: 0;
-  border-radius: var(--radius-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-6);
   color: var(--text-2);
   font-size: var(--font-12);
   cursor: pointer;
-  transition: 0.12s;
-}
-.ghost-btn:hover:not(:disabled) {
-  background: var(--surface-2);
-  color: var(--text);
-}
-.ghost-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  width: auto;
+  min-width: auto;
+  flex-wrap: nowrap;
 }
 
 /* ============ 快捷键提示 ============ */
-.kbd-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: var(--font-11);
-  color: var(--text-3);
-  user-select: none;
-}
+
 .kbd-hint kbd {
   display: inline-block;
   padding: 1px 5px;
@@ -2581,6 +2194,7 @@ function onHtmlDrop(e: DragEvent) {
   color: var(--text-2);
   text-align: center;
 }
+
 .kbd-hint .slash,
 .kbd-hint .plus {
   color: var(--text-3);
@@ -2595,65 +2209,13 @@ function onHtmlDrop(e: DragEvent) {
   font-size: var(--font-12);
   color: var(--text-3);
 }
+
 .status.ok {
   color: var(--success);
 }
+
 .status.err {
   color: var(--danger);
-}
-.s-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-/* status-moved */
-.head-status {
-  padding: 2px 8px;
-  border-radius: var(--radius-10);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-}
-.head-status.ok {
-  color: var(--success);
-  background: var(--success-bg);
-  border-color: transparent;
-}
-.head-status.err {
-  color: var(--danger);
-  background: var(--danger-bg);
-  border-color: transparent;
-}
-.head-meta {
-  font-variant-numeric: tabular-nums;
-}
-
-/* ============ 拖拽条 ============ */
-.split-handle {
-  flex-shrink: 0;
-  height: 8px;
-  cursor: row-resize;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  transition: background 0.15s;
-}
-.split-handle:hover,
-.split-handle.active {
-  background: rgb(37 99 235 / 6%);
-}
-.split-grip {
-  width: 36px;
-  height: 3px;
-  border-radius: var(--radius-2);
-  background: var(--border-2);
-  transition: 0.15s;
-}
-.split-handle:hover .split-grip,
-.split-handle.active .split-grip {
-  background: var(--primary);
-  width: 52px;
 }
 
 /* 键盘控制时：禁止选中 */
@@ -2663,600 +2225,265 @@ function onHtmlDrop(e: DragEvent) {
   cursor: row-resize !important;
 }
 
-/* ============ 终端 ============ */
-.terminal {
-  flex: 6 1 0;
-  min-height: 200px;
-  background: #1e1e1e;
-  border-color: #2a2a2a;
-  margin-bottom: 8px;
-}
-.terminal .term-bar {
-  background: #252526;
-  border-bottom: 1px solid #333;
-}
-.terminal .term-bar .file-badge {
-  color: #d4d4d4;
-}
-.terminal .term-bar .meta {
-  color: #808080;
-}
-.terminal .term-bar .ghost-btn {
-  color: #9d9d9d;
-}
-.terminal .term-bar .ghost-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 8%);
-  color: #e0e0e0;
+@keyframes ai-caret-blink {
+  to {
+    visibility: hidden;
+  }
 }
 
-.exit-badge {
-  padding: 2px 8px;
-  border-radius: var(--radius-10);
-  font: 11px/1.4 var(--mono, monospace);
+.bubble-head {
+  margin-bottom: 3px;
+  color: var(--term-text-3);
+  font-size: 10px;
   font-weight: 600;
-}
-.exit-badge.ok {
-  background: rgb(46 160 67 / 18%);
-  color: var(--success);
-}
-.exit-badge.err {
-  background: rgb(248 81 73 / 18%);
-  color: #f48771;
+  letter-spacing: 0.2px;
 }
 
-.term-body {
-  flex: 1;
-  min-height: 0;
-  /* no-h-scroll */
-  overflow-x: hidden;
-  overflow-y: auto;
-  /* tighten-spacing */
-  padding: 0;
-  background: #181818;
-  color: #d4d4d4;
-}
-.term-body::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-.term-body::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 12%);
-  border-radius: var(--radius-4);
-}
-.term-body::-webkit-scrollbar-thumb:hover {
-  background: rgb(255 255 255 / 20%);
+.bubble-body .md-h {
+  margin: 3px 0 2px;
+  font-size: 11px;
+  color: var(--term-accent);
+  text-transform: none;
+  letter-spacing: 0.3px;
 }
 
-/* 空状态 */
-.term-ai-thinking {
-  padding: 10px 14px;
-  background: rgb(255 255 255 / 2%);
-  border-left: 3px solid #60a5fa;
+.bubble-body code {
+  padding: 1px 4px;
+  background: var(--term-chip-bg-2);
+  border-radius: var(--radius-2);
+  font: 11px var(--mono, monospace);
+  color: var(--term-code-color);
+}
+
+.bubble-body strong {
+  color: var(--warning);
+}
+
+.bubble-body .md-code {
   margin: 4px 0;
-}
-.term-ai-label {
-  gap: 6px;
-  padding: 0 0 6px;
-}
-.term-ai-label .run-spinner {
-  width: 10px;
-  height: 10px;
-}
-.term-ai-text {
-  margin: 0;
-  padding: 0;
-  font: 12px/1.65 var(--mono, monospace);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  color: #d4d4d4;
-  max-height: 200px;
-  overflow: auto;
-}
-.term-ai-caret {
-  display: inline-block;
-  color: #60a5fa;
-  animation: ai-caret-blink 1s steps(2, start) infinite;
-}
-@keyframes ai-caret-blink { to { visibility: hidden; } }
-
-.chat-list { display: flex; flex-direction: column; gap: 12px; padding: 14px 18px 20px; font: 13px/1.65 var(--mono, monospace); }
-.chat-bubble { max-width: 84%; padding: 10px 14px; border-radius: 12px; word-break: break-word; line-height: 1.7; box-shadow: 0 1px 2px rgb(0 0 0 / 25%); }
-.bubble-right { align-self: flex-end; background: linear-gradient(180deg, rgb(37 99 235 / 26%), rgb(37 99 235 / 18%)); border: 1px solid rgb(37 99 235 / 45%); border-bottom-right-radius: 4px; }
-.bubble-left { align-self: flex-start; background: rgb(255 255 255 / 6%); border: 1px solid rgb(255 255 255 / 10%); border-bottom-left-radius: 4px; }
-.bubble-think { background: rgb(0 0 0 / 30%); border-left: 3px solid #6a737d; color: #9d9d9d; font-size: 12px; border-radius: 8px; }
-.bubble-head { margin-bottom: 6px; color: #7a8694; font-size: 11px; font-weight: 600; letter-spacing: 0.3px; }
-.bubble-body { color: #dbe2ea; }
-.bubble-body .md-h { margin: 6px 0 3px; font-size: 12px; color: #79b8ff; text-transform: none; letter-spacing: 0.3px; }
-.bubble-body .md-p { margin: 2px 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
-.bubble-body .md-ul { margin: 2px 0; padding-left: 18px; }
-.bubble-body code { padding: 1px 4px; background: rgb(255 255 255 / 8%); border-radius: 3px; font: 11px var(--mono, monospace); color: #9cdcfe; }
-.bubble-body strong { color: #dcdcaa; }
-.bubble-body .md-code { margin: 6px 0; border: 1px solid #2f2f2f; border-radius: var(--radius-4); overflow: hidden; background: rgb(0 0 0 / 25%); }
-.bubble-body .md-code-bar { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; background: rgb(255 255 255 / 4%); border-bottom: 1px solid #2f2f2f; }
-.bubble-body .md-code-lang { color: #9d9d9d; font: 11px var(--mono, monospace); }
-.bubble-body .md-code-acts { display: flex; gap: 6px; }
-.bubble-body .md-code-acts button { padding: 1px 8px; border: 1px solid #3a3a3a; border-radius: var(--radius-3); background: transparent; color: #9d9d9d; font: 10px var(--mono, monospace); cursor: pointer; }
-.bubble-body .md-code-acts button:hover { color: #d4d4d4; border-color: #d4d4d4; }
-.bubble-body .md-code summary { list-style: none; padding: 0; }
-.bubble-body .md-code summary::-webkit-details-marker { display: none; }
-.bubble-body :deep(.hljs-keyword), .bubble-body :deep(.hljs-literal), .tree-body :deep(.hljs-keyword), .tree-body :deep(.hljs-literal) { color: #569cd6; }
-.bubble-body :deep(.hljs-string), .tree-body :deep(.hljs-string) { color: #ce9178; }
-.bubble-body :deep(.hljs-number), .tree-body :deep(.hljs-number) { color: #b5cea8; }
-.bubble-body :deep(.hljs-comment), .tree-body :deep(.hljs-comment) { color: #6a9955; font-style: italic; }
-.bubble-body :deep(.hljs-function), .bubble-body :deep(.hljs-title), .tree-body :deep(.hljs-function), .tree-body :deep(.hljs-title) { color: #dcdcaa; }
-.bubble-body :deep(.hljs-variable), .bubble-body :deep(.hljs-params), .bubble-body :deep(.hljs-attr), .tree-body :deep(.hljs-variable), .tree-body :deep(.hljs-params), .tree-body :deep(.hljs-attr) { color: #9cdcfe; }
-.bubble-body :deep(.hljs-built_in), .bubble-body :deep(.hljs-type), .tree-body :deep(.hljs-built_in), .tree-body :deep(.hljs-type) { color: #4ec9b0; }
-.bubble-body :deep(.hljs-meta), .tree-body :deep(.hljs-meta) { color: #569cd6; }
-.bubble-body :deep(.hljs-section), .tree-body :deep(.hljs-section) { color: #4ec9b0; }
-.bubble-body :deep(.hljs-symbol), .bubble-body :deep(.hljs-bullet), .tree-body :deep(.hljs-symbol), .tree-body :deep(.hljs-bullet) { color: #d7ba7d; }
-
-.bubble-body .md-code pre { margin: 0; padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: 11px/1.55 var(--mono, monospace); color: #c9d1d9; }
-.chat-think { align-self: flex-start; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgb(0 0 0 / 22%); border-left: 3px solid #6a737d; border-radius: 8px; color: #9d9d9d; font-size: 12px; cursor: pointer; max-width: 84%; transition: background 0.15s; }
-.chat-think:hover { background: rgb(255 255 255 / 6%); color: #c9d1d9; }
-.chat-step {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
-  margin: 2px 0;
-  border-radius: var(--radius-8);
-  background: rgb(255 255 255 / 3%);
-  border: 1px solid rgb(255 255 255 / 6%);
-  border-left: 3px solid #6a737d;
-  font: 12px/1.4 var(--mono, monospace);
-  color: #c9d1d9;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-.chat-step:hover { background: rgb(255 255 255 / 5%); }
-.chat-step.state-pending { border-left-color: #6a737d; }
-.chat-step.state-running { border-left-color: #60a5fa; background: rgb(96 165 250 / 6%); }
-.chat-step.state-done { border-left-color: #10b981; }
-.chat-step.state-error { border-left-color: #f87171; background: rgb(248 113 113 / 8%); }
-.chat-step .step-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #6a737d;
-  flex-shrink: 0;
-}
-.chat-step.state-running .step-dot { background: #60a5fa; animation: step-pulse 1s ease-in-out infinite; }
-.chat-step.state-done .step-dot { background: #10b981; }
-.chat-step.state-error .step-dot { background: #f87171; }
-.chat-step .step-icon { font-size: 12px; flex-shrink: 0; }
-.chat-step .step-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-step .step-time { font-size: 11px; color: #6a737d; font-variant-numeric: tabular-nums; flex-shrink: 0; }
-.chat-step .step-state {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  padding: 1px 8px;
-  border-radius: 10px;
-  background: rgb(255 255 255 / 6%);
-  color: #9d9d9d;
-  flex-shrink: 0;
-}
-.chat-step.state-running .step-state { background: rgb(96 165 250 / 22%); color: #93c5fd; }
-.chat-step.state-done .step-state { background: rgb(16 185 129 / 18%); color: #6ee7b7; }
-.chat-step.state-error .step-state { background: rgb(248 113 113 / 22%); color: #fca5a5; }
-@keyframes step-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-.chat-sys { align-self: center; display: flex; align-items: center; gap: 8px; padding: 2px 10px; color: #5b6673; font-size: 10px; opacity: 0.85; max-width: 90%; }
-.sys-tag { padding: 1px 8px; border: 1px dashed rgb(255 255 255 / 12%); border-radius: 10px; color: #7a8694; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; }
-.sys-time { color: #4f5a66; flex-shrink: 0; }
-
-.session-tree { padding: 8px 12px; font: 12px/1.6 var(--mono, monospace); }
-.tree-node { margin-bottom: 1px; }
-.tree-head { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: var(--radius-4); cursor: pointer; }
-.tree-head:hover { background: rgb(255 255 255 / 5%); }
-.tree-caret { font-size: 10px; color: #6a737d; transition: transform 0.15s; }
-.tree-caret.open { transform: rotate(90deg); }
-.tree-icon { flex-shrink: 0; width: 18px; text-align: center; }
-.tree-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d4d4d4; }
-.tree-time { flex-shrink: 0; color: #6a737d; font-size: 10px; }
-.tree-node.is-ai .tree-title { color: #9cdcfe; }
-.tree-node.is-run .tree-title { color: #b5cea8; }
-.tree-node.is-loop .tree-title { color: #dcdcaa; }
-.tree-node.is-other .tree-title { color: #808080; }
-.tree-node.is-stream { margin-left: 0; }
-.think-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; cursor: pointer; color: #808080; font-size: 11px; border-radius: var(--radius-4); }
-.think-row:hover { background: rgb(255 255 255 / 4%); }
-.think-icon { font-size: 12px; }
-.think-label { flex: 1; min-width: 0; color: #9d9d9d; }
-.think-caret { transition: transform 0.15s; }
-.think-caret.open { transform: rotate(90deg); }
-.think-body { margin: 2px 0 8px 24px; padding: 8px 12px; background: rgb(0 0 0 / 15%); border-left: 2px solid #6a737d; border-radius: var(--radius-4); font: 11px/1.6 var(--mono, monospace); color: #9d9d9d; }
-.think-body .md-p, .think-body .md-ul { color: #9d9d9d; }
-.think-body .md-h { color: #9d9d9d; }
-.md-code-bar { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; background: rgb(255 255 255 / 4%); border-bottom: 1px solid #2f2f2f; }
-.md-code-lang { color: #9d9d9d; font: 11px var(--mono, monospace); }
-.md-code-acts { display: flex; gap: 6px; }
-.md-code-acts button { padding: 1px 8px; border: 1px solid #3a3a3a; border-radius: var(--radius-3); background: transparent; color: #9d9d9d; font: 10px var(--mono, monospace); cursor: pointer; }
-.md-code-acts button:hover { color: #d4d4d4; border-color: #d4d4d4; }
-.md-code summary { list-style: none; padding: 0; }
-.md-code summary::-webkit-details-marker { display: none; }
-.tree-node.is-ask .tree-title { color: #d4d4d4; background: rgb(0 0 0 / 20%); padding: 4px 8px; border-radius: var(--radius-4); }
-
-.tree-body { margin: 4px 0 8px 24px; padding: 8px 12px; background: rgb(0 0 0 / 20%); border-radius: var(--radius-6); }
-.tree-body .md-h { margin: 8px 0 4px; font-size: 12px; font-weight: 700; color: #79b8ff; letter-spacing: 0.3px; text-transform: none; }
-.tree-body .md-h:first-child { margin-top: 0; }
-.tree-body .md-p { margin: 2px 0; color: #d4d4d4; font: 12px/1.65 var(--mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
-.tree-body .md-ul { margin: 2px 0; padding-left: 18px; color: #d4d4d4; font: 12px/1.65 var(--mono, monospace); }
-.tree-body code { padding: 1px 4px; background: rgb(255 255 255 / 8%); border-radius: 3px; font: 11px var(--mono, monospace); color: #9cdcfe; }
-.tree-body strong { color: #dcdcaa; }
-.tree-body .md-code { margin: 6px 0; border: 1px solid #2f2f2f; border-radius: var(--radius-4); overflow: hidden; background: rgb(0 0 0 / 25%); }
-.tree-body .md-code summary { padding: 4px 10px; cursor: pointer; color: #808080; font: 11px var(--mono, monospace); background: rgb(255 255 255 / 3%); user-select: none; }
-.tree-body .md-code summary:hover { color: #d4d4d4; }
-.tree-body .md-code[open] summary { border-bottom: 1px solid #2f2f2f; }
-.tree-body .md-code pre { margin: 0; padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: 11px/1.55 var(--mono, monospace); color: #c9d1d9; }
-.tree-empty { padding: 60px 20px; text-align: center; color: #808080; }
-
-.term-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 100%;
-  padding: 24px 16px;
-  text-align: center;
-}
-.empty-icon {
-  font-size: 28px;
-  opacity: 0.6;
-  margin-bottom: 4px;
-}
-.empty-icon.dim {
-  opacity: 0.35;
-}
-.empty-title {
-  font:
-    13px/1.4 -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    sans-serif;
-  font-weight: 600;
-  color: #d4d4d4;
-}
-.empty-sub {
-  font-size: var(--font-11);
-  color: #808080;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-.empty-sub kbd {
-  display: inline-block;
-  padding: 1px 5px;
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
-  border-bottom-width: 2px;
-  border-radius: var(--radius-3);
-  font: 10px/1 var(--mono, monospace);
-  color: #d4d4d4;
-}
-.empty-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-  max-width: 620px;
-  width: 100%;
-  margin-top: 8px;
-}
-.empty-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 12px 14px;
-  background: #252526;
-  border: 1px solid #2f2f2f;
-  border-radius: var(--radius-6);
-  text-align: left;
-}
-.empty-card-ico {
-  font-size: 16px;
-  opacity: 0.85;
-}
-.empty-card-title {
-  font-size: var(--font-12);
-  font-weight: 600;
-  color: #d4d4d4;
-}
-.empty-card-desc {
-  font-size: var(--font-11);
-  color: #808080;
-  line-height: 1.5;
-}
-.empty-card-desc code {
-  padding: 0 4px;
-  background: #2a2a2a;
-  border-radius: var(--radius-3);
-  font-family: var(--mono, monospace);
-  font-size: 10px;
-  color: #d4d4d4;
-}
-.term-running.term-empty {
-  align-items: flex-start;
-  justify-content: flex-start;
-  text-align: left;
-  padding: 14px 16px;
-}
-.term-running .empty-title {
-  color: var(--success);
-}
-.term-running .empty-sub {
-  color: var(--success);
-  opacity: 0.85;
-}
-.term-shell-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 100%;
-  padding: 0 4px;
-  font: 13px/1.6 var(--mono, monospace);
-  color: #d4d4d4;
-}
-.term-shell-prompt {
-  flex-shrink: 0;
-  color: var(--success);
-  font-weight: 700;
-}
-.term-shell-cmd {
-  min-width: 0;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius-4);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  background: var(--term-code-bg);
+  border-color: var(--term-sep);
 }
-.term-shell-wait {
-  flex-shrink: 0;
-  color: var(--success);
-  font-size: var(--font-14);
-  font-variant-numeric: tabular-nums;
+
+.bubble-body .md-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--term-chip-bg);
+  border-bottom: 1px solid var(--surface-2);
+  border-bottom-color: var(--term-sep);
 }
-.term-live-out,
-.term-live-err {
-  align-self: stretch;
-  margin: 8px 0 0;
-  padding: 8px 10px;
-  font: 11px/1.6 var(--mono, monospace);
-  /* no-h-scroll */
+
+.bubble-body .md-code-lang {
+  color: var(--term-text-2);
+  font: 11px var(--mono, monospace);
+}
+
+.bubble-body .md-code-acts {
+  display: flex;
+  gap: 6px;
+}
+
+.bubble-body .md-code-acts button {
+  padding: 1px 8px;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius-3);
+  background: transparent;
+  color: var(--term-text-2);
+  font: 10px var(--mono, monospace);
+  cursor: pointer;
+  border-color: var(--term-chip-border);
+}
+
+.bubble-body .md-code summary {
+  list-style: none;
+  padding: 0;
+}
+
+.bubble-body .md-code summary::-webkit-details-marker {
+  display: none;
+}
+
+.bubble-body :deep(.hljs-keyword),
+.bubble-body :deep(.hljs-literal),
+.tree-body :deep(.hljs-keyword),
+.tree-body :deep(.hljs-literal) {
+  color: #569cd6;
+}
+
+.bubble-body :deep(.hljs-string),
+.tree-body :deep(.hljs-string) {
+  color: #ce9178;
+}
+
+.bubble-body :deep(.hljs-number),
+.tree-body :deep(.hljs-number) {
+  color: #b5cea8;
+}
+
+.bubble-body :deep(.hljs-comment),
+.tree-body :deep(.hljs-comment) {
+  color: #6a9955;
+  font-style: italic;
+}
+
+.bubble-body :deep(.hljs-function),
+.bubble-body :deep(.hljs-title),
+.tree-body :deep(.hljs-function),
+.tree-body :deep(.hljs-title) {
+  color: var(--warning);
+}
+
+.bubble-body :deep(.hljs-variable),
+.bubble-body :deep(.hljs-params),
+.bubble-body :deep(.hljs-attr),
+.tree-body :deep(.hljs-variable),
+.tree-body :deep(.hljs-params),
+.tree-body :deep(.hljs-attr) {
+  color: #9cdcfe;
+}
+
+.bubble-body :deep(.hljs-built_in),
+.bubble-body :deep(.hljs-type),
+.tree-body :deep(.hljs-built_in),
+.tree-body :deep(.hljs-type) {
+  color: #4ec9b0;
+}
+
+.bubble-body :deep(.hljs-meta),
+.tree-body :deep(.hljs-meta) {
+  color: #569cd6;
+}
+
+.bubble-body :deep(.hljs-section),
+.tree-body :deep(.hljs-section) {
+  color: #4ec9b0;
+}
+
+.bubble-body :deep(.hljs-symbol),
+.bubble-body :deep(.hljs-bullet),
+.tree-body :deep(.hljs-symbol),
+.tree-body :deep(.hljs-bullet) {
+  color: #d7ba7d;
+}
+
+.bubble-body .md-code pre {
+  margin: 0;
+  padding: 8px 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-  color: #e6edf3;
-  background: rgb(255 255 255 / 3%);
-  border-radius: var(--radius-6);
+  font: 11px/1.55 var(--mono, monospace);
+  color: var(--term-text);
 }
-.term-live-err {
-  color: #f48771;
-  background: rgb(248 81 73 / 8%);
-}
-.run-ico {
-  display: inline-block;
-  margin-left: 4px;
-  font-size: var(--font-10);
-  animation: run-pulse 1s ease-in-out infinite;
-}
-.run-status-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  align-self: flex-start;
-}
-.run-spinner {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border: 2px solid rgb(255 255 255 / 25%);
-  border-top-color: var(--success);
-  border-radius: 50%;
-  animation: run-spin 0.7s linear infinite;
-  vertical-align: middle;
+
+.chat-step .step-time {
+  font-size: 11px !important;
+  color: var(--text-3, var(--text-3)) !important;
+  font-variant-numeric: tabular-nums !important;
   flex-shrink: 0;
+  flex: 0 0 auto !important;
+  align-self: flex-start !important;
+  margin-top: 0 !important;
+  opacity: 0.9 !important;
+  padding-right: 6px !important;
 }
-@keyframes run-spin { to { transform: rotate(360deg); } }
-.run-frame {
-  display: inline-flex;
+
+@keyframes step-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.md-code-bar {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  min-width: 14px;
-  font: 14px/1 var(--mono, monospace);
-  color: var(--success);
-  text-shadow: 0 0 8px rgb(5 150 105 / 55%);
-  user-select: none;
-  font-variant-numeric: tabular-nums;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--term-chip-bg);
+  border-bottom: 1px solid var(--surface-2);
+  border-bottom-color: var(--term-sep);
 }
-.run-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--font-11);
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  color: var(--success);
-  text-shadow: 0 0 8px rgb(5 150 105 / 35%);
+
+.md-code-lang {
+  color: var(--term-text-2);
+  font: 11px var(--mono, monospace);
 }
-.run-elapsed {
-  margin-top: 6px;
-  font-size: var(--font-11);
-  color: #7a8694;
-  letter-spacing: 0.3px;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.9;
+
+.md-code-acts {
+  display: flex;
+  gap: 6px;
 }
+
+.md-code-acts button {
+  padding: 1px 8px;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius-3);
+  background: transparent;
+  color: var(--term-text-2);
+  font: 10px var(--mono, monospace);
+  cursor: pointer;
+  border-color: var(--term-chip-border);
+}
+
+.md-code summary {
+  list-style: none;
+  padding: 0;
+}
+
+.md-code summary::-webkit-details-marker {
+  display: none;
+}
+
+@keyframes run-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes run-pulse {
   0%,
   100% {
     opacity: 1;
     transform: translateX(0);
   }
+
   50% {
     opacity: 0.4;
     transform: translateX(3px);
   }
 }
 
-/* 段落 */
-.term-sections {
-  display: flex;
-  flex-direction: column;
-}
-.term-status {
-  padding-bottom: 4px;
-}
-.term-status.ok .term-status-detail {
-  color: var(--success);
-}
-.term-status.err .term-status-detail {
-  color: #f48771;
-}
-.term-status-detail {
-  margin-left: auto;
-  font-size: var(--font-11);
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  color: #9d9d9d;
-  font-variant-numeric: tabular-nums;
-  user-select: text;
-}
-.term-summary { padding-bottom: 4px; }
-.term-summary .term-label { gap: 6px; }
-.term-summary-text {
-  margin-left: 4px;
-  color: #9d9d9d;
-  font-size: var(--font-11);
-  letter-spacing: 0;
-  text-transform: none;
-  font-family: var(--mono, monospace);
-}
-.term-summary-line {
-  flex: 1;
-  min-width: 0;
-  color: #d4d4d4;
-  font: 12px/1.5 var(--mono, monospace);
-  letter-spacing: 0;
-  text-transform: none;
-}
-.term-line-summary.err .term-summary-line { color: #f48771; }
-.term-line-value { margin-left: auto; color: #9d9d9d; font-size: var(--font-11); font-family: var(--mono, monospace); letter-spacing: 0; text-transform: none; }
-.term-line-value.err { color: #f48771; }
-.term-section + .term-section {
-  border-top: 1px solid #2a2a2a;
-  /* tighten-spacing */
-  margin-top: 5px;
-  padding-top: 8px;
-}
-.term-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 16px 8px;
-  font: 11px/1 var(--mono, monospace);
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-}
-.prompt-char {
-  color: var(--success);
-  font-size: var(--font-12);
-}
-.prompt-char.err {
-  color: #f48771;
-}
-.label-text {
-  color: #9d9d9d;
-}
-.label-text.err {
-  color: #f48771;
-}
-
 /* ============ Side ============ */
-.side-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: var(--surface);
-  border: 1px dashed var(--border-2);
-  border-radius: var(--radius-10);
-  color: var(--text-3);
-}
-.side-empty-icon {
-  font-size: 28px;
-  opacity: 0.5;
-}
-.side-empty-text {
-  font-size: var(--font-12);
-}
 
 /* ============ Overlay ============ */
-.overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  border-radius: var(--radius-10);
-}
-.overlay.drop {
-  background: rgb(37 99 235 / 8%);
-}
-.overlay.success {
-  background: rgb(5 150 105 / 10%);
-  animation: fade-in 0.15s ease-out;
-}
-.overlay-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 20px 28px;
-  background: #fff;
-  border-radius: var(--radius-10);
-  box-shadow: 0 6px 24px rgb(15 30 60 / 18%);
-  animation: pop-in 0.2s ease-out;
-}
-.overlay-card.drop {
-  border: 2px dashed var(--primary);
-}
-.overlay-card.success {
-  border: 2px solid var(--success);
-}
-.overlay-icon {
-  font-size: 26px;
-}
-.overlay-text {
-  font-size: var(--font-13);
-  font-weight: 600;
-}
-.overlay-card.drop .overlay-text {
-  color: var(--primary);
-}
-.overlay-card.success .overlay-text {
-  color: var(--success);
-}
+
 @keyframes pop-in {
   from {
     transform: scale(0.9);
     opacity: 0;
   }
+
   to {
     transform: scale(1);
     opacity: 1;
   }
 }
+
 @keyframes fade-in {
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -3264,493 +2491,319 @@ function onHtmlDrop(e: DragEvent) {
 
 @media (max-width: 1100px) {
   .pane {
-    flex-direction: column;
-    overflow: visible;
+    display: flex;
+    flex-direction: row;
+    gap: 0 !important;
+    height: 100%;
+    overflow: hidden;
+    padding: 0 !important;
   }
-  .side-resize-handle {
-    display: none;
-  }
-  .side-drawer-toggle {
-    display: inline-flex;
-  }
-  .side-drawer-backdrop {
-    display: block;
-  }
+
   /* U.12: 窄屏 pane-side 改右侧抽屉 */
-  .pane-side {
-    position: fixed !important;
-    top: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    width: 320px !important;
-    height: 100vh !important;
-    z-index: 35 !important;
-    transform: translateX(100%) !important;
-    transition: transform 0.22s ease !important;
-    background: var(--surface);
-    border-left: 1px solid var(--border);
-    padding: 8px;
-    box-sizing: border-box;
-  }
-  .pane-side.drawer-open {
-    transform: translateX(0) !important;
-  }
+
   .pane-side :deep(.changes) {
     max-height: 42%;
   }
-  .editor-bar,
-  .term-bar {
-    gap: 6px;
-  }
-  .kbd-hint {
-    display: none;
-  }
 }
+
 @media (max-width: 720px) {
-  .pane-side {
-    height: 260px;
-  }
   .bar {
-    padding: 0 8px;
+    display: flex;
+    align-items: center;
     gap: 6px;
-  }
-  .gutter {
-    width: 34px;
-  }
-  .gutter-num {
-    padding-right: 6px;
-    font-size: var(--font-11);
-  }
-  .editor-textarea {
-    padding: 8px 10px;
-  }
-  .tpl-bar {
-    padding: 4px 8px;
+    height: 34px;
+    padding: 0 8px;
+    flex-shrink: 0;
   }
 }
 
-.tpl-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  /* tighten-spacing */
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
-  flex-shrink: 0;
-  overflow-x: auto;
-}
-.tpl-label {
-  font-size: var(--font-11);
-  font-weight: 600;
-  color: var(--text-3);
-  letter-spacing: 0.3px;
-  flex-shrink: 0;
-  margin-right: 2px;
-}
-.tpl-chip {
-  padding: 3px 10px;
-  border: 1px solid var(--border-2);
-  border-radius: 12px;
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: var(--font-11);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: 0.12s;
-  font-family: inherit;
-  flex-shrink: 0;
-}
-.draft-select {
-  max-width: 120px;
-  padding: 3px 8px;
-  border: 1px solid var(--border-2);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text-2);
-  font: 11px/1.4 var(--mono, monospace);
-  cursor: pointer;
-  outline: 0;
-}
-.draft-select:focus {
-  border-color: var(--primary);
-}
-.draft-del {
-  padding: 2px 6px;
-  font-size: 14px;
-  line-height: 1;
-}
-.tpl-chip:hover {
-  background: var(--primary-bg);
-  color: var(--primary);
-  border-color: var(--primary);
-}
-.diff-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgb(15 30 60 / 45%);
-  animation: overlay-in 0.15s ease-out;
-}
-.diff-overlay-panel {
-  position: relative;
-  width: min(1100px, 100%);
-  max-height: min(720px, 100%);
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 12px 40px rgb(15 30 60 / 26%);
-  border-radius: var(--radius-10);
-  overflow: hidden;
-}
-.diff-overlay-panel :deep(.diff-viewer) {
-  flex: 1;
-  min-height: 0;
-  border-radius: var(--radius-10);
-  background: var(--surface);
-}
-.diff-overlay-close {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  z-index: 2;
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-6);
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  transition: 0.12s;
-}
-.diff-overlay-close:hover {
-  color: var(--danger);
-  border-color: var(--danger);
-  background: var(--danger-bg);
-}
-@keyframes overlay-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-/* —— P2 自动化循环控制条 —— */
-.loop-bar {
-  display: flex;
-  flex-direction: row;
-  /* U.12: 窄屏按钮换行，不再一行硬挤 */
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  flex: 0 0 auto;
-  padding: 6px 12px;
-  margin-bottom: 6px;
-  min-height: 0;
-  max-height: 88px;
-  overflow: hidden;
+.skill-menu-fixed {
+  position: fixed;
+  z-index: 9999;
+  min-width: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left-width: 4px;
-  border-left-style: solid;
-  border-left-color: var(--border-2);
   border-radius: var(--radius-8);
+  box-shadow: 0 8px 24px rgb(15 30 60 / 15%);
 }
-.loop-bar .loop-status {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-.loop-bar .loop-goal-text {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.loop-bar .loop-actions {
-  flex-shrink: 0;
-  margin-left: auto;
-}
-.loop-bar.is-waiting, .loop-bar.is-running { border-left-color: #409eff; }
-.loop-bar.is-executing, .loop-bar.is-parsing, .loop-bar.is-feedback { border-left-color: #e6a23c; }
-.loop-bar.is-interrupted { border-left-color: var(--danger); }
-.loop-bar.is-stopped { border-left-color: var(--text-3); }
-.loop-bar.is-budget-limited { border-left-color: #e6a23c; }
-/* 倒计时进度条（waiting 状态） */
-.loop-waiting-progress {
-  display: inline-flex;
+
+.skill-menu-fixed .skill-row {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: var(--font-11);
-  color: var(--text-2);
-  font-variant-numeric: tabular-nums;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-4);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
 }
-.loop-waiting-bar {
-  display: inline-block;
-  width: 80px;
-  height: 4px;
-  background: var(--border-color, #dcdfe6);
-  border-radius: var(--radius-2);
-  overflow: hidden;
+
+.skill-menu-fixed .skill-row:hover {
+  background: var(--surface-2);
 }
-.loop-waiting-fill {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, #67c23a 0%, #e6a23c 70%, var(--danger) 100%);
-  transition: width 0.9s linear;
+
+.skill-menu-fixed .skill-row input {
+  margin: 0;
+  accent-color: var(--primary);
 }
-.loop-goal-input {
-  flex: 1 1 320px;
-  min-width: 200px;
-  padding: 6px 10px;
-  border: 1px solid var(--border-color, #dcdfe6);
-  border-radius: var(--radius-6);
-  font-size: var(--font-12);
-  background: var(--input-bg, #fff);
-  color: inherit;
-}
-.loop-status { font-size: var(--font-12); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.loop-goal-text {
-  flex: 1 1 160px;
-  font-size: var(--font-12);
-  opacity: .7;
+
+.skill-menu-fixed .skill-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.loop-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+
+.skill-menu-fixed .skill-src {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: var(--radius-2);
+  font-size: 10px;
+  font-weight: 600;
 }
-.loop-btn {
+
+.skill-menu-fixed .skill-src.src-base {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
+.skill-menu-fixed .skill-src.src-agents {
+  background: var(--warning-bg, #fffbeb);
+  color: var(--warning, #d97706);
+}
+
+.skill-menu-fixed .skill-src.src-user {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.skill-menu-fixed .skill-loading,
+.skill-menu-fixed .skill-empty {
+  color: var(--text-3);
+  font-style: italic;
+  cursor: default;
+}
+
+.skill-menu-fixed .skill-hint {
+  margin-top: 4px;
+  padding: 6px 8px 4px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.skill-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  min-height: 26px;
+  gap: 6px;
+  height: 28px;
   padding: 0 12px;
   border: 1px solid var(--border-2);
-  border-radius: var(--radius-6);
+  border-radius: var(--radius-12);
   background: var(--surface);
   color: var(--text-2);
-  font: 500 12px/1 inherit;
+  font-size: var(--font-12);
+  font-weight: 500;
+  user-select: none;
   cursor: pointer;
-  white-space: nowrap;
-  box-shadow: 0 1px 1px rgb(15 30 60 / 4%);
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease,
-    box-shadow 0.15s ease,
-    transform 0.08s ease;
+  transition: 0.12s;
+  flex-shrink: 0;
 }
-.loop-btn:hover:not(:disabled) {
+
+.skill-trigger:hover {
   border-color: var(--primary);
   color: var(--primary);
   background: var(--primary-bg);
 }
-.loop-btn:active:not(:disabled) {
-  transform: translateY(1px);
-  box-shadow: none;
-}
-.loop-btn:focus-visible {
-  outline: 0;
-  box-shadow: 0 0 0 3px rgb(37 99 235 / 18%);
-}
-.loop-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  background: var(--surface-2);
+
+.skill-count {
+  padding: 0 5px;
+  font-size: 10px;
   color: var(--text-3);
-  box-shadow: none;
+  background: var(--surface-2);
+  border-radius: var(--radius-2);
+  line-height: 14px;
+  flex-shrink: 0;
 }
-.loop-btn.primary {
+
+.skill-menu-head {
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  font-size: 10px;
+  color: var(--text-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.skill-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
   background: var(--primary);
-  border-color: var(--primary);
   color: #fff;
-  box-shadow: 0 1px 2px rgb(37 99 235 / 28%);
+  border-radius: var(--radius-8);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
 }
-.loop-btn.primary:hover:not(:disabled) {
-  background: var(--primary-hover);
-  border-color: var(--primary-hover);
-  color: #fff;
-  box-shadow: 0 3px 8px rgb(37 99 235 / 24%);
+
+.skill-badge-empty {
+  background: var(--border-2);
+  color: var(--text-3);
 }
-.loop-btn.kill,
-.loop-btn.rollback {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
-  box-shadow: 0 1px 2px rgb(239 68 68 / 28%);
-}
-.loop-btn.kill:hover:not(:disabled),
-.loop-btn.rollback:hover:not(:disabled) {
-  background: #dc2626;
-  border-color: var(--danger);
-  color: #fff;
-  box-shadow: 0 3px 8px rgb(239 68 68 / 32%);
-}
-.note-bar {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 12px;
-  margin-bottom: 6px;
+
+.skill-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 9999;
+  min-width: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-8);
+  box-shadow: 0 8px 24px rgb(15 30 60 / 15%);
 }
-.note-input {
-  width: 100%;
-  min-height: 40px;
-  padding: 6px 10px;
-  font: 12px/1.5 var(--mono);
-  color: var(--text);
-  background: var(--surface-2);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-6);
-  outline: 0;
-  resize: vertical;
-}
-.note-input:focus { border-color: var(--primary); }
-.note-actions { display: flex; gap: 6px; justify-content: flex-end; }
-.decision-actions { flex-wrap: wrap; }
-.decision-custom {
+
+.skill-row {
   display: flex;
-  gap: 6px;
   align-items: center;
-  width: 100%;
-  margin-top: 4px;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-4);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
 }
-.decision-input {
+
+.skill-row:hover {
+  background: var(--surface-2);
+}
+
+.skill-row input {
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.skill-name {
   flex: 1;
   min-width: 0;
-  padding: 6px 10px;
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-6);
-  background: var(--surface-2);
-  color: var(--text);
-  font: 12px/1.5 var(--mono, monospace);
-  outline: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.decision-input:focus { border-color: var(--primary); }
-.decision-btn {
-  background: var(--primary-bg);
-  color: var(--primary);
-  border-color: var(--primary);
+
+.skill-src {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: var(--radius-2);
+  font-size: 10px;
   font-weight: 600;
 }
-.decision-btn:hover:not(:disabled) {
-  background: var(--primary);
-  color: #fff;
-}
-.loop-end-status { flex: 1; font-size: var(--font-12); }
-.loop-end-status em { opacity: .65; font-style: normal; }
-.loop-spin { display: inline-block; animation: loop-spin 1.6s linear infinite; }
-.loop-stage-badge {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: var(--radius-10);
-  font-size: var(--font-10);
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  margin: 0 4px;
-  background: var(--surface-2);
-  border: 1px solid var(--border-2);
-  color: var(--text-2);
-}
-.loop-stage-badge.stage-plan { background: var(--primary-bg); color: var(--primary); border-color: var(--primary); }
-.loop-stage-badge.stage-implement { background: var(--warning-bg, rgba(230, 162, 60, 0.12)); color: var(--warning, #e6a23c); border-color: var(--warning, #e6a23c); }
-.loop-stage-badge.stage-verify { background: var(--success-bg, rgba(16, 185, 129, 0.12)); color: var(--success, #10b981); border-color: var(--success, #10b981); }
-.loop-round-bar {
-  display: inline-block;
-  width: 80px;
-  height: 4px;
-  background: var(--border-color, #dcdfe6);
-  border-radius: var(--radius-2);
-  overflow: hidden;
-  margin: 0 4px;
-}
-.loop-round-fill {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--primary, #2563eb) 0%, var(--warning, #e6a23c) 70%, var(--danger) 100%);
-  transition: width 0.3s ease;
-}
-@keyframes loop-spin { to { transform: rotate(360deg); } }
-.inbox-badge { color: #409eff; border-color: #409eff; }
 
+.skill-src.src-base {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
 
-/* ═══════════════════════════════════════════════════════════
-   [terminal-theme-override] 终端区主题化
-   覆盖上方硬编码深色值，浅色主题下终端同样清晰可读
-   ═══════════════════════════════════════════════════════════ */
-.terminal { background: var(--term-bg); border-color: var(--term-border); }
-.terminal .term-bar { background: var(--term-bar-bg); border-bottom-color: var(--term-border); }
-.terminal .term-bar .file-badge { color: var(--term-text); }
-.terminal .term-bar .meta { color: var(--term-text-3); }
-.terminal .term-bar .ghost-btn { color: var(--term-text-2); }
-.terminal .term-bar .ghost-btn:hover:not(:disabled) { background: var(--term-chip-bg-2); color: var(--term-text); }
-.term-raw { color: var(--term-text); background: var(--term-chip-bg); }
-.term-loading { color: var(--term-accent); background: var(--term-chip-bg); border-bottom-color: var(--term-chip-border); }
-.term-loading-spinner { border-color: var(--term-chip-border); border-top-color: var(--term-accent); }
-.term-body { color: var(--term-text); }
-.term-ai-thinking { background: var(--term-chip-bg); border-left-color: var(--term-accent); }
-.term-ai-text { color: var(--term-text); }
-.term-ai-caret { color: var(--term-accent); }
-.chat-list { color: var(--term-text); }
-.chat-bubble { box-shadow: 0 1px 2px var(--term-shadow); }
-.chat-bubble.bubble-right { background: var(--term-user-bg); border: 1px solid var(--term-user-border); }
-.chat-bubble.bubble-left { background: var(--term-ai-bg); border: 1px solid var(--term-ai-border); }
-.bubble-think { background: var(--term-think-bg); border-left-color: var(--term-accent); color: var(--term-text-2); }
-.bubble-head { color: var(--term-text-3); }
-.bubble-body { color: var(--term-text); }
-.bubble-body .md-h { color: var(--term-accent); }
-.bubble-body code { background: var(--term-chip-bg-2); color: var(--term-code-color); }
-.bubble-body .md-code { background: var(--term-code-bg); border-color: var(--term-sep); }
-.bubble-body .md-code-bar { background: var(--term-chip-bg); border-bottom-color: var(--term-sep); }
-.bubble-body .md-code-lang { color: var(--term-text-2); }
-.bubble-body .md-code-acts button { border-color: var(--term-chip-border); color: var(--term-text-2); }
-.bubble-body .md-code-acts button:hover { color: var(--term-text); border-color: var(--term-text); }
-.bubble-body .md-code pre { color: var(--term-text); }
-.chat-think { background: var(--term-think-bg); border-left-color: var(--term-accent); color: var(--term-text-2); }
-.chat-think:hover { background: var(--term-chip-hover); color: var(--term-text); }
-.chat-sys { color: var(--term-text-3); }
-.sys-tag { border-color: var(--term-chip-border-2); color: var(--term-text-3); }
-.sys-time { color: var(--term-text-3); }
-.chat-step { background: var(--term-chip-bg); border-color: var(--term-chip-border); color: var(--term-text); }
-.chat-step:hover { background: var(--term-chip-hover); }
-.chat-step .step-time { color: var(--term-text-3); }
-.chat-step .step-state { background: var(--term-chip-bg-2); color: var(--term-text-2); }
-.think-row { color: var(--term-text-3); }
-.think-row:hover { background: var(--term-chip-bg-2); }
-.think-label { color: var(--term-text-2); }
-.think-body { background: var(--term-chip-bg); border-left-color: var(--term-accent); color: var(--term-text-2); }
-.think-body .md-p, .think-body .md-ul { color: var(--term-text-2); }
-.think-body .md-h { color: var(--term-text-2); }
-.tree-head:hover { background: var(--term-chip-bg-2); }
-.tree-title { color: var(--term-text); }
-.tree-node.is-other .tree-title { color: var(--term-text-3); }
-.tree-node.is-ask .tree-title { color: var(--term-text); background: var(--term-chip-bg-2); }
-.tree-body .md-p, .tree-body .md-ul { color: var(--term-text); }
-.tree-body code { background: var(--term-chip-bg-2); color: var(--term-code-color); }
-.tree-empty { color: var(--term-text-3); }
-.tree-empty .empty-title { color: var(--term-text); }
-.tree-empty .empty-sub { color: var(--term-text-2); }
-.md-code-bar { background: var(--term-chip-bg); border-bottom-color: var(--term-sep); }
-.md-code-lang { color: var(--term-text-2); }
-.md-code-acts button { border-color: var(--term-chip-border); color: var(--term-text-2); }
-.md-code-acts button:hover { color: var(--term-text); border-color: var(--term-text); }
+.skill-src.src-user {
+  background: var(--success-bg);
+  color: var(--success);
+}
 
+.skill-loading,
+.skill-empty {
+  color: var(--text-3);
+  font-style: italic;
+  cursor: default;
+}
+
+.skill-loading:hover,
+.skill-empty:hover {
+  background: transparent;
+}
+
+.skill-hint {
+  margin-top: 4px;
+  padding: 6px 8px 4px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+/* 倒计时进度条（waiting 状态） */
+
+@keyframes loop-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.bubble-body {
+  color: var(--term-text);
+  font-size: 12px;
+}
+
+.bubble-body .md-code-acts button:hover {
+  color: var(--term-text);
+  border-color: var(--term-text);
+}
+
+.chat-step {
+  background: transparent !important;
+  border-color: var(--term-chip-border);
+  color: var(--text-2, var(--text-2)) !important;
+  padding: 10px 14px !important;
+  margin: 0 !important;
+  gap: 10px !important;
+  font: 11px/1.5 var(--mono, monospace) !important;
+  border-radius: var(--radius-4) !important;
+  border: 1px solid var(--border, var(--border)) !important;
+  border-left: 2px solid var(--text-3, var(--text-3)) !important;
+  min-height: 24px !important;
+  display: flex !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  width: auto !important;
+  max-width: 92% !important;
+  text-align: left !important;
+  flex-wrap: nowrap !important;
+  line-height: 1.55 !important;
+  cursor: pointer !important;
+  position: relative !important;
+  transition:
+    background 0.12s,
+    border-color 0.12s !important;
+  font-size: 12px !important;
+  border-left-width: 2px !important;
+  flex-direction: row !important;
+}
+
+.md-code-acts button:hover {
+  color: var(--term-text);
+  border-color: var(--term-text);
+}
 
 /* [button-icons] SVG 按钮图标 */
 .primary-btn .ico-svg {
@@ -3760,139 +2813,42 @@ function onHtmlDrop(e: DragEvent) {
   display: inline-block;
   vertical-align: -1px;
 }
-.primary-btn .ico-svg + span { margin-left: 2px; }
+
+.primary-btn .ico-svg + span {
+  margin-left: 2px;
+}
 
 /* ═══════════════════════════════════════════════════════════
    [ui-polish] 去外壳 + 按钮圆角 + tab 一体化
    ═══════════════════════════════════════════════════════════ */
 
 /* 1. 去外壳：terminal / editor 去 card 边框、背景、阴影 */
-.pane-main > .terminal.card,
-.pane-main > .editor.card {
-  background: transparent !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  overflow: visible !important;
-}
 
 /* 2. 顶栏 bar 加圆角，与内容视觉一体 */
-.pane-main .terminal .term-bar,
-.pane-main .editor .editor-bar {
-  border-radius: 10px 10px 0 0;
-}
 
 /* 3. 按钮圆角统一（原 6px → 8px） */
 .primary-btn,
 .loop-btn,
 .ghost-btn,
-.term-btn,
 .btn,
 .tpl-chip,
 .draft-select,
-.side-tab {
-  border-radius: 8px;
-}
 
 /* 4. side-tabs 图标化 + 与内容一体 */
-.side-tabs {
-  padding: 4px;
-  gap: 4px;
-  background: var(--surface-2);
-  border-bottom: 0;
-  border-radius: 10px 10px 0 0;
-}
-.side-tab {
-  padding: 6px 10px;
-}
-.side-tab.active {
-  background: var(--surface);
-  box-shadow: 0 1px 2px rgb(15 30 60 / 6%);
-}
-.side-tab-icon {
-  width: 14px;
-  height: 14px;
-  display: inline-block;
-  vertical-align: -2px;
-  flex-shrink: 0;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [dark-compact] 紧凑深色：步骤小字 + 气泡收紧
    ═══════════════════════════════════════════════════════════ */
 
 /* 对话区整体收紧 */
-.chat-list {
-  gap: 2px !important;
-  padding: 8px 12px 14px !important;
-  font: 12px/1.55 var(--mono, monospace) !important;
-}
 
 /* 步骤行（脚本执行过程）—— 小字日志风 */
-.chat-step {
-  padding: 2px 8px !important;
-  margin: 0 !important;
-  gap: 6px !important;
-  font: 11px/1.5 var(--mono, monospace) !important;
-  border-radius: 3px !important;
-  border: 0 !important;
-  border-left: 2px solid #6a737d !important;
-  background: transparent !important;
-  color: var(--text-2) !important;
-  min-height: 0 !important;
-}
-.chat-step:hover { background: var(--term-chip-bg-2) !important; }
-.chat-step.state-pending { border-left-color: #6a737d !important; }
-.chat-step.state-running { border-left-color: #60a5fa !important; background: rgb(96 165 250 / 6%) !important; }
-.chat-step.state-done { border-left-color: #10b981 !important; }
-.chat-step.state-error { border-left-color: #f87171 !important; background: rgb(248 113 113 / 8%) !important; }
-.chat-step .step-dot { width: 4px !important; height: 4px !important; }
-.chat-step .step-icon { font-size: 11px !important; }
-.chat-step .step-title { font-size: 11px !important; }
-.chat-step .step-time { font-size: 10px !important; }
-.chat-step .step-state {
-  font-size: 9px !important;
-  padding: 0 6px !important;
-  line-height: 1.5 !important;
-  border-radius: 3px !important;
-}
 
 /* 用户/AI 气泡收紧，别太占地方 */
-.chat-bubble {
-  padding: 6px 10px !important;
-  border-radius: 8px !important;
-  font-size: 12px !important;
-  line-height: 1.55 !important;
-  margin: 3px 0 !important;
-  max-width: 88% !important;
-}
-.bubble-head {
-  margin-bottom: 3px !important;
-  font-size: 10px !important;
-  letter-spacing: 0.2px !important;
-}
-.bubble-body { font-size: 12px !important; }
-.bubble-body .md-h { margin: 3px 0 2px !important; font-size: 11px !important; }
-.bubble-body .md-p { margin: 1px 0 !important; }
-.bubble-body .md-code { margin: 4px 0 !important; }
 
 /* 系统小提示行紧凑 */
-.chat-sys {
-  padding: 1px 8px !important;
-  font-size: 10px !important;
-  gap: 6px !important;
-}
-.sys-tag { padding: 0 6px !important; font-size: 10px !important; }
 
 /* 思考行紧凑 */
-.chat-think {
-  padding: 3px 8px !important;
-  font-size: 11px !important;
-  gap: 6px !important;
-  max-width: 100% !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [button-theme] 按钮配色重做：暖橙强调 + 灰阶次按钮
@@ -3900,199 +2856,37 @@ function onHtmlDrop(e: DragEvent) {
    ═══════════════════════════════════════════════════════════ */
 
 /* ——— 次按钮：透明底 + 细边框，hover 时淡淡提亮 ——— */
-.ghost-btn {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  padding: 4px 10px !important;
-  font-size: var(--font-12) !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.ghost-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 8%) !important;
-}
-.ghost-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
 
-/* ——— 终端内按钮 ——— */
-.term-btn {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+.ghost-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 8%);
 }
-.term-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
-}
-.term-btn:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
-.term-btn.copy, .term-btn.ask-panel { color: var(--text-2) !important; border-color: rgb(255 255 255 / 8%) !important; }
-.term-btn.copy:hover:not(:disabled), .term-btn.ask-panel:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; border-color: rgb(255 255 255 / 14%) !important;
+
+.ghost-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* ——— 芯片 / 下拉 / tab ——— */
-.tpl-chip {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-}
-.tpl-chip:hover {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
-}
-.draft-select {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-}
-.draft-select:hover { border-color: rgb(255 255 255 / 14%) !important; }
 
 /* ——— primary 系列（运行/主操作）：暖橙实底 ——— */
-.primary-btn.run {
-  background: var(--primary) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-  border: 0 !important;
-}
-.primary-btn.run:hover:not(:disabled) { background: var(--primary-hover) !important; box-shadow: none !important; }
 
 /* 运行按钮（takeover 态）：暖橙描边，非实心，更克制 */
-.primary-btn.takeover {
-  background: transparent !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
-}
-.primary-btn.takeover:hover:not(:disabled) {
-  background: rgb(217 119 87 / 12%) !important;
-  color: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-}
 
 /* 停止 / 暂停：柔和红描边 */
-.primary-btn.stop {
-  background: transparent !important;
-  color: var(--danger) !important;
-  border: 1px solid var(--danger) !important;
-  box-shadow: none !important;
-}
-.primary-btn.stop:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  color: #fff !important;
-  border-color: var(--danger) !important;
-}
 
 /* ——— loop-btn 系列 ——— */
-.loop-btn {
-  background: transparent !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  color: var(--text-2) !important;
-  border-radius: 6px !important;
-  box-shadow: none !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.loop-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 14%) !important;
-}
-.loop-btn:active:not(:disabled) { box-shadow: none !important; }
-.loop-btn:focus-visible { outline: 0 !important; box-shadow: 0 0 0 2px rgb(217 119 87 / 30%) !important; }
-.loop-btn:disabled { opacity: 0.4 !important; background: transparent !important; color: var(--text-3) !important; }
-
-.loop-btn.primary {
-  background: var(--primary) !important;
-  border-color: var(--primary) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-.loop-btn.primary:hover:not(:disabled) {
-  background: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-.loop-btn.kill, .loop-btn.rollback {
-  background: transparent !important;
-  border-color: rgb(224 108 117 / 55%) !important;
-  color: var(--danger) !important;
-  box-shadow: none !important;
-}
-.loop-btn.kill:hover:not(:disabled), .loop-btn.rollback:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  border-color: var(--danger) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-
 /* ——— 决策按钮 ——— */
-.decision-btn {
-  background: rgb(217 119 87 / 12%) !important;
-  color: var(--primary) !important;
-  border-color: var(--primary) !important;
-  font-weight: 600 !important;
-}
-.decision-btn:hover:not(:disabled) {
-  background: var(--primary) !important;
-  color: #fff !important;
-  border-color: var(--primary) !important;
-}
 
 /* ——— 焦点环统一暖橙 ——— */
-.primary-btn:focus-visible, .term-btn:focus-visible, .ghost-btn:focus-visible, .tpl-chip:focus-visible, .draft-select:focus-visible {
+.primary-btn:focus-visible,
+.ghost-btn:focus-visible,
+.tpl-chip:focus-visible,
+.draft-select:focus-visible {
   outline: 0 !important;
   box-shadow: 0 0 0 2px rgb(217 119 87 / 35%) !important;
 }
-
-/* ——— 图标按钮（App 头部）——— */
-.theme-toggle, .trace-toggle, .settings-toggle, .ask-toggle, .timeline-toggle {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--text-2) !important;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
-}
-.theme-toggle:hover, .trace-toggle:hover, .settings-toggle:hover, .ask-toggle:hover, .timeline-toggle:hover {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text) !important;
-  border-color: rgb(255 255 255 / 10%) !important;
-}
-
-/* ——— 主色大按钮（FileList.save-btn / GeneratePanel.btn-primary）——— */
-.save-btn, .btn-primary {
-  background: var(--primary) !important;
-  color: #fff !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  border-radius: 6px !important;
-}
-.save-btn:hover:not(:disabled), .btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover) !important;
-  box-shadow: none !important;
-}
-
-/* ——— FileList 撤回按钮 ——— */
-.undo-btn {
-  background: transparent !important;
-  border: 0 !important;
-  color: var(--text-3) !important;
-}
-.undo-btn:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%) !important;
-  color: var(--danger) !important;
-}
-
-/* ——— FileTree 刷新 ——— */
-.refresh { background: transparent !important; border: 0 !important; color: var(--text-3) !important; }
-.refresh:hover:not(:disabled) { background: rgb(255 255 255 / 6%) !important; color: var(--text) !important; }
-
 
 /* ═══════════════════════════════════════════════════════════
    [button-theme-v2] 主按钮去实底，静默态灰
@@ -4100,229 +2894,66 @@ function onHtmlDrop(e: DragEvent) {
 
 /* run 态（P2 主操作）—— 透明底 + 橙描边 */
 .primary-btn.run {
-  background: transparent !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
-}
-.primary-btn.run:hover:not(:disabled) {
-  background: var(--primary-bg) !important;
-  color: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-  box-shadow: none !important;
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  box-shadow: none;
 }
 
 /* takeover 态（运行按钮）—— 同样透明底 + 橙描边 */
-.primary-btn.takeover {
-  background: transparent !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
-}
-.primary-btn.takeover:hover:not(:disabled) {
-  background: var(--primary-bg) !important;
-  color: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-}
 
 /* stop 态（暂停）—— 透明底 + 柔红描边 */
-.primary-btn.stop {
-  background: transparent !important;
-  color: var(--danger) !important;
-  border: 1px solid var(--danger) !important;
-  box-shadow: none !important;
-}
-.primary-btn.stop:hover:not(:disabled) {
-  background: rgb(224 108 117 / 12%) !important;
-  color: var(--danger) !important;
-  border-color: var(--danger) !important;
-}
 
 /* loop-btn 主态：透明橙描边 */
-.loop-btn.primary {
-  background: transparent !important;
-  color: var(--primary) !important;
-  border-color: var(--primary) !important;
-}
-.loop-btn.primary:hover:not(:disabled) {
-  background: var(--primary-bg) !important;
-  color: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [side-connected] 树/变更 tab 与内容一体
    ═══════════════════════════════════════════════════════════ */
 
 /* 1. 去掉 tab 与内容之间的间距 */
-.pane-side {
-  gap: 0 !important;
-  background: var(--surface) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 10px !important;
-  overflow: hidden !important;
-}
 
 /* 2. tab 条紧贴内容，去圆角只留顶部，统一底色 */
-.side-tabs {
-  background: var(--surface-2) !important;
-  border-radius: 0 !important;
-  border-bottom: 1px solid var(--border) !important;
-  padding: 4px !important;
-  gap: 4px !important;
-  flex-shrink: 0 !important;
+
+@keyframes step-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-/* 3. 内容区透明无边框，融入外层圆角 */
-.side-tree,
-.side-changes {
-  background: transparent !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  padding: 8px 10px !important;
-  gap: 0 !important;
+.chat-step.state-running .step-title {
+  color: var(--primary-hover);
+  font-weight: 500;
 }
 
-/* 4. tab 激活态更柔和 */
-.side-tab.active {
-  background: var(--surface) !important;
-  color: var(--text) !important;
-  box-shadow: none !important;
-}
-.side-tab {
-  color: var(--text-3) !important;
-  transition: background 0.12s ease, color 0.12s ease !important;
-}
-.side-tab:hover {
-  background: rgb(255 255 255 / 4%) !important;
-  color: var(--text-2) !important;
-}
-
-/* 5. 项目结构标题行去底部留白 */
-.side-tree .tree-head {
-  margin-bottom: 4px !important;
-  padding: 0 4px 6px !important;
-}
-
-
-/* ═══════════════════════════════════════════════════════════
-   [tab-badge] 变更 tab 徽章：实心橙底白字，醒目显示数量
-   ═══════════════════════════════════════════════════════════ */
-.side-tab-badge {
+.chat-step .step-title {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: none !important;
+  flex: 1 1 auto !important;
+  text-align: left !important;
+  line-height: 1.4 !important;
+  min-width: 0 !important;
+  padding-right: 8px !important;
+  font-size: 12.5px !important;
+  color: var(--text, var(--surface-2)) !important;
+  font-weight: 500 !important;
   display: inline-flex !important;
   align-items: center !important;
-  justify-content: center !important;
-  min-width: 18px !important;
-  height: 18px !important;
-  padding: 0 5px !important;
-  margin-left: 3px !important;
-  background: var(--primary) !important;
-  color: #fff !important;
-  border-radius: 9px !important;
-  font-size: 10px !important;
-  font-weight: 700 !important;
-  font-variant-numeric: tabular-nums !important;
-  line-height: 1 !important;
-  box-shadow: 0 0 0 2px var(--surface-2) !important;
-  transition: transform 0.15s ease !important;
+  margin: 0 !important;
+  align-self: center !important;
 }
-/* 变更 tab 被激活时，徽章反色（白底橙字） */
-.side-tab.active .side-tab-badge {
-  background: var(--primary-bg) !important;
-  color: var(--primary) !important;
-  box-shadow: 0 0 0 2px var(--surface) !important;
-}
-
-
-/* ═══════════════════════════════════════════════════════════
-   [run-steps] 运行时实时步骤 + 执行中 loading
-   ═══════════════════════════════════════════════════════════ */
-
-.chat-step.state-running .step-dot {
-  width: 10px !important;
-  height: 10px !important;
-  background: transparent !important;
-  border: 2px solid var(--term-chip-border-2, rgb(255 255 255 / 20%)) !important;
-  border-top-color: #60a5fa !important;
-  border-right-color: #60a5fa !important;
-  border-radius: 50% !important;
-  animation: step-spin 0.75s linear infinite !important;
-  box-shadow: none !important;
-}
-@keyframes step-spin { to { transform: rotate(360deg); } }
-
-.chat-step.state-running .step-title { color: var(--term-text) !important; font-weight: 500 !important; }
-.chat-step .step-title { font-variant-numeric: tabular-nums; }
-
-.chat-step.state-running .step-state {
-  background: rgb(96 165 250 / 18%) !important;
-  color: #93c5fd !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [msg-center-v2] 消息居中 + 精简
    ═══════════════════════════════════════════════════════════ */
-.chat-msg {
-  display: block;
-  width: fit-content;
-  max-width: min(720px, 92%);
-  margin: 6px auto !important;
-  padding: 8px 14px;
-  border-radius: 8px;
-  background: var(--term-chip-bg, rgb(255 255 255 / 4%));
-  border: 1px solid var(--term-chip-border, rgb(255 255 255 / 6%));
-  font: 12px/1.6 var(--mono, monospace);
-  color: var(--term-text, var(--text));
-  text-align: left;
-}
-.chat-msg-user {
-  background: rgb(99 102 241 / 8%);
-  border-color: rgb(99 102 241 / 18%);
-}
-.chat-msg-ai {
-  background: var(--term-chip-bg, rgb(255 255 255 / 4%));
-}
-.chat-msg .bubble-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  justify-content: center;
-  margin-bottom: 4px;
-  font-size: 10px;
-  color: var(--term-text-3, var(--text-3));
-  font-weight: 500;
-  letter-spacing: 0.3px;
-}
-.chat-msg .bubble-body {
-  color: var(--term-text, var(--text));
-  word-break: break-word;
-}
-.chat-msg .bubble-body strong {
-  color: var(--term-accent, var(--primary));
-  font-weight: 600;
-}
-.chat-msg .bubble-body p {
-  margin: 2px 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
 /* 强制覆盖旧左右分栏位置 */
-.chat-list .chat-msg {
-  align-self: auto !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [step-dashed] 步骤行：无背景，虚线边框 + 字色
    ═══════════════════════════════════════════════════════════ */
-.chat-step {
-  background: transparent !important;
-  border: 1px dashed var(--term-chip-border-2, rgb(255 255 255 / 18%)) !important;
-  border-left: 1px dashed var(--term-chip-border-2, rgb(255 255 255 / 18%)) !important;
-  color: var(--term-text-2, var(--text-2)) !important;
-}
+
 .chat-step:hover {
   background: rgb(255 255 255 / 3%) !important;
   border-color: rgb(255 255 255 / 28%) !important;
@@ -4330,489 +2961,225 @@ function onHtmlDrop(e: DragEvent) {
 }
 
 /* 状态色：只改边框和字色 */
-.chat-step.state-pending {
-  border-color: rgb(255 255 255 / 14%) !important;
-  border-left-color: rgb(255 255 255 / 14%) !important;
-  color: var(--term-text-3, var(--text-3)) !important;
-}
-.chat-step.state-running {
-  border-color: rgb(96 165 250 / 55%) !important;
-  border-left-color: rgb(96 165 250 / 55%) !important;
-  color: #93c5fd !important;
-}
-.chat-step.state-running .step-dot {
-  border-color: rgb(96 165 250 / 35%) !important;
-  border-top-color: #93c5fd !important;
-  border-right-color: #93c5fd !important;
-}
-.chat-step.state-running .step-title { color: #93c5fd !important; }
+
 .chat-step.state-running .step-state {
-  background: transparent !important;
-  color: #93c5fd !important;
-  padding: 0 !important;
+  background: rgb(88 166 255 / 14%);
+  color: var(--primary-hover);
+  padding: 0;
 }
 
-.chat-step.state-done {
-  border-color: rgb(16 185 129 / 45%) !important;
-  border-left-color: rgb(16 185 129 / 45%) !important;
-  color: #6ee7b7 !important;
-}
-.chat-step.state-done .step-dot { background: #10b981 !important; }
-.chat-step.state-done .step-title { color: #6ee7b7 !important; }
 .chat-step.state-done .step-state {
-  background: transparent !important;
-  color: #6ee7b7 !important;
-  padding: 0 !important;
+  background: rgb(63 185 80 / 12%);
+  color: var(--success);
+  padding: 0;
 }
 
-.chat-step.state-error {
-  border-color: rgb(224 108 117 / 55%) !important;
-  border-left-color: rgb(224 108 117 / 55%) !important;
-  color: #fca5a5 !important;
-}
-.chat-step.state-error .step-dot { background: #e06c75 !important; }
-.chat-step.state-error .step-title { color: #fca5a5 !important; }
 .chat-step.state-error .step-state {
-  background: transparent !important;
-  color: #fca5a5 !important;
-  padding: 0 !important;
+  background: rgb(248 81 73 / 14%);
+  color: var(--danger);
+  padding: 0;
 }
 
 /* 时间戳跟字色同系 */
-.chat-step .step-time { color: inherit !important; opacity: 0.6; }
-
 
 /* ═══════════════════════════════════════════════════════════
    [step-center] 步骤内容聚中
    ═══════════════════════════════════════════════════════════ */
-.chat-step {
-  display: inline-flex !important;
-  justify-content: center !important;
-  align-items: center !important;
-  gap: 8px !important;
-  width: auto !important;
-  max-width: 92% !important;
-  margin: 4px auto !important;
-  padding: 4px 14px !important;
-}
-.chat-list {
-  text-align: center !important;
-}
-.chat-list > .chat-step {
-  display: inline-flex !important;
-}
+
 /* 步骤标题不再 flex:1 撑开 */
-.chat-step .step-title {
-  flex: 0 0 auto !important;
-  min-width: 0 !important;
-  max-width: 60ch !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-  text-align: left !important;
-}
+
 .chat-step .step-time,
 .chat-step .step-state {
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.2px !important;
+  padding: 1px 9px !important;
+  border-radius: var(--radius-10) !important;
+  background: rgb(255 255 255 / 4%) !important;
+  color: var(--text-3, var(--text-3)) !important;
+  flex-shrink: 0;
+  line-height: 1.5 !important;
+  border: 0 !important;
   flex: 0 0 auto !important;
+  align-self: flex-start !important;
+  margin-top: 0 !important;
 }
-
 
 /* ═══════════════════════════════════════════════════════════
    [waiting-bubble] AI 等待气泡 + typing 动画
    ═══════════════════════════════════════════════════════════ */
-.chat-waiting {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-  padding: 6px 16px !important;
-  margin: 6px auto !important;
-  background: var(--term-chip-bg, rgb(255 255 255 / 4%)) !important;
-  border: 1px dashed var(--term-chip-border-2, rgb(255 255 255 / 18%)) !important;
-}
-.chat-waiting .bubble-head {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 !important;
-  font-size: 11px;
-  color: var(--term-text-3, var(--text-3));
-}
-.chat-waiting .bubble-body {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--term-text-2, var(--text-2));
-  font-size: 11px;
-}
-.waiting-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 12px;
-}
-.waiting-dots i {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--term-accent, var(--primary));
-  opacity: 0.6;
-  animation: waiting-bounce 1.2s infinite ease-in-out;
-}
-.waiting-dots i:nth-child(2) { animation-delay: 0.15s; }
-.waiting-dots i:nth-child(3) { animation-delay: 0.30s; }
-@keyframes waiting-bounce {
-  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
-  40% { transform: translateY(-4px); opacity: 1; }
-}
-.waiting-text {
-  font-family: var(--mono, monospace);
-}
 
+@keyframes waiting-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
 
 /* ═══════════════════════════════════════════════════════════
    [user-step-style] 用户提问样式与步骤条一致
    ═══════════════════════════════════════════════════════════ */
 .chat-msg-user {
-  display: inline-flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  gap: 10px !important;
-  width: auto !important;
-  max-width: 92% !important;
-  margin: 4px auto !important;
-  padding: 4px 14px !important;
-  background: transparent !important;
-  border: 1px dashed var(--term-chip-border-2, rgb(255 255 255 / 18%)) !important;
-  border-radius: 3px !important;
-  font: 11px/1.5 var(--mono, monospace) !important;
-  color: var(--term-text-2, var(--text-2)) !important;
-}
-.chat-msg-user .bubble-head {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 4px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  font-size: 11px !important;
-  color: var(--term-text-3, var(--text-3)) !important;
-  font-weight: 500 !important;
-  letter-spacing: 0 !important;
-  flex: 0 0 auto !important;
-  white-space: nowrap !important;
-}
-.chat-msg-user .bubble-body {
-  display: inline !important;
-  color: var(--term-text-2, var(--text-2)) !important;
-  font-size: 11px !important;
-  line-height: 1.5 !important;
-  word-break: break-word !important;
-  max-width: 60ch !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-}
-.chat-msg-user .bubble-body p {
-  display: inline !important;
-  margin: 0 !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-}
-.chat-msg-user .bubble-body strong {
-  color: var(--term-text, var(--text)) !important;
-  font-weight: 500 !important;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: auto;
+  max-width: 92%;
+  margin: 4px auto;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border, var(--border));
+  border-radius: var(--radius-6);
+  font: 11px/1.5 var(--mono, monospace);
+  color: var(--term-text-2, var(--text-2));
+  justify-content: flex-start;
+  text-align: left;
+  align-self: flex-end;
+  margin-right: 40px;
+  margin-left: 0;
+  border-left: 3px solid var(--primary, var(--primary));
+  border-color: var(--surface-2);
 }
 
+.chat-msg-user .bubble-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px 0;
+  padding: 0;
+  font-size: 11px;
+  color: var(--text-3, var(--text-3));
+  font-weight: 500;
+  letter-spacing: 0;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  text-align: left;
+  justify-content: flex-start;
+  border-bottom: 0;
+}
+
+.chat-msg-user .bubble-body p {
+  display: inline;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-msg-user .bubble-body strong {
+  color: var(--term-text, var(--text));
+  font-weight: 500;
+}
 
 /* ═══════════════════════════════════════════════════════════
    [align-left] 容器居中 + 内容左对齐
    ═══════════════════════════════════════════════════════════ */
 
 /* 步骤条：宽度自适应居中；内容左对齐 */
-.chat-step {
-  display: inline-flex !important;
-  justify-content: flex-start !important;
-  align-items: center !important;
-  width: auto !important;
-  max-width: 92% !important;
-  margin: 4px auto !important;
-  text-align: left !important;
-}
-.chat-step .step-title {
-  flex: 0 1 auto !important;
-  min-width: 0 !important;
-  text-align: left !important;
-}
-.chat-step .step-time,
-.chat-step .step-state,
-.chat-step .step-icon,
-.chat-step .step-dot {
-  flex: 0 0 auto !important;
-}
 
 /* 用户消息：同款 */
-.chat-msg-user {
-  display: inline-flex !important;
-  flex-direction: row !important;
-  justify-content: flex-start !important;
-  align-items: center !important;
-  width: auto !important;
-  max-width: 92% !important;
-  margin: 4px auto !important;
-  text-align: left !important;
-}
-.chat-msg-user .bubble-head {
-  flex: 0 0 auto !important;
-  text-align: left !important;
-}
-.chat-msg-user .bubble-body {
-  flex: 0 1 auto !important;
-  text-align: left !important;
-}
 
 /* AI 消息：同款 */
-.chat-msg-ai {
-  display: inline-flex !important;
-  flex-direction: column !important;
-  align-items: flex-start !important;
-  width: auto !important;
-  max-width: min(720px, 92%) !important;
-  margin: 4px auto !important;
-  text-align: left !important;
-}
+
 .chat-msg-ai .bubble-head,
-.chat-msg-ai .bubble-body {
-  align-self: stretch !important;
-  text-align: left !important;
-}
 
 /* chat-list 容器保持居中排列、不强制 text-align */
-.chat-list {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  text-align: left !important;
-}
 
 /* 等待气泡也遵循 */
-.chat-waiting {
-  display: inline-flex !important;
-  justify-content: flex-start !important;
-  align-items: center !important;
-  width: auto !important;
-  margin: 4px auto !important;
-  text-align: left !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [no-shell] 彻底去掉卡片外壳边框
    ═══════════════════════════════════════════════════════════ */
-.pane-main > .terminal,
-.pane-main > .editor {
-  background: transparent !important;
-  border: 0 !important;
-  border-top: 0 !important;
-  border-left: 0 !important;
-  border-right: 0 !important;
-  border-bottom: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  outline: 0 !important;
-  overflow: visible !important;
-}
-.pane-main > .terminal .term-bar,
-.pane-main > .editor .editor-bar {
-  background: transparent !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-}
-.pane-main > .terminal .term-bar .dots,
-.pane-main > .editor .editor-bar .dots {
-  display: none !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [bg-tune] 背景层次：编辑器/终端统一深色，融入整体
    ═══════════════════════════════════════════════════════════ */
-.pane-main {
-  background: var(--bg, #181818) !important;
-}
-
-/* 终端区：更深的 bg，微边框区分 */
-.terminal {
-  background: var(--bg, #181818) !important;
-}
-.terminal .term-body {
-  background: var(--bg, #181818) !important;
-}
 
 /* 编辑器区：稍亮 surface，形成层次 */
-.editor {
-  background: var(--surface, #1f1f1f) !important;
-}
+
 .editor .editor-body,
 .editor .cm-host,
 .editor .cm-editor,
 .editor .cm-scroller,
-.editor .cm-content {
-  background: var(--surface, #1f1f1f) !important;
-}
-.editor .cm-gutters {
-  background: var(--surface, #1f1f1f) !important;
-  border-right: 1px solid var(--border, #2a2a2a) !important;
-}
 
 /* 顶栏淡背景 */
-.terminal .term-bar,
 .editor .editor-bar {
-  background: var(--surface-2, #252526) !important;
+  background: var(--surface-2, var(--surface-2)) !important;
+  padding: 6px 12px !important;
+  min-height: 36px !important;
 }
 
-
 /* [toolbar-refactor] tpl-bar 撑开 */
-.tpl-spacer { flex: 1; min-width: 8px; }
-.tpl-bar { gap: 6px; align-items: center; }
-
 
 /* ═══════════════════════════════════════════════════════════
    [purple-run] tpl-bar 一行 + 运行按钮紫色
    ═══════════════════════════════════════════════════════════ */
 
 /* tpl-bar 一行紧凑 */
-.tpl-bar {
-  display: flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  padding: 6px 12px !important;
-  border-bottom: 1px solid var(--border, #2a2a2a) !important;
-  background: var(--surface-2, #252526) !important;
-}
-.tpl-bar .kbd-hint {
-  flex: 0 0 auto !important;
-  margin-right: 2px !important;
-}
-.tpl-bar .tpl-divider {
-  width: 1px;
-  height: 14px;
-  background: var(--border, #2a2a2a);
-  flex: 0 0 auto;
-  margin: 0 4px;
-}
-.tpl-bar .tpl-spacer { flex: 1 1 auto !important; min-width: 8px !important; }
 
 /* 运行按钮紫色 */
 .primary-btn.takeover {
-  background: transparent !important;
-  color: #a78bfa !important;
-  border: 1px solid #a78bfa !important;
-  box-shadow: none !important;
-  font-weight: 600 !important;
-}
-.primary-btn.takeover:hover:not(:disabled) {
-  background: rgb(167 139 250 / 14%) !important;
-  color: #c4b5fd !important;
-  border-color: #c4b5fd !important;
-  box-shadow: 0 0 0 3px rgb(167 139 250 / 10%) !important;
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  box-shadow: none;
+  font-weight: 600;
+  border-color: var(--primary);
 }
 
 /* 暂停按钮紫红系（与运行按钮一致色系但区分） */
 .primary-btn.stop {
-  background: transparent !important;
-  color: #f0abfc !important;
-  border: 1px solid #f0abfc !important;
-  box-shadow: none !important;
-  font-weight: 600 !important;
-}
-.primary-btn.stop:hover:not(:disabled) {
-  background: rgb(240 171 252 / 14%) !important;
-  color: #f5d0fe !important;
-  border-color: #f5d0fe !important;
+  background: transparent;
+  color: #f0abfc;
+  border: 1px solid #f0abfc;
+  box-shadow: none;
+  font-weight: 600;
+  border-color: #f0abfc;
 }
 
 /* tpl-chip hover 也走紫色 */
-.tpl-chip:hover {
-  color: #c4b5fd !important;
-  border-color: #a78bfa !important;
-  background: rgb(167 139 250 / 8%) !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [hide-scrollbar] 隐藏所有滚动条
    ═══════════════════════════════════════════════════════════ */
-.pane-main *::-webkit-scrollbar,
-.terminal ::-webkit-scrollbar,
-.editor ::-webkit-scrollbar,
-.term-body::-webkit-scrollbar,
-.chat-list::-webkit-scrollbar,
-.cm-scroller::-webkit-scrollbar,
-.cm-host::-webkit-scrollbar,
-.pane-side ::-webkit-scrollbar,
-.side-tree ::-webkit-scrollbar,
-.side-changes ::-webkit-scrollbar {
-  width: 0 !important;
-  height: 0 !important;
-  background: transparent !important;
-  display: none !important;
-}
-.pane-main *,
-.term-body,
-.chat-list,
-.cm-scroller,
-.cm-host,
-.pane-side * {
-  scrollbar-width: none !important;
-  -ms-overflow-style: none !important;
-}
-
 /* ═══════════════════════════════════════════════════════════
    [purple-fix] 运行按钮紫色改偏红
    ═══════════════════════════════════════════════════════════ */
-.primary-btn.takeover {
-  color: #c084fc !important;
-  border-color: #c084fc !important;
-}
+
 .primary-btn.takeover:hover:not(:disabled) {
-  background: rgb(192 132 252 / 14%) !important;
-  color: #d8b4fe !important;
-  border-color: #d8b4fe !important;
-  box-shadow: 0 0 0 3px rgb(192 132 252 / 10%) !important;
-}
-.primary-btn.stop {
-  color: #f0abfc !important;
-  border-color: #f0abfc !important;
-}
-.primary-btn.stop:hover:not(:disabled) {
-  background: rgb(240 171 252 / 14%) !important;
-  color: #f5d0fe !important;
-  border-color: #f5d0fe !important;
-}
-.tpl-chip:hover {
-  color: #c084fc !important;
-  border-color: #c084fc !important;
-  background: rgb(192 132 252 / 8%) !important;
+  background: rgb(88 166 255 / 14%);
+  color: var(--primary-hover);
+  border-color: var(--primary-hover);
+  box-shadow: 0 0 0 3px rgb(88 166 255 / 10%);
 }
 
+.primary-btn.stop:hover:not(:disabled) {
+  background: rgb(88 166 255 / 14%);
+  color: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
 
 /* [pending-loading] 等待/执行中状态均显示 loading */
 .chat-step.state-running .step-dot,
 .chat-step.state-pending .step-dot {
-  width: 10px !important;
-  height: 10px !important;
-  background: transparent !important;
-  border: 2px solid rgb(255 255 255 / 20%) !important;
-  border-top-color: #60a5fa !important;
-  border-right-color: #60a5fa !important;
-  border-radius: 50% !important;
-  animation: step-spin 0.75s linear infinite !important;
-  box-shadow: none !important;
+  width: 10px;
+  height: 10px;
+  background: transparent;
+  border: 2px solid rgb(255 255 255 / 20%);
+  border-top-color: var(--primary);
+  border-right-color: var(--primary);
+  border-radius: var(--radius-full);
+  animation: step-spin 0.75s linear infinite;
+  box-shadow: none;
 }
-
 
 /* ═══════════════════════════════════════════════════════════
    [ui-polish-v3] UI 精修：统一间距/字号/圆角/对比度
@@ -4820,159 +3187,103 @@ function onHtmlDrop(e: DragEvent) {
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── 统一字号 ─── */
-.chat-list { font-size: 11.5px !important; }
+
 .chat-step .step-title,
 .chat-step .step-time,
 .chat-step .step-state,
-.chat-step .step-icon { font-size: 11px !important; }
-.chat-step .step-state { font-size: 9.5px !important; letter-spacing: 0.3px !important; }
+
 .chat-msg-user .bubble-head,
 .chat-msg-user .bubble-body,
 .chat-msg-ai .bubble-head,
-.chat-msg-ai .bubble-body { font-size: 11.5px !important; }
 
 /* ─── 统一间距 ─── */
-.chat-list { gap: 3px !important; padding: 10px 14px 16px !important; }
+
 .chat-step,
 .chat-msg-user,
 .chat-msg-ai,
-.chat-waiting { margin: 3px auto !important; }
 
 /* ─── 统一 padding ─── */
 .chat-step,
 .chat-msg-user,
-.chat-waiting { padding: 3px 12px !important; }
-.chat-msg-ai { padding: 6px 12px !important; }
 
 /* ─── 统一圆角（虚线块用小圆角）─── */
-.chat-step,
-.chat-msg-user,
-.chat-msg-ai,
-.chat-waiting { border-radius: 4px !important; }
 
 /* ─── 统一边框（虚线 + 同色）─── */
-.chat-step,
-.chat-msg-user,
-.chat-waiting {
-  border: 1px dashed var(--term-chip-border-2, rgb(255 255 255 / 22%)) !important;
-}
-.chat-msg-ai {
-  border: 1px solid var(--term-chip-border, rgb(255 255 255 / 10%)) !important;
-}
 
 /* ─── 统一图标尺寸 ─── */
-.chat-step .step-icon { font-size: 12px !important; }
-.chat-step .step-dot { width: 5px !important; height: 5px !important; }
 
 /* ─── 步骤状态色（统一色系）─── */
 .chat-step.state-pending {
-  border-color: rgb(255 255 255 / 16%) !important;
-  color: var(--term-text-3) !important;
+  border-color: rgb(255 255 255 / 16%);
+  color: var(--text-3, var(--text-3));
+  border-left-color: rgb(255 255 255 / 14%);
+  background: rgb(255 255 255 / 2%);
+  border-left: 3px solid var(--text-3, var(--text-3));
 }
+
 .chat-step.state-running {
-  border-color: rgb(192 132 252 / 55%) !important;
-  color: #d8b4fe !important;
+  border-color: rgb(88 166 255 / 55%);
+  color: var(--primary-hover);
+  border-left-color: var(--primary);
+  background: rgb(88 166 255 / 6%);
+  border-left: 3px solid var(--primary, var(--primary));
 }
-.chat-step.state-running .step-state {
-  background: rgb(192 132 252 / 14%) !important;
-  color: #d8b4fe !important;
-}
+
 .chat-step.state-done {
-  border-color: rgb(74 222 128 / 45%) !important;
-  color: #86efac !important;
+  border-color: rgb(63 185 80 / 45%);
+  color: var(--success);
+  border-left-color: rgb(63 185 80 / 55%);
+  background: rgb(63 185 80 / 5%);
+  border-left: 3px solid var(--success, var(--success));
 }
-.chat-step.state-done .step-state {
-  background: rgb(74 222 128 / 12%) !important;
-  color: #86efac !important;
-}
+
 .chat-step.state-error {
-  border-color: rgb(248 113 113 / 55%) !important;
-  color: #fca5a5 !important;
-}
-.chat-step.state-error .step-state {
-  background: rgb(248 113 113 / 14%) !important;
-  color: #fca5a5 !important;
+  border-color: rgb(248 81 73 / 55%);
+  color: var(--danger);
+  border-left-color: rgb(248 81 73 / 55%);
+  background: rgb(248 81 73 / 6%);
+  border-left: 3px solid var(--danger, #ef4444);
 }
 
 /* ─── 时间戳弱化 ─── */
 .chat-step .step-time,
 .chat-msg-user .bubble-head,
-.chat-msg-ai .bubble-head { color: var(--term-text-3) !important; opacity: 0.75; }
 
 /* ─── 顶栏统一高度 ─── */
-.term-bar,
 .editor-bar,
-.tpl-bar {
-  min-height: 32px !important;
-  padding: 0 12px !important;
-}
 
 /* ─── 底部工具栏对齐 ─── */
-.tpl-bar { padding: 5px 12px !important; }
-.tpl-bar .tpl-chip { padding: 2px 10px !important; font-size: 11px !important; }
-.tpl-bar .kbd-hint { font-size: 10.5px !important; }
-.tpl-bar .ghost-btn { padding: 3px 10px !important; font-size: 11px !important; }
-.tpl-bar .primary-btn.head-run { padding: 4px 14px !important; font-size: 11.5px !important; }
 
 /* ─── 编辑器区顶部留白 ─── */
-.editor-body { border-top: 1px solid var(--border) !important; }
 
 /* ─── 终端区与编辑器区分隔 ─── */
-.terminal + .editor,
-.terminal + .split-handle,
-.editor { border-top: 1px solid var(--border) !important; }
-
 
 /* ═══════════════════════════════════════════════════════════
    [step-multiline] 步骤标题多行展示（完整 desc/why/plan）
    ═══════════════════════════════════════════════════════════ */
-.chat-step {
-  flex-wrap: wrap !important;
-  align-items: flex-start !important;
-}
-.chat-step .step-title {
-  white-space: pre-wrap !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  max-width: none !important;
-  flex: 1 1 auto !important;
-  text-align: left !important;
-  line-height: 1.5 !important;
-}
-.chat-step .step-time,
-.chat-step .step-state,
-.chat-step .step-icon,
-.chat-step .step-dot {
-  margin-top: 1px !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [msg-align] 用户右 / AI 左 / 步骤条居中
    ═══════════════════════════════════════════════════════════ */
-.chat-msg-user {
-  align-self: flex-end !important;
-  margin-right: 4px !important;
-  margin-left: auto !important;
-}
+
 .chat-msg-user .bubble-head,
 .chat-msg-user .bubble-body {
-  text-align: right !important;
-}
-.chat-msg-ai {
-  align-self: flex-start !important;
-  margin-left: 4px !important;
-  margin-right: auto !important;
-}
-.chat-msg-ai .bubble-head,
-.chat-msg-ai .bubble-body {
-  text-align: left !important;
-}
-.chat-step,
-.chat-waiting {
-  align-self: center !important;
+  display: flex;
+  color: var(--text, var(--text));
+  font-size: 12.5px;
+  line-height: 1.6;
+  word-break: break-word;
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+  text-align: right;
+  align-items: center;
+  gap: 8px;
 }
 
+.chat-step,
 
 /* ═══════════════════════════════════════════════════════════
    [center-v2] 全部消息居中 + 内容左对齐（撤销右/左分布）
@@ -4982,14 +3293,22 @@ function onHtmlDrop(e: DragEvent) {
 /* 撤销 [msg-align] 的左右分布 */
 .chat-msg-user,
 .chat-msg-ai {
-  align-self: center !important;
-  margin: 4px auto !important;
-}
-.chat-msg-user .bubble-head,
-.chat-msg-user .bubble-body,
-.chat-msg-ai .bubble-head,
-.chat-msg-ai .bubble-body {
-  text-align: left !important;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: auto;
+  max-width: min(720px, 92%);
+  margin: 4px auto;
+  text-align: left;
+  align-self: center;
+  margin-left: 0;
+  margin-right: 0;
+  background: var(--term-chip-bg, rgb(255 255 255 / 3%));
+  border: 1px solid var(--border, #333);
+  border-left: 3px solid var(--primary, var(--primary));
+  border-radius: var(--radius-8);
+  padding: 7px 13px;
+  border-color: var(--border);
 }
 
 /* 统一容器宽度和居中 */
@@ -4997,272 +3316,122 @@ function onHtmlDrop(e: DragEvent) {
 .chat-msg-ai,
 .chat-step,
 .chat-waiting {
+  display: flex !important;
+  align-items: stretch !important;
+  gap: 6px !important;
+  padding: 10px 14px !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: 1px solid var(--border, #e5e9f0) !important;
+  justify-content: flex-start !important;
+  width: 100% !important;
+  text-align: left !important;
+  border-left: 3px solid var(--primary, var(--primary)) !important;
+  border-radius: var(--radius-8) !important;
+  align-self: stretch !important;
   margin-left: auto !important;
   margin-right: auto !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  position: relative !important;
+  color: var(--text, var(--text)) !important;
+  flex-direction: column !important;
+  box-shadow: none !important;
+  font-size: 13px !important;
+  border-top: 0 !important;
+  border-right: 0 !important;
+  border-bottom: 0 !important;
+  border-left-width: 3px !important;
+  border-left-style: solid !important;
 }
 
 /* 消息块：中性边框，去掉彩色底 */
-.chat-msg-user,
-.chat-msg-ai {
-  background: var(--term-chip-bg, rgb(255 255 255 / 3%)) !important;
-  border: 1px solid var(--border, #333) !important;
-  border-radius: 6px !important;
-}
-.chat-msg-user { border-color: rgb(255 255 255 / 8%) !important; }
-.chat-msg-ai   { border-color: rgb(255 255 255 / 8%) !important; }
 
 /* 头行弱化 */
-.chat-msg-user .bubble-head,
-.chat-msg-ai .bubble-head {
-  color: var(--text-3, #7a7a7a) !important;
-  font-size: 10.5px !important;
-  margin-bottom: 4px !important;
-}
-.chat-msg-user .bubble-body,
-.chat-msg-ai .bubble-body {
-  color: var(--text, #e0e0e0) !important;
-  font-size: 11.5px !important;
-  line-height: 1.55 !important;
-}
-.chat-msg-ai .bubble-body strong {
-  color: #c084fc !important;  /* 单一强调色 */
-  font-weight: 600 !important;
-}
 
 /* 步骤条：中性底 + 虚线，状态靠左竖线区分 */
-.chat-step {
-  background: var(--term-chip-bg, rgb(255 255 255 / 3%)) !important;
-  border: 1px dashed rgb(255 255 255 / 12%) !important;
-  border-left: 2px solid var(--text-3, #7a7a7a) !important;
-  border-radius: 4px !important;
-  color: var(--text-2, #b0b0b0) !important;
-}
-.chat-step .step-title { color: var(--text, #e0e0e0) !important; }
-.chat-step .step-time  { color: var(--text-3, #7a7a7a) !important; opacity: 0.7; }
-.chat-step .step-state {
-  background: transparent !important;
-  color: var(--text-3, #7a7a7a) !important;
-  border: 0 !important;
-  padding: 0 !important;
-}
 
 /* 状态色：只改左边竖线和 state 文字 */
-.chat-step.state-pending {
-  border-left-color: rgb(255 255 255 / 20%) !important;
-  color: var(--text-3, #7a7a7a) !important;
-}
-.chat-step.state-running {
-  border-left-color: #c084fc !important;
-  background: rgb(192 132 252 / 6%) !important;
-}
-.chat-step.state-running .step-title { color: #d8b4fe !important; }
-.chat-step.state-running .step-state { color: #c084fc !important; }
-.chat-step.state-running .step-dot {
-  border-color: rgb(192 132 252 / 30%) !important;
-  border-top-color: #c084fc !important;
-  border-right-color: #c084fc !important;
-}
 
-.chat-step.state-done {
-  border-left-color: #4ade80 !important;
+.chat-step.state-error .step-title {
+  color: var(--danger);
 }
-.chat-step.state-done .step-state { color: #86efac !important; }
-.chat-step.state-done .step-dot   { background: #4ade80 !important; }
-
-.chat-step.state-error {
-  border-left-color: #f87171 !important;
-  background: rgb(248 113 113 / 6%) !important;
-}
-.chat-step.state-error .step-title { color: #fca5a5 !important; }
-.chat-step.state-error .step-state { color: #f87171 !important; }
 
 /* 等待气泡：与步骤条一致 */
-.chat-waiting {
-  background: var(--term-chip-bg, rgb(255 255 255 / 3%)) !important;
-  border: 1px dashed rgb(255 255 255 / 12%) !important;
-  border-left: 2px solid #c084fc !important;
-  border-radius: 4px !important;
-}
-.chat-waiting .waiting-text { color: var(--text-2, #b0b0b0) !important; }
-.chat-waiting .waiting-dots i { background: #c084fc !important; }
-.chat-waiting .bubble-head,
-.chat-waiting .msg-name { color: var(--text-3, #7a7a7a) !important; }
 
 /* chat-list 统一 gap */
-.chat-list { gap: 4px !important; }
 
 /* 隐藏旧左右气泡 */
-.chat-bubble.bubble-left,
-.chat-bubble.bubble-right { display: none !important; }
-
 
 /* ═══════════════════════════════════════════════════════════
    [center-uniform] 统一宽度居中 + 左对齐
    ═══════════════════════════════════════════════════════════ */
 
 /* chat-list 容器：限制最大宽度居中 */
-.chat-list {
-  max-width: 780px !important;
-  margin: 0 auto !important;
-  padding: 12px 16px 20px !important;
-  gap: 5px !important;
-}
 
 /* 所有消息块：统一宽度占满 chat-list */
-.chat-msg-user,
-.chat-msg-ai,
-.chat-step,
-.chat-waiting {
-  width: 100% !important;
-  max-width: 100% !important;
-  align-self: stretch !important;
-  margin: 0 !important;
-  box-sizing: border-box !important;
-  text-align: left !important;
-}
 
 /* user 和 ai 消息块：内部对齐由 head+body 控制 */
 .chat-msg-user .bubble-head,
-.chat-msg-ai .bubble-head {
-  display: flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  justify-content: flex-start !important;
-  text-align: left !important;
-  padding-bottom: 3px !important;
-  margin-bottom: 3px !important;
-  border-bottom: 1px solid rgb(255 255 255 / 5%) !important;
-}
+
 .chat-msg-user .bubble-body,
-.chat-msg-ai .bubble-body {
-  text-align: left !important;
-  word-break: break-word !important;
-}
-.chat-msg-ai .bubble-body strong {
-  color: #c084fc !important;
-  font-weight: 600 !important;
-}
 
 /* 步骤条：完整展示 desc/why/plan，多行不折叠 */
-.chat-step {
-  display: flex !important;
-  align-items: flex-start !important;
-  gap: 8px !important;
-  padding: 6px 12px !important;
-  line-height: 1.55 !important;
-}
-.chat-step .step-title {
-  white-space: pre-wrap !important;
-  text-align: left !important;
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-}
+
 .chat-step .step-time,
 .chat-step .step-state,
 .chat-step .step-icon,
-.chat-step .step-dot {
-  flex: 0 0 auto !important;
-  align-self: flex-start !important;
-  margin-top: 4px !important;
-}
 
 /* 用户消息：淡灰底 */
-.chat-msg-user {
-  background: rgb(255 255 255 / 4%) !important;
-  border: 1px solid rgb(255 255 255 / 8%) !important;
-  border-radius: 6px !important;
-  padding: 6px 12px !important;
-}
 
 /* AI 消息：稍深底 */
-.chat-msg-ai {
-  background: rgb(192 132 252 / 6%) !important;
-  border: 1px solid rgb(192 132 252 / 18%) !important;
-  border-radius: 6px !important;
-  padding: 6px 12px !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [step-tidy] 步骤条紧凑化：标题加粗 + 次级弱化 + 时间/状态右对齐
    ═══════════════════════════════════════════════════════════ */
 
 /* 布局：图标[dot+icon] + 内容[title flex:1] + 右侧[time+state] */
-.chat-step {
-  display: flex !important;
-  flex-wrap: nowrap !important;
-  align-items: flex-start !important;
-  gap: 8px !important;
-  padding: 6px 12px !important;
-  line-height: 1.55 !important;
-}
 
 /* step-dot + step-icon 固定左列，紧贴 */
 .chat-step .step-dot,
 .chat-step .step-icon {
-  flex: 0 0 auto !important;
+  font-size: 11px !important;
+  flex-shrink: 0;
   margin-top: 5px !important;
   line-height: 1 !important;
+  flex: 0 0 auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 20px !important;
+  height: 20px !important;
 }
 
 /* 内容区：占满 */
-.chat-step .step-title {
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
-  white-space: pre-wrap !important;
-  text-align: left !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  padding-right: 8px !important;
-}
 
 /* 首行 desc：加粗为标题 */
 .chat-step .step-title strong {
   display: block !important;
   font-weight: 600 !important;
-  font-size: 12px !important;
-  color: var(--text, #e0e0e0) !important;
+  font-size: 12.5px !important;
+  color: var(--text, var(--text)) !important;
   margin-bottom: 2px !important;
 }
 
 /* 时间 + 状态：固定右侧，同基线 */
-.chat-step .step-time {
-  flex: 0 0 auto !important;
-  align-self: flex-start !important;
-  margin-top: 4px !important;
-  font-size: 10.5px !important;
-  color: var(--text-3, #7a7a7a) !important;
-  opacity: 0.7 !important;
-  padding-right: 6px !important;
-}
-.chat-step .step-state {
-  flex: 0 0 auto !important;
-  align-self: flex-start !important;
-  margin-top: 3px !important;
-  padding: 1px 8px !important;
-  border-radius: 10px !important;
-  font-size: 10px !important;
-  font-weight: 500 !important;
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text-3, #7a7a7a) !important;
-}
 
 /* why/plan 行弱化 */
 .chat-step.state-done .step-title {
-  color: var(--text-2, #b0b0b0) !important;
+  color: var(--text-2, #b0b0b0);
 }
+
 .chat-step.state-done .step-title strong {
-  color: var(--text, #e0e0e0) !important;
+  color: var(--text, #e0e0e0);
 }
 
 /* 状态徽章色 */
-.chat-step.state-running .step-state { background: rgb(192 132 252 / 14%) !important; color: #c084fc !important; }
-.chat-step.state-done .step-state { background: rgb(74 222 128 / 12%) !important; color: #86efac !important; }
-.chat-step.state-error .step-state { background: rgb(248 113 113 / 14%) !important; color: #fca5a5 !important; }
-.chat-step.state-pending .step-state { background: rgb(255 255 255 / 5%) !important; color: var(--text-3, #7a7a7a) !important; }
-
 
 /* ═══════════════════════════════════════════════════════════
    [toolbar-clean] 工具栏精简 + 清空/运行按钮样式优化
@@ -5270,301 +3439,55 @@ function onHtmlDrop(e: DragEvent) {
 
 /* 隐藏残留 kbd-hint（防其他位置） */
 .tpl-bar .kbd-hint,
-.tpl-bar .tpl-divider { display: none !important; }
 
 /* 清空按钮：幽灵样式，hover 才显形 */
-.tpl-bar .ghost-btn {
-  padding: 4px 12px !important;
-  border-radius: 6px !important;
-  background: transparent !important;
-  color: var(--text-2, #b0b0b0) !important;
-  font-size: 11.5px !important;
-  font-weight: 500 !important;
-  transition: background 0.12s ease, color 0.12s ease !important;
-}
-.tpl-bar .ghost-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text, #e0e0e0) !important;
-}
-.tpl-bar .ghost-btn:disabled { opacity: 0.35 !important; cursor: not-allowed !important; }
 
 /* 运行按钮：紫描边实底 hover */
-.tpl-bar .primary-btn.head-run {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 5px !important;
-  padding: 5px 14px !important;
-  border-radius: 6px !important;
-  font-size: 12px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.2px !important;
-  cursor: pointer !important;
-  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease !important;
-}
-.tpl-bar .primary-btn.takeover.head-run {
-  background: transparent !important;
-  color: #c084fc !important;
-  border: 1px solid #c084fc !important;
-  box-shadow: none !important;
-}
-.tpl-bar .primary-btn.takeover.head-run:hover:not(:disabled) {
-  background: rgb(192 132 252 / 12%) !important;
-  color: #d8b4fe !important;
-  border-color: #d8b4fe !important;
-  box-shadow: 0 0 0 3px rgb(192 132 252 / 8%) !important;
-}
-.tpl-bar .primary-btn.stop.head-run {
-  background: rgb(240 171 252 / 10%) !important;
-  color: #f0abfc !important;
-  border: 1px solid #f0abfc !important;
-  box-shadow: none !important;
-}
-.tpl-bar .primary-btn.stop.head-run:hover:not(:disabled) {
-  background: rgb(240 171 252 / 18%) !important;
-  color: #f5d0fe !important;
-  border-color: #f5d0fe !important;
-}
 
 /* 图标基线 */
-.tpl-bar .primary-btn .ico-svg {
-  width: 11px !important;
-  height: 11px !important;
-  display: inline-block !important;
-  vertical-align: -1px !important;
-}
 
 /* tpl-bar 布局：模板 chip 靠左，清空/运行靠右 */
-.tpl-bar {
-  display: flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  padding: 6px 12px !important;
-}
-.tpl-bar .tpl-chip { flex: 0 0 auto !important; }
-.tpl-bar .tpl-spacer { flex: 1 1 auto !important; }
-
 
 /* ═══════════════════════════════════════════════════════════
    [msg-indent-btns] 用户消息略偏左 + 间距加大 + 按钮精修
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── 用户消息：右侧缩进，视觉偏左 ─── */
-.chat-msg-user {
-  margin-right: 48px !important;
-  margin-left: 0 !important;
-}
+
 /* ─── AI 消息：保持占满 ─── */
-.chat-msg-ai {
-  margin-left: 0 !important;
-  margin-right: 0 !important;
-}
 
 /* ─── 消息间距加大 ─── */
-.chat-list {
-  gap: 10px !important;
-  padding: 16px 20px 24px !important;
-}
 
 /* 消息块内部间距宽松 */
-.chat-msg-user,
-.chat-msg-ai {
-  padding: 8px 14px !important;
-  border-radius: 8px !important;
-}
-.chat-msg-user .bubble-head,
-.chat-msg-ai .bubble-head {
-  padding-bottom: 5px !important;
-  margin-bottom: 5px !important;
-}
 
 /* 步骤条更宽松 */
-.chat-step {
-  padding: 8px 14px !important;
-  border-radius: 6px !important;
-}
 
 /* ─── 按钮精修：统一高度/圆角/字号 ─── */
-.tpl-bar {
-  padding: 8px 14px !important;
-  gap: 8px !important;
-}
 
 /* 模板 chip：更圆润 */
-.tpl-bar .tpl-chip {
-  padding: 4px 12px !important;
-  font-size: 11.5px !important;
-  border-radius: 6px !important;
-  border: 1px solid rgb(255 255 255 / 10%) !important;
-  background: transparent !important;
-  color: var(--text-2, #b0b0b0) !important;
-  transition: all 0.14s ease !important;
-}
-.tpl-bar .tpl-chip:hover {
-  background: rgb(192 132 252 / 10%) !important;
-  color: #c084fc !important;
-  border-color: rgb(192 132 252 / 40%) !important;
-}
 
 /* 清空按钮：幽灵型，加细边框 */
-.tpl-bar .ghost-btn {
-  padding: 4px 14px !important;
-  height: 26px !important;
-  border: 1px solid rgb(255 255 255 / 10%) !important;
-  border-radius: 6px !important;
-  background: transparent !important;
-  color: var(--text-2, #b0b0b0) !important;
-  font-size: 11.5px !important;
-  font-weight: 500 !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  transition: all 0.14s ease !important;
-}
-.tpl-bar .ghost-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%) !important;
-  color: var(--text, #e0e0e0) !important;
-  border-color: rgb(255 255 255 / 20%) !important;
-}
-.tpl-bar .ghost-btn:disabled {
-  opacity: 0.35 !important;
-  cursor: not-allowed !important;
-}
 
 /* 运行/暂停按钮：统一高度 28px */
-.tpl-bar .primary-btn.head-run {
-  height: 28px !important;
-  padding: 0 16px !important;
-  border-radius: 6px !important;
-  font-size: 12px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.3px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  transition: all 0.16s ease !important;
-}
-.tpl-bar .primary-btn.head-run .ico-svg {
-  width: 12px !important;
-  height: 12px !important;
-  flex-shrink: 0 !important;
-}
 
 /* 运行按钮（takeover 态）：紫描边 hover 变实底 */
-.tpl-bar .primary-btn.takeover.head-run {
-  background: transparent !important;
-  color: #c084fc !important;
-  border: 1px solid #c084fc !important;
-  box-shadow: none !important;
-}
-.tpl-bar .primary-btn.takeover.head-run:hover:not(:disabled) {
-  background: rgb(192 132 252 / 14%) !important;
-  color: #d8b4fe !important;
-  border-color: #d8b4fe !important;
-  box-shadow: 0 0 0 4px rgb(192 132 252 / 8%) !important;
-}
 
 /* 暂停按钮（stop 态）：紫红描边 + 淡底 */
-.tpl-bar .primary-btn.stop.head-run {
-  background: rgb(240 171 252 / 8%) !important;
-  color: #f0abfc !important;
-  border: 1px solid #f0abfc !important;
-  box-shadow: none !important;
-}
-.tpl-bar .primary-btn.stop.head-run:hover:not(:disabled) {
-  background: rgb(240 171 252 / 16%) !important;
-  color: #f5d0fe !important;
-  border-color: #f5d0fe !important;
-  box-shadow: 0 0 0 4px rgb(240 171 252 / 8%) !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [step-collapse] 步骤条折叠：默认 desc，点击展开详情
    ═══════════════════════════════════════════════════════════ */
-.chat-step { cursor: pointer !important; position: relative !important; }
-.chat-step .step-caret {
-  flex: 0 0 auto !important;
-  font-size: 10px !important;
-  color: var(--text-3, #7a7a7a) !important;
-  margin-left: 4px !important;
-  margin-top: 4px !important;
-  transition: transform 0.15s ease !important;
-  opacity: 0.6 !important;
+
+.chat-step .step-caret.open {
+  transform: rotate(180deg) !important;
 }
-.chat-step:hover .step-caret { opacity: 1 !important; }
-.chat-step .step-caret.open { transform: rotate(180deg) !important; }
 
 /* step-title 单行省略（收起态） */
-.chat-step .step-title {
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-}
-.chat-step.expanded .step-title {
-  white-space: normal !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-}
-
-/* 详情区 */
-.step-detail {
-  flex: 1 1 100% !important;
-  width: 100% !important;
-  margin-top: 8px !important;
-  padding-top: 8px !important;
-  border-top: 1px dashed rgb(255 255 255 / 10%) !important;
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 6px !important;
-  font-size: 11px !important;
-  cursor: default !important;
-}
-.detail-row {
-  display: flex !important;
-  align-items: flex-start !important;
-  gap: 10px !important;
-  text-align: left !important;
-}
-.detail-label {
-  flex: 0 0 56px !important;
-  color: var(--text-3, #7a7a7a) !important;
-  font-size: 10px !important;
-  letter-spacing: 0.3px !important;
-  text-transform: uppercase !important;
-  padding-top: 2px !important;
-}
-.detail-label.err { color: #f87171 !important; }
-.detail-val {
-  flex: 1 1 auto !important;
-  color: var(--text, #e0e0e0) !important;
-  white-space: pre-wrap !important;
-  word-break: break-word !important;
-  min-width: 0 !important;
-}
-.detail-pre {
-  flex: 1 1 auto !important;
-  margin: 0 !important;
-  padding: 6px 8px !important;
-  background: rgb(0 0 0 / 30%) !important;
-  border-radius: 4px !important;
-  color: var(--text-2, #b0b0b0) !important;
-  font: 10.5px/1.5 var(--mono, monospace) !important;
-  white-space: pre-wrap !important;
-  word-break: break-word !important;
-  max-height: 200px !important;
-  overflow-y: auto !important;
-  min-width: 0 !important;
-}
-.detail-pre.err { color: #fca5a5 !important; }
-.detail-empty {
-  color: var(--text-3, #7a7a7a) !important;
-  font-size: 10.5px !important;
-  font-style: italic !important;
-}
 
 /* chat-step 展开时 flex-wrap 允许 */
-.chat-step.expanded { flex-wrap: wrap !important; }
-
+.chat-step.expanded {
+  flex-wrap: wrap !important;
+}
 
 /* ═══════════════════════════════════════════════════════════
    [linear-ui] Linear / VSCode 风格：中性灰 + 单一紫强调
@@ -5572,228 +3495,55 @@ function onHtmlDrop(e: DragEvent) {
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── 全局背景 ─── */
-.pane-main,
-.terminal,
-.terminal .term-body,
-.editor,
-.editor .editor-body,
-.editor .cm-editor,
-.editor .cm-scroller,
-.editor .cm-content,
-.editor .cm-gutters {
-  background: var(--bg, #0d0d0d) !important;
-}
 
-/* ─── 消息列：极简间距 ─── */
-.chat-list {
-  gap: 6px !important;
-  padding: 14px 20px 20px !important;
-  max-width: 800px !important;
-}
+/* [user-req] 主区灰底 */
 
-/* ─── 步骤条：中性卡 ─── */
-.chat-step {
-  background: var(--surface, #141414) !important;
-  border: 1px solid var(--border, #262626) !important;
-  border-left: 2px solid var(--text-3, #6b6b6b) !important;
-  border-radius: 6px !important;
-  padding: 8px 12px !important;
-  color: var(--text-2, #a3a3a3) !important;
-  transition: background 0.12s, border-color 0.12s !important;
+.chat-step.state-error .step-dot {
+  background: var(--danger);
 }
-.chat-step:hover { background: var(--surface-2, #1a1a1a) !important; }
-.chat-step .step-title { color: var(--text, #e6e6e6) !important; font-weight: 500 !important; }
-.chat-step .step-title strong { color: var(--text, #e6e6e6) !important; font-weight: 600 !important; }
-.chat-step .step-time { color: var(--text-3, #6b6b6b) !important; font-size: 10.5px !important; }
-.chat-step .step-state {
-  background: rgb(255 255 255 / 4%) !important;
-  color: var(--text-3, #6b6b6b) !important;
-  border-radius: 10px !important;
-  font-weight: 500 !important;
-  padding: 1px 8px !important;
-  font-size: 10px !important;
-}
-
-/* 状态：只改左竖线 + 状态徽章色 */
-.chat-step.state-running {
-  border-left-color: var(--primary, #a78bfa) !important;
-}
-.chat-step.state-running .step-state { background: rgb(167 139 250 / 12%) !important; color: #c4b5fd !important; }
-.chat-step.state-running .step-dot {
-  border-color: rgb(167 139 250 / 30%) !important;
-  border-top-color: #a78bfa !important;
-  border-right-color: #a78bfa !important;
-}
-.chat-step.state-done { border-left-color: rgb(74 222 128 / 60%) !important; }
-.chat-step.state-done .step-state { background: rgb(74 222 128 / 10%) !important; color: #86efac !important; }
-.chat-step.state-done .step-dot { background: #4ade80 !important; }
-.chat-step.state-error { border-left-color: rgb(248 113 113 / 60%) !important; }
-.chat-step.state-error .step-state { background: rgb(248 113 113 / 10%) !important; color: #fca5a5 !important; }
-.chat-step.state-error .step-dot { background: #f87171 !important; }
-.chat-step.state-pending { border-left-color: var(--border-2, #333) !important; }
 
 /* ─── 用户消息：中性灰卡 + 右侧缩进 ─── */
-.chat-msg-user {
-  background: var(--surface, #141414) !important;
-  border: 1px solid var(--border, #262626) !important;
-  border-radius: 6px !important;
-  padding: 8px 14px !important;
-  margin-right: 48px !important;
-  margin-left: 0 !important;
-}
-.chat-msg-user .bubble-head { color: var(--text-3, #6b6b6b) !important; }
-.chat-msg-user .bubble-body { color: var(--text, #e6e6e6) !important; }
 
 /* ─── AI 消息：紫边卡 ─── */
-.chat-msg-ai {
-  background: rgb(167 139 250 / 4%) !important;
-  border: 1px solid rgb(167 139 250 / 12%) !important;
-  border-radius: 6px !important;
-  padding: 8px 14px !important;
-}
-.chat-msg-ai .bubble-head { color: var(--text-3, #6b6b6b) !important; }
-.chat-msg-ai .bubble-body { color: var(--text, #e6e6e6) !important; }
-.chat-msg-ai .bubble-body strong { color: #c4b5fd !important; font-weight: 600 !important; }
 
 /* ─── 等待气泡：紫左竖条 ─── */
-.chat-waiting {
-  background: var(--surface, #141414) !important;
-  border: 1px solid var(--border, #262626) !important;
-  border-left: 2px solid #a78bfa !important;
-  border-radius: 6px !important;
-}
-.chat-waiting .waiting-dots i { background: #a78bfa !important; }
-.chat-waiting .waiting-text { color: var(--text-2, #a3a3a3) !important; }
-
-/* ─── 顶部栏：极简 ─── */
-.term-bar,
-.editor-bar {
-  background: var(--surface, #141414) !important;
-  border-bottom: 1px solid var(--border, #262626) !important;
-}
 
 /* ─── tpl-bar 工具栏：Linear 风 ─── */
-.tpl-bar {
-  background: var(--surface, #141414) !important;
-  border-bottom: 1px solid var(--border, #262626) !important;
-  padding: 6px 12px !important;
-  gap: 6px !important;
-}
-.tpl-bar .tpl-chip {
-  background: transparent !important;
-  border: 1px solid var(--border, #262626) !important;
-  border-radius: 5px !important;
-  color: var(--text-2, #a3a3a3) !important;
-  padding: 3px 11px !important;
-  font-size: 11px !important;
-  font-weight: 500 !important;
-}
-.tpl-bar .tpl-chip:hover {
-  background: var(--surface-2, #1a1a1a) !important;
-  border-color: var(--border-2, #333) !important;
-  color: var(--text, #e6e6e6) !important;
-}
-.tpl-bar .ghost-btn {
-  background: transparent !important;
-  border: 1px solid var(--border, #262626) !important;
-  border-radius: 5px !important;
-  color: var(--text-2, #a3a3a3) !important;
-  padding: 3px 12px !important;
-  height: 26px !important;
-  font-size: 11.5px !important;
-  font-weight: 500 !important;
-}
-.tpl-bar .ghost-btn:hover:not(:disabled) {
-  background: var(--surface-2, #1a1a1a) !important;
-  border-color: var(--border-2, #333) !important;
-  color: var(--text, #e6e6e6) !important;
-}
-.tpl-bar .primary-btn.head-run {
-  height: 26px !important;
-  padding: 0 14px !important;
-  border-radius: 5px !important;
-  font-size: 11.5px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.2px !important;
-}
-.tpl-bar .primary-btn.takeover.head-run {
-  background: #a78bfa !important;
-  color: #0d0d0d !important;
-  border: 1px solid #a78bfa !important;
-  box-shadow: none !important;
-}
-.tpl-bar .primary-btn.takeover.head-run:hover:not(:disabled) {
-  background: #c4b5fd !important;
-  border-color: #c4b5fd !important;
-}
-.tpl-bar .primary-btn.stop.head-run {
-  background: transparent !important;
-  color: #f0abfc !important;
-  border: 1px solid #f0abfc !important;
-}
-.tpl-bar .primary-btn.stop.head-run:hover:not(:disabled) {
-  background: rgb(240 171 252 / 10%) !important;
-}
 
 /* ─── 侧栏 tab ─── */
-.side-tabs {
-  background: var(--surface, #141414) !important;
-  border-bottom: 1px solid var(--border, #262626) !important;
-}
-.side-tab.active {
-  background: var(--surface-2, #1a1a1a) !important;
-  color: #c4b5fd !important;
-}
-.side-tab-badge {
-  background: #a78bfa !important;
-  color: #0d0d0d !important;
-}
-
-/* ─── 隐藏所有旧气泡 ─── */
-.chat-bubble.bubble-left,
-.chat-bubble.bubble-right { display: none !important; }
 
 /* ─── 滚动条：Linear 极细 ─── */
-.pane-main *::-webkit-scrollbar { width: 8px !important; height: 8px !important; }
-.pane-main *::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 8%) !important;
-  border-radius: 4px !important;
-}
-.pane-main *::-webkit-scrollbar-thumb:hover {
-  background: rgb(255 255 255 / 14%) !important;
-}
-.pane-main *::-webkit-scrollbar-track { background: transparent !important; }
-
 
 /* ═══════════════════════════════════════════════════════════
    [editor-tune] 编辑器背景独立 + 间距收敛 + 字号上调
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── 编辑器区背景：稍亮于整体，形成层次 ─── */
-.editor,
+.editor {
+  background: var(--surface, var(--surface)) !important;
+}
+
 .editor .editor-body,
 .editor .cm-host,
 .editor .cm-editor,
 .editor .cm-scroller,
-.editor .cm-content {
-  background: var(--surface, #141414) !important;
-}
 .editor .cm-gutters {
-  background: var(--surface, #141414) !important;
-  border-right: 1px solid var(--border, #262626) !important;
-  color: var(--text-3, #6b6b6b) !important;
+  background: var(--surface, var(--surface)) !important;
+  color: var(--text-2, var(--text-2)) !important;
 }
+
 .editor .cm-activeLine {
   background: rgb(255 255 255 / 3%) !important;
 }
+
 .editor .cm-activeLineGutter {
   background: rgb(255 255 255 / 3%) !important;
 }
 
 /* 焦点时强调 */
 .editor:focus-within {
-  border-color: rgb(167 139 250 / 50%) !important;
-  box-shadow: 0 0 0 3px rgb(167 139 250 / 8%) !important;
+  border-color: rgb(88 166 255 / 50%) !important;
+  box-shadow: 0 0 0 3px rgb(88 166 255 / 8%) !important;
 }
 
 /* ─── 编辑器字号 ─── */
@@ -5805,53 +3555,15 @@ function onHtmlDrop(e: DragEvent) {
 }
 
 /* ─── 终端 / 消息区字号 ─── */
-.chat-list {
-  font-size: 12.5px !important;
-  gap: 5px !important;
-  padding: 12px 18px 18px !important;
-}
-.chat-msg-user,
-.chat-msg-ai {
-  padding: 7px 13px !important;
-}
-.chat-msg-user .bubble-body,
-.chat-msg-ai .bubble-body {
-  font-size: 12.5px !important;
-  line-height: 1.6 !important;
-}
-.chat-msg-user .bubble-head,
-.chat-msg-ai .bubble-head {
-  font-size: 11px !important;
-  margin-bottom: 4px !important;
-  padding-bottom: 4px !important;
-}
 
 /* ─── 步骤条：字号 + 间距 ─── */
-.chat-step {
-  padding: 7px 13px !important;
-  font-size: 12px !important;
-}
-.chat-step .step-title {
-  font-size: 12px !important;
-  line-height: 1.55 !important;
-}
-.chat-step .step-title strong { font-size: 12.5px !important; }
-.chat-step .step-time { font-size: 11px !important; }
-.chat-step .step-state { font-size: 10.5px !important; padding: 1px 9px !important; }
 
 /* ─── 等待气泡字号 ─── */
-.chat-waiting .waiting-text { font-size: 12px !important; }
-.chat-waiting .bubble-head { font-size: 11px !important; }
 
 /* ─── tpl-bar 工具栏字号 ─── */
-.tpl-bar .tpl-chip { font-size: 11.5px !important; padding: 4px 12px !important; }
-.tpl-bar .ghost-btn { font-size: 12px !important; height: 28px !important; }
-.tpl-bar .primary-btn.head-run { font-size: 12px !important; height: 28px !important; }
 
 /* ─── 侧栏字号 ─── */
 .pane-side .tree-title,
-.pane-side .title { font-size: 11px !important; }
-
 
 /* ═══════════════════════════════════════════════════════════
    [lifecycle-css] 生命周期时间线样式
@@ -5860,766 +3572,247 @@ function onHtmlDrop(e: DragEvent) {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 6px 8px;
-  background: rgb(0 0 0 / 20%);
-  border-radius: 4px;
+  gap: 4px;
+  padding: 2px 0 2px 12px;
+  background: transparent;
+  border-radius: 0;
   min-width: 0;
+  position: relative;
 }
-.stage-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--text-2, #a3a3a3);
-}
-.stage-idx {
-  flex: 0 0 16px;
-  text-align: right;
-  color: var(--text-3, #6b6b6b);
-  font: 10px/1 var(--mono, monospace);
-  font-variant-numeric: tabular-nums;
-}
-.stage-dot {
-  flex: 0 0 6px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-3, #6b6b6b);
-}
-.stage-dot.ok { background: #4ade80; }
-.stage-dot.err { background: #f87171; }
-.stage-dot.run { background: #a78bfa; animation: stage-pulse 1.2s ease-in-out infinite; }
-@keyframes stage-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-.stage-name {
-  flex: 0 0 auto;
-  font-weight: 500;
-  color: var(--text, #e6e6e6);
-  min-width: 70px;
-}
-.stage-meta, .stage-ms {
-  flex: 0 0 auto;
-  color: var(--text-3, #6b6b6b);
-  font: 10.5px/1 var(--mono, monospace);
-  font-variant-numeric: tabular-nums;
-}
-.stage-tag {
-  flex: 0 0 auto;
-  padding: 0 6px;
-  border-radius: 8px;
-  font-size: 9.5px;
-  font-weight: 600;
-}
-.stage-tag.err { background: rgb(248 113 113 / 16%); color: #fca5a5; }
-.stage-status {
-  flex: 0 0 auto;
-  margin-left: auto;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 0 6px;
-  border-radius: 8px;
-  color: var(--text-3, #6b6b6b);
-}
-.stage-status.ok { color: #86efac; background: rgb(74 222 128 / 10%); }
-.stage-status.err { color: #fca5a5; background: rgb(248 113 113 / 12%); }
-.stage-status.run { color: #c4b5fd; background: rgb(167 139 250 / 10%); }
 
+@keyframes stage-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
 /* 展开区行间距 */
-.step-detail { gap: 8px !important; }
-.detail-pre { max-height: 260px !important; }
-
 
 /* ═══════════════════════════════════════════════════════════
    [linear-polish] 步骤条 Linear 风：紧凑单行 + 状态圆点 + 弱化时间
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── chat-list 更窄居中 ─── */
-.chat-list {
-  max-width: 720px !important;
-  gap: 3px !important;
-  padding: 12px 16px 20px !important;
-}
 
 /* ─── 步骤条主体：单行紧凑 ─── */
-.chat-step {
-  padding: 5px 10px !important;
-  border-radius: 5px !important;
-  gap: 7px !important;
-  min-height: 0 !important;
-  border-left-width: 2px !important;
-  align-items: center !important;
-}
-.chat-step .step-dot {
-  width: 5px !important;
-  height: 5px !important;
-  margin-top: 0 !important;
-}
-.chat-step .step-icon {
-  font-size: 11px !important;
-  margin-top: 0 !important;
-  line-height: 1 !important;
-}
-.chat-step .step-title {
-  font-size: 11.5px !important;
-  font-weight: 500 !important;
-  line-height: 1.45 !important;
-  margin: 0 !important;
-}
-.chat-step .step-title strong { font-weight: 600 !important; }
-.chat-step .step-time {
-  font-size: 10px !important;
-  font-variant-numeric: tabular-nums !important;
-  opacity: 0.5 !important;
-  margin-top: 0 !important;
-}
-.chat-step .step-state {
-  padding: 0 !important;
-  background: transparent !important;
-  font-size: 10.5px !important;
-  font-weight: 500 !important;
-  margin-top: 0 !important;
-  letter-spacing: 0.2px !important;
-}
-.chat-step .step-caret {
-  font-size: 9px !important;
-  opacity: 0.4 !important;
-  margin-top: 0 !important;
-  margin-left: 2px !important;
-}
-.chat-step:hover .step-caret { opacity: 0.9 !important; }
 
 /* 状态色：只涂 dot + state 文字，无背景 */
-.chat-step.state-running { border-left-color: #a78bfa !important; background: rgb(167 139 250 / 5%) !important; }
-.chat-step.state-running .step-state { color: #c4b5fd !important; }
-.chat-step.state-done { border-left-color: rgb(74 222 128 / 55%) !important; background: transparent !important; }
-.chat-step.state-done .step-state { color: #86efac !important; }
-.chat-step.state-error { border-left-color: rgb(248 113 113 / 55%) !important; background: rgb(248 113 113 / 5%) !important; }
-.chat-step.state-error .step-state { color: #fca5a5 !important; }
-.chat-step.state-pending { border-left-color: rgb(255 255 255 / 14%) !important; background: transparent !important; }
-.chat-step.state-pending .step-state { color: var(--text-3, #6b6b6b) !important; }
 
 /* ─── 展开区：Linear 时间线 ─── */
-.step-detail {
-  gap: 10px !important;
-  padding-top: 10px !important;
-  margin-top: 10px !important;
-  border-top: 1px solid rgb(255 255 255 / 6%) !important;
-  font-size: 11.5px !important;
-}
-
-.detail-row {
-  gap: 12px !important;
-  align-items: flex-start !important;
-}
-.detail-label {
-  flex: 0 0 48px !important;
-  padding-top: 2px !important;
-  font-size: 10px !important;
-  font-weight: 600 !important;
-  color: var(--text-3, #6b6b6b) !important;
-  letter-spacing: 0.3px !important;
-  text-transform: uppercase !important;
-}
-.detail-val {
-  font-size: 11.5px !important;
-  line-height: 1.55 !important;
-}
 
 /* ─── 生命周期时间线：竖线连接 ─── */
-.detail-stages {
-  flex: 1 1 auto !important;
-  position: relative !important;
-  padding: 2px 0 2px 12px !important;
-  background: transparent !important;
-  border-radius: 0 !important;
-  gap: 4px !important;
-  display: flex !important;
-  flex-direction: column !important;
-}
-/* 竖线 */
-.detail-stages::before {
-  content: '' !important;
-  position: absolute !important;
-  left: 4px !important;
-  top: 8px !important;
-  bottom: 8px !important;
-  width: 1px !important;
-  background: rgb(255 255 255 / 10%) !important;
-}
-.stage-item {
-  position: relative !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  padding: 1px 0 !important;
-  font-size: 11px !important;
-  line-height: 1.5 !important;
-  min-height: 18px !important;
-}
+
 /* 时间线节点 */
-.stage-item .stage-idx { display: none !important; }
-.stage-item .stage-dot {
-  position: absolute !important;
-  left: -12px !important;
-  top: 50% !important;
-  transform: translateY(-50%) !important;
-  width: 7px !important;
-  height: 7px !important;
-  border-radius: 50% !important;
-  border: 2px solid var(--bg, #0d0d0d) !important;
-  background: var(--text-3, #6b6b6b) !important;
-  box-sizing: content-box !important;
-}
-.stage-item .stage-dot.ok { background: #4ade80 !important; }
-.stage-item .stage-dot.err { background: #f87171 !important; }
-.stage-item .stage-dot.run { background: #a78bfa !important; animation: stage-pulse 1.2s ease-in-out infinite !important; }
-
-.stage-item .stage-name {
-  flex: 0 0 auto !important;
-  min-width: 60px !important;
-  font-weight: 500 !important;
-  color: var(--text, #e6e6e6) !important;
-  font-size: 11.5px !important;
-}
-.stage-item .stage-meta,
-.stage-item .stage-ms {
-  color: var(--text-3, #6b6b6b) !important;
-  font: 10.5px/1 var(--mono, monospace) !important;
-  font-variant-numeric: tabular-nums !important;
-}
-.stage-item .stage-tag {
-  font-size: 9.5px !important;
-  padding: 0 5px !important;
-  border-radius: 3px !important;
-}
-.stage-item .stage-status {
-  margin-left: auto !important;
-  padding: 0 6px !important;
-  font-size: 10px !important;
-  font-weight: 500 !important;
-  background: transparent !important;
-  border-radius: 3px !important;
-}
-.stage-item .stage-status.ok { color: #86efac !important; }
-.stage-item .stage-status.err { color: #fca5a5 !important; }
-.stage-item .stage-status.run { color: #c4b5fd !important; }
-
 /* ─── 输出 pre：更紧凑 ─── */
-.detail-pre {
-  padding: 8px 10px !important;
-  font: 10.5px/1.55 var(--mono, monospace) !important;
-  background: rgb(0 0 0 / 25%) !important;
-  border-radius: 4px !important;
-  max-height: 240px !important;
-  color: var(--text-2, #a3a3a3) !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [revert-3] 撤销 linear-polish 的三处紧凑化
    ═══════════════════════════════════════════════════════════ */
 
 /* 1. 步骤条 padding 恢复：更大内边距 */
-.chat-step {
-  padding: 8px 14px !important;
-  gap: 10px !important;
-  min-height: 24px !important;
-}
 
 /* 2. 时间：恢复正常透明度 */
-.chat-step .step-time {
-  opacity: 1 !important;
-  color: var(--text-3, #6b6b6b) !important;
-  font-size: 11px !important;
-}
 
 /* 3. 输出 pre：恢复正常行高/内边距 */
-.detail-pre {
-  padding: 10px 12px !important;
-  font: 11px/1.65 var(--mono, monospace) !important;
-  max-height: 320px !important;
-}
 
 /* 4. 状态徽章恢复淡底 */
-.chat-step .step-state {
-  background: rgb(255 255 255 / 5%) !important;
-  padding: 1px 9px !important;
-  border-radius: 10px !important;
-  font-size: 10.5px !important;
-  font-weight: 500 !important;
+
+.chat-step.state-pending .step-state {
+  background: rgb(255 255 255 / 5%);
+  color: var(--text-3, var(--text-3));
 }
-.chat-step.state-running .step-state { background: rgb(167 139 250 / 14%) !important; color: #c4b5fd !important; }
-.chat-step.state-done .step-state { background: rgb(74 222 128 / 12%) !important; color: #86efac !important; }
-.chat-step.state-error .step-state { background: rgb(248 113 113 / 14%) !important; color: #fca5a5 !important; }
-.chat-step.state-pending .step-state { background: rgb(255 255 255 / 5%) !important; color: var(--text-3, #6b6b6b) !important; }
 
 /* 5. chat-list 恢复原宽 */
-.chat-list {
-  max-width: 800px !important;
-  gap: 5px !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [unify-spacing] 消息统一风格 + 加大间距
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── 消息间距加大 ─── */
-.chat-list {
-  gap: 12px !important;
-  padding: 18px 22px 28px !important;
-}
 
 /* ─── 用户消息：与步骤条同款（中性卡 + 左竖线 + 无紫底）─── */
-.chat-msg-user {
-  background: var(--surface, #141414) !important;
-  border: 1px solid var(--border, #262626) !important;
-  border-left: 2px solid rgb(167 139 250 / 55%) !important;
-  border-radius: 6px !important;
-  padding: 10px 14px !important;
-  margin-right: 40px !important;
-  margin-left: 0 !important;
-}
-.chat-msg-user .bubble-head {
-  display: flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  justify-content: flex-start !important;
-  color: var(--text-3, #6b6b6b) !important;
-  font-size: 11px !important;
-  margin: 0 0 6px 0 !important;
-  padding: 0 !important;
-  border-bottom: 0 !important;
-}
-.chat-msg-user .bubble-body {
-  color: var(--text, #e6e6e6) !important;
-  font-size: 12.5px !important;
-  line-height: 1.6 !important;
-}
 
 /* ─── AI 消息：同款（紫左竖线）─── */
-.chat-msg-ai {
-  background: var(--surface, #141414) !important;
-  border: 1px solid var(--border, #262626) !important;
-  border-left: 2px solid #a78bfa !important;
-  border-radius: 6px !important;
-  padding: 10px 14px !important;
-}
+
 .chat-msg-ai .bubble-head {
-  display: flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  color: var(--text-3, #6b6b6b) !important;
-  font-size: 11px !important;
-  margin: 0 0 6px 0 !important;
-  padding: 0 !important;
-  border-bottom: 0 !important;
+  color: var(--primary-hover);
+  opacity: 0.75;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: space-between;
+  text-align: left;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  border-bottom: 0;
+  font-size: 11px;
+  margin: 0 0 6px 0;
+  padding: 0;
+  font-weight: 500;
+  border-bottom-color: rgb(88 166 255 / 15%);
 }
+
 .chat-msg-ai .bubble-body {
-  color: var(--text, #e6e6e6) !important;
-  font-size: 12.5px !important;
-  line-height: 1.6 !important;
-}
-.chat-msg-ai .bubble-body strong {
-  color: #c4b5fd !important;
-  font-weight: 600 !important;
+  align-self: stretch;
+  text-align: left;
+  font-size: 12.5px;
+  word-break: break-word;
+  color: var(--text, var(--text));
+  line-height: 1.6;
+  padding-left: 0;
 }
 
 /* ─── 步骤条：同款间距 ─── */
-.chat-step {
-  padding: 10px 14px !important;
-  gap: 10px !important;
-  margin: 0 !important;
-}
 
 /* ─── 等待气泡：同款 ─── */
-.chat-waiting {
-  background: var(--surface, #141414) !important;
-  border: 1px solid var(--border, #262626) !important;
-  border-left: 2px solid #a78bfa !important;
-  border-radius: 6px !important;
-  padding: 10px 14px !important;
-}
 
 /* ─── 展开区：与卡片内边距对齐 ─── */
-.step-detail {
-  margin-top: 10px !important;
-  padding-top: 10px !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [card-bar-style] 卡片样式：粗左竖条 + 无边框 + 时间右对齐
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── 通用卡片基础：无边框 + 圆角 + 无左竖线边框 ─── */
-.chat-msg-user,
-.chat-msg-ai,
-.chat-step,
-.chat-waiting {
-  background: var(--surface, #141414) !important;
-  border: 0 !important;
-  border-radius: 8px !important;
-  padding: 10px 14px 10px 18px !important;
-  position: relative !important;
-}
 
 /* 粗左竖条（用伪元素，圆角与卡片一致） */
-.chat-msg-user::before,
-.chat-msg-ai::before,
-.chat-step::before,
-.chat-waiting::before {
-  content: '' !important;
-  position: absolute !important;
-  left: 0 !important;
-  top: 8px !important;
-  bottom: 8px !important;
-  width: 3px !important;
-  border-radius: 0 3px 3px 0 !important;
-  background: var(--text-3, #6b6b6b) !important;
-}
-.chat-msg-user::before { background: rgb(167 139 250 / 55%) !important; }
-.chat-msg-ai::before { background: #a78bfa !important; }
-.chat-waiting::before { background: #a78bfa !important; }
-.chat-step.state-pending::before { background: rgb(255 255 255 / 14%) !important; }
-.chat-step.state-running::before { background: #a78bfa !important; }
-.chat-step.state-done::before { background: #4ade80 !important; }
-.chat-step.state-error::before { background: #f87171 !important; }
 
 /* ─── 内容左对齐同一列 ─── */
-.chat-list {
-  align-items: stretch !important;
-  gap: 10px !important;
-  padding: 14px 18px 22px !important;
-  max-width: 860px !important;
-}
-.chat-msg-user,
-.chat-msg-ai,
-.chat-step,
-.chat-waiting {
-  margin: 0 !important;
-  align-self: stretch !important;
-  width: 100% !important;
-  text-align: left !important;
-  box-sizing: border-box !important;
-}
 
 /* ─── 头行：左信息 + 右时间 ─── */
-.chat-msg-user .bubble-head,
-.chat-msg-ai .bubble-head {
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  justify-content: flex-start !important;
-  margin: 0 0 6px 0 !important;
-  padding: 0 !important;
-  border-bottom: 0 !important;
-  color: var(--text-3, #6b6b6b) !important;
-  font-size: 11px !important;
-  font-weight: 500 !important;
-}
+
 /* 时间推到右侧 */
 .chat-msg-user .bubble-head::after,
 .chat-msg-ai .bubble-head::after {
-  content: '' !important;
-  flex: 1 1 auto !important;
-  order: 0 !important;
+  content: '';
+  flex: 1 1 auto;
+  order: 0;
 }
+
 .chat-msg-user .bubble-head > :last-child,
 .chat-msg-ai .bubble-head > :last-child {
-  margin-left: auto !important;
-  order: 1 !important;
+  margin-left: auto;
+  order: 1;
 }
 
 /* ─── 步骤条：标题左 + 时间/状态右 ─── */
-.chat-step {
-  display: flex !important;
-  align-items: center !important;
-  flex-wrap: nowrap !important;
-  gap: 10px !important;
-}
-.chat-step .step-title {
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-}
-.chat-step.expanded .step-title {
-  white-space: normal !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-}
-.chat-step .step-time {
-  flex: 0 0 auto !important;
-  font-size: 11px !important;
-  color: var(--text-3, #6b6b6b) !important;
-  opacity: 0.85 !important;
-  font-variant-numeric: tabular-nums !important;
-}
-.chat-step .step-state {
-  flex: 0 0 auto !important;
-  background: rgb(255 255 255 / 5%) !important;
-  padding: 1px 9px !important;
-  border-radius: 10px !important;
-  font-size: 10.5px !important;
-  font-weight: 500 !important;
-  color: var(--text-3, #6b6b6b) !important;
-}
-.chat-step.state-running .step-state { background: rgb(167 139 250 / 14%) !important; color: #c4b5fd !important; }
-.chat-step.state-done .step-state { background: rgb(74 222 128 / 12%) !important; color: #86efac !important; }
-.chat-step.state-error .step-state { background: rgb(248 113 113 / 14%) !important; color: #fca5a5 !important; }
 
 /* ─── 消息体字号 ─── */
-.chat-msg-user .bubble-body,
-.chat-msg-ai .bubble-body {
-  color: var(--text, #e6e6e6) !important;
-  font-size: 12.5px !important;
-  line-height: 1.6 !important;
-  padding-left: 0 !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [time-right-tight] 时间右对齐 + 段间距 0 + AI 消息加背景
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── head：name 左 + time 右 ─── */
-.chat-msg-user .bubble-head,
-.chat-msg-ai .bubble-head {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  gap: 8px !important;
-  margin: 0 0 6px 0 !important;
-  padding: 0 0 6px 0 !important;
-  border-bottom: 1px solid rgb(255 255 255 / 5%) !important;
-  font-size: 11px !important;
-  color: var(--text-3, #6b6b6b) !important;
-}
-.chat-msg-user .bubble-name,
-.chat-msg-ai .bubble-name {
-  flex: 0 0 auto !important;
-  font-weight: 500 !important;
-  letter-spacing: 0.2px !important;
-}
+
 .chat-msg-user .bubble-time,
 .chat-msg-ai .bubble-time {
-  flex: 0 0 auto !important;
-  margin-left: auto !important;
-  font-variant-numeric: tabular-nums !important;
-  opacity: 0.7 !important;
-  font-size: 10.5px !important;
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+  font-size: 11px;
+  color: var(--text-3, #94a3b8);
 }
 
 /* ─── 消息体：段落无 margin + 紧凑行高 ─── */
 .chat-msg-user .bubble-body .md-p,
 .chat-msg-ai .bubble-body .md-p,
 .bubble-body .md-p {
-  margin: 0 !important;
-  padding: 0 !important;
-  line-height: 1.55 !important;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  padding: 0;
+  line-height: 1.55;
 }
+
 .chat-msg-user .bubble-body .md-ul,
 .chat-msg-ai .bubble-body .md-ul,
 .bubble-body .md-ul {
-  margin: 0 !important;
-  padding-left: 18px !important;
-  line-height: 1.55 !important;
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.55;
 }
+
 .chat-msg-user .bubble-body p + p,
 .chat-msg-ai .bubble-body p + p {
-  margin-top: 2px !important;
+  margin-top: 2px;
 }
+
 /* 空 p 不占位 */
 .chat-msg-user .bubble-body .md-p:empty,
-.chat-msg-ai .bubble-body .md-p:empty { display: none !important; }
+.chat-msg-ai .bubble-body .md-p:empty {
+  display: none;
+}
 
 /* ─── AI 消息：明显紫底 + 无边框 ─── */
-.chat-msg-ai {
-  background: linear-gradient(180deg, rgb(167 139 250 / 10%), rgb(167 139 250 / 6%)) !important;
-  border: 1px solid rgb(167 139 250 / 18%) !important;
-}
-.chat-msg-ai .bubble-head {
-  border-bottom-color: rgb(167 139 250 / 15%) !important;
-  color: #c4b5fd !important;
-}
-.chat-msg-ai .bubble-body strong {
-  color: #d8b4fe !important;
-}
 
 /* ─── 用户消息：保持中性底色 ─── */
-.chat-msg-user {
-  background: var(--surface, #141414) !important;
-  border: 1px solid var(--border, #262626) !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [unified-bg] 所有消息卡统一默认底色
    ═══════════════════════════════════════════════════════════ */
 
-.chat-msg-user,
-.chat-msg-ai,
-.chat-step,
-.chat-waiting {
-  background: var(--surface, #141414) !important;
-  border: 1px solid var(--border, #262626) !important;
-  border-radius: 8px !important;
-  padding: 10px 14px 10px 18px !important;
-  position: relative !important;
-  margin: 0 !important;
-  align-self: stretch !important;
-  width: 100% !important;
-  box-sizing: border-box !important;
-  color: var(--text, #e6e6e6) !important;
-}
-
 .chat-msg-user::before,
 .chat-msg-ai::before,
 .chat-step::before,
-.chat-waiting::before {
-  content: '' !important;
-  position: absolute !important;
-  left: 0 !important;
-  top: 8px !important;
-  bottom: 8px !important;
-  width: 3px !important;
-  border-radius: 0 3px 3px 0 !important;
-  background: var(--text-3, #6b6b6b) !important;
-}
-
-.chat-msg-user::before { background: rgb(167 139 250 / 55%) !important; }
-.chat-msg-ai::before { background: #a78bfa !important; }
-.chat-waiting::before { background: #a78bfa !important; }
-.chat-step.state-pending::before { background: rgb(255 255 255 / 14%) !important; }
-.chat-step.state-running::before { background: #a78bfa !important; }
-.chat-step.state-done::before { background: #4ade80 !important; }
-.chat-step.state-error::before { background: #f87171 !important; }
 
 /* AI 卡强制回默认底 */
-.chat-msg-ai {
-  background: var(--surface, #141414) !important;
-  border: 1px solid var(--border, #262626) !important;
-}
 
-.chat-msg-user .bubble-head,
-.chat-msg-ai .bubble-head {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  margin: 0 0 6px 0 !important;
-  padding: 0 0 6px 0 !important;
-  border-bottom: 1px solid rgb(255 255 255 / 5%) !important;
-  font-size: 11px !important;
-  color: var(--text-3, #6b6b6b) !important;
-}
 .chat-msg-ai .bubble-body strong {
-  color: #c4b5fd !important;
-  font-weight: 600 !important;
+  color: var(--primary-hover);
+  font-weight: 600;
 }
-
 
 /* ═══════════════════════════════════════════════════════════
    [toast-style-msg] 消息卡对齐 toast 风：圆图标 + 左竖条 + 圆角卡
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── 图标：紫色圆底 ─── */
-.bubble-icon,
-.chat-waiting .bubble-icon {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 22px !important;
-  height: 22px !important;
-  min-width: 22px !important;
-  border-radius: 50% !important;
-  background: rgb(167 139 250 / 18%) !important;
-  color: #c4b5fd !important;
-  font-size: 12px !important;
-  line-height: 1 !important;
-  flex-shrink: 0 !important;
-}
-.chat-msg-user .bubble-icon {
-  background: rgb(167 139 250 / 12%) !important;
-  color: #c4b5fd !important;
-}
-.chat-msg-ai .bubble-icon {
-  background: rgb(167 139 250 / 22%) !important;
-  color: #d8b4fe !important;
-}
 
 /* ─── head 布局：icon + name 左 + time 右 ─── */
-.chat-msg-user .bubble-head,
-.chat-msg-ai .bubble-head {
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  margin: 0 0 8px 0 !important;
-  padding: 0 0 8px 0 !important;
-  border-bottom: 1px solid rgb(255 255 255 / 5%) !important;
-  font-size: 11.5px !important;
-  color: var(--text-2, #a3a3a3) !important;
-}
+
 .chat-msg-user .bubble-name,
 .chat-msg-ai .bubble-name {
-  flex: 0 0 auto !important;
-  font-weight: 500 !important;
-  color: var(--text, #e6e6e6) !important;
-  letter-spacing: 0.2px !important;
-}
-.chat-msg-user .bubble-time,
-.chat-msg-ai .bubble-time {
-  margin-left: auto !important;
-  font-size: 10.5px !important;
-  color: var(--text-3, #6b6b6b) !important;
-  font-variant-numeric: tabular-nums !important;
-  opacity: 0.8 !important;
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--text, var(--surface-2));
+  letter-spacing: 0.2px;
 }
 
 /* ─── 卡片整体：toast 风（深底 + 圆角 + 左竖条）─── */
-.chat-msg-user,
-.chat-msg-ai,
-.chat-step,
-.chat-waiting {
-  background: var(--surface, #141414) !important;
-  border: 1px solid var(--border, #262626) !important;
-  border-radius: 10px !important;
-  padding: 10px 14px 12px 18px !important;
-  position: relative !important;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 30%) !important;
-}
 
 /* 左竖条：4px 圆角 */
-.chat-msg-user::before,
-.chat-msg-ai::before,
-.chat-step::before,
-.chat-waiting::before {
-  content: '' !important;
-  position: absolute !important;
-  left: 0 !important;
-  top: 10px !important;
-  bottom: 10px !important;
-  width: 4px !important;
-  border-radius: 0 4px 4px 0 !important;
+
+.chat-msg-user::before {
+  background: rgb(88 166 255 / 55%);
 }
-.chat-msg-user::before { background: rgb(167 139 250 / 55%) !important; }
-.chat-msg-ai::before { background: #a78bfa !important; }
-.chat-waiting::before { background: #a78bfa !important; }
-.chat-step.state-pending::before { background: rgb(255 255 255 / 14%) !important; }
-.chat-step.state-running::before { background: #a78bfa !important; }
-.chat-step.state-done::before { background: #4ade80 !important; }
-.chat-step.state-error::before { background: #f87171 !important; }
+
+.chat-msg-ai::before {
+  background: var(--primary);
+}
+
+.chat-step.state-pending::before {
+  background: rgb(255 255 255 / 14%);
+}
+
+.chat-step.state-running::before {
+  background: var(--primary);
+}
+
+.chat-step.state-done::before {
+  background: var(--success);
+}
+
+.chat-step.state-error::before {
+  background: var(--danger);
+}
 
 /* ─── 消息体字号 ─── */
-.chat-msg-user .bubble-body,
-.chat-msg-ai .bubble-body {
-  font-size: 12.5px !important;
-  line-height: 1.6 !important;
-  color: var(--text, #e6e6e6) !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [toast-exact] 消息卡逐字复制 ToastHost 的 CSS 值
@@ -6627,277 +3820,72 @@ function onHtmlDrop(e: DragEvent) {
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── 卡片 = .toast ─── */
-.chat-msg-user,
-.chat-msg-ai,
-.chat-step,
-.chat-waiting {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: stretch !important;
-  gap: 6px !important;
-  padding: 10px 14px !important;
-  background: var(--surface) !important;
-  border: 1px solid var(--border, #e5e9f0) !important;
-  border-radius: 8px !important;
-  box-shadow: 0 8px 24px rgb(15 30 60 / 14%) !important;
-  font-size: 13px !important;
-  position: relative !important;
-  margin: 0 !important;
-  align-self: stretch !important;
-  width: 100% !important;
-  box-sizing: border-box !important;
-}
 
 /* ─── border-left 按类型（对齐 .toast.info / .success / .warn / .error）─── */
-.chat-msg-user { border-left: 3px solid var(--primary, #a78bfa) !important; }
-.chat-msg-ai { border-left: 3px solid var(--primary, #a78bfa) !important; }
-.chat-waiting { border-left: 3px solid var(--primary, #a78bfa) !important; }
-.chat-step.state-pending { border-left: 3px solid var(--text-3, #6b6b6b) !important; }
-.chat-step.state-running { border-left: 3px solid var(--primary, #a78bfa) !important; }
-.chat-step.state-done { border-left: 3px solid var(--success, #10b981) !important; }
-.chat-step.state-error { border-left: 3px solid var(--danger, #ef4444) !important; }
 
 /* 清掉旧的伪元素左竖条（toast 用 border-left，不用伪元素） */
-.chat-msg-user::before,
-.chat-msg-ai::before,
-.chat-step::before,
-.chat-waiting::before {
-  display: none !important;
-  content: none !important;
+
+.chat-msg-ai .bubble-icon {
+  background: var(--primary-bg, var(--primary-hover));
+  color: var(--primary, var(--primary));
 }
 
-/* ─── 图标 = .toast-icon ─── */
-.bubble-icon,
-.chat-waiting .bubble-icon {
-  width: 18px !important;
-  height: 18px !important;
-  min-width: 18px !important;
-  border-radius: 50% !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  font-size: 11px !important;
-  font-weight: 700 !important;
-  flex-shrink: 0 !important;
-  background: var(--primary-bg, #eaf2ff) !important;
-  color: var(--primary, #2563eb) !important;
-  line-height: 1 !important;
-}
-.chat-msg-ai .bubble-icon {
-  background: var(--primary-bg, #eaf2ff) !important;
-  color: var(--primary, #2563eb) !important;
-}
 .chat-msg-user .bubble-icon {
-  background: var(--primary-bg, #eaf2ff) !important;
-  color: var(--primary, #2563eb) !important;
+  background: var(--primary-bg, var(--primary-hover));
+  color: var(--primary, var(--primary));
+  align-self: center;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* ─── head：icon + name 左，time 右（横排对齐 .toast display flex gap 10）─── */
-.chat-msg-user .bubble-head,
-.chat-msg-ai .bubble-head {
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border-bottom: 0 !important;
-  font-size: 12.5px !important;
-  font-weight: 500 !important;
-  color: var(--text, #1f2d3d) !important;
-}
-.chat-msg-user .bubble-name,
-.chat-msg-ai .bubble-name {
-  flex: 0 0 auto !important;
-  font-weight: 600 !important;
-  color: var(--text, #1f2d3d) !important;
-}
-.chat-msg-user .bubble-time,
-.chat-msg-ai .bubble-time {
-  margin-left: auto !important;
-  font-size: 11px !important;
-  color: var(--text-3, #94a3b8) !important;
-  font-variant-numeric: tabular-nums !important;
-}
 
 /* ─── body：正文 ─── */
-.chat-msg-user .bubble-body,
-.chat-msg-ai .bubble-body {
-  font-size: 13px !important;
-  line-height: 1.6 !important;
-  color: var(--text, #1f2d3d) !important;
-  word-break: break-word !important;
-}
 
 /* ─── 步骤条：一行紧凑，对齐 toast 结构 ─── */
-.chat-step {
-  flex-direction: row !important;
-  align-items: center !important;
-  gap: 10px !important;
-}
-.chat-step .step-title {
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
-  font-size: 13px !important;
-  color: var(--text, #1f2d3d) !important;
-  font-weight: 500 !important;
-}
-.chat-step .step-time {
-  flex: 0 0 auto !important;
-  font-size: 11px !important;
-  color: var(--text-3, #94a3b8) !important;
-  opacity: 1 !important;
-}
-.chat-step .step-state {
-  flex: 0 0 auto !important;
-  font-size: 11px !important;
-  padding: 0 8px !important;
-  border-radius: 10px !important;
-  background: var(--surface-2, #f8fafc) !important;
-  color: var(--text-2, #475569) !important;
-  font-weight: 600 !important;
-}
 
 /* ─── chat-list 容器 ─── */
-.chat-list {
-  gap: 10px !important;
-  padding: 14px 18px 22px !important;
-  max-width: 860px !important;
-}
-
 
 /* [chatlist-transparent] chat-list 容器透明无背景 */
 .chat-list,
-.term-body,
-.terminal,
-.editor-body {
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-}
-
 
 /* [no-shadow] 消息卡去阴影（toast 阴影在满宽长条上变黑影） */
-.chat-msg-user,
-.chat-msg-ai,
-.chat-step,
-.chat-waiting {
-  box-shadow: none !important;
-}
-
 
 /* [left-border-only] 卡片只留左竖条，其他三边无边框 */
-.chat-msg-user,
-.chat-msg-ai,
-.chat-step,
-.chat-waiting {
-  border-top: 0 !important;
-  border-right: 0 !important;
-  border-bottom: 0 !important;
-  border-left-width: 3px !important;
-  border-left-style: solid !important;
-}
-
 
 /* [transparent-card] 消息卡背景透明，只保留左竖条 */
-.chat-msg-user,
-.chat-msg-ai,
-.chat-step,
-.chat-waiting {
-  background: transparent !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [status-bg] 卡片背景 = 半透明状态色
    ═══════════════════════════════════════════════════════════ */
 
 /* 用户消息：淡紫底 */
-.chat-msg-user {
-  background: rgb(167 139 250 / 5%) !important;
-}
-/* AI 消息：淡紫底（略深） */
-.chat-msg-ai {
-  background: rgb(167 139 250 / 7%) !important;
-}
-/* 等待：淡紫底 */
-.chat-waiting {
-  background: rgb(167 139 250 / 5%) !important;
-}
-/* 步骤条：按状态 */
-.chat-step.state-pending {
-  background: rgb(255 255 255 / 2%) !important;
-}
-.chat-step.state-running {
-  background: rgb(167 139 250 / 6%) !important;
-}
-.chat-step.state-done {
-  background: rgb(74 222 128 / 5%) !important;
-}
-.chat-step.state-error {
-  background: rgb(248 113 113 / 6%) !important;
-}
 
+/* AI 消息：淡紫底（略深） */
+
+/* 等待：淡紫底 */
+
+/* 步骤条：按状态 */
 
 /* ═══════════════════════════════════════════════════════════
    [loading-right] loading 右侧 + 明显旋转圈 + 图标描述居中
    ═══════════════════════════════════════════════════════════ */
 
 /* 步骤条：单行横向，左侧 icon+title，中间空白，右侧 time+loading+state+caret */
-.chat-step {
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  flex-wrap: nowrap !important;
-  gap: 10px !important;
-  padding: 10px 14px !important;
-}
 
 /* 隐藏旧 dot */
-.chat-step .step-dot { display: none !important; }
 
 /* 描述前图标：垂直居中 + 稍大 */
-.chat-step .step-icon {
-  flex: 0 0 auto !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  font-size: 14px !important;
-  line-height: 1 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  width: 20px !important;
-  height: 20px !important;
+
+.chat-step .step-icon::before {
+  content: '' !important;
 }
-.chat-step .step-icon::before { content: '' !important; }
 
 /* 标题：与 icon 居中对齐 */
-.chat-step .step-title {
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  font-size: 12.5px !important;
-  line-height: 1.5 !important;
-  margin: 0 !important;
-}
-.chat-step.expanded .step-title {
-  white-space: normal !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  display: block !important;
-}
 
 /* 时间 */
-.chat-step .step-time {
-  flex: 0 0 auto !important;
-  font-size: 11px !important;
-  color: var(--text-3, #6b6b6b) !important;
-  opacity: 0.9 !important;
-  font-variant-numeric: tabular-nums !important;
-}
 
 /* 右侧 loading 旋转圈 */
 .chat-step .step-loading {
@@ -6907,116 +3895,120 @@ function onHtmlDrop(e: DragEvent) {
   justify-content: center !important;
   width: 16px !important;
   height: 16px !important;
-  color: var(--primary, #a78bfa) !important;
+  color: var(--primary, var(--primary)) !important;
   animation: step-loading-spin 0.9s linear infinite !important;
 }
+
 .chat-step .step-loading svg {
   width: 14px !important;
   height: 14px !important;
   display: block !important;
 }
-@keyframes step-loading-spin { to { transform: rotate(360deg); } }
+
+@keyframes step-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 /* 状态徽章 */
-.chat-step .step-state {
-  flex: 0 0 auto !important;
-  padding: 1px 9px !important;
-  border-radius: 10px !important;
-  font-size: 10.5px !important;
-  font-weight: 600 !important;
-  background: rgb(255 255 255 / 4%) !important;
-  color: var(--text-3, #6b6b6b) !important;
-}
-.chat-step.state-running .step-state { background: rgb(167 139 250 / 14%) !important; color: #c4b5fd !important; }
-.chat-step.state-done .step-state { background: rgb(74 222 128 / 12%) !important; color: #86efac !important; }
-.chat-step.state-error .step-state { background: rgb(248 113 113 / 14%) !important; color: #fca5a5 !important; }
 
 /* caret */
-.chat-step .step-caret {
-  flex: 0 0 auto !important;
-  font-size: 9px !important;
-  opacity: 0.4 !important;
-  margin: 0 !important;
-}
-.chat-step:hover .step-caret { opacity: 0.9 !important; }
 
+.chat-step:hover .step-caret {
+  opacity: 0.9 !important;
+}
 
 /* ═══════════════════════════════════════════════════════════
    [attachments-css] 附件 tag 区
    ═══════════════════════════════════════════════════════════ */
 .attach-bar {
-  display: flex !important;
-  flex-wrap: wrap !important;
-  gap: 6px !important;
-  padding: 8px 12px !important;
-  border-bottom: 1px solid var(--border, #262626) !important;
-  background: var(--surface-2, #1a1a1a) !important;
-  max-height: 120px !important;
-  overflow-y: auto !important;
-}
-.attach-tag {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  padding: 3px 8px 3px 4px !important;
-  border-radius: 6px !important;
-  background: var(--surface, #141414) !important;
-  border: 1px solid var(--border, #262626) !important;
-  font-size: 11.5px !important;
-  color: var(--text, #e6e6e6) !important;
-  max-width: 260px !important;
-}
-.attach-tag.kind-image { border-color: rgb(167 139 250 / 30%) !important; }
-.attach-img {
-  width: 22px !important;
-  height: 22px !important;
-  object-fit: cover !important;
-  border-radius: 4px !important;
-  flex-shrink: 0 !important;
-  background: rgb(0 0 0 / 20%) !important;
-}
-.attach-ico { font-size: 14px !important; line-height: 1 !important; }
-.attach-name {
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-  font-weight: 500 !important;
-}
-.attach-size {
-  flex: 0 0 auto !important;
-  color: var(--text-3, #6b6b6b) !important;
-  font: 10px/1 var(--mono, monospace) !important;
-}
-.attach-del {
-  flex: 0 0 auto !important;
-  width: 16px !important;
-  height: 16px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 4px !important;
-  background: transparent !important;
-  color: var(--text-3, #6b6b6b) !important;
-  cursor: pointer !important;
-  font-size: 14px !important;
-  line-height: 1 !important;
-}
-.attach-del:hover {
-  color: #f87171 !important;
-  background: rgb(248 113 113 / 12%) !important;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, var(--border));
+  background: var(--surface-2, var(--surface-2));
+  max-height: 120px;
+  overflow-y: auto;
 }
 
+.attach-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-6);
+  background: var(--surface, var(--surface));
+  border: 1px solid var(--border, var(--border));
+  font-size: 11.5px;
+  color: var(--text, var(--text));
+  max-width: 260px;
+  justify-content: center;
+}
+
+.attach-tag.kind-image {
+  border-color: rgb(88 166 255 / 30%);
+}
+
+.attach-img {
+  width: 22px;
+  height: 22px;
+  object-fit: cover;
+  border-radius: var(--radius-4);
+  flex-shrink: 0;
+  background: rgb(0 0 0 / 20%);
+}
+
+.attach-ico {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.attach-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.attach-size {
+  flex: 0 0 auto;
+  color: var(--text-3, var(--text-3));
+  font: 10px/1 var(--mono, monospace);
+}
+
+.attach-del {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-4);
+  background: transparent;
+  color: var(--text-3, var(--text-3));
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.attach-del:hover {
+  color: var(--danger);
+  background: rgb(248 81 73 / 12%);
+}
 
 /* [tree-drop-css] 编辑器拖拽高亮 */
 .editor.is-dragging {
-  border-color: rgb(167 139 250 / 60%) !important;
-  box-shadow: 0 0 0 3px rgb(167 139 250 / 12%) !important;
-  background: rgb(167 139 250 / 4%) !important;
+  border-color: rgb(88 166 255 / 60%) !important;
+  box-shadow: 0 0 0 3px rgb(88 166 255 / 12%) !important;
+  background: rgb(88 166 255 / 4%) !important;
 }
+
 .editor.is-dragging::after {
   content: '松开以附加文件' !important;
   position: absolute !important;
@@ -7024,8 +4016,8 @@ function onHtmlDrop(e: DragEvent) {
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  background: rgb(167 139 250 / 8%) !important;
-  color: #c4b5fd !important;
+  background: rgb(88 166 255 / 8%) !important;
+  color: var(--primary-hover) !important;
   font-size: 13px !important;
   font-weight: 600 !important;
   pointer-events: none !important;
@@ -7033,205 +4025,131 @@ function onHtmlDrop(e: DragEvent) {
   border-radius: inherit !important;
 }
 
-
 /* ═══════════════════════════════════════════════════════════
    [inline-loading] 提问卡内联 loading + 附件 tag 居中
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── 用户卡 body 内联 loading ─── */
-.chat-msg-user .bubble-body {
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  text-align: left !important;
-}
+
 .chat-msg-user .bubble-text {
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
-  text-align: left !important;
-  word-break: break-word !important;
-  color: var(--text, #e6e6e6) !important;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  word-break: break-word;
+  color: var(--text, var(--text));
 }
+
 .chat-msg-user .bubble-text > p {
-  display: inline !important;
-  margin: 0 !important;
+  display: inline;
+  margin: 0;
 }
+
 .chat-msg-user .bubble-loading {
-  flex: 0 0 auto !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 14px !important;
-  height: 14px !important;
-  color: #a78bfa !important;
-  animation: bubble-loading-spin 0.9s linear infinite !important;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--primary);
+  animation: bubble-loading-spin 0.9s linear infinite;
 }
+
 .chat-msg-user .bubble-loading svg {
-  width: 13px !important;
-  height: 13px !important;
-  display: block !important;
+  width: 13px;
+  height: 13px;
+  display: block;
 }
-@keyframes bubble-loading-spin { to { transform: rotate(360deg); } }
+
+@keyframes bubble-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 /* ─── 附件 tag 内容居中（图标 + 名 + 大小 + 删除）─── */
-.attach-tag {
-  align-items: center !important;
-  justify-content: center !important;
-  padding: 4px 8px !important;
-}
+
 .attach-tag .attach-ico,
 .attach-tag .attach-img {
-  align-self: center !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
+
 .attach-tag .attach-name,
 .attach-tag .attach-size,
 .attach-tag .attach-del {
-  align-self: center !important;
-  line-height: 1.2 !important;
+  align-self: center;
+  line-height: 1.2;
 }
 
 /* ─── 用户卡 head 图标与文字垂直居中 ─── */
-.chat-msg-user .bubble-head {
-  align-items: center !important;
-}
-.chat-msg-user .bubble-icon {
-  align-self: center !important;
-  line-height: 1 !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-}
+
 .chat-msg-user .bubble-name,
 .chat-msg-user .bubble-time {
-  line-height: 1.2 !important;
+  line-height: 1.2;
 }
-
 
 /* [step-vertical-center] 步骤条图标/文字/时间/状态垂直居中 */
-.chat-step {
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  flex-wrap: nowrap !important;
-  gap: 10px !important;
-}
+
 .chat-step .step-icon,
 .chat-step .step-dot {
+  width: 5px !important;
+  height: 5px !important;
+  border-radius: var(--radius-full);
+  background: #6a737d;
+  flex-shrink: 0;
+  margin-top: 4px !important;
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
   flex: 0 0 auto !important;
   align-self: center !important;
+  align-items: center !important;
+  justify-content: center !important;
   line-height: 1 !important;
   margin: 0 !important;
   padding: 0 !important;
 }
-.chat-step .step-title {
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
-  align-self: center !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  line-height: 1.4 !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-}
+
 .chat-step.expanded .step-title {
   white-space: normal !important;
   overflow: visible !important;
   text-overflow: clip !important;
   display: block !important;
 }
+
 .chat-step .step-time,
 .chat-step .step-state,
 .chat-step .step-caret {
+  flex: 0 0 auto !important;
+  font-size: 9px !important;
+  color: var(--text-3, var(--text-3)) !important;
+  margin-left: 2px !important;
+  margin-top: 0 !important;
+  transition: transform 0.15s ease !important;
+  opacity: 0.4 !important;
+  margin: 0 !important;
   align-self: center !important;
   line-height: 1.2 !important;
-  margin: 0 !important;
 }
-
 
 /* ═══════════════════════════════════════════════════════════
    [msg-dark-bg] 聊天卡片背景统一深灰黑
    ═══════════════════════════════════════════════════════════ */
-.chat-msg {
-  background: #1a1a1a !important;
-  border-color: #2a2a2a !important;
-}
-.chat-msg-user {
-  background: #1c1c22 !important;
-  border-color: #2a2a35 !important;
-}
-.chat-msg-ai {
-  background: #1a1a1a !important;
-  border-color: #2a2a2a !important;
-}
-.chat-bubble {
-  background: #1a1a1a !important;
-  border-color: #2a2a2a !important;
-}
-.chat-bubble.bubble-left,
-.chat-bubble.bubble-right {
-  background: #1a1a1a !important;
-  border-color: #2a2a2a !important;
-}
-.bubble-think,
-.chat-think {
-  background: #151515 !important;
-  border-color: #262626 !important;
-}
-.chat-step {
-  background: transparent !important;
-}
-.chat-step:hover {
-  background: rgb(255 255 255 / 3%) !important;
-}
-/* 展开的 details / pre 也统一深灰 */
-.chat-msg .bubble-body .md-code {
-  background: #141414 !important;
-  border-color: #2a2a2a !important;
-}
-.chat-msg .bubble-body .md-code-bar {
-  background: #1a1a1a !important;
-  border-bottom-color: #2a2a2a !important;
-}
-.chat-msg .bubble-body .md-code pre {
-  background: #141414 !important;
-  color: #d4d4d4 !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [editor-tight] 编辑器边距收窄 + 圆角
    ═══════════════════════════════════════════════════════════ */
 
 /* 编辑器卡片圆角 + 顶部圆角 */
-.pane-main > .editor.card {
-  border-radius: 10px !important;
-  overflow: hidden !important;
-}
-.pane-main > .terminal.card {
-  border-radius: 10px !important;
-  overflow: hidden !important;
-}
 
 /* 顶栏收窄 */
 .editor .editor-bar,
-.editor .tpl-bar {
-  padding: 2px 8px !important;
-  gap: 4px !important;
-}
-.editor .tpl-bar {
-  padding: 2px 6px !important;
-}
 .editor .tpl-chip {
   padding: 2px 8px !important;
   font-size: 11px !important;
 }
+
 .editor .editor-bar .bar-actions {
   gap: 4px !important;
 }
@@ -7242,14 +4160,13 @@ function onHtmlDrop(e: DragEvent) {
   padding: 0 !important;
   margin: 0 !important;
 }
+
 /* CodeMirror 内容内边距 */
 .editor .cm-content {
+  background: var(--surface, var(--surface)) !important;
   padding: 8px 12px !important;
 }
-.editor .cm-gutters {
-  padding: 8px 0 !important;
-  min-width: 36px !important;
-}
+
 .editor .cm-lineNumbers .cm-gutterElement {
   padding: 0 8px 0 4px !important;
   min-width: 36px !important;
@@ -7261,51 +4178,18 @@ function onHtmlDrop(e: DragEvent) {
   padding: 3px 10px !important;
 }
 
-/* 终端区顶栏也收窄 */
-.terminal .term-bar {
-  padding: 0 8px !important;
-}
-
-
 /* [tight-margin-sp] 内层容器边距收窄 */
-.pane-main {
-  padding: 0 !important;
-  gap: 0 !important;
-}
-.pane-main > .terminal.card {
-  margin-bottom: 4px !important;
-}
-.pane-main > .editor.card {
-  margin-bottom: 0 !important;
-}
-.pane {
-  padding: 0 !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [ui-polish-v4] 4 项微调
    ═══════════════════════════════════════════════════════════ */
 
 /* 1. 编辑框 ↔ 树 边距收窄 */
-.side-resize-handle {
-  width: 6px !important;
-}
-.pane {
-  gap: 0 !important;
-}
-.pane-side {
-  gap: 0 !important;
-  margin-left: 0 !important;
-}
+
 /* 树容器只留左细线，不占空 */
-.side-resize-handle::after {
-  left: 50% !important;
-}
 
 /* 2. 按钮 hover 统一（所有按钮过渡 + 暖橙描边反馈） */
 .primary-btn,
-.term-btn,
 .ghost-btn,
 .loop-btn,
 .tpl-chip,
@@ -7314,49 +4198,35 @@ function onHtmlDrop(e: DragEvent) {
 .refresh,
 .undo-btn,
 .save-btn {
-  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, opacity 0.14s ease !important;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease,
+    border-color 0.14s ease,
+    opacity 0.14s ease !important;
 }
+
 /* 灰阶次按钮 hover 加暖橙字色 */
 .ghost-btn:hover:not(:disabled),
-.term-btn:hover:not(:disabled),
 .loop-btn:hover:not(:disabled),
 .tpl-chip:hover,
-.side-tab:hover {
-  color: var(--primary) !important;
-  border-color: rgb(217 119 87 / 40%) !important;
-  background: rgb(217 119 87 / 6%) !important;
-}
+
 /* 运行 / 主操作 hover 轻微提亮 */
 .primary-btn.takeover:hover:not(:disabled),
 .primary-btn.run:hover:not(:disabled) {
-  background: rgb(217 119 87 / 14%) !important;
-  border-color: var(--primary) !important;
-  color: var(--primary) !important;
+  background: rgb(217 119 87 / 14%);
+  color: var(--primary);
+  border-color: var(--primary);
+  box-shadow: none;
 }
 
 /* 3. loop-btn 里 icon + 文字间距 */
-.loop-btn .ico-svg {
-  width: 12px;
-  height: 12px;
-  flex-shrink: 0;
-  margin-right: 2px;
-  display: inline-block;
-  vertical-align: -1px;
-}
 
 /* 4. 输入器 header 加 padding */
-.editor .editor-bar {
-  padding: 6px 12px !important;
-  min-height: 36px !important;
-}
+
 .editor .tpl-bar {
   padding: 5px 12px !important;
+  gap: 4px !important;
 }
-.terminal .term-bar {
-  padding: 6px 12px !important;
-  min-height: 36px !important;
-}
-
 
 /* ═══════════════════════════════════════════════════════════
    [fix-run-btn] 最后生效：运行按钮各态锁死 + 取消按钮图标显式
@@ -7365,30 +4235,12 @@ function onHtmlDrop(e: DragEvent) {
 /* 运行按钮（takeover / run / head-run）：全部锁死为透明底 + 橙描边 */
 .pane-main .editor .primary-btn.head-run,
 .pane-main .editor .primary-btn.takeover,
-.pane-main .editor .primary-btn.run {
-  background: transparent !important;
-  background-color: transparent !important;
-  background-image: none !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
-  opacity: 1 !important;
-}
 
 .pane-main .editor .primary-btn.head-run:hover:not(:disabled),
 .pane-main .editor .primary-btn.takeover:hover:not(:disabled),
 .pane-main .editor .primary-btn.run:hover:not(:disabled),
 .pane-main .editor .primary-btn.head-run:focus-visible,
 .pane-main .editor .primary-btn.takeover:focus-visible,
-.pane-main .editor .primary-btn.run:focus-visible {
-  background: rgb(217 119 87 / 16%) !important;
-  background-color: rgb(217 119 87 / 16%) !important;
-  background-image: none !important;
-  color: var(--primary) !important;
-  border: 1px solid var(--primary) !important;
-  box-shadow: none !important;
-  opacity: 1 !important;
-}
 
 /* 按钮里 icon 和文字保持可见 */
 .pane-main .editor .primary-btn.head-run .ico-svg,
@@ -7396,91 +4248,1831 @@ function onHtmlDrop(e: DragEvent) {
 .pane-main .editor .primary-btn.run .ico-svg,
 .pane-main .editor .primary-btn.head-run span,
 .pane-main .editor .primary-btn.takeover span,
-.pane-main .editor .primary-btn.run span {
-  color: inherit !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-}
 
 /* 暂停（stop 态）：红描边 */
 .pane-main .editor .primary-btn.stop,
-.pane-main .editor .primary-btn.stop.head-run {
-  background: transparent !important;
-  background-color: transparent !important;
-  background-image: none !important;
-  color: var(--danger) !important;
-  border: 1px solid var(--danger) !important;
-  box-shadow: none !important;
-}
-.pane-main .editor .primary-btn.stop:hover:not(:disabled) {
-  background: rgb(224 108 117 / 16%) !important;
-  background-color: rgb(224 108 117 / 16%) !important;
-  background-image: none !important;
-  color: var(--danger) !important;
-  border-color: var(--danger) !important;
-}
+
 .pane-main .editor .primary-btn.stop .ico-svg,
-.pane-main .editor .primary-btn.stop span {
-  color: inherit !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-}
 
 /* 禁用态：稍微降不透明度，仍可读 */
 .pane-main .editor .primary-btn.head-run:disabled,
 .pane-main .editor .primary-btn.takeover:disabled,
 .pane-main .editor .primary-btn.run:disabled,
-.pane-main .editor .primary-btn.stop:disabled {
-  opacity: 0.45 !important;
-}
 
 /* 取消按钮图标显式可见 */
-.loop-btn > .ico-svg,
-.loop-btn > svg,
-.loop-btn .ico-svg,
-.loop-btn svg {
-  display: inline-block !important;
-  width: 12px !important;
-  height: 12px !important;
-  flex-shrink: 0 !important;
-  margin-right: 4px !important;
-  vertical-align: -2px !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-  fill: none !important;
-  stroke: currentColor !important;
-}
-
-
 /* ═══════════════════════════════════════════════════════════
    [ghost-nowrap] ghost-btn 硬锁横排
    ═══════════════════════════════════════════════════════════ */
-.ghost-btn {
+
+.ghost-btn > .ico-svg,
+.ghost-btn > svg {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  margin: 0;
+  vertical-align: middle;
+  fill: none;
+  stroke: currentColor;
+}
+
+.ghost-btn > span {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* [live-typewriter] terminal 内打字机实时输出 */
+
+@keyframes live-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* [terminal-status] 循环状态条 + 服务端调用日志 */
+
+@keyframes flow-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* [script-meta-row] 脚本元信息第二行 */
+
+/* [flow-spinner-v2] 流程 loading 视觉优化 */
+
+.meta-row:empty,
+
+/* [flow-tag-v3] flow-timeline 去底、去边框；tag 显"阶段名 + 状态" */
+
+/* [meta-row-v2] 脚本元信息卡片美化 */
+
+/* ─── 拖拽条：极细 + hover 显色 ─── */
+.side-resize-handle {
+  flex-shrink: 0;
+  width: 8px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 5;
+  transition: background 0.15s;
+}
+
+.side-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 24px;
+  border-radius: var(--radius-2);
+  background: var(--border);
+  transition:
+    background 0.15s,
+    height 0.15s;
+}
+
+.side-resize-handle:hover::after,
+.side-resize-handle.active::after {
+  background: var(--primary);
+  height: 40px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   [tpl-bar-final] 编辑器工具栏权威样式（覆盖此前所有 patch）
+   设计：与 header 一致 - surface 背景 + border-b + 8px padding
+   ═══════════════════════════════════════════════════════════ */
+
+.tpl-bar .ghost-btn,
+
+/* ═══════════════════════════════════════════════════════════
+   [editor-foot-final] 编辑器底栏权威样式
+   ═══════════════════════════════════════════════════════════ */
+
+.editor-foot .persist-warning,
+.editor-foot .req-err-badge,
+.editor-foot .dry-badge,
+
+/* ═══════════════════════════════════════════════════════════
+   [chat-final] chat 区权威样式
+   参考：One Dark Pro / Claude / ChatGPT 聊天 UI
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── 用户消息（右对齐） ─── */
+.chat-msg-user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.chat-msg-user .bubble-head {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 0 4px;
+  margin: 0;
+}
+
+.chat-msg-user .bubble-body {
+  background: var(--primary-bg);
+  border: 1px solid rgb(88 166 255 / 28%);
+  border-radius: var(--radius-10) 10px 2px 10px;
+  padding: 8px 12px;
+  max-width: 75%;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* ─── AI 消息（左对齐） ─── */
+.chat-msg-ai {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+}
+
+.chat-msg-ai .bubble-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 0 4px;
+  margin: 0;
+}
+
+.chat-msg-ai .bubble-body {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-10) 10px 10px 2px;
+  padding: 10px 14px;
+  max-width: 100%;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+  width: 100%;
+}
+
+/* ─── 步骤条（chat-step） ─── */
+.chat-step {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: flex-start !important;
+  gap: 8px !important;
+  padding: 6px 10px !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-left: 2px solid var(--border) !important;
+  border-radius: 0 !important;
+  font-size: 12px !important;
+  color: var(--text-3) !important;
+  transition: border-color 0.15s !important;
+}
+
+.chat-step:hover {
+  background: rgb(201 209 217 / 3%) !important;
+}
+
+.chat-step.state-running {
+  border-left-color: var(--primary);
+  color: var(--text-2);
+}
+
+.chat-step.state-done {
+  border-left-color: var(--success);
+}
+
+.chat-step.state-error {
+  border-left-color: var(--danger);
+}
+
+.chat-step .step-dot {
+  display: none !important;
+}
+
+.chat-step .step-icon,
+.chat-step .step-caret {
+  flex-shrink: 0 !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+  color: inherit !important;
+}
+
+.chat-step .step-title {
+  flex: 1 !important;
+  min-width: 0 !important;
+  color: inherit !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.chat-step .step-state {
+  flex-shrink: 0 !important;
+  font-size: 11px !important;
+  color: var(--text-3) !important;
+}
+
+.chat-step .step-time {
+  flex-shrink: 0 !important;
+  font-size: 10px !important;
+  color: var(--text-3) !important;
+  opacity: 0.6 !important;
+  font-family: var(--mono, monospace) !important;
+}
+
+/* ─── 代码块（md-code） ─── */
+.md-code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-6);
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.md-code summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.md-code summary::-webkit-details-marker {
+  display: none;
+}
+
+.md-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--mono, monospace);
+}
+
+.md-code-lang {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.md-code-acts {
+  display: flex;
+  gap: 4px;
+}
+
+.md-code-acts button {
+  padding: 2px 8px;
+  font-size: 10px;
+  color: var(--text-3);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-4);
+  cursor: pointer;
+  transition: 0.15s;
+}
+
+.md-code-acts button:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
+.md-code pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  background: var(--bg);
+  color: var(--text);
+  font: 12px/1.55 var(--mono, monospace);
+}
+
+/* ─── 行内元素 ─── */
+.bubble-body code:not(.md-code pre code) {
+  padding: 1px 6px;
+  background: var(--surface-3, rgb(48 54 61));
+  color: var(--primary-hover);
+  border-radius: var(--radius-4);
+  font-size: 12px;
+}
+
+.bubble-body .md-h {
+  margin: 12px 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.bubble-body .md-p {
+  margin: 6px 0;
+  line-height: 1.7;
+}
+
+.bubble-body .md-ul {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.bubble-body strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* ─── 实时流（打字机） ─── */
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ─── 空态（tree-empty） ─── */
+
+/* [user-req] flow-timeline 背景透明 */
+
+/* [user-req] flow-timeline 背景透明 */
+
+/* ═══════════════════════════════════════════════════════════
+   [left-unify] 左侧主区权威样式
+   设计语言：Trae / Cursor / VS Code 深色一致
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── 主区容器 ─────────────────────────────────────────────── */
+.pane-main {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+  padding: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* ── 顶部 flow-timeline（步骤条） ────────────────────────── */
+.flow-timeline {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 8px 16px !important;
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border) !important;
+  flex-shrink: 0 !important;
+  font-size: 11px !important;
+  min-height: 36px !important;
+}
+
+.flow-step {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 3px 10px !important;
+  border-radius: var(--radius-12) !important;
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text-3) !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  transition: all 0.15s ease !important;
+}
+
+.flow-step.run {
+  background: rgb(88 166 255 / 12%) !important;
+  border-color: rgb(88 166 255 / 40%) !important;
+  color: var(--primary) !important;
+}
+
+.flow-step.done {
+  background: rgb(63 185 80 / 10%) !important;
+  border-color: rgb(63 185 80 / 30%) !important;
+  color: var(--success) !important;
+}
+
+.flow-step.error {
+  background: rgb(248 81 73 / 10%) !important;
+  border-color: rgb(248 81 73 / 30%) !important;
+  color: var(--danger) !important;
+}
+
+.flow-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 12px !important;
+  height: 12px !important;
+  flex-shrink: 0 !important;
+}
+
+.flow-spinner {
+  display: inline-block !important;
+  width: 10px !important;
+  height: 10px !important;
+  border: 2px solid currentColor !important;
+  border-right-color: transparent !important;
+  border-radius: var(--radius-full) !important;
+  animation: flow-spin 0.7s linear infinite !important;
+}
+
+@keyframes flow-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.flow-glyph {
+  font-size: 12px !important;
+  line-height: 1 !important;
+}
+
+.flow-label {
+  font-family: var(--mono, monospace) !important;
+  font-size: 11px !important;
+  white-space: nowrap !important;
+}
+
+.flow-detail {
+  font-size: 10px !important;
+  opacity: 0.7 !important;
+  font-family: var(--mono, monospace) !important;
+}
+
+/* ── 终端区 term-body ──────────────────────────────────────── */
+.terminal {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  background: var(--bg) !important;
+}
+
+.term-body {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+/* ── ts-bar（循环状态条） ────────────────────────────────── */
+.ts-bar {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 6px 16px !important;
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border) !important;
+  font-family: var(--mono, monospace) !important;
+  font-size: 11px !important;
+  color: var(--text-3) !important;
+  flex-shrink: 0 !important;
+}
+
+.ts-bar:empty {
+  display: none !important;
+}
+
+.ts-chip {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  padding: 2px 8px !important;
+  border-radius: var(--radius-4) !important;
+  background: rgb(201 209 217 / 4%) !important;
+  border: 1px solid rgb(201 209 217 / 6%) !important;
+  color: var(--text-3) !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  white-space: nowrap !important;
+}
+
+.ts-chip b {
+  color: var(--text-2) !important;
+  font-weight: 600 !important;
+  margin-right: 2px !important;
+}
+
+.ts-chip.is-active b {
+  color: var(--success) !important;
+}
+
+/* ── chat-list（消息列表） ───────────────────────────────── */
+.chat-list {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 14px !important;
+  padding: 16px 24px 24px !important;
+  font: 13px/1.65 var(--mono, monospace) !important;
+  color: var(--text) !important;
+  background: transparent !important;
+  max-width: 900px !important;
+  margin: 0 auto !important;
+  width: 100% !important;
+}
+
+/* ── live-stream（打字机） ──────────────────────────────── */
+.live-stream {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  padding: 10px 14px !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-8) !important;
+  margin: 8px 0 !important;
+}
+
+.live-pre {
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  color: var(--text-2) !important;
+  font: 12px/1.55 var(--mono, monospace) !important;
+  white-space: pre-wrap !important;
+  word-break: break-all !important;
+}
+
+.live-pre.err {
+  color: var(--danger) !important;
+}
+
+.live-cursor {
+  display: inline-block !important;
+  width: 6px !important;
+  height: 12px !important;
+  background: var(--primary) !important;
+  vertical-align: middle !important;
+  margin-left: 2px !important;
+  animation: cursor-blink 1s steps(2) infinite !important;
+}
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ── 空态 tree-empty ───────────────────────────────────── */
+.tree-empty {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 14px !important;
+  padding: 40px 24px !important;
+  color: var(--text-3) !important;
+  text-align: center !important;
+  flex: 1 1 0 !important;
+}
+
+.empty-title {
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  color: var(--text-2) !important;
+}
+
+.empty-sub {
+  font-size: 12px !important;
+  color: var(--text-3) !important;
+}
+
+.empty-cards {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  justify-content: center !important;
+  gap: 10px !important;
+  margin-top: 10px !important;
+}
+
+.empty-card {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 4px !important;
+  padding: 12px 18px !important;
+  min-width: 110px !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-10) !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+  color: var(--text-2) !important;
+  font-family: inherit !important;
+}
+
+.empty-card:hover {
+  border-color: var(--primary) !important;
+  background: var(--surface-2) !important;
+  color: var(--text) !important;
+  transform: translateY(-1px) !important;
+}
+
+.empty-card-ico {
+  font-size: 20px !important;
+  margin-bottom: 4px !important;
+  line-height: 1 !important;
+}
+
+.empty-card-title {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: var(--text) !important;
+}
+
+.empty-card-desc {
+  font-size: 10px !important;
+  color: var(--text-3) !important;
+  line-height: 1.4 !important;
+  max-width: 120px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* ── editor（编辑器区） ─────────────────────────────────── */
+.editor.card {
+  flex: 0 0 300px !important;
+  min-height: 0 !important;
+  background: var(--surface) !important;
+  border-top: 1px solid var(--border) !important;
+  border-radius: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+.editor-body {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+.cm-host {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
+/* ── tpl-bar（工具栏） ──────────────────────────────────── */
+.tpl-bar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 8px 14px !important;
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border) !important;
+  flex-shrink: 0 !important;
+  min-height: 40px !important;
+}
+
+.tpl-chip {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 4px 10px !important;
+  font-size: 12px !important;
+  font-family: var(--mono, monospace) !important;
+  color: var(--text-3) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: var(--radius-6) !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.tpl-chip:hover {
+  color: var(--text) !important;
+  background: var(--surface-2) !important;
+  border-color: var(--border) !important;
+}
+
+.tpl-spacer {
+  flex: 1 1 auto !important;
+  min-width: 8px !important;
+}
+
+/* ── meta-row（脚本元信息） ─────────────────────────────── */
+.meta-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  padding: 6px 14px !important;
+  background: var(--surface-2) !important;
+  border-top: 1px solid var(--border) !important;
+  flex-shrink: 0 !important;
+}
+
+.meta-item {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  padding: 2px 8px !important;
+  border-radius: var(--radius-4) !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  font-size: 11px !important;
+  font-family: var(--mono, monospace) !important;
+  color: var(--text-3) !important;
+  max-width: 100% !important;
+}
+
+.meta-item b {
+  color: var(--text-2) !important;
+  font-weight: 600 !important;
+  flex-shrink: 0 !important;
+}
+
+.meta-item span {
+  color: var(--text-3) !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* ── editor-foot（底栏） ────────────────────────────────── */
+.editor-foot {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 6px 14px !important;
+  background: var(--surface) !important;
+  border-top: 1px solid var(--border) !important;
+  flex-shrink: 0 !important;
+  min-height: 28px !important;
+  font-size: 11px !important;
+}
+
+.editor-foot .foot-spacer {
+  flex: 1 !important;
+  min-width: 8px !important;
+}
+
+.editor-foot .persist-warning,
+.editor-foot .req-err-badge,
+.editor-foot .dry-badge,
+.editor-foot .git-after {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  padding: 2px 8px !important;
+  border-radius: var(--radius-4) !important;
+  font-size: 11px !important;
+  font-family: var(--mono, monospace) !important;
+  cursor: help !important;
+  white-space: nowrap !important;
+  line-height: 1.4 !important;
+}
+
+.editor-foot .persist-warning {
+  color: var(--warning) !important;
+  background: var(--warning-bg) !important;
+}
+
+.editor-foot .req-err-badge {
+  color: var(--danger) !important;
+  background: var(--danger-bg) !important;
+  font-weight: 600 !important;
+}
+
+.editor-foot .dry-badge {
+  color: var(--warning) !important;
+  background: var(--warning-bg) !important;
+}
+
+.editor-foot .git-after {
+  color: var(--success) !important;
+  background: var(--success-bg) !important;
+  font-weight: 600 !important;
+}
+
+/* ── file-picker（@ 文件选择器） ────────────────────────── */
+.file-picker {
+  position: absolute !important;
+  z-index: 100 !important;
+  min-width: 280px !important;
+  max-width: 480px !important;
+  max-height: 240px !important;
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-8) !important;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+.fp-input {
+  padding: 8px 12px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--border) !important;
+  background: transparent !important;
+  color: var(--text) !important;
+  font: 12px/1.4 var(--mono, monospace) !important;
+  outline: 0 !important;
+}
+
+.fp-list {
+  overflow-y: auto !important;
+  padding: 4px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1px !important;
+}
+
+.fp-item {
+  padding: 5px 10px !important;
+  border-radius: var(--radius-4) !important;
+  font-size: 12px !important;
+  font-family: var(--mono, monospace) !important;
+  color: var(--text-2) !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.fp-item:hover,
+.fp-item.active {
+  background: var(--primary-bg) !important;
+  color: var(--primary) !important;
+}
+
+.fp-empty {
+  padding: 12px !important;
+  text-align: center !important;
+  color: var(--text-3) !important;
+  font-size: 12px !important;
+}
+
+/* ── 拖拽浮层 overlay ──────────────────────────────────── */
+.overlay {
+  position: absolute !important;
+  inset: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 50 !important;
+  pointer-events: none !important;
+  background: rgb(13 17 23 / 70%) !important;
+}
+
+.overlay-card {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 24px 32px !important;
+  border-radius: var(--radius-12) !important;
+  background: var(--surface-2) !important;
+  border: 2px dashed var(--primary) !important;
+  color: var(--text) !important;
+}
+
+.overlay.success .overlay-card {
+  border-style: solid !important;
+  border-color: var(--success) !important;
+}
+
+.overlay-icon {
+  font-size: 32px !important;
+}
+.overlay-text {
+  font-size: 13px !important;
+  color: var(--text-2) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   [tplbar-btn-final] 工具栏按钮权威样式
+   ═══════════════════════════════════════════════════════════ */
+
+.tpl-bar .ghost-btn,
+.tpl-bar .primary-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  padding: 0 10px !important;
+  border-radius: 6px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--text-3) !important;
+  font-size: 12px !important;
+  font-family: inherit !important;
+  font-weight: 500 !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+}
+
+.tpl-bar .ghost-btn:hover:not(:disabled),
+.tpl-bar .primary-btn:hover:not(:disabled) {
+  color: var(--text) !important;
+  background: var(--surface-2) !important;
+  border-color: var(--border) !important;
+}
+
+.tpl-bar .ghost-btn:disabled,
+.tpl-bar .primary-btn:disabled {
+  opacity: 0.35 !important;
+  cursor: not-allowed !important;
+}
+
+.tpl-bar .ghost-btn > svg,
+.tpl-bar .ghost-btn > .ico-svg,
+.tpl-bar .primary-btn > svg,
+.tpl-bar .primary-btn > .ico-svg {
+  display: inline-block !important;
+  width: 14px !important;
+  height: 14px !important;
+  flex-shrink: 0 !important;
+  fill: none !important;
+  stroke: currentColor !important;
+  stroke-width: 2 !important;
+}
+
+.tpl-bar .ghost-btn > span,
+.tpl-bar .primary-btn > span {
+  display: inline-block !important;
+  white-space: nowrap !important;
+  line-height: 1 !important;
+}
+
+.tpl-bar .ghost-btn.ghost,
+.tpl-bar .ghost-btn.head-run {
+  color: var(--text-2) !important;
+}
+
+.tpl-bar .ghost-btn.ghost:hover:not(:disabled),
+.tpl-bar .ghost-btn.head-run:hover:not(:disabled) {
+  color: var(--text) !important;
+  background: var(--surface-2) !important;
+  border-color: var(--border-2) !important;
+}
+
+.tpl-bar .primary-btn.stop,
+.tpl-bar .primary-btn.stop.head-run {
+  color: var(--primary) !important;
+  border-color: var(--primary) !important;
+  background: transparent !important;
+  font-weight: 600 !important;
+}
+
+.tpl-bar .primary-btn.stop:hover:not(:disabled),
+.tpl-bar .primary-btn.stop.head-run:hover:not(:disabled) {
+  color: var(--primary-hover) !important;
+  border-color: var(--primary-hover) !important;
+  background: var(--primary-bg) !important;
+}
+
+.tpl-bar .primary-btn.cancel {
+  color: var(--danger) !important;
+  border-color: var(--danger) !important;
+}
+
+.tpl-bar .skill-trigger {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  height: 28px !important;
+  padding: 0 10px 0 8px !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--border) !important;
+  background: var(--surface-2) !important;
+  color: var(--text-2) !important;
+  font-size: 12px !important;
+  font-family: inherit !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+  flex-shrink: 0 !important;
+}
+
+.tpl-bar .skill-trigger:hover {
+  color: var(--text) !important;
+  border-color: var(--border-2) !important;
+}
+
+.tpl-bar .skill-trigger-label {
+  display: inline-block !important;
+  color: inherit !important;
+  white-space: nowrap !important;
+}
+
+.tpl-bar .skill-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 18px !important;
+  height: 18px !important;
+  padding: 0 5px !important;
+  border-radius: 10px !important;
+  background: var(--primary) !important;
+  color: var(--bg) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  font-family: var(--mono, monospace) !important;
+  line-height: 1 !important;
+}
+
+.tpl-bar .skill-badge-empty {
+  background: var(--surface) !important;
+  color: var(--text-3) !important;
+  box-shadow: inset 0 0 0 1px var(--border) !important;
+}
+
+.tpl-bar .skill-count {
+  display: inline-block !important;
+  color: var(--text-3) !important;
+  font-size: 11px !important;
+  font-family: var(--mono, monospace) !important;
+  margin-left: 2px !important;
+}
+
+.tpl-bar .tpl-chip {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 26px !important;
+  padding: 0 12px !important;
+  border-radius: 6px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--text-3) !important;
+  font-size: 12px !important;
+  font-family: var(--mono, monospace) !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+  flex-shrink: 0 !important;
+}
+
+.tpl-bar .tpl-chip:hover {
+  color: var(--text) !important;
+  background: var(--surface-2) !important;
+}
+
+.tpl-bar .tpl-spacer {
+  flex: 1 1 auto !important;
+  min-width: 12px !important;
+}
+
+.tpl-bar .kbd-hint {
+  flex-shrink: 0 !important;
+  color: var(--text-3) !important;
+  font-size: 11px !important;
+  font-family: var(--mono, monospace) !important;
+  opacity: 0.6 !important;
+}
+
+/* [btnforce] tpl-bar 按钮终极覆盖——必须放最尾 */
+.tpl-bar button.ghost-btn,
+.tpl-bar button.primary-btn,
+.tpl-bar button.tpl-chip,
+.tpl-bar button.skill-trigger {
   display: inline-flex !important;
   flex-direction: row !important;
+  flex-wrap: nowrap !important;
   align-items: center !important;
   justify-content: center !important;
   gap: 6px !important;
   white-space: nowrap !important;
-  width: auto !important;
-  min-width: auto !important;
-  flex-wrap: nowrap !important;
-}
-.ghost-btn > .ico-svg,
-.ghost-btn > svg {
-  display: inline-block !important;
-  width: 13px !important;
-  height: 13px !important;
-  flex-shrink: 0 !important;
-  margin: 0 !important;
+  word-break: keep-all !important;
+  writing-mode: horizontal-tb !important;
+  height: 28px !important;
+  line-height: 1 !important;
+  padding: 0 10px !important;
+  box-sizing: border-box !important;
   vertical-align: middle !important;
-  fill: none !important;
-  stroke: currentColor !important;
-}
-.ghost-btn > span {
-  display: inline-block !important;
-  white-space: nowrap !important;
 }
 
+.tpl-bar button.ghost-btn > svg,
+.tpl-bar button.primary-btn > svg,
+.tpl-bar button.skill-trigger > svg,
+.tpl-bar button.ghost-btn > .ico,
+.tpl-bar button.primary-btn > .ico,
+.tpl-bar button.ghost-btn > .ico-svg,
+.tpl-bar button.primary-btn > .ico-svg {
+  display: inline-block !important;
+  width: 14px !important;
+  height: 14px !important;
+  flex: 0 0 14px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  vertical-align: middle !important;
+  stroke: currentColor !important;
+  fill: none !important;
+}
+
+.tpl-bar button.ghost-btn > span,
+.tpl-bar button.primary-btn > span,
+.tpl-bar button.skill-trigger > span {
+  display: inline-block !important;
+  flex: 0 0 auto !important;
+  white-space: nowrap !important;
+  line-height: 1 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* [btnfix2] tpl-bar 按钮最后一层——用属性选择器 + 高优先级 */
+.tpl-bar button.ghost-btn,
+.tpl-bar button.primary-btn,
+.tpl-bar button.skill-trigger {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  width: auto !important;
+  min-width: auto !important;
+  max-width: none !important;
+  height: 28px !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+  padding: 0 10px !important;
+  line-height: 1 !important;
+}
+
+/* 强制子元素不堆叠 */
+.tpl-bar button.ghost-btn > *,
+.tpl-bar button.primary-btn > *,
+.tpl-bar button.skill-trigger > * {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: auto !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
+  vertical-align: middle !important;
+  line-height: 1 !important;
+}
+
+/* SVG 图标固定尺寸 */
+.tpl-bar button.ghost-btn > svg,
+.tpl-bar button.primary-btn > svg,
+.tpl-bar button.skill-trigger > svg {
+  width: 14px !important;
+  height: 14px !important;
+  flex: 0 0 14px !important;
+  stroke: currentColor !important;
+  fill: none !important;
+}
+
+/* 文字 span 不换行 */
+.tpl-bar button.ghost-btn > span,
+.tpl-bar button.primary-btn > span,
+.tpl-bar button.skill-trigger > span {
+  display: inline-block !important;
+  flex: 0 0 auto !important;
+  width: auto !important;
+  white-space: nowrap !important;
+  color: inherit !important;
+  font-size: 12px !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   [vlayout] flow-timeline 竖排 + terminal 背景透明
+   ═══════════════════════════════════════════════════════════ */
+
+/* 1. 背景透明：terminal / term-body / flow-timeline 及子级 */
+.terminal,
+.term-body,
+.flow-timeline {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* 2. flow-timeline 内容：从横排改竖排 */
+.flow-timeline {
+  display: flex !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  gap: 6px !important;
+  padding: 12px 16px !important;
+  border-bottom: 1px solid var(--border) !important;
+  min-height: auto !important;
+}
+
+/* 3. 每个 flow-step 铺满整行 */
+.flow-step {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  padding: 6px 10px !important;
+  width: 100% !important;
+  border-radius: var(--radius-6) !important;
+}
+
+/* 4. term-body / chat-list 布局 */
+.term-body {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   [vlayout-flex] 竖排后 chat-list 撑满
+   ═══════════════════════════════════════════════════════════ */
+
+/* flow-timeline 撑满 terminal */
+.flow-timeline {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+/* flow-step / term-body 固定高度（按内容） */
+.flow-step {
+  flex: 0 0 auto !important;
+}
+
+.term-body {
+  flex: 0 0 auto !important;
+}
+
+.term-body:empty {
+  display: none !important;
+}
+
+/* chat-list 撑满剩余 */
+.chat-list {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+}
+
+/* [single-stage] 单阶段显示：去外框 */
+.flow-timeline .flow-step {
+  background: transparent !important;
+  border: 0 !important;
+  padding: 8px 12px !important;
+  border-radius: 0 !important;
+  font-size: 12px !important;
+  color: var(--text-2) !important;
+  gap: 10px !important;
+}
+.flow-timeline .flow-step.run {
+  color: var(--primary) !important;
+}
+.flow-timeline .flow-step.ok {
+  color: var(--success) !important;
+}
+.flow-timeline .flow-step.err {
+  color: var(--danger) !important;
+}
+.flow-timeline .flow-step .flow-icon {
+  font-size: 14px !important;
+  width: 16px !important;
+  height: 16px !important;
+}
+.flow-timeline .flow-step .flow-label {
+  font-size: 12px !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   [left-out] 脚本输出区：贴左 + 去边框
+   ═══════════════════════════════════════════════════════════ */
+
+/* chat-list 贴左 + 去边距 */
+.chat-list {
+  padding: 8px 0 8px 12px !important;
+  margin: 0 !important;
+  max-width: none !important;
+  align-items: stretch !important;
+  text-align: left !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+/* live-stream 去卡片外壳 */
+.live-stream {
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+/* live-pre 贴左，保留色（不覆盖 color / font） */
+.live-pre {
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  text-align: left !important;
+  font-family: var(--mono, monospace) !important;
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+  white-space: pre-wrap !important;
+  word-break: break-all !important;
+}
+
+/* 输出里所有元素贴左 */
+.chat-list > *,
+.live-stream > * {
+  margin-left: 0 !important;
+  text-align: left !important;
+}
+
+/* [head-meta-style] 顶部 script-header + 输出着色 */
+.script-header {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 4px 0 8px 0 !important;
+  border-bottom: 1px solid var(--border) !important;
+  margin-bottom: 6px !important;
+}
+
+.script-header .sm-item {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  font-size: 11px !important;
+  font-family: var(--mono, monospace) !important;
+  color: var(--text-2) !important;
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 4px !important;
+  padding: 2px 6px !important;
+  max-width: 320px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.script-header .sm-item b {
+  color: var(--text-3) !important;
+  font-weight: 600 !important;
+  flex-shrink: 0 !important;
+}
+.script-header .sm-item em {
+  color: var(--text) !important;
+  font-style: normal !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.script-header .sm-state {
+  display: inline-flex !important;
+  align-items: center !important;
+  margin-left: auto !important;
+  padding: 2px 8px !important;
+  font-size: 11px !important;
+  font-family: var(--mono, monospace) !important;
+  font-weight: 600 !important;
+  border-radius: 10px !important;
+  background: var(--surface-2) !important;
+  color: var(--text-3) !important;
+  border: 1px solid var(--border) !important;
+}
+.script-header .sm-state.is-waiting,
+.script-header .sm-state.is-executing,
+.script-header .sm-state.is-parsing,
+.script-header .sm-state.is-feedback {
+  color: var(--primary) !important;
+  border-color: var(--primary) !important;
+  background: var(--primary-bg) !important;
+}
+.script-header .sm-state.is-done {
+  color: var(--success) !important;
+  border-color: var(--success) !important;
+  background: var(--success-bg) !important;
+}
+.script-header .sm-state.is-interrupted,
+.script-header .sm-state.is-stopped,
+.script-header .sm-state.is-budget-limited {
+  color: var(--danger) !important;
+  border-color: var(--danger) !important;
+  background: var(--danger-bg) !important;
+}
+
+/* 输出着色 */
+.live-pre .out-step {
+  color: var(--primary) !important;
+  font-weight: 600 !important;
+}
+.live-pre .out-ok {
+  color: var(--success) !important;
+}
+.live-pre .out-err {
+  color: var(--danger) !important;
+}
+.live-pre .out-warn {
+  color: var(--warning) !important;
+}
+
+/* [top-row] 顶部横排一行 */
+.flow-timeline {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  padding: 8px 14px !important;
+  border-bottom: 1px solid var(--border) !important;
+  min-height: 36px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  background: transparent !important;
+}
+
+.flow-timeline .script-header {
+  display: inline-flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  flex: 0 0 auto !important;
+}
+
+.flow-timeline .script-header .sm-state {
+  margin-left: 0 !important;
+}
+
+.flow-timeline .script-header .sm-time {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 2px 8px !important;
+  font-size: 11px !important;
+  font-family: var(--mono, monospace) !important;
+  color: var(--text-3) !important;
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 4px !important;
+}
+
+.flow-timeline .flow-step {
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
+  width: auto !important;
+  padding: 4px 10px !important;
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--text-2) !important;
+  font-size: 12px !important;
+  gap: 8px !important;
+}
+.flow-timeline .flow-step.run {
+  color: var(--primary) !important;
+}
+.flow-timeline .flow-step.ok {
+  color: var(--success) !important;
+}
+.flow-timeline .flow-step.err {
+  color: var(--danger) !important;
+}
+
+.flow-timeline .flow-icon {
+  font-size: 14px !important;
+  width: 16px !important;
+  height: 16px !important;
+  flex-shrink: 0 !important;
+}
+
+/* [loading-spin] 加载动画 + 空态居中 */
+.script-header .sm-loading {
+  display: inline-block !important;
+  width: 12px !important;
+  height: 12px !important;
+  border: 2px solid var(--border-2) !important;
+  border-top-color: var(--primary) !important;
+  border-radius: 50% !important;
+  animation: sm-spin 0.7s linear infinite !important;
+  flex-shrink: 0 !important;
+}
+
+@keyframes sm-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 空态强制居中 */
+.chat-list .tree-empty {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  margin: auto !important;
+  padding: 40px 24px !important;
+  gap: 16px !important;
+}
+
+.chat-list .tree-empty .empty-title {
+  font-size: 15px !important;
+  font-weight: 500 !important;
+  color: var(--text-2) !important;
+}
+
+.chat-list .tree-empty .empty-sub {
+  font-size: 12px !important;
+  color: var(--text-3) !important;
+}
+
+.chat-list .tree-empty .empty-cards {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  justify-content: center !important;
+  gap: 10px !important;
+  margin-top: 8px !important;
+}
+
+/* [dot-icon] flow-step 图标改圆点 + 内容居中 */
+.flow-timeline {
+  justify-content: center !important;
+  align-items: center !important;
+}
+
+/* 隐藏 emoji，用圆点替代 */
+.flow-timeline .flow-icon,
+.flow-timeline .flow-spinner,
+.flow-timeline .flow-glyph {
+  font-size: 0 !important;
+  line-height: 0 !important;
+  width: 8px !important;
+  height: 8px !important;
+  min-width: 8px !important;
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.flow-timeline .flow-icon::before,
+.flow-timeline .flow-glyph::before {
+  content: '' !important;
+  display: block !important;
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 50% !important;
+  background: currentColor !important;
+  opacity: 0.55 !important;
+}
+
+.flow-timeline .flow-step.run .flow-icon::before,
+.flow-timeline .flow-step.run .flow-glyph::before {
+  opacity: 1 !important;
+  box-shadow: 0 0 6px currentColor !important;
+  animation: dot-pulse 1.4s ease-in-out infinite !important;
+}
+
+.flow-timeline .flow-step.ok .flow-icon::before,
+.flow-timeline .flow-step.ok .flow-glyph::before {
+  opacity: 1 !important;
+}
+
+.flow-timeline .flow-step.err .flow-icon::before,
+.flow-timeline .flow-step.err .flow-glyph::before {
+  opacity: 1 !important;
+}
+
+@keyframes dot-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.7);
+    opacity: 0.6;
+  }
+}
+
+/* spinner 元素若存在也变圆点 */
+.flow-timeline .flow-spinner {
+  border: 0 !important;
+  animation: dot-pulse 1.4s ease-in-out infinite !important;
+}
+
+/* flow-step 内部水平垂直居中 */
+.flow-timeline .flow-step {
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* script-header 内元素垂直居中 */
+.flow-timeline .script-header {
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* [layout-final] flow-timeline 竖排：header/step 居中，chat-list 撑满贴左 */
+.flow-timeline {
+  display: flex !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+  gap: 0 !important;
+  padding: 0 !important;
+  border-bottom: 1px solid var(--border) !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  background: transparent !important;
+  flex: 1 1 0 !important;
+}
+
+/* script-header：整行 + 内容居中 */
+.flow-timeline .script-header {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  padding: 8px 14px !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--border) !important;
+  flex: 0 0 auto !important;
+  width: 100% !important;
+}
+
+/* flow-step：整行 + 内容居中 */
+.flow-timeline .flow-step {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  padding: 6px 14px !important;
+  margin: 0 !important;
+  border: 0 !important;
+  flex: 0 0 auto !important;
+  width: 100% !important;
+  background: transparent !important;
+}
+
+/* term-body：整行，无内容时隐藏 */
+.flow-timeline .term-body {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 0 0 auto !important;
+  width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* chat-list：撑满剩余，内容贴左 */
+.flow-timeline .chat-list {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  justify-content: flex-start !important;
+  text-align: left !important;
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 10px 14px !important;
+  gap: 8px !important;
+  overflow-y: auto !important;
+  background: transparent !important;
+}
+
+/* 空态：居中 */
+.flow-timeline .chat-list .tree-empty {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  margin: auto !important;
+  width: 100% !important;
+  padding: 40px 24px !important;
+}
+
+/* 输出：贴左 */
+.flow-timeline .chat-list .live-stream {
+  align-self: stretch !important;
+  text-align: left !important;
+  margin: 0 !important;
+}
+.flow-timeline .chat-list .live-pre {
+  text-align: left !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.draft-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--border, rgb(255 255 255 / 8%));
+}
+.draft-btn {
+  padding: 0 6px;
+  min-width: 22px;
+  height: 20px;
+  line-height: 1;
+}
+
+/* [ui-opt-p0] 空状态增强 + 草稿栏收紧 */
+/* 空状态：视觉加强 —— 卡片更大、图标更醒目、留白更足 */
+.chat-list .tree-empty {
+  padding: 64px 24px !important;
+  gap: 24px !important;
+}
+.chat-list .tree-empty .empty-title {
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.2px;
+}
+.chat-list .tree-empty .empty-sub {
+  font-size: 12.5px !important;
+  opacity: 0.9;
+}
+.chat-list .tree-empty .empty-cards {
+  margin-top: 12px !important;
+  gap: 14px !important;
+}
+.chat-list .tree-empty .empty-card {
+  padding: 18px 26px !important;
+  min-width: 138px !important;
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%) !important;
+  border-color: var(--border-2, var(--border)) !important;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 18%);
+}
+.chat-list .tree-empty .empty-card:hover {
+  border-color: var(--primary) !important;
+  box-shadow: 0 6px 18px rgb(77 107 254 / 22%);
+  transform: translateY(-2px) !important;
+}
+.chat-list .tree-empty .empty-card-ico {
+  font-size: 28px !important;
+  margin-bottom: 6px !important;
+  filter: drop-shadow(0 2px 6px rgb(0 0 0 / 25%));
+}
+.chat-list .tree-empty .empty-card-title {
+  font-size: 13px !important;
+  letter-spacing: 0.3px;
+}
+.chat-list .tree-empty .empty-card-desc {
+  font-size: 11px !important;
+  max-width: 140px !important;
+}
+
+/* 草稿槽工具栏：视觉收紧（下拉更小、按钮更紧凑） */
+.draft-toolbar {
+  padding: 4px 10px !important;
+  gap: 6px !important;
+  border-bottom: 1px solid var(--border) !important;
+  background: var(--surface);
+}
+.draft-toolbar .draft-select {
+  padding: 2px 8px !important;
+  font-size: 12px !important;
+  height: 22px !important;
+  border-radius: var(--radius-6) !important;
+}
+.draft-toolbar .draft-btn {
+  height: 22px !important;
+  min-width: 22px !important;
+  padding: 0 6px !important;
+  border-radius: var(--radius-6) !important;
+  font-size: 12px !important;
+}
 </style>
-<!-- tooltip-audit -->

@@ -29,7 +29,6 @@ export function readBody(req: IncomingMessage): Promise<string> {
   })
 }
 
- 
 export function parseJSON<T = any>(raw: string): T | null {
   try {
     return raw ? JSON.parse(raw) as T : null

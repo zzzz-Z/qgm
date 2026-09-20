@@ -18,7 +18,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'pnpm web:dev',
-    cwd: '../..',
+    cwd: '..',
     url: 'http://localhost:5174/__ai/',
     reuseExistingServer: true,
     timeout: 120_000,

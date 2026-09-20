@@ -3,9 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" href="/favicon.ico" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
     <title>AI Runner</title>
-  </head>
+      <script>
+      (function() {
+        try {
+          var t = localStorage.getItem('__ai_theme') || 'dark';
+          document.documentElement.setAttribute('data-theme', t);
+        } catch(e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+</head>
   <body>
     <div id="app"></div>
     <script type="module" src="/main.ts"></script>

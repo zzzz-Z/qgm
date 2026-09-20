@@ -22,9 +22,10 @@
 </template>
 
 <script setup lang="ts">
-defineOptions({ name: 'SessionTokenMonitor' })
 import { computed, onMounted } from 'vue'
 import { HARD_LIMIT, useSessionManager } from '../composables/useSessionManager'
+
+defineOptions({ name: 'SessionTokenMonitor' })
 
 const {
   sessionId,
@@ -51,7 +52,7 @@ onMounted(() => { restoreFromStorage() })
   gap: 8px;
   padding: 3px 8px;
   border: 1px solid var(--border-2);
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   background: var(--surface);
   font-family: var(--mono);
   font-size: 11px;
@@ -76,7 +77,7 @@ onMounted(() => { restoreFromStorage() })
   width: 60px;
   height: 4px;
   background: var(--surface-2);
-  border-radius: 2px;
+  border-radius: var(--radius-2);
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -96,7 +97,7 @@ onMounted(() => { restoreFromStorage() })
 .handoff-btn {
   padding: 1px 6px;
   border: 1px solid var(--warning);
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   background: transparent;
   color: var(--warning);
   font-size: 10px;
@@ -123,7 +124,7 @@ onMounted(() => { restoreFromStorage() })
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-4);
   background: transparent;
   color: var(--text-3);
   cursor: pointer;

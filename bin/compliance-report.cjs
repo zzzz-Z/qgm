@@ -25,7 +25,7 @@ function readAll() {
 
 function pct(n, total) {
   if (!total) return '0%'
-  return Math.round((n / total) * 100) + '%'
+  return `${Math.round((n / total) * 100)}%`
 }
 
 head('compliance-report')
@@ -55,7 +55,7 @@ for (const [hash, list] of sorted) {
   const idec = list.filter(x => x.isDecision).length
   const lastTs = Math.max(...list.map(x => x.ts || 0))
   const lastD = new Date(lastTs).toISOString().slice(0, 16).replace('T', ' ')
-  rows.push('| ' + hash + ' | ' + n + ' | ' + pct(hd, n) + ' | ' + pct(hs, n) + ' | ' + pct(idec, n) + ' | ' + lastD + ' |')
+  rows.push(`| ${hash} | ${n} | ${pct(hd, n)} | ${pct(hs, n)} | ${pct(idec, n)} | ${lastD} |`)
 }
 console.log(rows.join('\n'))
 ok('完成')

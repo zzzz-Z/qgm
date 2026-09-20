@@ -10,10 +10,10 @@ const ROOT = process.cwd()
 const RUNS_DIR = path.join(ROOT, '.ai-runner/runs')
 
 const TTY = process.stdout.isTTY && process.stdin.isTTY
-const c = (n, s) => (TTY ? `\x1b[${n}m${s}\x1b[0m` : s)
-const ok = (s) => console.log(c(32, '✓'), s)
-const warn = (s) => console.log(c(33, '⚠'), s)
-const err = (s) => console.error(c(31, '✗'), s)
+const c = (n, s) => (TTY ? `\x1B[${n}m${s}\x1B[0m` : s)
+const ok = s => console.log(c(32, '✓'), s)
+const warn = s => console.log(c(33, '⚠'), s)
+const err = s => console.error(c(31, '✗'), s)
 
 function loadRuns() {
   if (!fs.existsSync(RUNS_DIR)) return []
@@ -28,7 +28,7 @@ function loadRuns() {
     try {
       const m = JSON.parse(fs.readFileSync(mf, 'utf8'))
       runs.push({ runId: name, dir, createdAt: m.createdAt || st.mtimeMs, changes: m.changes || [] })
-    } catch {  }
+    } catch { }
   }
   runs.sort((a, b) => b.createdAt - a.createdAt)
   return runs
@@ -36,7 +36,7 @@ function loadRuns() {
 
 function fmtTime(ts) {
   const d = new Date(ts)
-  const p = (n) => String(n).padStart(2, '0')
+  const p = n => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
@@ -106,7 +106,7 @@ async function cmdPick() {
   let preview = false
 
   function render() {
-    process.stdout.write('\x1b[2J\x1b[H')
+    process.stdout.write('\x1B[2J\x1B[H')
     console.log(c(36, '▶'), '选择快照（↑↓ 移动 / Enter 恢复 / d 预览 / q 退出）')
     console.log('')
     for (let i = 0; i < runs.length; i++) {
@@ -172,7 +172,7 @@ async function main() {
   }
 
   if (cmd) {
-    const r = runs.find((x) => x.runId === cmd)
+    const r = runs.find(x => x.runId === cmd)
     if (!r) { err(`未找到 runId: ${cmd}`); process.exit(1) }
     console.log(c(36, '▶'), `恢复 ${r.runId}...`)
     const n = restore(r)

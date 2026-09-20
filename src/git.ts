@@ -130,9 +130,9 @@ export async function gitHead(): Promise<string | null> {
  *   （先 stash / 取消 / 强行执行并标注「含用户未提交改动」）。
  * - 非 git 仓库 → `{ ok: false, reason }`，bash 仍可执行（无 git 兜底）。
  */
-export type GitPreExecResult =
-  | { ok: true, rollbackRef: string }
-  | { ok: false, dirty?: boolean, files?: string[], reason?: string }
+export type GitPreExecResult
+  = | { ok: true, rollbackRef: string }
+    | { ok: false, dirty?: boolean, files?: string[], reason?: string }
 
 export async function gitPreExecCheck(): Promise<GitPreExecResult> {
   if (!(await gitAvailable())) {
@@ -182,6 +182,9 @@ export async function gitResetHard(ref: string): Promise<{ ok: boolean, reason?:
   if (!(await gitAvailable())) return { ok: false, reason: '非 git 仓库' }
   const safeRef = String(ref).replace(/[^\w.~^/-]/g, '').slice(0, 64)
   if (!safeRef) return { ok: false, reason: '非法 ref' }
+  // [F3] 祖先链校验
+  const anc = await run('git', ['merge-base', '--is-ancestor', safeRef, 'HEAD'])
+  if (anc.code !== 0) return { ok: false, reason: '非当前分支祖先，拒绝 reset（防止误回滚到未合并分支）' }
   const r = await run('git', ['reset', '--hard', safeRef])
   if (r.code !== 0) return { ok: false, reason: `git reset 失败: ${r.stderr}` }
   return { ok: true }

@@ -36,6 +36,24 @@ export interface TraceEntry {
     tokenDelta?: number
     reason?: string
     lastExec?: unknown
+    /** 阶段历史（run:stage 事件累积） */
+    stageHistory?: Array<{
+      name: string
+      status: string
+      ok?: boolean
+      files?: number
+      ms?: number
+      tscOk?: boolean
+      testOk?: boolean
+    }>
+    /** 标准输出尾部（截断存储） */
+    stdoutTail?: string
+    /** 标准错误尾部（截断存储） */
+    stderrTail?: string
+    /** 执行耗时 ms（run:end 事件） */
+    elapsedMs?: number | null
+    /** 变更文件数 */
+    changeCount?: number
     [key: string]: unknown
   }
 }
@@ -57,7 +75,8 @@ function load(): TraceEntry[] {
 const entries = ref<TraceEntry[]>(load())
 let seq = entries.value.reduce((m, e) => Math.max(m, e.id), 0)
 
-function persist() {
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+function persistNow() {
   try {
     let list = entries.value
     let json = JSON.stringify(list)
@@ -69,9 +88,42 @@ function persist() {
     if (list.length !== entries.value.length) entries.value = list
   } catch { }
 }
+function persist() {
+  if (persistTimer) return
+  persistTimer = setTimeout(() => {
+    persistTimer = null
+    persistNow()
+  }, 800)
+}
+// 页面关闭前刷一次，避免丢数据
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    if (persistTimer) { clearTimeout(persistTimer); persistTimer = null }
+    persistNow()
+  })
+}
 
+const MAX_FIELD = 4000
+function trimField(v: unknown): unknown {
+  if (typeof v !== 'string') return v
+  if (v.length <= MAX_FIELD) return v
+  return `${v.slice(0, MAX_FIELD)}\n… [truncated ${v.length - MAX_FIELD} chars]`
+}
+function trimPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const k of Object.keys(payload)) {
+    const v = payload[k]
+    if (k === 'files' || k === 'changes' || k === 'wantChanges') {
+      out[k] = Array.isArray(v) ? v.slice(0, 50) : v
+    } else {
+      out[k] = trimField(v)
+    }
+  }
+  return out
+}
 function addTrace(partial: Omit<TraceEntry, 'id' | 'ts'>): TraceEntry {
   const entry: TraceEntry = { id: ++seq, ts: Date.now(), ...partial }
+  if (entry.payload) entry.payload = trimPayload(entry.payload) as typeof entry.payload
   entries.value = [entry, ...entries.value].slice(0, MAX_ENTRIES)
   persist()
   return entry

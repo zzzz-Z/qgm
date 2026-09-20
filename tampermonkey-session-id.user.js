@@ -1,14 +1,19 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + token 估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.3.0
-// @description  回传会话 ID/token/AI 回复（script/done/plain/multi）到工作台；接收 fill/stop
+// @version      1.4.1
+// @description  回传会话 ID/token/AI 回复到工作台；接收 fill/stop（修复千问 Slate 输入框）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @match        https://claude.ai/*
 // @match        https://kimi.moonshot.cn/*
 // @match        https://gemini.google.com/*
+// @match        *://*.qianwen.com/*
+// @match        *://*.qianwen.ai/*
+// @match        *://*.aliyun.com/*
+// @match        *://*.tongyi.cn/*
+// @match        *://*.qianwen.cn/*
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==
@@ -22,16 +27,17 @@
     { re: /claude\.ai\/chat\/([\w-]+)/, n: 1 },
     { re: /kimi\.moonshot\.cn\/chat\/([\w-]+)/, n: 1 },
     { re: /gemini\.google\.com\/app\/([\w-]+)/, n: 1 },
+    { re: /tongyi\.aliyun\.com\/qianwen\/([\w-]+)/, n: 1 },
+    { re: /qianwen\.aliyun\.com\/[\w-]*\/?([\w-]{20,})/, n: 1 }
   ]
 
-  // 估算系数（token / 字符）
   const RATIO_CJK = 0.6
   const RATIO_LATIN = 0.25
 
   let lastId = ''
   let lastSid = ''
   let lastTokens = -1
-// [multi-loop-step5-tm] 从 location.hash 读取窗口 sid（由 useDeepseekUrl.withSidHash 注入）
+
   function extractSidFromHash() {
     const m = location.hash.match(/(?:^#|&)sid=([\w.-]+)/)
     return m ? m[1] : ''
@@ -46,7 +52,6 @@
     return ''
   }
 
-  // 从 DOM 抽对话文本。选择器覆盖 DeepSeek / ChatGPT / Claude / Kimi / Gemini
   const TEXT_SELECTORS = [
     '[class*="message"]',
     '[class*="chat-message"]',
@@ -54,6 +59,8 @@
     '[data-message-author-role]',
     '.ds-markdown',
     '.markdown',
+    '.chat-answers-card-wrap',
+    '.chat-question-card-wrap',
   ]
 
   function collectText() {
@@ -65,7 +72,6 @@
         const el = nodes[j]
         if (seen.has(el)) continue
         seen.add(el)
-        // 跳过嵌套，只取最外层容器
         let parent = el.parentElement
         let skip = false
         while (parent) {
@@ -86,7 +92,6 @@
     let latin = 0
     for (let i = 0; i < text.length; i++) {
       const code = text.charCodeAt(i)
-      // CJK 统一表意文字 + 全角标点
       if ((code >= 0x4E00 && code <= 0x9FFF)
         || (code >= 0x3000 && code <= 0x303F)
         || (code >= 0xFF00 && code <= 0xFFEF)) {
@@ -127,7 +132,6 @@
     }
   }, 500)
 
-  // DOM 变化后重新估算（防抖 800ms）
   let domTimer = null
   const observer = new MutationObserver(() => {
     if (domTimer) clearTimeout(domTimer)
@@ -138,19 +142,9 @@
   window.addEventListener('popstate', send)
   window.addEventListener('hashchange', send)
 
-  // ===========================================================================
-  // AI 回复回传（v6 §3.1 ai-runner:reply）—— 2s 静默 + 严格分类
-  // 四类（v6 §6 状态机输入）：
-  //   script —— 恰好 1 个「新」cjs/bash 代码块
-  //   multi  —— 出现 ≥2 个新代码块（契约违规）
-  //   done   —— 严格匹配 ^\s*DONE\s*$ 的独立元素（v6 §6.9 第 1 条）
-  //   plain  —— 无新代码块、无 DONE，但正文发生变化（纯文本回复）
-  // 去重：已回传 hash 的代码块 / 已见过的 DONE 元素 / 正文签名 不再重复回传
-  // ===========================================================================
-
-  /** FNV-1a 32 位变种，截 8 hex 位（与工作台 useScriptInbox 完全一致） */
+  // ===== 回复回传 =====
   function hash32(s) {
-    let h = 0x811c9dc5
+    let h = 0x811C9DC5
     for (let i = 0; i < s.length; i++) {
       h = Math.imul(h ^ s.charCodeAt(i), 0x1000193) >>> 0
     }
@@ -161,8 +155,7 @@
   const seenDoneMarkers = new Set()
   let lastBodySig = ''
 
-  /** 扫描页面所有「新」cjs/bash 代码块（按 DOM 顺序） */
-    function langFromText(s) {
+  function langFromText(s) {
     const t = String(s || '').trim().toLowerCase()
     if (!t || t.length > 24) return null
     if (/^(bash|sh|shell|zsh)\b/.test(t)) return 'bash'
@@ -196,7 +189,7 @@
     if (/\bif\s+\[\s/.test(head) || /\bfi\b/.test(head) || /\$\(/.test(head)) return 'bash'
     return null
   }
-    function extractLatestScript() {
+  function extractLatestScript() {
     const pres = document.querySelectorAll('pre')
     let last = null
     let lastMarked = null
@@ -205,7 +198,7 @@
       if (!text) continue
       if (!text.includes('\n') && text.length < 120) continue
       const lang = guessLangFromDom(pre) || guessLangFromContent(text) || null
-      if (lang !== 'cjs' && lang !== 'bash') continue
+      if (lang !== 'cjs' && lang !== 'js' && lang !== 'bash') continue
       const item = { lang, code: text, hash: hash32(text) }
       last = item
       const marked = /^#!\s*\/usr\/bin\/env\s+(node|bash)\b/m.test(text)
@@ -216,16 +209,14 @@
     return lastMarked || last
   }
 
-  /** 找严格 DONE：独立元素文本 trim 后恰为 DONE（防止「this task is done」误判） */
   function findNewDone() {
-    // 限制候选：叶子级小元素，避免大容器 textContent 恰好为 DONE 的极端情况
     const nodes = document.querySelectorAll('div,p,span,li')
     let found = null
     for (const el of nodes) {
       if (el.children.length > 0) continue
       const t = (el.textContent || '').trim()
       if (!/^\s*DONE\s*$/.test(t)) continue
-      const marker = hash32(t + '|' + (el.outerHTML || '').slice(0, 120))
+      const marker = hash32(`${t}|${(el.outerHTML || '').slice(0, 120)}`)
       if (seenDoneMarkers.has(marker)) continue
       found = marker
     }
@@ -233,13 +224,12 @@
   }
 
   function bodySignature() {
-    // 取页面正文尾部 300 字符做签名，足以检测「新一轮纯文本回复」
     const t = (document.body.innerText || '').replace(/\s+/g, ' ')
     return hash32(t.slice(-300))
   }
 
   let replyDebounce = null
-    function classifyAndPost() {
+  function classifyAndPost() {
     if (replyDebounce) clearTimeout(replyDebounce)
     replyDebounce = setTimeout(() => {
       replyDebounce = null
@@ -260,8 +250,12 @@
         if (s && !seenHashes.has(s.hash)) {
           seenHashes.add(s.hash)
           window.opener.postMessage({
-            type: 'ai-runner:reply', kind: 'script',
-            code: s.code, lang: s.lang, hash: s.hash, site: location.origin,
+            type: 'ai-runner:reply',
+            kind: 'script',
+            code: s.code,
+            lang: s.lang,
+            hash: s.hash,
+            site: location.origin,
             sessionId: extractSidFromHash(),
           }, '*')
           lastBodySig = bodySignature()
@@ -271,7 +265,9 @@
         if (doneMarker) {
           seenDoneMarkers.add(doneMarker)
           window.opener.postMessage({
-            type: 'ai-runner:reply', kind: 'done', site: location.origin,
+            type: 'ai-runner:reply',
+            kind: 'done',
+            site: location.origin,
             sessionId: extractSidFromHash(),
           }, '*')
           lastBodySig = bodySignature()
@@ -281,7 +277,9 @@
         if (sig !== lastBodySig) {
           lastBodySig = sig
           window.opener.postMessage({
-            type: 'ai-runner:reply', kind: 'plain', site: location.origin,
+            type: 'ai-runner:reply',
+            kind: 'plain',
+            site: location.origin,
             sessionId: extractSidFromHash(),
           }, '*')
         }
@@ -295,125 +293,188 @@
   })
   replyObserver.observe(document.body, { childList: true, subtree: true, characterData: true })
 
-  // ===========================================================================
-  // fill 接收（v6 §3.1 ai-runner:fill）—— 工作台向 AI 站点窗口发 prompt，自动填入并发送
-  // 算法（通用、多站点 best-effort）：
-  //   1. 找输入框（textarea 优先，否则 contenteditable）
-  //   2. 写入 prompt + 触发 input 事件（让 React/Vue 之类的受控组件识别）
-  //   3. 找发送按钮（aria-label 含「发送/send」或紧邻输入框的 button[type=submit]）
-  //   4. 找不到按钮 → 不自动发送，让用户手按 Enter（保留人类在环）
-  // 信任模型：postMessage 来源不严格校验 origin（跨域读 opener.origin 受限），
-  //   但只触发「在 AI 聊天框输入文本」这一低危操作
-  // ===========================================================================
-
+  // ===== fill / rotate / new-session / stop =====
   function clickStopGenerating() {
     try {
       const all = Array.from(document.querySelectorAll('button'))
-      const btn = all.find(b => {
-        const lbl = (b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '') + ' ' + (b.getAttribute('title') || '')
+      const btn = all.find((b) => {
+        const lbl = `${b.getAttribute('aria-label') || ''} ${b.textContent || ''} ${b.getAttribute('title') || ''}`
         return /停止生成|停止回答|停止输出|stop\s*generat|stop\s*stream|stop\s*response|stop\s*answer/i.test(lbl)
       })
       if (btn && !btn.disabled) {
         btn.click()
         return true
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
     return false
   }
+
   let handoffMode = 'off'
   let handoffReplyText = ''
+
   function findNewChatButton() {
     const all = Array.from(document.querySelectorAll('button, a'))
-    return all.find(el => {
-      const lbl = (el.getAttribute('aria-label') || '') + ' ' + (el.textContent || '') + ' ' + (el.getAttribute('title') || '')
+    return all.find((el) => {
+      const lbl = `${el.getAttribute('aria-label') || ''} ${el.textContent || ''} ${el.getAttribute('title') || ''}`
       return /新建对话|新对话|新建聊天|new\s*chat|new\s*conversation/i.test(lbl)
     }) || null
   }
   function clickNewSession() {
     const btn = findNewChatButton()
     if (btn && !btn.disabled) {
-      try { btn.click(); return true } catch { /* fallthrough */ }
+      try { btn.click(); return true } catch {}
     }
     return false
   }
+
   function findInputBox() {
-    // DeepSeek 用 textarea；ChatGPT/Claude 也都是 textarea；contenteditable 作为兜底
+    const qwen = document.querySelector('div[contenteditable="true"][role="textbox"]')
+    if (qwen) return qwen
     const ta = document.querySelector('textarea:not([readonly]):not([disabled])')
     if (ta) return ta
-    const ce = document.querySelector('[contenteditable="true"]')
-    return ce || null
+    return document.querySelector('[contenteditable="true"]') || null
   }
 
   function findSendButton(input) {
-    // 1. aria-label 含「发送」或 send
-    const all = Array.from(document.querySelectorAll('button:not([disabled])'))
-    const byAria = all.find(b => {
-      const lbl = (b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '')
-      return /发送|send|submit|发送消息/i.test(lbl)
+    const qwenBtn = document.querySelector('button[aria-label="发送消息"]')
+    if (qwenBtn && !qwenBtn.disabled) return qwenBtn
+    const allClickable = Array.from(document.querySelectorAll('button, div[role="button"]'))
+    const byLabel = allClickable.find((b) => {
+      if (b.disabled || b.getAttribute('aria-disabled') === 'true') return false
+      const lbl = [b.getAttribute('aria-label'), b.getAttribute('title'), b.textContent].filter(Boolean).join(' ')
+      return /发送消息|^发送$|send\s*message|^send$/i.test(lbl)
     })
-    if (byAria) return byAria
-    // 2. 紧邻 input 的 button[type=submit]
+    if (byLabel) return byLabel
     if (input && input.form) {
       const sb = input.form.querySelector('button[type=submit]:not([disabled])')
       if (sb) return sb
-    }
-    // 3. 输入框父级的下一个 button
-    if (input) {
-      let p = input.parentElement
-      for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
-        const sb = p.querySelector('button:not([disabled])')
-        if (sb) return sb
-      }
     }
     return null
   }
 
   function sendEnter(box) {
-    const opts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }
+    const opts = {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      which: 13,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      isComposing: false,
+    }
     box.dispatchEvent(new KeyboardEvent('keydown', opts))
     box.dispatchEvent(new KeyboardEvent('keypress', opts))
     box.dispatchEvent(new KeyboardEvent('keyup', opts))
   }
 
+  // ⭐ 核心修复：Slate.js / React 富文本用 ClipboardEvent('paste')
   function fillInput(box, text) {
+    if (!box) return
+
     if (box.tagName === 'TEXTAREA' || box.tagName === 'INPUT') {
-      // 受控组件：用原生 setter + dispatch input event
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set
-        || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+      const proto = box.tagName === 'TEXTAREA'
+        ? window.HTMLTextAreaElement.prototype
+        : window.HTMLInputElement.prototype
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
       if (setter) setter.call(box, text)
       else box.value = text
       box.dispatchEvent(new Event('input', { bubbles: true }))
       box.dispatchEvent(new Event('change', { bubbles: true }))
-    } else if (box.isContentEditable) {
-      box.focus()
-      document.execCommand('insertText', false, text)
+      return
     }
+
+    if (box.isContentEditable) {
+      box.focus()
+
+      // 清空
+      try {
+        const sel = window.getSelection()
+        const range = document.createRange()
+        range.selectNodeContents(box)
+        sel.removeAllRanges()
+        sel.addRange(range)
+        document.execCommand('delete', false, null)
+      } catch (e) {}
+
+      // 模拟粘贴（Slate 官方识别路径）
+      let pasted = false
+      try {
+        const dt = new DataTransfer()
+        dt.setData('text/plain', text)
+        const ev = new ClipboardEvent('paste', {
+          bubbles: true,
+          cancelable: true,
+          clipboardData: dt,
+        })
+        try { Object.defineProperty(ev, 'clipboardData', { value: dt }) } catch (e) {}
+        box.dispatchEvent(ev)
+        pasted = (box.innerText || '').trim().length > 0
+      } catch (e) {}
+
+      // 兜底：insertText
+      if (!pasted) {
+        try {
+          box.dispatchEvent(new InputEvent('beforeinput', {
+            bubbles: true,
+            cancelable: true,
+            inputType: 'insertText',
+            data: text,
+          }))
+          document.execCommand('insertText', false, text)
+          box.dispatchEvent(new InputEvent('input', {
+            bubbles: true,
+            cancelable: true,
+            inputType: 'insertText',
+            data: text,
+          }))
+        } catch (e) {}
+      }
+
+      // 最后补一个普通 input，兼容非 Slate 的 React
+      try {
+        box.dispatchEvent(new InputEvent('input', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'insertText',
+          data: text,
+        }))
+      } catch (e) {
+        box.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+    }
+  }
+
+  function doSend(box) {
+    const btn = findSendButton(box)
+    if (btn) {
+      try { btn.click() } catch (e) { sendEnter(box) }
+    } else {
+      sendEnter(box)
+    }
+    setTimeout(() => {
+      const stillHas = (box.innerText || box.value || '').trim().length > 0
+      if (stillHas) {
+        console.warn('[ai-runner] 发送可能失败，补一次 Enter')
+        sendEnter(box)
+      }
+    }, 400)
   }
 
   window.addEventListener('message', (e) => {
     const d = e.data
     if (!d || typeof d !== 'object') return
+
     if (d.type === 'ai-runner:fill') {
       const prompt = String(d.prompt || '')
       if (!prompt) return
       const box = findInputBox()
-      if (!box) {
-        console.warn('[ai-runner] 未找到输入框，无法 fill')
-        return
-      }
+      if (!box) { console.warn('[ai-runner] 未找到输入框'); return }
       fillInput(box, prompt)
-      // 短延迟后尝试点发送；找不到按钮则 Enter 兜底
-      setTimeout(() => {
-        const btn = findSendButton(box)
-        if (btn) {
-          btn.click()
-        } else {
-          console.warn('[ai-runner] 未找到发送按钮，尝试 Enter 兜底')
-          sendEnter(box)
-        }
-      }, 250)
+      setTimeout(doSend, 300, box)
       return
     }
+
     if (d.type === 'ai-runner:rotate') {
       const instruction = String(d.instruction || '')
       if (!instruction) return
@@ -422,13 +483,10 @@
       handoffReplyText = ''
       handoffMode = 'waiting-summary'
       fillInput(box, instruction)
-      setTimeout(() => {
-        const btn = findSendButton(box)
-        if (btn) btn.click()
-        else sendEnter(box)
-      }, 250)
+      setTimeout(doSend, 300, box)
       return
     }
+
     if (d.type === 'ai-runner:new-session') {
       const summary = String(d.summary || '')
       const clicked = clickNewSession()
@@ -441,11 +499,7 @@
           }
           const prefix = '这是上一个会话的上下文总结，请基于此继续工作：\n'
           fillInput(box, prefix + summary)
-          setTimeout(() => {
-            const btn = findSendButton(box)
-            if (btn) btn.click()
-            else sendEnter(box)
-          }, 250)
+          setTimeout(doSend, 300, box)
           window.opener.postMessage({ type: 'ai-runner:new-session-created', url: location.href, id: extractId(), sessionId: extractSidFromHash() }, '*')
         }, 1500)
       } else {
@@ -453,14 +507,15 @@
       }
       return
     }
+
     if (d.type === 'ai-runner:stop') {
-      // 清空回复检测状态：新循环开始前，旧代码块/DONE/正文签名全部重新计为「新」
       clickStopGenerating()
       seenHashes.clear()
       seenDoneMarkers.clear()
       lastBodySig = ''
+      handoffMode = 'off'
+      handoffReplyText = ''
       if (replyDebounce) { clearTimeout(replyDebounce); replyDebounce = null }
-      return
     }
   })
 })()

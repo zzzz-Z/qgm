@@ -54,7 +54,7 @@ export function runProcess(cmd: string, options: RunProcessOptions = {}): Promis
         timedOut = true
         kill('SIGTERM')
         if (options.killGraceMs !== 0) {
-          escalate = setTimeout(() => kill('SIGKILL'), options.killGraceMs ?? 5000)
+          escalate = setTimeout(kill, options.killGraceMs ?? 5000, 'SIGKILL')
         }
       }, options.timeoutMs)
     }

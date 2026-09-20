@@ -23,5 +23,5 @@ export function formatCost(yuan: number | null): string {
   if (yuan === null || yuan === undefined) return '未知'
   if (!Number.isFinite(yuan)) return '未知'
   if (yuan < 0.01) return '<¥0.01'
-  return '¥' + yuan.toFixed(2)
+  return `¥${yuan.toFixed(2)}`
 }
