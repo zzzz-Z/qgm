@@ -599,18 +599,19 @@ version: 2026-09-21
 
 **本章速览**：
 
-1. 一、CSS 选择器组 + 注释 = 灾难  <a id="ui-0"></a>
-2. 二、Console 的 `matches()` 对通配选择器失灵  <a id="ui-1"></a>
-3. 三、删了 `oneDark` 主题，编辑器退回亮色  <a id="ui-2"></a>
-4. 四、UnoCSS 的 `(--var)` vs `[var(--var)]`  <a id="ui-3"></a>
-5. 五、组件抽取 = 副作用连锁  <a id="ui-4"></a>
-6. 六、CSS `!important` 堆叠 = 后来的赢  <a id="ui-5"></a>
-7. 七、执行环境混用  <a id="ui-6"></a>
-8. 八、UI 排查正确顺序（记牢）  <a id="ui-7"></a>
-9. 九、AI 与用户协作  <a id="ui-8"></a>
-10. 十、UI 排查教训  <a id="ui-9"></a>
-11. 十一、ScriptPanel UI 会话复盘  <a id="ui-10"></a>
-12. 十二、常用排查命令  <a id="ui-11"></a>
+- [CSS 选择器组 + 注释 = 灾难](#ui-0)
+- [Console 的 `matches()` 对通配选择器失灵](#ui-1)
+- [删了 `oneDark` 主题，编辑器退回亮色](#ui-2)
+- [UnoCSS 的 `(--var)` vs `[var(--var)]`](#ui-3)
+- [组件抽取 = 副作用连锁](#ui-4)
+- [CSS `!important` 堆叠 = 后来的赢](#ui-5)
+- [执行环境混用](#ui-6)
+- [UI 排查正确顺序（记牢）](#ui-7)
+- [AI 与用户协作](#ui-8)
+- [UI 排查教训](#ui-9)
+- [ScriptPanel UI 会话复盘](#ui-10)
+- [常用排查命令](#ui-11)
+<a id="ui-0"></a>
 
 ### 一、CSS 选择器组 + 注释 = 灾难
 
@@ -653,6 +654,8 @@ grep -n "\.pane-main \*" client/components/ScriptPanel.vue
 - **多选择器组每个选择器独占一行，末行不带注释**
 - **改 CSS 前先 `grep` 目标选择器，别靠"改容器"猜**
 
+<a id="ui-1"></a>
+
 ### 二、Console 的 `matches()` 对通配选择器失灵
 
 #### 现象
@@ -676,6 +679,8 @@ grep -n "\.pane-main \*" client/components/ScriptPanel.vue
 - **CSS 规则排查，DevTools Styles 面板 > Console API**
 - `matches()` 只能验证**完整选择器链**，不能验证**后代通配**
 
+<a id="ui-2"></a>
+
 ### 三、删了 `oneDark` 主题，编辑器退回亮色
 
 #### 现象
@@ -691,6 +696,8 @@ grep -n "\.pane-main \*" client/components/ScriptPanel.vue
 1. **保留 `m.oneDark`**（CM 官方主题提供全部子样式）
 2. **在 `EditorView.theme(...)` 里覆盖容器色**（`& / .cm-content / .cm-gutters / .cm-activeLine / .cm-cursor / .cm-selectionBackground`）
 3. **加 `{ dark: true }`** 让 CM 选暗色变体
+
+<a id="ui-3"></a>
 
 ### 四、UnoCSS 的 `(--var)` vs `[var(--var)]`
 
@@ -710,6 +717,8 @@ bg-(--surface)     /* 同上 */
 
 - **UnoCSS 里所有 CSS 变量一律 `[var(--xxx)]`**
 - **改完 `grep` 一次**，确认无 `(--` 残留
+
+<a id="ui-4"></a>
 
 ### 五、组件抽取 = 副作用连锁
 
@@ -731,6 +740,8 @@ bg-(--surface)     /* 同上 */
 - **类型检查**：`pnpm tsc` 每轮跑
 - **抽取后立即 `tsc`**，别攒几轮再跑
 
+<a id="ui-5"></a>
+
 ### 六、CSS `!important` 堆叠 = 后来的赢
 
 #### 现象
@@ -749,6 +760,8 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 
 - **修改前先 `grep` 数选择器出现次数**，>1 时小心
 - **用 DevTools Styles 面板**看哪条生效（划掉的 = 被覆盖）
+
+<a id="ui-6"></a>
 
 ### 七、执行环境混用
 
@@ -772,6 +785,8 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 - **看到 `sed` / `grep` / `$()` → 终端**
 - **别复制粘贴，先确认当前是哪个环境**
 
+<a id="ui-7"></a>
+
 ### 八、UI 排查正确顺序（记牢）
 
 1. **DevTools Elements → 选中目标元素**
@@ -780,6 +795,8 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 4. **回到源码 `grep` 那行**
 5. **一处一改，改完强刷**
 6. **不要**：靠截图猜色值、改容器背景、改全局变量、删主题
+
+<a id="ui-8"></a>
 
 ### 九、AI 与用户协作
 
@@ -796,9 +813,13 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 - **改完必跑 `tsc`**
 - **不确定时输出只读诊断脚本**，别输出修改脚本
 
+<a id="ui-9"></a>
+
 ### 十、UI 排查教训
 
 - **教训**：CSS 类名诡异色值 → 先 `grep` 类名 + 通配选择器；真凶一行可定位，别靠猜色值改容器。
+
+<a id="ui-10"></a>
 
 ### 十一、ScriptPanel UI 会话复盘
 
@@ -864,6 +885,8 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 
 现象：同一边距改了 3+ 次，同一样式删了又加。
 修法：视觉改动前用 DevTools 定位「哪条规则给的当前效果」，改根规则，不再靠猜。
+
+<a id="ui-11"></a>
 
 ### 十二、常用排查命令
 
