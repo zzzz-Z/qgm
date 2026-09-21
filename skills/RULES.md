@@ -784,24 +784,6 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 ### 十、UI 排查教训
 
 - **教训**：CSS 类名诡异色值 → 先 `grep` 类名 + 通配选择器；真凶一行可定位，别靠猜色值改容器。
-### 附：常用排查命令
-
-```bash
-# 找某选择器所有定义（含通配）
-grep -n "^\.pane-main\|\.pane-main " client/components/ScriptPanel.vue
-
-# 找某色值出现位置
-grep -rn "rgba(88 166 255 / 14%)" client/
-
-# 找某函数所有引用
-grep -rn "\bgetChangeType\b" client/
-
-# 查看某个选择器块完整内容
-awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
-
-# 检查 CSS 括号平衡
-node -e 'const s=require("fs").readFileSync("client/components/ScriptPanel.vue","utf8");const a=(s.match(/\{/g)||[]).length;const b=(s.match(/\}/g)||[]).length;console.log(a+"/"+b);'
-```
 
 ### 十一、ScriptPanel UI 会话复盘
 
@@ -868,3 +850,21 @@ node -e 'const s=require("fs").readFileSync("client/components/ScriptPanel.vue",
 现象：同一边距改了 3+ 次，同一样式删了又加。
 修法：视觉改动前用 DevTools 定位「哪条规则给的当前效果」，改根规则，不再靠猜。
 
+### 十二、常用排查命令
+
+```bash
+# 找某选择器所有定义（含通配）
+grep -n "^\.pane-main\|\.pane-main " client/components/ScriptPanel.vue
+
+# 找某色值出现位置
+grep -rn "rgba(88 166 255 / 14%)" client/
+
+# 找某函数所有引用
+grep -rn "\bgetChangeType\b" client/
+
+# 查看某个选择器块完整内容
+awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
+
+# 检查 CSS 括号平衡
+node -e 'const s=require("fs").readFileSync("client/components/ScriptPanel.vue","utf8");const a=(s.match(/\{/g)||[]).length;const b=(s.match(/\}/g)||[]).length;console.log(a+"/"+b);'
+```
