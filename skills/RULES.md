@@ -21,7 +21,6 @@ version: 2026-09-21
 六、踩坑库（E/T/P/A）
 七、TypeScript HCLC 架构
 八、UI / CSS / Vue 踩坑
----
 
 ## 一、输出契约与自动化循环
 
@@ -72,7 +71,7 @@ version: 2026-09-21
 - **只输出可执行内容**：除代码块及上方一行功能摘要外，禁止解释、客套、recap 或思考过程。
 - **默认折叠思考**：内部推理不对外展示。
 - **连续失败熔断**：连续 3 轮未解决，停止改代码，转为提问诊断。
-- **读写协议优先**：涉及文件操作时，严格遵守 `script/standards.md` 中的 R1-R3 协议。
+- **读写协议优先**：涉及文件操作时，严格遵守 第三章「脚本编写与技术规范」 中的 R1-R3 协议。
 
 ### 自主决策与安全边界
 
@@ -144,7 +143,7 @@ version: 2026-09-21
 - [ ] 是否有无信息模糊词（可能/或许）？→ 删或改为字面动作
 - [ ] 读者扫视首尾锚点，能否在 3 秒内获知「做了什么 + 结果如何」？否 → 精简
 
-> 读写协议（R1-R3）、反模式详见 `script/standards.md`。
+> 读写协议（R1-R3）、反模式详见 第三章「脚本编写与技术规范」。
 ---
 
 ## 三、脚本编写与技术规范
@@ -327,12 +326,12 @@ version: 2026-09-21
 - [ ] 一次 <= 3 个文件
 - [ ] 报错先贴 pwd/ls，再贴 stderr
 
-> 详细踩坑库（E/T/P/A）见 `env/troubleshooting.md`。
+> 详细踩坑库（E/T/P/A）见 第六章「踩坑库」。
 ---
 
 ## 六、踩坑库（E/T/P/A）
 
-> 会话首条自检见 `env/preflight.md`。
+> 会话首条自检见 第五章「环境自检与提交闸门」。
 
 ### 踩坑索引
 
@@ -507,10 +506,10 @@ version: 2026-09-21
 
 ## 七、TypeScript HCLC 架构
 
-#### 🎯 核心目标
+### 🎯 核心目标
 在 TypeScript 项目中，通过严格的类型约束、模块化设计和依赖管理，确保每个模块**职责单一且完整（高内聚）**，模块间**依赖最小化且易于替换（低耦合）**。
 
-#### 🧠 思维框架 (Design Mindset)
+### 🧠 思维框架 (Design Mindset)
 
 1.  **内聚性检查**：这个文件/类是否只关心"一件事"？修改一个业务需求是否只需要改动这一个文件？
 2.  **耦合度检查**：删除或替换这个依赖，是否会导致其他模块崩溃？是否可以通过接口抽象隔离变化？
@@ -519,7 +518,7 @@ version: 2026-09-21
 
 ---
 
-#### ⚙️ 执行规范 (Actionable Rules) - 增强版
+### ⚙️ 执行规范 (Actionable Rules) - 增强版
 
 #### 1. 接口隔离与契约优先 (Enhanced)
 *   **规则**：跨模块通信必须通过契约进行。优先使用 **TypeScript 原生类型系统** 表达业务语义，而非仅靠 Interface。
@@ -555,7 +554,7 @@ version: 2026-09-21
     3.  调用方极少且可通过人工/E2E 快速验证。
 *   **重构手法**：优先使用 IDE 支持的自动化重构（Extract Method, Move File），再手动调整抽象。禁止“复制粘贴后删除旧代码”的高风险操作。
 
-#### 🔍 Code Review 自检清单 (量化版)
+### 🔍 Code Review 自检清单 (量化版)
 
 | 检查项 | 🟢 合格 | 🟡 警告 (需记录技术债) | 🔴 阻断 (必须修复) |
 | :--- | :--- | :--- | :--- |
@@ -565,7 +564,7 @@ version: 2026-09-21
 | `any` 使用 | 0 (Core) / <3 (Infra) | 有合理注释的 `any` | 无注释 `any` 或 `@ts-ignore` |
 | 变更影响面 | 单文件 | 同模块内 2-3 文件 | 跨模块 > 3 文件 |
 
-#### 📝 AI 输出格式规范 (Output Schema)
+### 📝 AI 输出格式规范 (Output Schema)
 
 当被要求审查或重构时，**必须**按以下结构响应：
 
@@ -821,7 +820,7 @@ node -e 'const s=require("fs").readFileSync("client/components/ScriptPanel.vue",
 
 ### 十一、会话复盘 · 2026-09-20 · ScriptPanel UI 重构
 
-### Vue 类
+#### Vue 类
 
 #### V1. `<script setup>` 的 const 不提升
 
@@ -833,7 +832,7 @@ node -e 'const s=require("fs").readFileSync("client/components/ScriptPanel.vue",
 现象：`props` 定义在 `displayWidth` 之后 → props is not defined。
 修法：宏调用与 props 必须早于所有依赖它们的响应式声明。
 
-### 脚本类
+#### 脚本类
 
 #### S1. 幂等性缺失 —— 重跑插入重复声明
 
@@ -855,7 +854,7 @@ node -e 'const s=require("fs").readFileSync("client/components/ScriptPanel.vue",
 现象：几轮编辑后 sed 行号定位失效。
 修法：改用唯一字符串锚点（注释 marker / 独特选择器名）定位。
 
-### CSS 类
+#### CSS 类
 
 #### C1. 全局选择器 `*` 副作用
 
@@ -872,7 +871,7 @@ node -e 'const s=require("fs").readFileSync("client/components/ScriptPanel.vue",
 现象：`(--xxx)` 在 presetWind4 中无效。
 修法：一律 `[var(--xxx)]` 方括号语法。
 
-### 决策类
+#### 决策类
 
 #### D1. UI 风格未先定参考
 
