@@ -6,13 +6,14 @@
 const { spawnSync, spawn } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
+const L = require('../src/logger.cjs')
 
 const ROOT = process.cwd()
-const DIST_ENTRY = path.join(ROOT, 'dist', 'ws-server.js')
-const SRC_ENTRY = path.join(ROOT, 'src', 'ws-server.ts')
+const DIST_ENTRY = path.join(ROOT, 'dist', 'server', 'ws-server.js')
+const SRC_ENTRY = path.join(ROOT, 'src', 'server', 'ws-server.ts')
 
 if (!fs.existsSync(SRC_ENTRY)) {
-  console.error(`[air-server] 未找到 src/ws-server.ts（cwd=${ROOT}）`)
+  L.err(`未找到 src/ws-server.ts（cwd=${ROOT}）`)
   process.exit(1)
 }
 
@@ -39,16 +40,16 @@ function srcIsNewer() {
 }
 
 if (srcIsNewer()) {
-  console.log('[air-server] 检测到 src 更新，先构建...')
+  L.info('检测到 src 更新，先构建...')
   const r = spawnSync('pnpm', ['build'], { cwd: ROOT, stdio: 'inherit', shell: process.platform === 'win32' })
   if (r.status !== 0) {
-    console.error(`[air-server] pnpm build 失败，退出码 ${r.status}`)
+    L.err(`pnpm build 失败，退出码 ${r.status}`)
     process.exit(r.status || 1)
   }
 }
 
 if (!fs.existsSync(DIST_ENTRY)) {
-  console.error(`[air-server] 构建后仍未找到 ${DIST_ENTRY}`)
+  L.err(`构建后仍未找到 ${DIST_ENTRY}`)
   process.exit(1)
 }
 

@@ -1,11 +1,13 @@
 #!/usr/bin/env node
+/* eslint-disable no-console -- CLI 输出 */
 'use strict'
 const { spawnSync } = require('node:child_process')
 
 const ROOT = process.cwd()
 const BASE_URL = process.env.AI_RUNNER_BASE_URL || 'http://localhost:5174'
-const TTY = Boolean(process.stdout.isTTY)
-const c = (n, s) => (TTY ? `\x1B[${n}m${s}\x1B[0m` : s)
+const L = require('../src/logger.cjs')
+
+const c = L.c
 const ok = s => console.log(c(32, '✓'), s)
 const skip = s => console.log(c(33, '!'), s)
 const err = s => console.error(c(31, '✗'), s)
@@ -110,4 +112,4 @@ async function smokeCheck() {
   console.log('')
   if (failed.length) { err(`${failed.length} 步失败 / ${passed.length} 步通过 / ${skipped.length} 步跳过`); process.exit(1) }
   ok(`全部通过（${passed.length} 步，${skipped.length} 跳过）`)
-})().catch((e) => { err(String(e && e.stack || e)); process.exit(1) })
+})().catch((e) => { err(String((e && e.stack) || e)); process.exit(1) })

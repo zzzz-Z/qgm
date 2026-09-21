@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable no-console -- CLI 输出 */
 // @desc: 无头链路 smoke：连接 /__ai/ws，跑 open → fill(空) → state 序列，验证服务端消息分发
 // @why: headless 链路从未端到端验证；本工具用最小脚本验证 WS 协议层
 // 用法：
@@ -14,6 +15,8 @@
 const URL_DEFAULT = 'ws://127.0.0.1:5175/__ai/ws'
 const TIMEOUT_MS = 8000
 
+const L = require('../src/logger.cjs')
+
 let WS
 try { WS = require('ws') } catch { console.error('✗ 未安装 ws（pnpm add ws）'); process.exit(3) }
 const { WebSocket } = WS
@@ -23,9 +26,9 @@ const real = args.includes('--real')
 const url = args.find(a => !a.startsWith('--')) || URL_DEFAULT
 
 function log(...a) { console.log(...a) }
-function ok(m) { console.log(`✓ ${m}`) }
-function err(m) { console.error(`✗ ${m}`) }
-function step(m) { console.log(`▶ ${m}`) }
+function ok(m) { console.log(L.chalk.green('✓'), m) }
+function err(m) { console.error(L.chalk.red('✗'), m) }
+function step(m) { console.log(L.chalk.cyan('▶'), m) }
 
 log('══ headless smoke ══')
 log(`  URL: ${url}`)
@@ -33,11 +36,9 @@ log(`  模式: ${real ? 'real（发 fill）' : 'probe（仅 open + 空 fill）'}
 log('')
 
 const ws = new WebSocket(url)
-let exitCode = 0
 const seen = new Set()
 
 function finish(code) {
-  exitCode = code
   try { ws.close() } catch { /* ignore */ }
   setTimeout(() => process.exit(code), 200)
 }

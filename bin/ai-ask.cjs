@@ -5,9 +5,9 @@ const path = require('node:path')
 
 const ROOT = process.cwd()
 const CONFIG = path.join(ROOT, '.ai-runner/config.json')
-const TTY = Boolean(process.stdout.isTTY)
-const c = (n, s) => (TTY ? `\u001B[${n}m${s}\u001B[0m` : s)
-const err = s => console.error(c(31, '✗'), s)
+const L = require('../src/logger.cjs')
+
+const err = s => L.err(s)
 
 function loadConfig() {
   const env = process.env.DEEPSEEK_API_KEY
@@ -102,9 +102,9 @@ async function main() {
     }
   }
   process.stdout.write('\n')
-  if (usage && TTY) {
-    console.error(`${c(36, '·')} tokens: prompt=${usage.prompt_tokens || 0} completion=${usage.completion_tokens || 0}`)
+  if (usage && process.stdout.isTTY) {
+    L.info(`tokens: prompt=${usage.prompt_tokens || 0} completion=${usage.completion_tokens || 0}`)
   }
 }
 
-main().catch((e) => { err(String(e && e.stack || e)); process.exit(1) })
+main().catch((e) => { err(String((e && e.stack) || e)); process.exit(1) })

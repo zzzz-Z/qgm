@@ -1,15 +1,16 @@
-// [refactor-routes] /skills GET/POST/DELETE
+// /skills GET/POST/DELETE
 import fs from 'node:fs'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getRoot } from '../config.js'
 import { clearRulesHashCache } from '../post-run/compliance.js'
-import { parseJSON, readBody, sendJSON } from '../http.js'
+import { parseJSON, readBody, sendJSON } from '../server/http.js'
 
 // 常驻 skill：与 skills/_loader.cjs 的 ALWAYS_KEYS 对齐
-const DEFAULT_SKILLS = new Set(['core-behavior', 'core-gen-rules', 'script-standards', 'env-preflight'])
+const DEFAULT_SKILLS = new Set(['core-behavior', 'core-loop-protocol', 'script-standards', 'script-ai-api', 'env-preflight'])
 
 /** /skills 列表 / 新建 / 删除 */
 export async function handleSkillsRoutes(
@@ -18,6 +19,20 @@ export async function handleSkillsRoutes(
   url: URL,
 ): Promise<boolean> {
   // ---------- Skills ----------
+  if (req.method === 'GET' && url.pathname === '/skills/always') {
+    try {
+      const require = createRequire(import.meta.url)
+      const loaderPath = path.join(getRoot(), 'skills/_loader.cjs')
+      // 清 require 缓存，确保 dev server 加载最新 _loader.cjs（ALWAYS_KEYS 会随版本变化）
+      try { delete require.cache[require.resolve(loaderPath)] } catch { /* ignore */ }
+      const loader = require(loaderPath)
+      const text = loader.load(loader.ALWAYS_KEYS)
+      sendJSON(res, { ok: true, text, keys: loader.ALWAYS_KEYS })
+    } catch (e) {
+      sendJSON(res, { ok: false, error: String(e) }, 500)
+    }
+    return true
+  }
   if (req.method === 'GET' && url.pathname === '/skills') {
     const baseDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../skills')
     const userDir = path.join(getRoot(), '.ai-runner/skills')

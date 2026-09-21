@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 'use strict'
+/* eslint-disable no-console -- CLI 输出 */
 const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
 const LOGS_DIR = path.join(ROOT, '.ai-runner/logs')
 const OUT = path.join(ROOT, 'PROJECT-NOTES.md')
-const TTY = Boolean(process.stdout.isTTY)
-const c = (n, s) => (TTY ? `\u001B[${n}m${s}\u001B[0m` : s)
+const L = require('../src/logger.cjs')
+
+const c = L.c
 const ok = s => console.log(c(32, '✓'), s)
 const head = s => console.log(c(36, '▶'), s)
 
@@ -26,7 +28,7 @@ function readLogs() {
     for (const line of raw.split('\n')) {
       const l = line.trim()
       if (!l) continue
-      try { out.push(JSON.parse(l)) } catch (e) {}
+      try { out.push(JSON.parse(l)) } catch {}
     }
   }
   return out

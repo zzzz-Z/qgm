@@ -1,4 +1,4 @@
-// [refactor-post-run] 从错误输出提取项目内源文件路径
+// 从错误输出提取项目内源文件路径
 import fs from 'node:fs'
 import path from 'node:path'
 import { getRoot } from '../config.js'

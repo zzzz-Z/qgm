@@ -1,18 +1,19 @@
 #!/usr/bin/env node
+/* eslint-disable no-console -- CLI 输出 */
 'use strict'
 // AI Runner 快照恢复工具
 // 从 .ai-runner/runs/<runId>/_manifest.json 恢复被修改/新增的文件
 const fs = require('node:fs')
 const path = require('node:path')
 const readline = require('node:readline')
+const L = require('../src/logger.cjs')
 
 const ROOT = process.cwd()
 const RUNS_DIR = path.join(ROOT, '.ai-runner/runs')
 
 const TTY = process.stdout.isTTY && process.stdin.isTTY
-const c = (n, s) => (TTY ? `\x1B[${n}m${s}\x1B[0m` : s)
+const c = L.c
 const ok = s => console.log(c(32, '✓'), s)
-const warn = s => console.log(c(33, '⚠'), s)
 const err = s => console.error(c(31, '✗'), s)
 
 function loadRuns() {

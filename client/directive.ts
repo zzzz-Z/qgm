@@ -1,5 +1,5 @@
 import type { Directive } from 'vue'
-import { hideTooltip, moveTooltip, showTooltip } from './composables/useTooltip'
+import { hideTooltip, moveTooltip, showTooltip } from './composables/ui/useTooltip'
 
 interface TooltipEl extends HTMLElement {
   __ttText?: string

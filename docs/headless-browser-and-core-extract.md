@@ -69,7 +69,7 @@
 ### 改造(Node 服务侧,薄包装)
 
 - [src/index.ts](file:///Users/apple/.trae-cn/worktrees/vite-plugin-ai-runner/feat-analyze-project-doc-Bk1dwQ/src/index.ts) `aiRunner()` — `configureServer` 改 `server.middlewares.use(PREFIX, createRouter(opts))` + `attach(server.httpServer!, opts)`;保留 `transformIndexHtml`。
-- `package.json` — 加 `ws` dep、`@zcc/cloak-browser` optionalDependencies、`air-server` bin、`start` 脚本、`exports["./protocol"]`。
+- `package.json` — 加 `ws` dep、`@qgm/cloak-browser` optionalDependencies、`air-server` bin、`start` 脚本、`exports["./protocol"]`。
 
 ### 不动
 
@@ -87,7 +87,7 @@ CloakBrowser 会话池 + 反风控,对应文档第十四节:
 - **随机延迟**:`fillPrompt` 前随机 sleep 3.5–6s,jitter 防固定间隔机器人特征。
 - **429 退避**:WS `headless:state` 推 `error:'429'` 时,`ai-headless.ts` 指数退避 `2^i` 秒重试(最多 5 次),超限推 `headless:state(error:'rate-limited')` 让前端降频或切油猴。
 - **监控**:统计 429 比例,>10% 主动降频(拉长随机延迟区间)。
-- **`loadEngine()`**:try `await import('@zcc/cloak-browser')` → `playwright` → 报错。CloakBrowser 作 `optionalDependencies`,`aiRunner()` 启动不急调,首个 `headless:open` 才加载。
+- **`loadEngine()`**:try `await import('@qgm/cloak-browser')` → `playwright` → 报错。CloakBrowser 作 `optionalDependencies`,`aiRunner()` 启动不急调,首个 `headless:open` 才加载。
 
 ### DOM 逻辑移植(油猴 → Node 侧 `page.evaluate`)
 
@@ -167,7 +167,7 @@ export type ServerMessage
 5. `client/composables/useAiTransport.ts`:`AiTransport` + `HeadlessTransport`(WS)+ `TampermonkeyTransport`(包装现有)。
 6. 改 [useAutoLoop.ts](file:///Users/apple/.trae-cn/worktrees/vite-plugin-ai-runner/feat-analyze-project-doc-Bk1dwQ/client/composables/useAutoLoop.ts) 5 调用点 + [App.vue](file:///Users/apple/.trae-cn/worktrees/vite-plugin-ai-runner/feat-analyze-project-doc-Bk1dwQ/client/App.vue) 切换 UI(藏 `__ai_transport` flag 后)。
 7. `bin/air-server.cjs` 独立壳 + 静态托管 `client/dist`。
-8. `package.json`:`ws` dep、`@zcc/cloak-browser` optional、`air-server` bin、`start` 脚本、`exports["./protocol"]`。
+8. `package.json`:`ws` dep、`@qgm/cloak-browser` optional、`air-server` bin、`start` 脚本、`exports["./protocol"]`。
 9. E2E:镜像 [client/e2e/ai-runner.spec.ts](file:///Users/apple/.trae-cn/worktrees/vite-plugin-ai-runner/feat-analyze-project-doc-Bk1dwQ/client/e2e/ai-runner.spec.ts),驱动 WS 而非 postMessage。
 
 ---

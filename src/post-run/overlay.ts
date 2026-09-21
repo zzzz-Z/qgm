@@ -1,4 +1,4 @@
-// [refactor-post-run] overlay apply 与变更读取
+// overlay apply 与变更读取
 import fs from 'node:fs'
 import path from 'node:path'
 import { getRoot } from '../config.js'

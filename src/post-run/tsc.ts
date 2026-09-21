@@ -1,9 +1,9 @@
-// [refactor-post-run] tsc 定向类型检查
+// tsc 定向类型检查
 import fs from 'node:fs'
 import path from 'node:path'
 import { getRoot } from '../config.js'
 import type { Change } from '../config.js'
-import { runProcess } from '../proc.js'
+import { runProcess } from '../process/proc.js'
 
 async function runCmd(cmd: string, args: string[], timeoutMs = 60_000): Promise<{ code: number, stdout: string, stderr: string }> {
   const r = await runProcess(cmd, { args, cwd: getRoot(), timeoutMs })
@@ -13,7 +13,7 @@ export const TSC_EXTS = new Set(['.ts', '.tsx', '.vue', '.mts', '.cts'])
 
 // pickTscTargets 排除测试文件：e2e/spec/test 归 playwright / node:test 管，不走根 tsconfig
 export const TSC_SKIP_DIRS = ['client/e2e/', 'e2e/', 'test/', 'tests/']
-const TSC_SKIP_RE = /\.(spec|test)\.(ts|tsx|mts|cts|vue)$/
+const TSC_SKIP_RE = /\.(?:spec|test)\.(?:ts|tsx|mts|cts|vue)$/
 export function pickTscTargets(changes: Change[]): string[] {
   return changes
     .filter(c => c.type !== 'deleted')
@@ -46,9 +46,9 @@ export async function runTsc(
       lib: ['ES2022', 'DOM', 'DOM.Iterable'],
       skipLibCheck: true,
       noEmit: true,
-      // [fix] 覆盖 rootDir：允许 client/*.vue 进入检查（原 rootDir=./src 会触发 TS6059）
+      // 覆盖 rootDir：允许 client/*.vue 进入检查（原 rootDir=./src 会触发 TS6059）
       rootDir: '.',
-      // [fix-allow-ts-ext-v1] 支持 client/*.node-test.ts 的 .ts 后缀导入
+      // 支持 client/*.node-test.ts 的 .ts 后缀导入
       allowImportingTsExtensions: true,
     },
     files: [],

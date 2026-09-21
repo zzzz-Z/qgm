@@ -1,4 +1,4 @@
-import { cleanCode } from '../codeCleaner'
+import { cleanCode } from './codeCleaner'
 import { fallbackEstimate } from './tokenEstimator'
 
 export const PROMPT_BUDGET = 32000
@@ -54,7 +54,7 @@ export function buildFullContext(files: ContextFile[], opts: CleanOptions): stri
 }
 export function parseErrorLocations(text: string): Map<string, Set<number>> {
   const out = new Map<string, Set<number>>()
-  const re = /((?:\/|[A-Za-z]:[\\/])?[\w./\\@-]+\.(?:ts|tsx|js|jsx|mjs|cjs|vue)):(\d+)(?::(\d+))?/g
+  const re = /(?:\/|[A-Za-z]:[\\/])?[\w./\\@-]+\.(?:ts|tsx|js|jsx|mjs|cjs|vue):(\d+)(?::(\d+))?/g
   let m: RegExpExecArray | null
   while ((m = re.exec(text)) !== null) {
     const p = m[1].replace(/\\/g, '/')

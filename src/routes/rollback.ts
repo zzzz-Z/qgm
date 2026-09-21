@@ -1,10 +1,10 @@
-// [refactor-routes] /rollback + /rollback-all + /save
+// /rollback + /rollback-all + /save
 import fs from 'node:fs'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getRoot } from '../config.js'
-import { readManifest, runDir } from '../snapshot.js'
-import { parseJSON, readBody, sendJSON } from '../http.js'
+import { readManifest, runDir } from '../state/snapshot.js'
+import { parseJSON, readBody, sendJSON } from '../server/http.js'
 
 /** 单文件 / 全量回滚 + 确认保存 */
 export async function handleRollbackRoutes(

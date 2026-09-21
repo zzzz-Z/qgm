@@ -3,7 +3,7 @@
   "explorer.fileNesting.patterns": {
     "tsconfig.json": "tsconfig.*.json, env.d.ts",
     "vite.config.*": "jsconfig*, vitest.config.*, cypress.config.*, playwright.config.*",
-    "package.json": "pnpm*, .yarnrc*, yarn*, .eslint*, prettier*, .editorconfig, .gitattributes, .gitignore, .gitlab-ci.yml, .npmrc, .nvmrc, .stylelintrc*, README.md, index.html"
+    "package.json": "uno.config.ts, vite.config.*, pnpm*, .yarnrc*, yarn*, .eslint*, prettier*, .editorconfig, .gitattributes, .gitignore, .gitlab-ci.yml, .npmrc, .nvmrc, .stylelintrc*, README.md, index.html"
   },
 
   // Disable the default formatter, use eslint instead
@@ -41,5 +41,16 @@
     "json",
     "jsonc",
     "yaml"
+  ],
+
+  // 项目专有词（消除 cSpell Unknown word 噪音）
+  "cSpell.words": [
+    "niuma",
+    "Deepseek",
+    "deepseek",
+    "keymap",
+    "okline",
+    "segs",
+    "air-runner"
   ]
 }

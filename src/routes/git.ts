@@ -1,7 +1,7 @@
-// [refactor-routes] /git/* —— HEAD / commit-loop / reset
+// /git/* —— HEAD / commit-loop / reset
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { gitCommitAll, gitHead, gitResetHard } from '../git.js'
-import { parseJSON, readBody, sendJSON } from '../http.js'
+import { parseJSON, readBody, sendJSON } from '../server/http.js'
 
 /** GET /git/head；POST /git/commit-loop；POST /git/reset */
 export async function handleGitRoutes(

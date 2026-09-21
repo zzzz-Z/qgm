@@ -1,9 +1,7 @@
-// [refactor-post-run] 子进程脚本执行（overlay 沙盒）
-import { createRequire } from 'node:module'
+// 子进程脚本执行（overlay 沙盒）
 import { fileURLToPath } from 'node:url'
-import path from 'node:path'
 import { getRoot } from '../config.js'
-import { runProcess } from '../proc.js'
+import { runProcess } from '../process/proc.js'
 
 export interface RunResult {
   code: number
@@ -25,7 +23,7 @@ export async function runScript(scriptPath: string, timeoutMs = 60_000, signal?:
     try { require(${JSON.stringify(scriptPath)}); }
     catch(e) { console.error('[script error]', e?.stack || e); process.exitCode = 1; }
   `
-  // [fix-interceptor-path] src/post-run/ 或 dist/post-run/ 都回 ../../
+  // src/post-run/ 或 dist/post-run/ 都回 ../../
   const interceptorCjs = fileURLToPath(new URL('../interceptor.cjs', import.meta.url))
   const helpersCjs = fileURLToPath(new URL('../helpers.cjs', import.meta.url))
   const r = await runProcess(process.execPath, {

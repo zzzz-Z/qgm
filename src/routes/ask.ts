@@ -1,9 +1,9 @@
-// [refactor-routes] /ask —— DeepSeek SSE 代理
+// /ask —— DeepSeek SSE 代理
 import fs from 'node:fs'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getRoot } from '../config.js'
-import { parseJSON, readBody, sendJSON } from '../http.js'
+import { parseJSON, readBody, sendJSON } from '../server/http.js'
 
 /** POST /ask { prompt, model } → SSE 流式转发 DeepSeek */
 export async function handleAskRoute(

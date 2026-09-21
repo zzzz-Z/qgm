@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 'use strict'
+/* eslint-disable no-console -- CLI 输出 */
 const fs = require('node:fs')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 
 const ROOT = process.cwd()
-const TTY = Boolean(process.stdout.isTTY)
-const c = (n, s) => (TTY ? `\u001B[${n}m${s}\u001B[0m` : s)
+const L = require('../src/logger.cjs')
+
+const c = L.c
 const ok = s => console.log(c(32, '✓'), s)
 const warn = s => console.log(c(33, '⚠'), s)
 const err = s => console.error(c(31, '✗'), s)
@@ -19,8 +21,8 @@ const read = r => fs.readFileSync(abs(r), 'utf8')
 
 const STAGES = [
   ['0.1', 'src/interceptor.cjs', 'overlay 拦截层'],
-  ['0.2', 'src/index-index.ts', '文件索引 / 跨轮 diff'],
-  ['0.3', 'src/smoke.ts', 'smoke 模块'],
+  ['0.2', 'src/utils/index-index.ts', '文件索引 / 跨轮 diff'],
+  ['0.3', 'src/headless/smoke.ts', 'smoke 模块'],
   ['1.2', 'src/index.ts', '主插件'],
   ['1.3', 'bin/recover.cjs', 'recover picker'],
   ['2.1', 'skills/gen-script-rules.md', '规则文件'],
@@ -100,4 +102,4 @@ function main() {
     process.exit(1)
   }
 }
-try { main() } catch (e) { err(String(e && e.stack || e)); process.exit(1) }
+try { main() } catch (e) { err(String((e && e.stack) || e)); process.exit(1) }

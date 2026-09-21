@@ -1,9 +1,9 @@
-// [refactor-post-run] eslint 检测与执行
+// eslint 检测与执行
 import fs from 'node:fs'
 import path from 'node:path'
 import { getRoot } from '../config.js'
 import type { Change } from '../config.js'
-import { detectPackageManager, runProcess } from '../proc.js'
+import { detectPackageManager, runProcess } from '../process/proc.js'
 /** 支持 eslint 处理的源文件扩展名 */
 export const LINT_EXTS = new Set(['.ts', '.tsx', '.vue', '.js', '.jsx', '.mjs', '.cjs'])
 

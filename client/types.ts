@@ -54,6 +54,9 @@ export interface RunResponse {
   tsc?: { ok: boolean, stdout: string, stderr: string } | null
   /** 失败时服务端从错误输出里提取的项目内文件路径（相对路径） */
   errorFiles?: string[]
+  scriptCtx?: string
+  /** [L4b] 服务端从错误输出提取的符号指纹，用于连续 2 轮未变检测 */
+  fingerprints?: Array<{ file: string, line: number, symbol: string, kind: string }>
   git?: {
     ok: boolean
     commit?: string

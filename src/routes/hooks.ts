@@ -1,11 +1,11 @@
-// [refactor-routes] /hooks/run + /skills/load
+// /hooks/run + /skills/load
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getRoot } from '../config.js'
-import { runHook } from '../hooks.js'
-import type { HookEvent } from '../hooks.js'
-import { parseJSON, readBody, sendJSON } from '../http.js'
+import { runHook } from '../utils/hooks.js'
+import type { HookEvent } from '../utils/hooks.js'
+import { parseJSON, readBody, sendJSON } from '../server/http.js'
 
 /** /hooks/run + /skills/load */
 export async function handleHooksRoutes(

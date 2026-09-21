@@ -1,0 +1,288 @@
+{
+  "anchors": [
+    {
+      "file": "client/composables/ai/useSessionManager.ts",
+      "contains": "ASK_ROTATE_THRESHOLD = 40"
+    },
+    {
+      "file": "client/App.vue",
+      "contains": "ai-runner:url-updated"
+    },
+    {
+      "file": "client/App.vue",
+      "contains": "ai-runner:new-session-created"
+    },
+    {
+      "file": "client/App.vue",
+      "contains": "ai-runner:session-id"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "function trimOutput"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "if (ctx === 'full') return text"
+    },
+    {
+      "file": "client/types.ts",
+      "contains": "scriptCtx?: string"
+    },
+    {
+      "file": "client/composables/runner/useRunner.ts",
+      "contains": "scriptCtx: (s.scriptCtx as string)"
+    },
+    {
+      "file": "src/post-run/script-meta.ts",
+      "contains": "ctx: string"
+    },
+    {
+      "file": "src/routes/run.ts",
+      "contains": "scriptCtx: scriptMeta.ctx"
+    },
+    {
+      "file": "scripts/tampermonkey-session-id.user.js",
+      "contains": "url-updated"
+    },
+    {
+      "file": "src/server/launcher.ts",
+      "contains": "window.focus()"
+    },
+    {
+      "file": "src/post-run/script-check.ts",
+      "contains": "export function checkScriptSyntax"
+    },
+    {
+      "file": "src/routes/run.ts",
+      "contains": "syntaxError: true"
+    },
+    {
+      "file": "client/composables/ai/loopLogic.ts",
+      "contains": "export const LOOP_STALL_LIMIT = 3"
+    },
+    {
+      "file": "client/composables/ai/loopLogic.ts",
+      "contains": "export function updateStall"
+    },
+    {
+      "file": "client/composables/ai/useAutoLoop.ts",
+      "contains": "const stallRounds = ref(0)"
+    },
+    {
+      "file": "client/composables/ai/useAutoLoop.ts",
+      "contains": "finish(inst, 'no-progress'"
+    },
+    {
+      "file": "client/composables/ai/loopLogic.ts",
+      "contains": "export function fpKey"
+    },
+    {
+      "file": "client/composables/ai/loopLogic.ts",
+      "contains": "export function updateFpStall"
+    },
+    {
+      "file": "client/composables/ai/loopLogic.ts",
+      "contains": "LOOP_FP_STALL_LIMIT = 2"
+    },
+    {
+      "file": "client/composables/ai/useAutoLoop.ts",
+      "contains": "finish(inst, 'same-fingerprint'"
+    },
+    {
+      "file": "client/composables/ai/useAutoLoop.ts",
+      "contains": "const lastFpKey = ref("
+    },
+    {
+      "file": "client/composables/runner/useRunner.ts",
+      "contains": "fingerprints: (s.fingerprints as RunResponse"
+    },
+    {
+      "file": "client/types.ts",
+      "contains": "fingerprints?: Array<"
+    },
+    {
+      "file": "src/helpers.cjs",
+      "contains": "readIfChanged(file)"
+    },
+    {
+      "file": "src/helpers.cjs",
+      "contains": "fileSig(file)"
+    },
+    {
+      "file": "src/helpers.cjs",
+      "contains": "clearReadCache()"
+    },
+    {
+      "file": "src/helpers.cjs",
+      "contains": "const _rcMem = {}"
+    },
+    {
+      "file": "scripts/session-start.cjs",
+      "contains": "verify-anchors.cjs"
+    },
+    {
+      "file": "package.json",
+      "contains": "session:start"
+    },
+    {
+      "file": "AGENTS.md",
+      "contains": "## 11. 会话首轮一键 preflight"
+    },
+    {
+      "file": "scripts/handoff-gen.cjs",
+      "contains": "SESSION-HANDOFF.md"
+    },
+    {
+      "file": "package.json",
+      "contains": "handoff:gen"
+    },
+    {
+      "file": "scripts/verify-anchors.cjs",
+      "contains": "/* eslint-disable no-console"
+    },
+    {
+      "file": ".ai-runner/evidence/health-latest.json",
+      "contains": "generatedAt"
+    },
+    {
+      "file": "src/logger.cjs",
+      "contains": "module.exports = L"
+    },
+    {
+      "file": "src/logger.cjs",
+      "contains": "require('chalk')"
+    },
+    {
+      "file": "src/logger.cjs",
+      "contains": "L.c = function"
+    },
+    {
+      "file": "bin/compliance-report.cjs",
+      "contains": "require('../src/logger.cjs')"
+    },
+    {
+      "file": "src/utils/plan-parser.ts",
+      "contains": "eslint-disable regexp/no-super-linear-backtracking"
+    },
+    {
+      "file": "client/composables/ai/loopLogic.ts",
+      "contains": "Number.POSITIVE_INFINITY"
+    },
+    {
+      "file": "client/composables/ai/loopLogic.ts",
+      "contains": "无轮次上限"
+    },
+    {
+      "file": "client/composables/ai/useAutoLoop.ts",
+      "contains": "// [drop-round-limit] 上限已取消"
+    },
+    {
+      "file": "scripts/tampermonkey-session-id.user.js",
+      "contains": "_msgBuf"
+    },
+    {
+      "file": "scripts/tampermonkey-session-id.user.js",
+      "contains": "ai-runner:request-replay"
+    },
+    {
+      "file": "scripts/tampermonkey-session-id.user.js",
+      "contains": "ai-runner:request-rescan"
+    },
+    {
+      "file": "client/App.vue",
+      "contains": "ai-runner:request-replay"
+    },
+    {
+      "file": "client/App.vue",
+      "contains": "ai-runner:request-rescan"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "unified-status-bar"
+    },
+    {
+      "file": "src/helpers.cjs",
+      "contains": "require('chalk')"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "usb-left"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "usb-right"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "usb-time"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "barMeta"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "is-countdown"
+    },
+    {
+      "file": "client/composables/ai/useAutoTakeover.ts",
+      "contains": "pendingMeta"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "usb-main"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "usb-icon"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "mainStatus"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "chatListRef"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "autoScroll"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "usb-spin"
+    },
+    {
+      "file": "client/composables/ai/useDeepseekUrl.ts",
+      "contains": "askcount-unify"
+    },
+    {
+      "file": "client/composables/ai/useDeepseekUrl.ts",
+      "contains": "count?: boolean"
+    },
+    {
+      "file": "client/App.vue",
+      "contains": "count: false"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "_scrollLock"
+    },
+    {
+      "file": "AGENTS.md",
+      "contains": "无轮次上限"
+    },
+    {
+      "file": "skills/core/gen-rules.md",
+      "contains": "无轮次上限"
+    },
+    {
+      "file": "skills/core/loop-protocol.md",
+      "contains": "无轮次上限"
+    },
+    {
+      "file": "client/components/script/ScriptPanel.vue",
+      "contains": "copyoutput-rotate"
+    }
+  ]
+}

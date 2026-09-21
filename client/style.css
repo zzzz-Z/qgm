@@ -1,5 +1,4 @@
 :root {
-  /* ═══ DeepSeek 灰黑 + 外层加深 ═══ */
   --bg: #0f0f0f;
   --surface: #1a1a1a;
   --surface-2: #252525;
@@ -77,10 +76,8 @@
   --term-ai-bg: rgb(255 255 255 / 3%);
   --term-ai-border: rgb(255 255 255 / 8%);
 }
-/* ═══════════════════════════════════════════════════════════
-   [theme-light] 浅色主题变量（GitHub Light）
-   ═══════════════════════════════════════════════════════════ */
-[data-theme="light"] {
+
+[data-theme='light'] {
   --bg: #ffffff;
   --surface: #f6f8fa;
   --surface-2: #eaeef2;
@@ -139,7 +136,6 @@
   --term-ai-border: rgb(31 35 40 / 10%);
 }
 
-
 * {
   box-sizing: border-box;
 }
@@ -147,7 +143,6 @@ button {
   font-family: inherit;
 }
 
-/* ---- LAYOUT-FIX: full-viewport, no page scroll ---- */
 html,
 body {
   font:
@@ -182,7 +177,6 @@ html {
   color-scheme: light;
 }
 
-/* ─── 全局隐藏滚动条（保留滚动）─── */
 * {
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -193,12 +187,6 @@ html {
   display: none;
 }
 
-
-/* ═══════════════════════════════════════════════════════════
-   [ui-enhance] 视觉层次增强
-   ═══════════════════════════════════════════════════════════ */
-
-/* 滚动条美化 */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -214,7 +202,6 @@ html {
   background: rgba(255, 255, 255, 0.14);
 }
 
-/* 焦点环：只对交互元素生效（不含容器） */
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
@@ -224,7 +211,6 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
-/* 容器元素强制去掉 focus outline */
 .terminal:focus,
 .terminal:focus-visible,
 .pane-main:focus,
@@ -246,40 +232,35 @@ textarea:focus-visible {
   outline: none !important;
 }
 
-/* 选中文字 */
 ::selection {
   background: rgb(88 166 255 / 30%);
   color: var(--text);
 }
 
-/* 按钮基础过渡 */
 button {
-  transition: background var(--transition-fast),
-              color var(--transition-fast),
-              border-color var(--transition-fast),
-              box-shadow var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
-/* 卡片 hover 微动效 */
-[class*="card"]:hover {
+[class*='card']:hover {
   box-shadow: var(--shadow-md);
 }
 
-/* [P2-3a] global :focus-visible */
-/* 键盘导航兜底：仅交互元素（不用 * 通配，避免容器 focus 时整块高亮） */
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
-[role="button"]:focus-visible,
-[tabindex="0"]:focus-visible {
+[role='button']:focus-visible,
+[tabindex='0']:focus-visible {
   outline: 2px solid var(--accent, rgb(88 166 255 / 90%));
   outline-offset: 2px;
 }
 
-/* 已自带 outline 的容器不重复加 */
-button:focus-visible:where([class*="ghost"]),
-button:focus-visible:where([class*="chip"]) {
+button:focus-visible:where([class*='ghost']),
+button:focus-visible:where([class*='chip']) {
   outline-offset: 1px;
 }

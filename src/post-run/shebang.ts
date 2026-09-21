@@ -1,4 +1,4 @@
-// [refactor-post-run] shebang 分流：非 bash shebang 默认走 node
+// shebang 分流：非 bash shebang 默认走 node
 
 export interface ShebangSplit {
   isNodeScript: boolean

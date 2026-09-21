@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { ROOT } from './config.js'
-import { runProcess } from './proc.js'
+import { runProcess } from './process/proc.js'
 
 async function run(cmd: string, args: string[], timeoutMs = 30_000): Promise<{ code: number, stdout: string, stderr: string }> {
   const r = await runProcess(cmd, { args, cwd: ROOT, timeoutMs, timeoutLabel: 'git 超时' })
@@ -90,7 +90,7 @@ export async function gitCommitAfter(
     ? `\n... 共 ${changes.length} 个文件`
     : ''
 
-  const conventionalRe = /^(fix|feat|refactor|chore|docs|test|style|perf|build|ci)(\(.+?\))?:/
+  const conventionalRe = /^(?:fix|feat|refactor|chore|docs|test|style|perf|build|ci)(?:\(.+?\))?:/
   const safeDesc = String(desc || '').trim().slice(0, 72)
   let head: string
   if (safeDesc && conventionalRe.test(safeDesc)) {

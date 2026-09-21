@@ -1,4 +1,4 @@
-// [refactor-post-run] 协议标记解析（helpers.cjs 单行 JSON）
+// 协议标记解析（helpers.cjs 单行 JSON）
 
 export interface DecisionOption { id: string, label: string }
 export interface DecisionPayload {

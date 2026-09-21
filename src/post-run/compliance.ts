@@ -1,4 +1,4 @@
-// [refactor-post-run] 规则文件 hash 计算（compliance 分组用）
+// 规则文件 hash 计算（compliance 分组用）
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { getRoot } from '../config.js'
 // [A13] 规则文件 hash：让 compliance 报告可按规则版本分组
 let _rulesHashCache: string | null = null
-// [fix-rules-cache] skills 变更后清缓存
+// skills 变更后清缓存
 export function clearRulesHashCache() { _rulesHashCache = null }
 export function hashRules(): string {
   if (_rulesHashCache !== null) return _rulesHashCache

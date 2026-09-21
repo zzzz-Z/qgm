@@ -1,18 +1,18 @@
-// [refactor-routes] /run —— node 沙盒 / shell 脚本执行主入口
-import type { SmokeResult } from '../smoke.js'
+// /run —— node 沙盒 / shell 脚本执行主入口
+import type { SmokeResult } from '../headless/smoke.js'
 import type { ClaimMismatch, LintResult } from '../post-run/types.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getRoot, SCRIPTS_DIR } from '../config.js'
 import type { Change } from '../config.js'
-import { diffMeta, ensureDirs, gcSnapshots, runDir, saveSnapshot, scanMeta, snapshot, writeRunLog } from '../snapshot.js'
-import { runSmoke } from '../smoke.js'
+import { diffMeta, ensureDirs, gcSnapshots, runDir, saveSnapshot, scanMeta, snapshot, writeRunLog } from '../state/snapshot.js'
+import { runSmoke } from '../headless/smoke.js'
 import { gitCommitAfter, gitSnapshot } from '../git.js'
-import { runProcess } from '../proc.js'
-import { BASH_TIMEOUT_MS, buildEnvWhitelist, checkBashBlacklist } from '../bash-guard.js'
-import { saveIndex, scanIndex } from '../index-index.js'
-import { parseJSON, readBody, sendJSON } from '../http.js'
+import { runProcess } from '../process/proc.js'
+import { BASH_TIMEOUT_MS, buildEnvWhitelist, checkBashBlacklist } from '../process/bash-guard.js'
+import { saveIndex, scanIndex } from '../utils/index-index.js'
+import { parseJSON, readBody, sendJSON } from '../server/http.js'
 import { runScript } from '../post-run/run-script.js'
 import { readToolLogWithRetry } from '../post-run/tool-log.js'
 import { applyOverlay, readOverlayChanges } from '../post-run/overlay.js'
@@ -20,11 +20,13 @@ import { hasEslint, pickLintTargets, runEslint } from '../post-run/lint.js'
 import { pickTscTargets, runTsc } from '../post-run/tsc.js'
 import { runTests } from '../post-run/test.js'
 import { extractErrorFiles } from '../post-run/error-files.js'
-import { fingerprintErrors } from '../error-fingerprint.js'
+import { fingerprintErrors } from '../utils/error-fingerprint.js'
 import { parseClaimed, parseScriptMeta } from '../post-run/script-meta.js'
 import { splitShebang } from '../post-run/shebang.js'
+import { checkScriptSyntax } from '../post-run/script-check.js'
 import { parseDecisionMarkers } from '../post-run/decision.js'
 import { hashRules } from '../post-run/compliance.js'
+import { computeClaimMismatch, computeCompliance } from './run-helpers.js'
 
 /** POST /run → node 沙盒 / shell 脚本执行（NDJSON 流） */
 export async function handleRunRoute(
@@ -36,7 +38,7 @@ export async function handleRunRoute(
   ensureDirs()
   fs.mkdirSync(path.join(getRoot(), '.ai-runner/tmp'), { recursive: true })
   const startedAt = Date.now()
-  const body = parseJSON<{ script?: string, gitCommit?: boolean, gitVerify?: boolean, sandbox?: string, loopCtx?: { loopId?: string, round?: number, max?: number } }>(await readBody(req))
+  const body = parseJSON<{ script?: string, gitCommit?: boolean, gitVerify?: boolean, sandbox?: string, loopCtx?: { loopId?: string, round?: number, max?: number }, smoke?: boolean }>(await readBody(req))
   const sandboxRaw = String(body?.sandbox || 'read-only')
   let sandbox = ['read-only', 'workspace-write', 'full'].includes(sandboxRaw) ? sandboxRaw : 'read-only'
   const script = String(body?.script || '').trim()
@@ -50,8 +52,15 @@ export async function handleRunRoute(
   const gitVerify = Boolean(body?.gitVerify)
   if (!script) { sendJSON(res, { error: '脚本为空' }, 400); return true }
   // === shebang 分流：非 node shebang 走 shell ===
-  // [fix-shebang-split] shebang 分流（已抽至 post-run/shebang.ts）
+  // shebang 分流（已抽至 post-run/shebang.ts）
   const { isNodeScript, effectiveScript } = splitShebang(script)
+  if (isNodeScript) {
+    const syntax = checkScriptSyntax(effectiveScript)
+    if (!syntax.ok) {
+      sendJSON(res, { error: `脚本语法错误：${syntax.error}`, syntaxError: true }, 400)
+      return true
+    }
+  }
   if (!isNodeScript) {
     const shellHit = checkBashBlacklist(script)
     if (shellHit) {
@@ -144,7 +153,7 @@ export async function handleRunRoute(
     const scriptChanges = diffMeta(before, beforeMeta, scanMeta())
 
     // 对改动源文件跑 eslint --fix
-    // [fix] 首次扫描疑似 overlay 落盘竞态漏检，兜底重扫一次
+    // 首次扫描疑似 overlay 落盘竞态漏检，兜底重扫一次
     const lintTargets = pickLintTargets(scriptChanges)
     if (process.env.AI_RUNNER_LINT_DEBUG) {
       console.error(`[ai-runner][lint-debug] scriptChanges=${scriptChanges.length} targets=${lintTargets.length} hasEslint=${hasEslint()}`)
@@ -169,7 +178,7 @@ export async function handleRunRoute(
     gcSnapshots(20)
     // [AI-Runner] TDD：自动运行新增/修改的测试文件
     const testFiles = changes
-      .filter(c => c.type !== 'deleted' && /\.(test|spec)\.(ts|js|mjs|cjs)$/.test(c.path))
+      .filter(c => c.type !== 'deleted' && /\.(?:test|spec)\.(?:ts|js|mjs|cjs)$/.test(c.path))
       .map(c => c.path)
     const [tsc, test] = await Promise.all([
       runTsc(pickTscTargets(changes), runId),
@@ -183,21 +192,9 @@ export async function handleRunRoute(
     const scriptWhy = scriptMeta.why
     const claimed = parseClaimed(effectiveScript)
 
-    // [A7] 规则遵守度静态特征（供 compliance 报告）
-    const compliance = {
-      hasDesc: scriptMeta.desc.length > 0,
-      hasSelfCheck: /__AI__\.assert|\.assert\(|process\.exit\(1\)/.test(effectiveScript),
-      isDecision: /__AI__\.exitNeedInput|__AI_RUNNER_DECISION__/.test(effectiveScript),
-    }
-    let claimMismatch: ClaimMismatch | null = null
-    if (claimed) {
-      const actual = changes.map(c => c.path)
-      const claimedSet = new Set(claimed)
-      const actualSet = new Set(actual)
-      const missing = claimed.filter(p => !actualSet.has(p))
-      const extra = actual.filter(p => !claimedSet.has(p))
-      claimMismatch = { claimed, actual, missing, extra }
-    }
+    // [A7] 规则遵守度静态特征（已抽至 run-helpers.ts）
+    const compliance = computeCompliance(effectiveScript, scriptMeta.desc)
+    const claimMismatch: ClaimMismatch | null = computeClaimMismatch(claimed, changes)
     const errorFiles = extractErrorFiles(`${result.stderr}\n${result.stdout}`)
     const fingerprints = fingerprintErrors(`${result.stderr}\n${result.stdout}`)
 
@@ -210,9 +207,9 @@ export async function handleRunRoute(
     }
 
     let smoke: SmokeResult | null = null
-    const smokeEnabled = (body as any)?.smoke === true
+    const smokeEnabled = body?.smoke === true
     if (smokeEnabled && scriptOk && changes.length > 0) {
-      const proto = (req.socket as any).encrypted ? 'https' : 'http'
+      const proto = (req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http'
       const host = req.headers.host || 'localhost:5173'
       smoke = await runSmoke(`${proto}://${host}`)
     }
@@ -258,9 +255,10 @@ export async function handleRunRoute(
       decision,
       needFiles,
       scriptMode: scriptMeta.mode,
+      scriptCtx: scriptMeta.ctx,
       // stdout/stderr 全程已通过 chunk 帧流式发出，summary 只带尾部片段（刷新/丢帧兜底），不再全量重复
-      stdoutTail: result.stdout.length > 2000 ? result.stdout.slice(-2000) : result.stdout,
-      stderrTail: result.stderr.length > 4000 ? result.stderr.slice(-4000) : result.stderr,
+      stdoutTail: scriptMeta.ctx === 'full' ? result.stdout : (result.stdout.length > 2000 ? result.stdout.slice(-2000) : result.stdout),
+      stderrTail: scriptMeta.ctx === 'full' ? result.stderr : (result.stderr.length > 4000 ? result.stderr.slice(-4000) : result.stderr),
       notice: applyError ? `[overlay apply error] ${applyError}` : undefined,
       changes,
       lint,

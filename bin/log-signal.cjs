@@ -1,12 +1,14 @@
 #!/usr/bin/env node
+/* eslint-disable no-console -- CLI 输出 */
 'use strict'
 const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
 const SIGNALS = path.join(ROOT, '.ai-runner/signals.md')
-const TTY = Boolean(process.stdout.isTTY)
-const c = (n, s) => (TTY ? `\u001B[${n}m${s}\u001B[0m` : s)
+const L = require('../src/logger.cjs')
+
+const c = L.c
 const ok = s => console.log(c(32, '✓'), s)
 const err = s => console.error(c(31, '✗'), s)
 const head = s => console.log(c(36, '▶'), s)
@@ -78,4 +80,4 @@ function main() {
   append(cat, args.slice(1).join(' '))
   report()
 }
-try { main() } catch (e) { err(String(e && e.stack || e)); process.exit(1) }
+try { main() } catch (e) { err(String((e && e.stack) || e)); process.exit(1) }

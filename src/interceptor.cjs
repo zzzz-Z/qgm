@@ -1,3 +1,4 @@
+/* eslint-disable ts/no-unused-vars, unused-imports/no-unused-vars -- 兼容 fs API 签名 / catch 兼容 */
 'use strict'
 // overlay 拦截层 —— 把 fs 写入/删除重定向到内存，退出时 dump 到 json
 // 工具日志走 openSync + writeSync，绕过 fs 层拦截，杜绝递归
@@ -113,19 +114,29 @@ function eacces(p) {
 
 function lookupWrite(p) { return overlay.get(norm(p)) || null }
 
+// [OPT] liveEntry helper
+function liveEntry(p) {
+  const entry = lookupWrite(p)
+  if (!entry) return null
+  if (entry.op === 'delete') throw enoent(p)
+  return entry
+}
+
 function readPrev(abs) {
   const prev = overlay.get(abs)
   if (prev && prev.op === 'write' && prev.data) return prev.data
   return orig.existsSync(abs) ? orig.readFileSync(abs) : Buffer.alloc(0)
 }
 
+// [OPT] toBuf helper
+function toBuf(data) {
+  return Buffer.isBuffer(data) ? data : Buffer.from(String(data))
+}
+
 function recordWrite(p, data) {
   if (sandboxReject(p)) throw eacces(p)
-  if (sandboxBypass(p)) {
-    const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
-    return orig.writeFileSync(p, buf)
-  }
-  const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
+  const buf = toBuf(data)
+  if (sandboxBypass(p)) return orig.writeFileSync(p, buf)
   overlay.set(norm(p), { op: 'write', data: buf, dir: false })
   logTool('write', p, buf.length)
 }
@@ -156,6 +167,11 @@ function enoent(p) {
 // ----------------------------------------------------------------------------
 
 fs.writeFileSync = function (p, data) { recordWrite(p, data) }
+// [OPT] readOrig helper
+function readOrig(p) {
+  return orig.existsSync(p) ? orig.readFileSync(p) : null
+}
+
 fs.appendFileSync = function (p, data) {
   const abs = norm(p)
   const merged = Buffer.concat([readPrev(abs), Buffer.isBuffer(data) ? data : Buffer.from(String(data))])
@@ -180,11 +196,13 @@ fs.renameSync = function (from, to) {
     overlay.delete(src)
     overlay.set(norm(to), { ...entry })
     logTool('write', to, entry.data ? entry.data.length : 0)
-  } else if (orig.existsSync(src)) {
-    const buf = orig.readFileSync(src)
-    overlay.set(norm(to), { op: 'write', data: buf, dir: false })
-    overlay.set(src, { op: 'delete', dir: false })
-    logTool('delete', from, 0); logTool('write', to, buf.length)
+  } else {
+    const buf = readOrig(src)
+    if (buf) {
+      overlay.set(norm(to), { op: 'write', data: buf, dir: false })
+      overlay.set(src, { op: 'delete', dir: false })
+      logTool('delete', from, 0); logTool('write', to, buf.length)
+    }
   }
 }
 fs.copyFileSync = function (from, to) {
@@ -196,12 +214,11 @@ fs.copyFileSync = function (from, to) {
   if (entry && entry.op === 'write' && entry.data) {
     overlay.set(norm(to), { op: 'write', data: Buffer.from(entry.data), dir: false })
     logTool('write', to, entry.data.length)
-  } else if (orig.existsSync(src)) {
-    const buf = orig.readFileSync(src)
+  } else {
+    const buf = readOrig(src)
+    if (!buf) throw enoent(src)
     overlay.set(norm(to), { op: 'write', data: buf, dir: false })
     logTool('write', to, buf.length)
-  } else {
-    throw enoent(src)
   }
 }
 fs.cpSync = function (from, to, opts) {
@@ -225,9 +242,8 @@ fs.cpSync = function (from, to, opts) {
   }
 }
 fs.readFileSync = function (p, opts) {
-  const entry = lookupWrite(p)
+  const entry = liveEntry(p)
   if (entry) {
-    if (entry.op === 'delete') throw enoent(p)
     if (typeof opts === 'string' || (opts && typeof opts === 'object')) {
       const enc = typeof opts === 'string' ? opts : opts.encoding
       if (enc) return entry.data.toString(enc)
@@ -245,24 +261,22 @@ fs.existsSync = function (p) {
   if (isReadBlacklisted(p)) return false
   return orig.existsSync(p)
 }
+// [OPT] fakeStat helper
+function fakeStat(data) {
+  const size = data ? data.length : 0
+  return { size, isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false, mtimeMs: Date.now(), mode: 0o100644 }
+}
+
 fs.statSync = function (p, opts) {
-  const entry = lookupWrite(p)
-  if (entry) {
-    if (entry.op === 'delete') throw enoent(p)
-    const size = entry.data ? entry.data.length : 0
-    return { size, isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false, mtimeMs: Date.now(), mode: 0o100644 }
-  }
+  const entry = liveEntry(p)
+  if (entry) return fakeStat(entry.data)
   if (isReadBlacklisted(p)) throw eacces(p)
   return orig.statSync(p, opts)
 }
 // [F5] lstatSync 保留软链语义：overlay 命中时返回虚拟 stat，未命中走原生 lstat
 fs.lstatSync = function (p, opts) {
-  const entry = lookupWrite(p)
-  if (entry) {
-    if (entry.op === 'delete') throw enoent(p)
-    const size = entry.data ? entry.data.length : 0
-    return { size, isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false, mtimeMs: Date.now(), mode: 0o100644 }
-  }
+  const entry = liveEntry(p)
+  if (entry) return fakeStat(entry.data)
   if (isReadBlacklisted(p)) throw eacces(p)
   return orig.lstatSync(p, opts)
 }
@@ -423,9 +437,7 @@ fs.fsyncSync = function (fd) { const rec = fakeFds.get(fd); if (!rec) return ori
 fs.fdatasyncSync = function (fd) { const rec = fakeFds.get(fd); if (!rec) return orig.fdatasyncSync(fd) }
 fs.fstatSync = function (fd) {
   const rec = fakeFds.get(fd)
-  if (rec) {
-    return { size: rec.buf.length, isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false, mtimeMs: Date.now(), mode: 0o100644 }
-  }
+  if (rec) return fakeStat(rec.buf)
   return orig.fstatSync(fd)
 }
 fs.ftruncateSync = function (fd, len) {
@@ -500,36 +512,41 @@ function asCb(args, idx) {
   }
   return null
 }
+// [OPT] withCb helper
+function withCb(run, fn) {
+  try { run(); if (typeof fn === 'function') fn(null) } catch (e) { if (typeof fn === 'function') fn(e); else throw e }
+}
+
 fs.writeFile = function (p, data, optsOrCb, maybeCb) {
   const cb = asCb(arguments, 2) || optsOrCb
-  try { recordWrite(p, data); if (cb) cb(null) } catch (e) { if (cb) cb(e); else throw e }
+  withCb(() => recordWrite(p, data), cb)
 }
 fs.appendFile = function (p, data, optsOrCb, maybeCb) {
   const cb = asCb(arguments, 2) || optsOrCb
-  try { fs.appendFileSync(p, data); if (cb) cb(null) } catch (e) { if (cb) cb(e); else throw e }
+  withCb(() => fs.appendFileSync(p, data), cb)
 }
 fs.unlink = function (p, cb) {
-  try { recordDelete(p); if (typeof cb === 'function') cb(null) } catch (e) { if (typeof cb === 'function') cb(e); else throw e }
+  withCb(() => recordDelete(p), cb)
 }
 fs.rm = function (p, opts, cb) {
-  try { recordDelete(p, { dir: Boolean(opts && opts.recursive) }); if (typeof cb === 'function') cb(null) } catch (e) { if (typeof cb === 'function') cb(e); else throw e }
+  withCb(() => recordDelete(p, { dir: Boolean(opts && opts.recursive) }), cb)
 }
 fs.rmdir = function (p, opts, cb) {
-  try { recordDelete(p, { dir: true }); if (typeof cb === 'function') cb(null) } catch (e) { if (typeof cb === 'function') cb(e); else throw e }
+  withCb(() => recordDelete(p, { dir: true }), cb)
 }
 fs.mkdir = function (p, optsOrCb, maybeCb) {
   const cb = asCb(arguments, 1)
   if (cb) cb(null)
 }
 fs.rename = function (from, to, cb) {
-  try { fs.renameSync(from, to); if (typeof cb === 'function') cb(null) } catch (e) { if (typeof cb === 'function') cb(e); else throw e }
+  withCb(() => fs.renameSync(from, to), cb)
 }
 fs.copyFile = function (from, to, flagsOrCb, maybeCb) {
   const cb = typeof flagsOrCb === 'function' ? flagsOrCb : (typeof maybeCb === 'function' ? maybeCb : null)
-  try { fs.copyFileSync(from, to); if (cb) cb(null) } catch (e) { if (cb) cb(e); else throw e }
+  withCb(() => fs.copyFileSync(from, to), cb)
 }
 fs.cp = function (from, to, opts, cb) {
-  try { fs.cpSync(from, to, opts); if (typeof cb === 'function') cb(null) } catch (e) { if (typeof cb === 'function') cb(e); else throw e }
+  withCb(() => fs.cpSync(from, to, opts), cb)
 }
 fs.open = function (p, flags, mode, cb) {
   const callback = typeof mode === 'function' ? mode : (typeof cb === 'function' ? cb : null)
@@ -582,7 +599,7 @@ if (P) {
   }
 }
 
-// [fix-dump-timing] 快照对比代替一次性 dumped；exit 不再关 TOOL_FD
+// 快照对比代替一次性 dumped；exit 不再关 TOOL_FD
 let _lastSnapshot = ''
 function dump() {
   if (!OVERLAY_FILE) return

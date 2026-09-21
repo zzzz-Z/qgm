@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import ScriptPanel from './components/ScriptPanel.vue'
-import GeneratePanel from './components/GeneratePanel.vue'
-import { copyAndFill, DEFAULT_URL, getWindowBySid, listWindows, MODELS, openDeepseek, removeWindowBySid, setActiveWinSid, useDeepseekUrl } from './composables/useDeepseekUrl'
-import { useScriptInbox } from './composables/useScriptInbox'
+import ScriptPanel from './components/script/ScriptPanel.vue'
+import GeneratePanel from './components/generate/GeneratePanel.vue'
+import { DEFAULT_SESSION_PROMPT } from './composables/ai/loopLogic'
+import { copyAndFill, DEFAULT_URL, getWindowBySid, listWindows, MODELS, openDeepseek, setActiveWinSid, useDeepseekUrl } from './composables/ai/useDeepseekUrl'
+import { useScriptInbox } from './composables/runner/useScriptInbox'
 import {
   autoRotateSession,
   createLoopInstanceFor,
@@ -16,25 +17,24 @@ import {
   onNonScriptReply,
   onScriptArrival,
   onSummary,
-  removeLoopInstance,
   setActiveLoopSessionId,
   setActiveSessionIdGetter,
   setTokenEstimate,
   startHandoff,
-} from './composables/useAutoLoop'
-import { useAutoTakeover } from './composables/useAutoTakeover'
-import { useSessionManager } from './composables/useSessionManager'
-import { useToast } from './composables/useToast'
-import { useTraceLog } from './composables/useTraceLog'
-import { useCodeCleaner } from './composables/useCodeCleaner'
-import { useRunner } from './composables/useRunner'
-import { setAiWaitingWatchdog, useAiWaiting } from './composables/useAiWaiting'
-import { emit as emitBus, takePendingAskKey } from './composables/useEventStream'
-import { getTransport } from './composables/useAiTransport' // [fix-headless-reply]
-import type { EventKind } from './composables/useEventStream'
-import ToastHost from './components/ToastHost.vue'
-import TooltipHost from './components/TooltipHost.vue'
-import KeyboardHelp from './components/KeyboardHelp.vue'
+} from './composables/ai/useAutoLoop'
+import { useAutoTakeover } from './composables/ai/useAutoTakeover'
+import { useSessionManager } from './composables/ai/useSessionManager'
+import { useToast } from './composables/ui/useToast'
+import { useTraceLog } from './composables/ui/useTraceLog'
+import { useCodeCleaner } from './composables/runner/useCodeCleaner'
+import { useRunner } from './composables/runner/useRunner'
+import { setAiWaitingWatchdog, useAiWaiting } from './composables/ai/useAiWaiting'
+import { emit as emitBus, takePendingAskKey } from './composables/ui/useEventStream'
+import { getTransport } from './composables/ai/useAiTransport' // [fix-headless-reply]
+import type { EventKind } from './composables/ui/useEventStream'
+import ToastHost from './components/feedback/ToastHost.vue'
+import TooltipHost from './components/feedback/TooltipHost.vue'
+import KeyboardHelp from './components/feedback/KeyboardHelp.vue'
 
 const autoTakeover = useAutoTakeover()
 // [ask-count-merge] 与 useSessionManager 共享同一 askCount 数据源
@@ -63,7 +63,7 @@ watch(activeSessionId, (v) => {
     if (v) localStorage.setItem(ACTIVE_SESSION_KEY, v)
     else localStorage.removeItem(ACTIVE_SESSION_KEY)
   } catch { }
-  // [multi-loop-step4-app] 同步到 loop 实例表与窗口表（多循环并发的前提）
+  // 同步到 loop 实例表与窗口表（多循环并发的前提）
   const sid = v || 'default'
   setActiveLoopSessionId(sid)
   createLoopInstanceFor(sid)
@@ -84,167 +84,8 @@ function addSessionToHistory(id: string, url: string, title: string) {
   sessionHistory.value = [entry, ...sessionHistory.value.filter(s => s.id !== id)].slice(0, 50)
   saveHistory(sessionHistory.value)
 }
-function removeSessionFromHistory(id: string) {
-  sessionHistory.value = sessionHistory.value.filter(s => s.id !== id)
-  saveHistory(sessionHistory.value)
-  if (activeSessionId.value === id) activeSessionId.value = ''
-  // [multi-loop-step7-app] 同步清理循环实例与窗口表
-  removeLoopInstance(id)
-  removeWindowBySid(id)
-}
-const TOKEN_LIMIT = 50000
-function tokenPct(n?: number): number {
-  if (!n) return 0
-  return Math.min(100, Math.round((n / TOKEN_LIMIT) * 100))
-}
-function tokenLevel(n?: number): 'ok' | 'warn' | 'over' {
-  if (!n) return 'ok'
-  if (n >= TOKEN_LIMIT) return 'over'
-  if (n >= TOKEN_LIMIT * 0.8) return 'warn'
-  return 'ok'
-}
-function fmtTok(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
-  return String(n)
-}
-function formatSessionTime(ts: number): string {
-  const d = new Date(ts)
-  const now = new Date()
-  if (d.toDateString() === now.toDateString()) {
-    const p = (n: number) => String(n).padStart(2, '0')
-    return `${p(d.getHours())}:${p(d.getMinutes())}`
-  }
-  const y = new Date(now)
-  y.setDate(now.getDate() - 1)
-  if (d.toDateString() === y.toDateString()) return '昨天'
-  const diff = Math.floor((now.getTime() - ts) / 86400000)
-  if (diff < 7) return `${diff}天前`
-  return `${d.getMonth() + 1}/${d.getDate()}`
-}
-function clearHistory() {
-  if (!sessionHistory.value.length) return
-  if (!window.confirm('清空所有对话历史？此操作不可撤销')) return
-  sessionHistory.value = []
-  saveHistory([])
-  activeSessionId.value = ''
-}
-
-const showNewSessionDialog = ref(false)
-const editingSessionId = ref('')
-const newSessionTitle = ref('')
-const newSessionModel = ref('deepseek')
-const newSessionUrl = ref('')
-const dialogTitleRef = ref<HTMLInputElement | null>(null)
-// dialog-autofocus-enter
-function focusDialogTitle() {
-  nextTick(() => {
-    dialogTitleRef.value?.focus()
-    dialogTitleRef.value?.select()
-  })
-}
-function genWebSessionId(): string {
-  return `s-${Math.random().toString(16).slice(2, 10)}`
-}
-function openNewSessionDialog() {
-  editingSessionId.value = ''
-  newSessionTitle.value = ''
-  newSessionModel.value = modelId.value
-  const m = MODELS.find(x => x.id === modelId.value)
-  newSessionUrl.value = m ? m.url : DEFAULT_URL
-  showNewSessionDialog.value = true
-  focusDialogTitle()
-}
-function openEditSessionDialog(s: SessionEntry) {
-  editingSessionId.value = s.id
-  newSessionTitle.value = s.title || ''
-  newSessionUrl.value = s.url || ''
-  const m = MODELS.find(x => x.url === s.url)
-  newSessionModel.value = m ? m.id : modelId.value
-  showNewSessionDialog.value = true
-  focusDialogTitle()
-}
-function closeNewSessionDialog() {
-  showNewSessionDialog.value = false
-  editingSessionId.value = ''
-}
-function onNewSessionModelChange() {
-  const m = MODELS.find(x => x.id === newSessionModel.value)
-  if (m) newSessionUrl.value = m.url
-}
-function confirmNewSession() {
-  const url = newSessionUrl.value.trim()
-  if (!url) return
-  // 编辑模式
-  if (editingSessionId.value) {
-    const idx = sessionHistory.value.findIndex(x => x.id === editingSessionId.value)
-    if (idx < 0) { closeNewSessionDialog(); return }
-    const prev = sessionHistory.value[idx]
-    const title = newSessionTitle.value.trim() || prev.title
-    sessionHistory.value[idx] = { ...prev, url, title }
-    sessionHistory.value = [...sessionHistory.value]
-    saveHistory(sessionHistory.value)
-    if (activeSessionId.value === editingSessionId.value) {
-      setDeepseekUrl(url)
-    }
-    showNewSessionDialog.value = false
-    editingSessionId.value = ''
-    return
-  }
-  // 新建
-  const id = genWebSessionId()
-  const label = MODELS.find(x => x.id === newSessionModel.value)?.label || '新会话'
-  const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-  const title = newSessionTitle.value.trim() || `${label} · ${hhmm}`
-  setModel(newSessionModel.value)
-  setDeepseekUrl(url)
-  addSessionToHistory(id, url, title)
-  activeSessionId.value = id
-  const oldId = sessionId.value
-  const text = `上一步会话总结：\n\n（粘贴 AI 的总结到这里）\n\n会话 ID: ${oldId}`
-  navigator.clipboard.writeText(text).catch(() => { })
-  resetSession()
-  openDeepseek(url)
-  showNewSessionDialog.value = false
-  editingSessionId.value = ''
-}
-async function handoffToNextSession(s: SessionEntry) {
-  const summary = generateHandoffSummary()
-  try {
-    await navigator.clipboard.writeText(summary)
-  } catch {
-    toast('复制失败，请手动复制', 'error')
-    return
-  }
-  const id = genWebSessionId()
-  const label = MODELS.find(x => x.url === s.url)?.label
-    || MODELS.find(x => x.id === modelId.value)?.label
-    || '新会话'
-  const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-  const title = `${label} · 交接 ${hhmm}`
-  const url = s.url || deepseekUrl.value
-  addSessionToHistory(id, url, title)
-  activeSessionId.value = id
-  setDeepseekUrl(url)
-  resetSession()
-  openDeepseek(url)
-  toast('交接总结已复制，新会话已创建', 'success')
-}
-function openSessionUrl(url: string) {
-  if (url) openDeepseek(url)
-}
-function selectSession(s: SessionEntry) {
-  activeSessionId.value = s.id
-  if (s.url) setDeepseekUrl(s.url)
-}
 
 const askOpen = ref(false)
-const isEmbedded = typeof window !== 'undefined' && window.parent !== window
-function collapsePanel() {
-  if (!isEmbedded) return
-  try {
-    window.parent.postMessage({ type: 'ai-runner:close' }, '*')
-  } catch { }
-}
 const KEY_THEME = '__ai_theme'
 function loadTheme(): 'light' | 'dark' {
   try { return localStorage.getItem(KEY_THEME) === 'light' ? 'light' : 'dark' } catch { return 'light' }
@@ -255,7 +96,12 @@ watch(theme, (v) => {
   try { localStorage.setItem(KEY_THEME, v) } catch { }
 }, { immediate: true })
 
-const { url: deepseekUrl, setUrl: setDeepseekUrl, modelId, setModel } = useDeepseekUrl()
+const { url: deepseekUrl, setUrl: setDeepseekUrl, modelId } = useDeepseekUrl()
+const { toast } = useToast()
+const { smokeEnabled, gitCommit, run: runScript } = useRunner()
+const scriptInbox = useScriptInbox()
+const { addTrace } = useTraceLog()
+const { stopWaiting: stopAiWaiting } = useAiWaiting()
 const headerUrl = computed(() => {
   const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
   return s ? s.url : deepseekUrl.value
@@ -309,7 +155,7 @@ function onSessionIdMessage(e: MessageEvent) {
   // 安全约束（v6 §3.4）：origin 必须落在已知 AI 站点；source 优先比对 getActiveWin()
   // ============================================================================
   if (d.type === 'ai-runner:reply') {
-    // [auto-handoff-at-10] 累计 10 次提问 → 自动轮转会话（总结 + 开新会话 + 续跑）
+    // [auto-handoff-at-40] 累计 40 次提问 → 自动轮转会话（总结 + 开新会话 + 续跑）
     if (askCount.value >= 10 && isLoopActive.value) {
       resetAskCount()
       void startHandoff()
@@ -333,7 +179,7 @@ function onSessionIdMessage(e: MessageEvent) {
       if (item) {
         const lineCount = code.split('\n').length
         toast(`AI 脚本已到达 · ${lang} · ${lineCount} 行 · ${item.desc || '无说明'}`, 'info', 4000)
-        const planM = code.match(/^\s*(?:\/\/|#)\s*@plan\s*:\s*(.+)$/m)
+        const planM = code.match(/^\s*(?:\/\/|#)[ \t]*@plan[ \t]*:[ \t]*(\S.*)$/m)
         const plan = planM ? planM[1].trim().slice(0, 200) : ''
         // 若用户刚发过提问，复用那条等待卡的 key —— 原地替换为执行卡
         const runKey = takePendingAskKey() || (`run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`)
@@ -358,9 +204,11 @@ function onSessionIdMessage(e: MessageEvent) {
           void onScriptArrival(item, sid)
         } else {
           // 手动模式：不回填编辑器，延迟 3-7s 直接执行
-          const delayMs = 3000 + Math.random() * 4000
-          toast(`⏱ ${Math.round(delayMs / 1000)}s 后自动执行`, 'info', Math.min(delayMs, 3000))
-          setTimeout(() => { void runScript({ script: code, runKey, autoFeedback: true }) }, delayMs)
+          // 用 scheduleAutoRun 统一倒计时，状态栏可展示
+          autoTakeover.scheduleAutoRun(
+            () => { void runScript({ script: code, runKey, autoFeedback: true }) },
+            { desc: item.desc, why: item.why, plan, lang, lineCount },
+          )
         }
       }
       return
@@ -459,7 +307,7 @@ function onSessionIdMessage(e: MessageEvent) {
       const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
       addSessionToHistory(id, url, `轮转 · ${hhmm}`)
       activeSessionId.value = id
-      // [auto-new-session] 新会话建立 → 立即回写完整 URL 到工作台
+      // 新会话建立 → 立即回写完整 URL 到工作台
       setDeepseekUrl(url)
     }
     // [reset-askcount-new-session] 新会话建立 → URL 旁提问计数清零
@@ -490,7 +338,7 @@ function onSessionIdMessage(e: MessageEvent) {
 
 /** 油猴来源校验：origin 必须落在已知 AI 站点；source 优先比对 getActiveWin()，为 null 时降级只校验 origin */
 function isFromActiveAiSite(e: MessageEvent): boolean {
-  // [fix-headless-reply] 无头模式：WS 内部消息，跳过 origin/source 校验
+  // 无头模式：WS 内部消息，跳过 origin/source 校验
   if ((() => { try { return localStorage.getItem('__ai_transport') === 'headless' } catch { return false } })()) return true
   // mock 模式：跳过来源校验，让合成 MessageEvent 直走完整链路
   if (MOCK_MODE) return true
@@ -503,7 +351,7 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
   }
   // e.source 可能为 null（窗口已关 / 跨域限制）；只在非 null 时比对
   if (e.source !== null) {
-    // [multi-loop-step4-app] 接受任一已注册 AI 窗口（多循环并发）
+    // 接受任一已注册 AI 窗口（多循环并发）
     const wins = listWindows()
     if (wins.length === 0) return true
     let matched = false
@@ -520,7 +368,7 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
 }
 async function onOpenAiWin() {
   const at = headerUrl.value || deepseekUrl.value
-  // [auto-new-session] URL 无会话 ID 时，打开新会话并预填「开始聊天」
+  // URL 无会话 ID 时，打开新会话并预填「开始聊天」
   const hasSession = /\/a\/chat\/s\/[\w-]{8,}/.test(at)
   const w = openDeepseek(hasSession ? at : DEFAULT_URL)
   if (!w) {
@@ -532,7 +380,7 @@ async function onOpenAiWin() {
     return
   }
   toast('已打开新会话，正在发送「开始聊天」…', 'info', 2000)
-  const r = await copyAndFill('新会话，不需要回复')
+  const r = await copyAndFill(DEFAULT_SESSION_PROMPT, { count: false })
   if (r === 'sent' || r === 'opened') {
     toast('已发送「开始聊天」，等待会话地址回写', 'success', 2500)
   } else {
@@ -559,7 +407,7 @@ function onShiftQuestion(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('message', onSessionIdMessage)
-  // [fix-headless-reply] 无头模式：订阅 transport.onReply，转成 MessageEvent 格式喂给同一处理器
+  // 无头模式：订阅 transport.onReply，转成 MessageEvent 格式喂给同一处理器
   try {
     if (localStorage.getItem('__ai_transport') === 'headless') {
       const t = getTransport()
@@ -582,13 +430,30 @@ onMounted(() => {
         } as unknown as MessageEvent
         try { onSessionIdMessage(fake) } catch (e) { console.error('[headless-reply] 处理失败:', e) }
       })
-      console.log('[ai-runner] 无头 reply 订阅已注册')
+      console.warn('[ai-runner] 无头 reply 订阅已注册')
     }
   } catch (e) { console.error('[headless-reply] 订阅失败:', e) }
   window.addEventListener('keydown', onEscClose)
   window.addEventListener('keydown', onShiftQuestion)
   // 注入 activeSessionId 读取器：循环启动时取当前活动会话 id 绑定到 loopSessionId
   setActiveSessionIdGetter(() => activeSessionId.value)
+
+  // 刷新后向已开 AI 窗口请求重发最近消息（reply/summary/session-id）
+  // 兜底场景：页面刷新导致消息监听重建，期间 AI 回复错过；由油猴缓存重放
+  nextTick(() => {
+    setTimeout(() => {
+      const wins = listWindows()
+      for (const w of wins) {
+        const target = getWindowBySid(w.sid)
+        if (target && !target.closed) {
+          try {
+            target.postMessage({ type: 'ai-runner:request-replay' }, '*')
+            target.postMessage({ type: 'ai-runner:request-rescan' }, '*')
+          } catch { /* ignore */ }
+        }
+      }
+    }, 800)
+  })
   if (!activeSessionId.value) return
   const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
   if (s && s.url && deepseekUrl.value !== s.url) {
@@ -600,19 +465,13 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onEscClose)
   window.removeEventListener('keydown', onShiftQuestion)
 })
-const { sessionId, resetSession, generateHandoffSummary } = useSessionManager()
-const { toast } = useToast()
 const { stripComments, stripBlankLines, toggleStripComments, toggleStripBlankLines } = useCodeCleaner()
-const { smokeEnabled, gitCommit, run: runScript } = useRunner()
-const scriptInbox = useScriptInbox()
-const runner = useRunner()
-const { addTrace } = useTraceLog()
-const { stopWaiting: stopAiWaiting } = useAiWaiting()
-// [ai-watchdog] auto resend after 3 min no reply
+// auto resend after 3 min no reply
 setAiWaitingWatchdog(async () => {
-  // [niuma-trace] 每次自动发送写 trace
+  // 每次自动发送写 trace
   const t0 = Date.now()
-  const r = await copyAndFill('继续工作')
+  // [askcount-unify] watchdog 重发不计入（同一轮重复，避免虚增）
+  const r = await copyAndFill('继续工作', { count: false })
   try {
     addTrace({
       kind: 'ask',
@@ -777,13 +636,12 @@ function onTransportChange(e: Event) {
 </template>
 
 <style scoped lang="scss">
-/* LAYOUT-FIX: 顶部栏和 tab 固定，内容区撑满剩余空间 */
 .hdr {
   flex-shrink: 0;
   position: relative;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  /* tighten-spacing */
+
   padding: 8px 18px;
   display: flex;
   align-items: center;
@@ -817,7 +675,7 @@ function onTransportChange(e: Event) {
 .tabs {
   display: none;
   flex-shrink: 0;
-  /* tighten-spacing */
+
   padding: 0 18px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -828,7 +686,7 @@ function onTransportChange(e: Event) {
 .main {
   flex: 1;
   min-height: 0;
-  /* tighten-spacing */
+
   padding: 12px 14px;
   overflow: hidden;
 }
@@ -853,7 +711,6 @@ function onTransportChange(e: Event) {
   gap: 12px;
 }
 
-/* ---------- DeepSeek URL 配置 ---------- */
 .ds-url {
   position: absolute;
   left: 50%;
@@ -944,7 +801,7 @@ function onTransportChange(e: Event) {
   inset: 0;
   z-index: 2147483646;
   background: rgb(15 30 60 / 32%);
-  /* P2-1 移除 backdrop-filter（GPU 性能负债）：backdrop-filter: blur(2px); */
+
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1029,7 +886,6 @@ function onTransportChange(e: Event) {
   min-height: 0;
   display: flex;
   overflow: hidden;
-  /* tighten-spacing */
 }
 .layout-main {
   flex: 1;
@@ -1103,7 +959,7 @@ function onTransportChange(e: Event) {
   inset: 0;
   z-index: 2147483645;
   background: rgb(15 30 60 / 38%);
-  /* P2-1 移除 backdrop-filter（GPU 性能负债）：backdrop-filter: blur(4px); */
+
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1195,17 +1051,10 @@ function onTransportChange(e: Event) {
   }
 }
 
-/* [button-icons] 主题按钮 SVG 基线 */
 .theme-toggle svg {
   display: block;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   [button-theme] 按钮配色重做：暖橙强调 + 灰阶次按钮
-   参考 Claude Code / Codex 克制配色
-   ═══════════════════════════════════════════════════════════ */
-
-/* ——— 图标按钮（App 头部）——— */
 .theme-toggle,
 .settings-toggle,
 .ask-toggle,
@@ -1229,11 +1078,6 @@ function onTransportChange(e: Event) {
   border-color: rgb(255 255 255 / 10%);
 }
 
-/* ═══════════════════════════════════════════════════════════
-   [button-theme-v2] 静默全灰阶，橙色只 hover / 主操作
-   ═══════════════════════════════════════════════════════════ */
-
-/* 主题/图标按钮：纯灰阶 */
 .theme-toggle,
 .settings-toggle,
 .ask-toggle,
@@ -1253,7 +1097,6 @@ function onTransportChange(e: Event) {
   border-color: rgb(255 255 255 / 8%);
 }
 
-/* [tight-margin] 外层容器边距收窄 */
 .main {
   padding: 8px;
 }
@@ -1303,7 +1146,6 @@ function onTransportChange(e: Event) {
   color: var(--text-1, inherit);
 }
 
-/* [icon-cursor] 图标按钮统一 pointer */
 .theme-toggle,
 .settings-toggle,
 .ask-toggle,
@@ -1317,7 +1159,6 @@ function onTransportChange(e: Event) {
   cursor: not-allowed;
 }
 
-/* [ask-count] URL 旁提问次数 */
 .ask-count {
   margin-left: 6px;
   font-size: 11px;
@@ -1327,12 +1168,6 @@ function onTransportChange(e: Event) {
   user-select: none;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   [app-unify] App.vue 主框架权威样式
-   设计语言：Trae / Cursor 深色
-   ═══════════════════════════════════════════════════════════ */
-
-/* ── 全局 ───────────────────────────────────────────────── */
 :global(#app) {
   display: flex !important;
   flex-direction: column !important;
@@ -1342,7 +1177,6 @@ function onTransportChange(e: Event) {
   color: var(--text) !important;
 }
 
-/* ── header（顶栏） ─────────────────────────────────────── */
 .hdr {
   display: flex !important;
   align-items: center !important;
@@ -1396,7 +1230,6 @@ function onTransportChange(e: Event) {
   gap: 10px !important;
 }
 
-/* ── 图标按钮（header 上的） ───────────────────────────── */
 .hdr button:not(.btn),
 .hdr .icon-btn {
   display: inline-flex !important;
@@ -1426,7 +1259,6 @@ function onTransportChange(e: Event) {
   stroke-width: 2 !important;
 }
 
-/* ── URL 编辑区 ────────────────────────────────────────── */
 .ds-url {
   display: inline-flex !important;
   align-items: center !important;
@@ -1435,7 +1267,7 @@ function onTransportChange(e: Event) {
   background: var(--surface-2) !important;
   border: 1px solid var(--border) !important;
   border-radius: var(--radius-6) !important;
-  /* [url-edit-v9] max-content 破除父-子循环依赖 */
+
   width: max-content !important;
   min-width: 0 !important;
   max-width: none !important;
@@ -1450,15 +1282,14 @@ function onTransportChange(e: Event) {
 }
 
 .ds-value-static {
-  /* [url-edit-v6] 内容决定宽度 */
   flex: 0 0 auto !important;
   color: var(--text-2) !important;
   font-size: 12px !important;
   font-family: var(--mono, monospace) !important;
   cursor: pointer !important;
-  /* [url-edit-v5] 单行展示，不换行，不加省略 */
+
   white-space: nowrap !important;
-  /* [url-edit-v7] 覆盖旧块 max-width/overflow/text-overflow 裁剪 */
+
   max-width: none !important;
   overflow: visible !important;
   text-overflow: clip !important;
@@ -1473,7 +1304,7 @@ function onTransportChange(e: Event) {
   font-size: 12px !important;
   font-family: var(--mono, monospace) !important;
   outline: 0 !important;
-  /* [url-edit-v9] 输入框宽度交给父级 max-content 撑开 */
+
   width: auto !important;
   min-width: 0 !important;
   max-width: none !important;
@@ -1491,7 +1322,6 @@ function onTransportChange(e: Event) {
   line-height: 1.4 !important;
 }
 
-/* ── 传输切换（油猴/无头） ─────────────────────────────── */
 .transport-switch {
   display: inline-flex !important;
   align-items: center !important;
@@ -1524,7 +1354,6 @@ function onTransportChange(e: Event) {
   border-color: var(--primary) !important;
 }
 
-/* ── 主布局 ─────────────────────────────────────────────── */
 .layout-row {
   display: flex !important;
   flex-direction: row !important;
@@ -1553,7 +1382,6 @@ function onTransportChange(e: Event) {
   background: var(--bg) !important;
 }
 
-/* ── tabs（顶部 tab 栏，若显示） ───────────────────────── */
 .tabs {
   display: flex !important;
   gap: 4px !important;
@@ -1563,7 +1391,6 @@ function onTransportChange(e: Event) {
   flex-shrink: 0 !important;
 }
 
-/* [theme-toggle] 主题切换按钮 */
 .theme-toggle {
   display: inline-flex !important;
   align-items: center !important;
@@ -1583,7 +1410,6 @@ function onTransportChange(e: Event) {
   background: var(--surface-2) !important;
 }
 
-/* [logo-svg] DeepSeek 风格 logo */
 .logo {
   display: inline-flex !important;
   align-items: center !important;
@@ -1600,8 +1426,6 @@ function onTransportChange(e: Event) {
   filter: drop-shadow(0 0 6px rgb(77 107 254 / 35%)) !important;
 }
 
-/* [ui-opt-p0] header 呼吸感 */
-/* header 高度与内边距微调：视觉更呼吸 */
 .hdr {
   padding: 8px 14px !important;
   gap: 10px;
@@ -1619,7 +1443,7 @@ function onTransportChange(e: Event) {
   font-size: 10px !important;
   letter-spacing: 0.5px;
 }
-/* 主区留白收紧：编辑器占据更多 */
+
 .main {
   padding: 8px 10px !important;
 }

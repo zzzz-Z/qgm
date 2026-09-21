@@ -1,10 +1,10 @@
-// [refactor-routes] /exec —— shell 流式执行
+// /exec —— shell 流式执行
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getRoot } from '../config.js'
-import { BASH_TIMEOUT_MS, buildEnvWhitelist, checkBashBlacklist } from '../bash-guard.js'
+import { BASH_TIMEOUT_MS, buildEnvWhitelist, checkBashBlacklist } from '../process/bash-guard.js'
 import { gitPreExecCheck } from '../git.js'
-import { runProcess } from '../proc.js'
-import { parseJSON, readBody, sendJSON } from '../http.js'
+import { runProcess } from '../process/proc.js'
+import { parseJSON, readBody, sendJSON } from '../server/http.js'
 
 /** POST /exec { cmd } → NDJSON 流式 shell 执行 */
 export async function handleExecRoute(

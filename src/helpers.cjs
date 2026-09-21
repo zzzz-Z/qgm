@@ -1,7 +1,15 @@
 'use strict'
+/* eslint-disable no-console -- __AI__ 的 ok/skip/warn/err/log 需直接输出 */
 const fs = require('node:fs')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
+// [chalk] 显示输出统一走 chalk；协议帧（__AI_*__）保持裸 console 供 runner 解析
+let _chalk = null
+try { _chalk = require('chalk') } catch { _chalk = null }
+const _useColor = Boolean(process.stdout && process.stdout.isTTY) && !process.env.NO_COLOR
+const _c = (_chalk && _useColor)
+  ? _chalk
+  : { green: s => s, yellow: s => s, red: s => s, cyan: s => s, gray: s => s, dim: s => s }
 
 function safeReaddir(p) {
   const names = fs.readdirSync(p)
@@ -34,6 +42,22 @@ function globToRe(glob) {
   return new RegExp(`^${re}$`)
 }
 
+// [L6-fix] overlay 沙盒下 writeFileSync 只写内存，readFileSync 从磁盘，读写不一致
+// 读缓存改用模块级 Map：同进程内有效（脚本内多次读同一文件时可去重）
+const _rcMem = {}
+
+function _changelog(action, file, extra) {
+  try {
+    let rel = file
+    try { rel = path.relative(process.cwd(), file).replace(/\\/g, '/') } catch { }
+    const rec = { ts: Date.now(), action, file: rel }
+    if (extra) { for (const k in extra) rec[k] = extra[k] }
+    const dir = path.join(process.cwd(), '.ai-runner')
+    try { fs.mkdirSync(dir, { recursive: true }) } catch { }
+    fs.appendFileSync(path.join(dir, 'changelog.jsonl'), JSON.stringify(rec) + String.fromCharCode(10))
+  } catch { }
+}
+
 const __AI__ = {
   readJSON(p) {
     try { return JSON.parse(fs.readFileSync(p, 'utf8')) }
@@ -43,6 +67,7 @@ const __AI__ = {
   writeText(p, s) {
     fs.mkdirSync(path.dirname(p), { recursive: true })
     fs.writeFileSync(p, s)
+    _changelog('write', p)
   },
   join() { return path.join.apply(path, arguments) },
   tryReadFile(p) {
@@ -53,9 +78,10 @@ const __AI__ = {
   writeFile(p, c) {
     fs.mkdirSync(path.dirname(p), { recursive: true })
     fs.writeFileSync(p, c)
+    _changelog('write', p)
   },
   deleteFile(p) {
-    try { fs.rmSync(p, { recursive: true, force: true }); return true }
+    try { fs.rmSync(p, { recursive: true, force: true }); _changelog('delete', p); return true }
     catch { return false }
   },
   exists(p) { return fs.existsSync(p) },
@@ -107,9 +133,9 @@ const __AI__ = {
     catch { return [] }
   },
   getProjectRoot() { return process.cwd() },
-  log() { console.log.apply(console, ['[AI]'].concat([].slice.call(arguments))) },
+  log() { console.log.apply(console, [_c.dim('[AI]')].concat([].slice.call(arguments))) },
   assert(cond, msg) {
-    if (!cond) { console.error('[assert]', msg); process.exit(1) }
+    if (!cond) { console.error(_c.red('[assert]'), msg); process.exit(1) }
   },
   assertVueHasName(file) {
     const s = __AI__.readText(file)
@@ -156,10 +182,10 @@ const __AI__ = {
   },
 
   // [common-helpers] 语义输出 + 文件安全 + 断言
-  ok(msg) { console.log(`\x1B[32m✓\x1B[0m ${msg}`) },
-  skip(msg) { console.log(`\x1B[33m!\x1B[0m ${msg}`) },
-  warn(msg) { console.log(`\x1B[33m⚠\x1B[0m ${msg}`) },
-  err(msg) { console.error(`\x1B[31m✗\x1B[0m ${msg}`) },
+  ok(msg) { console.log(_c.green('✓'), msg) },
+  skip(msg) { console.log(_c.yellow('!'), msg) },
+  warn(msg) { console.log(_c.yellow('⚠'), msg) },
+  err(msg) { console.error(_c.red('✗'), msg) },
   backup(file) {
     const root = process.cwd()
     const rel = path.relative(root, file)
@@ -182,15 +208,16 @@ const __AI__ = {
     fs.writeFileSync(file, next, 'utf8')
     const check = fs.readFileSync(file, 'utf8')
     if (check !== next) throw new Error('patchFile: readback mismatch')
+    _changelog('patch', file)
     return { ok: true, replaced: count }
   },
   assertContains(file, anchor) {
     const s = fs.readFileSync(file, 'utf8')
-    if (!s.includes(anchor)) { console.error(`[assertContains] ${file} missing: ${anchor}`); process.exit(1) }
+    if (!s.includes(anchor)) { console.error(_c.red('[assertContains]'), `${file} missing: ${anchor}`); process.exit(1) }
   },
   assertNotContains(file, anchor) {
     const s = fs.readFileSync(file, 'utf8')
-    if (s.includes(anchor)) { console.error(`[assertNotContains] ${file} has: ${anchor}`); process.exit(1) }
+    if (s.includes(anchor)) { console.error(_c.red('[assertNotContains]'), `${file} has: ${anchor}`); process.exit(1) }
   },
   // [common-helpers-v2] state / esc / dump / cwd / 原子写
   statePath() {
@@ -236,6 +263,7 @@ const __AI__ = {
     const tmp = `${file}.tmp-${process.pid}-${Date.now()}`
     fs.writeFileSync(tmp, content, 'utf8')
     fs.renameSync(tmp, file)
+    _changelog('write', file)
     return true
   },
   // [ai-helper-v3] syntaxCheck / exec / assertCtx
@@ -280,6 +308,100 @@ const __AI__ = {
         process.exit(2)
       }
     }
+    return true
+  },
+  walk(dir, opts) {
+    opts = opts || {}
+    const skip = new Set(opts.skip || ['.git', 'node_modules', 'dist', '.ai-runner', 'coverage', '.vite', '.npmrc', '.env', '.env.local', '.DS_Store'])
+    const extList = opts.ext || null
+    const extRe = extList ? new RegExp(`\\.(${extList.join('|')})$`) : null
+    const maxDepth = opts.maxDepth || 6
+    const out = []
+    const go = function (p, d) {
+      if (d > maxDepth) return
+      let st; try { st = fs.statSync(p) } catch { return }
+      if (st.isFile()) { if (!extRe || extRe.test(p)) out.push(p); return }
+      let entries; try { entries = safeReaddir(p) } catch { return }
+      for (const ent of entries) {
+        if (skip.has(ent.name)) continue
+        go(path.join(p, ent.name), d + 1)
+      }
+    }
+    go(dir, 0)
+    return out
+  },
+  grep(pattern, opts) {
+    opts = opts || {}
+    const re = pattern instanceof RegExp ? pattern : new RegExp(pattern)
+    const files = opts.files || __AI__.walk(opts.dir || process.cwd(), { ext: opts.ext || ['ts', 'tsx', 'vue', 'js', 'cjs', 'mjs'] })
+    const maxHits = opts.max || 300
+    const out = []
+    for (const f of files) {
+      if (out.length >= maxHits) break
+      let raw
+      try { raw = fs.readFileSync(f, 'utf8') } catch { continue }
+      if (typeof raw !== 'string') continue
+      const fl = raw.split(String.fromCharCode(10))
+      for (let i = 0; i < fl.length; i++) {
+        if (out.length >= maxHits) break
+        if (re.test(fl[i])) {
+          out.push({ file: path.relative(process.cwd(), f).replace(/\\/g, '/'), line: i + 1, text: fl[i].trim().slice(0, 200) })
+        }
+      }
+    }
+    return out
+  },
+  symbol(name, opts) {
+    const re = new RegExp(`\\b${__AI__.esc(name)}\\b`)
+    return __AI__.grep(re, opts)
+  },
+  dumpCtx(file, line, n) {
+    n = n || 10
+    const fl = __AI__.readText(file).split(String.fromCharCode(10))
+    const s = Math.max(1, line - n)
+    const e = Math.min(fl.length, line + n)
+    const out = []
+    for (let i = s; i <= e; i++) out.push(`${i}: ${fl[i - 1]}`)
+    return out.join(String.fromCharCode(10))
+  },
+  template(file) {
+    const raw = __AI__.readText(file)
+    const a = raw.indexOf('<template>')
+    const b = raw.lastIndexOf('</template>')
+    if (a < 0 || b < 0 || b <= a) return ''
+    return raw.slice(a, b + 11)
+  },
+  usedInTemplate(file, names) {
+    const tpl = __AI__.template(file)
+    if (!tpl) return []
+    return names.filter((n) => { return new RegExp(`\\b${__AI__.esc(n)}\\b`).test(tpl) })
+  },
+  // [L6] 读缓存：文件内容未变则跳过重读，省 token
+  _readCachePath() { return '(memory)' },
+  readCacheMap() { return _rcMem },
+  _writeCacheMap(m) { for (const k in m) _rcMem[k] = m[k] },
+  fileSig(file) {
+    try {
+      const st = fs.statSync(file)
+      return `${String(st.mtimeMs)}:${String(st.size)}`
+    } catch { return '' }
+  },
+  readIfChanged(file) {
+    const key = path.relative(process.cwd(), file).replace(/\\/g, '/')
+    const sig = __AI__.fileSig(file)
+    if (!sig) return { content: null, changed: false, reason: 'not-found' }
+    const cache = __AI__.readCacheMap()
+    const prev = cache[key]
+    if (prev && prev.sig === sig) {
+      return { content: null, changed: false, sig, since: prev.at }
+    }
+    const content = fs.readFileSync(file, 'utf8')
+    cache[key] = { sig, at: Date.now() }
+    __AI__._writeCacheMap(cache)
+    return { content, changed: true, sig, firstRead: !prev }
+  },
+  clearReadCache() {
+    for (const k in _rcMem) delete _rcMem[k]
     return true
   },
 }

@@ -1,4 +1,4 @@
-// [refactor-post-run] 沙盒内 fs 工具调用日志读取
+// 沙盒内 fs 工具调用日志读取
 import fs from 'node:fs'
 
 export interface ToolCall {

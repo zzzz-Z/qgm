@@ -2,6 +2,7 @@ import antfu from '@antfu/eslint-config'
 import type { Linter } from 'eslint'
 
 const config: Linter.Config[] = antfu({
+  ignores: ['skills/**/*.md'],
   unocss: true,
   typescript: true,
   vue: true,
@@ -14,9 +15,12 @@ const config: Linter.Config[] = antfu({
     'prefer-rest-params': 'off',
     'no-restricted-globals': 'off',
     'node/prefer-global/process': 'off',
+    'node/prefer-global/buffer': 'off',
     // cjs
 
-    '@typescript-eslint/no-unused-vars': 'warn',
+    '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
+    'ts/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
+    'unused-imports/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
     'no-console': 'warn',
     'vue/no-v-text-v-html-on-component': 'off',
     'perfectionist/sort-imports': 'off',

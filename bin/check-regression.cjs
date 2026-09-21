@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable no-console -- CLI 输出 */
 'use strict'
 const fs = require('node:fs')
 const path = require('node:path')
@@ -6,12 +7,12 @@ const { execFileSync } = require('node:child_process')
 
 const ROOT = process.cwd()
 const BASELINE = path.join(ROOT, '.ai-runner/baseline.json')
-const TTY = Boolean(process.stdout.isTTY)
-const c = (n, s) => (TTY ? `\u001B[${n}m${s}\u001B[0m` : s)
+const L = require('../src/logger.cjs')
+
+const c = L.c
 const ok = s => console.log(c(32, '✓'), s)
 const err = s => console.error(c(31, '✗'), s)
 const head = s => console.log(c(36, '▶'), s)
-const warn = s => console.log(c(33, '!'), s)
 
 function run(cmd, args, timeoutMs = 180_000) {
   try {
@@ -29,7 +30,7 @@ function run(cmd, args, timeoutMs = 180_000) {
   }
 }
 
-// [refactor-bypass-pnpm] 绕过 pnpm policy 拦截，直调二进制
+// 绕过 pnpm policy 拦截，直调二进制
 function runTsc() {
   const isWin = process.platform === 'win32'
   const vueTsc = path.join(ROOT, 'node_modules/.bin', isWin ? 'vue-tsc.cmd' : 'vue-tsc')
@@ -40,8 +41,8 @@ function runTsc() {
 }
 function runTests() {
   const files = []
-  const d1 = path.join(ROOT, 'client')
-  if (fs.existsSync(d1)) { for (const f of fs.readdirSync(d1)) { if (f.endsWith('.node-test.ts')) files.push(path.join('client', f))
+  const d1 = path.join(ROOT, 'client/test')
+  if (fs.existsSync(d1)) { for (const f of fs.readdirSync(d1)) { if (f.endsWith('.node-test.ts')) files.push(path.join('client/test', f))
   }
   }
   const d2 = path.join(ROOT, 'src')
@@ -50,6 +51,21 @@ function runTests() {
   }
   if (!files.length) return { code: 1, out: '未找到测试文件' }
   return run(process.execPath, ['--test', '--experimental-strip-types', ...files], 180_000)
+}
+
+function runLint() {
+  return run('npx', ['eslint', '.', '--format', 'json'], 180_000)
+}
+
+function countLintErrors(text) {
+  try {
+    const arr = JSON.parse(text)
+    let n = 0
+    for (const f of arr) { for (const m of f.messages || []) { if (m.severity === 2) n++
+    }
+    }
+    return n
+  } catch { return -1 }
 }
 
 function countTscErrors(text) {
@@ -74,12 +90,15 @@ if (cmd === 'init') {
   const t = runTsc()
   console.log('  跑 pnpm test:unit...')
   const u = runTests()
+  console.log('  跑 eslint...')
+  const l = runLint()
   const sha = run('git', ['rev-parse', 'HEAD']).out.trim().slice(0, 12)
   const baseline = {
     sha,
     ts: Date.now(),
     tsc: { code: t.code, errors: countTscErrors(t.out) },
     test: { code: u.code, fails: countTestFails(u.out) },
+    lint: { code: l.code, errors: countLintErrors(l.out) },
   }
   fs.mkdirSync(path.dirname(BASELINE), { recursive: true })
   fs.writeFileSync(BASELINE, `${JSON.stringify(baseline, null, 2)}\n`)
@@ -104,16 +123,22 @@ if (cmd === 'check') {
   console.log('  跑 pnpm test:unit...')
   const u = runTests()
   const curTestFails = countTestFails(u.out)
+  console.log('  跑 eslint...')
+  const l = runLint()
+  const curLintErrors = countLintErrors(l.out)
   console.log('')
 
   const dTsc = curTscErrors - base.tsc.errors
   const dTest = curTestFails - base.test.fails
+  const baseLint = (base.lint && base.lint.errors) || 0
+  const dLint = curLintErrors - baseLint
 
   const rows = [
     '  | 指标         | baseline | 当前 | 差值 |',
     '  |--------------|----------|------|------|',
     `  | tsc errors   | ${String(base.tsc.errors).padEnd(8)} | ${String(curTscErrors).padEnd(4)} | ${dTsc > 0 ? '+' : ''}${dTsc} |`,
     `  | test fails   | ${String(base.test.fails).padEnd(8)} | ${String(curTestFails).padEnd(4)} | ${dTest > 0 ? '+' : ''}${dTest} |`,
+    `  | lint errors  | ${String(baseLint).padEnd(8)} | ${String(curLintErrors).padEnd(4)} | ${dLint > 0 ? '+' : ''}${dLint} |`,
   ]
   console.log(rows.join('\n'))
   console.log('')
@@ -126,7 +151,11 @@ if (cmd === 'check') {
     err(`✗ 测试新增 ${dTest} 个失败，阻断`)
     process.exit(1)
   }
-  ok(`无新增回归（dTsc=${dTsc}, dTest=${dTest}）`)
+  if (dLint > 0) {
+    err(`✗ lint 新增 ${dLint} 个 error，阻断`)
+    process.exit(1)
+  }
+  ok(`无新增回归（dTsc=${dTsc}, dTest=${dTest}, dLint=${dLint}）`)
   process.exit(0)
 }
 

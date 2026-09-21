@@ -1,10 +1,10 @@
-// [refactor-routes] /script/save
+// /script/save
 import fs from 'node:fs'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getRoot, SCRIPTS_DIR } from '../config.js'
-import { ensureDirs } from '../snapshot.js'
-import { parseJSON, readBody, sendJSON } from '../http.js'
+import { ensureDirs } from '../state/snapshot.js'
+import { parseJSON, readBody, sendJSON } from '../server/http.js'
 
 /** POST /script/save { script } → 落盘到 .ai-runner/scripts/draft-*.cjs */
 export async function handleScriptRoutes(

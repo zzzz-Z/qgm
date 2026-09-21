@@ -1,4 +1,4 @@
-# @zcc/vite-plugin-ai-runner
+# @qgm/vite-plugin-ai-runner
 
 Vite **dev-only** 插件 + Vue 3 SPA：在开发服务器里嵌入一个「AI 辅助开发工作台」，把**脚本沙盒执行、文件 diff / 回滚、工程化预检、prompt 组装、AI 会话**一站式打通。
 
@@ -14,8 +14,8 @@ Vite **dev-only** 插件 + Vue 3 SPA：在开发服务器里嵌入一个「AI �
 ### 安装
 
 ```bash
-pnpm add -D @zcc/vite-plugin-ai-runner
-# 或 npm i -D @zcc/vite-plugin-ai-runner
+pnpm add -D @qgm/vite-plugin-ai-runner
+# 或 npm i -D @qgm/vite-plugin-ai-runner
 ```
 
 ### 接入
@@ -23,7 +23,7 @@ pnpm add -D @zcc/vite-plugin-ai-runner
 ```ts
 // vite.config.ts
 import { defineConfig } from 'vite'
-import { aiRunner } from '@zcc/vite-plugin-ai-runner'
+import { aiRunner } from '@qgm/vite-plugin-ai-runner'
 
 export default defineConfig({
   plugins: [
@@ -133,7 +133,7 @@ export DEEPSEEK_API_KEY=sk-xxxx
   - 配置了 key → `POST /ask` 经服务端 SSE 直连 DeepSeek（key 不进浏览器）
   - 没配 key → 复制完整 prompt，复用已打开的 AI tab 跳转
 - 会话管理：记录外部 AI 会话（DeepSeek / ChatGPT / Claude / Kimi / Gemini 等），支持交接历史
-- 仓库根的 [tampermonkey-session-id.user.js](./tampermonkey-session-id.user.js) 是可选油猴脚本：在各 AI 站点提取会话 ID 与估算 token 量，通过 `postMessage` 回传工作台
+- [scripts/tampermonkey-session-id.user.js](./scripts/tampermonkey-session-id.user.js) 是可选油猴脚本：在各 AI 站点提取会话 ID 与估算 token 量，通过 `postMessage` 回传工作台
 
 ---
 
@@ -209,7 +209,7 @@ src/                          # Vite 插件（Node 侧）
 client/                       # 工作台 SPA（Vue 3 + CodeMirror 6）
 ├── App.vue                   # 主布局 + 3 个 tab + 设置 / 会话管理
 ├── main.ts / index.html      # SPA 入口
-├── vite.config.ts            # 自托管：5174 端口挂自家插件（root 指向包根）
+├── vite.config.ts            # 自托管：5174 端口挂自家插件（root 指向 client/，唯一一份配置；server 不经 vite）
 ├── types.ts / style.css
 ├── codeCleaner.ts            # 代码清洗（去注释 / 去空行）
 ├── directive.ts              # v-tooltip 指令
@@ -226,7 +226,7 @@ client/                       # 工作台 SPA（Vue 3 + CodeMirror 6）
 bin/                          # 5 个 CLI（见上表）
 skills/
 └── gen-script-rules.md       # 内置 AI 协作规则（输出形状 / 决策 / 脚本约束）
-tampermonkey-session-id.user.js  # 可选：AI 站点会话 ID / token 回传油猴脚本
+scripts/tampermonkey-session-id.user.js  # 可选：AI 站点会话 ID / token 回传油猴脚本
 ```
 
 ---

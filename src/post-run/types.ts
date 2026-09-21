@@ -1,4 +1,4 @@
-// [refactor-post-run] 共享类型
+// 共享类型
 
 export interface ClaimMismatch {
   claimed: string[]

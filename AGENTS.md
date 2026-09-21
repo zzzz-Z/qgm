@@ -5,9 +5,9 @@
 
 ## 项目概览
 
-- 包名：@zcc/vite-plugin-ai-runner
+- 包名：@qgm/vite-plugin-ai-runner
 - 定位：Vite **dev-only** 插件 + Vue 3 SPA，在 dev server 内嵌「AI 辅助开发工作台」
-- 能力：脚本沙盒（fs overlay）、diff 回滚、工程化预检（eslint/tsc/test/smoke）、prompt 组装、AI 会话管理、自动化循环（≤8 轮）
+- 能力：脚本沙盒（fs overlay）、diff 回滚、工程化预检（eslint/tsc/test/smoke）、prompt 组装、AI 会话管理、自动化循环（无轮次上限，由无进展刹车 + token 熔断终止）
 - 生效范围：apply: "serve"，不进生产构建
 
 ## 技术栈
@@ -16,7 +16,7 @@
 - 包管理：pnpm（禁改 lockfile，除非显式装依赖）
 - 服务端：TypeScript + Vite Plugin API + ws
 - 前端：Vue 3 + CodeMirror 6 + UnoCSS + highlight.js + @floating-ui/vue
-- 可选：playwright（smoke）、@zcc/cloak-browser
+- 可选：playwright（smoke）、@qgm/cloak-browser
 - 测试：node:test（单测）+ Playwright（e2e）
 
 ## 常用命令
@@ -116,20 +116,20 @@ skills/               AI 协作规则（core / env / script / ui / sessions）
 
 ## 主要端点（挂 /__ai 前缀）
 
-- POST /run  /exec  /ask  /rollback  /rollback-all  /save  /search  /hooks/run  /git/commit-loop  /git/reset
-- GET  /  /launcher.js  /files  /files/tree  /files/children  /git/head
-- POST /files/read  /files/before  /diff-from-baseline  /script/save
+- POST /run /exec /ask /rollback /rollback-all /save /search /hooks/run /git/commit-loop /git/reset
+- GET / /launcher.js /files /files/tree /files/children /git/head
+- POST /files/read /files/before /diff-from-baseline /script/save
 - GET/POST/DELETE /skills；GET/POST /tasks
 
 ## 数据目录（.ai-runner/）
 
-- runs/<runId>/            快照 + _manifest.json + _index.json（保留最近 20 次）
-- logs/YYYY-MM-DD.jsonl    运行日志（保留 30 天）
-- skills/*.md             用户 skill（同名覆盖内置）
-- state.json              任务清单 state（/tasks 读写）
-- backup/                 脚本备份
-- tmp/                    overlay / tool log 临时文件（运行后删除）
-- config.json             DeepSeek key / baseUrl / model
+- runs/<runId>/ 快照 + _manifest.json +_index.json（保留最近 20 次）
+- logs/YYYY-MM-DD.jsonl 运行日志（保留 30 天）
+- skills/*.md 用户 skill（同名覆盖内置）
+- state.json 任务清单 state（/tasks 读写）
+- backup/ 脚本备份
+- tmp/ overlay / tool log 临时文件（运行后删除）
+- config.json DeepSeek key / baseUrl / model
 
 ## 环境自检（会话首条）
 
@@ -144,3 +144,173 @@ skills/               AI 协作规则（core / env / script / ui / sessions）
 - 快照不覆盖二进制与 >500KB 文本
 - LCS diff 在超大文件（N×M>4M）退化为全删全增展示
 - !命令 与 shell 分流脚本在沙盒外执行（无 overlay / 快照 / 回滚）
+
+---
+
+## AI Runner 会话工具链（L0-L6）
+
+> 以下章节由 2026-09-21 基础建设轮次追加；替代旧的 AGENT.md。
+
+### 7. 技术债状态（2026-09-21 治理后）
+
+**全项目 lint 基线**：
+
+- 治理前：327 问题（E=192 / W=135）
+- 治理后：**0**（E=0 / W=0）
+
+**治理批次**：
+
+1. `eslint --fix` 自动修（prettier / vue-html-indent / style-*）：198 → 131
+2. 规则豁免（`_` 前缀 argsIgnore + `node/prefer-global/buffer` off）：131 → 95
+3. 机械替换（regexp 捕获组→非捕获 + `\s*`→`[^\S\n]*`）：95 → 38
+4. 死代码 / 声明重排 / 文件级 disable：38 → 0
+
+**真 bug 修复（lint 暴露）**：
+
+- `tampermonkey-session-id.user.js`：`handoffMode` / `handoffReplyText` 使用早于声明；`extractLatestReplyText` 全库无定义（已补）
+- `client/composables/useAiTransport.ts`：`ackWaiters` 声明在 `ensure()` 之后（已前置）
+
+**保留为文件级 disable（固有复杂度）**：
+
+- `src/interceptor.cjs`：fs API 兼容签名需保留参数
+- `tampermonkey-session-id.user.js`：catch 兼容
+- `src/plan-parser.ts`：markdown 任务行解析正则复杂度固有
+
+**回归守卫**：
+
+```bash
+node bin/check-regression.cjs check   # 阻断 tsc/test/lint 任一回归
+```
+
+**策略**：新改动只需关注自身区域无新增；`check-regression` 会在 CI/提交前自动阻断。第 6 节改动须知仍适用。
+
+### 8. 沙箱约束
+
+- `src/interceptor.cjs` 拦截脚本 fs 调用，默认 `AI_RUNNER_SANDBOX=read-only`。
+- **`.npmrc` / `.env*` 会触发 EACCES**：所有探测脚本必须 try/catch 降级，或加入 SKIP。
+- 脚本须有 `@desc` / `@why` / `@plan` 元数据头（见 `skills/script/standards.md`）。
+
+---
+
+_本文件由会话探测自动生成，如与代码不符以代码为准。_
+
+<!-- AGENT-MD:END -->
+
+### 9. 每轮首条自查
+
+```bash
+npm run verify   # 校验 scripts/anchors.json 所有锚点是否在磁盘真实存在
+```
+
+- 每轮开工**第一条**跑，确认上轮声明的改动真在磁盘上
+- 锚点表在 `scripts/anchors.json`，改动关键符号后同步更新
+- 校验失败（exit 2）说明上轮未落盘或代码被回退，需先对账再推进
+
+### 10. 首轮加载 lessons
+
+每轮开工第一条：
+
+```bash
+npm run verify                          # 锚点对账
+cat .ai-runner/lessons.md 2>/dev/null   # 加载踩坑记录
+```
+
+新踩坑同步写入 `.ai-runner/lessons.md`，会话结束不删。
+
+### 11. 会话首轮一键 preflight
+
+每次新会话**第一条**跑：
+
+```bash
+npm run session:start
+```
+
+一次性完成：
+
+- 锚点对账（`npm run verify`）
+- 加载 `lessons.md` 踩坑记录
+- 打印 `changelog.jsonl` 最近改动
+- 读取 `state.json` 待办
+- 检查 evidence 目录
+
+退出码 2 = 有阻塞，先处理再开工。
+
+### 12. 会话工具链（L0-L6）
+
+### 首轮 preflight（推荐）
+
+```bash
+npm run session:start   # verify + lessons + changelog + state 一图
+```
+
+### 锚点对账
+
+```bash
+npm run verify          # scripts/anchors.json 逐条校验
+```
+
+关键符号变更后同步 `scripts/anchors.json`，防止声明漂移。
+
+### 交接生成
+
+```bash
+npm run handoff:gen     # 从 state + changelog + lessons + anchors 自动生成 SESSION-HANDOFF.md
+```
+
+### `__AI__` 探针函数（已注入，禁止重新定义）
+
+只读探测首选，避免手写 fs：
+
+| 函数                                 | 用途                                     |
+| ------------------------------------ | ---------------------------------------- |
+| `__AI__.walk(dir, {ext})`            | 按扩展名遍历目录（内置 SKIP 白名单）     |
+| `__AI__.grep(pattern, opts)`         | 跨文件正则搜索 → `[{file, line, text}]`  |
+| `__AI__.symbol(name)`                | 符号全库引用（判定死代码）               |
+| `__AI__.dumpCtx(file, line, n)`      | 某行 ±n 上下文                           |
+| `__AI__.template(file)`              | 抽 `<template>` 区段                     |
+| `__AI__.usedInTemplate(file, names)` | 哪些符号被 template 引用（删代码前必做） |
+
+### 读缓存
+
+```js
+const r = __AI__.readIfChanged(file)
+if (!r.changed) { /* 内容未变，复用上次结论 */ }
+```
+
+**内存版**（不落盘），同进程内有效，避免 overlay 陷阱。
+
+### 写操作 changelog
+
+`patchFile` / `writeText` / `writeFile` / `deleteFile` / `atomicWrite` 自动追加到 `.ai-runner/changelog.jsonl`。
+
+### 语法预检
+
+`src/post-run/script-check.ts` 用 `vm.Script` 在服务端做纯语法校验（不执行）。node 脚本语法错直接 400 返回，不占执行轮。
+
+### 循环刹车
+
+- `LOOP_STALL_LIMIT=3` — 连续 3 轮零文件变更 → 停
+- `LOOP_FP_STALL_LIMIT=2` — 相同错误指纹连续 2 轮未变 → 停转诊断
+
+### 输出截断
+
+- 默认：ok 短 / fail 长（`trimOutput`）
+- 脚本头加 `// @ctx: full` 可强制全量
+
+### overlay 沙盒三条铁律
+
+1. `writeText`/`patchFile` 只写内存，跨进程读（`execFileSync`/`node --check`）看不到
+2. 脚本内不做跨进程校验；写盘验证交给 runner 冒烟
+3. 关键改动走 bash 通道确认磁盘状态
+
+### 回归守卫
+
+```bash
+node bin/check-regression.cjs check   # 阻断 tsc/test/lint 任一回归
+```
+
+### 刷新恢复兜底（2026-09-21）
+
+- 油猴缓存最近 50 条外发消息（`_msgBuf`），post 包装统一入栈
+- 工作台刷新后 `onMounted` 向已开窗口发 `ai-runner:request-replay`（重放缓存）+ `ai-runner:request-rescan`（重扫 DOM）
+- 双保险：缓存丢失时 rescan 从页面抓最新回复
