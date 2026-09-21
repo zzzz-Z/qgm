@@ -347,7 +347,7 @@ version: 2026-09-21
 
 ### 踩坑索引
 
-### 踩坑库（来自 2026-09 会话复盘）
+### 踩坑库（E/T/P/A 分类）
 
 #### 环境类
 
@@ -781,14 +781,9 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 - **改完必跑 `tsc`**
 - **不确定时输出只读诊断脚本**，别输出修改脚本
 
-### 十、本会话数据
+### 十、UI 排查教训
 
-- **轮次**：~60 轮
-- **有效改动 commit**：~15 个
-- **回滚操作**：~8 次
-- **时间浪费**：真凶定位（.pane-main * 拼接）占了 **~15 轮**，事后用 `grep` 一行定位
-- **教训**：**CSS 类名诡异色值 → 先 `grep` 类名 + 通配选择器**
-
+- **教训**：CSS 类名诡异色值 → 先 `grep` 类名 + 通配选择器；真凶一行可定位，别靠猜色值改容器。
 ### 附：常用排查命令
 
 ```bash
@@ -808,7 +803,7 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 node -e 'const s=require("fs").readFileSync("client/components/ScriptPanel.vue","utf8");const a=(s.match(/\{/g)||[]).length;const b=(s.match(/\}/g)||[]).length;console.log(a+"/"+b);'
 ```
 
-### 十一、会话复盘 · 2026-09-20 · ScriptPanel UI 重构
+### 十一、ScriptPanel UI 会话复盘
 
 #### Vue 类
 
