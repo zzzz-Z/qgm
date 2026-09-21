@@ -530,8 +530,6 @@ version: 2026-09-21
 3.  **类型即文档**：TypeScript 的类型系统不仅是校验工具，更是表达"契约"和"边界"的核心手段。
 4.  **显式优于隐式**：拒绝 `any`，拒绝全局状态污染，所有依赖关系必须在构造函数或函数签名中显式声明。
 
----
-
 ### ⚙️ 执行规范 (Actionable Rules) - 增强版
 
 #### 1. 接口隔离与契约优先 (Enhanced)
@@ -599,8 +597,6 @@ version: 2026-09-21
 > 主题：One Dark 改造 + UnoCSS 迁移 + 组件抽取
 > 教训：**70% 的时间浪费在"改错地方"**。根因是**没先拿到确凿证据**就开始动手。
 
----
-
 ### 一、CSS 选择器组 + 注释 = 灾难
 
 #### 现象
@@ -642,8 +638,6 @@ grep -n "\.pane-main \*" client/components/ScriptPanel.vue
 - **多选择器组每个选择器独占一行，末行不带注释**
 - **改 CSS 前先 `grep` 目标选择器，别靠"改容器"猜**
 
----
-
 ### 二、Console 的 `matches()` 对通配选择器失灵
 
 #### 现象
@@ -667,8 +661,6 @@ grep -n "\.pane-main \*" client/components/ScriptPanel.vue
 - **CSS 规则排查，DevTools Styles 面板 > Console API**
 - `matches()` 只能验证**完整选择器链**，不能验证**后代通配**
 
----
-
 ### 三、删了 `oneDark` 主题，编辑器退回亮色
 
 #### 现象
@@ -684,8 +676,6 @@ grep -n "\.pane-main \*" client/components/ScriptPanel.vue
 1. **保留 `m.oneDark`**（CM 官方主题提供全部子样式）
 2. **在 `EditorView.theme(...)` 里覆盖容器色**（`& / .cm-content / .cm-gutters / .cm-activeLine / .cm-cursor / .cm-selectionBackground`）
 3. **加 `{ dark: true }`** 让 CM 选暗色变体
-
----
 
 ### 四、UnoCSS 的 `(--var)` vs `[var(--var)]`
 
@@ -705,8 +695,6 @@ bg-(--surface)     /* 同上 */
 
 - **UnoCSS 里所有 CSS 变量一律 `[var(--xxx)]`**
 - **改完 `grep` 一次**，确认无 `(--` 残留
-
----
 
 ### 五、组件抽取 = 副作用连锁
 
@@ -728,8 +716,6 @@ bg-(--surface)     /* 同上 */
 - **类型检查**：`pnpm tsc` 每轮跑
 - **抽取后立即 `tsc`**，别攒几轮再跑
 
----
-
 ### 六、CSS `!important` 堆叠 = 后来的赢
 
 #### 现象
@@ -748,8 +734,6 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 
 - **修改前先 `grep` 数选择器出现次数**，>1 时小心
 - **用 DevTools Styles 面板**看哪条生效（划掉的 = 被覆盖）
-
----
 
 ### 七、执行环境混用
 
@@ -773,8 +757,6 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 - **看到 `sed` / `grep` / `$()` → 终端**
 - **别复制粘贴，先确认当前是哪个环境**
 
----
-
 ### 八、UI 排查正确顺序（记牢）
 
 1. **DevTools Elements → 选中目标元素**
@@ -783,8 +765,6 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 4. **回到源码 `grep` 那行**
 5. **一处一改，改完强刷**
 6. **不要**：靠截图猜色值、改容器背景、改全局变量、删主题
-
----
 
 ### 九、AI 与用户协作
 
@@ -801,8 +781,6 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 - **改完必跑 `tsc`**
 - **不确定时输出只读诊断脚本**，别输出修改脚本
 
----
-
 ### 十、本会话数据
 
 - **轮次**：~60 轮
@@ -810,8 +788,6 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 - **回滚操作**：~8 次
 - **时间浪费**：真凶定位（.pane-main * 拼接）占了 **~15 轮**，事后用 `grep` 一行定位
 - **教训**：**CSS 类名诡异色值 → 先 `grep` 类名 + 通配选择器**
-
----
 
 ### 附：常用排查命令
 
@@ -831,8 +807,6 @@ awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
 # 检查 CSS 括号平衡
 node -e 'const s=require("fs").readFileSync("client/components/ScriptPanel.vue","utf8");const a=(s.match(/\{/g)||[]).length;const b=(s.match(/\}/g)||[]).length;console.log(a+"/"+b);'
 ```
-
----
 
 ### 十一、会话复盘 · 2026-09-20 · ScriptPanel UI 重构
 
@@ -899,4 +873,3 @@ node -e 'const s=require("fs").readFileSync("client/components/ScriptPanel.vue",
 现象：同一边距改了 3+ 次，同一样式删了又加。
 修法：视觉改动前用 DevTools 定位「哪条规则给的当前效果」，改根规则，不再靠猜。
 
----
