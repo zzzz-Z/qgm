@@ -273,11 +273,7 @@
       "contains": "无轮次上限"
     },
     {
-      "file": "skills/core/gen-rules.md",
-      "contains": "无轮次上限"
-    },
-    {
-      "file": "skills/core/loop-protocol.md",
+      "file": "skills/RULES.md",
       "contains": "无轮次上限"
     },
     {
