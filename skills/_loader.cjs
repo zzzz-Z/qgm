@@ -27,13 +27,14 @@ const ROOTS = [
 
 // 语义分组：key 匹配 rel 前缀或 key 前缀
 const GROUPS = {
-  core: ['core/', 'behavior', 'loop-protocol', 'gen-rules'],
-  rules: ['core/behavior', 'core/gen-rules', 'env/preflight'],
+  core: ['core/', 'behavior', 'loop-protocol'],
+  rules: ['core/behavior', 'env/preflight'],
   loop: ['loop-protocol'],
-  script: ['script/', 'gen-rules'],
+  script: ['script/'],
   env: ['env/'],
   ui: ['ui/'],
-  session: ['sessions/'],
+  refactor: ['refactor/'],
+
 }
 
 const KEYWORDS = {
@@ -42,10 +43,11 @@ const KEYWORDS = {
   script: ['脚本', 'cjs', 'node', 'bash', 'rollback', 'backup', 'ai-runner', '幂等'],
   env: ['环境', 'dev server', 'worktree', 'cwd', '分支', 'tsc', 'eslint'],
   loop: ['循环', 'loop', 'round', 'todo', 'state.json'],
+  refactor: ['重构', '架构', '高内聚', '低耦合', 'hclc', 'typescript 架构', '依赖注入', '接口隔离'],
 }
 
 // 常驻元规则：每轮无条件注入（决策准则/脚本契约/脚本标准/环境自检）
-const ALWAYS_KEYS = ['core-behavior', 'core-gen-rules', 'script-standards', 'env-preflight']
+const ALWAYS_KEYS = ['RULES']
 function isDefault(key) { return ALWAYS_KEYS.includes(key) }
 
 function parseFrontmatter(text) {
@@ -69,6 +71,8 @@ function walk(dir, opts, depth) {
   for (const e of ents) {
     const p = path.join(dir, e.name)
     if (e.isDirectory()) {
+      // [archiveSkip] 归档目录不参与扫描
+      if (e.name === '_archive') continue
       // [depthCap] onlySkillFile 模式下只下探到 skill 根目录下第一层，再深不再进
       if (onlySkillFile && d >= 1) continue
       out.push(...walk(p, opts, d + 1))
@@ -212,9 +216,20 @@ function load(keys) {
   return uniq.map(v => `## [${v.rel}]${NL}${NL}${v.text}`).join(`${NL + NL}---${NL}${NL}`)
 }
 
+// 累积命中分数：ALWAYS_KEYS 基础分 1；任务相关命中额外加分
+function addHit(hits, key, add) {
+  if (!hits.has(key)) hits.set(key, 0)
+  hits.set(key, hits.get(key) + add)
+}
+
+// 按分数降序；同分保持原 Map 插入顺序（稳定排序）
+function sortedByScore(hits) {
+  return [...hits.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0])
+}
+
 function loadFor(task) {
   const t = String(task || '').toLowerCase()
-  const hits = new Set(ALWAYS_KEYS)
+  const hits = new Map(ALWAYS_KEYS.map(k => [k, 1]))
 
   // 1. frontmatter keywords 打分：命中数 >= 1 即注入
   for (const [k, v] of REGISTRY) {
@@ -229,22 +244,22 @@ function loadFor(task) {
       }
       return t.includes(s)
     }).length
-    if (score >= 1) hits.add(k)
+    if (score >= 1) addHit(hits, k, 1 + score)
   }
 
   // 2. 兜底：无 keywords 的 skill 走硬编码 KEYWORDS 分组
   for (const [k, kws] of Object.entries(KEYWORDS)) {
-    if (kws.some(kw => t.includes(kw.toLowerCase()))) hits.add(k)
+    if (kws.some(kw => t.includes(kw.toLowerCase()))) addHit(hits, k, 2)
   }
 
-  return load([...hits])
+  return load(sortedByScore(hits))
 }
 
 scan()
 
 function loadForMeta(task) {
   const t = String(task || '').toLowerCase()
-  const hits = new Set(ALWAYS_KEYS)
+  const hits = new Map(ALWAYS_KEYS.map(k => [k, 1]))
   for (const [k, v] of REGISTRY) {
     const kws = Array.isArray(v.kw) ? v.kw : []
     if (!kws.length) continue
@@ -257,12 +272,12 @@ function loadForMeta(task) {
       }
       return t.includes(s)
     }).length
-    if (score >= 1) hits.add(k)
+    if (score >= 1) addHit(hits, k, 1 + score)
   }
   for (const [k, kws] of Object.entries(KEYWORDS)) {
-    if (kws.some(kw => t.includes(kw.toLowerCase()))) hits.add(k)
+    if (kws.some(kw => t.includes(kw.toLowerCase()))) addHit(hits, k, 2)
   }
-  const keys = [...hits]
+  const keys = sortedByScore(hits)
   return { content: load(keys), keys }
 }
 
