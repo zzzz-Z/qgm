@@ -1,7 +1,6 @@
 ---
 name: rules
-description: vite-plugin-ai-runner 全部 AI 行为 / 脚本 / 环境 / 架构规则（单一权威）
-keywords: 规则, 行为, 脚本, 循环, 环境, 架构, ai-runner, state, __AI__, 输出契约, 踩坑
+description: 项目唯一规则来源（AI 行为 / 脚本规范 / 环境自检 / 踩坑库 / TS 架构 / UI 踩坑）
 version: 2026-09-21
 ---
 
@@ -9,25 +8,22 @@ version: 2026-09-21
 
 # 规则总纲（Single Source of Truth）
 
-> 本文件由 `skills/_archive/` 下原始规则合并生成。冲突时以本文件为准；
-> 每章末尾的 `<!-- src: ... -->` 为溯源标记。
+> 本文件是本项目全部 AI 行为 / 脚本 / 环境 / 架构规则的**唯一权威来源**。
+> 冲突时以本文件为准。
 
 ## 目录
 
-1. 输出契约与自动化循环  `（src: core/loop-protocol.md）`
-2. AI 行为与决策准则  `（src: core/behavior.md）`
-3. 脚本编写与技术规范  `（src: script/standards.md）`
-4. __AI__ 全局注入 API  `（src: script/ai-api.md）`
-5. 环境自检与提交闸门  `（src: env/preflight.md）`
-6. 踩坑库（E/T/P/A）  `（src: env/troubleshooting.md）`
-7. TypeScript HCLC 架构  `（src: refactor/ts.md）`
-8. UI / CSS / Vue 踩坑  `（src: ui/pitfalls.md）`
+一、输出契约与自动化循环
+二、AI 行为与决策准则
+三、脚本编写与技术规范
+四、__AI__ 全局注入 API
+五、环境自检与提交闸门
+六、踩坑库（E/T/P/A）
+七、TypeScript HCLC 架构
+八、UI / CSS / Vue 踩坑
 ---
 
 ## 一、输出契约与自动化循环
-
-<!-- src: core/loop-protocol.md -->
-
 
 ### 输出契约（严格执行）
 
@@ -70,8 +66,6 @@ version: 2026-09-21
 ---
 
 ## 二、AI 行为与决策准则
-
-<!-- src: core/behavior.md -->
 
 ### 总则（最高优先级）
 
@@ -154,8 +148,6 @@ version: 2026-09-21
 ---
 
 ## 三、脚本编写与技术规范
-
-<!-- src: script/standards.md -->
 
 ### 脚本头部强制规范（唯一权威）
 
@@ -246,8 +238,6 @@ version: 2026-09-21
 
 ## 四、__AI__ 全局注入 API
 
-<!-- src: script/ai-api.md -->
-
 ### 文件操作
 
 - `__AI__.readText(path)` : 读取文本
@@ -312,8 +302,6 @@ version: 2026-09-21
 
 ## 五、环境自检与提交闸门
 
-<!-- src: env/preflight.md -->
-
 ### 环境自检（会话首条）
 
 - [ ] pwd 正确，非空目录
@@ -343,8 +331,6 @@ version: 2026-09-21
 ---
 
 ## 六、踩坑库（E/T/P/A）
-
-<!-- src: env/troubleshooting.md -->
 
 > 会话首条自检见 `env/preflight.md`。
 
@@ -521,8 +507,6 @@ version: 2026-09-21
 
 ## 七、TypeScript HCLC 架构
 
-<!-- src: refactor/ts.md -->
-
 #### 🎯 核心目标
 在 TypeScript 项目中，通过严格的类型约束、模块化设计和依赖管理，确保每个模块**职责单一且完整（高内聚）**，模块间**依赖最小化且易于替换（低耦合）**。
 
@@ -596,8 +580,6 @@ version: 2026-09-21
 ---
 
 ## 八、UI / CSS / Vue 踩坑
-
-<!-- src: ui/pitfalls.md -->
 
 > 主题：One Dark 改造 + UnoCSS 迁移 + 组件抽取
 > 教训：**70% 的时间浪费在"改错地方"**。根因是**没先拿到确凿证据**就开始动手。
