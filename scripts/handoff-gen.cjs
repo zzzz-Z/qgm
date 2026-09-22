@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/* eslint-disable no-console -- 报告输出 */
 // @desc: 从 .ai-runner/ 数据自动生成 SESSION-HANDOFF.md
 // @why: 交接手写重复、易漏；数据源已齐（state+changelog+lessons+anchors）
 // @plan: handoff-gen

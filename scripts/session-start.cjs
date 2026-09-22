@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/* eslint-disable no-console -- preflight 输出需要 */
 // @desc: 会话首轮 preflight——锚点对账 + lessons + changelog + state + 待办
 // @why: 每次新会话首条跑，替代手写多命令；退出码 2 表示状态异常需先处理
 // @plan: session-start

@@ -17,6 +17,14 @@ export default defineConfig({
       'client/playwright-report/**',
       'client/test-results/**',
     ],
+    // AIRUNNER-BATCH31-COVERAGE: 需先安装 @vitest/coverage-v8（pnpm add -D @vitest/coverage-v8）
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'lcov'],
+      reportsDirectory: 'coverage',
+      include: ['client/**/*.{ts,vue}', 'src/**/*.ts'],
+      exclude: ['**/*.d.ts', '**/node_modules/**', 'test/**', '**/*.test.ts', '**/*.node-test.ts'],
+    },
     globals: false,
     isolate: true,
   },

@@ -1,5 +1,5 @@
+// AIRUNNER-BATCH29-TEST-TSC-FIX: 供 VS Code 对 test/ 下 .ts 文件就近解析；继承 tsconfig.test.json
 {
-  "AIRUNNER-TEST-SUBTSC": "让 VS Code 对 test/ 下文件使用含 node types + DOM lib 的配置；命令行仍走 tsconfig.test.json",
   "extends": "../tsconfig.test.json",
   "include": ["**/*.ts"],
   "exclude": ["node_modules"]

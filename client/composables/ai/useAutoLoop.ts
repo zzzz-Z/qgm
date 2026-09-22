@@ -227,6 +227,7 @@ export async function startLoop(goal: string): Promise<void> {
   if (!await initLoop(inst, 'loop', g, `▶ 循环开始 · 目标：${g.slice(0, 60)}`, { prompt: g })) return
   loopPaused.value = false // [loop-paused:reset]
   inst.state.value = 'running'
+  stage.value = 'plan' // AIRUNNER-BATCH47-STAGE-WRITE
   persist(inst)
 
   const bfHook = await runHook('BeforeFill', {
@@ -466,6 +467,7 @@ async function toleranceFail(inst: LoopInstance, detail: string): Promise<void> 
 
 async function executeItem(inst: LoopInstance, item: InboxItem): Promise<void> {
   inst.state.value = 'executing'
+  stage.value = 'implement' // AIRUNNER-BATCH47-STAGE-WRITE
   persist(inst)
   const hookRes = await runHook('BeforeScript', {
     loopId: inst.id.value,
@@ -709,6 +711,7 @@ async function afterRound(inst: LoopInstance, o: RoundOutcome): Promise<void> {
     })
   }
   inst.state.value = 'feedback'
+  stage.value = 'verify' // AIRUNNER-BATCH47-STAGE-WRITE
   persist(inst)
 
   // 熔断判定（轮数 / token），规则与优先级由 loopLogic.checkRoundBreak 单测锁定

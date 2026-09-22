@@ -1,7 +1,6 @@
 import antfu from '@antfu/eslint-config'
-import type { Linter } from 'eslint'
 
-const config: Linter.Config[] = antfu({
+const config = antfu({
   ignores: ['skills/**/*.md'],
   unocss: true,
   typescript: true,
@@ -37,6 +36,10 @@ const config: Linter.Config[] = antfu({
     'vue/require-default-prop': 'off',
     'eslint-comments/no-unlimited-disable': 'off',
   }
-}) as unknown as Linter.Config[]
+}).append({
+  files: ['scripts/**/*.{js,mjs,cjs}', 'skills/**/*.cjs'],
+  rules: { 'no-console': 'off' },
+})
+// AIRUNNER-BATCH45-NO-CONSOLE-CLI: CLI 脚本允许 console 输出（antfu composer .append 形式）
 
 export default config
