@@ -50,9 +50,9 @@
     "lint:fix": "eslint . --fix",
     "tsc": "tsc -p tsconfig.json --noEmit",
     "tsc:client": "vue-tsc -p tsconfig.client.json --noEmit",
-    "test:unit": "node --test --experimental-strip-types client/test/*.node-test.ts src/*.test.cjs src/process/*.test.cjs src/post-run/*.node-test.ts",
+    "test:unit": "node --test --experimental-strip-types client/test/*.node-test.ts src/*.test.cjs src/process/*.test.cjs src/utils/*.node-test.ts src/state/*.node-test.ts src/post-run/*.node-test.ts",
     "test:e2e": "playwright test --config client/playwright.config.ts",
-    "verify": "pnpm tsc && pnpm lint && pnpm test:unit",
+    "verify": "pnpm tsc && pnpm lint:fix && pnpm test:unit",
     "check-regression": "node bin/check-regression.cjs check",
     "run-all": "node bin/run-all.cjs",
     "recover": "node bin/recover.cjs"

@@ -38,7 +38,7 @@ version: 2026-09-21
 [五、环境自检与提交闸门](#ch5)
 [六、踩坑库（E/T/P/A）](#ch6)
 [七、TypeScript HCLC 架构](#ch7)
-[八、UI / CSS / Vue 踩坑](#ch8)
+[八、UI / CSS / Vue 速查](#ch8)
 
 <a id="ch1"></a>
 
@@ -75,13 +75,8 @@ version: 2026-09-21
     -   `LOOP_FP_STALL_LIMIT=2`（假进展/重复hash上限）
     -   Token 上下文窗口溢出前自动保存 checkpoint 并退出
 
-### 常用命令清单
-
--   全量测试：`pnpm test:unit`
--   类型检查：`pnpm tsc --noEmit`
--   Lint 修复：`pnpm lint --fix`
--   端到端：`pnpm test:e2e`
--   全量回归：`pnpm run-all`
+<!-- AIRUNNER-BATCH3-CMDLIST-MOVED -->
+> 常用命令清单见 AGENTS.md「脚本入口」。
 ---
 
 <a id="ch2"></a>
@@ -288,6 +283,8 @@ version: 2026-09-21
 
 ---
 
+<a id="ch5"></a>
+
 ## 五、环境自检与提交闸门
 
 ### 环境自检（会话首条）
@@ -366,16 +363,6 @@ version: 2026-09-21
   - js 通道写后必须紧跟 `fs.readFileSync` **回读**验证
   - 复杂脚本分段提交，避免中途崩
 
-**T2. overlay 沙盒里 `chmodSync` 报 ENOENT**
-
-- 根因：`writeFileSync` 只进内存，真实磁盘无该文件
-- 规避：脚本里去掉 `chmodSync`；可执行位由用户在终端 `chmod +x` 补
-
-**T3. overlay 里 `statSync().mtime` 是 undefined**
-
-- 现象：`.mtime.toISOString()` 崩溃
-- 规避：统一用 `mtimeMs`（数字）
-
 **T4. bash-guard 黑名单误伤注释/字符串**
 
 - 现象：脚本正文（含注释）出现黑名单词被 400 拦
@@ -392,13 +379,6 @@ version: 2026-09-21
   - 替代写法：拆字母拼字符串（如 `'r' + 'm' + ' -rf'`）、改词（"递归删除"）
   - 或改写成动作描述
 
-**T5. macOS 无 GNU `timeout`**
-
-- 现象：`/bin/sh: timeout: command not found`
-- 规避：
-  - 不用 `timeout`
-  - 用 playwright / node 内置 timeout；或 `perl -e 'alarm N; exec @ARGV'`
-
 **T6. `--experimental-strip-types` 不重写 `.js`→`.ts`**
 
 - 现象：`ERR_MODULE_NOT_FOUND: Cannot find module '.../config.js'`
@@ -406,19 +386,6 @@ version: 2026-09-21
 - 规避：
   - 生产入口走 `pnpm build` → 跑 `dist/*.js`
   - 参考 `bin/air-server.cjs` 的 build-then-run 模式
-
-**T7. interceptor 的 `readdirSync withFileTypes` bug**
-
-- 现象：`The "path" argument must be of type string. Received an instance of Dirent`
-- 根因：overlay patch 把 Dirent 对象当字符串传给 `path.join`
-- 已修：见 commit `fix(interceptor): handle fs.readdirSync withFileTypes`
-- 规避：脚本里避免直接用 `fs.readdirSync(dir, { withFileTypes: true })`，改用 `safeReaddir`
-
-**T8. helpers.cjs 正则双重转义**
-
-- 现象：`SyntaxError: Invalid regular expression: /...\\s/: Unterminated group`
-- 根因：写正则时错误地写了双反斜杠（应为单反斜杠 + s）
-- 规避：正则字面量写完后 `node --check` 或 `node -e 'console.log(/.../)'` 验证
 
 **T9. Vue `v-if`/`v-else` 相邻性破坏**
 
@@ -459,12 +426,6 @@ version: 2026-09-21
   - 单脚本 ≤ 200 行
   - 需要更多时拆多次
   - 复杂改动先探针再改
-
-**P5. `git rm --cached` 后 `git add` 路径不存在**
-
-- 现象：`fatal: pathspec '...' did not match any files`
-- 根因：`--cached` 移除索引后，磁盘上文件已被手动删掉
-- 规避：直接 `git commit`（不 `git add`），或在删除前先 `git add -A`
 
 #### AI 协作类
 
@@ -513,15 +474,6 @@ version: 2026-09-21
 *   **规则**：跨模块通信必须通过契约进行。优先使用 **TypeScript 原生类型系统** 表达业务语义，而非仅靠 Interface。
 *   **TS 实践**：
     *   **状态表达**：使用 Discriminated Unions 替代 Enum + Class 继承。
-        ```ts
-        // ✅ Good: 穷尽性检查 + 数据与状态绑定
-        type OrderState = 
-
-          | { status: 'draft'; items: CartItem[] }
-          | { status: 'paid'; paymentId: string; paidAt: Date }
-          | { status: 'shipped'; trackingNo: string };
-
-        ```
     *   **契约验证**：使用 `satisfies` 确保实现符合契约且不丢失字面量类型推断。
     *   **ISP 落地**：若 Interface > 3 个方法，强制审查是否可拆分为 Role-based Interfaces。
 
@@ -569,320 +521,48 @@ version: 2026-09-21
 
 <a id="ch8"></a>
 
-## 八、UI / CSS / Vue 踩坑
-
-> 主题：One Dark 改造 + UnoCSS 迁移 + 组件抽取
-> 教训：**70% 的时间浪费在"改错地方"**。根因是**没先拿到确凿证据**就开始动手。
-
-<a id="ui-toc"></a>
-
-**本章速览**：
-
-- [CSS 选择器组 + 注释 = 灾难](#ui-0)
-- [Console 的 `matches()` 对通配选择器失灵](#ui-1)
-- [删了 `oneDark` 主题，编辑器退回亮色](#ui-2)
-- [UnoCSS 的 `(--var)` vs `[var(--var)]`](#ui-3)
-- [组件抽取 = 副作用连锁](#ui-4)
-- [CSS `!important` 堆叠 = 后来的赢](#ui-5)
-- [执行环境混用](#ui-6)
-- [UI 排查正确顺序（记牢）](#ui-7)
-- [AI 与用户协作](#ui-8)
-- [UI 排查教训](#ui-9)
-- [ScriptPanel UI 会话复盘](#ui-10)
-- [常用排查命令](#ui-11)
-
-<a id="ui-0"></a>
-
-### 一、CSS 选择器组 + 注释 = 灾难
-
-#### 现象
-
-主区 `.terminal` / `.flow-timeline` / `.term-body` 被刷成 `rgba(88,166,255,0.14)` 蓝透，改 `.pane-main` / `style.css` 变量 / 删 `m.oneDark` **全无效**。
-
-#### 真凶
-
-```css
-/* 坏：注释插在多选择器组中间 */
-.pane-main *::-webkit-scrollbar,
-.editor ::-webkit-scrollbar,
-...
-.side-tree ::-webkit-scrollbar,
-
-.pane-main *,      ← 通配所有后代
-.chat-list,
-.cm-scroller,
-.cm-host,
-
-/* 注释夹在中间 */
-.primary-btn.takeover:hover:not(:disabled) {
-  background: rgb(88 166 255 / 14%) !important;   ← 声明被并到上面选择器组
-  ...
-}
-```
-
-**CSS 解析规则**：选择器组后面的注释被忽略，**下一条规则的声明体被并入当前选择器组**。所以 `.pane-main *` 拿到了 `background: rgba(88,166,255,.14)`，**所有主区后代全蓝透**。
-
-#### 定位方法（一行）
-
-```bash
-grep -n "\.pane-main \*" client/components/ScriptPanel.vue
-```
-
-#### 预防
-
-- **CSS 注释不要写在选择器组和 `{` 之间**
-- **多选择器组每个选择器独占一行，末行不带注释**
-- **改 CSS 前先 `grep` 目标选择器，别靠"改容器"猜**
-
-<a id="ui-1"></a>
-
-### 二、Console 的 `matches()` 对通配选择器失灵
-
-#### 现象
-
-```js
-[...document.styleSheets].forEach(sheet => {
-  [...sheet.cssRules].forEach(r => {
-    if (el.matches(r.selectorText)) { ... }
-  });
-});
-```
-
-**查不到 `.pane-main *`** —— 因为 `el.matches('.pane-main *')` 对元素自身**返回 false**（该选择器需匹配**完整祖先链**）。
-
-#### 正确查法
-
-用 DevTools **Elements → Styles 面板**逐条看，**不靠 `matches()` API**。
-
-#### 预防
-
-- **CSS 规则排查，DevTools Styles 面板 > Console API**
-- `matches()` 只能验证**完整选择器链**，不能验证**后代通配**
-
-<a id="ui-2"></a>
-
-### 三、删了 `oneDark` 主题，编辑器退回亮色
-
-#### 现象
-
-上上轮删 `m.oneDark` → 编辑器变白底黑字；用户以为"亮蓝色是主区背景"，实际是 **CodeMirror 默认亮色主题**。
-
-#### 根因
-
-`@codemirror/theme-one-dark` **不只改颜色**，还改 token 高亮、光标、选区、行号等**所有内部状态**。只删它 + 加 `EditorView.theme` 覆盖 3 个选择器 → **内部全亮**。
-
-#### 正确做法
-
-1. **保留 `m.oneDark`**（CM 官方主题提供全部子样式）
-2. **在 `EditorView.theme(...)` 里覆盖容器色**（`& / .cm-content / .cm-gutters / .cm-activeLine / .cm-cursor / .cm-selectionBackground`）
-3. **加 `{ dark: true }`** 让 CM 选暗色变体
-
-<a id="ui-3"></a>
-
-### 四、UnoCSS 的 `(--var)` vs `[var(--var)]`
-
-#### 现象
-
-```css
-border-(--border)  /* 被当 border-width: var(--border)，生成无效声明 */
-bg-(--surface)     /* 同上 */
-```
-
-#### 真规则
-
-- UnoCSS presetWind4 **只支持** `[var(--xxx)]` **方括号语法**
-- 简写 `(--xxx)` 只对**部分属性**有效（`bg-(--xxx)` 在 UnoCSS 66.10 无效）
-
-#### 预防
-
-- **UnoCSS 里所有 CSS 变量一律 `[var(--xxx)]`**
-- **改完 `grep` 一次**，确认无 `(--` 残留
-
-<a id="ui-4"></a>
-
-### 五、组件抽取 = 副作用连锁
-
-#### 现象
-
-抽 4 个子组件（DiffOverlay / LoopBar / NoteBar / SidePane）后：
-
-- `getChangeType` / `resumeLoop` 被误删（模板仍在引用）
-- `SidePane` 的 `rolling` prop 类型写错（应该是 `Record<string, boolean>` 不是 `boolean`）
-- `.pane-side` / `.terminal` 的 scoped 样式错位
-
-#### 根因
-
-**删除前没 `grep` 所有调用方**。
-
-#### 预防
-
-- **删任何函数/组件前**：`grep -rn "函数名\|组件名" client/`
-- **类型检查**：`pnpm tsc` 每轮跑
-- **抽取后立即 `tsc`**，别攒几轮再跑
-
-<a id="ui-5"></a>
-
-### 六、CSS `!important` 堆叠 = 后来的赢
-
-#### 现象
-
-同选择器被 3+ 块定义，**最后一块赢**。改前面任一块都无效。
-
-#### 定位
-
-```bash
-grep -n "^\.pane-main {" client/components/ScriptPanel.vue
-# 或
-awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
-```
-
-#### 预防
-
-- **修改前先 `grep` 数选择器出现次数**，>1 时小心
-- **用 DevTools Styles 面板**看哪条生效（划掉的 = 被覆盖）
-
-<a id="ui-6"></a>
-
-### 七、执行环境混用
-
-#### 现象
-
-把**浏览器 Console 命令**（含 `document`）贴到**工作台 Node 面板** → `document is not defined`。
-把 **bash 命令**（含 `$()`）贴到工作台 → `syntax error near unexpected token`。
-
-#### 三个环境
-
-| 环境               | 能跑                                  | 进入方式     |
-| ------------------ | ------------------------------------- | ------------ |
-| **工作台面板**     | Node.js `.cjs` 脚本                   | 面板         |
-| **浏览器 Console** | `document` / DOM / `getComputedStyle` | F12          |
-| **系统终端**       | bash / sed / grep / npm               | Terminal.app |
-
-#### 预防
-
-- **看到 `document` / `window` / `getComputedStyle` → 浏览器**
-- **看到 `fs` / `require` / `process` → 工作台**
-- **看到 `sed` / `grep` / `$()` → 终端**
-- **别复制粘贴，先确认当前是哪个环境**
-
-<a id="ui-7"></a>
-
-### 八、UI 排查正确顺序（记牢）
-
-1. **DevTools Elements → 选中目标元素**
-2. **Styles 面板逐条看** background / color 生效规则
-3. **找到"哪条规则给的异常色"**（带文件名 + 行号）
-4. **回到源码 `grep` 那行**
-5. **一处一改，改完强刷**
-6. **不要**：靠截图猜色值、改容器背景、改全局变量、删主题
-
-<a id="ui-8"></a>
-
-### 九、AI 与用户协作
-
-#### 用户的正确姿势
-
-- **看到 AI 给"猜测性改动"时**，先问"你怎么确认的？"
-- **报错先贴完整 stderr**，别贴"就是不行"
-- **一个命令一个动作**，别一把梭
-
-#### AI 的正确姿势
-
-- **先 `grep` 再改**，别猜
-- **每轮只改一处**，可回滚
-- **改完必跑 `tsc`**
-- **不确定时输出只读诊断脚本**，别输出修改脚本
-
-<a id="ui-9"></a>
-
-### 十、UI 排查教训
-
-- **教训**：CSS 类名诡异色值 → 先 `grep` 类名 + 通配选择器；真凶一行可定位，别靠猜色值改容器。
-
-<a id="ui-10"></a>
-
-### 十一、ScriptPanel UI 会话复盘
-
-#### Vue 类
-
-##### V1. `<script setup>` 的 const 不提升
-
-现象：computed 引用后续 `defineProps` 报 used before it was defined。
-修法：defineProps / defineEmits / defineModel 全部置顶，之后再声明 computed / ref / watch。
-
-##### V2. defineModel 声明位置错误
-
-现象：`props` 定义在 `displayWidth` 之后 → props is not defined。
-修法：宏调用与 props 必须早于所有依赖它们的响应式声明。
-
-#### 脚本类
-
-##### S1. 幂等性缺失 —— 重跑插入重复声明
-
-现象：脚本跑两次，插入两个 `const theme = ref(...)` → already been declared。
-修法：所有追加/替换前先 `if (src.includes(marker)) return`。
-
-##### S2. 未 grep 全量引用就插入
-
-现象：header 出现两个 theme-toggle 按钮。
-修法：插 class / 元素前先 `grep -c "class=\"X\"" file` 确认不存在。
-
-##### S3. 自检计数非同类比较（追加场景）
-
-现象：追加样式块后 self-check 断言 padding 数不变 → 假阳性 abort。
-修法：追加断言 `after === before + 新增`；只有修改场景断言相等。
-
-##### S4. 大文件行号编辑漂移
-
-现象：几轮编辑后 sed 行号定位失效。
-修法：改用唯一字符串锚点（注释 marker / 独特选择器名）定位。
-
-#### CSS 类
-
-##### C1. 全局选择器 `*` 副作用
-
-现象：`*:focus-visible { outline }` 让容器 focus 时整块出现蓝框。
-修法：焦点环只写给 button / a / input / select / textarea。
-
-##### C2. CSS 变量未定义就引用
-
-现象：写 `var(--surface-3)` 但 style.css 从未定义 → fallback 空值。
-修法：新增变量引用前 `grep -- "--surface-3" client/style.css`。
-
-##### C3. UnoCSS 变量语法
-
-现象：`(--xxx)` 在 presetWind4 中无效。
-修法：一律 `[var(--xxx)]` 方括号语法。
-
-#### 决策类
-
-##### D1. UI 风格未先定参考
-
-现象：配色从 One Dark → DeepSeek → VSCode 反复切换，多轮重做。
-修法：UI 类改动首轮询问目标参考（Github / VSCode / DeepSeek / One Dark），确定后不改。
-
-##### D2. 反复改色/边距浪费轮次
-
-现象：同一边距改了 3+ 次，同一样式删了又加。
-修法：视觉改动前用 DevTools 定位「哪条规则给的当前效果」，改根规则，不再靠猜。
-
-<a id="ui-11"></a>
-
-### 十二、常用排查命令
-
-```bash
-# 找某选择器所有定义（含通配）
-grep -n "^\.pane-main\|\.pane-main " client/components/ScriptPanel.vue
-
-# 找某色值出现位置
-grep -rn "rgba(88 166 255 / 14%)" client/
-
-# 找某函数所有引用
-grep -rn "\bgetChangeType\b" client/
-
-# 查看某个选择器块完整内容
-awk '/^\.pane-main \{/,/^\}/' client/components/ScriptPanel.vue
-
-# 检查 CSS 括号平衡
-node -e 'const s=require("fs").readFileSync("client/components/ScriptPanel.vue","utf8");const a=(s.match(/\{/g)||[]).length;const b=(s.match(/\}/g)||[]).length;console.log(a+"/"+b);'
-```
+## 八、UI / CSS / Vue 速查
+
+<!-- AIRUNNER-BATCH3-UI-COMPRESSED -->
+> 详细复盘与排查命令见 skills/UI-LESSONS.md（按需加载）。
+> 浏览器通道建成前，DevTools → Styles 面板是唯一可靠排查路径。
+
+### 排查顺序（记牢）
+
+1. DevTools Elements → 选中目标元素
+2. Styles 面板逐条看生效规则
+3. 找到异常色 / 样式的来源（文件名 + 行号）
+4. 回源码 `grep` 那行
+5. 一处一改，改完强刷
+
+**禁止**：靠截图猜色值、改容器背景、改全局变量、删主题。
+
+### 常见坑速查
+
+| 现象 | 核心动作 |
+|---|---|
+| CSS 多选择器组内插注释 → 声明被并到组上 | 组内每选择器独占一行，末行不带注释；改前 `grep` 目标选择器 |
+| `el.matches(".pane-main *")` 查不到规则 | 用 DevTools Styles 面板，不用 `matches()` API |
+| 删 CodeMirror 主题 → 内部退回亮色 | 保留官方主题，只在 `EditorView.theme` 覆盖容器色 |
+| UnoCSS `(--var)` 生成无效声明 | 一律 `[var(--xxx)]` 方括号语法 |
+| 组件抽取后函数被误删 / prop 类型错 | 抽前 `grep -rn` 所有调用方；抽后立即 `tsc` |
+| 同选择器多块 `!important`，后者赢 | 修改前 `grep` 数选择器出现次数；DevTools 看划掉的 |
+| `document is not defined` / `$()` 报错 | 三环境区分：工作台 Node / 浏览器 Console / 系统终端 |
+| CSS 变量未定义就引用 → fallback 空值 | 新增引用前 `grep -- "--xxx" client/style.css` |
+| `*:focus-visible` 让容器整块出现蓝框 | 焦点环只写 button / a / input / select / textarea |
+| Vue `<script setup>` const 不提升 | defineProps / defineEmits / defineModel 置顶 |
+
+### 三环境区分
+
+| 环境 | 能跑 | 进入方式 |
+|---|---|---|
+| 工作台面板 | Node `.cjs` 脚本 | 面板 |
+| 浏览器 Console | `document` / `window` / `getComputedStyle` | F12 |
+| 系统终端 | bash / sed / grep / npm | Terminal.app |
+
+看到 `document` → 浏览器；看到 `fs` / `require` → 工作台；看到 `sed` / `grep` → 终端。
+
+### 与 AI 协作
+
+- **用户**：猜测性改动先问「怎么确认的」；报错贴完整 stderr；一个命令一个动作
+- **AI**：先 `grep` 再改；每轮只改一处；改完必 `tsc`；不确定时输出只读诊断脚本

@@ -53,6 +53,22 @@
   - skills/RULES.md 全部规则（单一权威，8 章：输出契约 / 行为准则 / 脚本规范 / **AI** API / 环境自检 / 踩坑库 / TS HCLC / UI 踩坑）
   - skills/_loader.cjs 动态加载器（ALWAYS_KEYS=[RULES]；--list / --for 查询）
 
+### client/composables 模块图（AIRUNNER-BATCH5-AUTO-LOOP-MAP)
+
+- client/composables/ai/useAutoLoop.ts —— 循环状态机主入口（单例，模块级 ref）
+- client/composables/ai/auto-loop/ —— 从主入口拆出的子模块
+  - types.ts 类型定义（LoopState / StopRequest / AiReply / LoopInstance / RoundOutcome）
+  - persist.ts sessionStorage 持久化（persist / restore）
+  - handoff.ts 会话切换与摘要交接
+  - keyboard.ts 快捷键绑定（bindKeyboard / unbindKeyboard）
+  - hooks.ts 生命周期 hook（runHook）
+  - token-rotate.ts token 估算与自动轮换
+- client/composables/runner/useScriptInbox.ts —— 脚本收件箱（push/consume/applyToEditor）
+- client/composables/runner/inbox-logic.ts —— 纯函数（normalizeForHash / parseMeta），带单测
+
+约定：拆分后主入口保留 re-export（如 export { persist } from ./auto-loop/persist.js），
+以便 handoff.ts 等循环依赖方继续从 useAutoLoop.js 引入而无需改动。
+
 ## 脚本入口
 
 - 开发
@@ -73,6 +89,15 @@
   - pnpm start bin/air-server.cjs（检测 src 变化，必要时先 build）
   - pnpm session:start
   - pnpm recover
+
+## 常用命令清单
+
+- 全量测试：`pnpm test:unit`
+- 类型检查：`pnpm tsc --noEmit`
+- 客户端类型检查：`pnpm tsc:client`（vue-tsc）
+- Lint 修复：`pnpm lint --fix`
+- 端到端：`pnpm test:e2e`
+- 全量回归：`pnpm run-all`
 
 ## 开发与运行
 
@@ -129,7 +154,7 @@
 
 - node --check 每个改动的 .cjs
 - pnpm tsc
-- pnpm lint
+- pnpm lint:fix
 - pnpm test:unit
 - git status 确认 .ai-runner/ 运行态文件未混入
 

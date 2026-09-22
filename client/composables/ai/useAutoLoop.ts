@@ -1,6 +1,5 @@
 import { computed, ref, watch } from 'vue'
 import { useAiWaiting } from './useAiWaiting.js'
-import type { Ref } from 'vue'
 import { useRunner } from '../runner/useRunner'
 import { getActiveWin } from './useDeepseekUrl'
 import { getTransport } from './useAiTransport.js'
@@ -35,6 +34,14 @@ import { runHook } from './auto-loop/hooks.js'
 
 import { autoRotateSession, setTokenEstimate } from './auto-loop/token-rotate.js'
 
+// AIRUNNER-BATCH5-0A-TYPES-SPLIT
+import type { AiReply, LoopInstance, LoopState, RoundOutcome, StopRequest } from './auto-loop/types.js'
+import { persist, restore } from './auto-loop/persist.js'
+// AIRUNNER-BATCH5-0D-PERSIST
+export type { HookEvent, HookResult } from './auto-loop/hooks.js'
+
+export { bindKeyboard, unbindKeyboard } from './auto-loop/keyboard.js'
+
 // 传输层分流：tampermonkey | headless（见 useAiTransport.ts）
 const transport = getTransport()
 const { niumaMode, loopPaused, startWaiting } = useAiWaiting()
@@ -50,35 +57,7 @@ const { niumaMode, loopPaused, startWaiting } = useAiWaiting()
 //                          └──────────────── 任意熔断 ──▶ stopped / interrupted ◀──┘
 // ============================================================================
 
-export type LoopState
-  = | 'idle' // 从未开始
-    | 'running' // 循环进行中（初始化/发送首轮）
-    | 'preparing'
-    | 'waiting' // 已 fill，等 AI 回复
-    | 'parsing' // 收到脚本，校验中
-    | 'executing' // 脚本执行中（cjs /run 或 bash /exec）
-    | 'feedback' // 回填结果给 AI
-    | 'stopped' // 自然终止（done / 熔断）
-    | 'interrupted' // 用户中断（暂停/急停/回滚）
-    | 'handoff'
-    | 'budget-limited'
-    | 'waiting-input' // 决策点（PLAN C.9）
-    | 'preparing' // 打开 AI 窗口前（PLAN E.3）
-
-export type StopRequest = 'none' | 'pause' | 'kill' | 'rollback'
-
-export interface AiReply {
-  kind: 'script' | 'done' | 'plain' | 'multi'
-  /** kind=script 时有效 */
-  item?: InboxItem
-  /** kind=multi 时：新代码块数量 */
-  count?: number
-  /** kind=done 时可选携带原 text，用于服务端二次校验 isStrictDone */
-  text?: string
-}
-
 // —— 熔断参数集中在 loopLogic.ts（带单测），此处仅持久化 key ——
-const STORAGE_KEY = '__ai_runner_loop'
 
 // —— 模块级单例状态（步骤 2：被 singletonView 包装；步骤 3 起多实例后仅作单例 fallback） ——
 const loopState = ref<LoopState>('idle')
@@ -116,48 +95,10 @@ const roundTimeoutMs = ref(LOOP_ROUND_TIMEOUT_MS)
 // 单对话模式：全局只有 singletonView 一份实例，inst 参数仅作函数签名一致性
 // ============================================================================
 
-// RoundOutcome 原位于 afterRound 区，提前到模块级供 LoopInstance 引用
-interface RoundOutcome {
-  lang: 'js' | 'cjs' | 'bash'
-  desc: string
-  exit: number
-  ok: boolean
-  stdout: string
-  stderr: string
-  changeCount: number
-  changedFiles: string[]
-  fingerprints?: Array<{ file: string, line: number, symbol: string, kind: string }>
-}
-
 /**
  * 循环实例的完整状态。单对话模式：全局只有 singletonView 一份实例，
  * inst 参数保留用于函数签名一致性，运行时指向同一份 singletonView。
  */
-export interface LoopInstance {
-  state: Ref<LoopState>
-  id: Ref<string>
-  round: Ref<number>
-  stallRounds: Ref<number>
-  lastFpKey: Ref<string>
-  fpStallCount: Ref<number>
-  goal: Ref<string>
-  startCommit: Ref<string>
-  startTokens: Ref<number>
-  latestTokens: Ref<number>
-  toleranceLeft: Ref<number>
-  stopRequest: Ref<StopRequest>
-  stopReason: Ref<string>
-  lastHash: Ref<string>
-  lastExec: Ref<{ lang: string, exit: number, changes: number, durationMs: number } | null>
-  waitingStartedAt: Ref<number>
-  waitingElapsed: Ref<number>
-  roundTimeoutMs: Ref<number>
-  pendingRound: Ref<RoundOutcome | null>
-  /** 定时器句柄（非响应式，随实例生命周期） */
-  roundTimer: ReturnType<typeof setTimeout> | null
-  waitingTicker: ReturnType<typeof setInterval> | null
-  handoffTimer: ReturnType<typeof setTimeout> | null
-}
 
 /**
  * 单例视图：把模块级 ref 包装成 LoopInstance 形状的静态对象。
@@ -212,53 +153,6 @@ export const isLoopActive = computed(() => isInstActive(activeLoop.value))
 // ============================================================================
 // 持久化（v6 §11.4）：刷新后不自动续跑（activeWin 引用已失效）→ 恢复为 stopped
 // ============================================================================
-interface PersistShape {
-  loopId: string
-  loopGoal: string
-  loopRound: number
-  loopStartCommit: string
-  loopStartTokens: number
-  stopReason: string
-  state: LoopState
-}
-
-export function persist(inst: LoopInstance) {
-  if (inst.state.value === 'idle') {
-    try { sessionStorage.removeItem(STORAGE_KEY) } catch { }
-    return
-  }
-  const snap: PersistShape = {
-    loopId: inst.id.value,
-    loopGoal: inst.goal.value,
-    loopRound: inst.round.value,
-    loopStartCommit: inst.startCommit.value,
-    loopStartTokens: inst.startTokens.value,
-    stopReason: inst.stopReason.value,
-    state: inst.state.value,
-  }
-  try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snap)) } catch { }
-}
-
-function restore(inst: LoopInstance) {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY)
-    if (!raw) return
-    const snap = JSON.parse(raw) as PersistShape
-    // 活动中的循环在刷新后无法续跑（窗口引用丢失）→ 标记 stopped 供用户查看
-    const activeStates: LoopState[] = ['running', 'waiting', 'parsing', 'executing', 'feedback']
-    if (activeStates.includes(snap.state)) {
-      inst.id.value = snap.loopId
-      inst.goal.value = snap.loopGoal
-      inst.round.value = snap.loopRound
-      inst.startCommit.value = snap.loopStartCommit
-      inst.startTokens.value = snap.loopStartTokens
-      // [U4] 携带进度信息，方便用户判断是否「再来一次」
-      inst.stopReason.value = `页面刷新中断 · 已完成 ${snap.loopRound} 轮 · 可点「再来一次」继续`
-      inst.state.value = 'stopped'
-      persist(inst)
-    }
-  } catch { }
-}
 restore(singletonView)
 
 // ============================================================================
@@ -1196,6 +1090,6 @@ function submitDecision(id: string, customText?: string): void {
 export { onNewSessionCreated, onSummary, startHandoff, SUMMARY_INSTRUCTION }
 export { autoRotateSession, setTokenEstimate }
 
-export type { HookEvent, HookResult } from './auto-loop/hooks.js'
+export { persist } from './auto-loop/persist.js' // AIRUNNER-BATCH5-0D-PERSIST-compat
 
-export { bindKeyboard, unbindKeyboard } from './auto-loop/keyboard.js'
+export type { AiReply, LoopInstance, LoopState, RoundOutcome, StopRequest } from './auto-loop/types.js'

@@ -59,7 +59,7 @@ export interface TraceEntry {
 }
 
 const STORAGE_KEY = '__ai_trace_log'
-const MAX_ENTRIES = 200
+const MAX_ENTRIES = 1500
 const MAX_BYTES = 1_000_000
 
 function load(): TraceEntry[] {
@@ -86,7 +86,25 @@ function persistNow() {
     }
     localStorage.setItem(STORAGE_KEY, json)
     if (list.length !== entries.value.length) entries.value = list
-  } catch { }
+  } catch (e) {
+    // AIRUNNER-TRACE-QUOTA-FIX
+    // localStorage 写入失败兜底：quota 满或不可序列化时，自动淘汰最旧记录
+    const isQuota = e instanceof DOMException
+      && (e.name === 'QuotaExceededError' || (e as DOMException).code === 22)
+    if (isQuota) {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const keep = Math.max(10, Math.floor(entries.value.length * 0.75))
+        if (keep >= entries.value.length) break
+        entries.value = entries.value.slice(0, keep)
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.value))
+          console.warn(`[trace-log] quota 已满，自动淘汰至 ${keep} 条`)
+          return
+        } catch { /* retry with fewer */ }
+      }
+    }
+    console.warn('[trace-log] persist 失败:', e)
+  }
 }
 function persist() {
   if (persistTimer) return

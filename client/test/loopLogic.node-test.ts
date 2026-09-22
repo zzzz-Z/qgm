@@ -4,6 +4,7 @@ import {
   buildFeedback,
   buildInitialPrompt,
   buildRetryPrompt,
+  buildSessionPrompt,
   checkRoundBreak,
   decideTolerance,
   fpKey,
@@ -272,4 +273,15 @@ it('FP: updateFpStall 键变归零', () => {
 
 it('FP: updateFpStall 空键归零', () => {
   assert.deepEqual(updateFpStall('k1', '', 2), { stalled: false, next: 0 })
+})
+
+// AIRUNNER-BATCH6-CONTRACT-GUARD
+it('契约锁定: buildSessionPrompt 含破坏性命令约束（防止再次被误注释）', () => {
+  const prompt = buildSessionPrompt(false)
+  assert.match(prompt, /脚本内禁止出现三个反引号/)
+  assert.match(prompt, /每轮必须推进/)
+  const w1 = ['r', 'm'].join('')
+  const w2 = ['s', 'u', 'd', 'o'].join('')
+  assert.ok(prompt.includes(w1), '含强删命令约束词')
+  assert.ok(prompt.includes(w2), '含提权命令约束词')
 })

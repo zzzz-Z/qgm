@@ -225,7 +225,7 @@ function confirmClear() {
     <header class="trace-bar">
       <div class="trace-title-row">
         <span class="trace-title">会话记录</span>
-        <span class="trace-total">{{ counts.total }} / {{ MAX_ENTRIES }}</span>
+        <span class="trace-total">{{ entries.length }} / {{ MAX_ENTRIES }}</span>
         <span class="trace-breakdown">
           <span class="t-pill run">成功 {{ counts.success }}</span>
           <span class="t-pill fail">失败 {{ counts.fail }}</span>

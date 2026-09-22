@@ -1,7 +1,40 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { BINARY_EXT, EXCLUDE_DIRS, EXCLUDE_PREFIX, LOGS_DIR, ROOT, RUNS_DIR, SCRIPTS_DIR } from '../config.js'
 import type { Change, Manifest, RunLogEntry } from '../config.js'
+// AIRUNNER-BATCH4-3A-INLINE-CONST
+// 从 src/config.ts 内联常量；strip-types 无法解析 .js 后缀 import（T6）。
+// 可变路径用 getter（config.setRoot 会写 AI_RUNNER_ROOT 到 env；避免 ESM 常量快照）。
+const getRoot = (): string => process.env.AI_RUNNER_ROOT || process.cwd()
+const getRunsDir = (): string => path.join(getRoot(), '.ai-runner/runs')
+const getScriptsDir = (): string => path.join(getRoot(), '.ai-runner/scripts')
+const getLogsDir = (): string => path.join(getRoot(), '.ai-runner/logs')
+const EXCLUDE_DIRS = new Set(['node_modules', '.git', 'dist', '.vite', '.turbo', '.cache'])
+const EXCLUDE_PREFIX = ['.ai-runner']
+const BINARY_EXT = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.ico',
+  '.svg',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.eot',
+  '.mp3',
+  '.mp4',
+  '.webm',
+  '.zip',
+  '.gz',
+  '.tar',
+  '.pdf',
+  '.xls',
+  '.xlsx',
+  '.doc',
+  '.docx',
+])
 
 export function isExcluded(rel: string): boolean {
   if (EXCLUDE_PREFIX.some(p => rel === p || rel.startsWith(`${p}/`))) return true
@@ -38,7 +71,7 @@ export function scanMeta(): Map<string, FileMeta> {
     for (const ent of entries) {
       if (ent.name.startsWith('.')) continue
       const full = path.join(dir, ent.name)
-      const rel = path.relative(ROOT, full)
+      const rel = path.relative(getRoot(), full)
       if (isExcluded(rel)) continue
       let stat: fs.Stats
       try { stat = fs.statSync(full) } catch { continue }
@@ -48,7 +81,7 @@ export function scanMeta(): Map<string, FileMeta> {
       }
     }
   }
-  walk(ROOT)
+  walk(getRoot())
   return meta
 }
 
@@ -62,7 +95,7 @@ export function snapshot(): SnapshotData {
     for (const ent of entries) {
       if (ent.name.startsWith('.')) continue
       const full = path.join(dir, ent.name)
-      const rel = path.relative(ROOT, full)
+      const rel = path.relative(getRoot(), full)
       if (isExcluded(rel)) continue
       let stat: fs.Stats
       try { stat = fs.statSync(full) } catch { continue }
@@ -73,7 +106,7 @@ export function snapshot(): SnapshotData {
       }
     }
   }
-  walk(ROOT)
+  walk(getRoot())
   return { contents, meta }
 }
 
@@ -93,7 +126,7 @@ export function diffMeta(
     const am = afterMeta.get(p)
     if (!bm && am) {
       let after = ''
-      try { after = fs.readFileSync(path.join(ROOT, p), 'utf8') } catch { /* ignore */ }
+      try { after = fs.readFileSync(path.join(getRoot(), p), 'utf8') } catch { /* ignore */ }
       out.push({ path: p, type: 'added', afterLines: countLines(after) })
     }
     else if (bm && !am) {
@@ -101,7 +134,7 @@ export function diffMeta(
     }
     else if (bm && am && (bm.size !== am.size || bm.mtimeMs !== am.mtimeMs || bm.ino !== am.ino)) {
       let after = ''
-      try { after = fs.readFileSync(path.join(ROOT, p), 'utf8') } catch { /* ignore */ }
+      try { after = fs.readFileSync(path.join(getRoot(), p), 'utf8') } catch { /* ignore */ }
       if (before.get(p) !== after) {
         out.push({ path: p, type: 'modified', afterLines: countLines(after) })
       }
@@ -121,9 +154,9 @@ const LOG_KEEP_DAYS = 30
 function gcLogs() {
   try {
     const cutoff = Date.now() - LOG_KEEP_DAYS * 86400000
-    for (const name of fs.readdirSync(LOGS_DIR)) {
+    for (const name of fs.readdirSync(getLogsDir())) {
       if (!name.endsWith('.jsonl')) continue
-      const p = path.join(LOGS_DIR, name)
+      const p = path.join(getLogsDir(), name)
       try {
         if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p)
       } catch { }
@@ -131,28 +164,28 @@ function gcLogs() {
   } catch { }
 }
 export function ensureDirs() {
-  fs.mkdirSync(RUNS_DIR, { recursive: true })
-  fs.mkdirSync(SCRIPTS_DIR, { recursive: true })
-  fs.mkdirSync(LOGS_DIR, { recursive: true })
+  fs.mkdirSync(getRunsDir(), { recursive: true })
+  fs.mkdirSync(getScriptsDir(), { recursive: true })
+  fs.mkdirSync(getLogsDir(), { recursive: true })
   gcLogs()
 }
 
 export function runDir(runId: string) {
-  return path.join(RUNS_DIR, runId)
+  return path.join(getRunsDir(), runId)
 }
 
 export function gcSnapshots(keep: number) {
   try {
-    const entries = fs.readdirSync(RUNS_DIR)
+    const entries = fs.readdirSync(getRunsDir())
       .filter(n => !n.startsWith('.'))
       .map((n) => {
-        try { return { name: n, mtime: fs.statSync(path.join(RUNS_DIR, n)).mtimeMs } }
+        try { return { name: n, mtime: fs.statSync(path.join(getRunsDir(), n)).mtimeMs } }
         catch { return null }
       })
       .filter((x): x is { name: string, mtime: number } => x !== null)
       .sort((a, b) => b.mtime - a.mtime)
     for (let i = keep; i < entries.length; i++) {
-      fs.rmSync(path.join(RUNS_DIR, entries[i].name), { recursive: true, force: true })
+      fs.rmSync(path.join(getRunsDir(), entries[i].name), { recursive: true, force: true })
     }
   } catch { /* ignore */ }
 }
@@ -184,9 +217,9 @@ export function readManifest(runId: string): Manifest | null {
 
 export function writeRunLog(entry: RunLogEntry) {
   try {
-    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.mkdirSync(getLogsDir(), { recursive: true })
     const date = new Date().toISOString().slice(0, 10)
-    const file = path.join(LOGS_DIR, `${date}.jsonl`)
+    const file = path.join(getLogsDir(), `${date}.jsonl`)
     fs.appendFileSync(file, `${JSON.stringify(entry)}\n`)
   } catch { /* ignore */ }
 }

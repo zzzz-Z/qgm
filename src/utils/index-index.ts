@@ -1,6 +1,35 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { BINARY_EXT, EXCLUDE_DIRS, EXCLUDE_PREFIX, ROOT } from '../config.js'
+// AIRUNNER-BATCH4-2A-INLINE-CONST
+// 从 src/config.ts 内联；strip-types 无法解析 .js 后缀 import（T6）；改常量需同步 config.ts
+const ROOT = process.env.AI_RUNNER_ROOT || process.cwd()
+const EXCLUDE_DIRS = new Set(['node_modules', '.git', 'dist', '.vite', '.turbo', '.cache'])
+const EXCLUDE_PREFIX = ['.ai-runner']
+const BINARY_EXT = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.ico',
+  '.svg',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.eot',
+  '.mp3',
+  '.mp4',
+  '.webm',
+  '.zip',
+  '.gz',
+  '.tar',
+  '.pdf',
+  '.xls',
+  '.xlsx',
+  '.doc',
+  '.docx',
+])
 
 export interface FileIndex {
   inode: number

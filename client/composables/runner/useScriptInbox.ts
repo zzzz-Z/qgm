@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { fnv1a8 } from '../../utils/hash'
 import { useRunner } from './useRunner'
 import { toast } from '../ui/useToast'
+import { normalizeForHash, parseMeta } from './inbox-logic' // AIRUNNER-BATCH5-0C-INBOX-LOGIC
 
 export interface InboxItem {
   id: string
@@ -27,23 +28,6 @@ export interface InboxItem {
  * 这样「等价变形」（仅注释/空白差异）能识别为同一脚本，
  * 避免通过改注释绕过「连续两轮相同」的重复判定。
  */
-function normalizeForHash(code: string): string {
-  return String(code ?? '')
-    .split('\n')
-    .map(l => l.trim())
-    .filter((l) => {
-      if (!l) return false
-      // shebang 行
-      if (l.startsWith('#!')) return false
-      // cjs/js 注释
-      if (l.startsWith('//')) return false
-      // bash 注释（也覆盖 #!）
-      if (l.startsWith('#')) return false
-      return true
-    })
-    .map(l => l.replace(/\s+/g, ''))
-    .join('')
-}
 
 const inbox = ref<InboxItem[]>([])
 /** 上次自动填入编辑器的内容；用于覆盖保护策略判断 */
@@ -53,18 +37,6 @@ let lastAutoFilled = ''
  * 解析 AI 回复中首部的 @desc / @why 元注释（与 src/index.ts parseScriptMeta 对齐）。
  * cjs 用 //，bash 用 #。
  */
-function parseMeta(code: string, lang: 'js' | 'cjs' | 'bash'): { desc: string, why: string } {
-  const out = { desc: '', why: '' }
-  const re = (lang === 'cjs' || lang === 'js')
-    ? /^[^\S\n]*\/\/[^\S\n]*@(desc|why)[^\S\n]*:[^\S\n]*(\S[^\n]*)$/gm
-    : /^[^\S\n]*#[^\S\n]*@(desc|why)[^\S\n]*:[^\S\n]*(\S[^\n]*)$/gm
-  let m: RegExpExecArray | null
-  while ((m = re.exec(code)) !== null) {
-    const k = m[1] === 'desc' ? 'desc' : 'why'
-    if (!out[k]) out[k] = m[2].trim().slice(0, 200)
-  }
-  return out
-}
 
 export interface PushOptions {
   code: string

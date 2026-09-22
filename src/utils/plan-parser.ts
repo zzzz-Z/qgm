@@ -1,7 +1,7 @@
 /* eslint-disable regexp/no-super-linear-backtracking, regexp/optimal-quantifier-concatenation -- markdown 任务行解析正则，复杂度固有 */
 import fs from 'node:fs'
 import path from 'node:path'
-import { ROOT } from '../config.js'
+// AIRUNNER-BATCH4-1B-NO-CONFIG
 
 export interface PlanTask {
   title: string
@@ -19,7 +19,8 @@ export interface PlanTask {
  * 找不到「## 二、待办」章节时返回空数组。
  */
 export function parsePlanTodo(planPath?: string): PlanTask[] {
-  const p = planPath || path.join(ROOT, 'PLAN.md')
+  const base = process.env.AIR_ROOT || process.cwd()
+  const p = planPath || path.join(base, 'PLAN.md')
   let src = ''
   try { src = fs.readFileSync(p, 'utf8') } catch { return [] }
   const lines = src.split('\n')
