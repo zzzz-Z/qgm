@@ -2,6 +2,10 @@ minimumReleaseAgeExcludePrune: true
 # [recover] 临时放开（原 no-downgrade 拦截 undici-types@6.21.0）
 
 trustPolicy: no-downgrade
+# pnpm-workspace.yaml
+trustPolicyExclude:
+  - undici-types@6.21.0
+
 shellEmulator: true
 
 allowBuilds:

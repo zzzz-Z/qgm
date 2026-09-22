@@ -1,27 +1,18 @@
 // tsc 定向类型检查
 import fs from 'node:fs'
 import path from 'node:path'
-import { getRoot } from '../config.js'
-import type { Change } from '../config.js'
 import { runProcess } from '../process/proc.js'
+// AIRUNNER-BATCH10-3B-SPLIT-TARGETS: 类型与 root 派生已内联/外移，解除对 config.js 的依赖（strip-types 可加载）
+
+function getRoot(): string {
+  return process.env.AI_RUNNER_ROOT || process.env.AIR_ROOT || process.cwd()
+}
 
 async function runCmd(cmd: string, args: string[], timeoutMs = 60_000): Promise<{ code: number, stdout: string, stderr: string }> {
   const r = await runProcess(cmd, { args, cwd: getRoot(), timeoutMs })
   return { code: r.code, stdout: r.stdout, stderr: r.stderr }
 }
-export const TSC_EXTS = new Set(['.ts', '.tsx', '.vue', '.mts', '.cts'])
-
-// pickTscTargets 排除测试文件：e2e/spec/test 归 playwright / node:test 管，不走根 tsconfig
-export const TSC_SKIP_DIRS = ['client/e2e/', 'e2e/', 'test/', 'tests/']
-const TSC_SKIP_RE = /\.(?:spec|test)\.(?:ts|tsx|mts|cts|vue)$/
-export function pickTscTargets(changes: Change[]): string[] {
-  return changes
-    .filter(c => c.type !== 'deleted')
-    .map(c => c.path)
-    .filter(p => TSC_EXTS.has(path.extname(p).toLowerCase()) || path.extname(p).toLowerCase() === '.vue')
-    .filter(p => !TSC_SKIP_DIRS.some(d => p.startsWith(d)))
-    .filter(p => !TSC_SKIP_RE.test(p))
-}
+export { pickTscTargets, TSC_EXTS, TSC_SKIP_DIRS } from './tsc-targets.js'
 
 export async function runTsc(
   targets: string[],

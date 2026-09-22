@@ -3,7 +3,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { getRoot } from '../config.js'
+// AIRUNNER-BATCH10-7-INLINE-ROOT: 内联 root 派生，解除 config.js 依赖（strip-types 可加载）
+function getRoot(): string {
+  return process.env.AI_RUNNER_ROOT || process.env.AIR_ROOT || process.cwd()
+}
 // [A13] 规则文件 hash：让 compliance 报告可按规则版本分组
 let _rulesHashCache: string | null = null
 // skills 变更后清缓存

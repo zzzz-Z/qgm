@@ -1,19 +1,14 @@
+// AIRUNNER-BATCH10-4-SPLIT-LINT
 // eslint 检测与执行
 import fs from 'node:fs'
 import path from 'node:path'
 import { getRoot } from '../config.js'
-import type { Change } from '../config.js'
 import { detectPackageManager, runProcess } from '../process/proc.js'
 /** 支持 eslint 处理的源文件扩展名 */
-export const LINT_EXTS = new Set(['.ts', '.tsx', '.vue', '.js', '.jsx', '.mjs', '.cjs'])
+// AIRUNNER-BATCH10-4-SPLIT-LINT: LINT_EXTS 已移至 lint-targets.ts
 
 /** 从 changes 里挑出需要 lint 的源文件（排除已删除的） */
-export function pickLintTargets(changes: Change[]): string[] {
-  return changes
-    .filter(c => c.type !== 'deleted')
-    .map(c => c.path)
-    .filter(p => LINT_EXTS.has(path.extname(p).toLowerCase()))
-}
+export { LINT_EXTS, pickLintTargets } from './lint-targets.js'
 
 /** 项目是否有 eslint 配置（无配置不跑，避免 eslint 初始化向导） */
 export function hasEslint(): boolean {

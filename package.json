@@ -50,12 +50,14 @@
     "lint:fix": "eslint . --fix",
     "tsc": "tsc -p tsconfig.json --noEmit",
     "tsc:client": "vue-tsc -p tsconfig.client.json --noEmit",
-    "test:unit": "node --test --experimental-strip-types client/test/*.node-test.ts src/*.test.cjs src/process/*.test.cjs src/utils/*.node-test.ts src/state/*.node-test.ts src/post-run/*.node-test.ts",
+    "test:unit": "vitest run --config vitest.config.ts",
     "test:e2e": "playwright test --config client/playwright.config.ts",
     "verify": "pnpm tsc && pnpm lint:fix && pnpm test:unit",
     "check-regression": "node bin/check-regression.cjs check",
     "run-all": "node bin/run-all.cjs",
-    "recover": "node bin/recover.cjs"
+    "recover": "node bin/recover.cjs",
+    "test:unit:node": "node --test src/hclc-guard.test.cjs src/interceptor.test.cjs src/process/proc.test.cjs",
+    "test:watch": "vitest --config vitest.config.ts"
   },
   "peerDependencies": {
     "vite": ">=5"
@@ -79,6 +81,7 @@
     "gpt-tokenizer": "^3.0.0",
     "highlight.js": "^11.12.0",
     "unocss": "^66.10.5",
+    "vitest": "^5.0.1",
     "vue": "^3.5.42",
     "ws": "^8.21.3"
   },

@@ -2,7 +2,7 @@
 // @desc Characterization Test for inbox-logic (normalizeForHash + parseMeta)
 // @why 锁定抽取后行为：空行/注释剔除、去空白、@desc/@why 首值截断语义
 
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { normalizeForHash, parseMeta } from '../composables/runner/inbox-logic.ts'
 

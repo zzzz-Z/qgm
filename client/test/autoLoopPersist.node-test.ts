@@ -2,7 +2,7 @@
 // @desc Characterization Test for auto-loop/persist.ts（persist + restore）
 // @why 锁定抽取后行为：idle 清 key；活动态刷新后降级 stopped 且写提示；非活动态不触碰实例
 
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import type { LoopInstance } from '../composables/ai/auto-loop/types.ts'
 import { persist, restore } from '../composables/ai/auto-loop/persist.ts'

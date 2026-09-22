@@ -1,7 +1,8 @@
+// AIRUNNER-BATCH20-4-FIX-SUFFIX: 补 .js 后缀（strip-types 不重写 import 路径）
 import { computed, ref } from 'vue'
-import { estimateTokens } from '../../utils/tokenEstimator'
-import { toast } from '../ui/useToast'
-import { useTraceLog } from '../ui/useTraceLog'
+import { estimateTokens } from '../../utils/tokenEstimator.js'
+import { toast } from '../ui/useToast.js'
+import { useTraceLog } from '../ui/useTraceLog.js'
 
 export interface Message {
   role: 'user' | 'assistant' | 'system'

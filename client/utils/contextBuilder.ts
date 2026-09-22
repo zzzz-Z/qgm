@@ -52,22 +52,8 @@ export function buildFullContext(files: ContextFile[], opts: CleanOptions): stri
   }
   return out.join('\n')
 }
-export function parseErrorLocations(text: string): Map<string, Set<number>> {
-  const out = new Map<string, Set<number>>()
-  const re = /(?:\/|[A-Za-z]:[\\/])?[\w./\\@-]+\.(?:ts|tsx|js|jsx|mjs|cjs|vue):(\d+)(?::(\d+))?/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) {
-    const p = m[1].replace(/\\/g, '/')
-    if (p.includes('node_modules')) continue
-    if (p.startsWith('node:')) continue
-    const n = Number(m[2])
-    if (!Number.isFinite(n) || n <= 0) continue
-    let set = out.get(p)
-    if (!set) { set = new Set(); out.set(p, set) }
-    set.add(n)
-  }
-  return out
-}
+// AIRUNNER-BATCH16-3-SPLIT-ERR-LOCS: 实现已外移至 context-error-locations.ts
+export { parseErrorLocations } from './context-error-locations.js'
 export function buildErrorContext(
   files: ContextFile[],
   errorLocations: Map<string, Set<number>>,

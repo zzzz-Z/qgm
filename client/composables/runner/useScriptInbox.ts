@@ -1,5 +1,6 @@
 import { ref } from 'vue'
-import { fnv1a8 } from '../../utils/hash'
+// AIRUNNER-BATCH20-2-FIX-HASH-SUFFIX: 补 .js 后缀
+import { fnv1a8 } from '../../utils/hash.js'
 import { useRunner } from './useRunner'
 import { toast } from '../ui/useToast'
 import { normalizeForHash, parseMeta } from './inbox-logic' // AIRUNNER-BATCH5-0C-INBOX-LOGIC

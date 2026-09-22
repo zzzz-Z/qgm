@@ -1,39 +1,20 @@
-import fs from 'node:fs'
+// AIRUNNER-BATCH11-1-HOOKS-CONFIG: 类型与配置加载已外移至 hooks-config.ts；此文件保留 runHook 执行编排
 import path from 'node:path'
 import { ROOT } from '../config.js'
 import { runProcess } from '../process/proc.js'
+import type { HookEvent, HookResult } from './hooks-config.js'
+import { loadHooksConfig } from './hooks-config.js'
 
-export type HookEvent = 'BeforeFill' | 'BeforeScript' | 'AfterScript' | 'AfterResult' | 'LoopStop'
-
-export interface HookDef {
-  command: string
-  onFail?: 'reject' | 'warn'
-}
-
-export interface HookResult {
-  event: HookEvent
-  action: 'ok' | 'reject'
-  reason?: string
-  hooksRun: number
-}
+export type { HookDef, HookEvent, HookResult } from './hooks-config.js'
 
 const CONFIG_PATH = path.join(ROOT, '.ai-runner/hooks.json')
 const HOOK_TIMEOUT_MS = 5000
 
-function loadHooksConfig(): Record<string, HookDef[]> {
-  try {
-    if (!fs.existsSync(CONFIG_PATH)) return {}
-    const raw = fs.readFileSync(CONFIG_PATH, 'utf8')
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return {}
-    return parsed as Record<string, HookDef[]>
-  } catch {
-    return {}
-  }
-}
+// 配置加载已外移至 hooks-config.ts；此处只传路径
+const readConfig = () => loadHooksConfig(CONFIG_PATH)
 
 export async function runHook(event: HookEvent, payload: unknown): Promise<HookResult> {
-  const cfg = loadHooksConfig()
+  const cfg = readConfig()
   const hooks = Array.isArray(cfg[event]) ? cfg[event] : []
   if (!hooks.length) return { event, action: 'ok', hooksRun: 0 }
 

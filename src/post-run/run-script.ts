@@ -2,6 +2,7 @@
 import { fileURLToPath } from 'node:url'
 import { getRoot } from '../config.js'
 import { runProcess } from '../process/proc.js'
+import { buildWrapperCode } from './run-script-wrapper.js'
 
 export interface RunResult {
   code: number
@@ -11,18 +12,7 @@ export interface RunResult {
 
 export async function runScript(scriptPath: string, timeoutMs = 60_000, signal?: AbortSignal, overlayPath?: string, toolLogPath?: string, onChunk?: (stream: 'stdout' | 'stderr', data: string) => void, sandbox?: string): Promise<RunResult> {
   // 全局错误捕获 wrapper（console 走原生输出，拦截器负责文件 API，无需包裹）
-  const wrapperCode = `
-    process.on('uncaughtException', (e) => {
-      console.error('[uncaughtException]', e?.stack || e);
-      process.exitCode = 1;
-    });
-    process.on('unhandledRejection', (e) => {
-      console.error('[unhandledRejection]', e?.stack || e);
-      process.exitCode = 1;
-    });
-    try { require(${JSON.stringify(scriptPath)}); }
-    catch(e) { console.error('[script error]', e?.stack || e); process.exitCode = 1; }
-  `
+  const wrapperCode = buildWrapperCode(scriptPath) // AIRUNNER-BATCH11-4-WRAPPER
   // src/post-run/ 或 dist/post-run/ 都回 ../../
   const interceptorCjs = fileURLToPath(new URL('../interceptor.cjs', import.meta.url))
   const helpersCjs = fileURLToPath(new URL('../helpers.cjs', import.meta.url))
