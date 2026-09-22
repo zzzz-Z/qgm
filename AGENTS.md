@@ -1,3 +1,6 @@
+<!-- AIRUNNER-BATCH25-3-DOCS-L20 -->
+<!-- AIRUNNER-BATCH25-2-DOCS-VITEST: 同步 batch21-24 迁移后的测试工具链 -->
+
 # AGENTS.md
 
 > 面向 AI 与协作者的仓库约定。会话首条应读此文件，再动手。
@@ -16,7 +19,7 @@
 - 后端：Node 原生 http + WebSocket；dev 由 Vite 中间件承载，prod 由 bin/air-server.cjs 独立壳托管
 - 类型：TypeScript，module=NodeNext，target=ES2022，strict
 - Lint：ESLint（eslint.config.ts）
-- 测试：node:test（单元）+ Playwright（E2E）
+- 测试：vitest（单元）+ Playwright（E2E）
 
 ## 目录结构（一级）
 
@@ -36,7 +39,7 @@
 - client/
   - client/components/ UI 组件（按域分子目录）
   - client/composables/ Vue 组合式函数（ai/runner/ui/data）
-  - client/test/ 单元测试
+  - test/web/ 前端单元测试（client 侧）；test/server/ 后端单元测试（src 侧）
   - client/main.ts SPA 入口
   - client/App.vue 根组件
 - bin/
@@ -80,7 +83,8 @@
   - pnpm lint eslint .
   - pnpm lint:fix eslint . --fix
   - pnpm tsc tsc --noEmit
-  - pnpm test:unit node:test
+  <!-- AIRUNNER-BATCH28-DOCS-SYNC-AGENTS -->
+- pnpm test:unit vitest（+ test:tsc 类型检查）
   - pnpm test:e2e Playwright
   - pnpm verify tsc + lint + test:unit
   - pnpm check-regression

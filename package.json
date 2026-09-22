@@ -56,8 +56,8 @@
     "check-regression": "node bin/check-regression.cjs check",
     "run-all": "node bin/run-all.cjs",
     "recover": "node bin/recover.cjs",
-    "test:unit:node": "node --test src/hclc-guard.test.cjs src/interceptor.test.cjs src/process/proc.test.cjs",
-    "test:watch": "vitest --config vitest.config.ts"
+    "test:watch": "vitest --config vitest.config.ts",
+    "test:tsc": "tsc -p tsconfig.test.json --noEmit"
   },
   "peerDependencies": {
     "vite": ">=5"

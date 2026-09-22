@@ -23,7 +23,6 @@
   "exclude": [
     "client/node_modules",
     "client/dist",
-    "client/test",
     "client/e2e",
     "client/test-results",
     "client/playwright-report"

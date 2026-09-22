@@ -1,3 +1,4 @@
+<!-- AIRUNNER-BATCH28-DOCS-SYNC-README -->
 # @qgm/vite-plugin-ai-runner
 
 Vite **dev-only** 插件 + Vue 3 SPA：在开发服务器里嵌入一个「AI 辅助开发工作台」，把**脚本沙盒执行、文件 diff / 回滚、工程化预检、prompt 组装、AI 会话**一站式打通。
@@ -108,7 +109,7 @@ export DEEPSEEK_API_KEY=sk-xxxx
 1. **eslint --fix**：仅对本次改动的 `.ts/.tsx/.vue/.js/...` 文件；项目无 eslint 配置则跳过
 2. **快照 diff**：eslint 可能再改文件，用最终快照计算净变化（A/M/D + 行数）
 3. **定向 tsc**：生成临时 tsconfig，只检查变更文件；有 `vue-tsc` 优先用，否则回退 `tsc`；定向配置失败再回退全量检查
-4. **node:test**：本次新增 / 修改的 `*.test.ts` / `*.spec.ts` 等自动跑（TS 文件走 `--experimental-strip-types`）
+4. **vitest**：本次新增 / 修改的 `*.node-test.ts` 自动跑（Vite 原生转译，无需 `--experimental-strip-types`）
 5. **Playwright 冒烟**（勾选 smoke 时）：headless chromium 访问 `/` 与 `/__ai/`，收集 pageerror / console.error / HTTP ≥400
 6. **Git 保护**（勾选 gitCommit 时）：运行前先 `git add -A && commit` 存档，运行成功后按本次 changes 再提一次（message 含文件清单、exit code、耗时）
 
@@ -221,7 +222,7 @@ client/                       # 工作台 SPA（Vue 3 + CodeMirror 6）
 │                             # useTraceLog / useToast / useTooltip
 ├── utils/                    # contextBuilder（prompt 组装）/ tokenEstimator
 ├── e2e/ai-runner.spec.ts     # Playwright e2e
-└── *.node-test.ts            # node:test 单测（codeCleaner / loopLogic / interceptor 拦截器沙盒）
+└── *.node-test.ts          # vitest 单测（test/web/ + test/server/）
 
 bin/                          # 5 个 CLI（见上表）
 skills/
@@ -271,7 +272,7 @@ pnpm typecheck    # 仅类型检查
 pnpm web:dev      # 启动 client 自托管 dev（http://localhost:5174/__ai/，插件 root 指向包根）
 pnpm web:build    # 构建 client
 
-pnpm test:unit    # node:test：codeCleaner / loopLogic / interceptor 拦截器沙盒
+pnpm test:unit    # vitest：49 文件 / 592 用例（test/web + test/server）
 pnpm test:e2e     # Playwright e2e（需先起 dev server）
 pnpm lint         # ESLint（flat config）
 pnpm run-all      # 全量回归（air-run-all）

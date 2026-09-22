@@ -1,11 +1,12 @@
-// AIRUNNER-BATCH22-4-VITEST-CFG: 测试集中到 client/test（batch22 迁移后）
+// AIRUNNER-BATCH26-3-INCLUDE-TEST-TS: include 同时覆盖 .node-test.ts 与 .test.ts
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
     environment: 'node',
     include: [
-      'client/test/**/*.node-test.ts',
+      'test/**/*.node-test.ts',
+      'test/**/*.test.ts',
     ],
     exclude: [
       '**/node_modules/**',

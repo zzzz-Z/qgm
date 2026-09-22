@@ -1,0 +1,28 @@
+// AIRUNNER-BATCH24-5-TSCONFIG-TEST: 覆盖 test/ 下测试文件；独立配置避免与 src 的 rootDir 冲突
+{
+  /* AIRUNNER-TEST-TSC */
+  "compilerOptions": {
+    "target": "ES2022",
+    // AIRUNNER-BATCH24-7-LIB-DOM: 测试 import client/ 代码，需 DOM lib（window / FileReader / RequestInit.cache）
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "noImplicitOverride": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "test/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    // AIRUNNER-BATCH28-DOCS-SYNC-TSTSC: client/test 已删除（batch23）
+    "test/**/*.test.cjs"
+  ]
+}
