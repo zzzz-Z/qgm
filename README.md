@@ -1,4 +1,5 @@
 <!-- AIRUNNER-BATCH28-DOCS-SYNC-README -->
+
 # @qgm/vite-plugin-ai-runner
 
 Vite **dev-only** 插件 + Vue 3 SPA：在开发服务器里嵌入一个「AI 辅助开发工作台」，把**脚本沙盒执行、文件 diff / 回滚、工程化预检、prompt 组装、AI 会话**一站式打通。

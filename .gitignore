@@ -15,3 +15,4 @@ client/e2e/playwright-report/
 .env
 .env.*
 !.env.example
+coverage/

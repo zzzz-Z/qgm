@@ -1,3 +1,4 @@
+<!-- AIRUNNER-BATCH30-VERIFY-DESC -->
 <!-- AIRUNNER-BATCH25-3-DOCS-L20 -->
 <!-- AIRUNNER-BATCH25-2-DOCS-VITEST: 同步 batch21-24 迁移后的测试工具链 -->
 
@@ -84,9 +85,13 @@
   - pnpm lint:fix eslint . --fix
   - pnpm tsc tsc --noEmit
   <!-- AIRUNNER-BATCH28-DOCS-SYNC-AGENTS -->
+
+<!-- AIRUNNER-BATCH31-AGENTS-COV -->
+
 - pnpm test:unit vitest（+ test:tsc 类型检查）
+- pnpm test:coverage 覆盖率报告（需先装 @vitest/coverage-v8）
   - pnpm test:e2e Playwright
-  - pnpm verify tsc + lint + test:unit
+  - pnpm verify tsc + tsc:client + test:tsc + lint + test:unit（5 道闸门）
   - pnpm check-regression
   - pnpm run-all 全流程
 - 运行
@@ -151,7 +156,7 @@
 2. 幂等且可回滚：备份到 .ai-runner/backup/，重复执行安全
 3. 锚点验证：replace 之前必须确认锚点命中；命中数不为 1 时退出码 2
 4. 单轮改动不超过 3 个文件；单轮 stdout 不超过 120 行；单脚本不超过 200 行
-5. 改动后自检：pnpm tsc + pnpm lint + pnpm test:unit（或一把 pnpm verify）
+5. 改动后自检：`pnpm verify`（tsc + tsc:client + test:tsc + lint + test:unit 五道闸门）
 6. 不做清单：不用 bash 写业务逻辑；不手动编辑自动生成文件；不动与任务无关的核心逻辑；不提交敏感配置
 
 ## 提交前闸门

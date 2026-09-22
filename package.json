@@ -52,12 +52,13 @@
     "tsc:client": "vue-tsc -p tsconfig.client.json --noEmit",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:e2e": "playwright test --config client/playwright.config.ts",
-    "verify": "pnpm tsc && pnpm lint:fix && pnpm test:unit",
+    "verify": "pnpm tsc && pnpm tsc:client && pnpm test:tsc && pnpm lint && pnpm test:unit",
     "check-regression": "node bin/check-regression.cjs check",
     "run-all": "node bin/run-all.cjs",
     "recover": "node bin/recover.cjs",
     "test:watch": "vitest --config vitest.config.ts",
-    "test:tsc": "tsc -p tsconfig.test.json --noEmit"
+    "test:tsc": "tsc -p tsconfig.test.json --noEmit",
+    "test:coverage": "vitest run --config vitest.config.ts --coverage"
   },
   "peerDependencies": {
     "vite": ">=5"
@@ -100,6 +101,7 @@
     "@types/ws": "^8.18.1",
     "@unocss/eslint-plugin": "^66.10.5",
     "@vitejs/plugin-vue": "^6.0.9",
+    "@vitest/coverage-v8": "5.0.1",
     "eslint": "^9.39.4",
     "eslint-plugin-format": "^2.0.1",
     "eslint-plugin-vue": "^10.11.0",
