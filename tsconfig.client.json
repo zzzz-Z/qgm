@@ -1,0 +1,31 @@
+/* AIRUNNER-CLIENT-TSC */
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noImplicitOverride": true,
+    "jsx": "preserve",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": false,
+    "useDefineForClassFields": true
+  },
+  "include": [
+    "client/**/*.ts",
+    "client/**/*.vue"
+  ],
+  "exclude": [
+    "client/node_modules",
+    "client/dist",
+    "client/test",
+    "client/e2e",
+    "client/test-results",
+    "client/playwright-report"
+  ]
+}

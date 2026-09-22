@@ -50,7 +50,7 @@
   - scripts/session-start.cjs
   - scripts/tampermonkey-session-id.user.js
 - skills/
-  - skills/RULES.md 全部规则（单一权威，8 章：输出契约 / 行为准则 / 脚本规范 / __AI__ API / 环境自检 / 踩坑库 / TS HCLC / UI 踩坑）
+  - skills/RULES.md 全部规则（单一权威，8 章：输出契约 / 行为准则 / 脚本规范 / **AI** API / 环境自检 / 踩坑库 / TS HCLC / UI 踩坑）
   - skills/_loader.cjs 动态加载器（ALWAYS_KEYS=[RULES]；--list / --for 查询）
 
 ## 脚本入口
@@ -145,13 +145,13 @@
 
 单一权威规则文件，按章索引：
 
-- 一、输出契约与自动化循环  （单块原则 / DONE / 熔断）
-- 二、AI 行为与决策准则    （L0-L2 分级 / 决策阶梯 / 不做清单）
-- 三、脚本编写与技术规范    （Shebang / 通道 / R1-R3 读写协议）
-- 四、__AI__ 全局注入 API   （readText / writeText / patchFile / assert）
-- 五、环境自检与提交闸门    （preflight / 提交前检查）
-- 六、踩坑库（E/T/P/A）    （环境 / 工具链 / 流程 / 协作）
-- 七、TypeScript HCLC 架构  （高内聚 / 低耦合 / 依赖分级）
-- 八、UI / CSS / Vue 踩坑   （选择器 / UnoCSS / 组件抽取）
+- 一、输出契约与自动化循环 （单块原则 / DONE / 熔断）
+- 二、AI 行为与决策准则 （L0-L2 分级 / 决策阶梯 / 不做清单）
+- 三、脚本编写与技术规范 （Shebang / 通道 / R1-R3 读写协议）
+- 四、**AI** 全局注入 API （readText / writeText / patchFile / assert）
+- 五、环境自检与提交闸门 （preflight / 提交前检查）
+- 六、踩坑库（E/T/P/A） （环境 / 工具链 / 流程 / 协作）
+- 七、TypeScript HCLC 架构 （高内聚 / 低耦合 / 依赖分级）
+- 八、UI / CSS / Vue 踩坑 （选择器 / UnoCSS / 组件抽取）
 
 加载：`node skills/_loader.cjs --list` 或 `--for "<任务描述>"`。

@@ -1,5 +1,5 @@
 {
-  "name": "@qgm/vite-plugin-ai-runner",
+  "name": "@qgm/ai-runner",
   "type": "module",
   "version": "0.1.0",
   "description": "Vite dev-only AI 辅助开发工作台：脚本沙盒执行 / diff 回滚 / prompt 组装",
@@ -49,7 +49,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "tsc": "tsc -p tsconfig.json --noEmit",
-    "test:unit": "node --test --experimental-strip-types client/test/*.node-test.ts src/*.test.cjs src/post-run/*.node-test.ts",
+    "tsc:client": "vue-tsc -p tsconfig.client.json --noEmit",
+    "test:unit": "node --test --experimental-strip-types client/test/*.node-test.ts src/*.test.cjs src/process/*.test.cjs src/post-run/*.node-test.ts",
     "test:e2e": "playwright test --config client/playwright.config.ts",
     "verify": "pnpm tsc && pnpm lint && pnpm test:unit",
     "check-regression": "node bin/check-regression.cjs check",

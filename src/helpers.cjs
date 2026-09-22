@@ -58,28 +58,42 @@ function _changelog(action, file, extra) {
   } catch { }
 }
 
+// [OPT] _writeText helper
+function _writeText(p, s) {
+  fs.mkdirSync(path.dirname(p), { recursive: true })
+  fs.writeFileSync(p, s)
+  _changelog('write', p)
+}
+
+// [OPT] _execBin helper
+// [OPT] _binPath helper
+function _binPath(name) {
+  const isWin = process.platform === 'win32'
+  return path.join(process.cwd(), 'node_modules', '.bin', isWin ? `${name}.cmd` : name)
+}
+function _execBin(bin, args) {
+  const isWin = process.platform === 'win32'
+  try {
+    return { ok: true, output: execFileSync(bin, args, { cwd: process.cwd(), encoding: 'utf8', shell: isWin }) }
+  } catch (e) {
+    return { ok: false, output: String(e.stdout || '') + String(e.stderr || '') }
+  }
+}
+
 const __AI__ = {
   readJSON(p) {
     try { return JSON.parse(fs.readFileSync(p, 'utf8')) }
     catch (e) { throw new Error(`${p}: ${e.message}`) }
   },
   readText(p) { return fs.readFileSync(p, 'utf8') },
-  writeText(p, s) {
-    fs.mkdirSync(path.dirname(p), { recursive: true })
-    fs.writeFileSync(p, s)
-    _changelog('write', p)
-  },
+  writeText(p, s) { return _writeText(p, s) },
   join() { return path.join.apply(path, arguments) },
   tryReadFile(p) {
     try { return { ok: true, content: fs.readFileSync(p, 'utf8') } }
     catch (e) { return { ok: false, error: e.message } }
   },
-  readFile(p) { return fs.readFileSync(p, 'utf8') },
-  writeFile(p, c) {
-    fs.mkdirSync(path.dirname(p), { recursive: true })
-    fs.writeFileSync(p, c)
-    _changelog('write', p)
-  },
+  readFile(p) { return this.readText(p) }, // [OPT] readFile delegates readText
+  writeFile(p, c) { return _writeText(p, c) },
   deleteFile(p) {
     try { fs.rmSync(p, { recursive: true, force: true }); _changelog('delete', p); return true }
     catch { return false }
@@ -142,29 +156,17 @@ const __AI__ = {
     __AI__.assert(/defineOptions\s*\(\s*\{/.test(s), `${file} 缺 defineOptions`)
   },
   lint(files) {
-    const cwd = process.cwd()
-    const isWin = process.platform === 'win32'
-    const bin = path.join(cwd, 'node_modules', '.bin', isWin ? 'eslint.cmd' : 'eslint')
+    const bin = _binPath('eslint')
     if (!fs.existsSync(bin)) return { ok: false, output: '未找到 node_modules/.bin/eslint' }
     const args = Array.isArray(files) && files.length ? files : ['.']
-    try {
-      return { ok: true, output: execFileSync(bin, args, { cwd, encoding: 'utf8', shell: isWin }) }
-    } catch (e) {
-      return { ok: false, output: String(e.stdout || '') + String(e.stderr || '') }
-    }
+    return _execBin(bin, args)
   },
   typeCheck() {
-    const cwd = process.cwd()
-    const isWin = process.platform === 'win32'
-    const vueTsc = path.join(cwd, 'node_modules', '.bin', isWin ? 'vue-tsc.cmd' : 'vue-tsc')
-    const tsc = path.join(cwd, 'node_modules', '.bin', isWin ? 'tsc.cmd' : 'tsc')
+    const vueTsc = _binPath('vue-tsc')
+    const tsc = _binPath('tsc')
     const bin = fs.existsSync(vueTsc) ? vueTsc : (fs.existsSync(tsc) ? tsc : null)
     if (!bin) return { ok: false, output: '未找到 node_modules/.bin/vue-tsc 或 tsc' }
-    try {
-      return { ok: true, output: execFileSync(bin, ['--noEmit'], { cwd, encoding: 'utf8', shell: isWin }) }
-    } catch (e) {
-      return { ok: false, output: String(e.stdout || '') + String(e.stderr || '') }
-    }
+    return _execBin(bin, ['--noEmit'])
   },
   writeReport(obj) { console.log(`__AI_REPORT__${JSON.stringify(obj)}`) },
   // [P3-2d] @mode: diff 显式声明：脚本用它标记本次为只读预览（服务端强制 read-only 沙盒）

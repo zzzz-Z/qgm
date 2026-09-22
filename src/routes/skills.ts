@@ -4,10 +4,10 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
-import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getRoot } from '../config.js'
 import { clearRulesHashCache } from '../post-run/compliance.js'
 import { parseJSON, readBody, sendJSON } from '../server/http.js'
+import type { IncomingMessage, ServerResponse } from '../server/http.js'
 
 // 常驻 skill：与 skills/_loader.cjs 的 ALWAYS_KEYS 对齐
 const DEFAULT_SKILLS = new Set(['core-behavior', 'core-loop-protocol', 'script-standards', 'script-ai-api', 'env-preflight'])

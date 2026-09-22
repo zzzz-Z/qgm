@@ -10,9 +10,27 @@ version: 2026-09-21
 
 > 本文件是本项目全部 AI 行为 / 脚本 / 环境 / 架构规则的**唯一权威来源**。
 > 冲突时以本文件为准。
+<!-- AGENTS-DEFAULT-LOAD -->
+<a id="ch0"></a>
+## 零、默认上下文加载（会话首轮强制）
+
+每次会话首轮，除本 RULES.md 外，AI 必须默认读取并遵守 `AGENTS.md`。
+
+- **AGENTS.md**：项目级启动说明（命令、运行方式、环境约定），会话首轮先读
+- **RULES.md**（本文件）：AI 行为 / 脚本 / 架构 / 踩坑的**唯一权威**
+- **冲突时**：以本文件为准
+
+加载顺序：`AGENTS.md` → `RULES.md` → `.ai-runner/state.json` → 当前任务
+
+### AGENTS.md 默认加载
+
+若 `AGENTS.md` 缺失 → 输出 `⚠ AGENTS.md 缺失` 并继续，不中断循环。
+
 
 ## 目录
 
+<!-- TOC-CH0 -->
+[零、默认上下文加载](#ch0)
 [一、输出契约与自动化循环](#ch1)
 [二、AI 行为与决策准则](#ch2)
 [三、脚本编写与技术规范](#ch3)
@@ -83,7 +101,14 @@ version: 2026-09-21
 - **可逆性分级执行**：
   - **L0 (无感)**: 格式化、类型补全、纯函数重构 → ⚡️ 直接执行，无需记录。
   - **L1 (Git 可恢复)**: 业务逻辑修改、文件增删改、依赖调整 → ⚡️ 直接执行 + 写入 `state.json#decisions`。
-  - **L2 (不可逆/跨域)**: DB DDL、生产环境操作、删除核心配置、外部服务写入 → ⚠️ **暂停并请求确认**，必须提供回滚方案。
+  - **L2 (不可逆/跨域)**: 命中以下五类之一即触发，**暂停并请求确认**，必须提供回滚方案。
+    <!-- AIRUNNER-L2-V1 -->
+    1. 生产环境操作：部署、发布、上生产
+    2. 数据库 DDL：建表、改表、删表、加索引
+    3. 删除核心配置：`.env` / 密钥 / 锁文件 / CI 配置
+    4. 外部服务写操作：调用第三方 API 做写操作
+    5. 修改 git 历史：rebase / reset / force push
+    其余归 L0/L1，由 AI 按可逆性自判。清单可演进，但必须有明确当前版本。
 - **遇分歧自行裁决**：当存在多种可行方案时，依据 `决策阶梯` 自主选择；若阶梯无法区分，优先选**更易测试 / 更少依赖**的方案，将理由写入 `state.json`，禁止暂停询问。
 - **禁止打断自动化循环**：除非触发 L2 级风险或退出码 2（硬性卡点），否则不得以任何理由中断循环、请求确认或等待用户输入。
 
@@ -245,69 +270,23 @@ version: 2026-09-21
 
 ## 四、__AI__ 全局注入 API
 
-### 文件操作
+<!-- AIRUNNER-BATCH3-API-EXTRACTED -->
+> 完整 API 手册见 skills/AI-API.md（按需加载）。高频函数速览：
 
-- `__AI__.readText(path)` : 读取文本
-- `__AI__.writeText(path, content)` : 写入文本（自动创建目录）
-- `__AI__.replaceInFile(path, { oldString, newString, unique })` : 替换文本，unique=true 时若非唯一出现会报错
-- `__AI__.exists(path)` : 判断文件是否存在
-- `__AI__.readJSON(path)` : 读取并解析 JSON
+| 类别 | 函数 |
+|---|---|
+| 读写 | readText / writeText / exists / readJSON / atomicWrite |
+| 安全补丁 | patchFile / backup |
+| 断言 | assert / assertContains / assertNotContains |
+| 语义输出 | ok / skip / warn / err |
+| 状态 | readState / updateState / statePath |
+| 环境 | cwdMust |
+| 查看 | dump |
 
-### 质量检查
+核心偏好：能用 __AI__ 函数解决的，不用原生 fs / console / process。
+若 runner 未注入速查表 → 报告异常并退出，不猜测 API 签名。
 
-- `__AI__.lint(files)` : 运行 ESLint，返回 { ok, output }
-- `__AI__.typeCheck()` : 运行 vue-tsc --noEmit，返回 { ok, output }
-
-### 日志与断言
-
-- `__AI__.log(...args)` : 带 [AI] 前缀的 console.log
-- `__AI__.assert(cond, msg)` : 断言失败即 process.exit(1)
-
-### 执行控制
-
-- `__AI__.writeReport(obj)` : 输出 `__AI_REPORT__` 结构供 Runner 解析
-- `__AI__.writeDiffReport(obj)` : 标记为只读预览并退出
-- `__AI__.exitNeedInput(question, options, defaultId)` : 请求人工输入
-
-### 语义输出（推荐用，替代裸 console.log）
-
-- `__AI__.ok(msg)` : 绿色 ✓
-- `__AI__.skip(msg)` : 黄色 !
-- `__AI__.warn(msg)` : 黄色 ⚠
-- `__AI__.err(msg)` : 红色 ✗，输出到 stderr
-
-### 文件安全补丁（替代手写 readFileSync + replace + writeFileSync）
-
-- `__AI__.backup(file)` : 备份 `file` → `.ai-runner/backup/<相对路径>`，已存在则保留首次
-- `__AI__.patchFile(file, anchor, replacement, opts)` : 幂等补丁
-  - 自动 readFileSync → 校验 anchor 命中 → backup → 替换 → 写回 → 回读验证
-  - `opts.unique` : anchor 命中数必须为 1，否则抛错
-  - `opts.marker` : 命中则返回 `{ ok: true, skipped: true }`（幂等）
-  - 返回 `{ ok: true, replaced: N }`
-
-### 断言
-
-- `__AI__.assertContains(file, anchor)` : 文件不含 anchor 则 exit 1
-- `__AI__.assertNotContains(file, anchor)` : 文件含 anchor 则 exit 1
-
-### State helper
-
-- **AI**.statePath() : .ai-runner/state.json 绝对路径
-- **AI**.readState() : 解析失败返回 null
-- **AI**.updateState(fn) : 读 -> fn(st) -> round+1 -> 写回 -> 返回 st
-
-### Regex / file
-
-- **AI**.esc(s) : 正则元字符转义
-- **AI**.dump(file, from, to) : 返回「行号: 内容」（1-based 含端点）
-- **AI**.atomicWrite(file, content) : tmp + rename
-
-### Env gate
-
-- **AI**.cwdMust(expected) : cwd 不符则 err + exit 2
 ---
-
-<a id="ch5"></a>
 
 ## 五、环境自检与提交闸门
 

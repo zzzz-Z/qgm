@@ -1,13 +1,12 @@
 /* eslint-disable no-console -- 服务端日志 */
 import type { Plugin, ViteDevServer } from 'vite'
-import type { IncomingMessage, ServerResponse } from 'node:http'
 import { PREFIX, setRoot } from '../config.js'
 import { closeBrowser } from '../headless/smoke.js'
 import { __pkgDir } from './page.js'
 import { handle } from './handle.js'
 import { attachWs } from './attach-ws.js' // [fix-vite-ws]
 import { guardRequest, sendJSON } from './http.js'
-import type { AiRunnerOptions } from './http.js'
+import type { AiRunnerOptions, IncomingMessage, ServerResponse } from './http.js'
 
 // ============================================================================
 // 插件导出

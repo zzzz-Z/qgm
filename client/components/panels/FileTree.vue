@@ -3,6 +3,9 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { highlightToHtml } from '../../composables/useHljs'
 import { useFileTree } from '../../composables/data/useFileTree'
 import type { FileNode } from '../../types'
+/** /__ai/files/read 响应结构（局部使用，避免显式 any） */
+interface FileReadItem { path?: string, content?: string }
+interface FileReadResponse { files?: FileReadItem[] }
 
 defineOptions({ name: 'FileTree' })
 
@@ -36,8 +39,8 @@ if (props.root) {
           })
           if (res.ok) {
             const j = await res.json() as Record<string, unknown>
-            const arr = Array.isArray((j as any).files) ? (j as any).files : (Array.isArray(j) ? j : [])
-            const hit = arr.find((x: any) => x && x.path === pkgNode.path) || arr[0] || {}
+            const arr = (Array.isArray((j as FileReadResponse).files) ? (j as FileReadResponse).files : (Array.isArray(j) ? j : [])) as FileReadItem[]
+            const hit = arr.find((x: FileReadItem) => x && x.path === pkgNode.path) || arr[0] || {}
             if (hit.content) {
               const parsed = JSON.parse(hit.content)
               if (parsed.name) projectName.value = String(parsed.name).split('/').pop() || String(parsed.name)
@@ -56,8 +59,8 @@ if (props.root) {
       })
       if (res.ok) {
         const j = await res.json() as Record<string, unknown>
-        const arr = Array.isArray((j as any).files) ? (j as any).files : (Array.isArray(j) ? j : [])
-        const hit = arr.find((x: any) => x && x.path === 'package.json') || arr[0] || {}
+        const arr = (Array.isArray((j as FileReadResponse).files) ? (j as FileReadResponse).files : (Array.isArray(j) ? j : [])) as FileReadItem[]
+        const hit = arr.find((x: FileReadItem) => x && x.path === 'package.json') || arr[0] || {}
         if (hit.content) {
           const parsed = JSON.parse(hit.content)
           if (parsed.name) {
@@ -164,7 +167,7 @@ async function collectFilePathsAsync(node: FileNode): Promise<string[]> {
     if (!res.ok) return []
     const data = await res.json()
     const out: string[] = []
-    const walk = (n: any) => {
+    const walk = (n: FileNode) => {
       if (n.type === 'file') out.push(n.path)
       else if (n.children?.length) n.children.forEach(walk)
     }
@@ -332,9 +335,9 @@ async function onFileDblClick(node: { type?: string, path: string }) {
     })
     if (!r.ok) { fileError.value = `HTTP ${r.status}`; return }
     const j = await r.json() as Record<string, unknown>
-    const arr = Array.isArray((j as any).files) ? (j as any).files : (Array.isArray(j) ? j : [])
-    const hit = arr.find((x: any) => x && x.path === node.path) || arr[0] || {}
-    fileDialog.value = { path: node.path, content: String((hit as any).content || '') }
+    const arr = (Array.isArray((j as FileReadResponse).files) ? (j as FileReadResponse).files : (Array.isArray(j) ? j : [])) as FileReadItem[]
+    const hit = arr.find((x: FileReadItem) => x && x.path === node.path) || arr[0] || {}
+    fileDialog.value = { path: node.path, content: String((hit as FileReadItem).content || '') }
   } catch (e) {
     fileError.value = e instanceof Error ? e.message : String(e)
   } finally {

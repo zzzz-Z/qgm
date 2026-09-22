@@ -54,6 +54,26 @@
 
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
+  /* AIRUNNER-TOKENS-v1 */
+  /* spacing: 4px grid */
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 10px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  --space-9: 32px;
+  --space-10: 40px;
+
+  /* font sizes (missing ones) */
+  --font-10: 10px;
+  --font-15: 15px;
+  --font-16: 16px;
+  --font-18: 18px;
+  --font-20: 20px;
+
   --term-bg: #0f0f0f;
   --term-bar-bg: #1a1a1a;
   --term-border: #2a2a2a;

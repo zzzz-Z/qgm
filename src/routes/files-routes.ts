@@ -1,10 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { IncomingMessage, ServerResponse } from 'node:http'
 import { EXCLUDE_DIRS, ROOT } from '../config.js'
 import { runDir } from '../state/snapshot.js'
 import { diffIndexes, readIndex, scanIndex } from '../utils/index-index.js'
 import { parseJSON, readBody, sendJSON } from '../server/http.js'
+import type { IncomingMessage, ServerResponse } from '../server/http.js'
 import { handleSearchRoute } from './search.js'
 import { handleFilesReadRoute } from './files-read.js'
 

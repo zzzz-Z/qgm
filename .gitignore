@@ -11,3 +11,7 @@ client/node_modules/
 # [refactor] e2e 运行态产物
 client/test-results/
 client/e2e/playwright-report/
+# --- 环境与本地产物（HCLC/RULES 安全基线） ---
+.env
+.env.*
+!.env.example

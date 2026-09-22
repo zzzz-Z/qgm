@@ -24,6 +24,8 @@ export interface TaskState {
   done: TaskDoneItem[]
   doneAt?: number
   planPending?: number
+  version?: number
+  sessionId?: string
 }
 
 /** 读 .ai-runner/state.json；缺失或损坏时返回空态，不抛错。 */
@@ -48,6 +50,8 @@ function readStateRaw(): TaskState {
       todo: rawTodo.map(x => String(x)),
       done,
       doneAt: obj.doneAt !== undefined ? Number(obj.doneAt) : undefined,
+      version: obj.version !== undefined ? Number(obj.version) : undefined,
+      sessionId: typeof obj.sessionId === 'string' ? obj.sessionId : undefined,
     }
   } catch {
     return { round: 0, status: 'missing', todo: [], done: [] }
@@ -107,9 +111,34 @@ function readState(): TaskState {
   }
 }
 
+// AIRUNNER-STATE-V2: version + sessionId
+let _sessionId: string | null = null
+function getSessionId(): string {
+  if (_sessionId) return _sessionId
+  const env = process.env.AIR_SESSION_ID
+  _sessionId = env && env.length ? env : `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  return _sessionId
+}
+
+function readDiskJson(): Record<string, unknown> {
+  try {
+    return JSON.parse(fs.readFileSync(statePath(), 'utf8')) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
 function writeState(next: TaskState): void {
   fs.mkdirSync(path.dirname(statePath()), { recursive: true })
-  fs.writeFileSync(statePath(), JSON.stringify(next, null, 2))
+  const disk = readDiskJson()
+  const prevVersion = Number(disk.version) || 0
+  const merged: Record<string, unknown> = {
+    ...disk,
+    ...next,
+    version: prevVersion + 1,
+    sessionId: getSessionId(),
+  }
+  fs.writeFileSync(statePath(), JSON.stringify(merged, null, 2))
 }
 
 /**

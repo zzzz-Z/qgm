@@ -30,6 +30,9 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { FileNode } from '../../types'
+import type { DecorationSet, EditorView, ViewUpdate } from '@codemirror/view'
+import type { Extension } from '@codemirror/state'
 
 const props = defineProps<{
   modelValue: string
@@ -47,6 +50,8 @@ const emit = defineEmits<{
 }>()
 
 // ---------- CodeMirror 动态加载 ----------
+
+// CM 动态 import 聚合；typeof import() 与 page tsc 的 bundler 解析冲突，暂以 any 保留
 let CM: any = null
 async function ensureCM(): Promise<any> {
   if (CM) return CM
@@ -67,7 +72,7 @@ async function ensureCM(): Promise<any> {
     Prec: s.Prec,
     Compartment: s.Compartment,
     RangeSetBuilder: s.RangeSetBuilder,
-    basicSetup: (c as any).basicSetup,
+    basicSetup: c.basicSetup,
     cmJavascript: j.javascript,
     oneDark: t.oneDark,
   }
@@ -76,8 +81,8 @@ async function ensureCM(): Promise<any> {
 
 // ---------- editor 状态 ----------
 const cmHost = ref<HTMLDivElement | null>(null)
-let cmView: any = null
-let editableComp: any = null
+let cmView: import('@codemirror/view').EditorView | null = null
+let editableComp: import('@codemirror/state').Compartment | null = null
 
 // ---------- file picker ----------
 /* @FILE_PICKER_V1 */
@@ -99,7 +104,7 @@ async function pickerLoadFiles() {
     const res = await fetch('/__ai/files?depth=6')
     const data = await res.json()
     const flat: string[] = []
-    const walk = (nodes: any[]) => {
+    const walk = (nodes: FileNode[]) => {
       for (const n of nodes || []) {
         if (n.type === 'file') flat.push(n.path)
         else if (n.children) walk(n.children)
@@ -164,7 +169,7 @@ function pickerPick(filePath: string) {
 }
 
 // ---------- 编辑器事件 ----------
-function onEditorUpdate(u: any) {
+function onEditorUpdate(u: ViewUpdate) {
   if (!u.docChanged) return
   const pos = u.state.selection.main.head
   if (pos < 1) return
@@ -182,17 +187,17 @@ function onEditorUpdate(u: any) {
 }
 
 // ---------- 编辑器创建 ----------
-let fileTagPlugin: any = null
+let fileTagPlugin: Extension | null = null
 async function createEditor() {
   if (!cmHost.value || cmView) return
   const m = await ensureCM()
   if (!editableComp) editableComp = new m.Compartment()
   if (!fileTagPlugin) {
     fileTagPlugin = m.ViewPlugin.fromClass(class {
-      decorations: any
-      constructor(view: any) { this.decorations = this.build(view) }
-      update(u: any) { if (u.docChanged) this.decorations = this.build(u.view) }
-      build(view: any) {
+      decorations: DecorationSet
+      constructor(view: EditorView) { this.decorations = this.build(view) }
+      update(u: ViewUpdate) { if (u.docChanged) this.decorations = this.build(u.view) }
+      build(view: EditorView): DecorationSet {
         const builder = new m.RangeSetBuilder()
         const text = view.state.doc.toString()
         const re = /@[\w./-]+/g
@@ -207,7 +212,7 @@ async function createEditor() {
         }
         return builder.finish()
       }
-    }, { decorations: (v: any) => v.decorations })
+    }, { decorations: (v: { decorations: DecorationSet }) => v.decorations })
   }
   const state = m.EditorState.create({
     doc: props.modelValue,
@@ -217,7 +222,7 @@ async function createEditor() {
       m.oneDark,
       /* editor-no-h-scroll */
       m.EditorView.lineWrapping,
-      editableComp.of(m.EditorView.editable.of(!props.isLoopActive)),
+      editableComp!.of(m.EditorView.editable.of(!props.isLoopActive)),
       m.placeholder('写脚本，或 !命令 走 shell · @问题 发给 AI · ⌘/Ctrl + ↵ 运行'),
       m.EditorView.theme({
         '&': {
@@ -298,7 +303,7 @@ async function createEditor() {
           }
         },
       ])),
-      m.EditorView.updateListener.of((u: any) => {
+      m.EditorView.updateListener.of((u: ViewUpdate) => {
         if (u.docChanged) {
           emit('update:modelValue', u.state.doc.toString())
           onEditorUpdate(u)

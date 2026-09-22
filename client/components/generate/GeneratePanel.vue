@@ -70,12 +70,22 @@ const newSkillName = ref('')
 const newSkillContent = ref('')
 const creatingSkill = ref(false)
 
+// [OPT] skill default + select-all
+// 常驻默认：每轮必读的核心规则（对齐后端 _loader.cjs ALWAYS_KEYS）
+const DEFAULT_SKILLS: string[] = [
+  'core-behavior',
+  'core-loop-protocol',
+  'script-standards',
+  'env-preflight',
+  'script-ai-api',
+]
+
 function loadSelectedSkills(): string[] {
   try {
     const raw = localStorage.getItem('__ai_selected_skills')
-    if (raw === null) return ['gen-script-rules']
+    if (raw === null) return DEFAULT_SKILLS.slice()
     return JSON.parse(raw)
-  } catch { return ['gen-script-rules'] }
+  } catch { return DEFAULT_SKILLS.slice() }
 }
 
 watch(selectedSkills, (v) => {
@@ -123,6 +133,14 @@ function toggleSkill(name: string) {
   const i = selectedSkills.value.indexOf(name)
   if (i >= 0) selectedSkills.value.splice(i, 1)
   else selectedSkills.value.push(name)
+}
+
+function selectAllSkills() {
+  selectedSkills.value = skills.value.map(s => s.name)
+}
+
+function clearAllSkills() {
+  selectedSkills.value = []
 }
 
 // 立即加载（不依赖 onMounted，避开不同版本差异）
@@ -855,6 +873,12 @@ function onAddAllHotkey(e: KeyboardEvent) {
         <div v-if="showSkills" class="skills-panel">
           <div class="skills-header">
             <span class="skills-title">Skills（{{ selectedSkills.length }} / {{ skills.length }} 启用）</span>
+            <button v-tooltip="'选中全部 Skill'" class="skills-bulk" :disabled="!skills.length || selectedSkills.length === skills.length" @click="selectAllSkills">
+              全选
+            </button>
+            <button v-tooltip="'清空已选'" class="skills-bulk" :disabled="!selectedSkills.length" @click="clearAllSkills">
+              清空
+            </button>
             <button v-tooltip="'收起'" aria-label="收起" class="skills-close" @click="showSkills = false">
               ×
             </button>
@@ -1086,6 +1110,27 @@ function onAddAllHotkey(e: KeyboardEvent) {
   to {
     opacity: 1;
   }
+}
+
+/* [OPT] skills-bulk style */
+.skills-bulk {
+  margin-left: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid var(--border, #444);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.skills-bulk:hover:not(:disabled) {
+  opacity: 1;
+  background: var(--hover, rgba(255, 255, 255, 0.06));
+}
+.skills-bulk:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 @media (max-width: 1100px) {

@@ -95,3 +95,6 @@ export function guardRequest(req: IncomingMessage, res: ServerResponse, options:
   }
   return true
 }
+
+// re-export for downstream convenience
+export type { IncomingMessage, ServerResponse } from 'node:http'

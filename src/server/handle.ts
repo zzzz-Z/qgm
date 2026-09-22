@@ -3,16 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { buildLauncher } from './launcher.js'
 import { PAGE } from './page.js'
 import { sendHTML } from './http.js'
-import { handleTasks } from '../routes/tasks-routes.js'
-import { handleScriptRoutes } from '../routes/script.js'
-import { handleExecRoute } from '../routes/exec.js'
-import { handleGitRoutes } from '../routes/git.js'
-import { handleRollbackRoutes } from '../routes/rollback.js'
-import { handleAskRoute } from '../routes/ask.js'
-import { handleRunRoute } from '../routes/run.js'
-import { handleSkillsRoutes } from '../routes/skills.js'
-import { handleHooksRoutes } from '../routes/hooks.js'
-import { handleFilesRoutes } from '../routes/files-routes.js'
+import { handleAskRoute, handleExecRoute, handleFilesRoutes, handleGitRoutes, handleHooksRoutes, handleRollbackRoutes, handleRunRoute, handleScriptRoutes, handleSkillsRoutes, handleTasks } from '../routes/index.js'
 
 export async function handle(
   req: IncomingMessage,

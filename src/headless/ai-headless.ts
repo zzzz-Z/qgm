@@ -136,6 +136,11 @@ async function loadPlaywright(): Promise<PlaywrightModule | null> {
 
 export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   const sessions = new Map<string, HeadlessSession>()
+
+  // [OPT] _getPage helper
+  function _getPage(sid: string): Page | undefined {
+    return sessions.get(sid)?.page as Page | undefined
+  }
   // 全局串行锁
   let openMutex: Promise<void> = Promise.resolve()
   const baseUserDataDir = opts.userDataDir || DEFAULT_USER_DATA_DIR
@@ -244,10 +249,9 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     },
     get(sid) { return sessions.get(sid) || null },
     list() { return [...sessions.values()] },
-    getPage(sid) { return sessions.get(sid)?.page ?? null },
+    getPage(sid) { return _getPage(sid) ?? null },
     async fillPrompt(sid, prompt) {
-      const sess = sessions.get(sid)
-      const page = sess?.page as Page | undefined
+      const page = _getPage(sid)
       if (!page) {
         return false
       }
@@ -268,8 +272,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       }
     },
     async stopGenerating(sid) {
-      const sess = sessions.get(sid)
-      const page = sess?.page as Page | undefined
+      const page = _getPage(sid)
       if (!page) {
         return false
       }
@@ -279,8 +282,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       } catch { return false }
     },
     async newSession(sid) {
-      const sess = sessions.get(sid)
-      const page = sess?.page as Page | undefined
+      const page = _getPage(sid)
       if (!page) {
         return null
       }
@@ -299,8 +301,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       return this.fillPrompt(sid, instruction)
     },
     startReplyPoll(sid, cb) {
-      const sess = sessions.get(sid)
-      const page = sess?.page as Page | undefined
+      const page = _getPage(sid)
       if (!page) {
         return () => {}
       }
@@ -325,8 +326,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       }
     },
     startTokenPoll(sid, cb) {
-      const sess = sessions.get(sid)
-      const page = sess?.page as Page | undefined
+      const page = _getPage(sid)
       if (!page) {
         return () => {}
       }
@@ -348,8 +348,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       }
     },
     async resetReplyDedup(sid) {
-      const sess = sessions.get(sid)
-      const page = sess?.page as Page | undefined
+      const page = _getPage(sid)
       if (!page) return
       try {
         await page.evaluate(resetReplyDedupInPage)

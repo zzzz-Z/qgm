@@ -1,7 +1,7 @@
 // @desc 统一 vite 配置（web/SPA）。仓库内唯一一份 vite 配置；server 端不经 vite。
-// @why server 由 tsc + scripts/copy-runtime.cjs 构建，bin/air-server.cjs 调度，与 vite 无关。
-//      package.json 为 type:module，因此本文件是 ESM，不能用 __dirname；改用 import.meta.url。
-//      根目录即 PKG_ROOT；SPA 通过 root 指向 ./client。
+// @why server 由 tsc 或 vite SSR 构建，bin/air-server.cjs 调度，与 vite 无关。
+//      package.json 为 type:module，本文件是 ESM，不能用 __dirname。
+//      watch.ignored 显式屏蔽 .ai-runner/ 与 dist/ 下的写盘，避免脚本执行触发整页刷新。
 import { defineConfig } from 'vite'
 import UnoCSS from 'unocss/vite'
 import vue from '@vitejs/plugin-vue'
@@ -17,6 +17,14 @@ export default defineConfig({
   server: {
     port: 5174,
     fs: { allow: [PKG_ROOT] },
+    watch: {
+      ignored: [
+        '**/.ai-runner/**',
+        '**/dist/**',
+        '**/client/dist/**',
+        '**/.git/**',
+      ],
+    },
   },
   plugins: [
     UnoCSS({ configFile: path.resolve(CLIENT_ROOT, 'uno.config.ts') }),
