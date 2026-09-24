@@ -1,17 +1,19 @@
 import { ref } from 'vue'
+import { useStorage } from '@vueuse/core'
 
 /** 键 */
 const KEY = '__ai_auto_takeover'
 
-/**
- * 加载 Bool
- */
-function loadBool(): boolean {
-  try { return localStorage.getItem(KEY) === '1' } catch { return false }
+// [use-storage-v1] 布尔持久化改用 @vueuse useStorage；
+// 自定义 serializer 兼容历史 '1'/'0' 存储格式（测试断言此格式）
+/** 布尔 serializer：'1' <-> true，其余 <-> false */
+const BOOL_SERIALIZER = {
+  read: (v: string) => v === '1',
+  write: (v: boolean) => (v ? '1' : '0'),
 }
 
 /** 启用的 */
-const enabled = ref(loadBool())
+const enabled = useStorage(KEY, false, undefined, { serializer: BOOL_SERIALIZER })
 /** 自动接管倒计时（秒） */
 const countdown = ref(0)
 // 待执行脚本元信息（供状态栏展示）
@@ -38,13 +40,11 @@ export function useAutoTakeover() {
     pendingMeta,
     enable() {
       enabled.value = true
-      try { localStorage.setItem(KEY, '1') } catch { /* ignore */ }
     },
     disable() {
       enabled.value = false
       if (timer) { clearTimeout(timer); timer = null }
       stopTicker()
-      try { localStorage.setItem(KEY, '0') } catch { /* ignore */ }
     },
     scheduleAutoRun(fn: () => void, meta?: { desc?: string, why?: string, plan?: string, lang?: string, lineCount?: number }) {
       if (timer) clearTimeout(timer)

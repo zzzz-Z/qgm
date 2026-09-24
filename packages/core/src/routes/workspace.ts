@@ -6,6 +6,75 @@ import { getRoot, setRoot } from '../config.js'
 import { execFile } from 'node:child_process'
 
 /** workspace 路由的 Hono 实例 */
+/** [workspace-project-info-v1] 项目画像：切换项目时采集的新项目关键信息 */
+export interface ProjectInfo {
+  name: string
+  version: string
+  scripts: string[]
+  framework: string
+  language: string
+  hasTsconfig: boolean
+  hasVite: boolean
+  hasReadme: boolean
+  hasAgents: boolean
+  hasGit: boolean
+  hasPnpmWorkspace: boolean
+  hasNodeModules: boolean
+  hasTests: boolean
+  hasEslint: boolean
+  hasPlaywright: boolean
+}
+
+/** 采集项目关键信息：包名、脚本、配置文件、依赖画像；失败时返回默认空值不阻断 */
+function collectProjectInfo(root: string): ProjectInfo {
+  const info: ProjectInfo = {
+    name: '',
+    version: '',
+    scripts: [],
+    framework: '',
+    language: '',
+    hasTsconfig: false,
+    hasVite: false,
+    hasReadme: false,
+    hasAgents: false,
+    hasGit: false,
+    hasPnpmWorkspace: false,
+    hasNodeModules: false,
+    hasTests: false,
+    hasEslint: false,
+    hasPlaywright: false,
+  }
+  try {
+    const pkgPath = path.join(root, 'package.json')
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as Record<string, unknown>
+      info.name = String(pkg.name || '')
+      info.version = String(pkg.version || '')
+      info.scripts = Object.keys((pkg.scripts as Record<string, unknown>) || {})
+      const deps = {
+        ...((pkg.dependencies as Record<string, unknown>) || {}),
+        ...((pkg.devDependencies as Record<string, unknown>) || {}),
+      }
+      if (deps.vue) info.framework = 'Vue'
+      else if (deps.react) info.framework = 'React'
+      else if (deps.svelte) info.framework = 'Svelte'
+      else if (deps.angular) info.framework = 'Angular'
+      if (deps.typescript) info.language = 'TypeScript'
+      else info.language = 'JavaScript'
+    }
+    info.hasTsconfig = fs.existsSync(path.join(root, 'tsconfig.json'))
+    info.hasVite = fs.existsSync(path.join(root, 'vite.config.ts')) || fs.existsSync(path.join(root, 'vite.config.js'))
+    info.hasReadme = fs.existsSync(path.join(root, 'README.md'))
+    info.hasAgents = fs.existsSync(path.join(root, 'AGENTS.md'))
+    info.hasGit = fs.existsSync(path.join(root, '.git'))
+    info.hasPnpmWorkspace = fs.existsSync(path.join(root, 'pnpm-workspace.yaml'))
+    info.hasNodeModules = fs.existsSync(path.join(root, 'node_modules'))
+    info.hasTests = fs.existsSync(path.join(root, 'test')) || fs.existsSync(path.join(root, 'tests')) || fs.existsSync(path.join(root, 'vitest.config.ts'))
+    info.hasEslint = fs.existsSync(path.join(root, 'eslint.config.ts')) || fs.existsSync(path.join(root, '.eslintrc.js')) || fs.existsSync(path.join(root, '.eslintrc.json'))
+    info.hasPlaywright = fs.existsSync(path.join(root, 'playwright.config.ts'))
+  } catch { /* 信息采集失败不阻断：切换项目本身仍然成功 */ }
+  return info
+}
 export const workspaceHono = new Hono()
 
 workspaceHono.get('/workspace', c => c.json({ root: getRoot() }))
@@ -43,7 +112,9 @@ workspaceHono.post('/workspace/select', async (c) => {
   try { stat = fs.statSync(target) } catch { return c.json({ error: '无法访问路径' }, 400) }
   if (!stat.isDirectory()) return c.json({ error: '不是目录' }, 400)
   setRoot(target)
-  return c.json({ ok: true, root: getRoot() })
+  // [workspace-project-info-v1] 切换后即读取新项目画像
+  const project = collectProjectInfo(target)
+  return c.json({ ok: true, root: getRoot(), project })
 })
 // [native-picker] 系统原生目录选择器（macOS osascript / Linux zenity / Windows PowerShell）
 
@@ -109,5 +180,7 @@ workspaceHono.post('/workspace/pick', async (c) => {
     if (!st.isDirectory()) return c.json({ ok: false, error: '不是目录' }, 400)
   } catch { return c.json({ ok: false, error: '路径不存在' }, 400) }
   setRoot(r.path)
-  return c.json({ ok: true, path: r.path, root: getRoot() })
+  // [workspace-project-info-v1] 系统选择器切换后同样采集画像
+  const project = collectProjectInfo(r.path)
+  return c.json({ ok: true, path: r.path, root: getRoot(), project })
 })

@@ -14,12 +14,25 @@ const DEFAULT_SKILLS = new Set(['core-behavior', 'core-loop-protocol', 'script-s
 interface SkillEntry { name: string, content: string, source: string }
 
 /** skills 路由的 Hono 实例 */
+/** [runner-own-skills-v1] 从 AI Runner 自身安装位置解析 skills 目录（向上最多 6 层找含 _loader.cjs 的 skills/） */
+function resolveRunnerSkillsDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  let dir = here
+  for (let i = 0; i < 6; i++) {
+    const candidate = path.join(dir, 'skills')
+    if (fs.existsSync(path.join(candidate, '_loader.cjs'))) return candidate
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return path.join(getRoot(), 'skills') // 兜底：兼容旧行为
+}
 export const skillsHono = new Hono()
 
 skillsHono.get('/skills/always', (c) => {
   try {
     const require = createRequire(import.meta.url)
-    const loaderPath = path.join(getRoot(), 'skills/_loader.cjs')
+    const loaderPath = path.join(resolveRunnerSkillsDir(), '_loader.cjs')
     try { delete require.cache[require.resolve(loaderPath)] } catch { /* ignore */ }
     const loader = require(loaderPath) as { load: (keys: string[]) => string, ALWAYS_KEYS: string[] }
     const text = loader.load(loader.ALWAYS_KEYS)
@@ -30,7 +43,7 @@ skillsHono.get('/skills/always', (c) => {
 })
 
 skillsHono.get('/skills', (c) => {
-  const baseDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../skills')
+  const baseDir = resolveRunnerSkillsDir()
   const userDir = path.join(getRoot(), '.ai-runner/skills')
   const agentsDir = path.join(os.homedir(), '.agents/skills')
   const collect = (dir: string, source: string): SkillEntry[] => {

@@ -20,6 +20,13 @@ export const LOOP_TOKEN_BUDGET = 30_000
  *  容忍 tokenEstimator 的启发式估算误差，避免误熔断
  */
 export const LOOP_TOKEN_HARD_LIMIT = 33_000
+/**
+ * [loop-hard-limit-v1] 循环硬上限：即使牛马模式也生效，防止"一直发不停"
+ * 双上限先到者触发 finish('hard-timeout' | 'hard-rounds')
+ */
+export const LOOP_HARD_MAX_MS = 30 * 60 * 1000
+/** [loop-hard-limit-v1] 循环最大轮次硬上限 */
+export const LOOP_HARD_MAX_ROUNDS = 50
 /** [fix-rotate-threshold] 循环内 token 达此值触发会话轮转（独立于熔断） */
 export const LOOP_ROTATE_THRESHOLD = 40_000
 /** 宽容预算：格式错误 OR 纯文本 OR 重复脚本共享（v6 §6.9 第 2 条） */
@@ -129,7 +136,14 @@ const CONTRACT_LINES = [
 ]
 
 /** 契约中的 DONE 标记行文本 */
-const CONTRACT_DONE_LINE = '5. 无轮次上限；任务完成时，第一行严格输出 DONE（大写、无其他字符），第二行起用 markdown 总结：完成了什么、整个流程解决了什么、遇到了什么问题'
+// [done-contract-v2] 强制首行只写 DONE，列举禁止变体，降低 isStrictDone 漏判
+const CONTRACT_DONE_LINE = [
+  '5. 任务完成时，回复格式必须严格如下：',
+  '   第 1 行：只写 DONE 三个大写字母（无标点、无前后缀、无缩进、无引号）',
+  '   第 2 行起：用 markdown 总结（完成了什么 / 解决了什么 / 遇到的问题）',
+  '   禁止写：完成 / DONE！ / DONE. / Task done / 已完成 / all done / 收工',
+  '   违反格式会导致循环无法识别完成信号而持续发消息。',
+].join('\n')
 
 /** 契约中的牛马模式标记行文本 */
 const CONTRACT_NIUMA_LINE = '5. 牛马模式：禁止输出 DONE；持续输出下一个可执行脚本推进项目优化，永不停下'
@@ -169,7 +183,6 @@ export function buildInitialPrompt(goal: string, niuma: boolean = false): string
 export function buildRetryPrompt(detail: string): string {
   return [
     `【格式不符，重试一次】${detail}。`,
-    '请重新输出：且仅输出一个 ```js 或 ```bash 代码块，首行 shebang，紧接 @desc/@why 注释。',
     '若任务实际已完成，请只回复 DONE。',
   ].join('\n')
 }

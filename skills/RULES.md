@@ -11,32 +11,27 @@ version: 2026-09-24-v4
 ## 一、输出契约（JS-Only Absolute Contract）
 
 ### 1.0 绝对围栏
+-   **单块纯化**：每次回复**只输出一个可直接运行的cjs代码块**
 -   **首字符**：回复第一个非空字符必须是 ```js
 -   **尾字符**：回复最后一个非空字符必须是独立的 ```
 -   **零溢出**：代码块外部禁止任何字符（含问候、解释、Markdown、多余换行）
--   **单块纯化**：有且仅有一个 js 代码块；禁 javascript/typescript/bash/json 标识符；块内禁连续三反引号
 
 ### 1.1 内容约束
--   **注释替代**：所有解释/推理/TODO/摘要必须以 // 或 /* */ 写在 JS 内部
--   **完成信号**：首行注释 // DONE，次行修改摘要
+-   **注释替代**：所有解释/推理/TODO/摘要必须以  /* */ 写在代码块内部
+-   **完成信号（// DONE）**：
+    - `// DONE` 仅用于**整个任务收尾轮**
+    - **单轮脚本执行成功不是任务完成**：单轮成功应使用 `__AI__.ok(...)` 上报，不得输出 `// DONE`
+    - 任何中间轮（诊断、修复、验证）一律禁止输出 `// DONE`
+    - 不确定是否满足收尾条件时，默认不输出 `// DONE`，继续循环
+    - 违反本条视为提前结束循环，runner 可标记 blocked 并 exit 2
 -   **验证正则**：发送前自检 /^```js\n[\s\S]*\n```$/；未通过 → 重试 1 次 → 仍失败则输出标准错误对象（见 1.3）
 
 ### 1.2 推进强制
 -   每轮新状态；同 SHA-256 跳过；格式错仅重试一次
 -   完成条件查询仅返回机器可读断言（JS 对象）
 
-### 1.3 统一错误协议
-所有错误（格式违规/安全拦截/API 缺失/卡点）必须输出以下 JS 对象，禁止 console.error 或自然语言：
 
-// ⚠️ ERROR
-module.exports = {
-  error: "OUTPUT_CONTRACT_VIOLATION | SECURITY_BLOCKED | API_MISSING | STALL",
-  detail: "人可读描述（≤50字）",
-  exitCode: 2, // 1=可重试, 2=人工介入
-  retryable: false,
-};
-
-### 1.4 脚本头契约（Script Head Contract）
+### 1.3 脚本头契约（Script Head Contract）
 > [script-head-contract-v1] 由 ai-guard.ts#scanScriptHead + run-script.ts 强制；缺失即 exit 2。
 
 -   **Shebang（唯一合法）**：#! /usr/bin/env node
@@ -45,11 +40,10 @@ module.exports = {
 -   **必需字段**（缺一即拒）：
     -   // @desc <做什么>（≤200 字符）
     -   // @why <为什么>（≤200 字符）
--   **可选字段**：@plan / @state / @done / @mode / @ctx / @changes
+-   **可选字段**：@plan / @state / @done / @mode / @ctx / @changes / @todo
     -   @mode: diff → 只读预览（对应 __AI__.writeDiffReport）
     -   @ctx: full → 输出不裁剪
     -   @changes: <路径列表> → 声明本轮预期变更文件
--   **违规错误**：{ error: "SCRIPT_META_MISSING", detail: "MISSING_DESC" | "MISSING_WHY" | "ILLEGAL_SHEBANG:…", exitCode: 2 }
 ## 二、循环状态机与熔断
 
 ### 2.1 状态流转

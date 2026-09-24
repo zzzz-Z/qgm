@@ -255,6 +255,9 @@ function submitDecisionCustom() {
         <span class="loop-stuck-icon">{{ stuckLevel === 'stuck' ? '⚠' : '⏳' }}</span>
         <span class="loop-stuck-text">{{ stuckLevel === 'stuck' ? '疑似卡住' : '回复偏慢' }}</span>
       </span>
+      <span class="loop-hard-chip" style="font-size:11px;font-family:monospace;color:var(--text-3);white-space:nowrap" title="循环硬上限：50 轮 / 30 分钟 / token 33k（牛马模式同样生效）">
+        {{ loopRound }}/50轮 · ⛽ {{ (tokenDelta / 1000).toFixed(1) }}k/33k
+      </span>
       <span class="loop-round-bar" :title="`轮次 ${loopRound}/${maxRounds}`">
         <span class="loop-round-fill" :style="{ width: `${roundPct}%` }" />
       </span>

@@ -49,6 +49,9 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boole
   return true
 }
 
+// [dev-hmr-core-v1-server-guard] dev 热重载：重入时先关闭旧实例，避免 EADDRINUSE
+const g = globalThis as typeof globalThis & { __aiRunnerServer?: http.Server }
+if (g.__aiRunnerServer) { try { g.__aiRunnerServer.close() } catch { /* ignore */ } }
 /** server（相关状态/数据） */
 const server = http.createServer((req, res) => {
   if (serveStatic(req, res)) return
@@ -62,6 +65,7 @@ const server = http.createServer((req, res) => {
     }
   })
 })
+g.__aiRunnerServer = server // [dev-hmr-core-v1-server-reg]
 attachWs(server, { wsPath: WS_PATH })
 
 // [port-guard-v1] 端口占用预检：给出可操作提示，避免原始 EADDRINUSE 堆栈

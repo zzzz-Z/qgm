@@ -2,8 +2,8 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + token 估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.4.2
-// @description  回传会话 ID/token/AI 回复到工作台；接收 fill/stop（修复千问 Slate 输入框）
+// @version      1.4.3
+// @description  回传会话 ID/token/AI 回复到工作台；接收 fill/stop（修复千问 Slate 输入框）；DONE 携带完整注释块
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -270,18 +270,91 @@
       return last
     } catch { return '' }
   }
+
+  // [done-comments] 从代码块中提取「DONE 起始的连续注释块」
+  // 返回：{ raw: string[], tagged: { [tag]: string }, text: string, firstLine: string }
+  function extractDoneComments(code) {
+    const lines = String(code || '').split(/\r?\n/)
+
+    // 1) 定位含 DONE 的注释行（行首 // 或 #）
+    let start = -1
+    for (let i = 0; i < lines.length; i++) {
+      if (/^[ \t]*(?:\/\/|#)[ \t]*DONE\b/i.test(lines[i])) { start = i; break }
+    }
+    if (start === -1) return null
+
+    // 2) 从 DONE 行开始，连续收集注释行（遇到第一个非注释行即停）
+    const raw = []
+    const tagged = {}
+    let curTag = null
+    let curVal = []
+
+    for (let i = start; i < lines.length; i++) {
+      const m = lines[i].match(/^[ \t]*(?:\/\/|#)[ \t]?(.*)$/)
+      if (!m) break
+      const content = m[1] // 已剥离行注释前缀
+      raw.push(content)
+
+      const tag = content.match(/^@([\w-]+)\s*(.*)$/)
+      if (tag) {
+        if (curTag) tagged[curTag] = curVal.join('\n').trim()
+        curTag = tag[1]
+        curVal = [tag[2]]
+      } else if (curTag) {
+        curVal.push(content)
+      }
+    }
+    if (curTag) tagged[curTag] = curVal.join('\n').trim()
+
+    return {
+      raw,
+      tagged,
+      text: raw.join('\n'),
+      firstLine: raw[0] || '',
+    }
+  }
+
   function findNewDone() {
-    const nodes = document.querySelectorAll('div,p,span,li')
+    const _blocks = document.querySelectorAll('.ds-assistant-message-main-content')
+    const _root = _blocks.length > 0 ? _blocks[_blocks.length - 1] : document
+    const summary = String(_root.textContent || '').trim()
+
     let found = null
+
+    // 1) 原逻辑：独立文本节点恰好为 DONE
+    const nodes = document.querySelectorAll('div,p,span,li')
     for (const el of nodes) {
       if (el.children.length > 0) continue
       const t = (el.textContent || '').trim()
       if (!/^\s*DONE\s*$/.test(t)) continue
-      const marker = hash32(`${t}|${(el.outerHTML || '').slice(0, 120)}`)
+      const marker = hash32(`text|${t}|${(el.outerHTML || '').slice(0, 120)}`)
       if (seenDoneMarkers.has(marker)) continue
-      const _blocks = document.querySelectorAll('.ds-assistant-message-main-content')
-      const _root = _blocks.length > 0 ? _blocks[_blocks.length - 1] : document
-      found = { marker, text: String(_root.textContent || '').trim() } // [done-with-summary]
+      found = { marker, text: summary, doneComments: null }
+    }
+    if (found) return found
+
+    // 2) 从 <pre> 代码块注释里抓 DONE + 后续所有注释行
+    const pres = document.querySelectorAll('pre')
+    for (const pre of pres) {
+      const raw = (pre.textContent || '').replace(/^\n+|\n+$/g, '')
+      if (!raw) continue
+
+      const comments = extractDoneComments(raw)
+      if (!comments) continue
+
+      // 用整段代码的哈希去重（React re-render 不重复上报）
+      const marker = hash32(`code-done|${hash32(raw)}`)
+      if (seenDoneMarkers.has(marker)) continue
+
+      found = {
+        marker,
+        text: summary,
+        doneText: comments.firstLine, // "DONE"
+        doneComments: comments.raw, // 全部注释行（已去前缀）
+        doneCommentsText: comments.text, // 拼好的纯文本
+        doneTags: comments.tagged, // { desc, why, mode, ... }
+      }
+      break
     }
     return found
   }
@@ -312,6 +385,27 @@
           }
           return
         }
+
+        const doneMarker = findNewDone()
+        console.log(doneMarker, 'doneMarker')
+
+        if (doneMarker) {
+          seenDoneMarkers.add(doneMarker.marker)
+          post({
+            type: 'ai-runner:reply',
+            kind: 'done',
+            site: location.origin,
+            sessionId: extractSidFromHash(),
+            text: doneMarker.text, // assistant 容器全文（兼容旧字段）
+            doneText: doneMarker.doneText || '', // 首行，如 "DONE"
+            doneComments: doneMarker.doneComments || [], // 字符串数组，去前缀
+            doneCommentsText: doneMarker.doneCommentsText || '', // 拼好的整块注释
+            doneTags: doneMarker.doneTags || {}, // { desc, why, mode, ... }
+          })
+          lastBodySig = bodySignature()
+          return
+        }
+
         const s = extractLatestScript()
         if (s && !seenHashes.has(s.hash)) {
           seenHashes.add(s.hash)
@@ -327,19 +421,7 @@
           lastBodySig = bodySignature()
           return
         }
-        const doneMarker = findNewDone()
-        if (doneMarker) {
-          seenDoneMarkers.add(doneMarker.marker)
-          post({
-            type: 'ai-runner:reply',
-            kind: 'done',
-            site: location.origin,
-            sessionId: extractSidFromHash(),
-            text: doneMarker.text, // [done-with-summary]
-          })
-          lastBodySig = bodySignature()
-          return
-        }
+
         const sig = bodySignature()
         if (sig !== lastBodySig) {
           lastBodySig = sig

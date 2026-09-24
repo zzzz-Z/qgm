@@ -37,12 +37,18 @@ export function scanScriptHead(code: string): HeadResult {
   if (first.charCodeAt(0) === 0xFEFF) first = first.slice(1)
   if (first.startsWith('#!')) {
     const isNode = /^#!\s*\/usr\/bin\/(?:env\s+)?node\b/.test(first)
-    if (!isNode) return { ok: false, reason: `ILLEGAL_SHEBANG: ${first.trim()}` }
+    if (!isNode) {
+      return {
+        ok: false,
+        reason: `ILLEGAL_SHEBANG: ${first.trim()}`
+      }
+    }
   }
   const hasDesc = /^[^\S\n]*(?:\/\/|#)[^\S\n]*@desc\b/m.test(code)
   const hasWhy = /^[^\S\n]*(?:\/\/|#)[^\S\n]*@why\b/m.test(code)
   if (!hasDesc) return { ok: false, reason: 'MISSING_DESC' }
   if (!hasWhy) return { ok: false, reason: 'MISSING_WHY' }
+
   return { ok: true }
 }
 /**

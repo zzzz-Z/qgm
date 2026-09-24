@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useEventListener } from '@vueuse/core'
 import ScriptPanel from './components/script/ScriptPanel.vue'
 import GeneratePanel from './components/generate/GeneratePanel.vue'
 import { DEFAULT_SESSION_PROMPT } from './composables/ai/loopLogic'
@@ -43,7 +44,7 @@ import type { SessionEntry } from './composables/ui/useAppStorage'
 /** 自动接管模式开关 */
 const autoTakeover = useAutoTakeover()
 // [ask-count-merge] 与 useSessionManager 共享同一 askCount 数据源
-const { askCount, resetAskCount } = useSessionManager()
+const { askCount, resetAskCount, resetSession } = useSessionManager()
 // [app-storage-extracted-v1] SESSION_HISTORY_KEY 已抽至 useAppStorage
 /** mock 通道（v6 §13.2 ?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
 const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
@@ -191,6 +192,19 @@ function onSessionIdMessage(e: MessageEvent) {
     const inst = sid ? getLoopBySessionId(sid) : undefined
     const routedToLoop = Boolean(inst && isInstActive(inst))
     const kind = String(d.kind || '')
+
+    // done / plain / multi 仅循环模式消费
+    // DONE：彻底停止循环（先停循环态再 emit，避免残留状态）
+    if (kind === 'done') {
+      if (isLoopActive.value) {
+        try { void killCurrent() } catch (e) { console.error('[done-stop-loop]', e) }
+      }
+      if (autoTakeover.enabled.value) {
+        autoTakeover.disable()
+      }
+      return
+    }
+
     if (kind === 'script') {
       const code = String(d.code || '')
       const lang = (d.lang === 'bash' ? 'bash' : d.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
@@ -233,16 +247,7 @@ function onSessionIdMessage(e: MessageEvent) {
       }
       return
     }
-    // done / plain / multi 仅循环模式消费
-    // DONE：彻底停止循环（先停循环态再 emit，避免残留状态）
-    if (kind === 'done') {
-      if (isLoopActive.value) {
-        try { void killCurrent() } catch (e) { console.error('[done-stop-loop]', e) }
-      }
-      if (autoTakeover.enabled.value) {
-        autoTakeover.disable()
-      }
-    }
+
     const text = d.text !== undefined ? String(d.text) : ''
     if (kind === 'plain' || kind === 'multi' || (kind === 'done' && text.trim() && text.trim() !== 'DONE')) {
       emitBus((`ai:${kind}`) as EventKind, `AI 回复 · ${kind}`, { payload: { kind, text, count: Number(d.count) || 0 } })
@@ -476,8 +481,36 @@ watch(() => _absTaskState.value.tiers, (tiers) => {
  */
 function dismissAbsence() { absenceDismissed.value = true }
 
+// [use-event-listener-v1] 窗口级监听改由 @vueuse 统一注册，unmount 自动清理
+useEventListener(window, 'message', onSessionIdMessage)
+useEventListener(window, 'keydown', onEscClose)
+useEventListener(window, 'keydown', onShiftQuestion)
+
 onMounted(() => {
-  window.addEventListener('message', onSessionIdMessage)
+  // [auto-new-session-on-switch-v1] 切项目后：自动开新会话并连接
+  try {
+    const flag = sessionStorage.getItem('__ai_switch_project')
+    const at = Number(sessionStorage.getItem('__ai_switch_project_at')) || 0
+    sessionStorage.removeItem('__ai_switch_project')
+    sessionStorage.removeItem('__ai_switch_project_at')
+    if (flag === '1' && Date.now() - at < 15000) {
+      // 1) 清空本地会话状态（消息 / token / askCount / sessionId）
+      try { resetSession() } catch { /* 未就绪时忽略 */ }
+      // 2) 打开新的 AI 会话窗口
+      setTimeout(() => {
+        try {
+          const w = openDeepseek(DEFAULT_URL)
+          if (w) {
+            // 3) 确保 headless 通道被激活（getTransport 懒创建，触发连接）
+            try { getTransport() } catch { /* 油猴模式下无需 */ }
+            // 4) 预填开新会话的引导语
+          } else {
+            toast('新会话窗口打开失败（可能被浏览器拦截弹窗）', 'warn', 4000)
+          }
+        } catch { /* 忽略 */ }
+      }, 600)
+    }
+  } catch { /* sessionStorage 不可用时静默 */ }
   // 无头模式：订阅 transport.onReply，转成 MessageEvent 格式喂给同一处理器
   try {
     if (localStorage.getItem('__ai_transport') === 'headless') {
@@ -504,8 +537,6 @@ onMounted(() => {
       console.warn('[ai-runner] 无头 reply 订阅已注册')
     }
   } catch (e) { console.error('[headless-reply] 订阅失败:', e) }
-  window.addEventListener('keydown', onEscClose)
-  window.addEventListener('keydown', onShiftQuestion)
   // 注入 activeSessionId 读取器：循环启动时取当前活动会话 id 绑定到 loopSessionId
   setActiveSessionIdGetter(() => activeSessionId.value)
 
@@ -531,11 +562,7 @@ onMounted(() => {
     setDeepseekUrl(s.url)
   }
 })
-onBeforeUnmount(() => {
-  window.removeEventListener('message', onSessionIdMessage)
-  window.removeEventListener('keydown', onEscClose)
-  window.removeEventListener('keydown', onShiftQuestion)
-})
+// [use-event-listener-v1] 手工清理块已移除，改由 @vueuse 接管
 const { stripComments, stripBlankLines, toggleStripComments, toggleStripBlankLines } = useCodeCleaner()
 // auto resend after 3 min no reply
 setAiWaitingWatchdog(async () => {

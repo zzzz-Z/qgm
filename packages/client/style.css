@@ -320,3 +320,82 @@ button:focus-visible:where([class*='chip']) {
     scroll-behavior: auto !important;
   }
 }
+
+/* [global-keyframes-v1] 全局关键帧：供 TerminalPane / ScriptPanel 跨组件引用 */
+/* 原因：Vue scoped style 会给 @keyframes 加 hash 后缀，导致跨组件引用失效 */
+
+@keyframes usb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes usb-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.9);
+  }
+}
+
+@keyframes usb-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes usb-fade {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes usb-breathe {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes waiting-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+
+@keyframes dot-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.7);
+    opacity: 0.6;
+  }
+}
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}

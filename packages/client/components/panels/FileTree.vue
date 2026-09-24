@@ -479,7 +479,15 @@ async function chooseWorkspace(): Promise<void> {
     if (r.status === 204) return
     if (r.ok) {
       const j = await r.json().catch(() => ({})) as { ok?: boolean, canceled?: boolean }
-      if (j && j.ok) { window.location.reload(); return }
+      if (j && j.ok) {
+        // [auto-new-session-on-switch-v1] 切项目后：写标记，让 reload 后的 App 开新会话并连接
+        try {
+          sessionStorage.setItem('__ai_switch_project', '1')
+          sessionStorage.setItem('__ai_switch_project_at', String(Date.now()))
+        } catch { /* sessionStorage 不可用时退化为普通 reload */ }
+        window.location.reload()
+        return
+      }
       // 兼容旧服务端：200 + { canceled: true }
       if (j && j.canceled) { /* silent */ }
     }

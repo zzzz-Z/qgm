@@ -158,6 +158,11 @@ export function detectReplyInPage() {
     return null
   }
 
+  /** 检测文本是否含 js 代码块（RULES.md §1.0 接收端容错） */
+  function hasJsFence(text: string): boolean {
+    return /```js\b/.test(String(text || ''))
+  }
+
   function extractLatestScript() {
     // 只扫最后一条 assistant 消息，排除历史/用户消息
     const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
@@ -239,6 +244,7 @@ export function detectReplyInPage() {
   if (doneMarker) {
     dedup.seenDoneMarkers.push(doneMarker.marker)
     dedup.lastBodySig = bodySignature()
+    if (!hasJsFence(doneMarker.text)) return null
     return { kind: 'done', text: doneMarker.text }
   }
 
@@ -254,8 +260,10 @@ export function detectReplyInPage() {
   if (dedup._plainSentInCycle) return null
   dedup._stableCount = (dedup._stableCount || 0) + 1
   if (dedup._stableCount < 3) return null
+  const plainText = getMainText()
+  if (!hasJsFence(plainText)) return null
   dedup._plainSentInCycle = true
-  return { kind: 'plain', text: getMainText() }
+  return { kind: 'plain', text: plainText }
 
   return null
 }

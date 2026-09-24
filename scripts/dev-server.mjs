@@ -26,6 +26,20 @@ await server.ssrLoadModule(path.join(ROOT, 'apps/standalone/src/server.ts'))
 
 console.log('[dev-server] 已加载 ws-server.ts（监听端口由 AIR_SERVER_PORT 决定，默认 5175）')
 
+// [dev-hmr-core-v1-devserver] core / standalone 源码变化 → 失效模块图并重新加载
+const ENTRY = `${ROOT}/apps/standalone/src/server.ts`
+server.watcher.on('change', async (file) => {
+  if (!/packages[\\/]core[\\/]src|apps[\\/]standalone[\\/]src/.test(file)) return
+  console.log('[dev-server] 热重载:', file)
+  try {
+    server.moduleGraph.invalidateAll()
+    await server.ssrLoadModule(ENTRY)
+    console.log('[dev-server] 已重载')
+  } catch (e) {
+    console.error('[dev-server] 重载失败:', e)
+  }
+})
+
 // 保持进程存活；Ctrl+C 退出
 process.on('SIGINT', async () => {
   console.log('[dev-server] 关闭中...')

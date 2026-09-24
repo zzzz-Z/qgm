@@ -1,5 +1,6 @@
 // [after-round-v1] 从 useAutoLoop.ts 抽出（PLAN 4.7 阈值整改）
 import type { LoopInstance, RoundOutcome } from './types.js'
+import { LOOP_HARD_MAX_MS, LOOP_HARD_MAX_ROUNDS } from '../loopLogic.js'
 
 interface AfterRoundDeps {
   finish: any
@@ -60,7 +61,25 @@ export function createAfterRound(deps: AfterRoundDeps) {
     LOOP_TOKEN_HARD_LIMIT,
   } = deps
 
+  // [loop-hard-limit-v1] 起跑时间：按 loopId 追踪，新循环重置
+  let hardTrackedLoopId = ''
+  let hardStartedAtMs = 0
+
   async function afterRound(inst: LoopInstance, o: RoundOutcome): Promise<void> {
+    // [loop-hard-limit-v1] 硬上限：总时长 / 总轮次，先到即停，牛马模式也生效
+    if (inst.id.value !== hardTrackedLoopId) {
+      hardTrackedLoopId = inst.id.value
+      hardStartedAtMs = Date.now()
+    }
+    const elapsedMs = Date.now() - hardStartedAtMs
+    if (elapsedMs > LOOP_HARD_MAX_MS) {
+      await finish(inst, 'hard-timeout', `循环超过硬上限 ${Math.round(LOOP_HARD_MAX_MS / 60000)} 分钟`)
+      return
+    }
+    if (inst.round.value >= LOOP_HARD_MAX_ROUNDS) {
+      await finish(inst, 'hard-rounds', `已达硬上限 ${LOOP_HARD_MAX_ROUNDS} 轮`)
+      return
+    }
     if (inst.stopRequest.value === 'pause') {
       // [loop-paused:after-round] 暂停 ≠ 结束：置 paused 后进入 waiting，可 resume 恢复
       inst.stopRequest.value = 'none'

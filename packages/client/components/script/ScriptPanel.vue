@@ -23,6 +23,7 @@
         :tw-stderr="twStderr"
         :tw-lines="twLines"
         :tw-err-lines="twErrLines"
+        :done-summary="doneSummary"
         :line-class="lineClass"
         :chat-items="[]"
         :templates="TEMPLATES"
@@ -184,7 +185,7 @@ const editorRef = ref<{ insertText: (t: string) => void } | null>(null)
 const { toast, confirmDialog } = useToast()
 // U.3: CodeMirror 全家桶懒加载——首建编辑器时才 await import，CM 打进独立 chunk
 
-const { script, lastRunCode, running, result, changes, rolling, busyAll, persistWarning, liveStdout, liveStderr, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback } = useRunner()
+const { script, lastRunCode, running, result, changes, rolling, busyAll, persistWarning, liveStdout, liveStderr, doneSummary, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback } = useRunner()
 const { enabled: autoTakeoverEnabled, countdown: autoTakeoverCountdown, enable: enableAutoTakeover, disable: disableAutoTakeover, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
 /**
  * 切换 Auto Takeover
@@ -214,10 +215,14 @@ const {
   userNote,
   // [sp-autopause-v1] 回车/发送后进入暂停态：暴露 loopPaused 与 requestPause
   requestPause,
+  // [soft-pause-v1] 发送给 AI 后软暂停（不发 stop、不静音，避免取消刚发出的 fill）
+  softPause,
   // [loop-paused-toggle-v1] 真暂停/恢复
   loopPaused,
   // [pause-to-idle-v2] 暂停点击 = 完全结束循环，回到待发状态（不再软恢复等待）
   exitPauseToIdle,
+  // [sp-send-after-softpause-v1] 无活跃循环时复位 softPause 残留
+  clearSoftPause,
 } = useAutoLoop()
 /** 最后一个运行脚本 */
 const lastRunScript = ref('')
@@ -286,9 +291,30 @@ function submitUserNote(text: string) {
  */
 function pauseAll() {
   cancelAutoRun()
+  // [autotakeover-stop-v1] 纯 autoTakeover（无 loop）场景：点击即关闭接管
+  if (autoTakeoverEnabled.value && !isLoopActive.value && !running.value) {
+    disableAutoTakeover()
+    clearSoftPause()
+    toast('已关闭自动接管', 'info', 3000)
+    return
+  }
   if (loopPaused.value) {
-    // [pause-to-idle-v2] 已暂停：点击即完全退出循环，复位到待发状态
-    void exitPauseToIdle()
+    // [pause-to-idle-v2] 有活跃循环 + 暂停态：点击即完全退出循环，复位到待发状态
+    if (isLoopActive.value || running.value) {
+      void exitPauseToIdle()
+      return
+    }
+    // [sp-send-after-softpause-v1] 无活跃循环但 loopPaused 被 softPause 残留置真：
+    // 视为用户点「发送」——复位 paused，走重新发送路径（等价 toggleAutoTakeover 的 else 分支）
+    clearSoftPause()
+    if (autoTakeoverEnabled.value) disableAutoTakeover()
+    if (!script.value.trim()) {
+      toast('请先在编辑器写脚本再发送', 'warn', 3000)
+      return
+    }
+    enableAutoTakeover()
+    toast('已开启自动接管：立即执行当前脚本 → 结果发 AI → AI 回填后 3-10s 自动执行', 'success', 6000)
+    void runSmart({ bypassAutoGuard: true })
     return
   }
   if (isLoopActive.value || running.value || autoTakeoverEnabled.value) {
@@ -514,14 +540,15 @@ const { pendingMeta: autoPendingMeta } = useAutoTakeover()
 
 // [statusbar] 主状态：图标 + 文本 + 语义色
 /** 状态 */
+// [usb-main-status-text-v1] 各状态文本简短醒目，配合 pill 样式
 const mainStatus = computed(() => {
   if (running.value) return { icon: '\u2699\uFE0F', text: '脚本执行中', cls: 'running' }
-  if (aiWaiting.value) return { icon: '\u23F3', text: '等待 AI 回复', cls: 'waiting' }
-  if (loopState.value === 'waiting-input') return { icon: '\u23F8\uFE0F', text: '决策点待选', cls: 'paused' }
-  if (loopState.value === 'budget-limited') return { icon: '\u26A0\uFE0F', text: '预算已用尽', cls: 'warn' }
-  if (isLoopActive.value) return { icon: '\u{1F504}', text: '循环进行中', cls: 'loop' }
+  if (aiWaiting.value) return { icon: '\u23F3', text: '等待 AI', cls: 'waiting' }
+  if (loopState.value === 'waiting-input') return { icon: '\u23F8\uFE0F', text: '待决策', cls: 'paused' }
+  if (loopState.value === 'budget-limited') return { icon: '\u26A0\uFE0F', text: '预算耗尽', cls: 'warn' }
+  if (isLoopActive.value) return { icon: '\u{1F504}', text: '循环中', cls: 'loop' }
   if (stopReason.value) return { icon: '\u23F9\uFE0F', text: '已停止', cls: 'stop' }
-  return { icon: '\u25CB', text: '待命中', cls: 'idle' }
+  return { icon: '\u25CB', text: '待命', cls: 'idle' }
 })
 
 // [status-active] 状态栏活跃态：运行/等待/循环时高亮
@@ -1062,8 +1089,8 @@ async function askAi(question: string) {
   if (cleanQuestion) segs.push(`# 问题\n\n${cleanQuestion}`)
   const prompt = segs.join('\n\n')
   const r = await copyAndFill(prompt)
-  // [sp-autopause-v2] 发送脚本给 AI 后同样进入暂停态
-  if (r) requestPause()
+  // [sp-autopause-v2] 发送脚本给 AI 后进入暂停态；用 softPause 避免 sendStop 取消刚发出的 fill
+  if (r) softPause()
   if (r === 'failed') {
     toast('发送失败，已复制到剪贴板', 'warn', 4000)
     return
@@ -1185,8 +1212,8 @@ async function copyOutput(force = false) {
     const text = await buildAiPrompt()
     if (!text) return
     const r = await copyAndFill(text)
-    // [sp-autopause-v1] 发送成功即进入暂停态，等用户手动恢复
-    if (r) requestPause()
+    // [sp-autopause-v1] 发送成功即进入暂停态；用 softPause 避免 sendStop 取消 fill
+    if (r) softPause()
     if (r === 'failed') {
       toast('发送失败，已复制到剪贴板', 'warn', 4000)
       return
@@ -1531,9 +1558,6 @@ const phaseElapsed = computed(() => {
   const sec = s % 60
   return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
 })
-
-// [script-panel-tw-extracted-v1] 降噪段已抽至 useTwDisplay
-// [script-panel-utils-extracted-v1] lineClass/trimOutput 已抽至 ./output-utils
 </script>
 
 <style scoped lang="scss">
@@ -1633,65 +1657,15 @@ const phaseElapsed = computed(() => {
   overflow: hidden !important;
 }
 
-@keyframes usb-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@keyframes usb-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.55;
-    transform: scale(0.9);
-  }
-}
-@keyframes usb-blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-@keyframes usb-fade {
-  0%,
-  100% {
-    opacity: 0.85;
-  }
-  50% {
-    opacity: 0.45;
-  }
-}
-@keyframes usb-breathe {
-  0%,
-  100% {
-    opacity: 0.6;
-  }
-  50% {
-    opacity: 1;
-  }
-}
+/* usb-spin → 已迁至全局 style.css ([global-keyframes-v1]) */
+/* usb-pulse → 已迁至全局 style.css ([global-keyframes-v1]) */
+/* usb-blink → 已迁至全局 style.css ([global-keyframes-v1]) */
+/* usb-fade → 已迁至全局 style.css ([global-keyframes-v1]) */
+/* usb-breathe → 已迁至全局 style.css ([global-keyframes-v1]) */
 
-@keyframes waiting-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.75;
-  }
-}
+/* waiting-pulse → 已迁至全局 style.css ([global-keyframes-v1]) */
 
-@keyframes cursor-blink {
-  50% {
-    opacity: 0;
-  }
-}
+/* cursor-blink → 已迁至全局 style.css ([global-keyframes-v1]) */
 
 .overlay {
   position: absolute !important;
@@ -1729,15 +1703,5 @@ const phaseElapsed = computed(() => {
   color: var(--text-2) !important;
 }
 
-@keyframes dot-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(0.7);
-    opacity: 0.6;
-  }
-}
+/* dot-pulse → 已迁至全局 style.css ([global-keyframes-v1]) */
 </style>

@@ -46,6 +46,16 @@ const busyAll = ref(false)
 const persistWarning = ref('')
 /** 实时标准输出缓冲区 */
 const liveStdout = ref('')
+
+/** [done-summary-channel-v1] DONE 后的总结：独立通道，不混入 raw stdout */
+export const doneSummary = ref('')
+
+/** [done-summary-channel-v1] 写入总结（走独立 ref，不追加 stdout） */
+export function pushTerminalNotice(text: string, _opts?: { divider?: boolean }): void {
+  const raw = String(text || '')
+  if (!raw) return
+  doneSummary.value = raw
+}
 /** 实时标准错误缓冲区 */
 const liveStderr = ref('')
 /** 启用的 */
@@ -132,6 +142,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   changes.value = []
   liveStdout.value = ''
   liveStderr.value = ''
+  doneSummary.value = '' // [done-summary-channel-v1] 新一轮清空上轮总结
 
   const metaM = code.match(/^[^\S\n]*(?:\/\/|#)[^\S\n]*@desc[^\S\n]*:[^\S\n]*(\S[^\n]*)$/m)
   const desc = metaM ? metaM[1].trim().slice(0, 80) : '执行脚本'
@@ -394,6 +405,7 @@ export function useRunner() {
     baselineRunId,
     liveStdout,
     liveStderr,
+    doneSummary,
     autoFeedbackRequested,
     clearAutoFeedback: () => { autoFeedbackRequested.value = false },
     run,

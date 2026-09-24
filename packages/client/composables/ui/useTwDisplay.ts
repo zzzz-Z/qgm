@@ -1,7 +1,8 @@
 // [use-tw-display-v1] 从 ScriptPanel.vue 抽出（PLAN 4.7 阈值整改）
 // 打字机式实时输出 + 降噪（关键节点行 + 尾部 N 行）
 import type { Ref } from 'vue'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRafFn } from '@vueuse/core'
 
 /** Tailwind 尾部字符标记 */
 const TW_TAIL = 5
@@ -16,10 +17,8 @@ const TW_KEEP_RE = /^[▶✓✗!⚠⋯]/
 export function useTwDisplay(liveStdout: Ref<string>, liveStderr: Ref<string>) {
   const twStdout = ref('')
   const twStderr = ref('')
-  let twRaf: number | null = null
-
-  function twStep() {
-    twRaf = null
+  // [use-raf-fn-v1] 打字机步进改由 @vueuse useRafFn 驱动；unmount 自动清理
+  const { pause: pauseRaf, resume: resumeRaf } = useRafFn(() => {
     const tOut = (liveStdout && liveStdout.value) || ''
     const tErr = (liveStderr && liveStderr.value) || ''
     let more = false
@@ -33,16 +32,12 @@ export function useTwDisplay(liveStdout: Ref<string>, liveStderr: Ref<string>) {
       twStderr.value = tErr.slice(0, twStderr.value.length + step)
       more = true
     } else if (twStderr.value !== tErr) { twStderr.value = tErr }
-    if (more) twRaf = requestAnimationFrame(twStep)
-  }
+    if (!more) pauseRaf()
+  }, { immediate: false })
 
-  function twKick() {
-    if (twRaf === null) twRaf = requestAnimationFrame(twStep)
-  }
-
+  const twKick = () => resumeRaf()
   watch(liveStdout, twKick)
   watch(liveStderr, twKick)
-  onBeforeUnmount(() => { if (twRaf !== null) cancelAnimationFrame(twRaf) })
 
   const twLines = computed<string[]>(() => {
     const raw = (twStdout.value || '').split('\n')

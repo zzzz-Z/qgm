@@ -20,3 +20,5 @@ export { __pkgDir } from './server/page.js'
 export { createRouter } from './server/router.js'
 
 export type { Router } from './server/router.js'
+
+console.log('ceshi')

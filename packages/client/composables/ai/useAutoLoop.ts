@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { useAiWaiting } from './useAiWaiting.js'
-import { useRuntime } from '../../stores/runtime' // [loopstate-mirror-v1]
-import { useRunner } from '../runner/useRunner'
+import { useRuntime } from '../../stores/runtime'
+import { pushTerminalNotice, useRunner } from '../runner/useRunner'
 import { getActiveWin } from './useDeepseekUrl'
 import { getTransport } from './useAiTransport.js'
 import { toast } from '../ui/useToast'
@@ -42,7 +42,7 @@ import { runBash } from './auto-loop/run-bash.js'
 import { createRoundGuards } from './auto-loop/round-guards.js'
 import { createWaiting } from './auto-loop/waiting.js'
 import { createAfterRound } from './auto-loop/after-round.js'
-// AIRUNNER-BATCH5-0D-PERSIST
+
 export type { HookEvent, HookResult } from './auto-loop/hooks.js'
 
 export { bindKeyboard, unbindKeyboard } from './auto-loop/keyboard.js'
@@ -152,6 +152,15 @@ const singletonView: LoopInstance = {
 
 /** 当前激活循环实例（单例视图，computed 维持响应式依赖） */
 export const activeLoop = computed<LoopInstance | null>(() => singletonView)
+
+// [loop-paused:orphan-guard-v1] 无活跃循环时清除 sessionStorage 恢复的孤儿 paused
+// 场景：用户暂停循环 → 刷新 → 循环实例已销毁，但 loopPaused 仍从 sessionStorage 恢复为 true
+// 用 setTimeout 让 onMounted / persist.restore 先跑完，再判定是否为孤儿
+setTimeout(() => {
+  if (!activeLoop.value && loopPaused.value) {
+    loopPaused.value = false
+  }
+}, 0)
 
 let _getActiveSessionId: () => string = () => ''
 
@@ -437,6 +446,10 @@ async function planHasPending(): Promise<boolean> {
  * @param reply - reply
  * @param sid - sid
  */
+/** [plan-resume-cap-v1] PLAN 续跑最多尝试次数，避免 PLAN 一直有 pending 就永不停止 */
+const PLAN_RESUME_MAX = 3
+/** [plan-resume-cap-v1] 连续因 PLAN pending 续跑的计数；放行 DONE 时归零 */
+let planResumeAttempts = 0
 export async function onNonScriptReply(reply: AiReply, sid?: string): Promise<void> {
   const inst = resolveInst(sid)
   if (!inst || !isInstActive(inst) || inst.state.value !== 'waiting') return
@@ -444,16 +457,24 @@ export async function onNonScriptReply(reply: AiReply, sid?: string): Promise<vo
   if (inst.stopRequest.value !== 'none') { await handleStopAfterRound(inst); return }
 
   if (reply.kind === 'done') {
-    // PLAN.md 待办未清空 → 忽略 DONE，注入反馈续跑
-    if (await planHasPending()) {
-      const okSent = loopPaused.value ? false : transport.sendFill('', { prompt: '【继续】长期计划（PLAN.md 待办）尚未清空。请对照 PLAN 剩余项继续输出下一个可执行脚本；只有 PLAN 全部完成才回复 DONE。' })
-      if (!okSent) { await finish(inst, 'window-lost', 'PLAN 未清空但窗口发送失败'); return }
-      ackFill(inst, 'PLAN 续跑')
-      bindKeyboard()
-      inst.round.value += 1
-      enterWaiting(inst)
-      return
+    // [plan-resume-cap-v1] PLAN 续跑加硬上限：连续续跑 PLAN_RESUME_MAX 次后放行 DONE
+    if (planResumeAttempts < PLAN_RESUME_MAX) {
+      if (await planHasPending()) {
+        planResumeAttempts += 1
+        const left = PLAN_RESUME_MAX - planResumeAttempts
+        toast(`PLAN 仍有待办，续跑（还剩 ${left} 次即强制结束）`, 'warn', 4000)
+        const okSent = loopPaused.value ? false : transport.sendFill('', { prompt: '【继续】长期计划（PLAN.md 待办）尚未清空。请对照 PLAN 剩余项继续输出下一个可执行脚本；只有 PLAN 全部完成才回复 DONE。' })
+        if (!okSent) { await finish(inst, 'window-lost', 'PLAN 未清空但窗口发送失败'); return }
+        ackFill(inst, 'PLAN 续跑')
+        bindKeyboard()
+        inst.round.value += 1
+        enterWaiting(inst)
+        return
+      }
+    } else {
+      toast(`PLAN 仍有待办，但已续跑 ${PLAN_RESUME_MAX} 次，强制结束循环`, 'warn', 6000)
     }
+    planResumeAttempts = 0
     // 防御性二次校验：油猴可能误把含解释/标点的回复判为 done
     // 当 reply.text 存在时必须严格匹配 isStrictDone，否则降级走 plain 容错
     if (reply.text !== undefined && !isStrictDone(reply.text)) {
@@ -476,15 +497,20 @@ export async function onNonScriptReply(reply: AiReply, sid?: string): Promise<vo
     }
     // [done-summary-archive] 归档 DONE 后总结（第二行起）
     try {
+      const doneText = String(reply.text ?? '').slice(0, 4000)
       addTrace({
         kind: 'loop',
         summary: '✓ 任务完成 · AI 回复 DONE',
         payload: {
           loopId: inst.id.value,
           loopRound: inst.round.value,
-          doneSummary: String(reply.text ?? '').slice(0, 4000),
+          doneSummary: doneText,
         },
       })
+      // [done-to-terminal-v1] 把 DONE 后的总结推送至 TerminalPane（工作台）
+      const summary = doneText.replace(/^\s*DONE\s*/, '').trim()
+      if (summary) pushTerminalNotice(`[任务完成]${String.fromCharCode(10)}${String.fromCharCode(10)}${summary}`, { divider: true })
+      else pushTerminalNotice('[任务完成] AI 回复 DONE', { divider: true })
     } catch { /* ignore */ }
     await finish(inst, 'done', 'AI 回复 DONE')
     return
@@ -660,12 +686,16 @@ export async function resumeFromPause(): Promise<void> {
   })
   toast('▶ 已恢复循环', 'success', 3000)
 }
-// [pause-to-idle-v2] 从暂停态直接回到待发状态：结束当前循环 + 复位 loopPaused + 解除静音
-// 与 resumeFromPause 的语义区分：resumeFromPause = 继续等 AI（软恢复）；
-// 本函数 = 完全退出循环，按钮回到「发送」（用户点暂停按钮时使用）
+
 /**
- * 执行 exit Pause To Idle
+ * 复位 softPause 残留的暂停标志（无活跃循环时使用）
+ * ScriptPanel 二次点击发送时调用：清除第一次发送后 softPause 留下的 paused 状态
  */
+export function clearSoftPause(): void {
+  if (isLoopActive.value) return
+  loopPaused.value = false
+  try { getTransport().unMute?.() } catch { /* ignore */ }
+}
 export async function exitPauseToIdle(): Promise<void> {
   const inst = activeLoop.value
   const wasPaused = loopPaused.value
@@ -735,6 +765,15 @@ export function requestPause() {
     try { useRunner().stop() } catch { /* 无正在运行的执行时忽略 */ }
   }
   toast('已暂停 · 点「发送」可结束循环回到待发状态', 'warn', 3000)
+}
+
+/**
+ * 软暂停：仅置 loopPaused 标志，不向油猴发 stop、不静音监听、不中断当前执行。
+ * 用于「手动/自动接管发送给 AI 后」进入暂停态的场景——此时 AI fill 刚发出，
+ * 若调 requestPause 会立即 sendStop 取消 fill 并 mute 掉回复，导致消息推不出去。
+ */
+export function softPause() {
+  loopPaused.value = true
 }
 
 /** ■ 停当前：立即 abort 执行 */
@@ -893,6 +932,9 @@ async function finish(inst: LoopInstance, reason: string, detail?: string): Prom
     }
   }
 
+  // [auto-idle-after-finish-v1] 整轮结束自动回初始态：按钮切「发送」
+  // 牛马模式已在函数上方 820-843 提前 return，此处无需再判 niumaMode
+  loopPaused.value = true
   inst.stopRequest.value = 'none'
   void runHook('LoopStop', {
     loopId: inst.id.value,
@@ -999,6 +1041,7 @@ export function useAutoLoop() {
     killCurrent,
     stopAndRollback,
     requestPause,
+    softPause,
     // [export-loopsflags-v1] 暴露暂停标志，供 LoopBar 展示「恢复」按钮
     loopPaused: computed(() => loopPaused.value),
     onScriptArrival,
@@ -1012,6 +1055,7 @@ export function useAutoLoop() {
     resumeLoop,
     resumeFromPause,
     exitPauseToIdle,
+    clearSoftPause,
     getLoopBySessionId,
     listActiveLoops,
     setActiveLoopSessionId,

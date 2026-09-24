@@ -173,7 +173,10 @@ const __AI__ = {
     if (!bin) return { ok: false, output: '未找到 node_modules/.bin/vue-tsc 或 tsc' }
     return _execBin(bin, ['--noEmit'])
   },
-  writeReport(obj) { console.log(`__AI_REPORT__${JSON.stringify(obj)}`) },
+  // [write-report-off-v1] [DEPRECATED 2026-09-24] 无消费者；保留签名，不再输出到 stdout
+  // 曾用于「脚本 → runner」结构化上报；全库无解析方；
+  // 需要机器可读结果请改写入 .ai-runner/board.jsonl 或 state.json
+  writeReport(_obj) { /* no-op */ },
   // [P3-2d] @mode: diff 显式声明：脚本用它标记本次为只读预览（服务端强制 read-only 沙盒）
   writeDiffReport(obj) {
     console.log(`__AI_MODE_DIFF__${JSON.stringify(obj || {})}`)

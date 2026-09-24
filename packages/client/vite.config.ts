@@ -19,6 +19,12 @@ const BACKEND = process.env.AIR_BACKEND_URL || 'http://127.0.0.1:5175'
 
 export default defineConfig({
   root: CLIENT_ROOT,
+  // [dev-hmr-core-v1-client] 让 client 侧插件加载 core 源码，改 core 免 build 生效
+  resolve: {
+    alias: {
+      '@qgm/ai-runner-core': path.join(PKG_ROOT, 'core', 'src', 'index.ts'),
+    },
+  },
   server: {
     port: 5174,
     fs: { allow: [PKG_ROOT] },
@@ -36,6 +42,13 @@ export default defineConfig({
         target: BACKEND,
         changeOrigin: true,
         ws: true, // 让 /__ai/ws WebSocket 也走 proxy
+        // [csrf-proxy-fix-v1] changeOrigin 只改写 Host，浏览器 Origin(5174) 仍透传；
+        // 后端 guardRequest 要求 Origin.host === Host，故显式对齐避免 POST 403
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('origin', BACKEND)
+          })
+        },
       },
     },
   },

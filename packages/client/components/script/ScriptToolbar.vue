@@ -80,16 +80,20 @@
       v-if="running || isLoopActive || autoTakeoverEnabled"
       v-tooltip="loopPaused ? '发送：结束本次循环，回到待发状态' : '暂停：不取 AI 脚本、不接收工作台结果'"
       :aria-label="loopPaused ? '发送脚本' : '暂停循环'"
-      class="primary-btn stop head-run" @click="emit('pauseAll')"
+      class="primary-btn stop head-run"
+      @click="emit('pauseAll')"
     >
       <svg
         class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
       >
-        <line x1="9" y1="4" x2="9" y2="20" />
-        <line x1="15" y1="4" x2="15" y2="20" />
+        <polygon v-if="loopPaused" points="6 4 20 12 6 20 6 4" />
+        <template v-else>
+          <line x1="9" y1="4" x2="9" y2="20" />
+          <line x1="15" y1="4" x2="15" y2="20" />
+        </template>
       </svg>
-      <span data-mark="[pause-toggle-label-v1]">{{ loopPaused ? '发送' : (autoTakeoverCountdown > 0 ? `暂停 · ${autoTakeoverCountdown}s` : '暂停') }}</span>
+      <span data-mark="[pause-toggle-label-v1]">{{ autoTakeoverEnabled ? '暂停' : (loopPaused ? '发送' : '暂停') }}</span>
     </button>
     <button
       v-else
