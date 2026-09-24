@@ -5,7 +5,7 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { applyOverlay, readOverlayChanges } from '../../src/post-run/overlay.ts'
+import { applyOverlay, readOverlayChanges } from '../../packages/core/src/post-run/overlay.ts'
 
 // AIRUNNER-BATCH10-9-INLINE-ROOT-TEST
 // AIRUNNER-BATCH10-9-TEST-FIX: 临时目录放在项目内（applyOverlay 过滤项目外路径）

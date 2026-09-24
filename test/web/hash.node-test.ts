@@ -2,7 +2,7 @@
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/hash.node-test.ts 迁至 test/hash.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { fnv1a8 } from '../../client/utils/hash.ts'
+import { fnv1a8 } from '../../packages/client/utils/hash.ts'
 
 // AIRUNNER-BATCH15-4-HASH
 test('fnv1a8: 输出恒为 8 位小写十六进制', () => {

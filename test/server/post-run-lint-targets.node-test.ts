@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/post-run/lint-targets.node-test.ts 迁至 client/test/post-run-lint-targets.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { LINT_EXTS, pickLintTargets } from '../../src/post-run/lint-targets.ts'
+import { LINT_EXTS, pickLintTargets } from '../../packages/core/src/post-run/lint-targets.ts'
 
 function ch(path: string, type: 'added' | 'modified' | 'deleted') { return { path, type } }
 

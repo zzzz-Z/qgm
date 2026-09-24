@@ -3,10 +3,8 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 
-// ════════════════════════════════════════════════════════════
 // [P5-3] useAiTransport mute flag 契约测试
 // 依赖浏览器 API，无法 node 环境直接 import；改为源码契约测试，防「暂停永久静音」回归
-// ════════════════════════════════════════════════════════════
 
 import process from 'node:process'
 import fs from 'node:fs'
@@ -14,8 +12,6 @@ import path from 'node:path'
 
 // 按 src/protocol.ts 实际 wire-shape（TransportMessage: { t: string, [k]: unknown }）覆盖 12 种消息。
 // 用 node:test（项目 test:unit 指定 glob: client/*.node-test.ts + src/*.test.cjs）。
-
-// ───── 客户端 → 服务端（6 种） ─────
 
 test('C→S headless:fill 往返', () => {
   const msg = { t: 'headless:fill', sid: 'default', prompt: 'hi', context: 'ctx' }
@@ -46,8 +42,6 @@ test('C→S headless:close 往返', () => {
   const msg = { t: 'headless:close', sid: 'default' }
   assert.deepEqual(JSON.parse(JSON.stringify(msg)), msg)
 })
-
-// ───── 服务端 → 客户端（7 种） ─────
 
 test('S→C headless:reply kind=script 往返', () => {
   const msg = {
@@ -102,8 +96,6 @@ test('S→C headless:summary 往返', () => {
   assert.equal(r.degraded, false)
 })
 
-// ───── 边界 ─────
-
 test('未知 t 字段不抛错', () => {
   const msg = { t: 'unknown:type', sid: 'x' }
   assert.equal(JSON.parse(JSON.stringify(msg)).t, 'unknown:type')
@@ -115,7 +107,7 @@ test('undefined 字段序列化后消失（wire 契约）', () => {
   assert.equal('detail' in r, false)
 })
 
-const TRANSPORT_SRC = path.join(process.cwd(), 'client/composables/ai/useAiTransport.ts')
+const TRANSPORT_SRC = path.join(process.cwd(), 'packages/client/composables/ai/useAiTransport.ts')
 
 test('[P5-3] mute 采用 flag 屏蔽（不移除 window.message 监听）', () => {
   const src = fs.readFileSync(TRANSPORT_SRC, 'utf8')
@@ -136,6 +128,6 @@ test('[P5-3] 提供 unMute 且能复位 flag', () => {
 })
 
 test('[P5-3] startLoop 前调 unMute 防永久静音', () => {
-  const ualSrc = fs.readFileSync(path.join(process.cwd(), 'client/composables/ai/useAutoLoop.ts'), 'utf8')
+  const ualSrc = fs.readFileSync(path.join(process.cwd(), 'packages/client/composables/ai/useAutoLoop.ts'), 'utf8')
   assert.ok(/transport\.unMute\?\.\(\)/.test(ualSrc), 'startLoop 缺 unMute 调用')
 })

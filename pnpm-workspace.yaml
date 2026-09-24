@@ -1,3 +1,4 @@
+# [workspace-v1] @qgm 双宿主 workspace：packages/* 能力层，apps/* 装配层
 minimumReleaseAgeExcludePrune: true
 # [recover] 临时放开（原 no-downgrade 拦截 undici-types@6.21.0）
 
@@ -7,6 +8,10 @@ trustPolicyExclude:
   - undici-types@6.21.0
 
 shellEmulator: true
+
+packages:
+  - packages/*
+  - apps/*
 
 allowBuilds:
   '@ast-grep/cli': true

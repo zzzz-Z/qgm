@@ -1,0 +1,27 @@
+// [workspace-apps-tsc] 检查 apps/* 宿主层；core 由 tsconfig.json 检查
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "baseUrl": ".",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "paths": {
+      "@qgm/ai-runner-core": ["./packages/core/src/index.ts"]
+    },
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "allowImportingTsExtensions": false,
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": false,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "apps/*/src/**/*.ts",
+    "apps/*/vite.config.ts"
+  ],
+  "exclude": ["**/node_modules", "**/dist"]
+}

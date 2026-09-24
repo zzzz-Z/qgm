@@ -6,7 +6,7 @@ const path = require('node:path')
 
 const ROOT = process.cwd()
 const FILE = path.join(ROOT, '.ai-runner/compliance.jsonl')
-const L = require('../src/logger.cjs')
+const L = require('./_logger-shim.cjs')
 
 const c = L.c
 const ok = s => console.log(c(32, '✓'), s)

@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/post-run/shebang.node-test.ts 迁至 client/test/post-run-shebang.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { splitShebang } from '../../src/post-run/shebang.ts'
+import { splitShebang } from '../../packages/core/src/post-run/shebang.ts'
 
 test('node shebang → isNodeScript=true', () => {
   const r = splitShebang('#!/usr/bin/env node\nconsole.log(1)')

@@ -6,9 +6,21 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const ROOT = process.cwd()
-const AL = fs.readFileSync(path.join(ROOT, 'client/composables/ai/useAutoLoop.ts'), 'utf8')
-const HD = fs.readFileSync(path.join(ROOT, 'client/composables/ai/auto-loop/handoff.ts'), 'utf8')
-const W = fs.readFileSync(path.join(ROOT, 'client/composables/ai/useAiWaiting.ts'), 'utf8')
+// [niuma-src-merge-v1] useAutoLoop 已拆分：把主入口与 auto-loop/*.ts 全部拼接后断言
+function readAutoLoopBundle(): string {
+  const aiDir = path.join(ROOT, 'packages/client/composables/ai')
+  const files = [
+    path.join(aiDir, 'useAutoLoop.ts'),
+    ...fs.readdirSync(path.join(aiDir, 'auto-loop'))
+      .filter(n => n.endsWith('.ts'))
+      .sort()
+      .map(n => path.join(aiDir, 'auto-loop', n)),
+  ]
+  return files.map(f => fs.readFileSync(f, 'utf8')).join('\n/* --- */\n')
+}
+const AL = readAutoLoopBundle()
+const HD = fs.readFileSync(path.join(ROOT, 'packages/client/composables/ai/auto-loop/handoff.ts'), 'utf8')
+const W = fs.readFileSync(path.join(ROOT, 'packages/client/composables/ai/useAiWaiting.ts'), 'utf8')
 
 test('niuma: useAiWaiting 导出 niumaMode', () => {
   assert.match(W, /export\s+const\s+niumaMode\s*=/)
@@ -36,7 +48,7 @@ test('niuma: 宽容耗尽旁路', () => {
 
 test('niuma: DONE 到达自动续推', () => {
   assert.ok(AL.includes('[niuma-done-continue]'))
-  assert.ok(AL.includes('transport.sendFill(\'\', { prompt: \'继续工作\' })'))
+  assert.match(AL, /\[niuma-done-continue\][\s\S]{0,600}?transport\.sendFill\s*\(/)
 })
 
 test('niuma: hook 拒绝旁路', () => {

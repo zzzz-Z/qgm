@@ -46,9 +46,9 @@ Object.defineProperty(globalThis, 'crypto', {
   value: { randomUUID: (): string => '00000000-0000-0000-0000-000000000000' },
 })
 
-let mod: typeof import('../../client/composables/ai/useDeepseekUrl.ts')
+let mod: typeof import('../../packages/client/composables/ai/useDeepseekUrl.ts')
 beforeAll(async () => {
-  mod = await import('../../client/composables/ai/useDeepseekUrl.ts')
+  mod = await import('../../packages/client/composables/ai/useDeepseekUrl.ts')
 })
 
 beforeEach(() => { lsStore.clear() })

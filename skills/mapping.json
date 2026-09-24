@@ -1,0 +1,282 @@
+{
+  "version": "2026-09-22-v2",
+  "description": "PLAN 阶段3 粗映射：意图 × 文件类型 → loader 章节组/skill key。人维护，勿自动生成。",
+  "source": "docs/plan/phase0/D-intent.md",
+  "loadKeys": {
+    "groups": [
+      "core",
+      "rules",
+      "loop",
+      "script",
+      "env",
+      "ui",
+      "refactor"
+    ],
+    "skills": [
+      "RULES",
+      "AI-API",
+      "UI-LESSONS",
+      "PITFALLS-ARCHIVE",
+      "vue-SKILL",
+      "unocss-SKILL",
+      "vitest-SKILL",
+      "antfu-SKILL",
+      "vue-best-practices-SKILL",
+      "vue-testing-best-practices-SKILL"
+    ]
+  },
+  "rules": [
+    {
+      "intent": "改样式",
+      "fileType": "vue",
+      "load": [
+        "ui",
+        "unocss-SKILL",
+        "vue-SKILL"
+      ],
+      "note": "UI 章节 + UnoCSS + Vue SFC"
+    },
+    {
+      "intent": "改样式",
+      "fileType": "css",
+      "load": [
+        "ui",
+        "unocss-SKILL"
+      ],
+      "note": "UI 踩坑 + UnoCSS 语法"
+    },
+    {
+      "intent": "改样式",
+      "fileType": "other",
+      "load": [
+        "ui"
+      ],
+      "note": "纯 UI 令牌"
+    },
+    {
+      "intent": "改逻辑",
+      "fileType": "ts",
+      "load": [
+        "core",
+        "rules"
+      ],
+      "note": "TS 架构 + R1–R3"
+    },
+    {
+      "intent": "改逻辑",
+      "fileType": "vue",
+      "load": [
+        "core",
+        "vue-SKILL"
+      ],
+      "note": "Vue SFC 约定 + 行为准则"
+    },
+    {
+      "intent": "改逻辑",
+      "fileType": "cjs",
+      "load": [
+        "core",
+        "rules"
+      ],
+      "note": "脚本头部规范 + 通道"
+    },
+    {
+      "intent": "修 bug",
+      "fileType": "other",
+      "load": [
+        "rules",
+        "RULES",
+        "core",
+        "AI-API",
+        "ui",
+        "vue-SKILL"
+      ],
+      "note": "踩坑库 + 输出契约"
+    },
+    {
+      "intent": "加测试",
+      "fileType": "ts",
+      "load": [
+        "vitest-SKILL",
+        "vue-testing-best-practices-SKILL",
+        "RULES"
+      ],
+      "note": "测试约定"
+    },
+    {
+      "intent": "加测试",
+      "fileType": "vue",
+      "load": [
+        "vitest-SKILL",
+        "vue-testing-best-practices-SKILL",
+        "RULES"
+      ],
+      "note": "组件测试"
+    },
+    {
+      "intent": "重构",
+      "fileType": "other",
+      "load": [
+        "refactor",
+        "RULES"
+      ],
+      "note": "HCLC + 重构安全协议"
+    },
+    {
+      "intent": "重构",
+      "fileType": "vue",
+      "load": [
+        "refactor",
+        "vue-best-practices-SKILL"
+      ],
+      "note": "Vue 拆分结构"
+    },
+    {
+      "intent": "文档",
+      "fileType": "md",
+      "load": [
+        "RULES",
+        "core",
+        "loop"
+      ],
+      "note": "输出契约 + 提交闸门"
+    },
+    {
+      "intent": "配置",
+      "fileType": "json",
+      "load": [
+        "rules",
+        "core",
+        "RULES"
+      ],
+      "note": "配置约定"
+    },
+    {
+      "intent": "配置",
+      "fileType": "ts",
+      "load": [
+        "rules",
+        "antfu-SKILL",
+        "core",
+        "RULES"
+      ],
+      "note": "antfu 工具链"
+    },
+    {
+      "intent": "脚本",
+      "fileType": "cjs",
+      "load": [
+        "script",
+        "core",
+        "AI-API"
+      ],
+      "note": "脚本头部规范 + 通道选择"
+    },
+    {
+      "intent": "脚本",
+      "fileType": "ts",
+      "load": [
+        "script",
+        "AI-API"
+      ],
+      "note": "脚本/工具"
+    },
+    {
+      "intent": "状态",
+      "fileType": "ts",
+      "load": [
+        "loop"
+      ],
+      "note": "状态持久化协议"
+    },
+    {
+      "intent": "状态",
+      "fileType": "json",
+      "load": [
+        "loop"
+      ],
+      "note": "state schema"
+    },
+    {
+      "intent": "接口",
+      "fileType": "ts",
+      "load": [
+        "core",
+        "rules",
+        "AI-API",
+        "vue-SKILL"
+      ],
+      "note": "__AI__ API + R1–R3"
+    },
+    {
+      "intent": "接口",
+      "fileType": "cjs",
+      "load": [
+        "rules",
+        "AI-API",
+        "vue-SKILL"
+      ],
+      "note": "__AI__ API"
+    },
+    {
+      "intent": "git",
+      "fileType": "other",
+      "load": [
+        "rules"
+      ],
+      "note": "提交闸门 + 不做清单"
+    },
+    {
+      "intent": "其他",
+      "fileType": "other",
+      "load": [
+        "RULES"
+      ],
+      "note": "兜底"
+    },
+    {
+      "intent": "脚本",
+      "fileType": "other",
+      "load": [
+        "AI-API"
+      ],
+      "note": "v2 自动补缺口"
+    },
+    {
+      "intent": "文档",
+      "fileType": "other",
+      "load": [
+        "core",
+        "loop"
+      ],
+      "note": "v2 自动补缺口"
+    },
+    {
+      "intent": "加测试",
+      "fileType": "other",
+      "load": [
+        "vue-testing-best-practices-SKILL",
+        "RULES"
+      ],
+      "note": "v2 自动补缺口"
+    },
+    {
+      "intent": "配置",
+      "fileType": "other",
+      "load": [
+        "core",
+        "RULES"
+      ],
+      "note": "v2 自动补缺口"
+    },
+    {
+      "intent": "接口",
+      "fileType": "other",
+      "load": [
+        "AI-API",
+        "vue-SKILL"
+      ],
+      "note": "v2 自动补缺口"
+    }
+  ]
+}

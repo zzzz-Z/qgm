@@ -1,0 +1,61 @@
+// [refactor] HTTP 请求分发：业务路由全量走 Hono（见 src/routes/hono/）
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { buildLauncher } from './launcher.js'
+import { buildPage } from './page.js'
+import { sendHTML } from './http.js'
+import { honoApp } from './hono-app.js'
+import { fetchResponseToNode, inferOrigin, nodeToFetchRequest } from './hono-bridge.js'
+
+// [arch-hono] 业务请求全量走 Hono；404 时回退页面壳 / 静态资源 / 404
+
+/**
+ * 分发 Hono
+ * @param req - req
+ * @param res - res
+ * @param url - url
+ */
+async function dispatchHono(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+): Promise<boolean> {
+  // [arch-hono-dispatch-v2]
+  // 不再依赖白名单：任何请求先试 Hono；404 时回退到静态/页面/404。
+  const origin = inferOrigin(req)
+  const fetchReq = await nodeToFetchRequest(req, origin)
+  const resp = await honoApp.fetch(fetchReq)
+  if (resp.status === 404) return false
+  await fetchResponseToNode(res, resp)
+  return true
+}
+
+/**
+ * 处理
+ * @param req - req
+ * @param res - res
+ */
+export async function handle(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const url = new URL(req.url || '/', 'http://localhost')
+  const pathname = url.pathname
+
+  if (await dispatchHono(req, res, url)) return
+
+  if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
+    return sendHTML(res, buildPage())
+  }
+
+  if (req.method === 'GET' && pathname === '/launcher.js') {
+    res.writeHead(200, {
+      'Content-Type': 'application/javascript; charset=utf-8',
+      'Cache-Control': 'no-store',
+    })
+    res.end(buildLauncher())
+    return
+  }
+
+  res.writeHead(404)
+  res.end('Not Found')
+}

@@ -6,12 +6,11 @@
 
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import type { LoopInstance } from '../../client/composables/ai/auto-loop/types.ts'
-import { persist, restore } from '../../client/composables/ai/auto-loop/persist.ts'
+import type { LoopInstance } from '../../packages/client/composables/ai/auto-loop/types.ts'
+import { persist, restore } from '../../packages/client/composables/ai/auto-loop/persist.ts'
 
 const STORAGE_KEY = '__ai_runner_loop'
 
-// ---- sessionStorage mock（node 无此全局） ----
 const store = new Map<string, string>()
 ;(globalThis as unknown as { sessionStorage: unknown }).sessionStorage = {
   getItem: (k: string) => (store.has(k) ? store.get(k)! : null),

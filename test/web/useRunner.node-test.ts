@@ -46,9 +46,9 @@ Object.defineProperty(globalThis, 'window', {
 const origFetch = globalThis.fetch
 globalThis.fetch = (async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch
 
-let mod: typeof import('../../client/composables/runner/useRunner.ts')
+let mod: typeof import('../../packages/client/composables/runner/useRunner.ts')
 beforeAll(async () => {
-  mod = await import('../../client/composables/runner/useRunner.ts')
+  mod = await import('../../packages/client/composables/runner/useRunner.ts')
 })
 
 beforeEach(() => {

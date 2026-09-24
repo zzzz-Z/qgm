@@ -38,12 +38,41 @@
   // [replay-buf] 缓存最近 N 条外发消息，供刷新后重放
   const _msgBuf = []
   const _MSG_BUF_MAX = 50
+  // [c1-bridge-v1] 消息去重（msgId）+ 断链队列 + 定期 drain
+  let _msgSeq = 0
+  const _pending = []
+  const _PENDING_MAX = 200
+  function _nextMsgId() {
+    _msgSeq = (_msgSeq + 1) >>> 0
+    return `${Date.now().toString(36)}-${_msgSeq.toString(36)}`
+  }
+  function _trySend(p) {
+    try {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(p, '*')
+        return true
+      }
+    } catch { /* ignore */ }
+    return false
+  }
   function post(payload) {
     if (!payload || typeof payload !== 'object') return
+    if (!payload.msgId) payload.msgId = _nextMsgId()
+    if (!payload.ts) payload.ts = Date.now()
     _msgBuf.push(payload)
     if (_msgBuf.length > _MSG_BUF_MAX) _msgBuf.shift()
-    try { if (window.opener && !window.opener.closed) window.opener.postMessage(payload, '*') } catch { /* ignore */ }
+    if (!_trySend(payload)) {
+      _pending.push(payload)
+      if (_pending.length > _PENDING_MAX) _pending.shift()
+    }
   }
+  function _drainPending() {
+    if (!_pending.length) return
+    if (!window.opener || window.opener.closed) return
+    const items = _pending.splice(0, _pending.length)
+    for (const p of items) _trySend(p)
+  }
+  setInterval(_drainPending, 1000)
 
   let lastId = ''
   let lastSid = ''
@@ -149,6 +178,11 @@
     domTimer = setTimeout(send, 800)
   })
   observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+  // [c1-bridge-v1] body 存活检查（DOM 容错，detached 时重挂）
+  setInterval(() => {
+    if (!document.body || !document.body.isConnected) return
+    try { observer.observe(document.body, { childList: true, subtree: true, characterData: true }) } catch { /* ignore */ }
+  }, 3000)
 
   window.addEventListener('popstate', send)
   window.addEventListener('hashchange', send)

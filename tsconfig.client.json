@@ -1,12 +1,21 @@
-/* AIRUNNER-CLIENT-TSC */
 {
   "compilerOptions": {
     "target": "ESNext",
     "jsx": "preserve",
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ESNext",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "useDefineForClassFields": true,
+    "baseUrl": ".",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "paths": {
+      "@qgm/ai-runner-core": [
+        "./packages/core/src/index.ts"
+      ]
+    },
     "resolveJsonModule": true,
     "allowImportingTsExtensions": false,
     "strict": true,
@@ -17,14 +26,15 @@
     "skipLibCheck": true
   },
   "include": [
-    "client/**/*.ts",
-    "client/**/*.vue"
+    "packages/client/**/*.ts",
+    "packages/client/**/*.d.ts",
+    "packages/client/**/*.vue"
   ],
   "exclude": [
-    "client/node_modules",
-    "client/dist",
-    "client/e2e",
-    "client/test-results",
-    "client/playwright-report"
+    "packages/client/node_modules",
+    "packages/client/dist",
+    "packages/client/e2e",
+    "packages/client/test-results",
+    "packages/client/playwright-report"
   ]
 }

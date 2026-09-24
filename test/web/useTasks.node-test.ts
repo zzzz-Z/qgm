@@ -21,10 +21,10 @@ g.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   return await fetchImpl(c)
 }) as typeof fetch
 
-let useTasks: typeof import('../../client/composables/data/useTasks.ts').useTasks
+let useTasks: typeof import('../../packages/client/composables/data/useTasks.ts').useTasks
 
 before(async () => {
-  const mod = await import('../../client/composables/data/useTasks.ts')
+  const mod = await import('../../packages/client/composables/data/useTasks.ts')
   useTasks = mod.useTasks
 })
 

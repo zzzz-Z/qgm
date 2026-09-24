@@ -7,13 +7,13 @@ import assert from 'node:assert/strict'
 // AIRUNNER-BATCH17-5-USE-TOOLTIP
 // 顶层启用 setTimeout mock（不是 await，允许）
 
-let useTooltip: typeof import('../../client/composables/ui/useTooltip.ts').useTooltip
-let showTooltip: typeof import('../../client/composables/ui/useTooltip.ts').showTooltip
-let moveTooltip: typeof import('../../client/composables/ui/useTooltip.ts').moveTooltip
-let hideTooltip: typeof import('../../client/composables/ui/useTooltip.ts').hideTooltip
+let useTooltip: typeof import('../../packages/client/composables/ui/useTooltip.ts').useTooltip
+let showTooltip: typeof import('../../packages/client/composables/ui/useTooltip.ts').showTooltip
+let moveTooltip: typeof import('../../packages/client/composables/ui/useTooltip.ts').moveTooltip
+let hideTooltip: typeof import('../../packages/client/composables/ui/useTooltip.ts').hideTooltip
 
 before(async () => {
-  const mod = await import('../../client/composables/ui/useTooltip.ts')
+  const mod = await import('../../packages/client/composables/ui/useTooltip.ts')
   useTooltip = mod.useTooltip
   showTooltip = mod.showTooltip
   moveTooltip = mod.moveTooltip

@@ -6,8 +6,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ROOT = process.cwd()
-const SM = readFileSync(join(ROOT, 'client/composables/ai/useSessionManager.ts'), 'utf8')
-const GP = readFileSync(join(ROOT, 'client/components/generate/GeneratePanel.vue'), 'utf8')
+const SM = readFileSync(join(ROOT, 'packages/client/composables/ai/useSessionManager.ts'), 'utf8')
+const GP = readFileSync(join(ROOT, 'packages/client/components/generate/GeneratePanel.vue'), 'utf8')
 
 it('SM: ASK_ROTATE_THRESHOLD 是数字', () => {
   assert.ok(/export const ASK_ROTATE_THRESHOLD = \d+/.test(SM))
@@ -72,7 +72,7 @@ it('GP: 发送后调用 checkRotateSession', () => {
 })
 
 it('DU: copyAndFill 统一计数（自动路径不再漏）', () => {
-  const DU = readFileSync(join(ROOT, 'client/composables/ai/useDeepseekUrl.ts'), 'utf8')
+  const DU = readFileSync(join(ROOT, 'packages/client/composables/ai/useDeepseekUrl.ts'), 'utf8')
   assert.ok(DU.includes('useSessionManager'), '应引 useSessionManager')
   assert.ok(DU.includes('trackMessage'), 'copyAndFill 内应调 trackMessage')
   assert.ok(DU.includes('count?: boolean'), '应有 count 开关')

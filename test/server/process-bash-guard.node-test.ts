@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/process/bash-guard.node-test.ts 迁至 client/test/process-bash-guard.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { BASH_BLACKLIST, BASH_TIMEOUT_MS, buildEnvWhitelist, checkBashBlacklist, ENV_WHITELIST } from '../../src/process/bash-guard.ts'
+import { BASH_BLACKLIST, BASH_TIMEOUT_MS, buildEnvWhitelist, checkBashBlacklist, ENV_WHITELIST } from '../../packages/core/src/process/bash-guard.ts'
 
 const RM_RF = 'rm -rf /tmp/x'
 const RM_UP = 'RM -RF /tmp/x'

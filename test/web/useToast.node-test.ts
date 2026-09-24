@@ -5,9 +5,9 @@ import assert from 'node:assert/strict'
 
 // AIRUNNER-BATCH19-1-USE-TOAST
 
-let mod: typeof import('../../client/composables/ui/useToast.ts')
+let mod: typeof import('../../packages/client/composables/ui/useToast.ts')
 before(async () => {
-  mod = await import('../../client/composables/ui/useToast.ts')
+  mod = await import('../../packages/client/composables/ui/useToast.ts')
 })
 
 beforeEach(() => {

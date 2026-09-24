@@ -1,0 +1,29 @@
+{
+  "name": "@qgm/vite-plugin-ai-runner",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Vite 插件宿主：把 core 挂成 dev server 中间件；对外 API aiRunner() 保持不变",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "tsc": "tsc -p tsconfig.json --noEmit",
+    "build": "vite build --config vite.config.ts && tsc -p tsconfig.json",
+    "build:types": "tsc -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "vite": ">=5"
+  },
+  "dependencies": {
+    "@qgm/ai-runner-client": "workspace:^",
+    "@qgm/ai-runner-core": "workspace:^"
+  }
+}

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { readToolLog, readToolLogWithRetry } from '../../src/post-run/tool-log.ts'
+import { readToolLog, readToolLogWithRetry } from '../../packages/core/src/post-run/tool-log.ts'
 
 // AIRUNNER-BATCH10-6-TOOL-LOG
 function tmpFile(content: string): string {

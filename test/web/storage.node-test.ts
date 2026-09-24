@@ -7,7 +7,7 @@ import {
   LS_DRAFT_SLOTS_KEY,
   LS_SIDE_WIDTH_KEY,
   LS_SKILLS_KEY,
-} from '../../client/utils/storage.ts'
+} from '../../packages/client/utils/storage.ts'
 
 // AIRUNNER-BATCH35-3-STORAGE-KEYS
 

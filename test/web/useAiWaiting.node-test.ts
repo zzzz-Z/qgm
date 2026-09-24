@@ -19,9 +19,9 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable
 
 const KEY = '__ai_niuma_mode'
 
-let mod: typeof import('../../client/composables/ai/useAiWaiting.ts')
+let mod: typeof import('../../packages/client/composables/ai/useAiWaiting.ts')
 before(async () => {
-  mod = await import('../../client/composables/ai/useAiWaiting.ts')
+  mod = await import('../../packages/client/composables/ai/useAiWaiting.ts')
 })
 
 beforeEach(() => {

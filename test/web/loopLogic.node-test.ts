@@ -20,12 +20,10 @@ import {
   tailClip,
   updateFpStall,
   updateStall,
-} from '../../client/composables/ai/loopLogic.ts'
-import type { FeedbackOutcome } from '../../client/composables/ai/loopLogic.ts'
+} from '../../packages/client/composables/ai/loopLogic.ts'
+import type { FeedbackOutcome } from '../../packages/client/composables/ai/loopLogic.ts'
 
-// ---------------------------------------------------------------------------
 // isStrictDone（v6 §6.9 第 1 条）：必须整段 trim 后恰为 DONE
-// ---------------------------------------------------------------------------
 it('DONE 严格匹配：合法形态', () => {
   assert.equal(isStrictDone('DONE'), true)
   assert.equal(isStrictDone('  DONE  '), true)
@@ -45,9 +43,7 @@ it('DONE 严格匹配：含解释 / 小写 / 标点 均不算', () => {
   assert.equal(isStrictDone(''), false)
 })
 
-// ---------------------------------------------------------------------------
 // checkRoundBreak：轮数 / token 熔断（警告+熔断两档），token 优先于轮数
-// ---------------------------------------------------------------------------
 it('[drop-round-limit] 无上限：任意有限轮次均 continue', () => {
   assert.equal(checkRoundBreak(1, 0), 'continue')
   assert.equal(checkRoundBreak(100, 0), 'continue')
@@ -74,9 +70,7 @@ it('熔断优先级：token 超 hard limit → token-budget', () => {
   assert.equal(checkRoundBreak(100, LOOP_TOKEN_HARD_LIMIT), 'token-budget')
 })
 
-// ---------------------------------------------------------------------------
 // decideTolerance：格式错误 / 纯文本 / 重复脚本共享的 1 次宽容
-// ---------------------------------------------------------------------------
 it('宽容预算：还有 1 次 → retry 且消耗为 0', () => {
   assert.deepEqual(decideTolerance(1), { action: 'retry', remaining: 0 })
 })
@@ -85,9 +79,7 @@ it('宽容预算：剩余 0 → 直接熔断', () => {
   assert.deepEqual(decideTolerance(0), { action: 'break' })
 })
 
-// ---------------------------------------------------------------------------
 // tailClip
-// ---------------------------------------------------------------------------
 it('tailClip：短串原样返回', () => {
   assert.equal(tailClip('abc'), 'abc')
 })
@@ -108,9 +100,7 @@ it('tailClip：保留尾部、丢弃头部（头尾各带独特标记）', () =>
   assert.ok(!r.includes('HEAD_TOKEN'))
 })
 
-// ---------------------------------------------------------------------------
 // buildInitialPrompt：首轮目标 + 契约
-// ---------------------------------------------------------------------------
 it('首轮 prompt：包含目标原文', () => {
   const p = buildInitialPrompt('让 pnpm test 全绿')
   assert.ok(p.startsWith('让 pnpm test 全绿'))
@@ -126,18 +116,14 @@ it('首轮 prompt：锁定关键契约词（cjs/bash、shebang、@desc/@why、�
   assert.ok(p.includes('DONE'))
 })
 
-// ---------------------------------------------------------------------------
 // buildRetryPrompt
-// ---------------------------------------------------------------------------
 it('重试 prompt：回带具体不符原因并提示 DONE 出口', () => {
   const p = buildRetryPrompt('回复含 3 个代码块')
   assert.ok(p.includes('回复含 3 个代码块'))
   assert.ok(p.includes('DONE'))
 })
 
-// ---------------------------------------------------------------------------
 // buildFeedback：轮后回填
-// ---------------------------------------------------------------------------
 function cjsOutcome(over: Partial<FeedbackOutcome> = {}): FeedbackOutcome {
   return {
     lang: 'cjs',

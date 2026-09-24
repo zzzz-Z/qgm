@@ -15,7 +15,7 @@
 const URL_DEFAULT = 'ws://127.0.0.1:5175/__ai/ws'
 const TIMEOUT_MS = 8000
 
-const L = require('../src/logger.cjs')
+const L = require('./_logger-shim.cjs')
 
 let WS
 try { WS = require('ws') } catch { console.error('✗ 未安装 ws（pnpm add ws）'); process.exit(3) }

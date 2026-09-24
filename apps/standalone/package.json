@@ -1,0 +1,21 @@
+{
+  "name": "@qgm/ai-runner",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "独立 Web 应用 + CLI 工具集：Node HTTP server，npx 或全局安装后可直接使用",
+  "bin": {
+    "ai-runner": "./bin/air-server.cjs"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "scripts": {
+    "start": "node ./bin/air-server.cjs",
+    "build": "node ./scripts/build.mjs"
+  },
+  "dependencies": {
+    "@qgm/ai-runner-client": "workspace:^",
+    "@qgm/ai-runner-core": "workspace:^"
+  }
+}

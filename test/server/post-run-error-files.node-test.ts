@@ -3,11 +3,11 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/post-run/error-files.node-test.ts 迁至 client/test/post-run-error-files.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { extractErrorFiles } from '../../src/post-run/error-files.ts'
+import { extractErrorFiles } from '../../packages/core/src/post-run/error-files.ts'
 
 // 使用项目内确实存在的文件作为命中的目标
-const KNOWN = 'src/post-run/error-files.ts'
-const KNOWN2 = 'src/post-run/decision.ts'
+const KNOWN = 'packages/core/src/post-run/error-files.ts'
+const KNOWN2 = 'packages/core/src/post-run/decision.ts'
 
 test('空文本 → 空数组', () => {
   assert.deepEqual(extractErrorFiles(''), [])
@@ -61,8 +61,8 @@ test('多条不同文件路径 → 全部返回', () => {
 })
 
 test('.vue 文件同样被识别', () => {
-  const text = 'at fn (client/App.vue:5:1)'
-  assert.deepEqual(extractErrorFiles(text), ['client/App.vue'])
+  const text = 'at fn (packages/client/App.vue:5:1)'
+  assert.deepEqual(extractErrorFiles(text), ['packages/client/App.vue'])
 })
 
 test('.tsx/.jsx/.mjs/.cjs 均在允许列表内（用不存在路径验证 regex 命中能力）', () => {

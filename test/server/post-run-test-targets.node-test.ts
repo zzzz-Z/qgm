@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/post-run/test-targets.node-test.ts 迁至 client/test/post-run-test-targets.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { buildTestArgs } from '../../src/post-run/test-targets.ts'
+import { buildTestArgs } from '../../packages/core/src/post-run/test-targets.ts'
 
 // AIRUNNER-BATCH11-3-SPLIT-TEST-TEST
 test('空列表 → ran=false, args=[]', () => {

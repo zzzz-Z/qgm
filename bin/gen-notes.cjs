@@ -7,7 +7,7 @@ const path = require('node:path')
 const ROOT = process.cwd()
 const LOGS_DIR = path.join(ROOT, '.ai-runner/logs')
 const OUT = path.join(ROOT, 'PROJECT-NOTES.md')
-const L = require('../src/logger.cjs')
+const L = require('./_logger-shim.cjs')
 
 const c = L.c
 const ok = s => console.log(c(32, '✓'), s)

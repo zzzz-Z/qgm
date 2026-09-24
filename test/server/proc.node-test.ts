@@ -18,8 +18,8 @@ const __dirname = path.dirname(__filename)
 let proc: any = null
 async function loadProc() {
   if (proc) return proc
-  // AIRUNNER-BATCH26-5-FIX-PATH-PROC: 测试在 test/server/，源在 ../../src/process/proc.ts
-  const tsPath = path.join(__dirname, '..', '..', 'src', 'process', 'proc.ts')
+  // AIRUNNER-BATCH26-5-FIX-PATH-PROC: 测试在 test/server/，源在 ../../packages/core/src/process/proc.ts
+  const tsPath = path.join(__dirname, '..', '..', 'packages', 'core', 'src', 'process', 'proc.ts')
   const tsSrc = fs.readFileSync(tsPath, 'utf8')
   const { stripTypeScriptTypes } = nodeModule
   const js = stripTypeScriptTypes(tsSrc, { mode: 'strip' })

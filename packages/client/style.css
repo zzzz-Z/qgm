@@ -1,0 +1,322 @@
+:root {
+  /* [design-tokens-v1] PLAN 3.1 统一令牌（别名指向既有变量，零破坏） */
+  /* 语义色 */
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--danger);
+  --color-running: #3b82f6;
+  --color-pending: #6b7280;
+  /* 文本层级 */
+  --color-text-1: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  /* 背景层级 */
+  --color-bg-1: var(--bg);
+  --color-bg-2: var(--surface);
+  --color-bg-3: var(--surface-2);
+  /* 边框 */
+  --color-border: var(--border);
+  /* 字号语义别名 */
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-md: 14px;
+  --font-lg: 16px;
+  --font-xl: 20px;
+  --bg: #0f0f0f;
+  --surface: #1a1a1a;
+  --surface-2: #252525;
+  --surface-3: #2f2f2f;
+  --surface-4: #3a3a3a;
+  --border: #2a2a2a;
+  --border-2: #333333;
+  --border-strong: #404040;
+
+  --text: #ececec;
+  --text-2: #c5c5c5;
+  --text-3: #9a9a9a;
+  --text-4: #7a7a7a;
+  --text-5: #5a5a5a;
+
+  --primary: #4d6bfe;
+  --primary-hover: #6b83ff;
+  --primary-bg: rgb(77 107 254 / 15%);
+
+  --success: #4ade80;
+  --success-bg: rgb(74 222 128 / 12%);
+  --warning: #fbbf24;
+  --warning-bg: rgb(251 191 36 / 12%);
+  --danger: #f87171;
+  --danger-bg: rgb(248 113 113 / 12%);
+
+  --code-bg: #252525;
+  --code-text: #ececec;
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-4: 4px;
+  --radius-6: 6px;
+  --radius-8: 8px;
+  --radius-10: 10px;
+  --radius-2: 2px;
+  --radius-12: 12px;
+  --radius-full: 9999px;
+
+  --font-11: 11px;
+  --font-12: 12px;
+  --font-13: 13px;
+  --font-14: 14px;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 20%);
+  --shadow: 0 1px 3px rgb(0 0 0 / 25%);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 30%);
+  --shadow-lg: 0 8px 24px rgb(0 0 0 / 40%);
+  --shadow-focus: 0 0 0 3px rgb(77 107 254 / 20%);
+
+  --transition-fast: 0.12s ease;
+  --transition-base: 0.18s ease;
+
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* AIRUNNER-TOKENS-v1 */
+  /* spacing: 4px grid */
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 10px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  --space-9: 32px;
+  --space-10: 40px;
+
+  /* font sizes (missing ones) */
+  --font-10: 10px;
+  --font-15: 15px;
+  --font-16: 16px;
+  --font-18: 18px;
+  --font-20: 20px;
+
+  --term-bg: #0f0f0f;
+  --term-bar-bg: #1a1a1a;
+  --term-border: #2a2a2a;
+  --term-sep: #252525;
+  --term-text: #ececec;
+  --term-text-2: #c5c5c5;
+  --term-text-3: #9a9a9a;
+  --term-code-color: #6b83ff;
+  --term-chip-bg: rgb(255 255 255 / 4%);
+  --term-chip-bg-2: rgb(255 255 255 / 6%);
+  --term-chip-hover: rgb(255 255 255 / 8%);
+  --term-chip-border: rgb(255 255 255 / 8%);
+  --term-chip-border-2: rgb(255 255 255 / 12%);
+  --term-think-bg: rgb(255 255 255 / 4%);
+  --term-code-bg: rgb(255 255 255 / 5%);
+  --term-accent: #4d6bfe;
+  --term-shadow: rgb(0 0 0 / 30%);
+  --term-user-bg: rgb(77 107 254 / 12%);
+  --term-user-border: rgb(77 107 254 / 30%);
+  --term-ai-bg: rgb(255 255 255 / 3%);
+  --term-ai-border: rgb(255 255 255 / 8%);
+}
+
+[data-theme='light'] {
+  --bg: #ffffff;
+  --surface: #f6f8fa;
+  --surface-2: #eaeef2;
+  --surface-3: #dfe3e8;
+  --surface-4: #d0d7de;
+  --border: #d0d7de;
+  --border-2: #afb8c1;
+  --border-strong: #8c959f;
+
+  --text: #1f2328;
+  --text-2: #32383f;
+  --text-3: #656d76;
+  --text-4: #8c959f;
+  --text-5: #afb8c1;
+
+  --primary: #0969da;
+  --primary-hover: #0550ae;
+  --primary-bg: rgb(9 105 218 / 10%);
+
+  --success: #1a7f37;
+  --success-bg: rgb(26 127 55 / 10%);
+  --warning: #9a6700;
+  --warning-bg: rgb(154 103 0 / 10%);
+  --danger: #cf222e;
+  --danger-bg: rgb(207 34 46 / 10%);
+
+  --code-bg: #f6f8fa;
+  --code-text: #1f2328;
+
+  --shadow-sm: 0 1px 2px rgb(31 35 40 / 8%);
+  --shadow: 0 1px 3px rgb(31 35 40 / 10%), 0 1px 2px rgb(31 35 40 / 6%);
+  --shadow-md: 0 4px 12px rgb(31 35 40 / 12%);
+  --shadow-lg: 0 8px 24px rgb(31 35 40 / 15%);
+  --shadow-focus: 0 0 0 3px rgb(9 105 218 / 15%);
+
+  --term-bg: #f6f8fa;
+  --term-bar-bg: #eaeef3;
+  --term-border: #d0d7de;
+  --term-sep: #d8dee4;
+  --term-text: #1f2328;
+  --term-text-2: #57606a;
+  --term-text-3: #8c959f;
+  --term-code-color: #0550ae;
+  --term-chip-bg: rgb(31 35 40 / 4%);
+  --term-chip-bg-2: rgb(31 35 40 / 6%);
+  --term-chip-hover: rgb(31 35 40 / 8%);
+  --term-chip-border: rgb(31 35 40 / 10%);
+  --term-chip-border-2: rgb(31 35 40 / 14%);
+  --term-think-bg: rgb(31 35 40 / 4%);
+  --term-code-bg: rgb(31 35 40 / 5%);
+  --term-accent: #0969da;
+  --term-shadow: rgb(31 35 40 / 8%);
+  --term-user-bg: rgb(9 105 218 / 10%);
+  --term-user-border: rgb(9 105 218 / 28%);
+  --term-ai-bg: rgb(31 35 40 / 3%);
+  --term-ai-border: rgb(31 35 40 / 10%);
+}
+
+* {
+  box-sizing: border-box;
+}
+button {
+  font-family: inherit;
+}
+
+html,
+body {
+  font:
+    13px/1.55 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font:
+    13px/1.55 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+html {
+  color-scheme: light;
+}
+
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.terminal:focus,
+.terminal:focus-visible,
+.pane-main:focus,
+.pane-main:focus-visible,
+.cm-host:focus,
+.cm-host:focus-visible,
+.pane:focus,
+.pane:focus-visible,
+.editor:focus,
+.editor:focus-visible,
+.side-tree:focus,
+.side-tree:focus-visible,
+.side-changes:focus,
+.side-changes:focus-visible,
+.chat-list:focus,
+.chat-list:focus-visible,
+.term-body:focus,
+.term-body:focus-visible {
+  outline: none !important;
+}
+
+::selection {
+  background: rgb(88 166 255 / 30%);
+  color: var(--text);
+}
+
+button {
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+[class*='card']:hover {
+  box-shadow: var(--shadow-md);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role='button']:focus-visible,
+[tabindex='0']:focus-visible {
+  outline: 2px solid var(--accent, rgb(88 166 255 / 90%));
+  outline-offset: 2px;
+}
+
+button:focus-visible:where([class*='ghost']),
+button:focus-visible:where([class*='chip']) {
+  outline-offset: 1px;
+}
+
+
+/* [a11y-reduce-motion-v1] 无障碍：尊重系统"减少动态效果"偏好，关闭动画与过渡 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

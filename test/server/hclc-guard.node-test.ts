@@ -18,14 +18,14 @@ const __dirname = path.dirname(__filename)
 
 // AIRUNNER-BATCH26-5-FIX-PATH-HCLC: 测试在 test/server/，源根在 ../../
 const ROOT = path.resolve(__dirname, '..', '..')
-const SRC = path.join(ROOT, 'src')
+const SRC = path.join(ROOT, 'packages', 'core', 'src')
 const LIMIT = 8
 
 // AIRUNNER-HCLC-SKIP-BARRELS
 function isBarrel(file: string) {
   const base = path.basename(file)
   if (base === 'index.ts') return true
-  if (path.relative(ROOT, file) === path.join('src', 'deps.ts')) return true
+  if (path.relative(ROOT, file) === path.join('packages', 'core', 'src', 'deps.ts')) return true
   return false
 }
 
@@ -69,11 +69,10 @@ it('hCLC: src/ 每个 .ts 的唯一 import 模块数 ≤ 8（阻断阈值）', (
 
 it('hCLC: barrel 入口存在且非空', () => {
   const barrels = [
-    'src/deps.ts',
-    'src/routes/index.ts',
-    'src/post-run/index.ts',
-    'src/process/index.ts',
-    'src/utils/index.ts',
+    'packages/core/src/deps.ts',
+    'packages/core/src/post-run/index.ts',
+    'packages/core/src/process/index.ts',
+    'packages/core/src/utils/index.ts',
   ]
   for (const b of barrels) {
     const p = path.join(ROOT, b)

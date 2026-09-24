@@ -281,7 +281,38 @@ function loadForMeta(task) {
   return { content: load(keys), keys }
 }
 
-module.exports = { load, loadFor, loadForMeta, list, scan, REGISTRY, GROUPS, KEYWORDS, ROOTS, ALWAYS_KEYS, isDefault }
+// [tier2a-1] 加载埋点：fail-silent，落 .ai-runner/skill-stats.json
+function _recordSkillLoad(keys) {
+  try {
+    const _fs = require('node:fs')
+    const _path = require('node:path')
+    const _root = process.env.AI_RUNNER_ROOT || process.env.AIR_ROOT || process.cwd()
+    const _p = _path.join(_root, '.ai-runner', 'skill-stats.json')
+    let _s = { loads: {}, lastUpdate: 0 }
+    try { _s = JSON.parse(_fs.readFileSync(_p, 'utf8')) } catch {}
+    if (!_s || typeof _s !== 'object') _s = { loads: {}, lastUpdate: 0 }
+    if (!_s.loads || typeof _s.loads !== 'object') _s.loads = {}
+    const _arr = Array.isArray(keys) ? keys : []
+    for (const k of _arr) _s.loads[k] = (_s.loads[k] || 0) + 1
+    _s.lastUpdate = Date.now()
+    _fs.writeFileSync(_p, JSON.stringify(_s, null, 2))
+  } catch {}
+}
+const _loadOrig = load
+
+module.exports = {
+  load(keys) { try { _recordSkillLoad(keys) } catch {} return _loadOrig(keys) },
+  loadFor,
+  loadForMeta,
+  list,
+  scan,
+  REGISTRY,
+  GROUPS,
+  KEYWORDS,
+  ROOTS,
+  ALWAYS_KEYS,
+  isDefault,
+}
 
 if (require.main === module) {
   const a = process.argv[2]
@@ -298,6 +329,25 @@ if (require.main === module) {
     process.exit(0)
   }
   if (a === '--for') { console.log(loadFor(process.argv.slice(3).join(' '))); process.exit(0) }
+  // [dump-keywords-v1] 阶段1：把可匹配词按分组显式列出
+  if (a === '--dump-keywords') {
+    console.log('=== GROUPS 语义分组 → 匹配前缀 ===')
+    for (const [g, pfx] of Object.entries(GROUPS)) {
+      console.log(`  ${g.padEnd(12)}-> ${pfx.join(', ')}`)
+    }
+    console.log('')
+    console.log('=== KEYWORDS 兜底词表 → 命中词 ===')
+    for (const [g, kws] of Object.entries(KEYWORDS)) {
+      console.log(`  ${g.padEnd(12)}<- ${kws.join(' / ')}`)
+    }
+    console.log('')
+    console.log('=== REGISTRY 已注册 skill → keywords ===')
+    for (const [k, v] of REGISTRY) {
+      const kw = Array.isArray(v.kw) ? v.kw.join(',') : ''
+      console.log(`  ${k.padEnd(28)}<- ${kw.slice(0, 120)}`)
+    }
+    process.exit(0)
+  }
   if (a === '--reload') { scan(); console.log(`✓ 重扫 ${REGISTRY.size} 个`); process.exit(0) }
   console.log(load(a))
 }

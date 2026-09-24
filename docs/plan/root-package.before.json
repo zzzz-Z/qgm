@@ -1,0 +1,127 @@
+{
+  "name": "@qgm/ai-runner",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Vite dev-only AI 辅助开发工作台：脚本沙盒执行 / diff 回滚 / prompt 组装",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json",
+    "./protocol": {
+      "types": "./dist/server/protocol.d.ts",
+      "import": "./dist/server/protocol.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "air-ask": "./bin/ai-ask.cjs",
+    "air-check": "./bin/check-status.cjs",
+    "air-log": "./bin/log-signal.cjs",
+    "air-recover": "./bin/recover.cjs",
+    "air-run-all": "./bin/run-all.cjs",
+    "air-notes": "./bin/gen-notes.cjs",
+    "air-compliance": "./bin/compliance-report.cjs",
+    "air-check-regression": "./bin/check-regression.cjs",
+    "air-server": "./bin/air-server.cjs"
+  },
+  "files": [
+    "README.md",
+    "bin",
+    "client",
+    "dist",
+    "skills"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:web": "vite --config client/vite.config.ts",
+    "dev:server": "node scripts/dev-server.mjs",
+    "build": "pnpm build:tsc && node scripts/build-all.mjs",
+    "build:web": "vite build --config client/vite.config.ts",
+    "build:server": "vite build --config src/server/vite.config.ts",
+    "build:watch": "node scripts/build-all.mjs --watch",
+    "build:tsc": "tsc -p tsconfig.json && node scripts/copy-runtime.cjs",
+    "start": "node bin/air-server.cjs",
+    "session:start": "node scripts/session-start.cjs",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "tsc": "tsc -p tsconfig.json --noEmit",
+    "tsc:client": "vue-tsc -p tsconfig.client.json --noEmit",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:e2e": "playwright test --config client/playwright.config.ts",
+    "verify": "pnpm tsc && pnpm tsc:client && pnpm test:tsc && pnpm lint && pnpm test:unit",
+    "check-regression": "node bin/check-regression.cjs check",
+    "run-all": "node bin/run-all.cjs",
+    "recover": "node bin/recover.cjs",
+    "test:watch": "vitest --config vitest.config.ts",
+    "test:tsc": "tsc -p tsconfig.test.json --noEmit",
+    "test:coverage": "vitest run --config vitest.config.ts --coverage",
+    "context-pack": "node scripts/context-pack.cjs",
+    "dev:all": "node scripts/dev-all.mjs"
+  },
+  "peerDependencies": {
+    "vite": ">=5"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": false
+    }
+  },
+  "dependencies": {
+    "@antfu/eslint-config": "^9.5.1",
+    "@ast-grep/cli": "^0.28.0",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/state": "^6.7.4",
+    "@codemirror/theme-one-dark": "^6.1.3",
+    "@codemirror/view": "^6.43.11",
+    "@floating-ui/vue": "^2.0.0",
+    "@hono/node-server": "^2.1.1",
+    "chalk": "^4.0.0",
+    "codemirror": "^6.0.2",
+    "diff": "^7.0.0",
+    "gpt-tokenizer": "^3.0.0",
+    "highlight.js": "^11.12.0",
+    "hono": "^4.13.8",
+    "unocss": "^66.10.5",
+    "vitest": "^5.0.1",
+    "vue": "^3.5.42",
+    "ws": "^8.21.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "optionalDependencies": {
+    "cloakbrowser": "^0.1.0",
+    "playwright": "^1.63.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
+    "@types/diff": "^7.0.0",
+    "@types/node": "^22.0.0",
+    "@types/pixelmatch": "^7.1.0",
+    "@types/pngjs": "^6.0.5",
+    "@types/ws": "^8.18.1",
+    "@unocss/eslint-plugin": "^66.10.5",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "@vitest/coverage-v8": "5.0.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-format": "^2.0.1",
+    "eslint-plugin-vue": "^10.11.0",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
+    "sass-embedded": "^1.104.1",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.70.0",
+    "vite": "^8.2.2",
+    "vue-eslint-parser": "^10.4.1",
+    "vue-tsc": "^3.3.11"
+  }
+}

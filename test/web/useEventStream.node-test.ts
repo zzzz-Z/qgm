@@ -19,9 +19,9 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable
 
 const STORAGE_KEY = '__ai_event_log'
 
-let mod: typeof import('../../client/composables/ui/event-stream.ts')
+let mod: typeof import('../../packages/client/composables/ui/event-stream.ts')
 before(async () => {
-  mod = await import('../../client/composables/ui/event-stream.ts')
+  mod = await import('../../packages/client/composables/ui/event-stream.ts')
 })
 
 beforeEach(() => {

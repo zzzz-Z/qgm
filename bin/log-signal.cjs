@@ -6,7 +6,7 @@ const path = require('node:path')
 
 const ROOT = process.cwd()
 const SIGNALS = path.join(ROOT, '.ai-runner/signals.md')
-const L = require('../src/logger.cjs')
+const L = require('./_logger-shim.cjs')
 
 const c = L.c
 const ok = s => console.log(c(32, '✓'), s)

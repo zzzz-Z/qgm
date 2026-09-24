@@ -2,7 +2,7 @@
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/useTaskSync.node-test.ts 迁至 test/useTaskSync.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { syncTasks } from '../../client/composables/data/useTaskSync.ts'
+import { syncTasks } from '../../packages/client/composables/data/useTaskSync.ts'
 
 // AIRUNNER-BATCH17-2-USE-TASK-SYNC
 

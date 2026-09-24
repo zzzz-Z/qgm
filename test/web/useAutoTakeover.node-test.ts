@@ -18,9 +18,9 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable
 
 const KEY = '__ai_auto_takeover'
 
-let useAutoTakeover: typeof import('../../client/composables/ai/useAutoTakeover.ts').useAutoTakeover
+let useAutoTakeover: typeof import('../../packages/client/composables/ai/useAutoTakeover.ts').useAutoTakeover
 before(async () => {
-  const mod = await import('../../client/composables/ai/useAutoTakeover.ts')
+  const mod = await import('../../packages/client/composables/ai/useAutoTakeover.ts')
   useAutoTakeover = mod.useAutoTakeover
 })
 

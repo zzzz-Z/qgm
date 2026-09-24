@@ -6,7 +6,7 @@
   "explorer.fileNesting.patterns": {
     "tsconfig.json": "tsconfig.*.json, env.d.ts",
     "vite.config.*": "jsconfig*, vitest.config.*, cypress.config.*, playwright.config.*",
-    "package.json": "uno.config.ts, vite.config.*, pnpm*, .yarnrc*, yarn*, .eslint*, prettier*, .editorconfig, .gitattributes, .gitignore, .gitlab-ci.yml, .npmrc, .nvmrc, .stylelintrc*, README.md, index.html"
+    "package.json": "eslint.config.ts,AGENTS.md,tsconfig.json, uno.config.ts, vite.config.ts, pnpm*, .yarnrc*, yarn*, .eslint*, prettier*, .editorconfig, .gitattributes, .gitignore, .gitlab-ci.yml, .npmrc, .nvmrc, .stylelintrc*, README.md, index.html"
   },
 
   // Disable the default formatter, use eslint instead

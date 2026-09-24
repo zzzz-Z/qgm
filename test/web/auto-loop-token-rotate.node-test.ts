@@ -21,9 +21,9 @@ const windowMock = {
 }
 Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: windowMock })
 
-let mod: typeof import('../../client/composables/ai/auto-loop/token-rotate.ts')
+let mod: typeof import('../../packages/client/composables/ai/auto-loop/token-rotate.ts')
 beforeAll(async () => {
-  mod = await import('../../client/composables/ai/auto-loop/token-rotate.ts')
+  mod = await import('../../packages/client/composables/ai/auto-loop/token-rotate.ts')
 })
 
 // ============ autoRotateSession ============

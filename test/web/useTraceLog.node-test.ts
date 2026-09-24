@@ -22,10 +22,10 @@ g.window = {
   removeEventListener(): void {},
 }
 
-let useTraceLog: typeof import('../../client/composables/ui/useTraceLog.ts').useTraceLog
+let useTraceLog: typeof import('../../packages/client/composables/ui/useTraceLog.ts').useTraceLog
 
 before(async () => {
-  const mod = await import('../../client/composables/ui/useTraceLog.ts')
+  const mod = await import('../../packages/client/composables/ui/useTraceLog.ts')
   useTraceLog = mod.useTraceLog
 })
 

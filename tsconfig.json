@@ -4,9 +4,14 @@
     "lib": [
       "ES2022"
     ],
-    "rootDir": "src",
+    "rootDir": "packages/core/src",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "paths": {
+      "@qgm/ai-runner-core": [
+        "./packages/core/src/index.ts"
+      ]
+    },
     "resolveJsonModule": true,
     "types": [
       "node"
@@ -17,13 +22,13 @@
     "noUncheckedIndexedAccess": false,
     "declaration": true,
     "declarationMap": true,
-    "outDir": "dist",
+    "outDir": "packages/core/dist",
     "sourceMap": true,
     "esModuleInterop": true,
     "skipLibCheck": true
   },
   "include": [
-    "src/**/*.ts"
+    "packages/core/src/**/*.ts"
   ],
   "exclude": [
     "node_modules",

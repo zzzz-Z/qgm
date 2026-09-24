@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/post-run/script-check.node-test.ts 迁至 client/test/post-run-script-check.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { checkScriptSyntax } from '../../src/post-run/script-check.ts'
+import { checkScriptSyntax } from '../../packages/core/src/post-run/script-check.ts'
 
 const NL = String.fromCharCode(10)
 

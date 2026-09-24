@@ -33,11 +33,11 @@
       "contains": "scriptCtx: (s.scriptCtx as string)"
     },
     {
-      "file": "src/post-run/script-meta.ts",
+      "file": "packages/core/src/post-run/script-meta.ts",
       "contains": "ctx: string"
     },
     {
-      "file": "src/routes/run.ts",
+      "file": "packages/core/src/routes/run.ts",
       "contains": "scriptCtx: scriptMeta.ctx"
     },
     {
@@ -45,15 +45,15 @@
       "contains": "url-updated"
     },
     {
-      "file": "src/server/launcher.ts",
+      "file": "packages/core/src/server/launcher.ts",
       "contains": "window.focus()"
     },
     {
-      "file": "src/post-run/script-check.ts",
+      "file": "packages/core/src/post-run/script-check.ts",
       "contains": "export function checkScriptSyntax"
     },
     {
-      "file": "src/routes/run.ts",
+      "file": "packages/core/src/routes/run.ts",
       "contains": "syntaxError: true"
     },
     {
@@ -101,19 +101,19 @@
       "contains": "fingerprints?: Array<"
     },
     {
-      "file": "src/helpers.cjs",
+      "file": "packages/core/src/helpers.cjs",
       "contains": "readIfChanged(file)"
     },
     {
-      "file": "src/helpers.cjs",
+      "file": "packages/core/src/helpers.cjs",
       "contains": "fileSig(file)"
     },
     {
-      "file": "src/helpers.cjs",
+      "file": "packages/core/src/helpers.cjs",
       "contains": "clearReadCache()"
     },
     {
-      "file": "src/helpers.cjs",
+      "file": "packages/core/src/helpers.cjs",
       "contains": "const _rcMem = {}"
     },
     {
@@ -145,23 +145,23 @@
       "contains": "generatedAt"
     },
     {
-      "file": "src/logger.cjs",
+      "file": "packages/core/src/logger.cjs",
       "contains": "module.exports = L"
     },
     {
-      "file": "src/logger.cjs",
+      "file": "packages/core/src/logger.cjs",
       "contains": "require('chalk')"
     },
     {
-      "file": "src/logger.cjs",
+      "file": "packages/core/src/logger.cjs",
       "contains": "L.c = function"
     },
     {
       "file": "bin/compliance-report.cjs",
-      "contains": "require('../src/logger.cjs')"
+      "contains": "require('./_logger-shim.cjs')"
     },
     {
-      "file": "src/utils/plan-parser.ts",
+      "file": "packages/core/src/utils/plan-parser.ts",
       "contains": "eslint-disable regexp/no-super-linear-backtracking"
     },
     {
@@ -201,7 +201,7 @@
       "contains": "unified-status-bar"
     },
     {
-      "file": "src/helpers.cjs",
+      "file": "packages/core/src/helpers.cjs",
       "contains": "require('chalk')"
     },
     {

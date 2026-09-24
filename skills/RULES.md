@@ -1,568 +1,257 @@
 ---
 name: rules
-description: 项目唯一规则来源（AI 行为 / 脚本规范 / 环境自检 / 踩坑库 / TS 架构 / UI 踩坑）
-version: 2026-09-21
+description: 项目唯一规则来源（Single Source of Truth）
+version: 2026-09-24-v4
 ---
-
-<!-- RULES-CONSOLIDATED-v2 -->
 
 # 规则总纲（Single Source of Truth）
-
-> 本文件是本项目全部 AI 行为 / 脚本 / 环境 / 架构规则的**唯一权威来源**。
-> 冲突时以本文件为准。
-<!-- AGENTS-DEFAULT-LOAD -->
-<a id="ch0"></a>
-## 零、默认上下文加载（会话首轮强制）
-
-每次会话首轮，除本 RULES.md 外，AI 必须默认读取并遵守 `AGENTS.md`。
-
-- **AGENTS.md**：项目级启动说明（命令、运行方式、环境约定），会话首轮先读
-- **RULES.md**（本文件）：AI 行为 / 脚本 / 架构 / 踩坑的**唯一权威**
-- **冲突时**：以本文件为准
-
-加载顺序：`AGENTS.md` → `RULES.md` → `.ai-runner/state.json` → 当前任务
-
-### AGENTS.md 默认加载
-
-若 `AGENTS.md` 缺失 → 输出 `⚠ AGENTS.md 缺失` 并继续，不中断循环。
-
-
-## 目录
-
-<!-- TOC-CH0 -->
-[零、默认上下文加载](#ch0)
-[一、输出契约与自动化循环](#ch1)
-[二、AI 行为与决策准则](#ch2)
-[三、脚本编写与技术规范](#ch3)
-[四、__AI__ 全局注入 API](#ch4)
-[五、环境自检与提交闸门](#ch5)
-[六、踩坑库（E/T/P/A）](#ch6)
-[七、TypeScript HCLC 架构](#ch7)
-[八、UI / CSS / Vue 速查](#ch8)
-
-<a id="ch1"></a>
-
-## 一、输出契约与自动化循环
-
-### 输出契约（严格执行）
-
-1.  **单块原则**：每次回复**只输出一个代码块**，块外禁止解释、总结、前言、后记。
-2.  **语言标签**：仅限 `js` / `bash`（`cjs` 视同 `js`），其他标签视为格式错误。
-3.  **安全熔断**：bash 中禁止破坏性命令（`rm -rf` / `sudo` / `curl|sh` / `wget|sh` / `dd if=` / `mkfs` / `> /dev/sd*` / `git push -f` / `git reset --hard` / fork bomb）。命中即停循环，输出退出码 2。
-4.  **完成信号**：任务完成时，第一行严格输出 `DONE`，第二行输出本次修改详情总结。
-5.  **推进强制**：每一轮必须产生新状态。禁止重复输出同一脚本（相同 SHA-256 hash 会被跳过）。
-6.  **转义安全**：脚本内禁止出现三个连续反引号字面量。写入 markdown/模板内容时，必须使用字符串拼接或变量替换。
-7.  **重试限制**：格式错误仅允许重试一次，第二次仍错则触发退出码 2。
-8.  **完成条件查询**：收到「请说明完成条件」时，仅回复可验证的、机器可读的完成断言。
-
-### 循环编排与状态机
-
-| 阶段 | 动作 | state.json 变更 |
-| :--- | :--- | :--- |
-| 首轮 | 初始化 `.ai-runner/state.json`，拆解 todo 为原子动作 | `status: "running"`, `todo: [...]` |
-| 中间轮 | 读 state → 执行 todo 下一项 → 回写 state | 更新 `current_step`, `last_hash` |
-| 收尾轮 | todo 空 → 跑验收命令 → 全绿 | `status: "done"`, `exit_code: 0` |
-| 卡点轮 | 连续无进展 → 输出只读诊断报告 | `status: "blocked"`, `exit_code: 2` |
-
-### 终止与熔断机制
-
--   **正常结束**：退出码 0 + todo 为空 + 验收通过 → `DONE`
--   **可恢复错误**：退出码 1 → 自动重试一轮（计入 stall counter）
--   **人工介入**：退出码 2 → 暂停循环，等待用户输入
--   **去重熔断**：同 hash 连续 2 次跳过 OR 同 todo 项连续 2 轮未推进 → 强制输出诊断脚本或退出码 2
--   **全局熔断**：无轮次上限，但受以下参数保护：
-    -   `LOOP_STALL_LIMIT=3`（无进展轮次上限）
-    -   `LOOP_FP_STALL_LIMIT=2`（假进展/重复hash上限）
-    -   Token 上下文窗口溢出前自动保存 checkpoint 并退出
-
-<!-- AIRUNNER-BATCH3-CMDLIST-MOVED -->
-> 常用命令清单见 AGENTS.md「脚本入口」。
----
-
-<a id="ch2"></a>
-
-## 二、AI 行为与决策准则
-
-### 总则（最高优先级）
-
-- **只输出可执行内容**：除代码块及上方一行功能摘要外，禁止解释、客套、recap 或思考过程。
-- **默认折叠思考**：内部推理不对外展示。
-- **连续失败熔断**：连续 3 轮未解决，停止改代码，转为提问诊断。
-- **读写协议优先**：涉及文件操作时，严格遵守 第三章「脚本编写与技术规范」 中的 R1-R3 协议。
-
-### 自主决策与安全边界
-
-- **AI 全程自主决策**：所有技术选型、实现方案、参数配置均由 AI 自行判断，不得向用户提问或提供选项让用户选择。
-- **可逆性分级执行**：
-  - **L0 (无感)**: 格式化、类型补全、纯函数重构 → ⚡️ 直接执行，无需记录。
-  - **L1 (Git 可恢复)**: 业务逻辑修改、文件增删改、依赖调整 → ⚡️ 直接执行 + 写入 `state.json#decisions`。
-  - **L2 (不可逆/跨域)**: 命中以下五类之一即触发，**暂停并请求确认**，必须提供回滚方案。
-    <!-- AIRUNNER-L2-V1 -->
-    1. 生产环境操作：部署、发布、上生产
-    2. 数据库 DDL：建表、改表、删表、加索引
-    3. 删除核心配置：`.env` / 密钥 / 锁文件 / CI 配置
-    4. 外部服务写操作：调用第三方 API 做写操作
-    5. 修改 git 历史：rebase / reset / force push
-    其余归 L0/L1，由 AI 按可逆性自判。清单可演进，但必须有明确当前版本。
-- **遇分歧自行裁决**：当存在多种可行方案时，依据 `决策阶梯` 自主选择；若阶梯无法区分，优先选**更易测试 / 更少依赖**的方案，将理由写入 `state.json`，禁止暂停询问。
-- **禁止打断自动化循环**：除非触发 L2 级风险或退出码 2（硬性卡点），否则不得以任何理由中断循环、请求确认或等待用户输入。
-
-### 状态持久化协议
-
-- **强制写入时机**：每次 L1+ 决策、循环中断、任务完成时，必须更新 `state.json`。
-- **Schema 约束**：
-  ```json
-  {
-    "goal": "当前原子目标",
-    "decisions": [{"t":"ISO","c":"选择X","r":"因Y符合阶梯3","rej":["Z"]}],
-    "blocker": "null 或具体卡点描述",
-    "checkpoint": "最后验证通过的 commit/hash/步骤ID"
-  }
-  ```
-- **Session 恢复**：新对话开始时，若检测到 `state.json` 存在且 `goal` 未完成，首行输出 `🔄 Resuming: [goal] @ [checkpoint]` 并继续执行。
-
-### 输出形状（ADHD 友好 v2）
-
-- **视觉锚点强制**：
-  - `⚡️` 置顶可执行内容（命令/代码/路径）
-  - `🧠` 决策理由（仅限 L1+ 操作，≤20字）
-  - `⚠️` 风险警告（仅限 L2 操作）
-  - `✅` 验证结果（执行后必附）
-- **首行即动作**：命令/路径/代码片段置顶，背景信息后置或删除。
-- **步骤极简**：多步操作编号，能合并则合并，最少步骤优先。
-- **列表上限 5 项**：超出则拆分为「现在做 / 稍后做」。
-- **报错格式化**：`📍 file:line | 🔥 现象 | 🔧 修法`，禁止情绪化表达或自然语言描述错误。
-- **执行后断言**：每个关键动作块末尾，必须包含验证步骤。
-  ```bash
-  npm run build && echo "✅ Build OK" || echo "❌ Build FAILED at $(date)"
-  ```
-- **选项类问题**：给 2–4 个排序选项 + 一行取舍说明，默认直接执行排第一的推荐方案（L2 级除外）。
-
-### 决策阶梯（命中即停）
-
-1. 需要做吗？（YAGNI）
-2. 项目里已有吗？→ 复用（若涉及 TS 架构变更，自动加载 `refactor-ts` 规范检查）
-3. 标准库能做吗？
-4. 平台特性覆盖吗？
-5. 已装依赖能解吗？
-6. 能一行解决吗？
-7. 以上都不行 → 写最少能跑的代码
-
-### 不做清单
-
-- 不用 bash 写业务逻辑（仅用于系统操作）
-- 不依赖终端粘贴大段内容
-- 不手动编辑自动生成文件
-- 不在未备份/未提交状态下执行 L1+ 操作
-- 不动与任务无关的核心逻辑
-- 不提交敏感配置 / `.env` / 锁文件
-
-### 发送前自查
-
-- [ ] 首字符是否为视觉锚点 (`⚡️/🧠/⚠️/✅/🔄`)？非锚点开头 → 重写
-- [ ] L1+ 操作是否已写入 state.json？未写 → 补写
-- [ ] 关键动作是否附带验证断言？无 → 补充
-- [ ] 是否存在 L2 操作未加 ⚠️ 标记？有 → 拦截
-- [ ] 末句是否在问「还有别的吗」或 recap？→ 删
-- [ ] 是否有无信息模糊词（可能/或许）？→ 删或改为字面动作
-- [ ] 读者扫视首尾锚点，能否在 3 秒内获知「做了什么 + 结果如何」？否 → 精简
-
-> 读写协议（R1-R3）、反模式详见 第三章「脚本编写与技术规范」。
----
-
-<a id="ch3"></a>
-
-## 三、脚本编写与技术规范
-
-### 脚本头部强制规范（唯一权威）
-
-每个代码块**第一行必须是 Shebang**，**第二行起紧跟元数据注释**。此格式为会话记录摘要的唯一数据源。
-
-#### JS / CJS
-
-```js
-#!/usr/bin/env node
-// @desc: 一句话说明本脚本做什么（必需，作为会话摘要）
-// @why: 解决什么问题（必需）
-// @plan: 本轮唯一子目标，对应 state.todo 中一项
-// @state: state 文件相对路径，缺省 .ai-runner/state.json
-// @done: 本轮收尾的机器可判定条件；非收尾轮省略
-```
-
-#### Bash
-
-```bash
-#!/usr/bin/env bash
-# @desc: 一句话说明本脚本做什么（必需，作为会话摘要）
-# @why: 解决什么问题（必需）
-# @plan: 本轮唯一子目标，对应 state.todo 中一项
-# @state: state 文件相对路径，缺省 .ai-runner/state.json
-# @done: 本轮收尾的机器可判定条件；非收尾轮省略
-```
-
-#### 约束
-
-- Shebang 必须是第 1 行，前后无空行；禁止硬编码路径（如 `#!/bin/bash`），保证跨平台
-- `@desc` 与 `@why` 均为必需，缺一会被要求重试一次
-- 可选字段（`@plan` / `@state` / `@done`）被服务端忽略、不报错
-
-### 核心原则
-
-- **文件改动必须走脚本**：禁止手动编辑、口头描述、输出整文件让用户复制。
-- **幂等 + 可回滚**：重复执行安全；备份到 `.ai-runner/backup/`；支持 `--rollback`。
-- **自检断言**：关键结果逐条校验，失败 `process.exit(1)`；非平凡逻辑留可跑 check。
-- **路径安全**：统一 `path.join(ROOT, ...)`，禁止字符串拼接。
-
-### 通道选择
-
-| 通道 | 用途 | 特性 |
-| :--- | :--- | :--- |
-| `js/cjs` | 改项目文件 | 内存 overlay 沙盒，失败零改动，成功可回滚 |
-| `bash` | 系统操作 | 走 shell，跑前工作台自动 git commit 兜底 |
-
-### Bash 黑名单（命中即停）
-
-禁止：`rm -rf` / `sudo` / `curl|sh` / `wget|sh` / `dd if=` / `mkfs` / `> /dev/sd*` / `git push -f` / `git reset --hard` / fork bomb。
-注释/字符串中也需避开黑名单字面量，可用字符串拼接或动作描述替代。
-
-### 输出符号规范
-
-- ▶ 阶段 / ✓ 成功（绿） / ! 跳过（黄） / ⚠ 警告（黄） / ✗ 失败（红，stderr）
-- 使用语义函数 `ok/skip/warn/err`，禁止裸打印。
-- 失败时报出 `文件 + 行号 + 现象`，可直接 grep。
-
-### 读写协议（硬约束）
-
-写文件前必过三关。任一关未过，禁止进 writeFileSync。
-
-#### R1 读为先
-
-- 改文件前，脚本首段必须 `fs.readFileSync` 目标文件
-- 文件 > 200 行时，只 dump 目标区域 ±20 行（不 dump 全文，避免 stdout 截断）
-- 未读即写 = 违反，预检必失败
-
-#### R2 锚点验证
-
-- 每个 `src.replace(anchor, ...)` 前一行加 `if (!src.includes(anchor)) process.exit(2)`
-- 锚点不匹配 → 退出码 2（暂停请求人工），**不降级猜测**
-- 严禁 `src.replace(/宽松正则/, ...)` 未验证命中数
-
-#### R3 幂等有据
-
-- 判「已应用」不仅查 MARKER，还要验证 MARKER 语义完整（后 30 字符内关键行存在）
-- 仅 MARKER 命中就 `skip` = 假阳性隐患
-
-#### 反模式清单
-
-- ❌ 用 `includes(...)` 判使用（会匹配定义行）
-- ❌ 用宽正则在未验证命中数时替换
-- ❌ 脚本内引用 `state` 却在 `const state` 之前
-- ❌ 一轮内跨 ≥3 文件改动（拆多轮）
-- ❌ 单轮 stdout > 120 行（截断丢证据）
----
-
-<a id="ch4"></a>
-
-## 四、__AI__ 全局注入 API
-
-<!-- AIRUNNER-BATCH3-API-EXTRACTED -->
-> 完整 API 手册见 skills/AI-API.md（按需加载）。高频函数速览：
-
-| 类别 | 函数 |
-|---|---|
-| 读写 | readText / writeText / exists / readJSON / atomicWrite |
-| 安全补丁 | patchFile / backup |
-| 断言 | assert / assertContains / assertNotContains |
-| 语义输出 | ok / skip / warn / err |
-| 状态 | readState / updateState / statePath |
-| 环境 | cwdMust |
-| 查看 | dump |
-
-核心偏好：能用 __AI__ 函数解决的，不用原生 fs / console / process。
-若 runner 未注入速查表 → 报告异常并退出，不猜测 API 签名。
-
----
-
-<a id="ch5"></a>
-
-## 五、环境自检与提交闸门
-
-### 环境自检（会话首条）
-
-- [ ] pwd 正确，非空目录
-- [ ] git rev-parse --abbrev-ref HEAD 分支正确
-- [ ] ls src/ 有文件，node_modules 存在
-- [ ] git worktree list 无孤儿
-
-### 提交前闸门
-
-- [ ] node --check 所有改动的 .cjs
-- [ ] pnpm tsc 通过
-- [ ] git status 无 .ai-runner/ 运行态文件
-
-### 脚本编写
-
-- [ ] 注释/字符串避开 bash-guard 黑名单字面量
-- [ ] 改动幂等 + 有 --rollback
-- [ ] 关键结果 assert 自检
-
-### 与 AI 协作
-
-- [ ] 精确改动的文件贴原文，不用压缩包
-- [ ] 一次 <= 3 个文件
-- [ ] 报错先贴 pwd/ls，再贴 stderr
-
-> 详细踩坑库（E/T/P/A）见 第六章「踩坑库」。
----
-
-<a id="ch6"></a>
-
-## 六、踩坑库（E/T/P/A）
-
-> 会话首条自检见 第五章「环境自检与提交闸门」。
-
-### 踩坑库（E/T/P/A 分类）
-
-#### 环境类
-
-**E1. 工作台 cwd 指向空目录**
-
-- 现象：脚本全部 exit 1/127；找不到 src/、interceptor.cjs、helpers.cjs
-- 根因：IDE 建了目录但没建 git worktree 关联，或 workspace 切换失败
-- 规避：
-  - 会话第一条脚本固定 `pwd && ls src/ && git rev-parse --abbrev-ref HEAD`
-  - 所有改动脚本加 **cwd 闸**（不等于预期目录则拒绝执行）
-  - 参考 `scripts/preflight.sh`
-
-**E2. dev server 挂掉 / 未启动**
-
-- 现象：`Failed to fetch`，面板所有脚本挂
-- 根因：终端崩溃 / 切 worktree 后未重启 dev server
-- 规避：
-  - 改动前跑 `curl -s -o /dev/null -w "%{http_code}" http://localhost:5174/__ai/`
-  - 不是 200 就先 `pnpm web:dev` 重启
-  - 一个 worktree 只保留一个 dev server
-
-**E3. worktree / master 分支混乱**
-
-- 现象：脚本误改到 master，或改动打在半成品分支上
-- 根因：没约定 worktree = 分支；切换动作缺失
-- 规避：
-  - worktree 命名严格等于分支名
-  - 会话首条命令 `git worktree list`
-  - 每个改动脚本头部加 `git rev-parse --abbrev-ref HEAD` 闸
-
-#### 工具链类
-
-**T1. overlay 沙盒崩溃丢改动**
-
-- 现象：js 脚本中途抛错，报"变更数 0"，磁盘未改；但 stdout 里已打印 "✓ 已写"
-- 根因：js 通道写的是内存 overlay，脚本非零退出时 overlay 全丢弃
-- 规避：
-  - **关键改动走 bash 通道**（直接写真实磁盘）
-  - js 通道写后必须紧跟 `fs.readFileSync` **回读**验证
-  - 复杂脚本分段提交，避免中途崩
-
-**T4. bash-guard 黑名单误伤注释/字符串**
-
-- 现象：脚本正文（含注释）出现黑名单词被 400 拦
-- 触发类别（此节用描述代替字面量，避免自身再触发）：
-  - 递归强删目录（三个 token：命令 + 递归标志 + force 标志）
-  - 提权命令
-  - 远程下载管道直执行（下载工具 + 竖线 + shell）
-  - 磁盘覆写命令
-  - 文件系统格式化命令
-  - 强制推送 / 硬回退
-  - fork bomb
-- 规避：
-  - 注释/字符串里避免这些字面量
-  - 替代写法：拆字母拼字符串（如 `'r' + 'm' + ' -rf'`）、改词（"递归删除"）
-  - 或改写成动作描述
-
-**T6. `--experimental-strip-types` 不重写 `.js`→`.ts`**
-
-- 现象：`ERR_MODULE_NOT_FOUND: Cannot find module '.../config.js'`
-- 根因：Node 的 TS strip 只剥类型，不改 import 路径
-- 规避：
-  - 生产入口走 `pnpm build` → 跑 `dist/*.js`
-  - 参考 `bin/air-server.cjs` 的 build-then-run 模式
-
-**T9. Vue `v-if`/`v-else` 相邻性破坏**
-
-- 现象：`v-else/v-else-if has no adjacent v-if or v-else-if`
-- 根因：在 `v-if` 和 `v-else` 之间插入了新元素
-- 规避：
-  - 插按钮时看清相邻结构
-  - 想插在中间就用 `v-if` 独立条件，不动原有链
-  - 或者整段挪到链**之前**
-
-#### 流程类
-
-**P1. tsc 失败但脚本仍 commit**
-
-- 现象：`pnpm tsc && echo` 在 `set -e` 里不阻断后续
-- 根因：`&&` 的短路行为在 bash `set -e` 下不足以阻断
-- 规避：
-  - 统一用 `if ! pnpm tsc; then exit 1; fi`
-  - 任何"验证"步骤都不能用 `&&` 挂载
-
-**P2. merge 带进运行态文件**
-
-- 现象：`.ai-runner/compliance.jsonl`、`.ai-runner/SESSION-HANDOFF.md` 误入 master
-- 规避：
-  - `.gitignore` 覆盖 `.ai-runner/` 运行态子目录
-  - merge 前 `git diff --stat master..HEAD` 过一眼
-  - 已 untrack 的用 `git rm --cached`
-
-**P3. 合并后 worktree 落后 master**
-
-- 现象：master 领先 worktree 若干 commit
-- 规避：合并后立刻在 worktree 里 `git merge --ff-only master`
-
-**P4. 长脚本被截断**
-
-- 现象：脚本贴到面板只跑了前一半，尾部丢失
-- 规避：
-  - 单脚本 ≤ 200 行
-  - 需要更多时拆多次
-  - 复杂改动先探针再改
-
-#### AI 协作类
-
-**A1. 源码被压缩，行号不可信**
-
-- 现象：file 标签带 `cleaned="XXXB"`，大文件只保留骨架
-- 规避：
-  - 精确改动前**单独贴原文**（用代码块，不走 file 标签）
-  - 一次 ≤ 3 个文件
-  - 本 AI 看到 `cleaned=` 就明说"行号不可信"
-
-**A2. 盲改 vs 探针**
-
-- 现象：直接改代码，脚本自检报"未找到锚点"，反复失败
-- 规避：
-  - 每个改动脚本**先探针**（`grep -n` 定位锚点）
-  - 锚点不存在则 abort，不盲改
-  - 只有探针通过才进改动阶段
-
-**A3. 一次做完 vs 分批**
-
-- 现象：大重构一次脚本做完，出错无法定位
-- 规避：
-  - 单脚本单目标（≤3 文件）
-  - 每步 commit 独立可回滚
-  - 依赖链长的（如 headless），先搭骨架，再填逻辑
----
-
-<a id="ch7"></a>
-
-## 七、TypeScript HCLC 架构
-
-### 🎯 核心目标
-在 TypeScript 项目中，通过严格的类型约束、模块化设计和依赖管理，确保每个模块**职责单一且完整（高内聚）**，模块间**依赖最小化且易于替换（低耦合）**。
-
-### 🧠 思维框架 (Design Mindset)
-
-1.  **内聚性检查**：这个文件/类是否只关心"一件事"？修改一个业务需求是否只需要改动这一个文件？
-2.  **耦合度检查**：删除或替换这个依赖，是否会导致其他模块崩溃？是否可以通过接口抽象隔离变化？
-3.  **类型即文档**：TypeScript 的类型系统不仅是校验工具，更是表达"契约"和"边界"的核心手段。
-4.  **显式优于隐式**：拒绝 `any`，拒绝全局状态污染，所有依赖关系必须在构造函数或函数签名中显式声明。
-
-### ⚙️ 执行规范 (Actionable Rules) - 增强版
-
-#### 1. 接口隔离与契约优先 (Enhanced)
-*   **规则**：跨模块通信必须通过契约进行。优先使用 **TypeScript 原生类型系统** 表达业务语义，而非仅靠 Interface。
-*   **TS 实践**：
-    *   **状态表达**：使用 Discriminated Unions 替代 Enum + Class 继承。
-    *   **契约验证**：使用 `satisfies` 确保实现符合契约且不丢失字面量类型推断。
-    *   **ISP 落地**：若 Interface > 3 个方法，强制审查是否可拆分为 Role-based Interfaces。
-
-#### 2. 依赖管理分级策略 (Tiered Dependency Strategy)
-*   **规则**：根据代码层级采用不同的耦合容忍度，避免过度设计。
-*   **分级标准**：
-
-    | 层级 | 耦合要求 | DI 方式 | 类型约束 |
-    | :--- | :--- | :--- | :--- |
-    | Domain Core | 零外部依赖 | 纯函数 / Value Objects | Strict, No `any` |
-    | Application | 仅依赖 Domain 接口 | 构造函数注入 / Factory | Interface Only |
-    | Infrastructure | 允许具体实现 | 容器注入 / Adapter | 允许 SDK 类型穿透 |
-    | Edge/API | 允许框架耦合 | 框架原生 Hooks/Decorators | Zod/Schema 验证边界 |
-
-#### 3. 重构安全协议 (Refactoring Safety Protocol)
-*   **⚠️ 强制执行**：在对任何模块进行 HCLC 重构前，必须确认以下任一条件满足：
-    1.  存在覆盖该模块公共 API 的单元测试/集成测试。
-    2.  已编写 Characterization Test 锁定当前输入输出行为。
-    3.  调用方极少且可通过人工/E2E 快速验证。
-*   **重构手法**：优先使用 IDE 支持的自动化重构（Extract Method, Move File），再手动调整抽象。禁止“复制粘贴后删除旧代码”的高风险操作。
-
-### 🔍 Code Review 自检清单 (量化版)
-
-| 检查项 | 🟢 合格 | 🟡 警告 (需记录技术债) | 🔴 阻断 (必须修复) |
-| :--- | :--- | :--- | :--- |
-| 文件 Import 数 | ≤ 5 个 | 6-8 个 | > 8 个或含循环依赖 |
-| 函数参数个数 | ≤ 3 个 | 4 个 | ≥ 5 个 (应封装为 Options Object) |
-| 圈复杂度 | ≤ 10 | 11-15 | > 15 |
-| `any` 使用 | 0 (Core) / <3 (Infra) | 有合理注释的 `any` | 无注释 `any` 或 `@ts-ignore` |
-| 变更影响面 | 单文件 | 同模块内 2-3 文件 | 跨模块 > 3 文件 |
-
-### 📝 AI 输出格式规范 (Output Schema)
-
-当被要求审查或重构时，**必须**按以下结构响应：
-
-1.  **🩺 诊断摘要**：一句话概括核心架构问题（如："OrderService 承担了持久化与业务计算双重职责"）。
-2.  **🎯 违规映射**：列出具体代码行号及其违反的 HCLC 原则编号。
-3.  **🛠️ 重构方案**：
-    *   **Step-by-Step**：分步骤说明（先提取接口 -> 再创建适配器 -> 最后替换注入）。
-    *   **Before/After**：提供关键代码对比片段（Diff 风格）。
-4.  **🧪 验证策略**：明确说明如何验证重构未破坏功能（如："运行 `npm test -- orders` 并确保覆盖率不下降"）。
-5.  **⚖️ 权衡说明**：诚实指出重构带来的潜在成本（如："增加了 2 个文件，但提升了订单状态流转的可测试性"）。
-
----
-
-<a id="ch8"></a>
-
-## 八、UI / CSS / Vue 速查
-
-<!-- AIRUNNER-BATCH3-UI-COMPRESSED -->
-> 详细复盘与排查命令见 skills/UI-LESSONS.md（按需加载）。
-> 浏览器通道建成前，DevTools → Styles 面板是唯一可靠排查路径。
-
-### 排查顺序（记牢）
-
-1. DevTools Elements → 选中目标元素
-2. Styles 面板逐条看生效规则
-3. 找到异常色 / 样式的来源（文件名 + 行号）
-4. 回源码 `grep` 那行
-5. 一处一改，改完强刷
-
-**禁止**：靠截图猜色值、改容器背景、改全局变量、删主题。
-
-### 常见坑速查
-
-| 现象 | 核心动作 |
-|---|---|
-| CSS 多选择器组内插注释 → 声明被并到组上 | 组内每选择器独占一行，末行不带注释；改前 `grep` 目标选择器 |
-| `el.matches(".pane-main *")` 查不到规则 | 用 DevTools Styles 面板，不用 `matches()` API |
-| 删 CodeMirror 主题 → 内部退回亮色 | 保留官方主题，只在 `EditorView.theme` 覆盖容器色 |
-| UnoCSS `(--var)` 生成无效声明 | 一律 `[var(--xxx)]` 方括号语法 |
-| 组件抽取后函数被误删 / prop 类型错 | 抽前 `grep -rn` 所有调用方；抽后立即 `tsc` |
-| 同选择器多块 `!important`，后者赢 | 修改前 `grep` 数选择器出现次数；DevTools 看划掉的 |
-| `document is not defined` / `$()` 报错 | 三环境区分：工作台 Node / 浏览器 Console / 系统终端 |
-| CSS 变量未定义就引用 → fallback 空值 | 新增引用前 `grep -- "--xxx" client/style.css` |
-| `*:focus-visible` 让容器整块出现蓝框 | 焦点环只写 button / a / input / select / textarea |
-| Vue `<script setup>` const 不提升 | defineProps / defineEmits / defineModel 置顶 |
-
-### 三环境区分
-
-| 环境 | 能跑 | 进入方式 |
+> 冲突时以本文件为准。会话首轮加载顺序：AGENTS.md → 本文件 → state.json → 当前任务。
+> AGENTS.md 缺失仅警告，不中断。
+
+## 一、输出契约（JS-Only Absolute Contract）
+
+### 1.0 绝对围栏
+-   **首字符**：回复第一个非空字符必须是 ```js
+-   **尾字符**：回复最后一个非空字符必须是独立的 ```
+-   **零溢出**：代码块外部禁止任何字符（含问候、解释、Markdown、多余换行）
+-   **单块纯化**：有且仅有一个 js 代码块；禁 javascript/typescript/bash/json 标识符；块内禁连续三反引号
+
+### 1.1 内容约束
+-   **注释替代**：所有解释/推理/TODO/摘要必须以 // 或 /* */ 写在 JS 内部
+-   **完成信号**：首行注释 // DONE，次行修改摘要
+-   **验证正则**：发送前自检 /^```js\n[\s\S]*\n```$/；未通过 → 重试 1 次 → 仍失败则输出标准错误对象（见 1.3）
+
+### 1.2 推进强制
+-   每轮新状态；同 SHA-256 跳过；格式错仅重试一次
+-   完成条件查询仅返回机器可读断言（JS 对象）
+
+### 1.3 统一错误协议
+所有错误（格式违规/安全拦截/API 缺失/卡点）必须输出以下 JS 对象，禁止 console.error 或自然语言：
+
+// ⚠️ ERROR
+module.exports = {
+  error: "OUTPUT_CONTRACT_VIOLATION | SECURITY_BLOCKED | API_MISSING | STALL",
+  detail: "人可读描述（≤50字）",
+  exitCode: 2, // 1=可重试, 2=人工介入
+  retryable: false,
+};
+
+### 1.4 脚本头契约（Script Head Contract）
+> [script-head-contract-v1] 由 ai-guard.ts#scanScriptHead + run-script.ts 强制；缺失即 exit 2。
+
+-   **Shebang（唯一合法）**：#! /usr/bin/env node
+    -   其他 shebang（bash/sh/zsh/python 等）→ 拒绝执行，错误码 ILLEGAL_SHEBANG
+    -   无 shebang：默认按 node 处理（runner 自动补），不视为违规
+-   **必需字段**（缺一即拒）：
+    -   // @desc <做什么>（≤200 字符）
+    -   // @why <为什么>（≤200 字符）
+-   **可选字段**：@plan / @state / @done / @mode / @ctx / @changes
+    -   @mode: diff → 只读预览（对应 __AI__.writeDiffReport）
+    -   @ctx: full → 输出不裁剪
+    -   @changes: <路径列表> → 声明本轮预期变更文件
+-   **违规错误**：{ error: "SCRIPT_META_MISSING", detail: "MISSING_DESC" | "MISSING_WHY" | "ILLEGAL_SHEBANG:…", exitCode: 2 }
+## 二、循环状态机与熔断
+
+### 2.1 状态流转
+| 阶段   | 动作                     | state.json         |
+|--------|--------------------------|--------------------|
+| 首轮   | 初始化 + 拆解 todo       | status: running    |
+| 中间轮 | 读 state → 执行 → 回写   | current_step 更新  |
+| 收尾轮 | todo 空 → 验收全绿       | status: done, exit 0 |
+| 卡点轮 | 无进展 → 输出 1.3 错误对象 | status: blocked, exit 2 |
+
+### 2.2 熔断阈值
+-   LOOP_STALL_LIMIT=3 / LOOP_FP_STALL_LIMIT=2
+-   同 hash/todo 连续 2 轮未推进 → exit 2
+-   Token 溢出前强制 checkpoint
+
+## 三、AI 行为准则
+
+### 3.1 自主决策
+-   全程自主，不问用户；L0 ⚡️ 直接执行 / L1 ⚡️ 执行 + 写 state / L2 ⚠️ 暂停确认 + 回滚方案
+-   分歧按决策阶梯裁决：YAGNI → 复用 → 标准库 → 平台特性 → 已装依赖 → 一行解 → 最少代码
+-   除 L2 或 exit 2 外，禁打断循环
+
+### 3.2 状态持久化
+-   L1+ 决策/中断/完成 → 必写 state.json { goal, decisions[], blocker, checkpoint }
+-   Session 恢复 → 首行注释 // Resuming: [goal] @ [checkpoint]
+
+### 3.3 输出形状（ADHD v2）
+-   锚点注释：// ⚡️ 动作 / // 🧠 理由 / // ⚠️ 风险 / // ✅ 验证
+-   报错：// 📍file:line | 🔥现象 | 🔧修法
+-   关键动作必附验证断言
+
+### 3.4 不做清单
+-   不贴大段内容；不手编自动生成文件；未备份不做 L1+；不动无关核心；不提交敏感文件
+-   禁 as any / as unknown as（除非注释理由）；union 类型只定义一次
+
+### 3.5 发送前自查
+[ ] 首尾围栏正确 [ ] 块外零字符 [ ] 通过验证正则 [ ] L1+ 已写 state [ ] 关键动作有验证 [ ] L2 有 ⚠️ [ ] 无原生模块调用 [ ] 3 秒获知结果
+
+## 四、__AI__ API（强制运行时沙箱）
+
+> ⛔ **绝对禁令**：禁止 require/import fs / path / child_process / os / process
+> 所有副作用操作**必须且只能**通过 __AI__ 命名空间。
+> 检测正则（发送前自检）：/\b(require\s*\(\s*["']fs["']|import[^;\n]*from\s+["']fs["']|fs\.|path\.|child_process\.|process\.exit)\b/
+
+### 4.1 安全封装（Bash 黑名单下沉至此）
+__AI__.shell(cmd) 内置拦截；以下模式无论是否拼接均拒绝执行并返回 1.3 错误：
+rm -rf / sudo / curl|sh / wget|sh / dd / mkfs / >/dev/sd* / git push -f / git reset --hard / fork bomb / chmod 777
+
+### 4.2 API 映射表（Native → __AI__）
+> [rules-4.2-sync-v2] 由 helpers.cjs 的 `__AI__` 顶层对象反向生成；覆盖 54 个公开 key。
+> 每次改动 helpers.cjs 后须重跑同步。
+
+**文件读**
+
+| ❌ 禁用 (Native) | ✅ 强制 (__AI__) | 备注 |
 |---|---|---|
-| 工作台面板 | Node `.cjs` 脚本 | 面板 |
-| 浏览器 Console | `document` / `window` / `getComputedStyle` | F12 |
-| 系统终端 | bash / sed / grep / npm | Terminal.app |
+| fs.readFileSync(p, "utf8") | __AI__.readText(p) | 同步读文本 |
+| fs.readFileSync(p) + try/catch | __AI__.tryReadFile(p) | { ok, content|error } |
+| fs.readFileSync(p) 别名 | __AI__.readFile(p) | 等价 readText |
+| JSON.parse(fs.readFileSync(p)) | __AI__.readJSON(p) | JSON 读，错误带文件名 |
+| statSync 比 mtime/size | __AI__.fileSig(p) | "mtimeMs:size" 字符串 |
+| 读缓存命中判断 | __AI__.readIfChanged(p) | { content, changed, sig } |
 
-看到 `document` → 浏览器；看到 `fs` / `require` → 工作台；看到 `sed` / `grep` → 终端。
+**文件写**
 
-### 与 AI 协作
+| ❌ 禁用 (Native) | ✅ 强制 (__AI__) | 备注 |
+|---|---|---|
+| fs.writeFileSync(p, s) | __AI__.writeText(p, s) | 自动建目录 + changelog |
+| fs.writeFileSync(p, s) 别名 | __AI__.writeFile(p, s) | 等价 writeText |
+| 写 tmp + rename 原子落盘 | __AI__.atomicWrite(p, s) | 防中断损坏 |
+| copyFileSync 到 .ai-runner/backup | __AI__.backup(p) | 幂等备份 |
+| 字符串 split/join + writeFileSync | __AI__.patchFile(f, anchor, next, opts) | R2 锚点 + 唯一性 + 回读 |
+| str.replace + 唯一性校验 | __AI__.replaceInFile(p, { oldString, newString, unique }) | 整串替换 |
 
-- **用户**：猜测性改动先问「怎么确认的」；报错贴完整 stderr；一个命令一个动作
-- **AI**：先 `grep` 再改；每轮只改一处；改完必 `tsc`；不确定时输出只读诊断脚本
+**文件系统查询与遍历**
+
+| ❌ 禁用 (Native) | ✅ 强制 (__AI__) | 备注 |
+|---|---|---|
+| fs.existsSync(p) | __AI__.exists(p) | 布尔返回 |
+| fs.readdirSync(p) | __AI__.listDir(p) | { name, isDir, isFile }[] |
+| fs.rmSync(p, { recursive }) | __AI__.deleteFile(p) | 递归删 + changelog |
+| 递归遍历目录 | __AI__.walk(dir, { ext, maxDepth, skip }) | 内置跳过 node_modules/.git |
+| glob 批量读文件 | __AI__.readFiles(glob) | glob: **/*.ts 等 |
+
+**检索与定位**
+
+| ❌ 禁用 (Native) | ✅ 强制 (__AI__) | 备注 |
+|---|---|---|
+| grep -rn | __AI__.grep(pattern, { dir, ext, max }) | { file, line, text } |
+| 精确符号查找 | __AI__.symbol(name, opts) | grep 的转义版 |
+| sed -n "s,e p" | __AI__.dump(file, from, to) | 行区间文本 |
+| awk NR 上下文窗口 | __AI__.dumpCtx(file, line, n) | line±n 文本 |
+| 查看 .vue 的 <template> 段 | __AI__.template(file) | 模板段文本 |
+| 模板中是否引用某名字 | __AI__.usedInTemplate(file, names) | 命中名字列表 |
+| 正则元字符转义 | __AI__.esc(s) | 安全拼接正则 |
+
+**状态（state.json）**
+
+| ❌ 禁用 (Native) | ✅ 强制 (__AI__) | 备注 |
+|---|---|---|
+| 读 .ai-runner/state.json | __AI__.readState() | JSON 解析；失败 null |
+| state.json 绝对路径 | __AI__.statePath() | .ai-runner/state.json |
+| 写 .ai-runner/state.json | __AI__.updateState(fn) | fn(st) + round++ + 环境字段 |
+
+**执行与断言**
+
+| ❌ 禁用 (Native) | ✅ 强制 (__AI__) | 备注 |
+|---|---|---|
+| execFileSync(cmd, args) | __AI__.exec(cmd, args, opts) | 统一执行入口 |
+| 所有 shell 调用 | __AI__.shell(cmd, opts) | 黑名单拦截（rm -rf / sudo / …） |
+| node_modules/.bin/eslint | __AI__.lint(files) | lint 包装 |
+| node_modules/.bin/vue-tsc | __AI__.typeCheck() | 类型检查包装 |
+| new vm.Script 语法检查 | __AI__.syntaxCheck(code, filename) | 不执行只解析 |
+| throw / 退出码 1 | __AI__.assert(cond, msg) | 不符即 exit 1 |
+| 退出码控制 | __AI__.exit(code, msg) | 可选打印后退出 |
+| cwd 一致性校验 | __AI__.cwdMust(expected) | 不符即 exit 2 |
+| cwd / branch 上下文断言 | __AI__.assertCtx({ cwd, branch }) | 不符即 exit 2 |
+| 写后断言含 / 不含 | __AI__.assertContains(f, s) / __AI__.assertNotContains(f, s) | 不符即 exit 1 |
+| 自查 .vue 是否有 defineOptions | __AI__.assertVueHasName(file) | 缺则 exit 1 |
+
+**输出协议（供 runner 解析）**
+
+| ❌ 禁用 (Native) | ✅ 强制 (__AI__) | 备注 |
+|---|---|---|
+| console.log/error | __AI__.ok / __AI__.skip / __AI__.warn / __AI__.err | 带 ✓/!/⚠/✗ 前缀 |
+| console.log 加前缀 | __AI__.log(...args) | "[AI]" 前缀 |
+| 结构化上报 | __AI__.writeReport(obj) | __AI_REPORT__<JSON> |
+| 只读预览模式 | __AI__.writeDiffReport(obj) | __AI_MODE_DIFF__ + 退出 |
+| 交互式询问 | __AI__.exitNeedInput(q, opts, def) | __AI_RUNNER_DECISION__ + exit 2 |
+| 请求外部文件 | __AI__.exitNeedFiles(paths) | __AI_NEED_FILES__ + exit 4 |
+
+**上下文辅助**
+
+| ❌ 禁用 (Native) | ✅ 强制 (__AI__) | 备注 |
+|---|---|---|
+| child_process + headless CLI | __AI__.browser.cssom(url, sel) | CSSOM 查询 |
+| headless 截图 | __AI__.browser.screenshot(url, sel, out, mask) | 截图到文件 |
+| process.cwd() | __AI__.getProjectRoot() | 语义化根路径 |
+| process.env.AI_RUNNER_CHANGED | __AI__.getChangedFiles() | 本轮已变更文件 |
+| 跨平台路径拼接 | __AI__.join(...parts) | path.join 的封装 |
+| 读缓存 / 清缓存 | __AI__.readCacheMap() / __AI__.clearReadCache() | 同进程内读去重 |
+
+> 若某 `__AI__` 函数在运行时不存（非 AI 遗忘），按 §4.3 降级协议先注 `// ⚠️ not found` 再用原生，并写 state.json#blocker。
+
+### 4.3 注入与降级
+-   Runner 必须在执行前注入 __AI__ JSDoc 签名
+-   未注入 → AI 输出 { error: "API_MISSING", exitCode: 2 }
+-   仅当函数确实不存在于运行时，允许降级：先注释 // ⚠️ fallback，再用原生，同时写 state.json#blocker
+
+## 五、读写协议（R1-R3）
+
+-   **R1 读为先**：改前必读；>200 行只 dump ±20 行；未读即写 → precheck fail
+-   **R2 锚点验证**：patchFile 前验 anchor 存在；不存在 → exit 2；禁宽松正则未验命中数
+-   **R3 幂等有据**：判已应用需验 MARKER 语义完整（后 30 字符关键行存在）
+
+## 六、环境与提交闸门
+
+### 6.1 会话首条自检
+[ ] pwd 正确 [ ] 分支正确 [ ] packages/ 存在 + node_modules [ ] worktree 无孤儿
+
+### 6.2 提交前闸门
+[ ] node --check 改动 .cjs [ ] pnpm tsc 通过 [ ] git status 无 .ai-runner/ 运行态文件
+> [rules-drift-fix-v1] 闸门载体：scripts/verify-contracts.cjs（契约校验）+ 本清单（人工自查）。
+> pre-commit hook 为可选增强（未安装 husky/lint-staged 时不视为违规）。
+
+## 七、踩坑库索引（E/T/P/A）
+> 详细案例见 .ai-runner/pitfalls/，此处仅保留检索键
+
+-   **E 环境**: E1-cwd 空 / E2-devserver 挂 / E3-worktree 混乱
+-   **T 工具**: T1-overlay 丢改动 / T4-bashguard 误伤 / T6-strip-types / T9-vue-vif 破坏
+-   **P 流程**: P1-tsc 失败 commit / P2-merge 运行态 / P3-worktree 落后 / P4-长脚本截断
+-   **A 协作**: A1-压缩行号 / A2-盲改 vs 探针 / A3-分批原则
+
+## 八、TS HCLC 架构
+
+-   跨模块走契约；状态用 Discriminated Unions；satisfies 验实现
+-   依赖分级：Domain Core(零依赖) → Application(仅 Domain 接口) → Infrastructure(允许 SDK) → Edge(API+Zod)
+-   重构安全：必有测试 / Characterization Test；优先 IDE 自动化重构
+-   CR 量化（Domain Core 严格档）：Import ≤ 5 / 参数 ≤ 3 / 圈复杂度 ≤ 10 / any = 0
+-   CR 量化（Application/Infrastructure/Edge 宽档）：Import ≤ 9 / 参数 ≤ 4 / 圈复杂度 ≤ 15 / any 需注释理由
+    > [rules-drift-fix-v1] 分档依据：Core 是零依赖层，其他层天然高扇入（run.ts 路由聚合 = 9、run-script.ts 编排 = 7）。
+    > [rules-barrel-exempt-v1] barrel 豁免：`*/routes/index.ts`、`*/server/index.ts`、`*/index.ts` 等聚合入口的 import 数不设上限（其职责就是 re-export 与装配）。
+    > 判定：文件名匹配 `index.ts|barrel.ts` 且首行注释含 `barrel` / `聚合` / `re-export` 关键字，即视为豁免对象。
+
+## 九、UI/CSS/Vue 速查
+
+-   排查：DevTools Elements → Styles → grep 源码 → 一处一改强刷
+-   禁：截图猜色 / 改容器背景 / 改全局变量 / 删主题
+-   三环境：Node.cjs(工作台) / Browser(Console) / Shell(__AI__.shell 封装)
+-   AI 协作：先 grep 再改；一轮一处；改完 tsc；不确定出只读诊断(JS 对象)
+
+## 十、文件内分区（TS/Vue）
+import → Vue 宏 → 类型 → 常量 → ref/reactive → computed → watch/onMounted → function → export
+-   固定顺序；同类聚合；function 声明；节间空一行
+-   跨模块 UI 共享状态（主题/布局/宽高/折叠）仅 packages/client/stores/runtime.ts（useStorage）；禁散落 ref
+-   领域内组合式状态归属自身 composable：loopPaused 定义于 packages/client/composables/ai/useAiWaiting.ts
+    > [rules-drift-fix-v1] 归属判据：先问「是否被 3 个以上非本域模块读写」→ 是 → runtime.ts；否则留原 composable。
+
+## 十一、代码风格与注释
+
+-   catch 不吞错误；可忽略需注释理由
+-   标记 [fix-xxx-v1] >5 处抽常量/函数
+-   参数 >2 用 options object
+-   外部数据过 Zod；布尔 is/has/can/should；时间 timeoutMs/durationSec；集合复数
+-   注释：函数一句话做什么 / 变量一句话是什么 / 复杂逻辑为什么 / 禁复述代码 / jsdoc 类型

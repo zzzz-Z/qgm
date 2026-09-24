@@ -7,7 +7,7 @@ const { execFileSync } = require('node:child_process')
 
 const ROOT = process.cwd()
 const BASELINE = path.join(ROOT, '.ai-runner/baseline.json')
-const L = require('../src/logger.cjs')
+const L = require('./_logger-shim.cjs')
 
 const c = L.c
 const ok = s => console.log(c(32, '✓'), s)

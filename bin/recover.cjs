@@ -6,7 +6,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const readline = require('node:readline')
-const L = require('../src/logger.cjs')
+const L = require('./_logger-shim.cjs')
 
 const ROOT = process.cwd()
 const RUNS_DIR = path.join(ROOT, '.ai-runner/runs')

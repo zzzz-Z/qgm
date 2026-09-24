@@ -2,7 +2,7 @@
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/stream.node-test.ts 迁至 test/stream.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { readNdjson } from '../../client/utils/stream.ts'
+import { readNdjson } from '../../packages/client/utils/stream.ts'
 
 // AIRUNNER-BATCH16-1-STREAM
 

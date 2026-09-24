@@ -5,7 +5,7 @@ const path = require('node:path')
 
 const ROOT = process.cwd()
 const CONFIG = path.join(ROOT, '.ai-runner/config.json')
-const L = require('../src/logger.cjs')
+const L = require('./_logger-shim.cjs')
 
 const err = s => L.err(s)
 

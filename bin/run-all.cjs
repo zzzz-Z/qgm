@@ -5,7 +5,7 @@ const { spawnSync } = require('node:child_process')
 
 const ROOT = process.cwd()
 const BASE_URL = process.env.AI_RUNNER_BASE_URL || 'http://localhost:5174'
-const L = require('../src/logger.cjs')
+const L = require('./_logger-shim.cjs')
 
 const c = L.c
 const ok = s => console.log(c(32, '✓'), s)

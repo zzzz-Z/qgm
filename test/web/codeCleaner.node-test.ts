@@ -2,7 +2,7 @@
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/codeCleaner.node-test.ts 迁至 test/codeCleaner.node-test.ts
 import { it } from 'vitest'
 import assert from 'node:assert/strict'
-import { cleanCode } from '../../client/utils/codeCleaner.ts'
+import { cleanCode } from '../../packages/client/utils/codeCleaner.ts'
 
 it('去注释：行首注释', () => {
   const r = cleanCode('// hi\nconst x = 1\n', { stripComments: true, stripBlankLines: false })

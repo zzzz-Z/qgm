@@ -10,7 +10,7 @@ fs.mkdirSync(distDir, { recursive: true })
 const files = ['interceptor.cjs', 'helpers.cjs', 'logger.cjs']
 let copied = 0
 for (const f of files) {
-  const src = path.join(ROOT, 'src', f)
+  const src = path.join(ROOT, 'packages', 'core', 'src', f)
   const dst = path.join(distDir, f)
   if (fs.existsSync(src)) { fs.copyFileSync(src, dst); console.log(`copied ${f}`); copied++ }
   else { console.log(`skip (missing) ${f}`) }

@@ -1,0 +1,140 @@
+// [generate-panel-style-v1] PLAN 4.7 阈值整改：从 GeneratePanel.vue 抽出
+
+.pane {
+  display: flex;
+
+  gap: 10px;
+  align-items: stretch;
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+.pane-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+
+  gap: 8px;
+  position: relative;
+  border-radius: var(--radius);
+  transition: box-shadow 0.15s;
+  min-height: 0;
+  overflow: hidden;
+}
+.pane-main.is-dragging {
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 25%);
+}
+.pane-main.is-success {
+  box-shadow: 0 0 0 3px rgb(16 185 129 / 35%);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+@keyframes tag-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+@keyframes at-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.drop-overlay,
+.success-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  border-radius: var(--radius);
+}
+.drop-overlay {
+  background: rgb(37 99 235 / 8%);
+}
+.drop-card,
+.success-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 20px 28px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 20px rgb(37 99 235 / 20%);
+  animation: pop-in 0.18s ease-out;
+}
+.drop-card {
+  border: 2px dashed var(--primary);
+  background: var(--surface);
+}
+.drop-icon {
+  font-size: 28px;
+}
+.drop-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+}
+@keyframes pop-in {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* [OPT] skills-bulk style */
+.skills-bulk {
+  margin-left: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid var(--border, #444);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.skills-bulk:hover:not(:disabled) {
+  opacity: 1;
+  background: var(--hover, rgba(255, 255, 255, 0.06));
+}
+.skills-bulk:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1100px) {
+  .pane {
+    flex-direction: column;
+  }
+}
+@media (max-width: 720px) {
+}

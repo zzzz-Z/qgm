@@ -1,0 +1,44 @@
+{
+  "name": "@qgm/ai-runner-client",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Vue 3 SPA：两个宿主共享的唯一视图产物",
+  "author": "qgm",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qgm/vite-plugin-ai-runner.git"
+  },
+  "exports": {
+    ".": "./dist/index.html",
+    "./main.ts": "./main.ts",
+    "./src/*": "./src/*",
+    "./dist/*": "./dist/*"
+  },
+  "files": [
+    "App.scss",
+    "App.vue",
+    "components",
+    "composables",
+    "directive.ts",
+    "dist",
+    "index.html",
+    "main.ts",
+    "style.css",
+    "types.ts",
+    "uno.config.ts",
+    "utils"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "tsc": "vue-tsc --noEmit"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@vueuse/core": "^15.0.0",
+    "pinia": "^4.0.3",
+    "zod": "^4.6.5"
+  }
+}

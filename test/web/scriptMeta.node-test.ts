@@ -2,7 +2,7 @@
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/scriptMeta.node-test.ts 迁至 test/scriptMeta.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { detectLang, parseScriptMeta } from '../../client/utils/scriptMeta.ts'
+import { detectLang, parseScriptMeta } from '../../packages/client/utils/scriptMeta.ts'
 
 // AIRUNNER-BATCH15-5-SCRIPT-META
 const NL = String.fromCharCode(10)

@@ -10,7 +10,7 @@ import process from 'node:process'
 // [P5-4] error-fingerprint 单测：用 fixture 驱动真实定位
 
 test('[P5-4] fingerprintErrors 定位函数 beta', async () => {
-  const { fingerprintErrors } = await import('../../src/utils/error-fingerprint.ts')
+  const { fingerprintErrors } = await import('../../packages/core/src/utils/error-fingerprint.ts')
   const dir = path.join(process.cwd(), '.ai-runner/tmp/fp-fixture')
   fs.mkdirSync(dir, { recursive: true })
   const fixture = path.join(dir, 'sample.ts')
@@ -33,13 +33,13 @@ test('[P5-4] fingerprintErrors 定位函数 beta', async () => {
 })
 
 test('[P5-4] fingerprintErrors 忽略 node_modules', async () => {
-  const { fingerprintErrors } = await import('../../src/utils/error-fingerprint.ts')
+  const { fingerprintErrors } = await import('../../packages/core/src/utils/error-fingerprint.ts')
   const fp = fingerprintErrors('node_modules/foo/bar.ts:10:1')
   assert.equal(fp.length, 0)
 })
 
 test('[P5-4] fingerprintErrors 定位箭头函数变量名', async () => {
-  const { fingerprintErrors } = await import('../../src/utils/error-fingerprint.ts')
+  const { fingerprintErrors } = await import('../../packages/core/src/utils/error-fingerprint.ts')
   const dir = path.join(process.cwd(), '.ai-runner/tmp/fp-fixture')
   fs.mkdirSync(dir, { recursive: true })
   const fixture = path.join(dir, 'arrow.ts')

@@ -1,15 +1,33 @@
 <!-- AIRUNNER-BATCH28-DOCS-SYNC-README -->
 
-# @qgm/vite-plugin-ai-runner
+# AI Runner
 
-Vite **dev-only** 插件 + Vue 3 SPA：在开发服务器里嵌入一个「AI 辅助开发工作台」，把**脚本沙盒执行、文件 diff / 回滚、工程化预检、prompt 组装、AI 会话**一站式打通。
+> 一个 AI 辅助开发工作台：**脚本沙盒执行、文件 diff / 回滚、工程化预检、prompt 组装、AI 会话**一站式打通。
 
-- 零侵入：仅在 `vite dev` / `vite serve` 时生效（`apply: 'serve'`），不进生产构建
+**两种宿主形态**：
+
+- **Vite 插件** `@qgm/vite-plugin-ai-runner` —— 挂到用户项目的 dev server
+- **独立 Web 应用** `@qgm/ai-runner` —— `npx` 或全局安装后直接跑
+
+本仓库是 pnpm workspace monorepo：
+
+| 包                 | 名称                         | 角色                                                        |
+| :----------------- | :--------------------------- | :---------------------------------------------------------- |
+| `packages/core`    | `@qgm/ai-runner-core`        | 宿主无关核心：Hono 路由 / 脚本执行 / post-run / 状态 / 快照 |
+| `packages/client`  | `@qgm/ai-runner-client`      | Vue 3 SPA 工作台视图产物（唯一一份）                        |
+| `apps/vite-plugin` | `@qgm/vite-plugin-ai-runner` | Vite 插件宿主（对外 API `aiRunner()`）                      |
+| `apps/standalone`  | `@qgm/ai-runner`             | 独立 Web 应用宿主（Node HTTP server + CLI bin）             |
+
+**核心特性**：
+
+- 零侵入：Vite 插件模式仅在 `vite dev` / `vite serve` 时生效（`apply: 'serve'`），不进生产构建
 - 安全：脚本写入先落内存 overlay，进程退出码为 0 才 flush 到磁盘，失败则磁盘零改动
 - 可回滚：每次运行自动快照，支持单文件 / 整次撤回
 - 工作台挂在 `/__ai/`，同时向业务页面注入一个 Shadow DOM 悬浮球（⚡），`Ctrl/Cmd + Shift + A` 唤起
 
 ---
+
+> 打包后的使用方式（构建产物自托管 / 发布安装 / 环境变量速查）见 [docs/USAGE.md](./docs/USAGE.md)。
 
 ## 一、快速开始
 
@@ -96,7 +114,7 @@ export DEEPSEEK_API_KEY=sk-xxxx
 执行环境：
 
 - Node 子进程，`--max-old-space-size=512`，**60 秒超时**（SIGTERM，请求中断时 SIGKILL）
-- 通过 `-r src/interceptor.cjs` 预加载，patch 掉 `fs` / `fs.promises` 的写删 API：
+- 通过 `-r packages/core/src/interceptor.cjs` 预加载，patch 掉 `fs` / `fs.promises` 的写删 API：
   - `writeFileSync` / `appendFileSync` / `unlinkSync` / `rmSync` / `renameSync` / `copyFileSync` 等全部重定向到**内存 overlay**
   - 读 API（`readFileSync` / `existsSync` / `statSync` / `readdirSync` …）感知 overlay，脚本读到的是「改完之后」的视图
 - 进程退出时把 overlay dump 成 JSON：
@@ -141,7 +159,7 @@ export DEEPSEEK_API_KEY=sk-xxxx
 
 ## 四、HTTP 端点
 
-全部挂在 `/__ai` 前缀下，由 [src/index.ts](./src/index.ts) 的 `handle()` 处理。
+全部挂在 `/__ai` 前缀下，由 [packages/core/src/server/handle.ts](./packages/core/src/server/handle.ts) 处理。
 
 | Method              | Path                  | 说明                                                       |
 | ------------------- | --------------------- | ---------------------------------------------------------- |
@@ -196,40 +214,58 @@ export DEEPSEEK_API_KEY=sk-xxxx
 
 ## 七、项目结构
 
+monorepo（pnpm workspace）：能力层 `packages/*` + 装配层 `apps/*`。
+
 ```text
-src/                          # Vite 插件（Node 侧）
-├── index.ts                  # 插件入口：HTTP 路由 + 沙盒执行 + 预检流水线
-├── config.ts                 # 常量（PREFIX=/__ai、排除目录、二进制后缀）与类型
-├── interceptor.cjs           # fs overlay 拦截层（-r 预加载，同步 + promises API）
-├── overlay.ts                # overlay 的 TS 参考实现
-├── snapshot.ts               # 全项目快照 / diff / 快照 GC / 运行日志
-├── index-index.ts            # 文件索引（inode/mtime/size）与跨轮 diff
-├── git.ts                    # 运行前后自动 commit 的 git 保护
-├── smoke.ts                  # Playwright headless 页面冒烟
-└── launcher.ts               # 注入业务页面的悬浮球（Shadow DOM）脚本
+packages/core/                  # @qgm/ai-runner-core：宿主无关核心
+├── src/
+│   ├── index.ts                # 公开 barrel：双宿主唯一契约入口
+│   ├── config.ts               # 常量（PREFIX=/__ai、排除目录、二进制后缀）
+│   ├── routes/                 # Hono 路由（workspace / skills / script / run / ...）
+│   ├── post-run/               # eslint / tsc / 单测 / 冒烟 预检流水线
+│   ├── process/                # 子进程执行与 bash 白名单
+│   ├── state/                  # 快照 / pipeline / timeline / 任务状态
+│   ├── server/                 # HTTP 基础设施（不含 listen）
+│   │   ├── router.ts           # createRouter：宿主共享
+│   │   ├── handle.ts           # HTTP 请求分发（Hono + 静态页壳）
+│   │   ├── attach-ws.ts        # WS attach（宿主注入 server 后调用）
+│   │   └── page.ts / http.ts / protocol.ts / hono-*.ts
+│   ├── headless/               # Playwright headless + 悬浮球注入
+│   ├── utils/                  # error-fingerprint / plan-parser / search ...
+│   ├── interceptor.cjs         # fs overlay 拦截层（-r 预加载）
+│   └── helpers.cjs / logger.cjs
 
-client/                       # 工作台 SPA（Vue 3 + CodeMirror 6）
-├── App.vue                   # 主布局 + 3 个 tab + 设置 / 会话管理
-├── main.ts / index.html      # SPA 入口
-├── vite.config.ts            # 自托管：5174 端口挂自家插件（root 指向 client/，唯一一份配置；server 不经 vite）
-├── types.ts / style.css
-├── codeCleaner.ts            # 代码清洗（去注释 / 去空行）
-├── directive.ts              # v-tooltip 指令
-├── components/               # ScriptPanel / GeneratePanel / TracePanel /
-│                             # DiffViewer / FileTree / FileList / LintBlock /
-│                             # SessionTokenMonitor / ToastHost / TooltipHost
-├── composables/              # useRunner（单例）/ useSessionManager /
-│                             # useFileTree / useCodeCleaner / useDeepseekUrl /
-│                             # useTraceLog / useToast / useTooltip
-├── utils/                    # contextBuilder（prompt 组装）/ tokenEstimator
-├── e2e/ai-runner.spec.ts     # Playwright e2e
-└── *.node-test.ts          # vitest 单测（test/web/ + test/server/）
+packages/client/                # @qgm/ai-runner-client：唯一一份 SPA 产物
+├── App.vue / main.ts / index.html
+├── components/                 # ScriptPanel / GeneratePanel / TracePanel /
+│                               # DiffViewer / FileTree / LintBlock / ...
+├── composables/                # ai/ runner/ data/ ui/
+├── utils/                      # contextBuilder / tokenEstimator / ...
+└── dist/                       # vite build 产物（被两宿主托管）
 
-bin/                          # 5 个 CLI（见上表）
-skills/
-└── gen-script-rules.md       # 内置 AI 协作规则（输出形状 / 决策 / 脚本约束）
-scripts/tampermonkey-session-id.user.js  # 可选：AI 站点会话 ID / token 回传油猴脚本
+apps/vite-plugin/               # @qgm/vite-plugin-ai-runner：Vite 插件宿主
+└── src/
+    ├── index.ts                # 对外 API：aiRunner()
+    └── plugin.ts               # 插件主体：configureServer 中间件 + WS 挂载
+
+apps/standalone/                # @qgm/ai-runner：独立 Web 应用宿主
+├── src/server.ts               # Node HTTP server（唯一 listen 处）
+└── vite.config.ts              # SSR 打包：dist/_server/index.js
+
+bin/                            # CLI 工具集（air-ask / air-check / air-log / ...）
+test/
+├── server/                     # 后端单测（node-test）
+└── web/                        # 前端单测（node-test）
+scripts/                        # build-all / dev-server / dev-all / copy-runtime
+docs/                           # api-contract.json / plan/
+skills/                         # 内置 AI 协作规则
 ```
+
+三条铁律（`test/server/workspace-guard.node-test.ts`）：
+
+1. `packages/*` 不得依赖 `apps/*`
+2. `packages/*` 里禁止 `listen` / `createServer` / `import vite` / `@hono/node-server`
+3. `packages/client` 不得 import `packages/core`
 
 ---
 
@@ -263,6 +299,60 @@ scripts/tampermonkey-session-id.user.js  # 可选：AI 站点会话 ID / token �
 
 ---
 
+## 九·五、本地部署（link + build --watch 常驻）
+
+<!-- AIRUNNER-DEPLOY-LINK-V1 -->
+
+在目标项目里以 link 方式接入本插件：源码改动 → 自动重建 → 项目重启 → 生效。
+
+### 步骤
+
+1. 在本仓库建立全局软链（终端执行）：
+
+   cd /path/to/web-ai-qgm
+   pnpm link --global
+
+2. 在目标项目 link 进来：
+
+   cd /path/to/your-project
+   pnpm link --global @qgm/ai-runner
+
+3. 目标项目 vite.config.ts：
+
+   import { aiRunner } from '@qgm/ai-runner'
+   export default defineConfig({ plugins: [aiRunner()] })
+
+4. 本仓库保持构建常驻：
+
+   pnpm build:watch
+
+   - 监听 packages/core/src 与 apps/* 改动
+   - 自动重建 dist/_server/index.js
+   - 重建完成后提示「请重启 air-server 使新 dist 生效」
+
+### 生效循环
+
+| 阶段       | 动作                                   |
+| ---------- | -------------------------------------- |
+| 改源码     | 编辑 packages/core/src 或 apps/*/src   |
+| 自动 build | build:watch 300ms 防抖后重建           |
+| 重启服务   | 目标项目重启（Vite dev 或 pnpm start） |
+| 验证       | 打开 /__ai/ 页面刷新                   |
+
+### 独立模式（不依赖 Vite）
+
+    pnpm start                      # apps/standalone/bin/air-server.cjs 自动检测 src 变更并构建
+    AIR_SERVER_PORT=5176 pnpm start # 换端口
+
+> apps/standalone/bin/air-server.cjs 检测 packages/core/src 与 apps/standalone/src 的 mtime 晚于 dist/_server/index.js 时会自动先 build 再启动。
+
+### 卸载
+
+    cd /path/to/your-project && pnpm unlink @qgm/ai-runner
+    cd /path/to/web-ai-qgm && pnpm unlink --global
+
+---
+
 ## 十、本地开发
 
 ```bash
@@ -270,10 +360,10 @@ pnpm install
 
 pnpm build        # tsc 编译到 dist/
 pnpm typecheck    # 仅类型检查
-pnpm web:dev      # 启动 client 自托管 dev（http://localhost:5174/__ai/，插件 root 指向包根）
-pnpm web:build    # 构建 client
+pnpm dev:web      # 前端 SPA dev（http://localhost:5174/__ai/，proxy→5175）
+pnpm build:web    # 只构建前端 SPA
 
-pnpm test:unit    # vitest：49 文件 / 592 用例（test/web + test/server）
+pnpm test:unit    # vitest：67 文件 / 841 用例（test/web + test/server）
 pnpm test:e2e     # Playwright e2e（需先起 dev server）
 pnpm lint         # ESLint（flat config）
 pnpm run-all      # 全量回归（air-run-all）
@@ -284,8 +374,8 @@ pnpm recover      # 快照恢复 picker（air-recover）
 
 ### 扩展指引
 
-- **加 HTTP 端点**：在 [src/index.ts](./src/index.ts) 的 `handle()` 里加分支；文件树 / 检索类路由放 [src/files-routes.ts](./src/files-routes.ts)；共享 HTTP 工具在 [src/http.ts](./src/http.ts)
-- **加面板**：新建 `client/components/XxxPanel.vue`，在 [client/App.vue](./client/App.vue) 的 `Tab` 联合类型与 `<nav class="tabs">` 中注册
+- **加 HTTP 端点**：在 [packages/core/src/server/handle.ts](./packages/core/src/server/handle.ts) 里加分支；Hono 路由放 [packages/core/src/routes/](./packages/core/src/routes/)；共享 HTTP 工具在 [packages/core/src/server/http.ts](./packages/core/src/server/http.ts)
+- **加面板**：新建 `packages/client/components/XxxPanel.vue`，在 [packages/client/App.vue](./packages/client/App.vue) 的 `Tab` 联合类型与 `<nav class="tabs">` 中注册
 - **加 skill**：丢一个 `.md` 到 `skills/`（内置）或项目的 `.ai-runner/skills/`（用户级），刷新即加载
 
 ---

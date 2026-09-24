@@ -1,0 +1,113 @@
+// [ai-guard-v1] RULES.md §4.2/§4.3 硬执行器：pre-execution 原生 API 扫描 + __AI__ JSDoc 幂等注入
+
+/** 扫描结果：是否命中禁用的 node 原生 API，以及命中的具体模式 */
+export interface ScanResult {
+  hit: boolean
+  matches: string[]
+}
+
+/** 原生 API 黑名单（RULES.md §4.1）：fs / path / child_process / os / process.exit */
+const FORBIDDEN: { name: string, re: RegExp }[] = [
+  { name: 'require(fs)', re: /\brequire\s*\(\s*['"](?:node:)?fs['"]\s*\)/ },
+  { name: 'import from fs', re: /\bimport\s+(?:[^\s;][^;\n]*)?\bfrom\s+['"](?:node:)?fs['"]/ },
+  { name: 'fs.method', re: /\bfs\s*\.\s*[A-Za-z_$]/ },
+  { name: 'require(child_process)', re: /\brequire\s*\(\s*['"](?:node:)?child_process['"]\s*\)/ },
+  { name: 'import from child_process', re: /\bimport\s+(?:[^\s;][^;\n]*)?\bfrom\s+['"](?:node:)?child_process['"]/ },
+  { name: 'require(os)', re: /\brequire\s*\(\s*['"](?:node:)?os['"]\s*\)/ },
+  { name: 'import from os', re: /\bimport\s+(?:[^\s;][^;\n]*)?\bfrom\s+['"](?:node:)?os['"]/ },
+  { name: 'path.method', re: /\bpath\s*\.\s*[A-Za-z_$]/ },
+  { name: 'process.exit', re: /\bprocess\s*\.\s*exit\b/ },
+]
+
+/** 剥离注释，避免把说明性文字里的 fs. 当调用命中 */
+function stripComments(code: string): string {
+  return code.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ')
+}
+
+/** 扫描脚本源码，返回是否命中禁用 API 及命中清单（RULES.md §4.3） */
+// [script-head-contract-v1] RULES.md §1.4 脚本头契约：shebang 唯一合法 + @desc/@why 必需
+export interface HeadResult {
+  ok: boolean
+  reason?: string
+}
+
+/** 校验脚本头（RULES.md §1.4）：shebang 只允许 node；@desc 与 @why 必需 */
+export function scanScriptHead(code: string): HeadResult {
+  let first = String(code).split(/\r?\n/, 1)[0] || ''
+  if (first.charCodeAt(0) === 0xFEFF) first = first.slice(1)
+  if (first.startsWith('#!')) {
+    const isNode = /^#!\s*\/usr\/bin\/(?:env\s+)?node\b/.test(first)
+    if (!isNode) return { ok: false, reason: `ILLEGAL_SHEBANG: ${first.trim()}` }
+  }
+  const hasDesc = /^[^\S\n]*(?:\/\/|#)[^\S\n]*@desc\b/m.test(code)
+  const hasWhy = /^[^\S\n]*(?:\/\/|#)[^\S\n]*@why\b/m.test(code)
+  if (!hasDesc) return { ok: false, reason: 'MISSING_DESC' }
+  if (!hasWhy) return { ok: false, reason: 'MISSING_WHY' }
+  return { ok: true }
+}
+/**
+ * 执行 scan Native Apis
+ * @param code - code
+ */
+export function scanNativeApis(code: string): ScanResult {
+  const cleaned = stripComments(code)
+  const matches: string[] = []
+  for (const f of FORBIDDEN) {
+    if (f.re.test(cleaned)) matches.push(f.name)
+  }
+  return { hit: matches.length > 0, matches }
+}
+
+// [ai-guard-fallback-v2] RULES.md §4.4 降级协议：显式标记才允许豁免原生 API
+// 命中原生 API 的行，向上回溯 3 行内若出现 `// __AI__.xxx not found`，该行豁免
+/** §4.4 降级标记匹配：`// __AI__.xxx not found` 形式的显式豁免注释 */
+const FALLBACK_RE = /\/\/\s*(?:[\u26A0!]\s*)?__AI__\.\w+\s+not found/i
+
+/** 从给定行向上回溯 lookback 行，判断是否出现 §4.4 降级标记 */
+function hasFallbackNear(lines: string[], idx: number, lookback = 3): boolean {
+  const from = Math.max(0, idx - lookback)
+  for (let i = from; i <= idx; i++) {
+    if (FALLBACK_RE.test(lines[i])) return true
+  }
+  return false
+}
+
+/** 带 §4.4 降级豁免的扫描：命中位置附近的显式降级标记可豁免该行 */
+export function scanNativeApisWithFallback(code: string): ScanResult {
+  const lines = code.split(/\r?\n/)
+  const matches: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/\/\/[^\n]*$/, '')
+    for (const f of FORBIDDEN) {
+      if (f.re.test(line) && !hasFallbackNear(lines, i)) {
+        matches.push(`${f.name} @L${i + 1}`)
+        break
+      }
+    }
+  }
+  return { hit: matches.length > 0, matches }
+}
+
+/** 注入标识：命中后 injectAiJsdoc 幂等 */
+const INJECT_MARK = '[__AI__-injected-v1]'
+
+/** 注入到脚本顶部的 __AI__ API 速查 JSDoc（RULES.md §4.2） */
+const AI_JSDOC = [
+  '/**',
+  ' * [__AI__ 运行时沙箱 · RULES.md §4]',
+  ' * 禁用：node 原生 fs / path / child_process / os / process.exit',
+  ' * 可用：__AI__.readText(p) / writeText(p, s) / exists(p) / readJSON(p)',
+  ' *       __AI__.atomicWrite(p, s) / patchFile(p, { find, replace })',
+  ' *       __AI__.join(...parts) / cwdMust() / listDir(p)',
+  ' *       __AI__.ok(msg) / warn(msg) / err(msg) / skip(msg)',
+  ' */',
+].join('\n')
+
+/** 将 __AI__ 速查 JSDoc 幂等注入脚本头部；保留 shebang 行在其后（RULES.md §4.2） */
+export function injectAiJsdoc(code: string): string {
+  if (code.includes(INJECT_MARK)) return code
+  const block = `${AI_JSDOC}\n// ${INJECT_MARK}\n`
+  const shebang = code.match(/^(#![^\n]*\n)/)
+  if (shebang) return shebang[1] + block + code.slice(shebang[1].length)
+  return block + code
+}
