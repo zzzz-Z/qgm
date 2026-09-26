@@ -1,28 +1,39 @@
 // [after-round-v1] 从 useAutoLoop.ts 抽出（PLAN 4.7 阈值整改）
+import type { Ref } from 'vue'
 import type { LoopInstance, RoundOutcome } from './types.js'
 import { LOOP_HARD_MAX_MS, LOOP_HARD_MAX_ROUNDS } from '../loopLogic.js'
+import type { AiTransport } from '../useAiTransport.js'
+
+// [p1-2-client-v1] 从各源模块反推精确类型，杜绝 any；本文件对外只暴露 createAfterRound
+type HooksMod = typeof import('./hooks.js')
+type PersistMod = typeof import('./persist.js')
+type LoopLogicMod = typeof import('../loopLogic.js')
+type ToastFn = typeof import('../../ui/useToast.js').toast
+type TraceHook = ReturnType<typeof import('../../ui/useTraceLog.js').useTraceLog>
+type RoundGuards = ReturnType<typeof import('./round-guards.js').createRoundGuards>
+type Waiting = ReturnType<typeof import('./waiting.js').createWaiting>
 
 interface AfterRoundDeps {
-  finish: any
-  handleStopAfterRound: any
-  runHook: any
-  addTrace: any
-  toast: any
-  persist: any
-  budgetLimited: any
-  ackFill: any
-  buildFeedback: any
-  transport: any
-  loopPaused: any
-  niumaMode: any
-  userNote: any
-  stage: any
-  fpKey: any
-  updateFpStall: any
-  updateStall: any
-  checkRoundBreak: any
-  stallRounds: any
-  enterWaiting: any
+  finish: (inst: LoopInstance, reason: string, detail?: string) => Promise<void>
+  handleStopAfterRound: (inst: LoopInstance) => Promise<void>
+  runHook: HooksMod['runHook']
+  addTrace: TraceHook['addTrace']
+  toast: ToastFn
+  persist: PersistMod['persist']
+  budgetLimited: RoundGuards['budgetLimited']
+  ackFill: RoundGuards['ackFill']
+  buildFeedback: LoopLogicMod['buildFeedback']
+  transport: AiTransport
+  loopPaused: Ref<boolean>
+  niumaMode: Ref<boolean>
+  userNote: Ref<string>
+  stage: Ref<'' | 'plan' | 'implement' | 'verify'>
+  fpKey: LoopLogicMod['fpKey']
+  updateFpStall: LoopLogicMod['updateFpStall']
+  updateStall: LoopLogicMod['updateStall']
+  checkRoundBreak: LoopLogicMod['checkRoundBreak']
+  stallRounds: Ref<number>
+  enterWaiting: Waiting['enterWaiting']
   LOOP_STALL_LIMIT: number
   LOOP_FP_STALL_LIMIT: number
   LOOP_MAX_ROUNDS: number

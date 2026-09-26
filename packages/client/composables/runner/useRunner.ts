@@ -2,6 +2,7 @@ import { ref, watch } from 'vue'
 import { readNdjson } from '../../utils/stream'
 import { emit } from '../ui/useEventStream'
 import type { Change, DecisionPayload, RunResponse } from '../../types'
+import { log } from '../../utils/log'
 
 /** 存储键脚本 */
 const STORAGE_KEY_SCRIPT = '__ai_runner_script'
@@ -85,7 +86,7 @@ watch(script, (v) => {
     persistWarning.value = ''
   } catch (e) {
     persistWarning.value = '脚本内容过大，已无法持久化到会话存储（刷新后会丢失）'
-    console.warn('[ai-runner] sessionStorage 写入失败:', e)
+    log.warn('[ai-runner] sessionStorage 写入失败:', e)
   }
 })
 watch(result, (v) => {
@@ -170,7 +171,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   const runStartedAt = Date.now()
   let finalPhase: 'running' | 'done' | 'error' = 'running' // [loading-fix]
   const wrappedEmitStep = (phase: string, over: Record<string, unknown> = {}) => {
-    if (phase === 'done' || phase === 'error') finalPhase = phase as any
+    if (phase === 'done' || phase === 'error') finalPhase = phase
     emitStep(phase, over)
   }
   wrappedEmitStep('running')

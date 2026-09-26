@@ -1,6 +1,7 @@
 // AIRUNNER-BATCH19-2-FIX-TS-SUFFIX: 用 .ts 后缀，node strip-types 与 tsc allowImportingTsExtensions 均可解析
 // AIRUNNER-BATCH19-2-FIX5-JS: .js 后缀，tsc/vite 均接受
 import { getActiveWin, MODELS } from '../ai/useDeepseekUrl.js'
+import { log } from '../../utils/log'
 
 // AIRUNNER-BATCH19-2-SPLIT-EVENT-STREAM: 实现已外移至 event-stream.ts，此处 re-export 保 API 稳定
 
@@ -43,13 +44,13 @@ export function useEventStream(cb: EventStreamCallbacks) {
       .map((m) => { try { return new URL(m.url).origin } catch { return '' } })
       .filter(Boolean)
     if (!AI_ORIGINS.includes(e.origin)) {
-      console.warn('[ai-runner] 来源 origin 非 AI 站点，已忽略', e.origin)
+      log.warn('[ai-runner] 来源 origin 非 AI 站点，已忽略', e.origin)
       return false
     }
     if (e.source !== null) {
       const w = getActiveWin()
       if (w && w !== e.source) {
-        console.warn('[ai-runner] source 非当前激活窗口，已忽略')
+        log.warn('[ai-runner] source 非当前激活窗口，已忽略')
         return false
       }
     }

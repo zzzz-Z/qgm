@@ -1,13 +1,17 @@
 import * as hljsNs from 'highlight.js/lib/core'
 import * as javascriptNs from 'highlight.js/lib/languages/javascript'
 import * as typescriptNs from 'highlight.js/lib/languages/typescript'
+import type { HLJSApi } from 'highlight.js'
 
-/** highlight.js 实例 */
-const hljs: any = (hljsNs as any).default ?? hljsNs
+/** [p1-2-client-v1] 语言定义函数类型：从 registerLanguage 签名反推，避免依赖 highlight.js 内部导出名。 */
+type LanguageFn = Parameters<HLJSApi['registerLanguage']>[1]
+
+/** highlight.js 实例（ESM 默认导出，namespace.default 即 HLJSApi） */
+const hljs: HLJSApi = hljsNs.default
 /** JavaScript 语言语法定义 */
-const javascript: any = (javascriptNs as any).default ?? javascriptNs
+const javascript: LanguageFn = javascriptNs.default
 /** TypeScript 语言语法定义 */
-const typescript: any = (typescriptNs as any).default ?? typescriptNs
+const typescript: LanguageFn = typescriptNs.default
 
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('typescript', typescript)

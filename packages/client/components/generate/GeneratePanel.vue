@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // [generate-panel-utils-extracted]
 import { formatRepoSummary } from './generate-panel-utils'
+import type { PkgLike } from './generate-panel-utils'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FileTree from '../panels/FileTree.vue'
 import { copyAndFill, sendNewSession } from '../../composables/ai/useDeepseekUrl'
@@ -10,7 +11,7 @@ import { buildFullContext, enforceBudget } from '../../utils/contextBuilder'
 import { useToast } from '../../composables/ui/useToast'
 import { useTraceLog } from '../../composables/ui/useTraceLog'
 import { useSessionManager } from '../../composables/ai/useSessionManager'
-import type { FilesReadResponse } from '../../types'
+import type { FileNode, FilesReadResponse } from '../../types'
 
 defineOptions({ name: 'GeneratePanel' })
 
@@ -639,7 +640,7 @@ async function addAllFiles() {
     const data = await res.json()
     if (data.error) { toast(`加载失败：${data.error}`, 'error'); return }
     const paths: string[] = []
-    const walk = (nodes: any[]) => {
+    const walk = (nodes: FileNode[]) => {
       for (const n of nodes) {
         if (n.type === 'file') paths.push(n.path)
         else if (n.children?.length) walk(n.children)
@@ -671,7 +672,7 @@ async function loadTree() {
     ])
     const pkgData = await pkgRes.json()
     const data = await res.json()
-    let pkg: any = null
+    let pkg: PkgLike | null = null
     const pkgFile = pkgData.files?.[0]
     if (pkgFile && !pkgFile.error) {
       try { pkg = JSON.parse(pkgFile.content) } catch { pkg = null }

@@ -10,7 +10,8 @@ import { createHeadlessPool } from '../headless/ai-headless.js'
 import type { ServerMessage, TransportMessage } from './protocol.js'
 // Vite 可能是 HttpServer | Http2SecureServer，取交集的最小子集
 
-interface AnyHttpServer { on: (e: string, fn: (...args: any[]) => void) => void, off: (e: string, fn: (...args: any[]) => void) => void }
+// [p1-2-v1] 宽档：HttpServer 与 Http2SecureServer 的公共最小子集；用 Pick 避免显式 any
+type AnyHttpServer = Pick<import('node:events').EventEmitter, 'on' | 'off'>
 
 /** WebSocket 挂载配置：路径、心跳、升级处理 */
 export interface AttachWsOptions {

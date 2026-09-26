@@ -29,7 +29,7 @@ test('/__ai/diff-from-baseline 未知 baselineRunId 返回 404', async ({ reques
 test('/__ai/diff-from-baseline 有效 runId 返回结构完整', async ({ request }) => {
   // 1) 先跑一个只读脚本拿 runId
   const runRes = await request.post('/__ai/run', {
-    data: { script: '#!/usr/bin/env node\nconsole.log("baseline-seed")\nprocess.exit(0)' },
+    data: { script: '#!/usr/bin/env node\nlog.info("baseline-seed")\nprocess.exit(0)' },
   })
   expect(runRes.status()).toBe(200)
 

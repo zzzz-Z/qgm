@@ -139,13 +139,16 @@ export async function runAstGrep(pattern: string, lang: string, glob: string | n
   if (r.code !== 0 && r.code !== 1) {
     return { results: [], error: `ast-grep exit ${r.code}: ${(r.stderr || '').slice(0, 300)}` }
   }
-  let arr: any[]
+  let arr: unknown[]
   try { arr = JSON.parse(r.stdout || '[]') } catch (e) {
     return { results: [], error: `ast-grep JSON 解析失败: ${String(e)}` }
   }
   if (!Array.isArray(arr)) return { results: [] }
   const out: AstHit[] = []
-  for (const m of arr.slice(0, max)) {
+  for (const rawItem of arr.slice(0, max)) {
+    if (rawItem === null || typeof rawItem !== 'object') continue
+    // [p1-2-v1] 解析边界收窄：ast-grep JSON 结构已知（非外部数据入域）
+    const m = rawItem as { file?: string, path?: string, range?: { start?: { line?: number } }, text?: string, lines?: string }
     const p = String(m.file || m.path || '')
     const startLine = m.range?.start?.line
     const line = typeof startLine === 'number' ? startLine + 1 : undefined

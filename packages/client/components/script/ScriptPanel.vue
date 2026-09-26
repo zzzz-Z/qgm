@@ -154,8 +154,23 @@ import { useTraceLog } from '../../composables/ui/useTraceLog'
 import { setLastAutoFilled } from '../../composables/runner/useScriptInbox'
 import SidePane from '../panels/SidePane.vue'
 import DiffOverlay from '../diff/DiffOverlay.vue'
+import type { FileNode, FilesReadResponse } from '../../types'
+import { log } from '../../utils/log'
 
 defineOptions({ name: 'ScriptPanel' })
+
+// ── 类型 ──
+
+interface SkillInfo { name: string, content?: string, source?: 'base' | 'user' | 'agents' }
+interface AttachedFile {
+  id: string
+  name: string
+  size: number
+  kind: 'image' | 'text' | 'folder'
+  content: string
+  paths?: string[] // folder 专用：展开后的文件列表
+}
+interface DraftSlot { id: string, text: string, ts: number, name: string }
 
 // ── 常量 ── [partition-scriptpanel-v1] 模块级常量集中区
 
@@ -178,8 +193,125 @@ const DRAFT_SLOTS_KEY = LS_DRAFT_SLOTS_KEY
 /** 活动的键 */
 const DRAFT_ACTIVE_KEY = LS_DRAFT_ACTIVE_KEY
 
+// [templates-onboard-v1] 首次体验：空态示例卡片
+// 注意：js 脚本的 code 字段用真实源码字符串；bash 用单行命令；ask 用自然语言问题。
+/** 模板列表 */
+const TEMPLATES: Array<{ id: string, label: string, title: string, code: string }> = [
+  {
+    id: 'check',
+    label: '项目巡检',
+    title: '跑 tsc + lint + 冒烟，一键确认仓库健康度',
+    code: '#!/usr/bin/env node\\n// @desc: 项目巡检 - 类型 + lint + 冒烟\\n// @why: 快速确认仓库健康度\\nconst { execSync } = require(\'node:child_process\')\\nfunction run(label, cmd) {\\n  try { execSync(cmd, { stdio: \'inherit\' }) ; log.info(\'✓ \' + label) }\\n  catch { log.error(\'✗ \' + label) ; process.exitCode = 1 }\\n}\\nrun(\'tsc\', \'npx tsc -p tsconfig.json --noEmit\')\\nrun(\'lint\', \'npx eslint .\')\\nrun(\'smoke\', \'node bin/check-status.cjs\')',
+  },
+  {
+    id: 'bash',
+    label: 'shell 命令',
+    title: '直接执行 shell（白名单内），如 git status / ls',
+    code: 'git status --short && echo "---" && ls -1 | head -20',
+  },
+  {
+    id: 'ask',
+    label: '问 AI',
+    title: '把问题发给 AI 并等待回复，不占用循环',
+    code: '请阅读当前仓库结构，给出三条针对 v3-template 项目的优化建议。',
+  },
+]
+
 /** 编辑器 */
 const editorRef = ref<{ insertText: (t: string) => void } | null>(null)
+
+// ── 主状态 ref ──
+
+const lastRunScript = ref('')
+/** 技能列表 */
+const skillsList = ref<SkillInfo[]>([])
+/** 技能加载中 */
+const skillsLoading = ref(false)
+/** 已选中技能名 */
+const selectedSkillNames = ref<string[]>(loadSelectedSkillNames())
+/** 用户补充说明面板开关 */
+const showUserNote = ref(false)
+/** 是否已复制到剪贴板 */
+const copied = ref(false)
+/** 附件拖入成功遮罩 */
+const fileSuccess = ref(false)
+/** 主区 DOM 引用 */
+const mainRef = ref<HTMLElement | null>(null)
+
+// ── 右侧面板 / 运行时长 / Diff 预览 / 列表 ref ──
+
+/** 面板引用 */
+const paneRef = ref<HTMLElement | null>(null)
+/** 当前侧栏宽度（像素） */
+const sideWidth = ref(SIDE_WIDTH_DEFAULT)
+/** 侧栏拖动起始宽度（像素） */
+const sideWidthBase = ref(SIDE_WIDTH_DEFAULT)
+/** 是否正在拖动侧栏 */
+const resizingSide = ref(false)
+/** 上次运行时长（显示用） */
+const lastDuration = ref('')
+/** 命令已运行秒数 */
+const runningElapsed = ref('')
+/** 当前正在执行的命令 */
+const runningCommand = ref('')
+let elapsedTimer: ReturnType<typeof setInterval> | null = null
+let runStartAt = 0
+/** 侧栏标签页 */
+const sideTab = ref<'tree' | 'changes' | 'trace' | 'tasks'>('tree')
+/** 窄屏抽屉开合 */
+const sideDrawerOpen = ref(false)
+/** Diff 预览文件 */
+const previewFile = ref<string | null>(null)
+/** 差异预览：变更前内容 */
+const previewBefore = ref<string | null>(null)
+/** 差异预览：变更后内容 */
+const previewAfter = ref<string>('')
+/** 终端聊天列表 DOM 引用 */
+const chatListRef = ref<HTMLElement | null>(null)
+/** 树展开的 stream id 集合 */
+const treeExpanded = ref<Set<number>>(new Set())
+
+// ── 附件 / 命令历史 / 草稿 / 滚动 ref ──
+
+/* [attachments] 附件：粘贴图片 / 拖文件 → tag 展示；发送时文本内容拼入脚本 */
+/** 附件列表 */
+const attachedFiles = ref<AttachedFile[]>([])
+/** 命令历史记录 */
+const cmdHistory = ref<string[]>(loadCmdHistory())
+let cmdHistoryIndex = -1
+let cmdHistoryDraft = ''
+// [P2-2b] draft slots API
+/** 草稿槽位列表（多份草稿切换） */
+const draftSlots = ref<DraftSlot[]>([])
+/** 活动草稿 id */
+const activeDraftId = ref<string>('default')
+/** 终端自动滚动开关 */
+const autoScroll = ref(true)
+
+// ── 模块级可变状态（let）──
+
+/** 命令执行策略覆盖（内部临时变量） */
+let execPolicyOverride: string | null = null
+/** 最近一次自动回传 AI 的 runKey（防重复） */
+let lastAutoAskedRunId = ''
+// [P2-2b] auto-persist active slot（debounce 400ms）
+let draftPersistTimer: ReturnType<typeof setTimeout> | null = null
+/** 滚动锁时间戳（防高频 scrollTo） */
+let _scrollLock = 0
+
+// ── 状态栏 ref ──
+
+/** 状态文本（短暂提示，如「已发送」） */
+const statusText = ref('')
+/** 状态样式类（ok/err） */
+const statusClass = ref('')
+/** 当前时间戳（用于刷新相对时间显示） */
+const _now = ref(Date.now())
+/** 阶段启动时间戳 */
+const _phaseStart = ref(Date.now())
+let _nowTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => { _nowTimer = setInterval(() => { _now.value = Date.now() }, 1000) })
+onBeforeUnmount(() => { if (_nowTimer) clearInterval(_nowTimer) })
 
 // 组合式函数：toast 在 script 早段被使用，此处集中初始化
 const { toast, confirmDialog } = useToast()
@@ -187,6 +319,104 @@ const { toast, confirmDialog } = useToast()
 
 const { script, lastRunCode, running, result, changes, rolling, busyAll, persistWarning, liveStdout, liveStderr, doneSummary, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback } = useRunner()
 const { enabled: autoTakeoverEnabled, countdown: autoTakeoverCountdown, enable: enableAutoTakeover, disable: disableAutoTakeover, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
+const { addTrace } = useTraceLog()
+
+// ── 领域 composable ──
+const { maybeRotateSession } = useSessionManager()
+const { waiting: aiWaiting, niumaMode, startWaiting: startAiWaiting } = useAiWaiting()
+const { pendingMeta: autoPendingMeta } = useAutoTakeover()
+const { events: busEvents } = useEventBus()
+const { stripComments, stripBlankLines } = useCodeCleaner()
+
+// [script-panel-tw-extracted-v1] 初始化打字机
+const { twStdout, twStderr, twLines, twErrLines } = useTwDisplay(liveStdout, liveStderr)
+const {
+  loopState,
+  stopReason,
+  isLoopActive,
+  userNote,
+  // [sp-autopause-v1] 回车/发送后进入暂停态：暴露 loopPaused 与 requestPause
+  requestPause,
+  // [soft-pause-v1] 发送给 AI 后软暂停（不发 stop、不静音，避免取消刚发出的 fill）
+  softPause,
+  // [loop-paused-toggle-v1] 真暂停/恢复
+  loopPaused,
+  // [pause-to-idle-v2] 暂停点击 = 完全结束循环，回到待发状态（不再软恢复等待）
+  exitPauseToIdle,
+  // [sp-send-after-softpause-v1] 无活跃循环时复位 softPause 残留
+  clearSoftPause,
+} = useAutoLoop()
+
+// ── computed（状态栏 / 元信息 / 阶段耗时 / 流标识）──
+
+// [statusbar] 主状态：图标 + 文本 + 语义色
+/** 状态 */
+// [usb-main-status-text-v1] 各状态文本简短醒目，配合 pill 样式
+const mainStatus = computed(() => {
+  if (running.value) return { icon: '\u2699\uFE0F', text: '脚本执行中', cls: 'running' }
+  if (aiWaiting.value) return { icon: '\u23F3', text: '等待 AI', cls: 'waiting' }
+  if (loopState.value === 'waiting-input') return { icon: '\u23F8\uFE0F', text: '待决策', cls: 'paused' }
+  if (loopState.value === 'budget-limited') return { icon: '\u26A0\uFE0F', text: '预算耗尽', cls: 'warn' }
+  if (isLoopActive.value) return { icon: '\u{1F504}', text: '循环中', cls: 'loop' }
+  if (stopReason.value) return { icon: '\u23F9\uFE0F', text: '已停止', cls: 'stop' }
+  return { icon: '\u25CB', text: '待命', cls: 'idle' }
+})
+
+// [status-active] 状态栏活跃态：运行/等待/循环时高亮
+/** 状态活动的 */
+const statusActive = computed(() => ACTIVE_CLS.has(mainStatus.value.cls))
+
+// [script-meta-row] 从当前脚本内容解析 @desc/@why/@plan/@done
+/** 脚本元信息 */
+const scriptMeta = computed(() => parseScriptMeta(String((script && script.value) || '')))
+// [statusbar] 优先展示待执行脚本（到达未执行），否则用编辑器内容
+/** 栏元信息 */
+const barMeta = computed(() => {
+  const p = autoPendingMeta.value
+  if (p && (p.desc || p.why || p.plan)) return { desc: p.desc, why: p.why, plan: p.plan }
+  return scriptMeta.value
+})
+// [statusbar] 阶段耗时：mainStatus 变化时重置，每秒更新
+/** 阶段 */
+const phaseElapsed = computed(() => {
+  const ms = _now.value - _phaseStart.value
+  const s = Math.floor(ms / 1000)
+  const m = Math.floor(s / 60)
+  const sec = s % 60
+  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+})
+
+// [statusbar] 阶段切换时重置计时
+watch(() => mainStatus.value.cls, () => { _phaseStart.value = Date.now() })
+
+// [user-run-wait] 点运行 → 立即置“等待 AI 回复”loading
+
+// [loop-loading] 循环态统一触发等待 loading，确保从发问起有「等待 AI」提示
+watch(loopState, (v, old) => {
+  if ((v === 'waiting' || v === 'preparing') && v !== old) {
+    startAiWaiting()
+  }
+})
+
+// 分栏比例（终端占比）
+
+/* 自动展开最后一个 ai:stream */
+/** 最后一个流标识 */
+const lastStreamId = computed(() => {
+  const ev = busEvents.value
+  for (let i = ev.length - 1; i >= 0; i--) {
+    if (ev[i].kind === 'ai:stream') return ev[i].id
+  }
+  return 0
+})
+watch(lastStreamId, (id) => {
+  if (!id) return
+  const s2 = new Set(treeExpanded.value)
+  if (!s2.has(id)) {
+    s2.add(id)
+    treeExpanded.value = s2
+  }
+})
 /**
  * 切换 Auto Takeover
  */
@@ -208,29 +438,7 @@ function toggleAutoTakeover() {
 /** 当前 inbox 待取用条数（仅展示用，避免在模板里直接 inbox.value.length 触发响应式开销） */
 /** 取最新一条入队脚本，覆盖当前编辑器内容 */
 
-const {
-  loopState,
-  stopReason,
-  isLoopActive,
-  userNote,
-  // [sp-autopause-v1] 回车/发送后进入暂停态：暴露 loopPaused 与 requestPause
-  requestPause,
-  // [soft-pause-v1] 发送给 AI 后软暂停（不发 stop、不静音，避免取消刚发出的 fill）
-  softPause,
-  // [loop-paused-toggle-v1] 真暂停/恢复
-  loopPaused,
-  // [pause-to-idle-v2] 暂停点击 = 完全结束循环，回到待发状态（不再软恢复等待）
-  exitPauseToIdle,
-  // [sp-send-after-softpause-v1] 无活跃循环时复位 softPause 残留
-  clearSoftPause,
-} = useAutoLoop()
 /** 最后一个运行脚本 */
-const lastRunScript = ref('')
-interface SkillInfo { name: string, content?: string, source?: 'base' | 'user' | 'agents' }
-/** 列表 */
-const skillsList = ref<SkillInfo[]>([])
-/** 加载中 */
-const skillsLoading = ref(false)
 /**
  * 加载 Selected Skill Names
  */
@@ -242,8 +450,6 @@ function loadSelectedSkillNames(): string[] {
     return Array.isArray(arr) ? arr : []
   } catch { return ['gen-script-rules'] }
 }
-/** 已选中 */
-const selectedSkillNames = ref<string[]>(loadSelectedSkillNames())
 watch(selectedSkillNames, (v) => {
   try { localStorage.setItem(SKILLS_KEY, JSON.stringify(v)) } catch { }
 }, { deep: true })
@@ -257,9 +463,9 @@ async function loadSkillsList(): Promise<void> {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     skillsList.value = Array.isArray(data) ? data : []
-    ; (window as any).__ai_skills = skillsList.value
+    ; (window as unknown as { __ai_skills?: unknown }).__ai_skills = skillsList.value
   } catch (e) {
-    console.error('[ai-runner] loadSkillsList failed:', e)
+    log.error('[ai-runner] loadSkillsList failed:', e)
     skillsList.value = []
   } finally { skillsLoading.value = false }
 }
@@ -273,8 +479,6 @@ function toggleSkill(name: string): void {
   else selectedSkillNames.value = [...selectedSkillNames.value, name]
 }
 void loadSkillsList()
-/** 显示 */
-const showUserNote = ref(false)
 /**
  * 执行 submit User Note
  * @param text - text
@@ -326,26 +530,9 @@ function pauseAll() {
   stop()
 }
 
-/** 引用 */
-const mainRef = ref<HTMLElement | null>(null)
-
 /** 是否已复制到剪贴板 */
-const copied = ref(false)
 /** 文件成功 */
-const fileSuccess = ref(false)
-const { maybeRotateSession } = useSessionManager()
 
-/* [attachments] 附件：粘贴图片 / 拖文件 → tag 展示；发送时文本内容拼入脚本 */
-interface AttachedFile {
-  id: string
-  name: string
-  size: number
-  kind: 'image' | 'text' | 'folder'
-  content: string
-  paths?: string[] // folder 专用：展开后的文件列表
-}
-/** 文件 */
-const attachedFiles = ref<AttachedFile[]>([])
 // [script-panel-utils-v2-extracted]
 async function addAttachedFile(file: File): Promise<void> {
   if (file.size > MAX_ATTACH_BYTES) {
@@ -416,7 +603,7 @@ async function onDesktopDrop(e: DragEvent): Promise<void> {
  */
 async function fetchTreePaths(rootPath: string): Promise<string[]> {
   const out: string[] = []
-  const walk = (nodes: any[]) => {
+  const walk = (nodes: FileNode[]) => {
     for (const n of nodes || []) {
       if (n.type === 'file') out.push(String(n.path || ''))
       else if (n.children) walk(n.children)
@@ -424,7 +611,7 @@ async function fetchTreePaths(rootPath: string): Promise<string[]> {
   }
   try {
     const res = await fetch(`/__ai/files/tree?path=${encodeURIComponent(rootPath)}`)
-    const data = await res.json()
+    const data = await res.json() as { tree?: FileNode[] }
     walk(data.tree || [])
   } catch { /* ignore */ }
   return out.filter(Boolean)
@@ -497,8 +684,8 @@ async function fetchFolderContents(paths: string[]): Promise<Array<{ path: strin
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paths }),
     })
-    const data = await res.json()
-    return (data.files || []).filter((f: any) => !f.error).map((f: any) => ({ path: String(f.path), content: String(f.content || '') }))
+    const data = await res.json() as FilesReadResponse
+    return (data.files || []).filter(f => !f.error).map(f => ({ path: String(f.path), content: String(f.content || '') }))
   } catch { return [] }
 }
 /**
@@ -530,102 +717,8 @@ async function buildScriptWithAttachments(scriptText: string, files: AttachedFil
   parts.push('')
   return parts.join('\n') + scriptText
 }
-/** 状态文本 */
-const statusText = ref('')
-/** 状态 */
-const statusClass = ref('')
 
-const { waiting: aiWaiting, niumaMode, startWaiting: startAiWaiting } = useAiWaiting()
-const { pendingMeta: autoPendingMeta } = useAutoTakeover()
-
-// [statusbar] 主状态：图标 + 文本 + 语义色
-/** 状态 */
-// [usb-main-status-text-v1] 各状态文本简短醒目，配合 pill 样式
-const mainStatus = computed(() => {
-  if (running.value) return { icon: '\u2699\uFE0F', text: '脚本执行中', cls: 'running' }
-  if (aiWaiting.value) return { icon: '\u23F3', text: '等待 AI', cls: 'waiting' }
-  if (loopState.value === 'waiting-input') return { icon: '\u23F8\uFE0F', text: '待决策', cls: 'paused' }
-  if (loopState.value === 'budget-limited') return { icon: '\u26A0\uFE0F', text: '预算耗尽', cls: 'warn' }
-  if (isLoopActive.value) return { icon: '\u{1F504}', text: '循环中', cls: 'loop' }
-  if (stopReason.value) return { icon: '\u23F9\uFE0F', text: '已停止', cls: 'stop' }
-  return { icon: '\u25CB', text: '待命', cls: 'idle' }
-})
-
-// [status-active] 状态栏活跃态：运行/等待/循环时高亮
-/** 状态活动的 */
-const statusActive = computed(() => ACTIVE_CLS.has(mainStatus.value.cls))
-
-// [user-run-wait] 点运行 → 立即置“等待 AI 回复”loading
-
-// [loop-loading] 循环态统一触发等待 loading，确保从发问起有「等待 AI」提示
-watch(loopState, (v, old) => {
-  if ((v === 'waiting' || v === 'preparing') && v !== old) {
-    startAiWaiting()
-  }
-})
-
-// 分栏比例（终端占比）
-
-// 右侧面板宽度
-/** 面板引用 */
-const paneRef = ref<HTMLElement | null>(null)
-/** 当前侧栏宽度（像素） */
-const sideWidth = ref(SIDE_WIDTH_DEFAULT)
-/** 侧栏拖动起始宽度（像素） */
-const sideWidthBase = ref(SIDE_WIDTH_DEFAULT)
-/** 是否正在拖动侧栏 */
-const resizingSide = ref(false)
-
-// 上次运行时长
-const lastDuration = ref('')
-/** 命令已运行秒数 */
-const runningElapsed = ref('')
-/** 当前正在执行的命令 */
-const runningCommand = ref('')
-let elapsedTimer: ReturnType<typeof setInterval> | null = null
-let runStartAt = 0
-
-// Diff 预览
-/** 标签页 */
-const sideTab = ref<'tree' | 'changes' | 'trace' | 'tasks'>('tree')
-// U.12: 窄屏抽屉开合
-/** 打开 */
-const sideDrawerOpen = ref(false)
-/** 文件 */
-const previewFile = ref<string | null>(null)
-/** 差异预览：变更前内容 */
-const previewBefore = ref<string | null>(null)
-/** 差异预览：变更后内容 */
-const previewAfter = ref<string>('')
-
-const { events: busEvents } = useEventBus()
-const { stripComments, stripBlankLines } = useCodeCleaner()
-
-/** 列表 */
-const chatListRef = ref<HTMLElement | null>(null)
-
-// [minimal-chat-v1] chat 区移除：chatRole / chatItems 一并下线
-
-/** 树 */
-const treeExpanded = ref<Set<number>>(new Set())
-
-/* 自动展开最后一个 ai:stream */
-/** 最后一个流标识 */
-const lastStreamId = computed(() => {
-  const ev = busEvents.value
-  for (let i = ev.length - 1; i >= 0; i--) {
-    if (ev[i].kind === 'ai:stream') return ev[i].id
-  }
-  return 0
-})
-watch(lastStreamId, (id) => {
-  if (!id) return
-  const s2 = new Set(treeExpanded.value)
-  if (!s2.has(id)) {
-    s2.add(id)
-    treeExpanded.value = s2
-  }
-})
+// ── computed（状态栏 / 元信息 / 阶段耗时 / 流标识）──
 
 /** 最新的 AI 流式文本（取最后一条 ai:stream 事件） */
 
@@ -654,7 +747,7 @@ async function onPreviewFile(p: string) {
     const resBefore = await fetch('/__ai/files/before', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: result.value.runId, file: p }) })
     const dataBefore = await resBefore.json()
     previewBefore.value = dataBefore.content ?? ''
-  } catch (e) { console.error('Diff load failed', e); previewBefore.value = '' }
+  } catch (e) { log.error('Diff load failed', e); previewBefore.value = '' }
 }
 
 /**
@@ -678,7 +771,7 @@ async function onRollbackAll() {
 /**
  * 构建 Ai Prompt
  */
-async function buildAiPrompt() {
+async function buildAiPrompt(): Promise<string> {
   if (!result.value) return ''
   const errorLocs = parseErrorLocations(`${result.value.stderr || ''}\n${result.value.stdout || ''}`)
   const p: string[] = []
@@ -688,56 +781,72 @@ async function buildAiPrompt() {
   p.push(`变更数: ${changes.value.length}`)
   p.push('')
 
-  if (!result.value.ok) {
-    // 变更文件 + 报错涉及的文件，去重后取前 5 个
-    const changedPaths = changes.value.filter(c => c.type !== 'deleted').map(c => c.path)
-    const errorPaths = result.value.errorFiles ?? []
-    const mergedPaths = [...new Set([...errorPaths, ...changedPaths])].slice(0, 5)
-    if (mergedPaths.length > 0) {
-      try {
-        const res = await fetch('/__ai/files/read', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paths: mergedPaths }),
-        })
-        const data = await res.json()
-        if (data.files?.length) {
-          p.push('# 相关文件源码（失败时自动附加，含报错涉及的文件）')
-          p.push(buildErrorContext(data.files, errorLocs, {
-            stripComments: stripComments.value,
-            stripBlankLines: stripBlankLines.value,
-          }))
-          p.push('')
-        }
-      } catch (e) {
-        p.push(`# ⚠️ 获取变更文件源码失败: ${String(e)}`)
-        p.push('')
-      }
-    }
-  }
+  await appendFailedSourceFiles(p, errorLocs)
+  appendFeedbackSummary(p)
+  appendChangeList(p)
+  appendDryRunFailure(p)
+  appendSmokeReport(p)
+  appendTscReport(p)
+  appendLintReport(p)
+  appendTestReport(p)
+  await appendBaselineChanges(p, errorLocs)
+  appendClaimMismatch(p)
+  appendRawOutputs(p)
 
-  // [P3-7] 三层反馈摘要：代码层（lint/结构）→ 类型层（tsc）→ 行为层（test/smoke/runtime）
-  // 声明累积数组
-  const issues = []
-  const okLine = []
-  // 行为层（优先级最高）
-  if (result.value.test?.ran) {
-    if (!result.value.test.ok) issues.push('行为层: 单测失败（见下 # 单元测试）')
+  const text = p.join('\n')
+  return trimPromptIfOverBudget(text)
+}
+
+/** 失败时把相关文件源码块追加到 prompt 数组（去重后取前 5 个路径） */
+async function appendFailedSourceFiles(p: string[], errorLocs: ReturnType<typeof parseErrorLocations>): Promise<void> {
+  const r = result.value
+  if (!r || r.ok) return
+  const changedPaths = changes.value.filter(c => c.type !== 'deleted').map(c => c.path)
+  const errorPaths = r.errorFiles ?? []
+  const mergedPaths = [...new Set([...errorPaths, ...changedPaths])].slice(0, 5)
+  if (mergedPaths.length === 0) return
+  try {
+    const res = await fetch('/__ai/files/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: mergedPaths }),
+    })
+    const data = await res.json()
+    if (data.files?.length) {
+      p.push('# 相关文件源码（失败时自动附加，含报错涉及的文件）')
+      p.push(buildErrorContext(data.files, errorLocs, {
+        stripComments: stripComments.value,
+        stripBlankLines: stripBlankLines.value,
+      }))
+      p.push('')
+    }
+  } catch (e) {
+    p.push(`# ⚠️ 获取变更文件源码失败: ${String(e)}`)
+    p.push('')
+  }
+}
+
+/** 追加三层反馈摘要（行为层 → 类型层 → 代码层，含通过项） */
+function appendFeedbackSummary(p: string[]): void {
+  const r = result.value
+  if (!r) return
+  const issues: string[] = []
+  const okLine: string[] = []
+  if (r.test?.ran) {
+    if (!r.test.ok) issues.push('行为层: 单测失败（见下 # 单元测试）')
     else okLine.push('test ✓')
   }
-  if (result.value.smoke?.ran && !result.value.smoke.ok) issues.push('行为层: 冒烟失败（见下 # 页面冒烟）')
-  if (result.value.dryRunFailed) issues.push('行为层: 脚本运行中断，磁盘零改动')
-  if (result.value.code !== 0 && !result.value.dryRunFailed && result.value.code !== -1) {
-    issues.push(`行为层: 退出码 ${result.value.code}`)
+  if (r.smoke?.ran && !r.smoke.ok) issues.push('行为层: 冒烟失败（见下 # 页面冒烟）')
+  if (r.dryRunFailed) issues.push('行为层: 脚本运行中断，磁盘零改动')
+  if (r.code !== 0 && !r.dryRunFailed && r.code !== -1) {
+    issues.push(`行为层: 退出码 ${r.code}`)
   }
-  // 类型层
-  if (result.value.tsc) {
-    if (result.value.tsc.ok === false) issues.push('类型层: tsc 报错（见下 # 类型检查）')
+  if (r.tsc) {
+    if (r.tsc.ok === false) issues.push('类型层: tsc 报错（见下 # 类型检查）')
     else okLine.push('tsc ✓')
   }
-  // 代码层
-  if (result.value.lint?.ran) {
-    if (!result.value.lint.ok) issues.push('代码层: eslint 报错（见下 # 代码格式化）')
+  if (r.lint?.ran) {
+    if (!r.lint.ok) issues.push('代码层: eslint 报错（见下 # 代码格式化）')
     else okLine.push('lint ✓')
   }
   p.push('# 三层反馈摘要')
@@ -749,149 +858,160 @@ async function buildAiPrompt() {
     if (okLine.length) p.push(`已通过：${okLine.join(' / ')}`)
   }
   p.push('')
-  if (changes.value.length) {
-    p.push('# 变更')
-    p.push('```')
-    changes.value.forEach(c => p.push(`${c.type} ${c.path}`))
-    p.push('```')
-    p.push('')
+}
+
+/** 追加变更文件列表（有变更时） */
+function appendChangeList(p: string[]): void {
+  if (!changes.value.length) return
+  p.push('# 变更')
+  p.push('```')
+  changes.value.forEach(c => p.push(`${c.type} ${c.path}`))
+  p.push('```')
+  p.push('')
+}
+
+/** 追加预检失败块（dryRunFailed 时） */
+function appendDryRunFailure(p: string[]): void {
+  const r = result.value
+  if (!r?.dryRunFailed) return
+  p.push('# ⚠ 预检失败：脚本未通过校验，磁盘零改动', '')
+  p.push(`- 脚本本想改动 ${r.dryRunChangeCount ?? 0} 个文件，但执行中途失败，磁盘上没有任何变化`)
+  p.push(`- 原因：${r.dryRunReason || '脚本运行时错误（非类型错误）'}`)
+  if (r.wantChanges?.length) {
+    p.push('- 脚本声称/尝试的改动：')
+    for (const c of r.wantChanges.slice(0, 20)) p.push(`  - [${c.type}] ${c.path}`)
+    if (r.wantChanges.length > 20) p.push(`  - ... 共 ${r.wantChanges.length} 个`)
   }
-  if (result.value.dryRunFailed) {
-    p.push('# ⚠ 预检失败：脚本未通过校验，磁盘零改动', '')
-    p.push(`- 脚本本想改动 ${result.value.dryRunChangeCount ?? 0} 个文件，但执行中途失败，磁盘上没有任何变化`)
-    p.push(`- 原因：${result.value.dryRunReason || '脚本运行时错误（非类型错误）'}`)
-    if (result.value.wantChanges?.length) {
-      p.push('- 脚本声称/尝试的改动：')
-      for (const c of result.value.wantChanges.slice(0, 20)) p.push(`  - [${c.type}] ${c.path}`)
-      if (result.value.wantChanges.length > 20) p.push(`  - ... 共 ${result.value.wantChanges.length} 个`)
+  p.push('- 请基于下方 stderr 定位根因，重新生成完整脚本；不要再给出会中途抛错的版本')
+  p.push('')
+}
+
+/** 追加页面冒烟结果（smoke.ran 时） */
+function appendSmokeReport(p: string[]): void {
+  const r = result.value
+  if (!r?.smoke?.ran) return
+  p.push('# 页面冒烟')
+  if (r.smoke.error) {
+    p.push(`启动失败: ${r.smoke.error}`)
+  } else {
+    for (const pg of r.smoke.pages) {
+      p.push(`${pg.ok ? '✓' : '✗'} ${pg.url}`)
+      for (const e of pg.errors) p.push(`  ${e}`)
     }
-    p.push('- 请基于下方 stderr 定位根因，重新生成完整脚本；不要再给出会中途抛错的版本')
-    p.push('')
   }
-  if (result.value.smoke?.ran) {
-    p.push('# 页面冒烟')
-    if (result.value.smoke.error) {
-      p.push(`启动失败: ${result.value.smoke.error}`)
-    } else {
-      for (const pg of result.value.smoke.pages) {
-        p.push(`${pg.ok ? '✓' : '✗'} ${pg.url}`)
-        for (const e of pg.errors) p.push(`  ${e}`)
-      }
-    }
-    p.push('')
-  }
-  if (result.value.tsc) {
-    p.push('# 类型检查 (tsc)')
-    p.push(result.value.tsc.ok ? '✓ 通过' : '✗ 存在类型错误')
-    p.push('```')
-    p.push((result.value.tsc.stdout || '') + (result.value.tsc.stderr ? `\n${result.value.tsc.stderr}` : ''))
-    p.push('```')
-    p.push('')
-  }
-  if (result.value.lint?.ran && !result.value.lint.ok) {
-    p.push('# 代码格式化 (eslint)')
-    p.push('✗ 存在 lint 错误')
-    p.push('```')
-    p.push((result.value.lint.stdout || '') + (result.value.lint.stderr ? `\n${result.value.lint.stderr}` : ''))
-    p.push('```')
-    p.push('')
-  }
-  if (result.value.test?.ran && !result.value.test.ok) {
-    p.push('# 单元测试')
-    p.push('✗ 存在测试失败')
-    p.push('```')
-    p.push((result.value.test.stdout || '') + (result.value.test.stderr ? `\n${result.value.test.stderr}` : ''))
-    p.push('```')
-    p.push('')
-  }
-  const baseline = result.value.baselineRunId
-  if (baseline && baseline !== result.value.runId) {
-    try {
-      const r = await fetch('/__ai/diff-from-baseline', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baselineRunId: baseline }),
-      })
-      const data = await r.json()
-      const acc = data.changes || []
-      if (acc.length && shouldIncludeChanges(acc, errorLocs)) {
-        p.push(`# 跨轮累积变更（基准 ${baseline}）`)
-        p.push('```')
-        for (const c of acc) p.push(`${c.type} ${c.path}`)
-        p.push('```')
-        p.push('')
-      }
-    } catch { }
-  }
-  if (result.value.claimMismatch) {
-    const cm = result.value.claimMismatch
-    if (cm.missing.length || cm.extra.length || !cm.actual.length) {
-      p.push('# 脚本声明的改动 vs 实际改动')
-      p.push(`声明：${cm.claimed.join(', ') || '（无）'}`)
-      p.push(`实际：${cm.actual.join(', ') || '（无）'}`)
-      if (cm.extra.length) p.push(`⚠ 未声明但改动：${cm.extra.join(', ')}`)
-      if (!cm.actual.length) p.push('⚠ 脚本未产生任何文件改动')
+  p.push('')
+}
+
+/** 追加类型检查报告（tsc 时） */
+function appendTscReport(p: string[]): void {
+  const r = result.value
+  if (!r?.tsc) return
+  p.push('# 类型检查 (tsc)')
+  p.push(r.tsc.ok ? '✓ 通过' : '✗ 存在类型错误')
+  p.push('```')
+  p.push((r.tsc.stdout || '') + (r.tsc.stderr ? `\n${r.tsc.stderr}` : ''))
+  p.push('```')
+  p.push('')
+}
+
+/** 追加 eslint 报告（lint.ran 且失败时） */
+function appendLintReport(p: string[]): void {
+  const r = result.value
+  if (!r?.lint?.ran || r.lint.ok) return
+  p.push('# 代码格式化 (eslint)')
+  p.push('✗ 存在 lint 错误')
+  p.push('```')
+  p.push((r.lint.stdout || '') + (r.lint.stderr ? `\n${r.lint.stderr}` : ''))
+  p.push('```')
+  p.push('')
+}
+
+/** 追加单元测试报告（test.ran 且失败时） */
+function appendTestReport(p: string[]): void {
+  const r = result.value
+  if (!r?.test?.ran || r.test.ok) return
+  p.push('# 单元测试')
+  p.push('✗ 存在测试失败')
+  p.push('```')
+  p.push((r.test.stdout || '') + (r.test.stderr ? `\n${r.test.stderr}` : ''))
+  p.push('```')
+  p.push('')
+}
+
+/** 追加跨轮累积变更（baselineRunId 存在且与当前 runId 不同时） */
+async function appendBaselineChanges(p: string[], errorLocs: ReturnType<typeof parseErrorLocations>): Promise<void> {
+  const r = result.value
+  const baseline = r?.baselineRunId
+  if (!r || !baseline || baseline === r.runId) return
+  try {
+    const res = await fetch('/__ai/diff-from-baseline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baselineRunId: baseline }),
+    })
+    const data = await res.json()
+    const acc = data.changes || []
+    if (acc.length && shouldIncludeChanges(acc, errorLocs)) {
+      p.push(`# 跨轮累积变更（基准 ${baseline}）`)
+      p.push('```')
+      for (const c of acc) p.push(`${c.type} ${c.path}`)
+      p.push('```')
       p.push('')
     }
+  } catch { /* ignore */ }
+}
+
+/** 追加脚本声明 vs 实际改动差异块（claimMismatch 时） */
+function appendClaimMismatch(p: string[]): void {
+  const cm = result.value?.claimMismatch
+  if (!cm) return
+  if (cm.missing.length || cm.extra.length || !cm.actual.length) {
+    p.push('# 脚本声明的改动 vs 实际改动')
+    p.push(`声明：${cm.claimed.join(', ') || '（无）'}`)
+    p.push(`实际：${cm.actual.join(', ') || '（无）'}`)
+    if (cm.extra.length) p.push(`⚠ 未声明但改动：${cm.extra.join(', ')}`)
+    if (!cm.actual.length) p.push('⚠ 脚本未产生任何文件改动')
+    p.push('')
   }
-  if (result.value.stderr) { p.push('# 错误输出 (stderr)', '```', trimOutput(result.value.stderr, result.value.ok, 3000, 12000, result.value.scriptCtx), '```', '') }
-  if (result.value.stdout) { p.push('# Stdout', '```', trimOutput(result.value.stdout, result.value.ok, 3000, 12000, result.value.scriptCtx), '```', '') }
-  let text = p.join('\n')
+}
+
+/** 追加 stderr / stdout 原始输出块 */
+function appendRawOutputs(p: string[]): void {
+  const r = result.value
+  if (!r) return
+  if (r.stderr) p.push('# 错误输出 (stderr)', '```', trimOutput(r.stderr, r.ok, 3000, 12000, r.scriptCtx), '```', '')
+  if (r.stdout) p.push('# Stdout', '```', trimOutput(r.stdout, r.ok, 3000, 12000, r.scriptCtx), '```', '')
+}
+
+/** 预算裁剪：超预算时对「相关文件源码」块做二次裁剪 */
+function trimPromptIfOverBudget(text: string): string {
   const budget = enforceBudget(text)
-  if (!budget.ok) {
-    // smart-trim：对相关文件源码块做二次裁剪（只对失败时附加的源码块生效）
-    const marker = '# 相关文件源码'
-    const idx = text.indexOf(marker)
-    if (idx >= 0) {
-      const head = text.slice(0, idx)
-      const tail = text.slice(idx)
-      // 粗暴按行裁剪 tail：保留前 200 行
-      const tailLines = tail.split('\n')
-      const keep = tailLines.slice(0, 200).join('\n')
-      const keepRest = tailLines.slice(200)
-      text = `${head + keep}\n// …（prompt 超预算，已省略 ${keepRest.length} 行源码）\n`
-      const after = enforceBudget(text)
-      if (after.ok) {
-        toast(`prompt 超预算，已裁剪源码块到 ${after.size} 字节`, 'warn', 4000)
-      } else {
-        toast(`prompt 仍超预算（${after.size} 字节），请减少附加文件`, 'error', 5000)
-      }
-    } else {
-      toast(`prompt 超预算：${budget.size} / ${budget.budget} 字节`, 'warn', 4000)
-    }
+  if (budget.ok) return text
+  const marker = '# 相关文件源码'
+  const idx = text.indexOf(marker)
+  if (idx < 0) {
+    toast(`prompt 超预算：${budget.size} / ${budget.budget} 字节`, 'warn', 4000)
+    return text
   }
-  return text
+  const head = text.slice(0, idx)
+  const tail = text.slice(idx)
+  const tailLines = tail.split('\n')
+  const keep = tailLines.slice(0, 200).join('\n')
+  const keepRest = tailLines.slice(200)
+  const trimmed = `${head + keep}\n// …（prompt 超预算，已省略 ${keepRest.length} 行源码）\n`
+  const after = enforceBudget(trimmed)
+  if (after.ok) {
+    toast(`prompt 超预算，已裁剪源码块到 ${after.size} 字节`, 'warn', 4000)
+  } else {
+    toast(`prompt 仍超预算（${after.size} 字节），请减少附加文件`, 'error', 5000)
+  }
+  return trimmed
 }
 
 // URL 长度安全上限。超过就打开首页，靠剪贴板兜底。
 /* __ai_removed: DEEPSEEK_URL_MAX */
 // URL 从全局 composable 读，在 App.vue 的 header 里配置
 /* __ai_removed: deepseekUrl ref */
-const { addTrace } = useTraceLog()
-
-// [templates-onboard-v1] 首次体验：空态示例卡片
-// 注意：js 脚本的 code 字段用真实源码字符串；bash 用单行命令；ask 用自然语言问题。
-/** 模板列表 */
-const TEMPLATES: Array<{ id: string, label: string, title: string, code: string }> = [
-  {
-    id: 'check',
-    label: '项目巡检',
-    title: '跑 tsc + lint + 冒烟，一键确认仓库健康度',
-    code: '#!/usr/bin/env node\\n// @desc: 项目巡检 - 类型 + lint + 冒烟\\n// @why: 快速确认仓库健康度\\nconst { execSync } = require(\'node:child_process\')\\nfunction run(label, cmd) {\\n  try { execSync(cmd, { stdio: \'inherit\' }) ; console.log(\'✓ \' + label) }\\n  catch { console.error(\'✗ \' + label) ; process.exitCode = 1 }\\n}\\nrun(\'tsc\', \'npx tsc -p tsconfig.json --noEmit\')\\nrun(\'lint\', \'npx eslint .\')\\nrun(\'smoke\', \'node bin/check-status.cjs\')',
-  },
-  {
-    id: 'bash',
-    label: 'shell 命令',
-    title: '直接执行 shell（白名单内），如 git status / ls',
-    code: 'git status --short && echo "---" && ls -1 | head -20',
-  },
-  {
-    id: 'ask',
-    label: '问 AI',
-    title: '把问题发给 AI 并等待回复，不占用循环',
-    code: '请阅读当前仓库结构，给出三条针对 v3-template 项目的优化建议。',
-  },
-]
 
 /**
  * 应用 Template
@@ -911,10 +1031,6 @@ function loadCmdHistory(): string[] {
     return Array.isArray(arr) ? arr : []
   } catch { return [] }
 }
-/** 命令历史记录 */
-const cmdHistory = ref<string[]>(loadCmdHistory())
-let cmdHistoryIndex = -1
-let cmdHistoryDraft = ''
 /**
  * 执行 push Cmd History
  * @param cmd - cmd
@@ -1016,10 +1132,10 @@ async function loadSkillsForAsk(question: string): Promise<string> {
   if (selected.length) {
     try {
       const res = await fetch('/__ai/skills')
-      const all = await res.json()
+      const all = await res.json() as SkillInfo[]
       if (Array.isArray(all)) {
-        const picked = all.filter((s: any) => selected.includes(s.name))
-        if (picked.length) parts.push(picked.map((s: any) => s.content).join('\n\n---\n\n'))
+        const picked = all.filter(s => selected.includes(s.name))
+        if (picked.length) parts.push(picked.map(s => s.content).join('\n\n---\n\n'))
       }
     } catch { }
   }
@@ -1116,7 +1232,6 @@ async function askAi(question: string) {
   startAiWaiting()
   setTimeout(() => { statusText.value = ''; statusClass.value = '' }, 1500)
 }
-let execPolicyOverride: string | null = null
 /**
  * 执行 Cmd Internal
  * @param cmd - cmd
@@ -1198,7 +1313,6 @@ async function execCmd(text: string) {
     running.value = false
   }
 }
-let lastAutoAskedRunId = ''
 /**
  * 复制 Output
  * @param force - force
@@ -1224,18 +1338,12 @@ async function copyOutput(force = false) {
     copied.value = true
     startAiWaiting()
     setTimeout(() => { copied.value = false }, 2000)
-  } catch (e) { console.error(e) }
+  } catch (e) { log.error(e) }
 }
 
 // stderr 里把 file.ts:12:34 变成可点击（点击复制路径）
 // ponytail: 不做跨文件跳转（无 Monaco，行号可能失准），只复制路径。
 
-// [P2-2b] draft slots API
-interface DraftSlot { id: string, text: string, ts: number, name: string }
-/** 草稿槽位列表（多份草稿切换） */
-const draftSlots = ref<DraftSlot[]>([])
-/** 活动的标识 */
-const activeDraftId = ref<string>('default')
 /**
  * 读取 Draft Slots
  */
@@ -1272,8 +1380,6 @@ function upsertDraftSlot(id: string, text: string, name?: string): void {
   else draftSlots.value.push(item)
   persistDraftSlots()
 }
-// [P2-2b] auto-persist active slot（debounce 400ms）
-let draftPersistTimer: ReturnType<typeof setTimeout> | null = null
 watch(script, (v) => {
   if (draftPersistTimer) clearTimeout(draftPersistTimer)
   draftPersistTimer = setTimeout(() => {
@@ -1346,8 +1452,6 @@ watch(previewFile, (v) => {
     : sideWidthBase.value
 })
 
-/** 自动滚动 */
-const autoScroll = ref(true)
 /**
  * 执行 scroll Term To Bottom
  */
@@ -1361,9 +1465,7 @@ function scrollTermToBottom() {
       if (el && autoScroll.value) el.scrollTop = el.scrollHeight
     })
   })
-}
-let _scrollLock = 0
-/**
+}/**
  * 执行 locked Scroll
  */
 function _lockedScroll() {
@@ -1516,7 +1618,7 @@ function onHtmlDrop(e: DragEvent) {
   e.preventDefault()
   const files = Array.from(e.dataTransfer?.files || [])
   if (!files.length) return
-  const text = files.map(f => `// 📄 ${(f as any).path || f.name}`).join('\n')
+  const text = files.map(f => `// 📄 ${f.name}`).join('\n')
   const view = editorRef.value
   if (view) {
     view.insertText(text)
@@ -1526,38 +1628,6 @@ function onHtmlDrop(e: DragEvent) {
   fileSuccess.value = true
   setTimeout(() => { fileSuccess.value = false }, 1500)
 }
-
-// [script-panel-tw-extracted-v1] 初始化打字机
-const { twStdout, twStderr, twLines, twErrLines } = useTwDisplay(liveStdout, liveStderr)
-
-// [script-meta-row] 从当前脚本内容解析 @desc/@why/@plan/@done
-/** 脚本元信息 */
-const scriptMeta = computed(() => parseScriptMeta(String((script && script.value) || '')))
-// [statusbar] 优先展示待执行脚本（到达未执行），否则用编辑器内容
-/** 栏元信息 */
-const barMeta = computed(() => {
-  const p = autoPendingMeta.value
-  if (p && (p.desc || p.why || p.plan)) return { desc: p.desc, why: p.why, plan: p.plan }
-  return scriptMeta.value
-})
-// [statusbar] 右侧时间：每秒刷新
-/** 当前时间戳（用于刷新相对时间显示） */
-const _now = ref(Date.now())
-let _nowTimer: ReturnType<typeof setInterval> | null = null
-onMounted(() => { _nowTimer = setInterval(() => { _now.value = Date.now() }, 1000) })
-onBeforeUnmount(() => { if (_nowTimer) clearInterval(_nowTimer) })
-// [statusbar] 阶段耗时：mainStatus 变化时重置，每秒更新
-/** 阶段启动 */
-const _phaseStart = ref(Date.now())
-watch(() => mainStatus.value.cls, () => { _phaseStart.value = Date.now() })
-/** 阶段 */
-const phaseElapsed = computed(() => {
-  const ms = _now.value - _phaseStart.value
-  const s = Math.floor(ms / 1000)
-  const m = Math.floor(s / 60)
-  const sec = s % 60
-  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
-})
 </script>
 
 <style scoped lang="scss">

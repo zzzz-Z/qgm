@@ -8,15 +8,48 @@ import { useLogs } from '../../composables/ui/useLogs.js'
 // [trace-fold-v1] PLAN 5.4 filter 持久化
 import { useFoldState } from '../../composables/ui/useFoldState.js'
 
-type AnyEntry = Record<string, any>
+// [p1-2-client-trace-v1] 内存 trace 与磁盘日志的公共宽松形状；具名字段按实际读法声明
+interface AnyEntry {
+  id?: number
+  kind?: string
+  summary?: string
+  title?: string
+  runId?: string
+  exit?: number
+  pipeline?: Record<string, { status?: string }>
+  payload?: Record<string, unknown>
+  [k: string]: unknown
+}
+/** [p1-2-client-trace-v1] e.payload / e 上可能出现的具名逻辑字段集合 */
+interface TraceBag {
+  loopId?: string
+  loopRound?: number
+  prompt?: string
+  desc?: string
+  why?: string
+  runId?: string
+  summary?: string
+  title?: string
+  script?: string
+  ok?: boolean
+  exit?: number
+  pipeline?: Record<string, { status?: string }>
+  // [p1-2-client-trace-v2] 模板区消费字段补全（避免 unknown 导致入参不匹配）
+  question?: string
+  files?: string[]
+  stdout?: string
+  stderr?: string
+  changes?: Array<{ path: string, type: string }>
+  [k: string]: unknown
+}
 
 /**
  * 执行 bag Of
  * @param e - e
  */
-function bagOf(e: AnyEntry): Record<string, any> {
+function bagOf(e: AnyEntry): TraceBag {
   const b = (e && e.payload) ? e.payload : e
-  return (b && typeof b === 'object') ? b as Record<string, any> : {}
+  return (b && typeof b === 'object') ? b as TraceBag : {}
 }
 /**
  * 执行 id Of
@@ -139,7 +172,7 @@ const filter = computed<TraceFilter>({
  * @param e - e
  */
 function isRunEntry(e: typeof entries.value[0]): boolean {
-  if (e && (e as any).kind) return (e as any).kind === 'run'
+  if (e && e.kind) return e.kind === 'run'
   // 磁盘日志：无 kind，视为 run
   return true
 }
@@ -148,9 +181,9 @@ function isRunEntry(e: typeof entries.value[0]): boolean {
  * @param e - e
  */
 function entryOk(e: typeof entries.value[0]): boolean | undefined {
-  const pl = (e as any).payload
+  const pl = e.payload
   if (pl && typeof pl.ok === 'boolean') return pl.ok
-  const ex = (e as any).exit
+  const ex = e.exit
   if (typeof ex === 'number') return ex === 0
   return undefined
 }
@@ -275,7 +308,7 @@ function toggleLoop(loopId: string) {
  * @param e - e
  */
 function displayTitle(e: typeof entries.value[0]): string {
-  const bag: any = (e as any).payload || e
+  const bag: TraceBag = (e.payload as TraceBag) || e
   // 1. desc 优先
   const d = String(bag.desc || '').trim()
   if (d) return d
@@ -318,12 +351,12 @@ function displayTitle(e: typeof entries.value[0]): string {
   }
   // [trace-title-fallback-v2]
   // 兜底：先后尝试 payload.summary / summary / 首行脚本片段 / kindLabel / "未命名记录"
-  const p = (e as any).payload
+  const p = e.payload
   const cands = [
     p && p.summary,
-    (e as any).summary,
+    e.summary,
     p && p.title,
-    (e as any).title,
+    e.title,
     bagOf(e).desc,
     bagOf(e).why,
   ]
@@ -332,12 +365,12 @@ function displayTitle(e: typeof entries.value[0]): string {
     if (s) return s.length > 100 ? `${s.slice(0, 100)}…` : s
   }
   // [trace-title-fallback-v3] 极端兜底：用 runId 尾部 + pipeline 阶段拼可辨认标题
-  const ex = (e as any).exit
-  const runId = String((e as any).runId || bagOf(e).runId || '')
+  const ex = e.exit
+  const runId = String(e.runId || bagOf(e).runId || '')
   const runIdTail = runId ? runId.slice(-8) : ''
-  const pipe = (e as any).pipeline || bagOf(e).pipeline
+  const pipe = e.pipeline || bagOf(e).pipeline
   let stage = ''
-  if (pipe && typeof pipe === 'object') {
+  if (pipe) {
     const keys = Object.keys(pipe)
     const failedK = keys.find(k => pipe[k] && pipe[k].status === 'failed')
     if (failedK) { stage = `失败于 ${failedK}`
@@ -498,12 +531,12 @@ watch(() => logApi.offset.value, () => { void logApi.load() })
                   </div>
                   <pre class="trace-pre" :style="{ cursor: preTruncated(bagOf(e).question || '', idOf(e), 'question') ? 'pointer' : 'auto' }" @click="preTruncated(bagOf(e).question || '', idOf(e), 'question') && togglePre(idOf(e), 'question')"><span v-html="renderMarkdown(bagOf(e).question || '')" /></pre>
                 </div>
-                <div v-if="bagOf(e).files && bagOf(e).files.length" class="trace-section">
+                <div v-if="(bagOf(e).files || []).length" class="trace-section">
                   <div class="trace-label">
-                    <span>附加文件（{{ bagOf(e).files.length }}）</span>
+                    <span>附加文件（{{ (bagOf(e).files || []).length }}）</span>
                   </div>
                   <ul class="trace-files">
-                    <li v-for="p in bagOf(e).files" :key="p">
+                    <li v-for="p in (bagOf(e).files || [])" :key="p">
                       {{ p }}
                     </li>
                   </ul>
@@ -526,12 +559,12 @@ watch(() => logApi.offset.value, () => { void logApi.load() })
                   </div>
                   <pre class="trace-pre" :style="{ cursor: preTruncated(bagOf(e).script || '', idOf(e), 'script') ? 'pointer' : 'auto' }" @click="preTruncated(bagOf(e).script || '', idOf(e), 'script') && togglePre(idOf(e), 'script')"><span v-html="renderMarkdown(bagOf(e).script || '')" /></pre>
                 </div>
-                <div v-if="bagOf(e).changes && bagOf(e).changes.length" class="trace-section">
+                <div v-if="(bagOf(e).changes || []).length" class="trace-section">
                   <div class="trace-label">
-                    <span>变更（{{ bagOf(e).changes.length }}）</span>
+                    <span>变更（{{ (bagOf(e).changes || []).length }}）</span>
                   </div>
                   <ul class="trace-changes">
-                    <li v-for="c in bagOf(e).changes" :key="c.path">
+                    <li v-for="c in (bagOf(e).changes || [])" :key="c.path">
                       <div class="chg-row" :class="{ 'is-open': expandedFiles.has(c.path) }" @click="toggleFilePreview(c.path)">
                         <span class="chg" :class="c.type">{{ c.type.charAt(0).toUpperCase() }}</span>
                         <span class="chg-path">{{ c.path }}</span>

@@ -27,6 +27,8 @@ import { useAutoTakeover } from './composables/ai/useAutoTakeover'
 import { useSessionManager } from './composables/ai/useSessionManager'
 import { useToast } from './composables/ui/useToast'
 import { useTasks } from './composables/data/useTasks' // [absent-summary-v1]
+import type { AiReply } from './composables/ai/auto-loop/types'
+import { log } from './utils/log'
 import { useTraceLog } from './composables/ui/useTraceLog'
 import { useCodeCleaner } from './composables/runner/useCodeCleaner'
 import { useRunner } from './composables/runner/useRunner'
@@ -48,6 +50,20 @@ const { askCount, resetAskCount, resetSession } = useSessionManager()
 // [app-storage-extracted-v1] SESSION_HISTORY_KEY 已抽至 useAppStorage
 /** mock 通道（v6 §13.2 ?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
 const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
+
+/** localStorage 键：上次访问时间 */
+const LS_LAST_VISIT = '__ai_last_visit'
+
+const { url: deepseekUrl, setUrl: setDeepseekUrl, modelId } = useDeepseekUrl()
+const { toast } = useToast()
+const { smokeEnabled, gitCommit, run: runScript } = useRunner()
+/** 脚本收件箱：来自 AI 的脚本队列 */
+const scriptInbox = useScriptInbox()
+const { addTrace } = useTraceLog()
+const { stopWaiting: stopAiWaiting } = useAiWaiting()
+// [absent-summary-v1] 缺席摘要：距离上次访问 ≥4h 则展示
+const { state: _absTaskState } = useTasks()
+const { stripComments, stripBlankLines, toggleStripComments, toggleStripBlankLines } = useCodeCleaner()
 // [app-storage-extracted-v1] SessionEntry/loadHistory/saveHistory 已抽至 useAppStorage
 const sessionHistory = ref<SessionEntry[]>(loadHistory())
 // [ask-count] 当前会话收到的 AI 回复次数（每 reply +1）
@@ -56,25 +72,38 @@ const sessionHistory = ref<SessionEntry[]>(loadHistory())
 // [app-storage-extracted-v1] ACTIVE_SESSION_KEY/loadActiveSessionId 已抽至 useAppStorage
 /** 活动的会话标识 */
 const activeSessionId = ref<string>(loadActiveSessionId())
-watch(activeSessionId, (v) => {
-  try {
-    if (v) localStorage.setItem(ACTIVE_SESSION_KEY, v)
-    else localStorage.removeItem(ACTIVE_SESSION_KEY)
-  } catch { }
-  // 同步到 loop 实例表与窗口表（多循环并发的前提）
-  const sid = v || 'default'
-  setActiveLoopSessionId(sid)
-  createLoopInstanceFor(sid)
-  setActiveWinSid(sid)
-}, { immediate: true })
 /** 打开 */
 const settingsOpen = ref(false)
 // [app-storage-extracted-v1] KEY_SANDBOX/KEY_BASH_POLICY/loadStr 已抽至 useAppStorage
 const sandboxMode = ref(loadStr(KEY_SANDBOX, 'read-only'))
 /** bash 命令策略：白名单 / 黑名单 / 审批 */
 const bashPolicy = ref(loadStr(KEY_BASH_POLICY, 'on-request'))
-watch(sandboxMode, (v) => { try { localStorage.setItem(KEY_SANDBOX, v) } catch { } })
-watch(bashPolicy, (v) => { try { localStorage.setItem(KEY_BASH_POLICY, v) } catch { } })
+/** 键盘帮助面板开关 */
+const keyboardHelpOpen = ref(false)
+/** 信息 */
+const absenceInfo = ref<{ daysAgo: number, pendingCount: number, lastGoal: string } | null>(null)
+/** 离开提示是否已被用户关闭 */
+const absenceDismissed = ref(false)
+/** AI 传输链路类型 */
+const transportKind = ref<'tampermonkey' | 'headless'>(
+  (() => { try { return localStorage.getItem('__ai_transport') === 'headless' ? 'headless' : 'tampermonkey' } catch { return 'tampermonkey' } })()
+)
+/** 问 AI 弹窗开关 */
+const askOpen = ref(false)
+/** 主题（light / dark） */
+const theme = ref<'light' | 'dark'>(loadTheme())
+/** URL 是否处于编辑态 */
+const urlEditing = ref(false)
+/** URL 编辑中的临时值 */
+const urlDraft = ref('')
+/** URL 输入框引用 */
+const urlInputRef = ref<HTMLInputElement | null>(null)
+
+/** 顶部 AI 会话地址显示 */
+const headerUrl = computed(() => {
+  const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
+  return s ? s.url : deepseekUrl.value
+})
 /**
  * 添加 Session To History
  * @param id - id
@@ -87,34 +116,11 @@ function addSessionToHistory(id: string, url: string, title: string) {
   saveHistory(sessionHistory.value)
 }
 
-/** 打开 */
-const askOpen = ref(false)
-// [app-storage-extracted-v1] KEY_THEME/loadTheme 已抽至 useAppStorage
-const theme = ref<'light' | 'dark'>(loadTheme())
-watch(theme, (v) => {
-  document.documentElement.setAttribute('data-theme', v)
-  try { localStorage.setItem(KEY_THEME, v) } catch { }
-}, { immediate: true })
+/**
+ * 执行 dismiss Absence
+ */
+function dismissAbsence() { absenceDismissed.value = true }
 
-const { url: deepseekUrl, setUrl: setDeepseekUrl, modelId } = useDeepseekUrl()
-const { toast } = useToast()
-const { smokeEnabled, gitCommit, run: runScript } = useRunner()
-/** 脚本收件箱：来自 AI 的脚本队列 */
-const scriptInbox = useScriptInbox()
-const { addTrace } = useTraceLog()
-const { stopWaiting: stopAiWaiting } = useAiWaiting()
-/** 顶部 AI 会话地址显示 */
-const headerUrl = computed(() => {
-  const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
-  return s ? s.url : deepseekUrl.value
-})
-
-/** URL 是否处于编辑态 */
-const urlEditing = ref(false)
-/** URL 编辑中的临时值 */
-const urlDraft = ref('')
-/** 输入引用 */
-const urlInputRef = ref<HTMLInputElement | null>(null)
 /**
  * 打开 Url Edit
  */
@@ -169,184 +175,189 @@ function onUrlBlur() {
 function onSessionIdMessage(e: MessageEvent) {
   const d = e.data
   if (!d) return
+  const t = String(d.type || '')
+  if (t === 'ai-runner:reply') return handleAiReply(d, e)
+  if (t === 'ai-runner:script') return handleLegacyScript(d, e)
+  if (t === 'ai-runner:token-estimate') return handleTokenEstimate(d)
+  if (t === 'ai-runner:summary') return handleSummaryMsg(d)
+  if (t === 'ai-runner:new-session-created') return handleNewSessionCreated(d)
+  if (t === 'ai-runner:url-updated') return handleUrlUpdated(d)
+  if (t === 'ai-runner:session-id' && d.id) handleSessionIdUpdate(d)
+}
 
-  // ============================================================================
-  // 油猴 → 工作台：统一回复通道（v6 §3.1 ai-runner:reply）
-  // kind: script（恰好 1 个新 cjs/bash 块）/ done（严格 DONE）/ plain（纯文本）/ multi（多块）
-  // 安全约束（v6 §3.4）：origin 必须落在已知 AI 站点；source 优先比对 getActiveWin()
-  // ============================================================================
-  if (d.type === 'ai-runner:reply') {
-    // [auto-handoff-at-40] 累计 40 次提问 → 自动轮转会话（总结 + 开新会话 + 续跑）
-    if (askCount.value >= 10 && isLoopActive.value) {
-      resetAskCount()
-      void startHandoff()
-      return
-    }
-    if (!isFromActiveAiSite(e)) return
-    // 收到 AI 回复，清除「发送给 AI」按钮的 loading 状态
-    stopAiWaiting()
-    // 多 AI 窗口 session 隔离：循环模式下若油猴传了 sessionId，
-    // 必须与当前循环绑定的 loopSessionId 一致，否则丢弃
-    // [multi-loop-step4b-app] 多循环路由
-    const sid = String(d.sessionId || '')
-    const inst = sid ? getLoopBySessionId(sid) : undefined
-    const routedToLoop = Boolean(inst && isInstActive(inst))
-    const kind = String(d.kind || '')
+/** 处理统一回复通道 ai-runner:reply（d 来自 MessageEvent.data） */
+function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
+  // [auto-handoff-at-40] 累计 40 次提问 → 自动轮转会话（总结 + 开新会话 + 续跑）
+  if (askCount.value >= 10 && isLoopActive.value) {
+    resetAskCount()
+    void startHandoff()
+    return
+  }
+  if (!isFromActiveAiSite(e)) return
+  // 收到 AI 回复，清除「发送给 AI」按钮的 loading 状态
+  stopAiWaiting()
+  // 多 AI 窗口 session 隔离：循环模式下若油猴传了 sessionId，必须与当前循环绑定的 loopSessionId 一致，否则丢弃
+  // [multi-loop-step4b-app] 多循环路由
+  const sid = String(d.sessionId || '')
+  const inst = sid ? getLoopBySessionId(sid) : undefined
+  const routedToLoop = Boolean(inst && isInstActive(inst))
+  const kind = String(d.kind || '')
 
-    // done / plain / multi 仅循环模式消费
-    // DONE：彻底停止循环（先停循环态再 emit，避免残留状态）
-    if (kind === 'done') {
-      if (isLoopActive.value) {
-        try { void killCurrent() } catch (e) { console.error('[done-stop-loop]', e) }
-      }
-      if (autoTakeover.enabled.value) {
-        autoTakeover.disable()
-      }
-      return
+  // done / plain / multi 仅循环模式消费
+  // DONE：彻底停止循环（先停循环态再 emit，避免残留状态）
+  if (kind === 'done') {
+    if (isLoopActive.value) {
+      try { void killCurrent() } catch (e) { log.error('[done-stop-loop]', e) }
     }
-
-    if (kind === 'script') {
-      const code = String(d.code || '')
-      const lang = (d.lang === 'bash' ? 'bash' : d.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
-      const site = String(d.site || e.origin || '')
-      const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined })
-      if (item) {
-        const lineCount = code.split('\n').length
-        toast(`📥 脚本 · ${lang} · ${lineCount} 行${item.desc ? ` · ${item.desc}` : ''}`, 'info', 3500) // [toast-script-arrival-v2]
-        const planM = code.match(/^\s*(?:\/\/|#)[ \t]*@plan[ \t]*:[ \t]*(\S.*)$/m)
-        const plan = planM ? planM[1].trim().slice(0, 200) : ''
-        // 若用户刚发过提问，复用那条等待卡的 key —— 原地替换为执行卡
-        const runKey = takePendingAskKey() || (`run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`)
-        try {
-          emitBus('run:start', `等待执行：${item.desc || '脚本'}`, { payload: { desc: item.desc, why: item.why, plan, lang, lineCount, hash: item.hash, phase: 'pending', runKey, ...currentLoopContext() }, updateKey: runKey })
-        } catch (e) { console.error('[run:start pending] failed:', e) }
-        // 决策链路：脚本到达事件入 TraceLog（v6 §3.2），循环中盖 loopId/loopRound
-        addTrace({
-          kind: 'script',
-          summary: `📥 脚本到达 · ${lang} · ${lineCount} 行${item.desc ? ` · ${item.desc}` : ''}`,
-          payload: {
-            script: code.slice(0, 4000),
-            desc: item.desc,
-            why: item.why,
-            lang,
-            hash: item.hash,
-            ...currentLoopContext(),
-          },
-        })
-        if (routedToLoop) {
-          // 循环模式：状态机接管（不经编辑器覆盖策略）
-          void onScriptArrival(item, sid)
-        } else {
-          // 手动模式：不回填编辑器，延迟 3-7s 直接执行
-          // 用 scheduleAutoRun 统一倒计时，状态栏可展示
-          autoTakeover.scheduleAutoRun(
-            () => { void runScript({ script: code, runKey, autoFeedback: true }) },
-            { desc: item.desc, why: item.why, plan, lang, lineCount },
-          )
-        }
-      }
-      return
-    }
-
-    const text = d.text !== undefined ? String(d.text) : ''
-    if (kind === 'plain' || kind === 'multi' || (kind === 'done' && text.trim() && text.trim() !== 'DONE')) {
-      emitBus((`ai:${kind}`) as EventKind, `AI 回复 · ${kind}`, { payload: { kind, text, count: Number(d.count) || 0 } })
-    } else if (kind === 'done') {
-      emitBus('ai:done', 'AI 回复 DONE', { payload: { kind: 'done', text: 'DONE' } })
-    }
-    if (routedToLoop) {
-      void onNonScriptReply({
-        kind: kind as 'done' | 'plain' | 'multi',
-        count: Number(d.count) || 0,
-        // 油猴可能未传 text；传了则用于二次校验 isStrictDone
-        text: d.text !== undefined ? String(d.text) : undefined,
-      }, sid)
+    if (autoTakeover.enabled.value) {
+      autoTakeover.disable()
     }
     return
   }
 
-  // 兼容旧版油猴（v1.2）的 ai-runner:script 单脚本消息
-  if (d.type === 'ai-runner:script') {
-    if (!isFromActiveAiSite(e)) return
-    // 收到 AI 回复（v1.2 通道），清除「发送给 AI」按钮的 loading 状态
-    stopAiWaiting()
+  if (kind === 'script') {
     const code = String(d.code || '')
     const lang = (d.lang === 'bash' ? 'bash' : d.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
     const site = String(d.site || e.origin || '')
     const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined })
     if (item) {
-      // [multi-loop-step4b-app-fallback] 兜底通道同样按 sid 路由
-      const sid = String(d.sessionId || '')
-      const inst = sid ? getLoopBySessionId(sid) : undefined
-      const routedToLoop = Boolean(inst && isInstActive(inst))
+      const lineCount = code.split('\n').length
+      toast(`📥 脚本 · ${lang} · ${lineCount} 行${item.desc ? ` · ${item.desc}` : ''}`, 'info', 3500)
+      const planM = code.match(/^\s*(?:\/\/|#)[ \t]*@plan[ \t]*:[ \t]*(\S.*)$/m)
+      const plan = planM ? planM[1].trim().slice(0, 200) : ''
+      // 若用户刚发过提问，复用那条等待卡的 key —— 原地替换为执行卡
+      const runKey = takePendingAskKey() || (`run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`)
+      try {
+        emitBus('run:start', `等待执行：${item.desc || '脚本'}`, { payload: { desc: item.desc, why: item.why, plan, lang, lineCount, hash: item.hash, phase: 'pending', runKey, ...currentLoopContext() }, updateKey: runKey })
+      } catch (e) { log.error('[run:start pending] failed:', e) }
+      // 决策链路：脚本到达事件入 TraceLog（v6 §3.2），循环中盖 loopId/loopRound
+      addTrace({
+        kind: 'script',
+        summary: `📥 脚本到达 · ${lang} · ${lineCount} 行${item.desc ? ` · ${item.desc}` : ''}`,
+        payload: {
+          script: code.slice(0, 4000),
+          desc: item.desc,
+          why: item.why,
+          lang,
+          hash: item.hash,
+          ...currentLoopContext(),
+        },
+      })
       if (routedToLoop) {
+        // 循环模式：状态机接管（不经编辑器覆盖策略）
         void onScriptArrival(item, sid)
       } else {
-        // v1.2 兜底通道：延迟执行
-        const runKey = `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-        const delayMs = 3000 + Math.random() * 4000
-        setTimeout(() => { void runScript({ script: code, runKey, autoFeedback: true }) }, delayMs)
+        // 手动模式：不回填编辑器，延迟 3-7s 直接执行
+        // 用 scheduleAutoRun 统一倒计时，状态栏可展示
+        autoTakeover.scheduleAutoRun(
+          () => { void runScript({ script: code, runKey, autoFeedback: true }) },
+          { desc: item.desc, why: item.why, plan, lang, lineCount },
+        )
       }
     }
     return
   }
 
-  // token-estimate 用固定 key 原地更新，防 MutationObserver 风暴（v6 §12.5）
-  if (d.type === 'ai-runner:token-estimate') {
-    if (activeSessionId.value) {
-      const i = sessionHistory.value.findIndex(x => x.id === activeSessionId.value)
-      if (i >= 0 && sessionHistory.value[i].tokens !== d.tokens) {
-        sessionHistory.value[i] = { ...sessionHistory.value[i], tokens: Number(d.tokens) || 0 }
-        sessionHistory.value = [...sessionHistory.value]
-        saveHistory(sessionHistory.value)
-      }
-    }
-    const tokens = Number(d.tokens) || 0
-    if (tokens > 0) {
-      // 喂给循环状态机做 30k 增量熔断（v6 §6.9 第 4 条）
-      setTokenEstimate(tokens)
-    }
-    return
+  const text = d.text !== undefined ? String(d.text) : ''
+  if (kind === 'plain' || kind === 'multi' || (kind === 'done' && text.trim() && text.trim() !== 'DONE')) {
+    emitBus((`ai:${kind}`) as EventKind, `AI 回复 · ${kind}`, { payload: { kind, text, count: Number(d.count) || 0 } })
+  } else if (kind === 'done') {
+    emitBus('ai:done', 'AI 回复 DONE', { payload: { kind: 'done', text: 'DONE' } })
   }
+  if (routedToLoop) {
+    void onNonScriptReply({
+      kind: kind as 'done' | 'plain' | 'multi',
+      count: Number(d.count) || 0,
+      // 油猴可能未传 text；传了则用于二次校验 isStrictDone
+      text: d.text !== undefined ? String(d.text) : undefined,
+    }, sid)
+  }
+}
 
-  if (d.type === 'ai-runner:summary') {
-    const text = String(d.text || '')
+/** 处理旧版油猴 ai-runner:script 单脚本消息 */
+function handleLegacyScript(d: MessageEvent['data'], e: MessageEvent) {
+  if (!isFromActiveAiSite(e)) return
+  // 收到 AI 回复（v1.2 通道），清除「发送给 AI」按钮的 loading 状态
+  stopAiWaiting()
+  const code = String(d.code || '')
+  const lang = (d.lang === 'bash' ? 'bash' : d.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
+  const site = String(d.site || e.origin || '')
+  const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined })
+  if (item) {
+    // [multi-loop-step4b-app-fallback] 兜底通道同样按 sid 路由
     const sid = String(d.sessionId || '')
-    const degraded = Boolean(d.degraded)
-    void onSummary(text, sid, degraded)
-    return
-  }
-  if (d.type === 'ai-runner:new-session-created') {
-    const url = String(d.url || '')
-    const id = String(d.id || '')
-    const oldId = activeSessionId.value
-    if (oldId) {
-      const i = sessionHistory.value.findIndex(x => x.id === oldId)
-      if (i >= 0 && !sessionHistory.value[i].handedOff) {
-        sessionHistory.value[i] = { ...sessionHistory.value[i], handedOff: true }
-        sessionHistory.value = [...sessionHistory.value]
-        saveHistory(sessionHistory.value)
-      }
+    const inst = sid ? getLoopBySessionId(sid) : undefined
+    const routedToLoop = Boolean(inst && isInstActive(inst))
+    if (routedToLoop) {
+      void onScriptArrival(item, sid)
+    } else {
+      // v1.2 兜底通道：延迟执行
+      const runKey = `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+      const delayMs = 3000 + Math.random() * 4000
+      setTimeout(() => { void runScript({ script: code, runKey, autoFeedback: true }) }, delayMs)
     }
-    if (url && id) {
-      const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-      addSessionToHistory(id, url, `轮转 · ${hhmm}`)
-      activeSessionId.value = id
-      // 新会话建立 → 立即回写完整 URL 到工作台
-      setDeepseekUrl(url)
+  }
+}
+
+/** 处理 ai-runner:token-estimate 增量估算 */
+function handleTokenEstimate(d: MessageEvent['data']) {
+  if (activeSessionId.value) {
+    const i = sessionHistory.value.findIndex(x => x.id === activeSessionId.value)
+    if (i >= 0 && sessionHistory.value[i].tokens !== d.tokens) {
+      sessionHistory.value[i] = { ...sessionHistory.value[i], tokens: Number(d.tokens) || 0 }
+      sessionHistory.value = [...sessionHistory.value]
+      saveHistory(sessionHistory.value)
     }
-    // [reset-askcount-new-session] 新会话建立 → URL 旁提问计数清零
-    resetAskCount()
-    void onNewSessionCreated(url, id)
-    return
   }
-  if (d.type === 'ai-runner:url-updated') {
-    // [url-updated] 油猴发送后回传完整 URL，写入工作台
-    const u = String(d.url || '')
-    if (u && u !== deepseekUrl.value) setDeepseekUrl(u)
-    return
+  const tokens = Number(d.tokens) || 0
+  if (tokens > 0) {
+    // 喂给循环状态机做 30k 增量熔断（v6 §6.9 第 4 条）
+    setTokenEstimate(tokens)
   }
-  if (d.type !== 'ai-runner:session-id' || !d.id) return
+}
+
+/** 处理 ai-runner:summary 摘要回包 */
+function handleSummaryMsg(d: MessageEvent['data']) {
+  const text = String(d.text || '')
+  const sid = String(d.sessionId || '')
+  const degraded = Boolean(d.degraded)
+  void onSummary(text, sid, degraded)
+}
+
+/** 处理 ai-runner:new-session-created 新会话建立 */
+function handleNewSessionCreated(d: MessageEvent['data']) {
+  const url = String(d.url || '')
+  const id = String(d.id || '')
+  const oldId = activeSessionId.value
+  if (oldId) {
+    const i = sessionHistory.value.findIndex(x => x.id === oldId)
+    if (i >= 0 && !sessionHistory.value[i].handedOff) {
+      sessionHistory.value[i] = { ...sessionHistory.value[i], handedOff: true }
+      sessionHistory.value = [...sessionHistory.value]
+      saveHistory(sessionHistory.value)
+    }
+  }
+  if (url && id) {
+    const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    addSessionToHistory(id, url, `轮转 · ${hhmm}`)
+    activeSessionId.value = id
+    // 新会话建立 → 立即回写完整 URL 到工作台
+    setDeepseekUrl(url)
+  }
+  // [reset-askcount-new-session] 新会话建立 → URL 旁提问计数清零
+  resetAskCount()
+  void onNewSessionCreated(url, id)
+}
+
+/** 处理 ai-runner:url-updated URL 回写 */
+function handleUrlUpdated(d: MessageEvent['data']) {
+  // [url-updated] 油猴发送后回传完整 URL，写入工作台
+  const u = String(d.url || '')
+  if (u && u !== deepseekUrl.value) setDeepseekUrl(u)
+}
+
+/** 处理 ai-runner:session-id 会话 ID 回写 */
+function handleSessionIdUpdate(d: MessageEvent['data']) {
   if (!activeSessionId.value) return
   const idx = sessionHistory.value.findIndex(x => x.id === activeSessionId.value)
   if (idx < 0) return
@@ -360,8 +371,6 @@ function onSessionIdMessage(e: MessageEvent) {
   saveHistory(sessionHistory.value)
   setDeepseekUrl(url)
 }
-
-/** 油猴来源校验：origin 必须落在已知 AI 站点；source 优先比对 getActiveWin()，为 null 时降级只校验 origin */
 function isFromActiveAiSite(e: MessageEvent): boolean {
   // 无头模式：WS 内部消息，跳过 origin/source 校验
   if ((() => { try { return localStorage.getItem('__ai_transport') === 'headless' } catch { return false } })()) return true
@@ -371,7 +380,7 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
     .map((m) => { try { return new URL(m.url).origin } catch { return '' } })
     .filter(Boolean)
   if (!AI_ORIGINS.includes(e.origin)) {
-    console.warn('[ai-runner] 来源 origin 非 AI 站点，已忽略', e.origin)
+    log.warn('[ai-runner] 来源 origin 非 AI 站点，已忽略', e.origin)
     return false
   }
   // e.source 可能为 null（窗口已关 / 跨域限制）；只在非 null 时比对
@@ -385,7 +394,7 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
       if (w && w === e.source) { matched = true; break }
     }
     if (!matched) {
-      console.warn('[ai-runner] source 非任一注册窗口，已忽略')
+      log.warn('[ai-runner] source 非任一注册窗口，已忽略')
       return false
     }
   }
@@ -424,8 +433,6 @@ function onEscClose(e: KeyboardEvent) {
   if (askOpen.value) askOpen.value = false
 }
 
-/** 键盘打开 */
-const keyboardHelpOpen = ref(false)
 /**
  * 响应 Shift Question
  * @param e - e
@@ -442,14 +449,6 @@ function onShiftQuestion(e: KeyboardEvent) {
   }
 }
 
-// [absent-summary-v1] 缺席摘要：距离上次访问 ≥4h 则展示
-const { state: _absTaskState } = useTasks()
-/** 信息 */
-const absenceInfo = ref<{ daysAgo: number, pendingCount: number, lastGoal: string } | null>(null)
-/** 离开提示是否已被用户关闭 */
-const absenceDismissed = ref(false)
-/** localStorage 键：上次访问时间 */
-const LS_LAST_VISIT = '__ai_last_visit'
 try {
   const raw = localStorage.getItem(LS_LAST_VISIT)
   const last = raw ? Number(raw) : 0
@@ -465,6 +464,24 @@ try {
   }
   localStorage.setItem(LS_LAST_VISIT, String(Date.now()))
 } catch { /* ignore */ }
+watch(activeSessionId, (v) => {
+  try {
+    if (v) localStorage.setItem(ACTIVE_SESSION_KEY, v)
+    else localStorage.removeItem(ACTIVE_SESSION_KEY)
+  } catch { }
+  // 同步到 loop 实例表与窗口表（多循环并发的前提）
+  const sid = v || 'default'
+  setActiveLoopSessionId(sid)
+  createLoopInstanceFor(sid)
+  setActiveWinSid(sid)
+}, { immediate: true })
+watch(sandboxMode, (v) => { try { localStorage.setItem(KEY_SANDBOX, v) } catch { } })
+watch(bashPolicy, (v) => { try { localStorage.setItem(KEY_BASH_POLICY, v) } catch { } })
+watch(theme, (v) => {
+  document.documentElement.setAttribute('data-theme', v)
+  try { localStorage.setItem(KEY_THEME, v) } catch { }
+}, { immediate: true })
+
 watch(() => _absTaskState.value.goal, (g) => {
   if (absenceInfo.value && g) absenceInfo.value.lastGoal = String(g)
 }, { immediate: true })
@@ -476,15 +493,27 @@ watch(() => _absTaskState.value.tiers, (tiers) => {
   }
   absenceInfo.value.pendingCount = pend
 }, { immediate: true, deep: true })
-/**
- * 执行 dismiss Absence
- */
-function dismissAbsence() { absenceDismissed.value = true }
 
 // [use-event-listener-v1] 窗口级监听改由 @vueuse 统一注册，unmount 自动清理
 useEventListener(window, 'message', onSessionIdMessage)
 useEventListener(window, 'keydown', onEscClose)
 useEventListener(window, 'keydown', onShiftQuestion)
+
+// auto resend after 3 min no reply
+setAiWaitingWatchdog(async () => {
+  // 每次自动发送写 trace
+  const t0 = Date.now()
+  // [askcount-unify] watchdog 重发不计入（同一轮重复，避免虚增）
+  const r = await copyAndFill('继续工作', { count: false })
+  try {
+    addTrace({
+      kind: 'ask',
+      summary: r === 'failed' ? '牛马模式：发送失败' : '牛马模式：已自动发送自驱指令',
+      payload: { auto: true, result: r, latencyMs: Date.now() - t0 },
+    })
+  } catch { /* ignore */ }
+  if (r === 'failed') log.warn('[niuma] 发送失败：找不到 AI 窗口')
+})
 
 onMounted(() => {
   // [auto-new-session-on-switch-v1] 切项目后：自动开新会话并连接
@@ -515,7 +544,9 @@ onMounted(() => {
   try {
     if (localStorage.getItem('__ai_transport') === 'headless') {
       const t = getTransport()
-      t.onReply((reply: any, sid: string) => {
+      t.onReply((raw: unknown, sid: string) => {
+        // [p1-2-client-v2] transport 回调签名声明 unknown（逆变）；此处一次性收窄为 AiReply|null
+        const reply = raw as AiReply | null
         const item = reply && reply.item ? reply.item : null
         const fake = {
           data: {
@@ -532,11 +563,11 @@ onMounted(() => {
           origin: 'ws://headless',
           source: null,
         } as unknown as MessageEvent
-        try { onSessionIdMessage(fake) } catch (e) { console.error('[headless-reply] 处理失败:', e) }
+        try { onSessionIdMessage(fake) } catch (e) { log.error('[headless-reply] 处理失败:', e) }
       })
-      console.warn('[ai-runner] 无头 reply 订阅已注册')
+      log.warn('[ai-runner] 无头 reply 订阅已注册')
     }
-  } catch (e) { console.error('[headless-reply] 订阅失败:', e) }
+  } catch (e) { log.error('[headless-reply] 订阅失败:', e) }
   // 注入 activeSessionId 读取器：循环启动时取当前活动会话 id 绑定到 loopSessionId
   setActiveSessionIdGetter(() => activeSessionId.value)
 
@@ -563,27 +594,7 @@ onMounted(() => {
   }
 })
 // [use-event-listener-v1] 手工清理块已移除，改由 @vueuse 接管
-const { stripComments, stripBlankLines, toggleStripComments, toggleStripBlankLines } = useCodeCleaner()
-// auto resend after 3 min no reply
-setAiWaitingWatchdog(async () => {
-  // 每次自动发送写 trace
-  const t0 = Date.now()
-  // [askcount-unify] watchdog 重发不计入（同一轮重复，避免虚增）
-  const r = await copyAndFill('继续工作', { count: false })
-  try {
-    addTrace({
-      kind: 'ask',
-      summary: r === 'failed' ? '牛马模式：发送失败' : '牛马模式：已自动发送自驱指令',
-      payload: { auto: true, result: r, latencyMs: Date.now() - t0 },
-    })
-  } catch { /* ignore */ }
-  if (r === 'failed') console.warn('[niuma] 发送失败：找不到 AI 窗口')
-})
 
-/** 类型 */
-const transportKind = ref<'tampermonkey' | 'headless'>(
-  (() => { try { return localStorage.getItem('__ai_transport') === 'headless' ? 'headless' : 'tampermonkey' } catch { return 'tampermonkey' } })()
-)
 /**
  * 响应 Transport Change
  * @param e - e

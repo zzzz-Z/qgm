@@ -1,11 +1,11 @@
 // [generate-panel-utils-v1] PLAN 4.7 阈值整改：从 GeneratePanel.vue 抽出
 
-interface TreeNode {
+export interface TreeNode {
   name: string
   type: 'file' | 'directory'
 }
 
-interface PkgLike {
+export interface PkgLike {
   dependencies?: Record<string, string>
   devDependencies?: Record<string, string>
   scripts?: Record<string, string>

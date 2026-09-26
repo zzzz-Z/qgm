@@ -2,7 +2,6 @@ import { computed, ref, watch } from 'vue'
 import { useAiWaiting } from './useAiWaiting.js'
 import { useRuntime } from '../../stores/runtime'
 import { pushTerminalNotice, useRunner } from '../runner/useRunner'
-import { getActiveWin } from './useDeepseekUrl'
 import { getTransport } from './useAiTransport.js'
 import { toast } from '../ui/useToast'
 import { useTraceLog } from '../ui/useTraceLog'
@@ -10,7 +9,6 @@ import { syncTasks } from '../data/useTaskSync'
 import type { InboxItem } from '../runner/useScriptInbox'
 import {
   buildFeedback,
-  buildInitialPrompt,
   buildRetryPrompt,
   checkRoundBreak,
   decideTolerance,
@@ -42,6 +40,9 @@ import { runBash } from './auto-loop/run-bash.js'
 import { createRoundGuards } from './auto-loop/round-guards.js'
 import { createWaiting } from './auto-loop/waiting.js'
 import { createAfterRound } from './auto-loop/after-round.js'
+import { createStopAndFinish } from './auto-loop/stop-and-finish.js'
+import { createPauseControl } from './auto-loop/pause-control.js'
+import { createStartFamily } from './auto-loop/start-family.js'
 
 export type { HookEvent, HookResult } from './auto-loop/hooks.js'
 
@@ -186,14 +187,32 @@ export function isInstActive(inst: LoopInstance | null): boolean {
 export const isLoopActive = computed(() => isInstActive(activeLoop.value))
 
 // [waiting-v1] enterWaiting / disarmTimer 已抽到 auto-loop/waiting.ts
+// [stop-and-finish-v1] createWaiting 需要 finish，而 finish 需要 enterWaiting/disarmTimer（循环依赖）→ 用 lateSet
+let _finish: ((inst: LoopInstance, reason: string, detail?: string) => Promise<void>) | null = null
 const { enterWaiting, disarmTimer } = createWaiting({
   loopPaused,
   niumaMode,
   persist,
-  finish,
+  finish: (inst, reason, detail) => _finish ? _finish(inst, reason, detail) : Promise.resolve(),
   LOOP_ROUND_TIMEOUT_BASH_MS,
   LOOP_ROUND_TIMEOUT_MS,
 })
+
+// [stop-and-finish-v1] handleStopAfterRound / finish 已抽到 auto-loop/stop-and-finish.ts
+const { finish, handleStopAfterRound } = createStopAndFinish({
+  niumaMode,
+  loopPaused,
+  addTrace,
+  disarmTimer,
+  persist,
+  enterWaiting,
+  startWaiting,
+  transport,
+  toast,
+  runHook,
+  unbindKeyboard,
+})
+_finish = finish
 
 // [round-guards-v1] 守卫函数已抽到 auto-loop/round-guards.ts
 const { toleranceFail, budgetLimited, ackFill } = createRoundGuards({
@@ -272,138 +291,24 @@ watch([
 // 主入口
 // ============================================================================
 
-/**
- * 初始化 Loop
- * @param inst - inst
- * @param prefix - prefix
- * @param goal - goal
- * @param traceSummary - trace Summary
- * @param tracePayload - trace Payload
- */
-async function initLoop(
-  inst: LoopInstance,
-  prefix: string,
-  goal: string,
-  traceSummary: string,
-  tracePayload?: Record<string, unknown>,
-): Promise<boolean> {
-  const win = getActiveWin()
-  if (!win || win.closed) {
-    toast('AI 站点窗口未打开，请先打开会话窗口', 'error', 5000)
-    return false
-  }
-  let head = ''
-  try {
-    const r = await fetch('/__ai/git/head')
-    const d = await r.json()
-    head = d.head || ''
-  } catch { }
-  inst.id.value = `${prefix}_${Date.now().toString(36)}`
-  inst.goal.value = goal
-  inst.round.value = 1
-  inst.startCommit.value = head
-  inst.startTokens.value = inst.latestTokens.value
-  inst.toleranceLeft.value = LOOP_TOLERANCE_BUDGET
-  inst.stopRequest.value = 'none'
-  inst.stopReason.value = ''
-  inst.lastHash.value = ''
-  inst.lastExec.value = null
-  originalTitle = typeof document !== 'undefined' ? document.title : ''
-  addTrace({
-    kind: 'loop',
-    summary: traceSummary,
-    payload: { loopId: inst.id.value, loopRound: 0, ...tracePayload },
-  })
-  bindKeyboard()
-  return true
-}
-
-/**
- * 启动 Loop
- * @param goal - goal
- */
-export async function startLoop(goal: string): Promise<void> {
-  const inst = activeLoop.value
-  if (!inst) return
-  const g = goal.trim()
-  if (!g) { toast('请填写循环目标', 'warn'); return }
-  if (isLoopActive.value) { toast('已有循环在运行', 'warn'); return }
-  if (!await initLoop(inst, 'loop', g, `▶ 循环开始 · 目标：${g.slice(0, 60)}`, { prompt: g })) return
-  // [autopause-on-start] 发送后默认暂停，等用户手动 resume 才真正发消息
-  loopPaused.value = true // [loop-paused:reset]
-  inst.state.value = 'running'
-  stage.value = 'plan' // AIRUNNER-BATCH47-STAGE-WRITE
-  persist(inst)
-
-  const bfHook = await runHook('BeforeFill', {
-    loopId: inst.id.value,
-    goal: g,
-    prompt: buildInitialPrompt(g),
-  })
-  if (bfHook.action === 'reject') {
-    // [niuma-hook-keep] 牛马模式：hook 拒绝不终止，改为继续等待
-    if (niumaMode.value) { enterWaiting(inst); return }
-    await finish(inst, 'hook-reject-before-fill', bfHook.reason || 'BeforeFill hook rejected')
-    return
-  }
-  if (bfHook.hooksRun > 0) {
-    addTrace({
-      kind: 'loop',
-      summary: `🪝 BeforeFill · ${bfHook.hooksRun} 个 hook 通过`,
-      payload: { loopId: inst.id.value, loopRound: 0 },
-    })
-  }
-  // [tasks-init] 首轮预生成计划：把目标写入任务清单
-  void syncTasks({
-    mode: 'set',
-    todo: [`🎯 ${String(g).slice(0, 60)}`],
-    status: 'running',
-    round: 0,
-  })
-  // 新循环开始前恢复消息接收（防上次暂停后永久静音）
-  transport.unMute?.()
-  const ok = loopPaused.value ? false : transport.sendFill('', { prompt: buildInitialPrompt(g, niumaMode.value) })
-  if (!ok) {
-    // [niuma-window-keep:首轮] 牛马模式：窗口暂失不停止，保持 waiting 等 watchdog 重发
-    if (niumaMode.value) { enterWaiting(inst); return }
-    await finish(inst, 'window-lost', 'AI 窗口已关闭或跨域发送失败')
-    return
-  }
-  // [P3-1c2] 等 ACK，3s 未回则落 trace（不阻断循环）
-  if (typeof transport.waitAck === 'function') {
-    void transport.waitAck('headless:fill', '', 3000).then((ack) => {
-      if (!ack) {
-        addTrace({
-          kind: 'loop',
-          summary: '⚠ sendFill 3s 未 ACK（服务端未回 state，可能页面卡住或链路异常）',
-          payload: { loopId: inst.id.value, loopRound: 0 },
-        })
-      }
-    }).catch(() => { /* waitAck 自身异常不阻断 */ })
-  }
-  // [P3-1b] preparing 态：sendFill 后到 AI 首 token 前显示 preparing
-  inst.state.value = 'preparing'
-  persist(inst)
-  setTimeout(() => {
-    if (inst.state.value === 'preparing') enterWaiting(inst)
-  }, 500)
-}
-
-// ============================================================================
-// 等待 AI 回复 + 单轮 90s 超时（熔断第 7 条）
-// ============================================================================
-/**
- * 启动 Takeover
- */
-async function startTakeover(): Promise<void> {
-  const inst = activeLoop.value
-  if (!inst) return
-  if (isLoopActive.value) { toast('已有循环在运行', 'warn'); return }
-  if (!await initLoop(inst, 'take', '（脚本运行后接管）', '▶ 接管开始 · 等待 AI 回传脚本')) return
-  inst.state.value = 'waiting'
-  persist(inst)
-  enterWaiting(inst)
-}
+// [start-family-v1] 启动族已抽到 auto-loop/start-family.ts
+const { initLoop, startLoop, startTakeover } = createStartFamily({
+  loopPaused,
+  niumaMode,
+  activeLoop,
+  isLoopActive,
+  persist,
+  enterWaiting,
+  addTrace,
+  runHook,
+  finish,
+  bindKeyboard,
+  stage,
+  transport,
+  setOriginalTitle: (v: string) => { originalTitle = v },
+})
+// [start-family-v1] startLoop 为对外导出，re-export 保持契约
+export { startLoop }
 
 // ============================================================================
 // 回复入口（App.vue 消息桥接调用）
@@ -660,289 +565,26 @@ async function executeItem(inst: LoopInstance, item: InboxItem): Promise<void> {
 // ============================================================================
 // 轮后：反馈 → 熔断检查 → 下一轮
 // ============================================================================
-// [resume-from-pause-v1]
-// 从暂停态恢复：复位 loopPaused、解除静音、重新进入 waiting
-// - 若处于 budget-limited，转到 resumeLoop()
-/**
- * 执行 resume From Pause
- */
-export async function resumeFromPause(): Promise<void> {
-  const inst = activeLoop.value
-  if (!inst) { toast('无活动循环', 'warn'); return }
-  if (inst.state.value === 'budget-limited') { await resumeLoop(); return }
-  if (!loopPaused.value && isLoopActive.value) { toast('循环未处于暂停态', 'warn'); return }
-  const win = getActiveWin()
-  if (!win || win.closed) { toast('AI 窗口已关闭，无法恢复', 'error'); return }
-  loopPaused.value = false
-  try { getTransport().unMute?.() } catch { /* ignore */ }
-  bindKeyboard()
-  inst.state.value = 'waiting'
-  persist(inst)
-  enterWaiting(inst)
-  addTrace({
-    kind: 'loop',
-    summary: '▶ 从暂停恢复 · 继续等待 AI 回复',
-    payload: { loopId: inst.id.value, loopRound: inst.round.value },
-  })
-  toast('▶ 已恢复循环', 'success', 3000)
-}
+// [pause-control-v1] pause/resume 家族已抽到 auto-loop/pause-control.ts
+const { resumeFromPause, clearSoftPause, exitPauseToIdle, resumeLoop, requestPause, softPause, killCurrent, stopAndRollback } = createPauseControl({
+  loopPaused,
+  activeLoop,
+  isLoopActive,
+  isInstActive,
+  persist,
+  enterWaiting,
+  disarmTimer,
+  addTrace,
+  userNote,
+  ackFill,
+  finish,
+  bindKeyboard,
+})
+// [pause-control-v1] 保持对外契约
+// keyboard.ts 等旧路径通过 useAutoLoop 导入这 8 个符号，re-export 保持契约稳定
+export { clearSoftPause, exitPauseToIdle, killCurrent, requestPause, resumeFromPause, resumeLoop, softPause, stopAndRollback }
 
-/**
- * 复位 softPause 残留的暂停标志（无活跃循环时使用）
- * ScriptPanel 二次点击发送时调用：清除第一次发送后 softPause 留下的 paused 状态
- */
-export function clearSoftPause(): void {
-  if (isLoopActive.value) return
-  loopPaused.value = false
-  try { getTransport().unMute?.() } catch { /* ignore */ }
-}
-export async function exitPauseToIdle(): Promise<void> {
-  const inst = activeLoop.value
-  const wasPaused = loopPaused.value
-  loopPaused.value = false
-  try { getTransport().unMute?.() } catch { /* 链路未就绪忽略 */ }
-  try { useRuntime().resume?.() } catch { /* runtime 无 resume 时忽略 */ }
-  if (inst && isInstActive(inst)) {
-    await finish(inst, 'interrupted', wasPaused ? '用户点「发送」，从暂停回到待发' : '用户点「发送」，结束当前循环')
-  }
-  toast('已结束循环 · 可重新点「发送」', 'info', 2500)
-}
-/**
- * 执行 resume Loop
- */
-export async function resumeLoop(): Promise<void> {
-  const inst = activeLoop.value
-  if (!inst) return
-  if (inst.state.value !== 'budget-limited') { toast('当前不在 budget-limited 状态', 'warn'); return }
-  const o = inst.pendingRound.value
-  if (!o) { toast('无待发反馈，无法续跑', 'error'); return }
-  const win = getActiveWin()
-  if (!win || win.closed) { toast('AI 窗口已关闭，无法续跑', 'error'); return }
-  inst.startTokens.value = inst.latestTokens.value
-  inst.pendingRound.value = null
-  // 清空上轮 lastHash：budget 恢复后 AI 重发同一脚本是合理的（它没收到结果），
-  // 避免被误判为「连续两轮重复」而熔断
-  inst.lastHash.value = ''
-  const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta: 0, goal: inst.goal.value, round: inst.round.value, userNote: userNote.value || undefined })
-  const okSent = loopPaused.value ? false : transport.sendFill('', { prompt: feedback })
-  if (!okSent) { await finish(inst, 'window-lost', '续跑时窗口发送失败'); return }
-  ackFill(inst, '续跑')
-  bindKeyboard()
-  inst.round.value += 1
-  inst.state.value = 'waiting'
-  persist(inst)
-  enterWaiting(inst)
-  addTrace({
-    kind: 'loop',
-    summary: `▶ 续跑 · 从第 ${inst.round.value} 轮`,
-    payload: { loopId: inst.id.value, loopRound: inst.round.value },
-  })
-  toast(`▶ 续跑，从第 ${inst.round.value} 轮开始`, 'success', 4000)
-}
-
-// 回填文本构造已抽至 loopLogic.buildFeedback（带单测）
-
-// [P3-6] sendFill 后统一 ACK 追踪（3s 未回则落 trace；不阻断循环）
-
-// ============================================================================
-// 用户中断（v6 §6.6）
-// ============================================================================
-
-/** Esc 暂停：中断当前执行 + 静音，但循环状态保留为 paused，可恢复 */
-export function requestPause() {
-  // [pause-fix-v2] 暂停 ≠ 结束：只置 paused，不调 finish
-  loopPaused.value = true
-  const runtime = useRuntime()
-  runtime.pause()
-  const t = getTransport()
-  try { t.sendStop('') } catch { /* 链路未就绪时忽略 */ }
-  try { t.mute?.() } catch { /* 链路未就绪时忽略 */ }
-  const inst = activeLoop.value
-  if (inst) {
-    disarmTimer(inst)
-    // 不设置 stopRequest：暂停期间 AI 若回包，mute+loopPaused 会拦下；恢复后继续正常处理
-    inst.stopRequest.value = 'none'
-    try { useRunner().stop() } catch { /* 无正在运行的执行时忽略 */ }
-  }
-  toast('已暂停 · 点「发送」可结束循环回到待发状态', 'warn', 3000)
-}
-
-/**
- * 软暂停：仅置 loopPaused 标志，不向油猴发 stop、不静音监听、不中断当前执行。
- * 用于「手动/自动接管发送给 AI 后」进入暂停态的场景——此时 AI fill 刚发出，
- * 若调 requestPause 会立即 sendStop 取消 fill 并 mute 掉回复，导致消息推不出去。
- */
-export function softPause() {
-  loopPaused.value = true
-}
-
-/** ■ 停当前：立即 abort 执行 */
-export async function killCurrent(): Promise<void> {
-  loopPaused.value = true // [loop-paused:k]
-  // [hardpause-align-v1] 急停对齐 requestPause：静音油猴/AI 双向消息
-  try { getTransport().mute?.() } catch { /* ignore */ }
-  const inst = activeLoop.value
-  if (!inst || !isLoopActive.value) return
-  inst.stopRequest.value = 'kill'
-  disarmTimer(inst)
-  const runner = useRunner()
-  runner.stop() // cjs abort；bash 依赖连接中断
-  await finish(inst, 'interrupted', '用户急停（终止当前执行）')
-}
-
-/** Ctrl+Esc 停止并回滚：abort + git reset 到循环起点 */
-export async function stopAndRollback(): Promise<void> {
-  loopPaused.value = true // [loop-paused:r]
-  // [hardpause-align-v1] 回滚对齐 requestPause：静音油猴/AI 双向消息
-  try { getTransport().mute?.() } catch { /* ignore */ }
-  const inst = activeLoop.value
-  if (!inst || !isLoopActive.value) return
-  inst.stopRequest.value = 'rollback'
-  disarmTimer(inst)
-  useRunner().stop()
-  if (inst.startCommit.value) {
-    try {
-      const r = await fetch('/__ai/git/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ref: inst.startCommit.value }),
-      })
-      const d = await r.json()
-      if (!d.ok) toast(`回滚失败：${d.reason || '未知错误'}`, 'error', 5000)
-      else toast(`已回滚到 ${inst.startCommit.value}`, 'success', 5000)
-    } catch (e) {
-      toast(`回滚请求失败：${String(e)}`, 'error', 5000)
-    }
-  } else {
-    toast('无循环起点 commit，跳过 git 回滚', 'warn', 4000)
-  }
-  await finish(inst, 'interrupted', `用户急停并回滚到 ${inst.startCommit.value || '（无）'}`)
-}
-
-/**
- * 处理 Stop After Round
- * @param inst - inst
- */
-async function handleStopAfterRound(inst: LoopInstance): Promise<void> {
-  if (inst.stopRequest.value === 'rollback') {
-    if (inst.startCommit.value) {
-      try {
-        await fetch('/__ai/git/reset', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ref: inst.startCommit.value }),
-        })
-      } catch { }
-    }
-    await finish(inst, 'interrupted', '用户急停并回滚')
-    return
-  }
-  await finish(inst, 'interrupted', '用户急停/暂停')
-}
-
-// ============================================================================
-// 终止 + 循环级 commit（v6 §6.10）
-// ============================================================================
-/**
- * 执行 finish
- * @param inst - inst
- * @param reason - reason
- * @param detail - detail
- */
-async function finish(inst: LoopInstance, reason: string, detail?: string): Promise<void> {
-  // [niuma-finish-keep] 牛马模式统一拦截：除用户中断外一切终止均转为继续
-  if (niumaMode.value && reason !== 'interrupted') {
-    try {
-      addTrace({
-        kind: 'loop',
-        summary: `🐂 牛马模式拦截终止 · reason=${reason} · ${String(detail || '').slice(0, 80)}`,
-        payload: { loopId: inst.id.value, loopRound: inst.round.value, reason },
-      })
-    } catch { /* ignore */ }
-    disarmTimer(inst)
-    inst.pendingRound.value = null
-    inst.stopReason.value = ''
-    inst.state.value = 'waiting'
-    try { persist(inst) } catch { /* ignore */ }
-    enterWaiting(inst)
-    try { startWaiting() } catch { /* ignore */ }
-    // 主动推一把：立即重发提示，避免仅靠 3 分钟 watchdog
-    try {
-      const okSent = loopPaused.value ? false : transport.sendFill('', { prompt: '基于项目当前状态自主判断下一步优化项，直接执行脚本推进，不要停下来等指令。若无明显优化项，做类型、测试、依赖、文档巡检并给出改动。' }) // [loop-paused]
-      if (!okSent) {
-        addTrace({ kind: 'loop', summary: '⚠ 牛马续推发送失败（窗口可能已关）', payload: { loopId: inst.id.value } })
-      }
-    } catch { /* ignore */ }
-    return
-  }
-  try { inst.stallRounds.value = 0 } catch { /* ignore */ }
-  try { inst.lastFpKey.value = '' } catch { /* ignore */ }
-  try { inst.fpStallCount.value = 0 } catch { /* ignore */ }
-  disarmTimer(inst)
-  inst.pendingRound.value = null
-  const wasRollback = inst.stopRequest.value === 'rollback'
-  const interrupted = reason === 'interrupted'
-  inst.stopReason.value = detail || reason
-
-  inst.state.value = interrupted ? 'interrupted' : 'stopped'
-  transport.sendStop('')
-  unbindKeyboard()
-  // loopRegistry 已删（PLAN #17 单例回退），多循环 Map 已移除
-  persist(inst)
-
-  addTrace({
-    kind: 'loop',
-    summary: `${interrupted ? '⏹' : '■'} 循环结束 · ${inst.stopReason.value}`,
-    payload: {
-      loopId: inst.id.value,
-      loopRound: inst.round.value,
-      reason,
-      // 失败链路 trace ref：把终止时的关键状态打包，便于事后复盘
-      lastExec: inst.lastExec.value,
-      lastHash: inst.lastHash.value,
-      toleranceLeft: inst.toleranceLeft.value,
-      tokenDelta: Math.max(0, inst.latestTokens.value - inst.startTokens.value),
-      loopSessionId: '',
-    },
-  })
-
-  // 回滚场景不再提交（改动已 reset）；其余终止一次性 commit
-  if (!wasRollback) {
-    try {
-      const r = await fetch('/__ai/git/commit-loop', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `ai-runner: ${(inst.goal.value || inst.id.value).slice(0, 60)} · ${inst.round.value} 轮 · ${reason}`,
-        }),
-      })
-      const d = await r.json()
-      if (d.ok && d.commit) {
-        const hint = inst.startCommit.value
-          ? `撤回：git reset --hard ${inst.startCommit.value}`
-          : ''
-        toast(`循环已提交 ${d.commit}（${inst.round.value} 轮）${hint ? ` · ${hint}` : ''}`, 'success', 8000)
-      } else if (d.ok && d.empty) {
-        toast('循环结束，无文件改动', 'info', 4000)
-      } else {
-        toast(`循环结束，自动提交失败：${d.reason || ''}`, 'warn', 6000)
-      }
-    } catch {
-      toast('循环结束（非 git 仓库，未提交）', 'info', 4000)
-    }
-  }
-
-  // [auto-idle-after-finish-v1] 整轮结束自动回初始态：按钮切「发送」
-  // 牛马模式已在函数上方 820-843 提前 return，此处无需再判 niumaMode
-  loopPaused.value = true
-  inst.stopRequest.value = 'none'
-  void runHook('LoopStop', {
-    loopId: inst.id.value,
-    round: inst.round.value,
-    reason,
-    detail: detail || '',
-  }).catch(() => {})
-}
+// [stop-and-finish-v1] handleStopAfterRound / finish 已抽到 auto-loop/stop-and-finish.ts
 
 // ============================================================================
 // token 估算（App.vue 桥接）

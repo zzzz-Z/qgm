@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { DEFAULT_SESSION_PROMPT } from './loopLogic'
 import { useSessionManager } from './useSessionManager'
+import { log } from '../../utils/log'
 // [headless] 传输层路由：__ai_transport='headless' 时走 useAiTransport；默认 tampermonkey 保字节级一致
 
 let _transportMod: Promise<typeof import('./useAiTransport.js')> | null = null
@@ -295,14 +296,14 @@ interface FillPayload {
  */
 export function sendFillTo(sid: string, payload: FillPayload): boolean {
   const win = getWindowBySid(sid)
-  if (!win) { console.warn('[sendFillTo] win=null sid=', sid, 'active=', activeWinSid.value); return false }
+  if (!win) { log.warn('[sendFillTo] win=null sid=', sid, 'active=', activeWinSid.value); return false }
   const origin = targetOrigin()
-  if (!origin) { console.warn('[sendFillTo] origin="" url=', url.value); return false }
+  if (!origin) { log.warn('[sendFillTo] origin="" url=', url.value); return false }
   try {
     win.postMessage({ type: 'ai-runner:fill', ...payload }, origin)
     return true
   } catch (e) {
-    console.warn('[sendFillTo] postMessage threw', e)
+    log.warn('[sendFillTo] postMessage threw', e)
     return false
   }
 }
@@ -419,10 +420,10 @@ export async function copyAndFill(prompt: string, opts?: { count?: boolean }): P
   let win = getActiveWin()
   if (win && !win.closed) {
     const r = sendFill({ prompt }) ? 'sent' : 'failed'
-    if (r === 'failed') console.warn('[copyAndFill] B1 sendFill failed sid=', sid, 'name=', name)
+    if (r === 'failed') log.warn('[copyAndFill] B1 sendFill failed sid=', sid, 'name=', name)
     return r
   }
-  console.info('[copyAndFill] B1 skipped win=', !!win, 'closed=', win ? win.closed : 'n/a')
+  log.info('[copyAndFill] B1 skipped win=', !!win, 'closed=', win ? win.closed : 'n/a')
 
   // 2. [win-recover] 内存丢了（页面刷新过），但 AI 窗口可能还开着 —— 按名字找回
   try {
@@ -448,7 +449,7 @@ export async function copyAndFill(prompt: string, opts?: { count?: boolean }): P
 
   // 4. 全失败
   // [diag] copyAndFill 失败，打印诊断
-  console.error('[copyAndFill] 无法发送到 AI 窗口', {
+  log.error('[copyAndFill] 无法发送到 AI 窗口', {
     activeWinSid: activeWinSid.value,
     winName: name,
     urlValue: url.value,

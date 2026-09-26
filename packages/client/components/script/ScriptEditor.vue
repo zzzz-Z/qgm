@@ -31,7 +31,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { FileNode } from '../../types'
-import type { DecorationSet, EditorView, ViewUpdate } from '@codemirror/view'
+import type { Decoration, DecorationSet, EditorView, ViewUpdate } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
 
 /** 组件接收的 props 定义 */
@@ -51,13 +51,27 @@ const emit = defineEmits<{
   'drop': [e: DragEvent]
 }>()
 
-// CM 动态 import 聚合；typeof import() 与 page tsc 的 bundler 解析冲突，暂以 any 保留
-let CM: any = null
+// [p1-2-client-v3] CM 动态 import 聚合类型：从各包具名导出反推，杜绝 any
+interface CMModule {
+  EditorView: typeof import('@codemirror/view').EditorView
+  keymap: typeof import('@codemirror/view').keymap
+  placeholder: typeof import('@codemirror/view').placeholder
+  Decoration: typeof import('@codemirror/view').Decoration
+  ViewPlugin: typeof import('@codemirror/view').ViewPlugin
+  EditorState: typeof import('@codemirror/state').EditorState
+  Prec: typeof import('@codemirror/state').Prec
+  Compartment: typeof import('@codemirror/state').Compartment
+  RangeSetBuilder: typeof import('@codemirror/state').RangeSetBuilder
+  basicSetup: typeof import('codemirror').basicSetup
+  cmJavascript: typeof import('@codemirror/lang-javascript').javascript
+  oneDark: typeof import('@codemirror/theme-one-dark').oneDark
+}
+let CM: CMModule | null = null
 
 /**
  * 确保 CM
  */
-async function ensureCM(): Promise<any> {
+async function ensureCM(): Promise<CMModule> {
   if (CM) return CM
   const [v, s, j, t, c] = await Promise.all([
     import('@codemirror/view'),
@@ -239,7 +253,7 @@ async function createEditor() {
       constructor(view: EditorView) { this.decorations = this.build(view) }
       update(u: ViewUpdate) { if (u.docChanged) this.decorations = this.build(u.view) }
       build(view: EditorView): DecorationSet {
-        const builder = new m.RangeSetBuilder()
+        const builder = new m.RangeSetBuilder<Decoration>()
         const text = view.state.doc.toString()
         const re = /@[\w./-]+/g
         let match: RegExpExecArray | null
@@ -332,16 +346,10 @@ async function createEditor() {
         { key: 'Alt-ArrowUp', preventDefault: true, run: () => { props.onHistoryPrev?.(); return true } },
         { key: 'Alt-ArrowDown', preventDefault: true, run: () => { props.onHistoryNext?.(); return true } },
 
-        // [enter-send-v2] 回车直接发送（Shift-Enter 保留换行）
-        {
-          key: 'Enter',
-          run: (view: { event?: KeyboardEvent } | null) => {
-            const ev = (view && view.event) || null
-            if (ev && (ev.shiftKey || ev.altKey)) return false
-            props.onRun?.()
-            return true
-          }
-        },
+        // [enter-send-v2] 回车直接发送（Shift-Enter / Alt-Enter 走 CM 默认换行）
+        { key: 'Enter', preventDefault: true, run: () => { props.onRun?.(); return true } },
+        { key: 'Shift-Enter', run: () => false },
+        { key: 'Alt-Enter', run: () => false },
       ])),
       m.EditorView.updateListener.of((u: ViewUpdate) => {
         if (u.docChanged) {
