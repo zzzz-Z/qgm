@@ -22,6 +22,10 @@ export interface InboxItem {
   why: string
   /** 到达时间戳 */
   ts: number
+  /** [done-in-head-v1] 脚本头含 @done：执行完就收尾，不再进下一轮 */
+  isDone?: boolean
+  /** [done-in-head-v1] @done 后续连续注释（md 文本，供前端展示总结） */
+  doneMd?: string
 }
 
 /**
@@ -47,6 +51,10 @@ interface PushOptions {
   site: string
   /** 油猴传入的原始 hash（保留为元数据），重复判定始终用归一化 hash */
   hash?: string
+  /** [done-in-head-v1] 是否收尾轮 */
+  isDone?: boolean
+  /** [done-in-head-v1] @done 后续 md 文本 */
+  doneMd?: string
 }
 
 /**
@@ -79,6 +87,8 @@ export function push(opts: PushOptions): InboxItem | null {
     desc: meta.desc,
     why: meta.why,
     ts: Date.now(),
+    isDone: Boolean(opts.isDone),
+    doneMd: typeof opts.doneMd === 'string' ? opts.doneMd : undefined,
   }
   inbox.value = [...inbox.value, item]
   return item

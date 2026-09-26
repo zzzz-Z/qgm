@@ -11,15 +11,17 @@ test('node shebang → isNodeScript=true', () => {
   assert.ok(r.effectiveScript.startsWith('#!/usr/bin/env node'))
 })
 
-test('bash shebang → isNodeScript=false', () => {
+// [g2-narrow-v1] shebang.ts 已收窄为恒定返回 isNodeScript=true；非 node shebang 的拦截
+// 发生在 routes/run.ts 前置的 scanScriptHead（§1.4 ILLEGAL_SHEBANG）。
+test('bash shebang → shebang.ts 恒 true（拦截在 routes/run.ts）', () => {
   const r = splitShebang('#!/usr/bin/env bash\necho hi')
-  assert.equal(r.isNodeScript, false)
+  assert.equal(r.isNodeScript, true)
   assert.equal(r.effectiveScript, '#!/usr/bin/env bash\necho hi')
 })
 
-test('sh / zsh 也走 shell', () => {
-  assert.equal(splitShebang('#!/bin/sh\nls').isNodeScript, false)
-  assert.equal(splitShebang('#!/usr/bin/env zsh\nls').isNodeScript, false)
+test('sh / zsh 同样由上层拦截，shebang.ts 不分流', () => {
+  assert.equal(splitShebang('#!/bin/sh\nls').isNodeScript, true)
+  assert.equal(splitShebang('#!/usr/bin/env zsh\nls').isNodeScript, true)
 })
 
 test('无 shebang → 默认 node, 自动补行', () => {

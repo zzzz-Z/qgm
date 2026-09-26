@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 
-type TraceKind = 'ask' | 'run' | 'script' | 'loop'
+// [interaction-log-v1] 加 'user' 承载用户交互动作（暂停 / 恢复 / 终止 / 回滚 / 接管切换）
+type TraceKind = 'ask' | 'run' | 'script' | 'loop' | 'user'
 
 interface TraceEntry {
   id: number
@@ -53,6 +54,10 @@ interface TraceEntry {
     elapsedMs?: number | null
     /** 变更文件数 */
     changeCount?: number
+    /** [interaction-log-v1] 用户动作标识（pause / resume / kill / rollback / takeover-on / takeover-off） */
+    userAction?: string
+    /** [interaction-log-v1] 触发来源（keyboard / button / auto） */
+    userSource?: string
     [key: string]: unknown
   }
 }

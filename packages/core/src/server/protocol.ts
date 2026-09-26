@@ -23,6 +23,12 @@ export interface AiReplyDto {
   item?: InboxItemDto
   count?: number
   text?: string
+  /**
+   * [reasoning-channel-v1] AI 的思考过程原文（DeepSeek deep-thinking 区段）。
+   * 采集自油猴 / 无头浏览器；缺失时 undefined（旧版脚本或非 DeepSeek 站点）。
+   * 契约：不保证长度稳定，消费方需自行截断 / 节流。
+   */
+  reasoning?: string
 }
 
 /** 决策点选项的传输对象 */

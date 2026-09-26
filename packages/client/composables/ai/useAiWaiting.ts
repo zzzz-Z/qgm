@@ -6,7 +6,7 @@ import { ref, watch } from 'vue'
 const WATCHDOG_MS = 180_000
 /** 键 */
 const NIumaKey = '__ai_niuma_mode'
-// loopPaused 持久化到 sessionStorage：刷新后仍保持暂停态，LoopBar 可继续显示「恢复」
+// loopPaused 持久化到 sessionStorage：刷新后仍保持暂停态
 const LS_LOOP_PAUSED = '__ai_loop_paused'
 
 /** 是否处于等待 AI 回复状态 */

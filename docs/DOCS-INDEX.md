@@ -9,7 +9,7 @@
 | 场景               | 先看                                                                                                  |
 | :----------------- | :---------------------------------------------------------------------------------------------------- |
 | 第一次接手项目     | [`AGENTS.md`](../AGENTS.md) → [`README.md`](../README.md) → [`PROJECT-NOTES.md`](../PROJECT-NOTES.md) |
-| 让 AI 干活         | [`skills/RULES.md`](../skills/RULES.md)（常驻规则）                                                   |
+| 让 AI 干活         | [`SYSTEM.md`](../SYSTEM.md)（常驻规则）                                                   |
 | 打包后怎么用       | [`docs/USAGE.md`](USAGE.md)                                                                           |
 | 现在进度如何       | [`docs/plan/CURRENT-STATUS.md`](plan/CURRENT-STATUS.md)                                               |
 | 默认加载哪些 skill | [`docs/skills-default-load.md`](skills-default-load.md)                                               |
@@ -66,7 +66,7 @@
 | :--------------------------- | ---: | :--------------------------------------------------------------------------------------------------------------------------- |
 | `skills/AI-API.md`           |   77 | 完整 **AI** API 手册（按需加载）。                                                                                           |
 | `skills/PITFALLS-ARCHIVE.md` |   47 | 已修复坑档案（E/T/P/A 分类）。                                                                                               |
-| `skills/RULES.md` | — | AI 行为单一权威（零 ~ 十一共 12 章）。**常驻加载**。 |
+| `SYSTEM.md` | — | AI 行为单一权威（零 ~ 十一共 12 章）。**常驻加载**。 |
 | `skills/UI-LESSONS.md`       |  332 | UI/CSS/Vue 详细复盘与排查命令（按需加载）。                                                                                  |
 
 ## apps/ 与 packages/
@@ -91,6 +91,6 @@
 ## 维护建议
 
 - **单一权威**：`.ai-runner/plan.json` 是计划唯一权威；`docs/plan/*.md` 是生成物/记录，不要手改关键数据。
-- **常驻 vs 按需**：`skills/RULES.md` 每轮必读；`skills/AI-API.md` `skills/UI-LESSONS.md` `skills/PITFALLS-ARCHIVE.md` 按需加载（见 `skills/mapping.json`）。
+- **常驻 vs 按需**：`SYSTEM.md` 每轮必读；`skills/AI-API.md` `skills/UI-LESSONS.md` `skills/PITFALLS-ARCHIVE.md` 按需加载（见 `skills/mapping.json`）。
 - **归档规则**：被取代的旧文档移入 `docs/archive/`，不删除；本索引的「归档」分组标注【归档】。
 - **新增 md 流程**：放在合适目录 → 在本文档对应的分组里加一行 → 描述一句话作用。

@@ -3,7 +3,6 @@ import { workspaceHono } from './workspace.js'
 import { skillsHono } from './skills.js'
 import { scriptHono } from './script.js'
 import { rollbackHono } from './rollback.js'
-import { askHono } from './ask.js'
 import { execHono } from './exec.js'
 import { tasksHono } from './tasks.js'
 import { filesHono } from './files.js'
@@ -20,7 +19,6 @@ export const HONO_SUB_APPS = [
   skillsHono,
   scriptHono,
   rollbackHono,
-  askHono,
   execHono,
   tasksHono,
   filesHono,
@@ -43,7 +41,6 @@ export const HONO_PREFIXES = [
   '/save',
   '/git',
   '/hooks',
-  '/ask',
   '/exec',
   '/tasks',
   '/files',

@@ -25,7 +25,7 @@ const STAGES = [
   ['0.3', 'packages/core/src/headless/smoke.ts', 'smoke 模块'],
   ['1.2', 'apps/vite-plugin/src/index.ts', '主插件'],
   ['1.3', 'bin/recover.cjs', 'recover picker'],
-  ['2.1', 'skills/gen-script-rules.md', '规则文件'],
+  ['2.1', 'SYSTEM.md', '系统提示词'],
   ['3.2', 'bin/run-all.cjs', 'run-all'],
   ['4', 'bin/log-signal.cjs', '信号记录'],
 ]

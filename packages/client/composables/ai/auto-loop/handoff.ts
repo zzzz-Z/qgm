@@ -78,7 +78,6 @@ export async function onNewSessionCreated(url: string, id: string): Promise<void
   const inst = activeLoop.value
   if (!inst || inst.state.value !== 'handoff') return
   handoffDisarm(inst)
-  inst.latestTokens.value = 0
   addTrace({
     kind: 'loop',
     summary: `✓ 已切到新会话 · ${id || url}`,

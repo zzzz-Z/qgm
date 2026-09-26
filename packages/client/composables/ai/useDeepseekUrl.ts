@@ -389,25 +389,58 @@ export function sendNewSession(payload: NewSessionPayload): boolean {
 type FillResult = 'sent' | 'opened' | 'failed'
 
 /**
+ * [first-prompt-rules] 会话首问前置规则：读 SYSTEM.md 与 AGENTS.md 全文包成 <file> 块拼在问题前
+ * 读取失败或文件缺失时降级返回原 prompt，不阻断发送
+ * @param prompt - 原始问题
+ */
+async function _prependFirstPromptRules(prompt: string): Promise<string> {
+  try {
+    const res = await fetch('/__ai/files/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: ['SYSTEM.md', 'AGENTS.md'] }),
+    })
+    const data = await res.json()
+    const parts: string[] = []
+    for (const f of data.files || []) {
+      if (f.error || !f.content) continue
+      parts.push(`<file path="${f.path}">` + `\n${f.content}\n` + `</file>`)
+    }
+    if (!parts.length) return prompt
+    return `# 会话首问规则（自动携带）\n\n${parts.join('\n\n')}\n\n# 问题\n\n${prompt}`
+  } catch {
+    return prompt
+  }
+}
+
+/**
  * 复制 And Fill
  * @param prompt - prompt
  * @param opts - opts
  */
 export async function copyAndFill(prompt: string, opts?: { count?: boolean }): Promise<FillResult> {
   if (!prompt) return 'failed'
+  let finalPrompt = prompt
+  // [first-prompt-rules] 会话首问自动前置 SYSTEM.md + AGENTS.md 全文（askCount 归零视为新会话）
+  if (opts?.count !== false) {
+    try {
+      const { askCount } = useSessionManager()
+      if (askCount.value === 0) finalPrompt = await _prependFirstPromptRules(prompt)
+    } catch { /* ignore */ }
+  }
   // [askcount-unify] 统一计数：所有发送路径（自动/手动）都计入 askCount
   // count: false 用于打招呼类消息（如「开始聊天」）
   if (opts?.count !== false) {
-    try { useSessionManager().trackMessage('user', prompt) } catch { /* ignore */ }
+    try { useSessionManager().trackMessage('user', finalPrompt) } catch { /* ignore */ }
   }
-  try { await navigator.clipboard.writeText(prompt) } catch { /* ignore */ }
+  try { await navigator.clipboard.writeText(finalPrompt) } catch { /* ignore */ }
   // 无头模式直接发 WS，不开真实窗口
   if (_isHeadless()) {
     void _loadTransport().then((t) => {
       try {
         const tr = t.useAiTransport().transport
         tr.sendOpen?.(activeWinSid.value, { url: url.value })
-        tr.sendFill(activeWinSid.value, { prompt })
+        tr.sendFill(activeWinSid.value, { prompt: finalPrompt })
       } catch {}
     })
     return 'sent'
@@ -419,7 +452,7 @@ export async function copyAndFill(prompt: string, opts?: { count?: boolean }): P
   // 1. 内存里有引用且活着
   let win = getActiveWin()
   if (win && !win.closed) {
-    const r = sendFill({ prompt }) ? 'sent' : 'failed'
+    const r = sendFill({ prompt: finalPrompt }) ? 'sent' : 'failed'
     if (r === 'failed') log.warn('[copyAndFill] B1 sendFill failed sid=', sid, 'name=', name)
     return r
   }
@@ -436,7 +469,7 @@ export async function copyAndFill(prompt: string, opts?: { count?: boolean }): P
   } catch { /* cross-origin 抛错视为找回失败 */ }
 
   if (win && !win.closed) {
-    const ok1 = sendFill({ prompt })
+    const ok1 = sendFill({ prompt: finalPrompt })
     if (ok1) return 'sent'
   }
 
@@ -444,7 +477,7 @@ export async function copyAndFill(prompt: string, opts?: { count?: boolean }): P
   const w = openDeepseek()
   if (w) {
     await new Promise(resolve => setTimeout(resolve, 1500))
-    return sendFill({ prompt }) ? 'opened' : 'failed'
+    return sendFill({ prompt: finalPrompt }) ? 'opened' : 'failed'
   }
 
   // 4. 全失败

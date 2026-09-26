@@ -1,4 +1,4 @@
-// shebang 分流：RULES.md §一 JS-Only 唯一通道（[g2-narrow-v1] G2 收窄）
+// shebang 分流：SYSTEM.md §一 JS-Only 唯一通道（[g2-narrow-v1] G2 收窄）
 // 非 node shebang 的脚本由 routes/run.ts 前置的 scanScriptHead (§1.4) 拦截；
 // 本函数一律返回 isNodeScript:true，不再走 shell 通道。
 

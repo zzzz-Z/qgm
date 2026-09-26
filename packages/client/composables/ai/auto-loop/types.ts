@@ -32,6 +32,11 @@ export interface AiReply {
   count?: number
   /** kind=done 时可选携带原 text，用于服务端二次校验 isStrictDone */
   text?: string
+  /**
+   * [reasoning-channel-v1] AI 思考过程原文（DeepSeek deep-thinking 区段）。
+   * 与 protocol.ts 的 AiReplyDto.reasoning 对齐；缺失表示旧版脚本或非 DeepSeek 站点。
+   */
+  reasoning?: string
 }
 
 /** 循环实例（接口） */
@@ -39,14 +44,8 @@ export interface LoopInstance {
   state: Ref<LoopState>
   id: Ref<string>
   round: Ref<number>
-  stallRounds: Ref<number>
-  lastFpKey: Ref<string>
-  fpStallCount: Ref<number>
   goal: Ref<string>
   startCommit: Ref<string>
-  startTokens: Ref<number>
-  latestTokens: Ref<number>
-  toleranceLeft: Ref<number>
   stopRequest: Ref<StopRequest>
   stopReason: Ref<string>
   lastHash: Ref<string>

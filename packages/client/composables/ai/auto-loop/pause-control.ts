@@ -1,12 +1,11 @@
 // [pause-control-v1] 从 useAutoLoop.ts 抽出（PLAN P0-2 瘦身）；pause/resume 家族 8 个动作
+import { getTransport } from '../useAiTransport.js'
 import type { ComputedRef, Ref } from 'vue'
 import type { LoopInstance } from './types.js'
 import { toast } from '../../ui/useToast'
 import { getActiveWin } from '../useDeepseekUrl'
-import { getTransport } from '../useAiTransport.js'
 import { useRuntime } from '../../../stores/runtime'
 import { useRunner } from '../../runner/useRunner'
-import { buildFeedback } from '../loopLogic.js'
 
 type RoundGuards = ReturnType<typeof import('./round-guards.js').createRoundGuards>
 type TraceHook = ReturnType<typeof import('../../ui/useTraceLog.js').useTraceLog>
@@ -21,7 +20,6 @@ interface PauseControlDeps {
   enterWaiting: (inst: LoopInstance) => void
   disarmTimer: (inst: LoopInstance) => void
   addTrace: TraceHook['addTrace']
-  userNote: Ref<string>
   ackFill: RoundGuards['ackFill']
   finish: (inst: LoopInstance, reason: string, detail?: string) => Promise<void>
   bindKeyboard: () => void
@@ -32,9 +30,7 @@ interface PauseControlDeps {
  * @param deps - deps
  */
 export function createPauseControl(deps: PauseControlDeps) {
-  const { loopPaused, activeLoop, isLoopActive, isInstActive, persist, enterWaiting, disarmTimer, addTrace, userNote, ackFill, finish, bindKeyboard } = deps
-  // [pause-control-v1] getTransport 返回单例，局部持有等价于直接调用
-  const transport = getTransport()
+  const { loopPaused, activeLoop, isLoopActive, isInstActive, persist, enterWaiting, disarmTimer, addTrace, ackFill, finish, bindKeyboard } = deps
   // [resume-from-pause-v1]
   // 从暂停态恢复：复位 loopPaused、解除静音、重新进入 waiting
   // - 若处于 budget-limited，转到 resumeLoop()
@@ -93,15 +89,10 @@ export function createPauseControl(deps: PauseControlDeps) {
     if (!o) { toast('无待发反馈，无法续跑', 'error'); return }
     const win = getActiveWin()
     if (!win || win.closed) { toast('AI 窗口已关闭，无法续跑', 'error'); return }
-    inst.startTokens.value = inst.latestTokens.value
     inst.pendingRound.value = null
     // 清空上轮 lastHash：budget 恢复后 AI 重发同一脚本是合理的（它没收到结果），
     // 避免被误判为「连续两轮重复」而熔断
     inst.lastHash.value = ''
-    const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta: 0, goal: inst.goal.value, round: inst.round.value, userNote: userNote.value || undefined })
-    const okSent = loopPaused.value ? false : transport.sendFill('', { prompt: feedback })
-    if (!okSent) { await finish(inst, 'window-lost', '续跑时窗口发送失败'); return }
-    ackFill(inst, '续跑')
     bindKeyboard()
     inst.round.value += 1
     inst.state.value = 'waiting'
@@ -114,8 +105,6 @@ export function createPauseControl(deps: PauseControlDeps) {
     })
     toast(`▶ 续跑，从第 ${inst.round.value} 轮开始`, 'success', 4000)
   }
-
-  // 回填文本构造已抽至 loopLogic.buildFeedback（带单测）
 
   // [P3-6] sendFill 后统一 ACK 追踪（3s 未回则落 trace；不阻断循环）
 

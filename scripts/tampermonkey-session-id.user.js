@@ -103,6 +103,38 @@
     '.chat-question-card-wrap',
   ]
 
+  // [reasoning-channel-v1] DeepSeek 思考块候选选择器（多站点适配，命中即用，缺失静默）
+  // 契约：仅采集文本，长度截断到 8000 字符；不改动原有回复/脚本提取逻辑
+  const REASONING_SELECTORS = [
+    '.ds-think-content',
+    '[class*="think-content"]',
+    '[class*="reasoning-content"]',
+    '[class*="thinking-content"]',
+    '[class*="deep-think"]',
+    '[data-testid*="reasoning"]',
+    '[class*="chain-of-thought"]',
+    'details[class*="think"] > div',
+  ]
+
+  /**
+   * 提取最近一条 assistant 消息内的思考文本；无命中返回空串。
+   * 优先最后一条 assistant 容器；容器找不到时降级为整页最后一个命中元素。
+   */
+  function extractLatestReasoning() {
+    try {
+      const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
+      const root = blocks.length > 0 ? blocks[blocks.length - 1] : document
+      for (let i = 0; i < REASONING_SELECTORS.length; i++) {
+        const els = root.querySelectorAll(REASONING_SELECTORS[i])
+        if (els.length === 0) continue
+        const el = els[els.length - 1]
+        const t = (el.textContent || '').trim()
+        if (t) return t.slice(-8000)
+      }
+      return ''
+    } catch { return '' }
+  }
+
   function collectText() {
     const seen = new Set()
     const parts = []
@@ -295,11 +327,11 @@
       const content = m[1] // 已剥离行注释前缀
       raw.push(content)
 
-      const tag = content.match(/^@([\w-]+)\s*(.*)$/)
+      const tag = content.match(/^@([\w-]+)/)
       if (tag) {
         if (curTag) tagged[curTag] = curVal.join('\n').trim()
         curTag = tag[1]
-        curVal = [tag[2]]
+        curVal = [content.slice(tag[0].length).trim()]
       } else if (curTag) {
         curVal.push(content)
       }
@@ -311,6 +343,44 @@
       tagged,
       text: raw.join('\n'),
       firstLine: raw[0] || '',
+    }
+  }
+
+  // [done-in-head-v1] 从脚本头提取 @done 标记 + 后续连续注释作为 md 总结
+  // 返回：{ marker, md, tags } | null
+  // md: @done 那一行 + 后续所有连续注释（去前缀），用 \n 拼接；作为任务总结文本供前端展示
+  function extractDoneFromHead(code) {
+    const lines = String(code || '').split(/\r?\n/)
+    let start = -1
+    for (let i = 0; i < lines.length; i++) {
+      if (/^[ \t]*(?:\/\/|#)[ \t]*@done\b/.test(lines[i])) { start = i; break }
+    }
+    if (start === -1) return null
+
+    const raw = []
+    const tags = {}
+    let curTag = null
+    let curVal = []
+    for (let i = start; i < lines.length; i++) {
+      const m = lines[i].match(/^[ \t]*(?:\/\/|#)[ \t]?(.*)$/)
+      if (!m) break
+      const content = m[1]
+      raw.push(content)
+      const tag = content.match(/^@([\w-]+)/)
+      if (tag) {
+        if (curTag) tags[curTag] = curVal.join('\n').trim()
+        curTag = tag[1]
+        curVal = [content.slice(tag[0].length).trim()]
+      } else if (curTag) {
+        curVal.push(content)
+      }
+    }
+    if (curTag) tags[curTag] = curVal.join('\n').trim()
+
+    return {
+      marker: hash32(`head-done|${hash32(String(code || ''))}`),
+      md: raw.join('\n'),
+      tags,
     }
   }
 
@@ -396,6 +466,7 @@
             kind: 'done',
             site: location.origin,
             sessionId: extractSidFromHash(),
+            reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
             text: doneMarker.text, // assistant 容器全文（兼容旧字段）
             doneText: doneMarker.doneText || '', // 首行，如 "DONE"
             doneComments: doneMarker.doneComments || [], // 字符串数组，去前缀
@@ -408,6 +479,8 @@
 
         const s = extractLatestScript()
         if (s && !seenHashes.has(s.hash)) {
+          // [done-in-head-v1] 脚本头含 @done → 收尾轮：仍发 script（要执行）+ isDone/doneMd
+          const headDone = extractDoneFromHead(s.code)
           seenHashes.add(s.hash)
           post({
             type: 'ai-runner:reply',
@@ -417,6 +490,10 @@
             hash: s.hash,
             site: location.origin,
             sessionId: extractSidFromHash(),
+            reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
+            isDone: Boolean(headDone),
+            doneMd: headDone ? headDone.md : '',
+            doneTags: headDone ? headDone.tags : {},
           })
           lastBodySig = bodySignature()
           return
@@ -430,6 +507,7 @@
             kind: 'plain',
             site: location.origin,
             sessionId: extractSidFromHash(),
+            reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
           })
         }
       } catch {}

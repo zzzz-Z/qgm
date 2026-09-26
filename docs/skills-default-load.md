@@ -1,6 +1,6 @@
 # 默认加载 Skill 清单
 
-> 数据源：`skills/_loader.cjs` · `skills/mapping.json` · `skills/RULES.md` 第零章。
+> 数据源：`skills/_loader.cjs` · `skills/mapping.json` · `SYSTEM.md` 第零章。
 
 生成日期：2026-09-23
 
@@ -8,20 +8,20 @@
 
 按 `RULES.md` 第零章，顺序为：
 
-    AGENTS.md  →  skills/RULES.md  →  .ai-runner/state.json  →  当前任务
+    AGENTS.md  →  SYSTEM.md  →  .ai-runner/state.json  →  当前任务
 
 ## 二、三级加载分类
 
 ### L1 常驻（每轮无条件注入）
 
-- `RULES`（`skills/RULES.md`）
+- `RULES`（`SYSTEM.md`）
 
 依据：`_loader.cjs` 中 `ALWAYS_KEYS = ["RULES"]`，`isDefault(key)` 对其返回 true。
 
 ### L2 会话首轮强制读取
 
 - `AGENTS.md`（仓库根，运行方式）
-- `skills/RULES.md`（AI 行为单一权威）
+- `SYSTEM.md`（AI 行为单一权威）
 - `.ai-runner/state.json`（循环状态）
 
 ### L3 按需（意图 × 文件类型 → mapping.json）
@@ -92,6 +92,6 @@
 
 ## 四、一句话结论
 
-- **每轮无条件注入**：`RULES`（即 `skills/RULES.md`）。
+- **每轮无条件注入**：`SYSTEM.md`。
 - **会话首轮额外强制**：`AGENTS.md` + `.ai-runner/state.json`。
 - **其余全部按需**：由 `mapping.json` 依据意图 × 文件类型触发；本地实际可加载的 skill 文件目前有 RULES / AI-API / UI-LESSONS / PITFALLS-ARCHIVE 四个，其余 key 指向外部 skill 库。

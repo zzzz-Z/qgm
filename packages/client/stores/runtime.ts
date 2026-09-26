@@ -21,8 +21,6 @@ export interface RuntimeState {
   loopId: string
   loopRound: number
   loopGoal: string
-  tokenDelta: number
-  loopCost: number | null
   stage: RuntimeStage
   userNote: string
 }
@@ -36,8 +34,6 @@ const INITIAL: RuntimeState = {
   loopId: '',
   loopRound: 0,
   loopGoal: '',
-  tokenDelta: 0,
-  loopCost: null,
   stage: '',
   userNote: '',
 }
@@ -100,8 +96,6 @@ export const useRuntime = defineStore('runtime-store', () => { // [runtime-fix2]
     state.value.loopId = ''
     state.value.loopRound = 0
     state.value.loopGoal = ''
-    state.value.tokenDelta = 0
-    state.value.loopCost = null
     state.value.stage = ''
   }
 
@@ -125,16 +119,6 @@ export const useRuntime = defineStore('runtime-store', () => { // [runtime-fix2]
     state.value.loopId = String(id || '')
   }
 
-  /** 设置本轮 token 消耗差值（非负数） */
-  function setTokenDelta(n: number): void {
-    state.value.tokenDelta = Math.max(0, Number(n) || 0)
-  }
-
-  /** 设置循环累计花费（null = 未知，非空则转数字） */
-  function setCost(c: number | null): void {
-    state.value.loopCost = c === null ? null : Number(c)
-  }
-
   /** 设置用户备注：随下一轮反馈带给 AI */
   function setUserNote(t: string): void {
     state.value.userNote = String(t || '')
@@ -156,8 +140,6 @@ export const useRuntime = defineStore('runtime-store', () => { // [runtime-fix2]
     bumpRound,
     setStage,
     setLoopId,
-    setTokenDelta,
-    setCost,
     setUserNote,
   }
 })

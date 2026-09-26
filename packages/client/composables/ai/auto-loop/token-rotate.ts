@@ -29,7 +29,6 @@ export function setTokenEstimate(n: number): void {
   const v = Math.max(0, Number(n) || 0)
   const inst = activeLoop.value
   if (!inst) return
-  inst.latestTokens.value = v
   if (!autoRotateSession.value) return
   if (!isLoopActive.value) return
   if (inst.state.value === 'handoff') return

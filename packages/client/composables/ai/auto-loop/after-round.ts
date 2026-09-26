@@ -20,24 +20,13 @@ interface AfterRoundDeps {
   addTrace: TraceHook['addTrace']
   toast: ToastFn
   persist: PersistMod['persist']
-  budgetLimited: RoundGuards['budgetLimited']
   ackFill: RoundGuards['ackFill']
-  buildFeedback: LoopLogicMod['buildFeedback']
   transport: AiTransport
   loopPaused: Ref<boolean>
   niumaMode: Ref<boolean>
-  userNote: Ref<string>
   stage: Ref<'' | 'plan' | 'implement' | 'verify'>
-  fpKey: LoopLogicMod['fpKey']
-  updateFpStall: LoopLogicMod['updateFpStall']
-  updateStall: LoopLogicMod['updateStall']
-  checkRoundBreak: LoopLogicMod['checkRoundBreak']
-  stallRounds: Ref<number>
   enterWaiting: Waiting['enterWaiting']
-  LOOP_STALL_LIMIT: number
-  LOOP_FP_STALL_LIMIT: number
   LOOP_MAX_ROUNDS: number
-  LOOP_TOKEN_HARD_LIMIT: number
 }
 
 /**
@@ -52,24 +41,13 @@ export function createAfterRound(deps: AfterRoundDeps) {
     addTrace,
     toast,
     persist,
-    budgetLimited,
     ackFill,
-    buildFeedback,
     transport,
     loopPaused,
     niumaMode,
-    userNote,
     stage,
-    fpKey,
-    updateFpStall,
-    updateStall,
-    checkRoundBreak,
-    stallRounds,
     enterWaiting,
-    LOOP_STALL_LIMIT,
-    LOOP_FP_STALL_LIMIT,
     LOOP_MAX_ROUNDS,
-    LOOP_TOKEN_HARD_LIMIT,
   } = deps
 
   // [loop-hard-limit-v1] 起跑时间：按 loopId 追踪，新循环重置
@@ -128,38 +106,8 @@ export function createAfterRound(deps: AfterRoundDeps) {
     stage.value = 'verify'
     persist(inst)
 
-    const tokenDelta = Math.max(0, inst.latestTokens.value - inst.startTokens.value)
-    const stall = updateStall(o.changeCount, stallRounds.value)
-    stallRounds.value = stall.next
-    if (stall.stalled && !niumaMode.value) {
-      await finish(inst, 'no-progress', `连续 ${LOOP_STALL_LIMIT} 轮无文件变更`)
-      return
-    }
-    const currKey = fpKey(o.fingerprints)
-    const fp = updateFpStall(inst.lastFpKey.value, currKey, inst.fpStallCount.value)
-    inst.lastFpKey.value = currKey
-    inst.fpStallCount.value = fp.next
-    if (fp.stalled && !niumaMode.value) {
-      await finish(inst, 'same-fingerprint', `相同错误指纹连续 ${LOOP_FP_STALL_LIMIT} 轮未变`)
-      return
-    }
-    const breakReason = checkRoundBreak(inst.round.value, tokenDelta, Number.POSITIVE_INFINITY)
-    if (breakReason === 'token-budget' && !niumaMode.value) {
-      budgetLimited(inst, o, tokenDelta)
-      return
-    }
-    if (breakReason === 'token-warn') {
-      addTrace({
-        kind: 'loop',
-        summary: `⚠ token 增量约 ${(tokenDelta / 1000).toFixed(1)}k，已达预算警告线（熔断线 ${(LOOP_TOKEN_HARD_LIMIT / 1000).toFixed(1)}k）`,
-        payload: { loopId: inst.id.value, loopRound: inst.round.value, tokenDelta },
-      })
-      toast(`token 已用约 ${(tokenDelta / 1000).toFixed(1)}k（警告），到 ${(LOOP_TOKEN_HARD_LIMIT / 1000).toFixed(1)}k 将熔断`, 'warn', 5000)
-    }
-    if (breakReason === 'round-limit') {
-      await finish(inst, 'round-limit', `已达轮次上限 ${LOOP_MAX_ROUNDS}`)
-      return
-    }
+    // [breaker-removed-v1] token/熔断判断已删除
+    const tokenDelta = 0
 
     const arHook = await runHook('AfterResult', {
       loopId: inst.id.value,
@@ -181,10 +129,6 @@ export function createAfterRound(deps: AfterRoundDeps) {
         payload: { loopId: inst.id.value, loopRound: inst.round.value },
       })
     }
-    const feedback = buildFeedback(o, { nextRound: inst.round.value + 1, tokenDelta, goal: inst.goal.value, round: inst.round.value, userNote: userNote.value || undefined })
-    const ok = loopPaused.value ? false : transport.sendFill('', { prompt: feedback })
-    if (!ok) { await finish(inst, 'window-lost', '回填结果时 AI 窗口已关闭'); return }
-    ackFill(inst, '回填结果')
 
     inst.round.value += 1
     enterWaiting(inst)

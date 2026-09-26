@@ -158,7 +158,37 @@ export function detectReplyInPage() {
     return null
   }
 
-  /** 检测文本是否含 js 代码块（RULES.md §1.0 接收端容错） */
+  // [done-in-head-v1] 从脚本头提取 @done 标记 + 后续连续注释作为 md 总结
+  function extractDoneFromHead(code: string): { md: string, tags: Record<string, string> } | null {
+    const lines = String(code || '').split(/\r?\n/)
+    let start = -1
+    for (let i = 0; i < lines.length; i++) {
+      if (/^[ \t]*(?:\/\/|#)[ \t]*@done\b/.test(lines[i])) { start = i; break }
+    }
+    if (start === -1) return null
+    const raw: string[] = []
+    const tags: Record<string, string> = {}
+    let curTag: string | null = null
+    let curVal: string[] = []
+    for (let i = start; i < lines.length; i++) {
+      const m = lines[i].match(/^[ \t]*(?:\/\/|#)[ \t]?(.*)$/)
+      if (!m) break
+      const content = m[1]
+      raw.push(content)
+      const tagPrefix = content.match(/^@([\w-]+)/)
+      if (tagPrefix) {
+        if (curTag) tags[curTag] = curVal.join('\n').trim()
+        curTag = tagPrefix[1]
+        curVal = [content.slice(tagPrefix[0].length).trim()]
+      } else if (curTag) {
+        curVal.push(content)
+      }
+    }
+    if (curTag) tags[curTag] = curVal.join('\n').trim()
+    return { md: raw.join('\n'), tags }
+  }
+
+  /** 检测文本是否含 js 代码块（SYSTEM.md §1 接收端容错） */
   function hasJsFence(text: string): boolean {
     return /```js\b/.test(String(text || ''))
   }
@@ -180,7 +210,8 @@ export function detectReplyInPage() {
       const _cached = dedup._preCache.get(pre)
       if (_cached && _cached.len === text.length) { _h = _cached.hash }
       else { _h = hash32(text); dedup._preCache.set(pre, { len: text.length, hash: _h }) }
-      const item = { lang, code: text, hash: _h }
+      const _headDone = extractDoneFromHead(text)
+      const item = { lang, code: text, hash: _h, isDone: Boolean(_headDone), doneMd: _headDone ? _headDone.md : '' }
       last = item
       const marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
         || /^\s*\/\/\s*@desc\s*:/m.test(text)
@@ -198,6 +229,38 @@ export function detectReplyInPage() {
     const el = blocks[blocks.length - 1]
     const t = (el && el.textContent) || ''
     return t.slice(-8000)
+  }
+
+  // [reasoning-channel-v1] DeepSeek 思考块候选选择器；多站点命中即用，缺失静默返回空串
+  // 契约：与 scripts/tampermonkey-session-id.user.js 的 REASONING_SELECTORS 保持一致
+  const REASONING_SELECTORS = [
+    '.ds-think-content',
+    '[class*="think-content"]',
+    '[class*="reasoning-content"]',
+    '[class*="thinking-content"]',
+    '[class*="deep-think"]',
+    '[data-testid*="reasoning"]',
+    '[class*="chain-of-thought"]',
+    'details[class*="think"] > div',
+  ]
+
+  /**
+   * 提取最近一条 assistant 消息内的思考文本；无命中返回空串。
+   * 与油猴版语义一致：优先最后一条 assistant 容器，长度截断到 8000 字符。
+   */
+  function extractLatestReasoning() {
+    try {
+      const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
+      const root = blocks.length > 0 ? blocks[blocks.length - 1] : document
+      for (let i = 0; i < REASONING_SELECTORS.length; i++) {
+        const els = root.querySelectorAll(REASONING_SELECTORS[i])
+        if (els.length === 0) continue
+        const el = els[els.length - 1]
+        const t = (el.textContent || '').trim()
+        if (t) return t.slice(-8000)
+      }
+      return ''
+    } catch { return '' }
   }
   /** 查找新已完成 */
   function findNewDone() {
@@ -234,7 +297,7 @@ export function detectReplyInPage() {
       dedup._pendingScriptHash = null
       dedup.seenHashes.push(script.hash)
       dedup.lastBodySig = bodySignature()
-      return { kind: 'script', code: script.code, lang: script.lang, hash: script.hash }
+      return { kind: 'script', code: script.code, lang: script.lang, hash: script.hash, isDone: Boolean((script as { isDone?: boolean }).isDone), doneMd: String((script as { doneMd?: string }).doneMd || ''), reasoning: extractLatestReasoning() }
     }
     dedup._pendingScriptHash = script.hash
     return null
@@ -245,7 +308,7 @@ export function detectReplyInPage() {
     dedup.seenDoneMarkers.push(doneMarker.marker)
     dedup.lastBodySig = bodySignature()
     if (!hasJsFence(doneMarker.text)) return null
-    return { kind: 'done', text: doneMarker.text }
+    return { kind: 'done', text: doneMarker.text, reasoning: extractLatestReasoning() }
   }
 
   // 文本稳定检测：连续 3 次 body 不变 → 生成结束，推 plain + text
@@ -263,7 +326,7 @@ export function detectReplyInPage() {
   const plainText = getMainText()
   if (!hasJsFence(plainText)) return null
   dedup._plainSentInCycle = true
-  return { kind: 'plain', text: plainText }
+  return { kind: 'plain', text: plainText, reasoning: extractLatestReasoning() }
 
   return null
 }

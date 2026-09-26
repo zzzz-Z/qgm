@@ -1,5 +1,7 @@
 // keyboard —— Esc 暂停 / Ctrl+Esc 回滚
 import { activeLoop, isLoopActive, requestPause, stopAndRollback } from '../useAutoLoop.js'
+// [interaction-log-v1] 交互记录
+import { recordInteraction } from '../useInteractionLog.js'
 
 let keyboardBound = false
 // ============================================================================
@@ -16,9 +18,11 @@ export function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
+      recordInteraction('rollback', 'keyboard')
       void stopAndRollback()
     } else {
       e.preventDefault()
+      recordInteraction('pause', 'keyboard')
       requestPause()
     }
   }

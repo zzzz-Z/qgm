@@ -1,6 +1,6 @@
 // [arch-hono/run-v1] POST /run —— node 沙盒 / shell 脚本执行（NDJSON 流式；Hono 版）
 import { Hono } from 'hono'
-import { scanScriptHead } from '../post-run/ai-guard.js' // [g2-narrow-v1]
+import { scanScriptHead } from '../post-run/ai-guard.js'; // [g2-narrow-v1]
 import {
   applyOverlay,
   checkScriptSyntax,
@@ -80,7 +80,7 @@ runHono.post('/run', async (c) => {
     return c.json({
       error: `脚本头契约违规：${head.reason}`,
       metaError: true,
-      rule: 'RULES.md §1.4',
+      rule: 'SYSTEM.md',
     }, 400)
   }
   const { isNodeScript, effectiveScript } = splitShebang(script)

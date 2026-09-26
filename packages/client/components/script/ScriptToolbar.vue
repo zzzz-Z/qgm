@@ -11,49 +11,6 @@
     <!-- [decision-in-header-v1] 决策模式三档选择（输入框顶部） -->
     <DecisionPolicySwitch class="tpl-dps" />
     <button
-      ref="skillTriggerRef"
-      v-tooltip="'选择要注入 AI 提示词的规则'" aria-label="选择要注入 AI 提示词的规则"
-      data-skill-trigger class="skill-trigger"
-      @mousedown.prevent="toggleSkillMenu"
-    >
-      <span class="skill-trigger-label">☰ 规则</span>
-      <!-- [tplbar-copy-v1] 单一计数：选中/总数 合成为 选中/总，去掉并列两个数字 -->
-      <span
-        class="skill-badge" :class="{ 'skill-badge-empty': !selectedSkillNames.length }"
-        :title="`已选 ${selectedSkillNames.length} · 可用 ${skillsList.length}`"
-      >{{ selectedSkillNames.length }}/{{ skillsList.length }}</span>
-    </button>
-    <Teleport to="body">
-      <div v-if="skillMenuOpen" data-skill-menu class="skill-menu-fixed" :style="skillMenuPos" @mousedown.stop>
-        <div class="skill-menu-head">
-          共 {{ skillsList.length }} 个可用规则
-        </div>
-        <input
-          v-model="skillFilter"
-          class="skill-search"
-          type="text"
-          placeholder="搜索规则…"
-          @mousedown.stop
-        >
-        <div v-if="skillsLoading" class="skill-row skill-loading">
-          加载中…
-        </div>
-        <div v-if="!skillsLoading && !filteredSkills.length" class="skill-row skill-empty">
-          {{ skillFilter.trim() ? '无匹配规则' : '暂无规则' }}
-        </div>
-        <label v-for="sk in filteredSkills" :key="sk.name" class="skill-row">
-          <input type="checkbox" :checked="selectedSkillNames.includes(sk.name)" @change="emit('toggleSkill', sk.name)">
-          <span class="skill-name">{{ sk.name }}</span>
-          <span class="skill-src" :class="`src-${sk.source || 'base'}`">{{ sk.source === 'user' ? '用户'
-            : (sk.source
-              === 'agents' ? '全局' : '系统') }}</span>
-        </label>
-        <div class="skill-hint">
-          选择后，点「运行」发送给 AI 的 prompt 会带上这些规则
-        </div>
-      </div>
-    </Teleport>
-    <button
       v-tooltip="'清空编辑器与附件'"
       aria-label="清空编辑器与附件" class="ghost-btn"
       :disabled="running || (!script && !attachedFilesCount)" @click="emit('clearAll')"
@@ -111,18 +68,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue' // [skill-search-v1]
 import DecisionPolicySwitch from '../panels/DecisionPolicySwitch.vue'
 
 interface Template { id: string, label: string, title: string, code: string }
-interface SkillInfo { name: string, content?: string, source?: 'base' | 'user' | 'agents' }
 
 /** 组件接收的 props 定义 */
 const props = defineProps<{
   templates: Template[]
-  selectedSkillNames: string[]
-  skillsList: SkillInfo[]
-  skillsLoading: boolean
   running: boolean
   isLoopActive: boolean
   autoTakeoverEnabled: boolean
@@ -132,308 +84,19 @@ const props = defineProps<{
   niumaMode: boolean
   script: string
   attachedFilesCount: number
-  onLoadSkills?: () => void
 }>()
 
 /** 派发 */
 const emit = defineEmits<{
   'applyTemplate': [code: string]
-  'toggleSkill': [name: string]
   'clearAll': []
   'pauseAll': []
   'toggleAutoTakeover': []
   'update:niumaMode': [v: boolean]
 }>()
-
-/** skill引用 */
-const skillTriggerRef = ref<HTMLElement | null>(null)
-/** 打开 */
-const skillMenuOpen = ref(false)
-/** skill 菜单弹出位置 */
-const skillMenuPos = ref<{ top: string, left: string, maxHeight: string }>({ top: '0px', left: '0px', maxHeight: '320px' })
-/** 过滤 */
-const skillFilter = ref('')
-
-/** skill 列表 */
-const filteredSkills = computed(() => {
-  const kw = skillFilter.value.trim().toLowerCase()
-  if (!kw) return props.skillsList
-  return props.skillsList.filter(s => s.name.toLowerCase().includes(kw))
-})
-
-onMounted(() => document.addEventListener('mousedown', onGlobalMousedown))
-onBeforeUnmount(() => document.removeEventListener('mousedown', onGlobalMousedown))
-
-/**
- * 切换 Skill Menu
- */
-function toggleSkillMenu() {
-  const el = skillTriggerRef.value
-  if (!el) return
-  const rect = el.getBoundingClientRect()
-  const maxHeight = Math.max(120, window.innerHeight - rect.bottom - 16)
-  skillMenuPos.value = { top: `${rect.bottom + 4}px`, left: `${rect.left}px`, maxHeight: `${maxHeight}px` }
-  skillMenuOpen.value = !skillMenuOpen.value
-  if (skillMenuOpen.value) { skillFilter.value = ''; props.onLoadSkills?.() }
-}
-
-/**
- * 响应 Global Mousedown
- * @param e - e
- */
-function onGlobalMousedown(e: MouseEvent) {
-  if (!skillMenuOpen.value) return
-  const t = e.target as HTMLElement | null
-  if (t && (t.closest('[data-skill-menu]') || t.closest('[data-skill-trigger]'))) return
-  skillMenuOpen.value = false
-}
 </script>
 
 <style scoped lang="scss">
-.skill-menu-fixed {
-  position: fixed;
-  z-index: 9999;
-  min-width: 220px;
-  max-height: 320px;
-  overflow-y: auto;
-  padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-8);
-  box-shadow: 0 8px 24px rgb(15 30 60 / 15%);
-}
-
-.skill-menu-fixed .skill-search {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  margin: 4px 0 6px;
-  padding: 5px 8px;
-  font-size: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-4);
-  background: var(--surface-2);
-  color: inherit;
-  outline: none;
-}
-
-.skill-menu-fixed .skill-search:focus {
-  border-color: var(--primary);
-}
-
-.skill-menu-fixed .skill-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
-  border-radius: var(--radius-4);
-  font-size: 12px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.skill-menu-fixed .skill-row:hover {
-  background: var(--surface-2);
-}
-
-.skill-menu-fixed .skill-row input {
-  margin: 0;
-  accent-color: var(--primary);
-}
-
-.skill-menu-fixed .skill-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.skill-menu-fixed .skill-src {
-  flex-shrink: 0;
-  padding: 1px 5px;
-  border-radius: var(--radius-2);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.skill-menu-fixed .skill-src.src-base {
-  background: var(--primary-bg);
-  color: var(--primary);
-}
-
-.skill-menu-fixed .skill-src.src-agents {
-  background: var(--warning-bg, #fffbeb);
-  color: var(--warning, #d97706);
-}
-
-.skill-menu-fixed .skill-src.src-user {
-  background: var(--success-bg);
-  color: var(--success);
-}
-
-.skill-menu-fixed .skill-loading,
-.skill-menu-fixed .skill-empty {
-  color: var(--text-3);
-  font-style: italic;
-  cursor: default;
-}
-
-.skill-menu-fixed .skill-hint {
-  margin-top: 4px;
-  padding: 6px 8px 4px;
-  border-top: 1px solid var(--border);
-  font-size: 10px;
-  color: var(--text-3);
-  line-height: 1.5;
-}
-
-.skill-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 12px;
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-12);
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: var(--font-12);
-  font-weight: 500;
-  user-select: none;
-  cursor: pointer;
-  transition: 0.12s;
-  flex-shrink: 0;
-}
-
-.skill-trigger:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: var(--primary-bg);
-}
-
-.skill-count {
-  padding: 0 5px;
-  font-size: 10px;
-  color: var(--text-3);
-  background: var(--surface-2);
-  border-radius: var(--radius-2);
-  line-height: 14px;
-  flex-shrink: 0;
-}
-
-.skill-menu-head {
-  padding: 4px 8px;
-  margin-bottom: 4px;
-  font-size: 10px;
-  color: var(--text-3);
-  border-bottom: 1px solid var(--border);
-}
-
-.skill-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
-  background: var(--primary);
-  color: #fff;
-  border-radius: var(--radius-8);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.skill-badge-empty {
-  background: var(--border-2);
-  color: var(--text-3);
-}
-
-.skill-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 9999;
-  min-width: 220px;
-  max-height: 320px;
-  overflow-y: auto;
-  padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-8);
-  box-shadow: 0 8px 24px rgb(15 30 60 / 15%);
-}
-
-.skill-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
-  border-radius: var(--radius-4);
-  font-size: 12px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.skill-row:hover {
-  background: var(--surface-2);
-}
-
-.skill-row input {
-  margin: 0;
-  accent-color: var(--primary);
-}
-
-.skill-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.skill-src {
-  flex-shrink: 0;
-  padding: 1px 5px;
-  border-radius: var(--radius-2);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.skill-src.src-base {
-  background: var(--primary-bg);
-  color: var(--primary);
-}
-
-.skill-src.src-user {
-  background: var(--success-bg);
-  color: var(--success);
-}
-
-.skill-loading,
-.skill-empty {
-  color: var(--text-3);
-  font-style: italic;
-  cursor: default;
-}
-
-.skill-loading:hover,
-.skill-empty:hover {
-  background: transparent;
-}
-
-.skill-hint {
-  margin-top: 4px;
-  padding: 6px 8px 4px;
-  border-top: 1px solid var(--border);
-  font-size: 10px;
-  color: var(--text-3);
-  line-height: 1.5;
-}
-
 .tpl-bar {
   display: flex !important;
   align-items: center !important;
@@ -535,64 +198,6 @@ function onGlobalMousedown(e: MouseEvent) {
   border-color: var(--danger) !important;
 }
 
-.tpl-bar .skill-trigger {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  height: 28px !important;
-  padding: 0 10px 0 8px !important;
-  border-radius: 6px !important;
-  border: 1px solid var(--border) !important;
-  background: var(--surface-2) !important;
-  color: var(--text-2) !important;
-  font-size: 12px !important;
-  font-family: inherit !important;
-  cursor: pointer !important;
-  transition: all 0.15s ease !important;
-  flex-shrink: 0 !important;
-}
-
-.tpl-bar .skill-trigger:hover {
-  color: var(--text) !important;
-  border-color: var(--border-2) !important;
-}
-
-.tpl-bar .skill-trigger-label {
-  display: inline-block !important;
-  color: inherit !important;
-  white-space: nowrap !important;
-}
-
-.tpl-bar .skill-badge {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  min-width: 18px !important;
-  height: 18px !important;
-  padding: 0 5px !important;
-  border-radius: 10px !important;
-  background: var(--primary) !important;
-  color: var(--bg) !important;
-  font-size: 10px !important;
-  font-weight: 700 !important;
-  font-family: var(--mono, monospace) !important;
-  line-height: 1 !important;
-}
-
-.tpl-bar .skill-badge-empty {
-  background: var(--surface) !important;
-  color: var(--text-3) !important;
-  box-shadow: inset 0 0 0 1px var(--border) !important;
-}
-
-.tpl-bar .skill-count {
-  display: inline-block !important;
-  color: var(--text-3) !important;
-  font-size: 11px !important;
-  font-family: var(--mono, monospace) !important;
-  margin-left: 2px !important;
-}
-
 .tpl-bar .tpl-chip {
   display: inline-flex !important;
   align-items: center !important;
@@ -632,111 +237,18 @@ function onGlobalMousedown(e: MouseEvent) {
 .tpl-bar button.ghost-btn,
 .tpl-bar button.primary-btn,
 .tpl-bar button.tpl-chip,
-.tpl-bar button.skill-trigger {
-  display: inline-flex !important;
-  flex-direction: row !important;
-  flex-wrap: nowrap !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 6px !important;
-  white-space: nowrap !important;
-  word-break: keep-all !important;
-  writing-mode: horizontal-tb !important;
-  height: 28px !important;
-  line-height: 1 !important;
-  padding: 0 10px !important;
-  box-sizing: border-box !important;
-  vertical-align: middle !important;
-}
-
 .tpl-bar button.ghost-btn > svg,
 .tpl-bar button.primary-btn > svg,
-.tpl-bar button.skill-trigger > svg,
-.tpl-bar button.ghost-btn > .ico,
-.tpl-bar button.primary-btn > .ico,
-.tpl-bar button.ghost-btn > .ico-svg,
-.tpl-bar button.primary-btn > .ico-svg {
-  display: inline-block !important;
-  width: 14px !important;
-  height: 14px !important;
-  flex: 0 0 14px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  vertical-align: middle !important;
-  stroke: currentColor !important;
-  fill: none !important;
-}
-
 .tpl-bar button.ghost-btn > span,
 .tpl-bar button.primary-btn > span,
-.tpl-bar button.skill-trigger > span {
-  display: inline-block !important;
-  flex: 0 0 auto !important;
-  white-space: nowrap !important;
-  line-height: 1 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-}
-
 .tpl-bar button.ghost-btn,
 .tpl-bar button.primary-btn,
-.tpl-bar button.skill-trigger {
-  display: inline-flex !important;
-  flex-direction: row !important;
-  flex-wrap: nowrap !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 6px !important;
-  width: auto !important;
-  min-width: auto !important;
-  max-width: none !important;
-  height: 28px !important;
-  white-space: nowrap !important;
-  overflow: visible !important;
-  box-sizing: border-box !important;
-  padding: 0 10px !important;
-  line-height: 1 !important;
-}
-
 .tpl-bar button.ghost-btn > *,
 .tpl-bar button.primary-btn > *,
-.tpl-bar button.skill-trigger > * {
-  display: inline-flex !important;
-  flex-direction: row !important;
-  flex-wrap: nowrap !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: auto !important;
-  height: auto !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  flex-shrink: 0 !important;
-  white-space: nowrap !important;
-  vertical-align: middle !important;
-  line-height: 1 !important;
-}
-
 .tpl-bar button.ghost-btn > svg,
 .tpl-bar button.primary-btn > svg,
-.tpl-bar button.skill-trigger > svg {
-  width: 14px !important;
-  height: 14px !important;
-  flex: 0 0 14px !important;
-  stroke: currentColor !important;
-  fill: none !important;
-}
-
 .tpl-bar button.ghost-btn > span,
 .tpl-bar button.primary-btn > span,
-.tpl-bar button.skill-trigger > span {
-  display: inline-block !important;
-  flex: 0 0 auto !important;
-  width: auto !important;
-  white-space: nowrap !important;
-  color: inherit !important;
-  font-size: 12px !important;
-}
-
 .tpl-bar .niuma-toggle input {
   accent-color: var(--primary);
   cursor: pointer;

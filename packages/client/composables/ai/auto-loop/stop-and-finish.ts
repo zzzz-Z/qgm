@@ -80,9 +80,6 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
       } catch { /* ignore */ }
       return
     }
-    try { inst.stallRounds.value = 0 } catch { /* ignore */ }
-    try { inst.lastFpKey.value = '' } catch { /* ignore */ }
-    try { inst.fpStallCount.value = 0 } catch { /* ignore */ }
     disarmTimer(inst)
     inst.pendingRound.value = null
     const wasRollback = inst.stopRequest.value === 'rollback'
@@ -105,8 +102,6 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
         // 失败链路 trace ref：把终止时的关键状态打包，便于事后复盘
         lastExec: inst.lastExec.value,
         lastHash: inst.lastHash.value,
-        toleranceLeft: inst.toleranceLeft.value,
-        tokenDelta: Math.max(0, inst.latestTokens.value - inst.startTokens.value),
         loopSessionId: '',
       },
     })

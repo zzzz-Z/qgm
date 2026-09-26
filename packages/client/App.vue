@@ -2,7 +2,6 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import ScriptPanel from './components/script/ScriptPanel.vue'
-import GeneratePanel from './components/generate/GeneratePanel.vue'
 import { DEFAULT_SESSION_PROMPT } from './composables/ai/loopLogic'
 import { copyAndFill, DEFAULT_URL, getWindowBySid, listWindows, MODELS, openDeepseek, setActiveWinSid, useDeepseekUrl } from './composables/ai/useDeepseekUrl'
 import { useScriptInbox } from './composables/runner/useScriptInbox'
@@ -88,8 +87,6 @@ const absenceDismissed = ref(false)
 const transportKind = ref<'tampermonkey' | 'headless'>(
   (() => { try { return localStorage.getItem('__ai_transport') === 'headless' ? 'headless' : 'tampermonkey' } catch { return 'tampermonkey' } })()
 )
-/** 问 AI 弹窗开关 */
-const askOpen = ref(false)
 /** 主题（light / dark） */
 const theme = ref<'light' | 'dark'>(loadTheme())
 /** URL 是否处于编辑态 */
@@ -219,7 +216,7 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
     const code = String(d.code || '')
     const lang = (d.lang === 'bash' ? 'bash' : d.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
     const site = String(d.site || e.origin || '')
-    const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined })
+    const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined, isDone: Boolean(d.isDone), doneMd: d.doneMd ? String(d.doneMd) : undefined })
     if (item) {
       const lineCount = code.split('\n').length
       toast(`📥 脚本 · ${lang} · ${lineCount} 行${item.desc ? ` · ${item.desc}` : ''}`, 'info', 3500)
@@ -425,12 +422,21 @@ async function onOpenAiWin() {
   }
 }
 /**
- * 响应 Esc Close
- * @param e - e
+ * 打开一个全新的 AI 会话窗口（强制新会话，无论当前是否有会话）
  */
-function onEscClose(e: KeyboardEvent) {
-  if (e.key !== 'Escape') return
-  if (askOpen.value) askOpen.value = false
+async function onNewSession() {
+  const w = openDeepseek(DEFAULT_URL)
+  if (!w) {
+    toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
+    return
+  }
+  toast('已打开新会话，正在发送「开始聊天」…', 'info', 2000)
+  const r = await copyAndFill(DEFAULT_SESSION_PROMPT, { count: false })
+  if (r === 'sent' || r === 'opened') {
+    toast('已发送「开始聊天」，等待会话地址回写', 'success', 2500)
+  } else {
+    toast('发送失败，请检查 AI 窗口是否就绪', 'warn', 4000)
+  }
 }
 
 /**
@@ -496,7 +502,6 @@ watch(() => _absTaskState.value.tiers, (tiers) => {
 
 // [use-event-listener-v1] 窗口级监听改由 @vueuse 统一注册，unmount 自动清理
 useEventListener(window, 'message', onSessionIdMessage)
-useEventListener(window, 'keydown', onEscClose)
 useEventListener(window, 'keydown', onShiftQuestion)
 
 // auto resend after 3 min no reply
@@ -671,6 +676,18 @@ function onTransportChange(e: Event) {
             <line x1="10" y1="14" x2="21" y2="3" />
           </svg>
         </button>
+        <button
+          v-tooltip="'打开一个新的 AI 会话窗口（强制新会话，不影响当前会话）'"
+          aria-label="打开新会话"
+          class="new-session-toggle"
+          @click="onNewSession"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            <line x1="12" y1="8" x2="12" y2="13" />
+            <line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
+          </svg>
+        </button>
       </div>
       <label class="transport-switch" title="AI 传输链路（切换后自动刷新）">
         <select :value="transportKind" aria-label="AI 传输链路" @change="onTransportChange">
@@ -732,27 +749,10 @@ function onTransportChange(e: Event) {
   <div class="layout-row">
     <div class="layout-main">
       <main class="main">
-        <ScriptPanel @open-ask="askOpen = true" />
+        <ScriptPanel />
       </main>
     </div>
   </div>
-  <Teleport to="body">
-    <Transition name="ask-modal">
-      <div v-if="askOpen" class="ask-modal-mask" @click.self="askOpen = false">
-        <div class="ask-modal-card">
-          <div class="ask-modal-head">
-            <span class="ask-modal-title">问 AI</span>
-            <button v-tooltip="'关闭（Esc）'" aria-label="关闭（Esc）" class="ask-modal-close" @click="askOpen = false">
-              ×
-            </button>
-          </div>
-          <div class="ask-modal-body">
-            <GeneratePanel v-if="askOpen" @sent="askOpen = false" />
-          </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
   <KeyboardHelp v-if="keyboardHelpOpen" @close="keyboardHelpOpen = false" />
   <ToastHost />
   <TooltipHost />

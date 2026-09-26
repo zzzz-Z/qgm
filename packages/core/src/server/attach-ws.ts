@@ -130,9 +130,9 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         const stopReply = pool.startReplyPoll(sid, (reply) => {
           try {
             if (reply.kind === 'script' && reply.code) {
-              send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now() } } })
+              send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now(), isDone: Boolean((reply as { isDone?: boolean }).isDone), doneMd: String((reply as { doneMd?: string }).doneMd || ''), reasoning: String((reply as { reasoning?: string }).reasoning || '') } } })
             } else {
-              send({ t: 'headless:reply', sid, reply: { kind: reply.kind, text: reply.text } })
+              send({ t: 'headless:reply', sid, reply: { kind: reply.kind, text: reply.text, reasoning: String((reply as { reasoning?: string }).reasoning || '') } })
             }
           } catch {}
         })

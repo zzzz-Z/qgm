@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
 import { getRoot } from '../config.js'
-import { injectAiJsdoc, scanNativeApisWithFallback, scanScriptHead } from './ai-guard.js' // [ai-guard-v1]
+import { injectAiJsdoc, scanNativeApisWithFallback, scanScriptHead } from './ai-guard.js'; // [ai-guard-v1]
 import { runProcess } from '../process/proc.js'
 import { buildWrapperCode } from './run-script-wrapper.js'
 
@@ -25,7 +25,6 @@ export interface RunResult {
  * @param data - data
  */
 export async function runScript(scriptPath: string, timeoutMs = 60_000, signal?: AbortSignal, overlayPath?: string, toolLogPath?: string, onChunk?: (stream: 'stdout' | 'stderr', data: string) => void, sandbox?: string): Promise<RunResult> {
-  // [ai-guard-v1] pre-execution 扫描 + __AI__ JSDoc 注入（RULES.md §4.2/§4.3）
   try {
     const raw = fs.readFileSync(scriptPath, 'utf8')
     // [script-head-contract-v1] 脚本头契约（先于 API 扫描与注入）
@@ -37,7 +36,7 @@ export async function runScript(scriptPath: string, timeoutMs = 60_000, signal?:
         stderr: JSON.stringify({
           error: 'SCRIPT_META_MISSING',
           detail: head.reason,
-          rule: 'RULES.md §1.4',
+          rule: 'SYSTEM.md',
         }),
       }
     }
@@ -49,7 +48,7 @@ export async function runScript(scriptPath: string, timeoutMs = 60_000, signal?:
         stderr: JSON.stringify({
           error: 'NATIVE_API_FORBIDDEN',
           detail: scan.matches.join(', '),
-          rule: 'RULES.md §4.1',
+          rule: 'SYSTEM.md',
         }),
       }
     }

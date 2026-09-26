@@ -16,7 +16,6 @@ const shortcuts: Shortcut[] = [
   { group: '脚本', keys: 'Ctrl/Cmd + Enter', label: '运行编辑器内容' },
   { group: '脚本', keys: 'Alt + R', label: '打开规则/追加规则' },
   { group: '脚本', keys: 'Ctrl/Cmd + Enter', label: '提示词面板内复制' },
-  { group: 'GeneratePanel', keys: 'Alt + Ctrl + A', label: '添加全部文件' },
 ]
 
 /** 按分组聚合后的列表 */

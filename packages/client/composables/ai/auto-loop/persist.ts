@@ -8,7 +8,6 @@ interface PersistShape {
   loopGoal: string
   loopRound: number
   loopStartCommit: string
-  loopStartTokens: number
   stopReason: string
   state: LoopState
 }
@@ -30,7 +29,6 @@ export function persist(inst: LoopInstance) {
     loopGoal: inst.goal.value,
     loopRound: inst.round.value,
     loopStartCommit: inst.startCommit.value,
-    loopStartTokens: inst.startTokens.value,
     stopReason: inst.stopReason.value,
     state: inst.state.value,
   }
@@ -53,7 +51,6 @@ export function restore(inst: LoopInstance) {
       inst.goal.value = snap.loopGoal
       inst.round.value = snap.loopRound
       inst.startCommit.value = snap.loopStartCommit
-      inst.startTokens.value = snap.loopStartTokens
       // [U4] 携带进度信息，方便用户判断是否「再来一次」
       inst.stopReason.value = `页面刷新中断 · 已完成 ${snap.loopRound} 轮 · 可点「再来一次」继续`
       inst.state.value = 'stopped'

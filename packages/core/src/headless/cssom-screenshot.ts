@@ -35,7 +35,7 @@ interface CdpMatchedResponse {
 
 /**
  * 用 CDP 的 CSS.getMatchedStylesForNode 拿「哪条规则生效、来自哪张样式表」。
- * 替代 skills/RULES.md 第八章的 DevTools 人肉排查。
+ * 替代 SYSTEM.md 第八章的 DevTools 人肉排查。
  */
 
 /**

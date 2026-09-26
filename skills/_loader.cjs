@@ -47,7 +47,10 @@ const KEYWORDS = {
 }
 
 // 常驻元规则：每轮无条件注入（决策准则/脚本契约/脚本标准/环境自检）
-const ALWAYS_KEYS = ['RULES']
+// [system-md-migrated] RULES.md 已迁移到根 SYSTEM.md；该文件现由 useDeepseekUrl
+// 的 _prependFirstPromptRules 在会话首问时拼入 prompt，不再走 skills loader。
+// 保留数组但留空，未来如需追加常驻 skill 在此登记（key 需与 REGISTRY 一致）。
+const ALWAYS_KEYS = []
 function isDefault(key) { return ALWAYS_KEYS.includes(key) }
 
 function parseFrontmatter(text) {

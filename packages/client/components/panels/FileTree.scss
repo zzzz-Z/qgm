@@ -1,0 +1,730 @@
+// [filetree-style-v1] 从 FileTree.vue 抽出：树 / 拖拽 ghost / 文件弹窗样式（原 scoped 语义保留在引用处）
+:deep(.ft-icon) {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.tree {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+
+  padding: 4px 0;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.tree.is-root {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.tree.is-root > .tree-head .subtitle {
+  font-size: 10px;
+  color: var(--text-3);
+  opacity: 0.7;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  margin-left: 4px;
+}
+.empty-workspace {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 20px;
+  color: var(--text-3);
+}
+.empty-workspace-icon {
+  width: 48px;
+  height: 48px;
+  opacity: 0.4;
+}
+.empty-workspace-text {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.empty-workspace-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-6);
+  background: transparent;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.empty-workspace-btn:hover {
+  background: var(--primary-bg);
+}
+.tree-head {
+  border-bottom: 0;
+  margin-bottom: 2px;
+  padding: 4px 6px 6px;
+}
+
+.tree-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  padding: 5px 10px 7px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.tip {
+  font-size: 13px;
+  color: var(--text-3);
+  margin-left: auto;
+  opacity: 0.7;
+}
+.refresh {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-4);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.refresh:hover:not(:disabled) {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+.refresh:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.refresh-svg {
+  width: 14px;
+  height: 14px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.item {
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+
+  padding: 1px 8px 1px calc(var(--depth) * 16px + 8px);
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.08s;
+  position: relative;
+  white-space: nowrap;
+}
+.row:hover {
+  background: var(--surface-2);
+}
+.row.dir {
+  color: var(--text);
+  font-weight: 500;
+}
+.row.file {
+  color: var(--text-2);
+}
+.row.is-draggable {
+  cursor: grab;
+}
+.row.is-draggable:hover {
+  background: var(--primary-bg);
+}
+.row.is-draggable:active {
+  cursor: grabbing;
+}
+
+.guide {
+  position: absolute;
+  left: calc((var(--i) - 1) * 18px + 19px);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+  opacity: 0.8;
+}
+.row:hover ~ .guide,
+.row:hover .guide {
+  opacity: 1;
+  background: var(--primary);
+}
+
+.row:hover .guide {
+  opacity: 1;
+  background: var(--primary);
+}
+
+.arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-3);
+  transition: transform 0.15s ease;
+}
+.arrow .ft-icon {
+  width: 10px;
+  height: 10px;
+}
+.arrow.open {
+  transform: rotate(90deg);
+}
+.arrow.placeholder {
+  visibility: hidden;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+.icon :deep(.ft-icon) {
+  width: 16px;
+  height: 16px;
+}
+
+.name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+@keyframes badge-in {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 12px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.empty-icon {
+  width: 16px;
+  height: 16px;
+}
+.loading-children {
+  padding: 4px 10px 4px calc((var(--depth)) * 18px + 30px);
+  font-size: 13px;
+  color: var(--text-3);
+  font-style: italic;
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* [ws-browser-v1] */
+.ws-nav:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ws-input {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.ws-input:focus {
+  border-color: var(--primary);
+}
+
+html.ai-runner-dragging,
+html.ai-runner-dragging * {
+  cursor: grabbing;
+  user-select: none;
+}
+html.ai-runner-dragging,
+html.ai-runner-dragging body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.ai-runner-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 300px;
+  padding: 7px 14px;
+  background: var(--surface);
+  border: 1px solid rgb(37 99 235 / 30%);
+  border-radius: var(--radius-8);
+  box-shadow:
+    0 8px 24px rgb(15 30 60 / 18%),
+    0 0 0 3px rgb(37 99 235 / 8%);
+  /* P2-1 移除 backdrop-filter（GPU 性能负债）：backdrop-filter: blur(8px); */
+  color: var(--text);
+  font:
+    12px/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
+  transform: translate3d(0, 0, 0);
+  transition: opacity 0.12s ease;
+  will-change: transform;
+  user-select: none;
+}
+.ai-runner-drag-ghost .ghost-svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.ai-runner-drag-ghost .ghost-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   [button-theme] 按钮配色重做：暖橙强调 + 灰阶次按钮
+   参考 Claude Code / Codex 克制配色
+   ═══════════════════════════════════════════════════════════ */
+
+/* ——— 次按钮：透明底 + 细边框，hover 时淡淡提亮 ——— */
+.ghost-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  border-radius: var(--radius-6);
+  padding: 4px 10px;
+  font-size: var(--font-12);
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.ghost-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 8%);
+}
+.ghost-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ——— 终端内按钮 ——— */
+.term-btn {
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 8%);
+  color: var(--text-2);
+  border-radius: var(--radius-6);
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.term-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 14%);
+}
+.term-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.term-btn.copy,
+.term-btn.ask-panel {
+  color: var(--text-2);
+  border-color: rgb(255 255 255 / 8%);
+}
+.term-btn.copy:hover:not(:disabled),
+.term-btn.ask-panel:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 14%);
+}
+
+/* ——— 芯片 / 下拉 / tab ——— */
+.tpl-chip {
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 8%);
+  color: var(--text-2);
+  border-radius: var(--radius-6);
+}
+.tpl-chip:hover {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 14%);
+}
+.draft-select {
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 8%);
+  color: var(--text-2);
+  border-radius: var(--radius-6);
+}
+.draft-select:hover {
+  border-color: rgb(255 255 255 / 14%);
+}
+
+/* ——— primary 系列（运行/主操作）：暖橙实底 ——— */
+.primary-btn.run {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: none;
+  border: 0;
+}
+.primary-btn.run:hover:not(:disabled) {
+  background: var(--primary-hover);
+  box-shadow: none;
+}
+
+/* 运行按钮（takeover 态）：暖橙描边，非实心，更克制 */
+.primary-btn.takeover {
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  box-shadow: none;
+}
+.primary-btn.takeover:hover:not(:disabled) {
+  background: rgb(217 119 87 / 12%);
+  color: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+/* 停止 / 暂停：柔和红描边 */
+.primary-btn.stop {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  box-shadow: none;
+}
+.primary-btn.stop:hover:not(:disabled) {
+  background: rgb(224 108 117 / 14%);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+/* ——— loop-btn 系列 ——— */
+.loop-btn {
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 8%);
+  color: var(--text-2);
+  border-radius: var(--radius-6);
+  box-shadow: none;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.loop-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 14%);
+}
+.loop-btn:active:not(:disabled) {
+  box-shadow: none;
+}
+.loop-btn:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px rgb(217 119 87 / 30%);
+}
+.loop-btn:disabled {
+  opacity: 0.4;
+  background: transparent;
+  color: var(--text-3);
+}
+
+.loop-btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  box-shadow: none;
+}
+.loop-btn.primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+  color: #fff;
+  box-shadow: none;
+}
+.loop-btn.kill,
+.loop-btn.rollback {
+  background: transparent;
+  border-color: rgb(224 108 117 / 55%);
+  color: var(--danger);
+  box-shadow: none;
+}
+.loop-btn.kill:hover:not(:disabled),
+.loop-btn.rollback:hover:not(:disabled) {
+  background: rgb(224 108 117 / 14%);
+  border-color: var(--danger);
+  color: #fff;
+  box-shadow: none;
+}
+
+/* ——— 决策按钮 ——— */
+.decision-btn {
+  background: rgb(217 119 87 / 12%);
+  color: var(--primary);
+  border-color: var(--primary);
+  font-weight: 600;
+}
+.decision-btn:hover:not(:disabled) {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+/* ——— 焦点环统一暖橙 ——— */
+.primary-btn:focus-visible,
+.term-btn:focus-visible,
+.ghost-btn:focus-visible,
+.tpl-chip:focus-visible,
+.draft-select:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px rgb(217 119 87 / 35%);
+}
+
+/* ——— 图标按钮（App 头部）——— */
+.theme-toggle,
+.trace-toggle,
+.settings-toggle,
+.ask-toggle,
+.timeline-toggle {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.theme-toggle:hover,
+.trace-toggle:hover,
+.settings-toggle:hover,
+.ask-toggle:hover,
+.timeline-toggle:hover {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 10%);
+}
+
+/* ——— 主色大按钮（FileList.save-btn / GeneratePanel.btn-primary）——— */
+.save-btn,
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+  border: 0;
+  box-shadow: none;
+  border-radius: var(--radius-6);
+}
+.save-btn:hover:not(:disabled),
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  box-shadow: none;
+}
+
+/* ——— FileList 撤回按钮 ——— */
+.undo-btn {
+  background: transparent;
+  border: 0;
+  color: var(--text-3);
+}
+.undo-btn:hover:not(:disabled) {
+  background: rgb(224 108 117 / 14%);
+  color: var(--danger);
+}
+
+/* ——— FileTree 刷新 ——— */
+.refresh {
+  background: transparent;
+  border: 0;
+  color: var(--text-3);
+}
+.refresh:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+}
+
+/* [file-dialog] 双击文件详情弹窗 */
+.ft-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(0 0 0 / 55%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ft-card {
+  width: min(680px, 92vw);
+  max-height: 82vh;
+  min-height: 40vh;
+  background: var(--surface, #1b1b1b);
+  border: 1px solid var(--border, #333);
+  border-radius: var(--radius-10);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 40%);
+}
+.ft-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, #333);
+}
+.ft-path {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-2, #aaa);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ft-btn {
+  background: transparent;
+  color: var(--text-2, #aaa);
+  border: 1px solid var(--border, #333);
+  border-radius: var(--radius-6);
+  font-size: 13px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.ft-btn:hover {
+  color: var(--text-1, #fff);
+  border-color: var(--text-3, #666);
+  background: rgb(255 255 255 / 6%);
+}
+.ft-close {
+  padding: 3px 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+.ft-body {
+  padding: 8px 12px 12px;
+  overflow: auto;
+}
+.ft-loading,
+.ft-error {
+  font-size: 13px;
+  color: var(--text-3, #888);
+  padding: 12px 0;
+}
+.ft-error {
+  color: #ef4444;
+}
+.ft-pre {
+  margin: 0;
+  white-space: pre;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-1, inherit);
+}
+
+/* [ft-hljs] 弹窗内容 hljs 颜色（与 DiffViewer 一致） */
+.tree-head .refresh {
+  margin-left: auto;
+}
+/* [root-row-style] */
+.tree-head .root-row {
+  padding: 0;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.tree-head .root-row .name {
+  font-weight: 600;
+}
+
+/* [ft-hljs-global] FileTree 弹窗高亮颜色（全局，避免 Teleport + scoped :deep 失配） */
+.ft-pre .hljs-keyword,
+.ft-pre .hljs-literal {
+  color: #569cd6;
+}
+.ft-pre .hljs-string {
+  color: #ce9178;
+}
+.ft-pre .hljs-number {
+  color: #b5cea8;
+}
+.ft-pre .hljs-comment {
+  color: #6a9955;
+  font-style: italic;
+}
+.ft-pre .hljs-function,
+.ft-pre .hljs-title {
+  color: #dcdcaa;
+}
+.ft-pre .hljs-variable,
+.ft-pre .hljs-params,
+.ft-pre .hljs-attr {
+  color: #9cdcfe;
+}
+.ft-pre .hljs-built_in,
+.ft-pre .hljs-type {
+  color: #4ec9b0;
+}

@@ -4,7 +4,7 @@ import type { LoopInstance } from './types.js'
 import { toast } from '../../ui/useToast'
 import { getActiveWin } from '../useDeepseekUrl'
 import { buildInitialPrompt } from '../loopLogic.js'
-import { syncTasks } from '../data/useTaskSync'
+import { syncTasks } from '../../data/useTaskSync'
 
 type TraceHook = ReturnType<typeof import('../../ui/useTraceLog.js').useTraceLog>
 type RunHookFn = typeof import('./hooks.js').runHook
@@ -63,8 +63,6 @@ export function createStartFamily(deps: StartFamilyDeps) {
     inst.goal.value = goal
     inst.round.value = 1
     inst.startCommit.value = head
-    inst.startTokens.value = inst.latestTokens.value
-    inst.toleranceLeft.value = LOOP_TOLERANCE_BUDGET
     inst.stopRequest.value = 'none'
     inst.stopReason.value = ''
     inst.lastHash.value = ''

@@ -1,4 +1,4 @@
-// [ai-guard-v1] RULES.md §4.2/§4.3 硬执行器：pre-execution 原生 API 扫描 + __AI__ JSDoc 幂等注入
+// [ai-guard-v1] SYSTEM.md §4.2/§4.3 硬执行器：pre-execution 原生 API 扫描 + __AI__ JSDoc 幂等注入
 
 /** 扫描结果：是否命中禁用的 node 原生 API，以及命中的具体模式 */
 export interface ScanResult {
@@ -6,7 +6,7 @@ export interface ScanResult {
   matches: string[]
 }
 
-/** 原生 API 黑名单（RULES.md §4.1）：fs / path / child_process / os / process.exit */
+/** 原生 API 黑名单（SYSTEM.md §4.1）：fs / path / child_process / os / process.exit */
 const FORBIDDEN: { name: string, re: RegExp }[] = [
   { name: 'require(fs)', re: /\brequire\s*\(\s*['"](?:node:)?fs['"]\s*\)/ },
   { name: 'import from fs', re: /\bimport\s+(?:[^\s;][^;\n]*)?\bfrom\s+['"](?:node:)?fs['"]/ },
@@ -24,14 +24,14 @@ function stripComments(code: string): string {
   return code.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ')
 }
 
-/** 扫描脚本源码，返回是否命中禁用 API 及命中清单（RULES.md §4.3） */
-// [script-head-contract-v1] RULES.md §1.4 脚本头契约：shebang 唯一合法 + @desc/@why 必需
+/** 扫描脚本源码，返回是否命中禁用 API 及命中清单（SYSTEM.md §4.3） */
+// [script-head-contract-v1] SYSTEM.md §1.4 脚本头契约：shebang 唯一合法 + @desc/@why 必需
 export interface HeadResult {
   ok: boolean
   reason?: string
 }
 
-/** 校验脚本头（RULES.md §1.4）：shebang 只允许 node；@desc 与 @why 必需 */
+/** 校验脚本头（SYSTEM.md §1.4）：shebang 只允许 node；@desc 与 @why 必需 */
 export function scanScriptHead(code: string): HeadResult {
   let first = String(code).split(/\r?\n/, 1)[0] || ''
   if (first.charCodeAt(0) === 0xFEFF) first = first.slice(1)
@@ -64,7 +64,7 @@ export function scanNativeApis(code: string): ScanResult {
   return { hit: matches.length > 0, matches }
 }
 
-// [ai-guard-fallback-v2] RULES.md §4.4 降级协议：显式标记才允许豁免原生 API
+// [ai-guard-fallback-v2] SYSTEM.md §4.4 降级协议：显式标记才允许豁免原生 API
 // 命中原生 API 的行，向上回溯 3 行内若出现 `// __AI__.xxx not found`，该行豁免
 /** §4.4 降级标记匹配：`// __AI__.xxx not found` 形式的显式豁免注释 */
 const FALLBACK_RE = /\/\/\s*(?:[\u26A0!]\s*)?__AI__\.\w+\s+not found/i
@@ -97,10 +97,10 @@ export function scanNativeApisWithFallback(code: string): ScanResult {
 /** 注入标识：命中后 injectAiJsdoc 幂等 */
 const INJECT_MARK = '[__AI__-injected-v1]'
 
-/** 注入到脚本顶部的 __AI__ API 速查 JSDoc（RULES.md §4.2） */
+/** 注入到脚本顶部的 __AI__ API 速查 JSDoc（SYSTEM.md §4.2） */
 const AI_JSDOC = [
   '/**',
-  ' * [__AI__ 运行时沙箱 · RULES.md §4]',
+  ' * [__AI__ 运行时沙箱 · SYSTEM.md §4]',
   ' * 禁用：node 原生 fs / path / child_process / os / process.exit',
   ' * 可用：__AI__.readText(p) / writeText(p, s) / exists(p) / readJSON(p)',
   ' *       __AI__.atomicWrite(p, s) / patchFile(p, { find, replace })',
@@ -109,7 +109,7 @@ const AI_JSDOC = [
   ' */',
 ].join('\n')
 
-/** 将 __AI__ 速查 JSDoc 幂等注入脚本头部；保留 shebang 行在其后（RULES.md §4.2） */
+/** 将 __AI__ 速查 JSDoc 幂等注入脚本头部；保留 shebang 行在其后（SYSTEM.md §4.2） */
 export function injectAiJsdoc(code: string): string {
   if (code.includes(INJECT_MARK)) return code
   const block = `${AI_JSDOC}\n// ${INJECT_MARK}\n`
