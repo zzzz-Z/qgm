@@ -74,5 +74,3 @@ export async function runHook(event: HookEvent, payload: unknown): Promise<HookR
 
   return { event, action: 'ok', hooksRun: run }
 }
-
-// [fn-decl-v1]-hooks 箭头函数改 function 声明
