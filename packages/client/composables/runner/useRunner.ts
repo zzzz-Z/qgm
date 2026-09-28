@@ -102,10 +102,13 @@ function stop() {
 }
 
 /**
- * 运行
- * @param opts - opts
- * @param runKey - run Key
- * @param autoFeedback - auto Feedback
+ * 执行一次脚本运行（NDJSON 流式接收 + 结果落状态）
+ * [WHY] opts.script 允许临时脚本（AI 回填），否则跑编辑器内容；runKey 便于把同一轮事件聚到一张卡上
+ * [CONSTRAINT] 空脚本或已有运行中直接返回；每轮清空 result/changes/liveStdout/liveStderr/doneSummary
+ * [CHANGE-IMPACT] 会写 lastRunCode / running / result / changes，UI 状态依赖此路径；异常走 catch 置 error 帧
+ * @param opts.script 覆盖编辑器内容的一次性脚本；缺省读 script.value
+ * @param opts.runKey 事件聚合 key；缺省自动生成 `run-<ts>-<rand>`
+ * @param opts.autoFeedback 置位后本轮结束自动回传结果（一次性）
  */
 async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boolean }) {
   if (opts?.autoFeedback) autoFeedbackRequested.value = true
@@ -304,8 +307,10 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
 }
 
 /**
- * 执行 rollback
- * @param file - file
+ * 回滚单个文件的变更到本轮运行前状态
+ * [CONSTRAINT] 无 result.value 时静默 no-op；rolling[file] 置位期间 UI 会显示行级 loading
+ * [CHANGE-IMPACT] 成功时会从 changes 中移除该文件；失败时保留并返回 data（含错误信息）
+ * @param file 文件相对路径；与 /__ai/rollback 的 file 字段一致
  */
 async function rollback(file: string) {
   if (!result.value) return
