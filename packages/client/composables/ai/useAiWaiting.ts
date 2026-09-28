@@ -15,14 +15,13 @@ const waiting = ref(false)
  * 暂停闸：阻断续推 / 发脚本 / 等待
  * [WHY] 走 vueuse useSessionStorage 替换原手工 sessionStorage + watch：
  * 自动惰性读写 + 序列化 + storage 事件跨标签页同步
- * [CONSTRAINT] 用 '1' / '0' 兼容历史持久化格式（老版本写入 String(v ? '1' : '0')）；
- * 未读过 sessionStorage 时初值为 false，与原行为一致
+ * [CONSTRAINT] 类型必须是 boolean 与下游引用一致；serializer 用 '1'/'0' 兼容历史持久化格式
  * [CHANGE-IMPACT] 多标签页共享 sessionStorage 时，一处改暂停会立即同步到另一处
  */
-export const loopPaused = useSessionStorage<string>(LS_LOOP_PAUSED, '0', {
+export const loopPaused = useSessionStorage<boolean>(LS_LOOP_PAUSED, false, {
   serializer: {
-    read: raw => (raw === '1' ? '1' : '0'),
-    write: v => (v === '1' ? '1' : '0'),
+    read: raw => raw === '1',
+    write: v => (v ? '1' : '0'),
   },
 })
 
