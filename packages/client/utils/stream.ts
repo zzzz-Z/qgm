@@ -1,7 +1,12 @@
 /**
- * 读取 Ndjson
- * @param body - body
- * @param onFrame - on Frame
+ * 逐行解析 NDJSON 流并回调每一帧
+ * [WHY] 服务端 /__ai/run 返回 NDJSON（每行一个 JSON 对象）；此工具收敛流式解析细节
+ * [CONSTRAINT] 依赖 stream:true 解码处理跨 chunk 的多字节字符；
+ * 行末无换行的尾帧在流关闭时会被丢弃（服务端需保证最后一帧带换行）
+ * [CHANGE-IMPACT] 被 useRunner 消费；回调抛错会中断整个流的读取
+ * @param body HTTP 响应的 ReadableStream
+ * @param onFrame 每解析出一帧时回调
+ * @param signal 可选 AbortSignal；aborted 时提前跳出读取循环
  */
 export async function readNdjson<T>(
   body: ReadableStream<Uint8Array>,
