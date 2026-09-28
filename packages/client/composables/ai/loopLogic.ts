@@ -5,7 +5,6 @@
 // 修改熔断参数/判定规则只需改这里，行为被 loopLogic.node-test.ts 锁定。
 // ============================================================================
 
-/** 循环最大轮数（v6 §6.9 第 3 条） */
 interface FingerprintLite { file: string, line: number, symbol: string, kind?: string }
 
 /**
@@ -13,13 +12,8 @@ interface FingerprintLite { file: string, line: number, symbol: string, kind?: s
  *  循环终止改由「轮次上限」（LOOP_HARD_MAX_ROUNDS）负责。
  */
 export const LOOP_MAX_ROUNDS = Number.POSITIVE_INFINITY
-/** 循环内 token 增量警告阈值（v6 §6.9 第 4 条），独立于会话累计 */
 /**
- * 循环内 token 增量熔断阈值：在警告基础上加 10% 缓冲，
- *  容忍 tokenEstimator 的启发式估算误差，避免误熔断
- */
-/**
- * [loop-hard-limit-v1] 循环硬上限：即使牛马模式也生效，防止"一直发不停"
+ * [loop-hard-limit-v1] 循环硬上限：防止"一直发不停"
  * 双上限先到者触发 finish('hard-timeout' | 'hard-rounds')
  */
 export const LOOP_HARD_MAX_MS = 30 * 60 * 1000
@@ -27,20 +21,19 @@ export const LOOP_HARD_MAX_MS = 30 * 60 * 1000
 export const LOOP_HARD_MAX_ROUNDS = 50
 /** [fix-rotate-threshold] 循环内 token 达此值触发会话轮转（独立于熔断） */
 export const LOOP_ROTATE_THRESHOLD = 40_000
-/** 宽容预算：格式错误 OR 纯文本 OR 重复脚本共享（v6 §6.9 第 2 条） */
 /** 单轮等待 AI 回复超时（v6 §6.9 第 7 条）—— cjs 默认 90s */
 export const LOOP_ROUND_TIMEOUT_MS = 90_000
 /** bash 任务单轮超时：bash 通常更复杂，给 180s */
 export const LOOP_ROUND_TIMEOUT_BASH_MS = 180_000
-/** 回填给 AI 的输出尾部截断长度（v6 §6.5） */
 
 // DONE 严格识别（v6 §6.9 第 1 条）
 // 必须整段 trim 后恰为 DONE；防止「this task is done」「DONE！」误判终止。
 // 关键：DONE 必须独占一行，前后不允许出现其他可打印字符；
 // 仅允许前后空白/换行（^\s* 与 \s*$）。多行文本中夹带 DONE 不算终止信号。
 /**
- * 判断是否为 Strict Done
- * @param text - text
+ * 判断首行是否为严格的 DONE 标记（v6 §6.9 第 1 条）
+ * [WHY] 允许多行：首行 DONE，第二行起可跟总结（[done-with-summary] 归档用）
+ * [CONSTRAINT] 首行 trim 后必须恰为 DONE；'DONE!' / 'Task done' / '已完成' 均不识别
  */
 export function isStrictDone(text: string): boolean {
   // 默认模式 ^/$ 不跨行，'DONE\nDONE' 不匹配；'DONE\n' 仍可匹配（\n 属 \s）
@@ -50,36 +43,16 @@ export function isStrictDone(text: string): boolean {
   return /^\s*DONE\s*$/.test(firstNonEmpty)
 }
 
-// 轮后熔断判定：在「一轮已成功执行完、准备进入下一轮」前调用
-// 优先级与历史实现保持一致：token 熔断 > token 警告 > 轮数上限
-// 区分 token-warn（30k，UI 提示继续）与 token-budget（33k，熔断暂停）
-/** 轮次（类型别名） */
-
-/** [L4] 连续 N 轮零变更判定为停滞 */
-
-/** [L4b] 相同指纹连续 N 轮未变则停循环转诊断 */
-
-/** 指纹数组转稳定键（file:line:symbol 排序后拼接） */
-
-/** 相同指纹连续累加判定 */
-
-/**
- * 校验 Round Break
- * @param round - round
- * @param tokenDelta - token Delta
- * @param maxRounds - max Rounds
- */
-
-/** [L4] 每轮结束时更新停滞计数：有变更归零，无变更累加 */
-
 // 宽容预算判定：返回「重试（消耗一次）」或「熔断」
 type ToleranceResult
   = | { action: 'retry', remaining: number }
     | { action: 'break' }
 
 /**
- * 执行 decide Tolerance
- * @param leftBefore - left Before
+ * 消耗一次宽容预算；无余量则熔断
+ * [WHY] 用"重试"而非"静默跳过"，让 AI 有机会按契约重发；预算有限以防死循环
+ * [CONSTRAINT] 返回 remaining 便于调用方持久化到 loop 状态；leftBefore<=0 直接 break
+ * @param leftBefore 剩余宽容次数（调用方持有并递减）
  */
 export function decideTolerance(leftBefore: number): ToleranceResult {
   if (leftBefore > 0) return { action: 'retry', remaining: leftBefore - 1 }
@@ -89,8 +62,8 @@ export function decideTolerance(leftBefore: number): ToleranceResult {
 // 文本工具
 
 // 首轮 prompt：目标 + 输出契约（与 SYSTEM.md §1 对齐）
-// 契约文案：普通模式 DONE + 总结；牛马模式禁止 DONE
-/** 行集合 */
+// 契约文案：DONE + 总结
+/** 输出契约固定行（与 SYSTEM.md §1 契约部分对齐；DONE 规则见 CONTRACT_DONE_LINE） */
 const CONTRACT_LINES = [
   '',
   '【输出契约（必须严格遵守）】',
@@ -110,40 +83,40 @@ const CONTRACT_DONE_LINE = [
   '   违反格式会导致循环无法识别完成信号而持续发消息。',
 ].join('\n')
 
-/** 契约中的牛马模式标记行文本 */
-const CONTRACT_NIUMA_LINE = '5. 牛马模式：禁止输出 DONE；持续输出下一个可执行脚本推进项目优化，永不停下'
-
 /**
- * 构建 Session Prompt
- * @param niuma - niuma
+ * 构建新会话首问 prompt（含输出契约）
+ * [WHY] 新会话 / 切换工作区后必须重新注入契约，否则 AI 不知道格式要求
+ * [CONSTRAINT] CONTRACT_LINES + CONTRACT_DONE_LINE 拼接后作为会话启动提示词
  */
-export function buildSessionPrompt(niuma: boolean = false): string {
+export function buildSessionPrompt(): string {
   return [
     '【新会话启动 · 默认提示词】请按输出契约继续工作，等待用户指定任务。',
     ...CONTRACT_LINES,
-    niuma ? CONTRACT_NIUMA_LINE : CONTRACT_DONE_LINE,
+    CONTRACT_DONE_LINE,
   ].join('\n')
 }
 
-/** 会话 */
-export const DEFAULT_SESSION_PROMPT = buildSessionPrompt(false)
+/** [done-summary-channel-v1] 新会话默认提示词；与 SYSTEM.md 契约同源，由 buildSessionPrompt 生成 */
+export const DEFAULT_SESSION_PROMPT = buildSessionPrompt()
 
 /**
- * 构建 Initial Prompt
- * @param goal - goal
- * @param niuma - niuma
+ * 构建循环首轮 prompt：目标 + 输出契约
+ * [CONSTRAINT] goal 前后空白会被 trim；空 goal 由调用方（startLoop）拦截
+ * @param goal 用户填写的循环目标
  */
-export function buildInitialPrompt(goal: string, niuma: boolean = false): string {
+export function buildInitialPrompt(goal: string): string {
   return `${String(goal).trim()}\n${[
     ...CONTRACT_LINES,
-    niuma ? CONTRACT_NIUMA_LINE : CONTRACT_DONE_LINE,
+    CONTRACT_DONE_LINE,
   ].join('\n')}`
 }
 
 // 格式不符时的重试 prompt（宽容预算内唯一一次重试）
 /**
- * 构建 Retry Prompt
- * @param detail - detail
+ * 构建格式重试 prompt（宽容预算内唯一一次）
+ * [WHY] 明确告知 AI 失败原因并允许其声明 DONE，避免格式错误被误解为任务未完成
+ * [CONSTRAINT] detail 应简短单行（会拼进 prompt 首行）
+ * @param detail 上一轮格式不符的原因
  */
 export function buildRetryPrompt(detail: string): string {
   return [
