@@ -337,7 +337,10 @@ async function createEditor() {
       m.oneDark,
       /* editor-no-h-scroll */
       m.EditorView.lineWrapping,
-      editableComp!.of(m.EditorView.editable.of(!props.isLoopActive)),
+      // [no-non-null-v1] 显式空检查：editableComp 依赖 @codemirror 动态 import，失败时为 undefined；
+      // 用 ! 会让 state 创建得到非法 extension 参数（静默失效）；此处提前抛出让错误位置清晰
+      (editableComp ?? (() => { throw new Error('cm-editable 扩展未加载') }))
+        .of(m.EditorView.editable.of(!props.isLoopActive)),
       m.EditorView.theme({
         '&': {
           height: '100%',
