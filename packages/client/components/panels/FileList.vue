@@ -28,8 +28,10 @@ const summary = computed(() => {
 })
 
 /**
- * 执行 meta Of
- * @param t - t
+ * 取变更类型对应的展示元信息（徽标字母 / tooltip / CSS 类）
+ * [WHY] 集中在此处映射避免模板里三处重复 switch；label 用于紧凑徽标，title 用于 tooltip
+ * [CONSTRAINT] 键必须覆盖 ChangeType 全部取值，否则模板渲染会拿到 undefined
+ * @param t 变更类型（added / modified / deleted）
  */
 function metaOf(t: ChangeType) {
   return {
@@ -40,8 +42,11 @@ function metaOf(t: ChangeType) {
 }
 
 /**
- * 切分 Path
- * @param p - p
+ * 把文件路径拆成目录前缀与文件名
+ * [WHY] 列表展示时目录用浅色、文件名用主色，需要单独字段
+ * [CONSTRAINT] 只按 POSIX 斜杠切分；无斜杠时 dir 返回空串（非 './'）
+ * [CHANGE-IMPACT] 模板里两处 slot 依赖返回结构 {dir, name}
+ * @param p 文件相对路径
  */
 function splitPath(p: string) {
   const idx = p.lastIndexOf('/')
