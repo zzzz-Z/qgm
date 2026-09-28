@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useClipboard } from '@vueuse/core'
 // [filetree-fold-v1] PLAN 5.4 目录展开态持久化
 import { useFoldState } from '../../composables/ui/useFoldState'
 import { highlightToHtml } from '../../composables/useHljs'
@@ -7,14 +8,14 @@ import { useFileTree } from '../../composables/data/useFileTree'
 // [drag-controller-v1] 拖拽逻辑已抽到 drag-controller.ts
 import { createDragController } from './drag-controller'
 import type { FileNode } from '../../types'
-/** /__ai/files/read 响应结构（局部使用，避免显式 any） */
-
+/** 单条文件读取结果；content 缺失表示未读到（二进制/权限不足等） */
 interface FileReadItem { path?: string, content?: string }
+/** /__ai/files/read 的响应（兼容 {files:[...]} 与裸数组两种历史格式） */
 interface FileReadResponse { files?: FileReadItem[] }
 
 defineOptions({ name: 'FileTree' })
 
-/** 派发 */
+/** 向父组件请求打开"添加项目"流程（空工作区按钮触发） */
 const emit = defineEmits<{
   addProject: []
 }>()
@@ -29,7 +30,7 @@ const props = defineProps<{
 
 const { tree, loading, copiedPath, load, loadChildren, getChildren, isChildrenLoading, copyPath } = useFileTree()
 
-/** 名称 */
+/** 当前工作区项目名；初值兜底 '工作区'，onMounted 后按 /__ai/workspace 或 package.json name 修正 */
 const projectName = ref('工作区')
 
 if (props.root) {
@@ -96,7 +97,8 @@ for (const [k, v] of Object.entries(fold.all.value)) {
 function _persistExpanded(): void {
   const map: Record<string, boolean> = {}
   for (const p of expanded) map[p] = true
-  // 保留原 fold 中所有 key 的 true，覆盖展开态；未展开的 key 不再保留
+  // [CONSTRAINT] 全量替换：fold 中未出现在 expanded 的 key 会被清除，
+  // 即"折叠"是默认态，只持久化"展开"项（与 useFoldState 的 isOpen fallback 语义一致）
   fold.all.value = map
 }
 
@@ -224,14 +226,12 @@ const dragCtl = createDragController({
 const { onRootPointerDown, onPointerDown } = dragCtl
 onBeforeUnmount(() => dragCtl.dispose())
 
-// [drag-controller-v1] 拖拽簇已抽到 drag-controller.ts
-
 // [file-dialog] 双击文件弹窗查看详情 + 复制
-/** 文件 */
+/** 双击文件后的查看弹窗状态；null 表示未打开 */
 const fileDialog = ref<{ path: string, content: string } | null>(null)
-/** 文件加载中 */
+/** 文件内容请求中标志；用于显示"加载中"占位 */
 const fileLoading = ref(false)
-/** 文件错误 */
+/** 文件内容读取失败原因（HTTP status 或 Error.message） */
 const fileError = ref('')
 /**
  * 响应 File Dbl Click
@@ -265,12 +265,18 @@ async function onFileDblClick(node: { type?: string, path: string }) {
  */
 function closeFileDialog() { fileDialog.value = null }
 /**
- * 复制 File Content
+ * 复制弹窗中展示的文件内容到剪贴板
+ * [copy-via-vueuse] 走 vueuse useClipboard：内部自动选择 navigator.clipboard 或 execCommand 回退，
+ * 且组件卸载时自动解绑 copy 事件监听
+ * [CONSTRAINT] 复制失败静默（无 UI 反馈），因为内容已可见、用户可手动选择复制
  */
 async function copyFileContent() {
   if (!fileDialog.value) return
-  try { await navigator.clipboard.writeText(fileDialog.value.content) } catch { /* ignore */ }
+  try { await _clipboard.copy(fileDialog.value.content) } catch { /* ignore */ }
 }
+
+/** [copy-via-vueuse] 组件级单例；随组件卸载自动清理 copy 事件监听 */
+const _clipboard = useClipboard()
 /**
  * 响应 Dialog Key
  * @param e - e
@@ -287,8 +293,8 @@ const fileDialogHtml = computed(() => {
     return c.replace(/[&<>]/g, m => (m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;'))
   }
 })
-// [native-picker] 优先调系统原生选择器；失败或未支持时回退浏览器式弹窗
-// [native-picker] 系统原生选择器（无浏览器式回退）
+// [native-picker] 调用系统原生文件夹选择器（macOS osascript / Windows / Linux 各平台实现）；
+// 不支持平台或用户取消时静默返回，本组件不提供浏览器式回退
 /**
  * 执行 choose Workspace
  */
@@ -494,5 +500,3 @@ html.ai-runner-dragging body {
   white-space: nowrap;
 }
 </style>
-
-// [fn-decl-v1]-filetree 箭头函数改 function 声明
