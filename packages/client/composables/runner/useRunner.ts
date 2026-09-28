@@ -1,51 +1,57 @@
 import { ref, watch } from 'vue'
+import { useSessionStorage } from '@vueuse/core'
 import { readNdjson } from '../../utils/stream'
 import { emit } from '../ui/useEventStream'
 import type { Change, DecisionPayload, RunResponse } from '../../types'
 import { log } from '../../utils/log'
 
-/** 存储键脚本 */
+/** sessionStorage 键：脚本内容 */
 const STORAGE_KEY_SCRIPT = '__ai_runner_script'
-/** 存储键 */
+/** sessionStorage 键：最近一次运行结果 */
 const STORAGE_KEY_RESULT = '__ai_runner_result'
-/** 存储键 */
+/** sessionStorage 键：变更列表 */
 const STORAGE_KEY_CHANGES = '__ai_runner_changes'
-/** 存储键 */
+/** sessionStorage 键：冒烟开关 */
 const STORAGE_KEY_SMOKE = '__ai_runner_smoke'
-/** 存储键 */
+/** sessionStorage 键：基线 runId */
 const STORAGE_KEY_BASELINE = '__ai_runner_baseline'
-/** 键 */
+/** sessionStorage 键：git 提交开关 */
 const GIT_KEY = '__ai_runner_git_commit'
 
 // ============================================================================
-// 模块级单例状态 —— 与 useSessionManager / useTraceLog 惯例一致
-// 每次 useRunner() 返回同一份 ref，避免 useAutoLoop 与 ScriptPanel 拿到两份不同的状态
+// 模块级单例状态 —— 与 useSessionManager 惯例一致
+// 每次 useRunner() 返回同一份引用，避免 useAutoLoop 与 ScriptPanel 拿到两份不同的状态
+// 持久化统一走 vueuse useSessionStorage：自动 JSON 序列化 + 跨标签页同步
 // ============================================================================
-/** 脚本 */
-const script = ref(loadFromStorage<string>(STORAGE_KEY_SCRIPT, ''))
-// [last-run-code] 保存最近一次运行的脚本，script.value 被清空后仍可追溯
-/** 最后一个运行代码 */
-const lastRunCode = ref('')
-/** 进行中任务列表 */
-const running = ref(false)
-/** 当前脚本运行结果 */
-const result = ref<RunResponse | null>(loadFromStorage<RunResponse | null>(STORAGE_KEY_RESULT, null))
-// DEDUP_LAST_RUN: 按 path 去重，只保留最近一次每文件的变更记录
-const changes = ref<Change[]>(
-  (loadFromStorage<Change[]>(STORAGE_KEY_CHANGES, []) || []).reduce<Change[]>((acc, c) => {
-    const i = acc.findIndex(x => x.path === c.path)
-    if (i >= 0) acc[i] = c
-    else acc.push(c)
-    return acc
-  }, []),
-)
-/** 滚动输出中标志 */
-const rolling = ref<Record<string, boolean>>({})
-/** 全局忙状态（任一运行/执行中） */
-const busyAll = ref(false)
-/** 警告 */
+/** 持久化失败提示（仅脚本内容超配额时置位）；由下方 script 的 watch 写入 / 清空 */
 const persistWarning = ref('')
-/** 实时标准输出缓冲区 */
+/** 脚本内容；[CONSTRAINT] 保留 ref + watch 而非 useSessionStorage：需捕获 QuotaExceeded 设 persistWarning（vueuse 无 onSuccess 回调无法自动清空） */
+const script = ref('')
+try {
+  const raw = sessionStorage.getItem(STORAGE_KEY_SCRIPT)
+  if (raw) script.value = JSON.parse(raw) as string
+} catch { /* 首次访问或解析失败：保持空脚本 */ }
+// [last-run-code] 保存最近一次运行的脚本，script.value 被清空后仍可追溯
+/** 最近一次实际执行的脚本源码；内存态，不持久化 */
+const lastRunCode = ref('')
+/** 是否有运行中的脚本 */
+const running = ref(false)
+/** 最近一次运行结果；[CONSTRAINT] 值置 null 时 useSessionStorage 会自动移除存储项 */
+const result = useSessionStorage<RunResponse | null>(STORAGE_KEY_RESULT, null)
+// DEDUP_LAST_RUN: 按 path 去重，只保留最近一次每文件的变更记录
+/** 变更列表（按 path 去重）；初始化后立即 dedup 一次，兼容老版本 sessionStorage 残留 */
+const changes = useSessionStorage<Change[]>(STORAGE_KEY_CHANGES, [])
+changes.value = changes.value.reduce<Change[]>((acc, c) => {
+  const i = acc.findIndex(x => x.path === c.path)
+  if (i >= 0) acc[i] = c
+  else acc.push(c)
+  return acc
+}, [])
+/** 单文件回滚进行中标志（键 = 文件路径） */
+const rolling = ref<Record<string, boolean>>({})
+/** 全局忙状态（rollbackAll / save 进行中） */
+const busyAll = ref(false)
+/** 实时 stdout 缓冲区（流式累积，刷新会清空） */
 const liveStdout = ref('')
 
 /** [done-summary-channel-v1] DONE 后的总结：独立通道，不混入 raw stdout */
@@ -57,29 +63,21 @@ export function pushTerminalNotice(text: string, _opts?: { divider?: boolean }):
   if (!raw) return
   doneSummary.value = raw
 }
-/** 实时标准错误缓冲区 */
+/** 实时 stderr 缓冲区（流式累积，刷新会清空） */
 const liveStderr = ref('')
-/** 启用的 */
-const smokeEnabled = ref(loadFromStorage<boolean>(STORAGE_KEY_SMOKE, true))
-/** 运行标识 */
-const baselineRunId = ref(loadFromStorage<string>(STORAGE_KEY_BASELINE, ''))
+/** 冒烟测试开关；持久化到 sessionStorage */
+const smokeEnabled = useSessionStorage<boolean>(STORAGE_KEY_SMOKE, true)
+/** 基线 runId（用于对比 diff）；持久化到 sessionStorage */
+const baselineRunId = useSessionStorage<string>(STORAGE_KEY_BASELINE, '')
 // [auto-feedback] 一次性标志：AI 直接返回的脚本执行后无条件回传结果
+/** 是否已请求执行后自动回传（一次性，消费后由 clearAutoFeedback 重置） */
 const autoFeedbackRequested = ref(false)
-/** 是否启用 git 提交（每轮打点） */
-const gitCommit = ref(loadFromStorage<boolean>(GIT_KEY, false))
+/** 是否启用 git 提交（每轮打点）；持久化到 sessionStorage */
+const gitCommit = useSessionStorage<boolean>(GIT_KEY, false)
 
 let abortController: AbortController | null = null
 
-// 持久化监听器 —— 模块级仅注册一次（之前每次 useRunner() 调用都重复 watch，存在隐性泄漏）
-watch(baselineRunId, (v) => {
-  try { sessionStorage.setItem(STORAGE_KEY_BASELINE, JSON.stringify(v)) } catch { }
-})
-watch(smokeEnabled, (v) => {
-  try { sessionStorage.setItem(STORAGE_KEY_SMOKE, JSON.stringify(v)) } catch { }
-})
-watch(gitCommit, (v) => {
-  try { sessionStorage.setItem(GIT_KEY, JSON.stringify(v)) } catch { /* ignore */ }
-})
+// 脚本持久化：仅 script 一项需要手工 watch（见上方注释）；其余键由 useSessionStorage 内部管理
 watch(script, (v) => {
   try {
     sessionStorage.setItem(STORAGE_KEY_SCRIPT, JSON.stringify(v))
@@ -89,35 +87,11 @@ watch(script, (v) => {
     log.warn('[ai-runner] sessionStorage 写入失败:', e)
   }
 })
-watch(result, (v) => {
-  try {
-    if (v) sessionStorage.setItem(STORAGE_KEY_RESULT, JSON.stringify(v))
-    else sessionStorage.removeItem(STORAGE_KEY_RESULT)
-  } catch { /* quota exceeded */ }
-}, { deep: true })
-watch(changes, (v) => {
-  try {
-    if (v.length) sessionStorage.setItem(STORAGE_KEY_CHANGES, JSON.stringify(v))
-    else sessionStorage.removeItem(STORAGE_KEY_CHANGES)
-  } catch { /* quota exceeded */ }
-}, { deep: true })
 
 /**
- * 加载 From Storage
- * @param key - key
- * @param fallback - fallback
- */
-function loadFromStorage<T>(key: string, fallback: T): T {
-  try {
-    const raw = sessionStorage.getItem(key)
-    return raw ? JSON.parse(raw) : fallback
-  } catch {
-    return fallback
-  }
-}
-
-/**
- * 停止
+ * 中止当前运行
+ * [CONSTRAINT] 幂等：无 abortController 时仅清 running
+ * [CHANGE-IMPACT] 触发 readNdjson 抛出 AbortError → run 的 catch 走"已取消"分支
  */
 function stop() {
   if (abortController) {
