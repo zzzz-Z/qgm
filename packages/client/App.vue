@@ -459,18 +459,18 @@ watch(activeSessionId, (v) => {
   try {
     if (v) localStorage.setItem(ACTIVE_SESSION_KEY, v)
     else localStorage.removeItem(ACTIVE_SESSION_KEY)
-  } catch { }
+  } catch { /* swallow: localStorage 配额 / 隐私模式抛错，不阻断 watch 后续逻辑 */ }
   // 同步到 loop 实例表与窗口表（多循环并发的前提）
   const sid = v || 'default'
   setActiveLoopSessionId(sid)
   createLoopInstanceFor(sid)
   setActiveWinSid(sid)
 }, { immediate: true })
-watch(sandboxMode, (v) => { try { localStorage.setItem(KEY_SANDBOX, v) } catch { } })
-watch(bashPolicy, (v) => { try { localStorage.setItem(KEY_BASH_POLICY, v) } catch { } })
+watch(sandboxMode, (v) => { try { localStorage.setItem(KEY_SANDBOX, v) } catch { /* swallow: 配额/隐私模式 */ } })
+watch(bashPolicy, (v) => { try { localStorage.setItem(KEY_BASH_POLICY, v) } catch { /* swallow: 配额/隐私模式 */ } })
 watch(theme, (v) => {
   document.documentElement.setAttribute('data-theme', v)
-  try { localStorage.setItem(KEY_THEME, v) } catch { }
+  try { localStorage.setItem(KEY_THEME, v) } catch { /* swallow: 配额/隐私模式 */ }
 }, { immediate: true })
 
 // [use-event-listener-v1] 用 vueuse useEventListener 而非原生 addEventListener：
@@ -566,7 +566,7 @@ onMounted(() => {
  */
 function onTransportChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
-  try { localStorage.setItem('__ai_transport', v === 'headless' ? 'headless' : 'tampermonkey') } catch {}
+  try { localStorage.setItem('__ai_transport', v === 'headless' ? 'headless' : 'tampermonkey') } catch { /* swallow: 仅影响下次刷新偏好，不阻断 reload */ }
   window.location.reload()
 }
 </script>
