@@ -26,8 +26,11 @@ export const BASH_BLACKLIST: ReadonlyArray<{ pattern: RegExp, label: string }> =
  */
 
 /**
- * 校验 Bash Blacklist
- * @param cmd - cmd
+ * 检查命令是否命中 bash 黑名单（破坏性命令）
+ * [WHY] 服务端在执行前统一拦截 rm -rf / sudo / curl|sh 等危险模式
+ * [CONSTRAINT] 命中任意一条即返回该规则的 label（供前端展示）；全部未命中返回 null
+ * [CHANGE-IMPACT] 返回 label 会作为 err 提示的一部分返回给用户；改 label 文案需同步 i18n 期望
+ * @param cmd 待检查的原始命令文本
  */
 export function checkBashBlacklist(cmd: string): string | null {
   for (const rule of BASH_BLACKLIST) {
@@ -121,8 +124,11 @@ function firstCmd(line: string): string {
 }
 
 /**
- * 切分 Commands
- * @param script - script
+ * 按行 / 分号 / && / || 切分脚本为独立命令
+ * [WHY] 白名单校验需逐条判定；不解析子 shell、管道、重定向，只做粗切分
+ * [CONSTRAINT] 不做引号转义处理 —— 引号内的分隔符也会被切开（罕见，可接受）
+ * [CHANGE-IMPACT] 结果被 checkBashWhitelist 消费；若误切会导致合法命令被误报为 unknown
+ * @param script 待切分的 bash 脚本全文
  */
 export function splitCommands(script: string): string[] {
   return String(script)

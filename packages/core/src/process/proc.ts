@@ -37,9 +37,13 @@ export interface ProcessResult {
  */
 
 /**
- * 运行 Process
- * @param cmd - cmd
- * @param options - options
+ * 以 Promise 形式执行外部命令（含超时与取消）
+ * [WHY] 子进程事件模型不适合直接 await；此封装把 close/error/timeout 统一收敛为 resolve
+ * [CONSTRAINT] 不 reject —— 失败通过返回结构的 code / timedOut / killed 表达；
+ * stdout / stderr 全量缓冲在内存，超大输出会占用较多内存
+ * [CHANGE-IMPACT] 被 git.ts / tsc.ts / run-script.ts 等大量消费；改返回结构会影响所有调用方
+ * @param cmd 可执行名或路径
+ * @param options 运行参数（args / cwd / env / shell / stdin / timeoutMs / timeoutLabel）
  */
 export function runProcess(cmd: string, options: RunProcessOptions = {}): Promise<ProcessResult> {
   return new Promise((resolve) => {
