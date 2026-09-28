@@ -8,6 +8,11 @@ import { useFileTree } from '../../composables/data/useFileTree'
 // [drag-controller-v1] 拖拽逻辑已抽到 drag-controller.ts
 import { createDragController } from './drag-controller'
 import type { FileNode } from '../../types'
+
+// [copy-via-vueuse] 组件级单例 useClipboard：内部会注册 copy 事件监听，
+// 通过 setup scope 在组件卸载时自动清理；因此必须定义在 setup 顶层而非函数内
+const _clipboard = useClipboard()
+
 /** 单条文件读取结果；content 缺失表示未读到（二进制/权限不足等） */
 interface FileReadItem { path?: string, content?: string }
 /** /__ai/files/read 的响应（兼容 {files:[...]} 与裸数组两种历史格式） */
@@ -274,9 +279,6 @@ async function copyFileContent() {
   if (!fileDialog.value) return
   try { await _clipboard.copy(fileDialog.value.content) } catch { /* ignore */ }
 }
-
-/** [copy-via-vueuse] 组件级单例；随组件卸载自动清理 copy 事件监听 */
-const _clipboard = useClipboard()
 /**
  * 响应 Dialog Key
  * @param e - e
