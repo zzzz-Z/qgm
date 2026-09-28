@@ -1,8 +1,13 @@
 import { ref } from 'vue'
+import { useClipboard } from '@vueuse/core'
 import { DEFAULT_SESSION_PROMPT } from './loopLogic'
 import { useSessionManager } from './useSessionManager'
 import { log } from '../../utils/log'
 // [headless] 传输层路由：__ai_transport='headless' 时走 useAiTransport；默认 tampermonkey 保字节级一致
+
+// [copy-via-vueuse] 模块级单例：useClipboard 内部会注册 copy 事件监听，
+// 在 setup 外反复构造会残留 listener；提升为模块级只注册一次
+const _clipboard = useClipboard()
 
 let _transportMod: Promise<typeof import('./useAiTransport.js')> | null = null
 
@@ -142,7 +147,7 @@ function setSessionId(next: string): void {
   url.value = m.sessionTemplate.replace('{id}', encodeURIComponent(trimmed))
   try { localStorage.setItem(STORAGE_KEY_URL, url.value) } catch { }
 }
-// [deadcode-a2a1-v1] 已删常量 modelLabel
+
 /**
  * 执行 display
  * @param u - u
@@ -158,7 +163,6 @@ function display(u: string): string {
     return u
   }
 }
-// [deadcode-a3-v1] 已删除：跨包 0 引用
 
 // ============================================================================
 // 活动窗口引用管理 —— postMessage 的目标 window 必须精确，否则跨域无法操作 DOM
@@ -388,6 +392,10 @@ export function sendNewSession(payload: NewSessionPayload): boolean {
 
 type FillResult = 'sent' | 'opened' | 'failed'
 
+// [rules-always-v1] 每会话首次发送必带规则：以 sessionId 为键去重；
+// 切换工作区触发 reload 后 useSessionManager 会重新 generateId → 新键 → 规则自动重新注入
+const _rulesInjectedSids = new Set<string>()
+
 /**
  * [first-prompt-rules] 会话首问前置规则：读 SYSTEM.md 与 AGENTS.md 全文包成 <file> 块拼在问题前
  * 读取失败或文件缺失时降级返回原 prompt，不阻断发送
@@ -431,18 +439,25 @@ export async function copyAndFill(prompt: string, opts?: { count?: boolean }): P
   if (!prompt) return 'failed'
   let finalPrompt = prompt
   // [first-prompt-rules] 会话首问自动前置 SYSTEM.md + AGENTS.md 全文（askCount 归零视为新会话）
-  if (opts?.count !== false) {
-    try {
-      const { askCount } = useSessionManager()
-      if (askCount.value === 0) finalPrompt = await _prependFirstPromptRules(prompt)
-    } catch { /* ignore */ }
-  }
+  // [rules-always-v1] 每会话首次发送必带规则（不受 count 标志与 askCount 限制）
+  // WHY: 打招呼类消息（count:false）与切换工作区后新会话都需要 SYSTEM.md 常驻；
+  // 以 sessionId 为键防止同会话内重复注入；切工作区 reload 后 sid 新生成 → 自动重注入
+  try {
+    const { sessionId } = useSessionManager()
+    const sid = sessionId.value
+    if (sid && !_rulesInjectedSids.has(sid)) {
+      _rulesInjectedSids.add(sid)
+      finalPrompt = await _prependFirstPromptRules(prompt)
+    }
+  } catch { /* ignore */ }
   // [askcount-unify] 统一计数：所有发送路径（自动/手动）都计入 askCount
   // count: false 用于打招呼类消息（如「开始聊天」）
   if (opts?.count !== false) {
     try { useSessionManager().trackMessage('user', finalPrompt) } catch { /* ignore */ }
   }
-  try { await navigator.clipboard.writeText(finalPrompt) } catch { /* ignore */ }
+  // [copy-via-vueuse] 复制走 vueuse useClipboard：内置 navigator.clipboard 与 execCommand 回退
+  // [CONSTRAINT] 失败静默 —— clipboard 只是兜底路径，主通道是 postMessage / WS
+  try { await _clipboard.copy(finalPrompt) } catch { /* ignore */ }
   // 无头模式直接发 WS，不开真实窗口
   if (_isHeadless()) {
     void _loadTransport().then((t) => {
