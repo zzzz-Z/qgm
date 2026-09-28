@@ -436,4 +436,63 @@ async function chooseWorkspace(): Promise<void> {
 
 <style scoped lang="scss" src="./FileTree.scss" />
 
+<style lang="scss">
+/* [drag-ghost-global-v1] ghost 挂载到 document.body，必须非 scoped 才能命中 */
+// WHY: FileTree.scss 现由 scoped 引入，选择器会被加 [data-v-xxx]；ghost 无此属性 → 完全失效 → 拖动时鼠标旁看不到文件
+// CONSTRAINT: 与 FileTree.scss 内同名规则并存（scoped 那份不生效），后续清理时先确认本块已生效再删旧版
+html.ai-runner-dragging,
+html.ai-runner-dragging * {
+  cursor: grabbing;
+  user-select: none;
+}
+html.ai-runner-dragging,
+html.ai-runner-dragging body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.ai-runner-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  padding: 7px 14px;
+  background: var(--surface);
+  border: 1px solid rgb(37 99 235 / 40%);
+  border-radius: var(--radius-8);
+  box-shadow:
+    0 8px 24px rgb(15 30 60 / 18%),
+    0 0 0 3px rgb(37 99 235 / 10%);
+  color: var(--text);
+  font:
+    12px/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
+  transform: translate3d(0, 0, 0);
+  transition: opacity 0.12s ease;
+  will-change: transform;
+  user-select: none;
+}
+
+.ai-runner-drag-ghost .ghost-svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.ai-runner-drag-ghost .ghost-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>
+
 // [fn-decl-v1]-filetree 箭头函数改 function 声明
