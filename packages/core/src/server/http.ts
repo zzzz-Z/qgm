@@ -1,10 +1,12 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 /**
- * 发送 JSON
- * @param res - res
- * @param data - data
- * @param code - code
+ * 写出 JSON 响应
+ * [CONSTRAINT] Content-Type 固定 application/json + charset=utf-8；响应体走 JSON.stringify，
+ * 循环引用会抛错（调用方需自行保证 data 可序列化）
+ * [CHANGE-IMPACT] guardRequest 的 403/415 拒绝路径依赖本函数，改 header 会破坏 CSRF 防护约定
+ * @param data 任意可 JSON 序列化的值
+ * @param code HTTP 状态码，默认 200
  */
 export function sendJSON(res: ServerResponse, data: unknown, code = 200) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -12,9 +14,8 @@ export function sendJSON(res: ServerResponse, data: unknown, code = 200) {
 }
 
 /**
- * 发送 HTML
- * @param res - res
- * @param html - html
+ * 写出 HTML 响应（状态码固定 200）
+ * [CONSTRAINT] Content-Type 固定 text/html + charset=utf-8；调用方负责 HTML 转义，本函数不做过滤
  */
 export function sendHTML(res: ServerResponse, html: string) {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -24,8 +25,11 @@ export function sendHTML(res: ServerResponse, html: string) {
 /** 请求体最大字节数（防止超大请求耗尽内存） */
 const MAX_BODY = 5 * 1024 * 1024
 /**
- * 读取 Body
- * @param req - req
+ * 读取请求体文本，超过 MAX_BODY 立即中断
+ * [WHY] 缓冲超大请求会耗尽内存；达到上限时 destroy 连接并 resolve 空串（调用方判空即为拒绝）
+ * [CONSTRAINT] 依赖 req.destroy() 触发 error 事件但以 over 标志抑制重复 resolve；
+ * 溢出与读取错误都返回空串，调用方无法区分两者
+ * [CHANGE-IMPACT] MAX_BODY 影响路由处理上限，调小需同步检查 /run 脚本大小
  */
 export function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
@@ -46,8 +50,10 @@ export function readBody(req: IncomingMessage): Promise<string> {
 }
 
 /**
- * 解析 JSON
- * @param raw - raw
+ * 容错 JSON 解析
+ * [CONSTRAINT] 空串与非法 JSON 均返回 null（不区分）；解析异常不抛错
+ * [CHANGE-IMPACT] 调用方需判 null 而非 falsy，因为合法值 false / 0 也会被 typeof 命中
+ * @param raw 请求体原文
  */
 export function parseJSON<T = any>(raw: string): T | null {
   try {
@@ -71,8 +77,12 @@ export interface AiRunnerOptions {
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
 
 /**
- * 执行 host Is Loopback
- * @param hostHeader - host Header
+ * 判断 Host 头是否指向本机回环地址
+ * [WHY] SSRF / DNS-rebinding 防护：仅本机访问的 dev server 不应响应外部 Host 的命令执行端点
+ * [CONSTRAINT] 取逗号分隔的第一段（代理链场景）；IPv6 用 [::1] 形式含方括号匹配；
+ * 空 header 视为 loopback（兼容本地无 Host 直连）
+ * [CHANGE-IMPACT] 误判 true 会绕过 guardRequest 的 allowRemote 检查
+ * @param hostHeader 原始 Host 头值，可含端口；undefined 视为本机
  */
 function hostIsLoopback(hostHeader?: string): boolean {
   if (!hostHeader) return true
