@@ -30,11 +30,11 @@ export interface TimelinePaths {
 }
 
 /**
- * 解析为 Paths
- * @param root - root
- * @param sessionId - session Id
- * @param runId - run Id
- * @param round - round
+ * 计算单轮快照的三个落盘路径（目录 + round-N.json + _index.json）
+ * [CONSTRAINT] 目录布局 .ai-runner/runs/{sessionId}/{runId} 与 run.ts 的 runDir 保持兼容；
+ * 修改此布局会破坏历史快照读取
+ * [CHANGE-IMPACT] 被 writeRoundSnapshot / readRoundSnapshot / listRounds 共享
+ * @param round 轮次编号；listRounds 传 0 只用 dir 字段
  */
 export function resolvePaths(root: string, sessionId: string, runId: string, round: number): TimelinePaths {
   const dir = path.join(root, '.ai-runner', 'runs', sessionId, runId)
@@ -46,9 +46,10 @@ export function resolvePaths(root: string, sessionId: string, runId: string, rou
 }
 
 /**
- * 写入 Round Snapshot
- * @param root - root
- * @param snap - snap
+ * 落盘单轮快照并同步更新 _index.json
+ * [WHY] index 便于 listRounds/前端时间线快速读取，避免遍历所有 round-N.json
+ * [CONSTRAINT] 会 mkdir -p 目标目录；覆盖同 round 的旧快照（幂等）
+ * [CHANGE-IMPACT] run.ts 每轮收尾调用一次；返回 roundFile 绝对路径供后续 gitCommitAfter 读取
  */
 export function writeRoundSnapshot(root: string, snap: RoundSnapshot): string {
   const p = resolvePaths(root, snap.sessionId, snap.runId, snap.round)
@@ -75,9 +76,9 @@ interface IndexEntry {
 }
 
 /**
- * 执行 upsert Index
- * @param indexPath - index Path
- * @param entry - entry
+ * 向 _index.json 更新或追加一条轮次摘要（按 round 号去重）
+ * [CONSTRAINT] 文件缺失/JSON 损坏时以空数组重建；结果始终按 round 升序落盘
+ * [CHANGE-IMPACT] 被 writeRoundSnapshot 内部调用；直接改索引会导致时间线展示错乱
  */
 function upsertIndex(indexPath: string, entry: IndexEntry): void {
   let list: IndexEntry[] = []
@@ -93,11 +94,9 @@ function upsertIndex(indexPath: string, entry: IndexEntry): void {
 }
 
 /**
- * 读取 Round Snapshot
- * @param root - root
- * @param sessionId - session Id
- * @param runId - run Id
- * @param round - round
+ * 读取某轮快照
+ * [CONSTRAINT] 文件缺失或 JSON 损坏时返回 null，不抛错
+ * [CHANGE-IMPACT] 供回放 / 失败分类使用；返回结构须与 RoundSnapshot 接口一致
  */
 export function readRoundSnapshot(root: string, sessionId: string, runId: string, round: number): RoundSnapshot | null {
   const p = resolvePaths(root, sessionId, runId, round)
@@ -105,10 +104,9 @@ export function readRoundSnapshot(root: string, sessionId: string, runId: string
 }
 
 /**
- * 执行 list Rounds
- * @param root - root
- * @param sessionId - session Id
- * @param runId - run Id
+ * 列出该 run 下所有轮次编号（升序）
+ * [CONSTRAINT] 只匹配 round-{数字}.json；不存在的目录静默返回空数组
+ * [CHANGE-IMPACT] 与 writeRoundSnapshot 的命名严格配对，改名会导致历史轮次不可见
  */
 export function listRounds(root: string, sessionId: string, runId: string): number[] {
   const p = resolvePaths(root, sessionId, runId, 0)
@@ -122,8 +120,10 @@ export function listRounds(root: string, sessionId: string, runId: string): numb
 }
 
 /**
- * 计算哈希值 Script
- * @param s - s
+ * 计算脚本内容的轻量哈希（djb2 变体，32 位无符号，8 位 hex）
+ * [WHY] 用于快照对比 / 缓存失效判定，无需密码学安全，只求快速稳定
+ * [CONSTRAINT] 输出定长 8 字符；不同内容可能碰撞（非加密哈希）
+ * [CHANGE-IMPACT] 输出被 RoundSnapshot.script.hash 消费；换算法会让历史 hash 全部失配
  */
 export function hashScript(s: string): string {
   let h = 0
