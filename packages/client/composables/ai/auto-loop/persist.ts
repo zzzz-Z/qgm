@@ -3,6 +3,7 @@
 
 import type { LoopInstance, LoopState } from './types.js'
 
+/** sessionStorage 中持久化的循环快照结构；只存恢复所需的标量字段，不存窗口/定时器引用 */
 interface PersistShape {
   loopId: string
   loopGoal: string
@@ -12,12 +13,16 @@ interface PersistShape {
   state: LoopState
 }
 
-/** 存储键 */
+/** sessionStorage 键；[CONSTRAINT] 与 restore 严格配对，改名会丢失既有循环恢复能力 */
 const STORAGE_KEY = '__ai_runner_loop'
 
 /**
- * 持久化
- * @param inst - inst
+ * 把循环关键状态写入 sessionStorage
+ * [WHY] 只存恢复所需字段（id / goal / round / startCommit / reason / state）；
+ * 窗口引用与定时器无法跨刷新，持久化只会带来误以为可续跑的错觉
+ * [CONSTRAINT] state='idle' 视为无活动循环，直接移除存储项（避免脏数据）
+ * [CHANGE-IMPACT] 会被 restore 消费；改字段名或结构会破坏刷新恢复
+ * @param inst 循环实例；读取其 id/goal/round/startCommit/stopReason/state
  */
 export function persist(inst: LoopInstance) {
   if (inst.state.value === 'idle') {
@@ -36,8 +41,13 @@ export function persist(inst: LoopInstance) {
 }
 
 /**
- * 执行 restore
- * @param inst - inst
+ * 从 sessionStorage 恢复循环状态（页面刷新后调用）
+ * [WHY] 刷新会丢失窗口引用，无法续跑；此处把活动态降级为 'stopped'，
+ * 并把已完成轮数写入 stopReason，用户据此判断是否「再来一次」
+ * [CONSTRAINT] 只处理活动态（running/waiting/parsing/executing/feedback）；
+ * 已是 stopped 的快照不覆盖当前内存态，避免破坏用户手动操作
+ * [CHANGE-IMPACT] 会调用 persist 回写一次（state 已被改为 stopped）
+ * @param inst 循环实例；就地恢复字段
  */
 export function restore(inst: LoopInstance) {
   try {
