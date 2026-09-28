@@ -176,7 +176,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
     })
     if (!res.ok || !res.body) {
       let detail = ''
-      try { detail = await res.text() } catch { }
+      try { detail = await res.text() } catch { /* swallow: body 已被消费 / 网络中断，detail 保持空串 */ }
       result.value = {
         runId: '',
         code: res.status,

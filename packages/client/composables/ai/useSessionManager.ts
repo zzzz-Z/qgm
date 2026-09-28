@@ -77,7 +77,7 @@ function saveToStorage(): void {
       sessionUrl: sessionUrl.value,
       messages: messages.value.slice(-100),
     }))
-  } catch { }
+  } catch { /* swallow: 配额 / 隐私模式抛错，会话持久化失败不阻断主流程 */ }
 }
 
 /**
@@ -93,7 +93,7 @@ function restoreFromStorage(): void {
     if (data.sessionId) sessionId.value = String(data.sessionId)
     if (data.sessionUrl) sessionUrl.value = String(data.sessionUrl)
     if (Array.isArray(data.messages)) messages.value = data.messages
-  } catch { }
+  } catch { /* swallow: JSON 损坏 / 结构不符，保持现有状态 */ }
 }
 
 /**
@@ -177,7 +177,7 @@ export function useSessionManager() {
     sessionUrl.value = typeof window !== 'undefined' ? window.location.href : ''
     messages.value = []
     askCount.value = 0
-    try { sessionStorage.removeItem(STORAGE_KEY) } catch { }
+    try { sessionStorage.removeItem(STORAGE_KEY) } catch { /* swallow: 配额/隐私模式，内存态已清空 */ }
     toast('会话已重置', 'success')
   }
 

@@ -16,7 +16,7 @@ function loadBoolSetting(key: string, fallback: boolean): boolean {
 /** 会话 */
 export const autoRotateSession = ref<boolean>(loadBoolSetting(KEY_AUTO_ROTATE, true))
 watch(autoRotateSession, (v) => {
-  try { localStorage.setItem(KEY_AUTO_ROTATE, v ? '1' : '0') } catch { }
+  try { localStorage.setItem(KEY_AUTO_ROTATE, v ? '1' : '0') } catch { /* swallow: 配额/隐私模式，开关仅在内存态生效 */ }
 })
 
 /**

@@ -26,7 +26,7 @@ const STORAGE_KEY = '__ai_runner_loop'
  */
 export function persist(inst: LoopInstance) {
   if (inst.state.value === 'idle') {
-    try { sessionStorage.removeItem(STORAGE_KEY) } catch { }
+    try { sessionStorage.removeItem(STORAGE_KEY) } catch { /* swallow: 无存储权限时仅内存态为 idle，不阻断 */ }
     return
   }
   const snap: PersistShape = {
@@ -37,7 +37,7 @@ export function persist(inst: LoopInstance) {
     stopReason: inst.stopReason.value,
     state: inst.state.value,
   }
-  try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snap)) } catch { }
+  try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snap)) } catch { /* swallow: 配额/隐私模式，持久化失败仅丢失刷新恢复能力 */ }
 }
 
 /**
@@ -66,5 +66,5 @@ export function restore(inst: LoopInstance) {
       inst.state.value = 'stopped'
       persist(inst)
     }
-  } catch { }
+  } catch { /* swallow: JSON 损坏 / 结构不符，保持 idle 由用户手动启动 */ }
 }

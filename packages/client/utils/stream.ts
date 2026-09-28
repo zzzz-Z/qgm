@@ -33,6 +33,6 @@ export async function readNdjson<T>(
       }
     }
   } finally {
-    try { reader.releaseLock() } catch { }
+    try { reader.releaseLock() } catch { /* swallow: 流已关闭 / 已释放，releaseLock 幂等性不保证 */ }
   }
 }
