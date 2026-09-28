@@ -3,19 +3,15 @@ import type { Ref } from 'vue'
 import type { LoopInstance } from './types.js'
 import type { AiTransport } from '../useAiTransport.js'
 
-type AddTraceFn = ReturnType<typeof import('../../ui/useTraceLog.js').useTraceLog>['addTrace']
 type ToastFn = typeof import('../../ui/useToast.js').toast
 type RunHookFn = typeof import('./hooks.js').runHook
 
 /** 抽离出的依赖面：全部由 useAutoLoop.ts 注入，本模块无模块级状态 */
 interface StopAndFinishDeps {
-  niumaMode: Ref<boolean>
   loopPaused: Ref<boolean>
-  addTrace: AddTraceFn
   disarmTimer: (inst: LoopInstance) => void
   persist: (inst: LoopInstance) => void
   enterWaiting: (inst: LoopInstance) => void
-  startWaiting: () => void
   transport: AiTransport
   toast: ToastFn
   runHook: RunHookFn
@@ -27,7 +23,7 @@ interface StopAndFinishDeps {
  * @param deps - deps
  */
 export function createStopAndFinish(deps: StopAndFinishDeps) {
-  const { niumaMode, loopPaused, addTrace, disarmTimer, persist, enterWaiting, startWaiting, transport, toast, runHook, unbindKeyboard } = deps
+  const { loopPaused, disarmTimer, persist, enterWaiting, transport, toast, runHook, unbindKeyboard } = deps
   async function handleStopAfterRound(inst: LoopInstance): Promise<void> {
     if (inst.stopRequest.value === 'rollback') {
       if (inst.startCommit.value) {
@@ -55,31 +51,6 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
    * @param detail - detail
    */
   async function finish(inst: LoopInstance, reason: string, detail?: string): Promise<void> {
-    // [niuma-finish-keep] 牛马模式统一拦截：除用户中断外一切终止均转为继续
-    if (niumaMode.value && reason !== 'interrupted') {
-      try {
-        addTrace({
-          kind: 'loop',
-          summary: `🐂 牛马模式拦截终止 · reason=${reason} · ${String(detail || '').slice(0, 80)}`,
-          payload: { loopId: inst.id.value, loopRound: inst.round.value, reason },
-        })
-      } catch { /* ignore */ }
-      disarmTimer(inst)
-      inst.pendingRound.value = null
-      inst.stopReason.value = ''
-      inst.state.value = 'waiting'
-      try { persist(inst) } catch { /* ignore */ }
-      enterWaiting(inst)
-      try { startWaiting() } catch { /* ignore */ }
-      // 主动推一把：立即重发提示，避免仅靠 3 分钟 watchdog
-      try {
-        const okSent = loopPaused.value ? false : transport.sendFill('', { prompt: '基于项目当前状态自主判断下一步优化项，直接执行脚本推进，不要停下来等指令。若无明显优化项，做类型、测试、依赖、文档巡检并给出改动。' }) // [loop-paused]
-        if (!okSent) {
-          addTrace({ kind: 'loop', summary: '⚠ 牛马续推发送失败（窗口可能已关）', payload: { loopId: inst.id.value } })
-        }
-      } catch { /* ignore */ }
-      return
-    }
     disarmTimer(inst)
     inst.pendingRound.value = null
     const wasRollback = inst.stopRequest.value === 'rollback'
@@ -89,22 +60,7 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
     inst.state.value = interrupted ? 'interrupted' : 'stopped'
     transport.sendStop('')
     unbindKeyboard()
-    // loopRegistry 已删（PLAN #17 单例回退），多循环 Map 已移除
     persist(inst)
-
-    addTrace({
-      kind: 'loop',
-      summary: `${interrupted ? '⏹' : '■'} 循环结束 · ${inst.stopReason.value}`,
-      payload: {
-        loopId: inst.id.value,
-        loopRound: inst.round.value,
-        reason,
-        // 失败链路 trace ref：把终止时的关键状态打包，便于事后复盘
-        lastExec: inst.lastExec.value,
-        lastHash: inst.lastHash.value,
-        loopSessionId: '',
-      },
-    })
 
     // 回滚场景不再提交（改动已 reset）；其余终止一次性 commit
     if (!wasRollback) {
@@ -133,7 +89,6 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
     }
 
     // [auto-idle-after-finish-v1] 整轮结束自动回初始态：按钮切「发送」
-    // 牛马模式已在函数上方 820-843 提前 return，此处无需再判 niumaMode
     loopPaused.value = true
     inst.stopRequest.value = 'none'
     void runHook('LoopStop', {

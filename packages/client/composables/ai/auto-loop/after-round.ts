@@ -9,7 +9,6 @@ type HooksMod = typeof import('./hooks.js')
 type PersistMod = typeof import('./persist.js')
 type LoopLogicMod = typeof import('../loopLogic.js')
 type ToastFn = typeof import('../../ui/useToast.js').toast
-type TraceHook = ReturnType<typeof import('../../ui/useTraceLog.js').useTraceLog>
 type RoundGuards = ReturnType<typeof import('./round-guards.js').createRoundGuards>
 type Waiting = ReturnType<typeof import('./waiting.js').createWaiting>
 
@@ -17,13 +16,11 @@ interface AfterRoundDeps {
   finish: (inst: LoopInstance, reason: string, detail?: string) => Promise<void>
   handleStopAfterRound: (inst: LoopInstance) => Promise<void>
   runHook: HooksMod['runHook']
-  addTrace: TraceHook['addTrace']
   toast: ToastFn
   persist: PersistMod['persist']
   ackFill: RoundGuards['ackFill']
   transport: AiTransport
   loopPaused: Ref<boolean>
-  niumaMode: Ref<boolean>
   stage: Ref<'' | 'plan' | 'implement' | 'verify'>
   enterWaiting: Waiting['enterWaiting']
   LOOP_MAX_ROUNDS: number
@@ -38,13 +35,11 @@ export function createAfterRound(deps: AfterRoundDeps) {
     finish,
     handleStopAfterRound,
     runHook,
-    addTrace,
     toast,
     persist,
     ackFill,
     transport,
     loopPaused,
-    niumaMode,
     stage,
     enterWaiting,
     LOOP_MAX_ROUNDS,
@@ -55,7 +50,7 @@ export function createAfterRound(deps: AfterRoundDeps) {
   let hardStartedAtMs = 0
 
   async function afterRound(inst: LoopInstance, o: RoundOutcome): Promise<void> {
-    // [loop-hard-limit-v1] 硬上限：总时长 / 总轮次，先到即停，牛马模式也生效
+    // [loop-hard-limit-v1] 硬上限：总时长 / 总轮次，先到即停
     if (inst.id.value !== hardTrackedLoopId) {
       hardTrackedLoopId = inst.id.value
       hardStartedAtMs = Date.now()
@@ -95,18 +90,12 @@ export function createAfterRound(deps: AfterRoundDeps) {
       await finish(inst, 'hook-reject-after-script', asHook.reason || 'AfterScript hook rejected')
       return
     }
-    if ((asHook.hooksRun || 0) > 0) {
-      addTrace({
-        kind: 'loop',
-        summary: `🪝 AfterScript · ${asHook.hooksRun} 个 hook 通过`,
-        payload: { loopId: inst.id.value, loopRound: inst.round.value },
-      })
-    }
     inst.state.value = 'feedback'
     stage.value = 'verify'
     persist(inst)
 
-    // [breaker-removed-v1] token/熔断判断已删除
+    // [breaker-removed-v1] token 熔断已移除（PLAN #17 单例回退）；tokenDelta 保留为 0，
+    // 因 AfterResult 钩子契约仍带此字段，删除会破坏下游 hook 的入参结构
     const tokenDelta = 0
 
     const arHook = await runHook('AfterResult', {
@@ -121,13 +110,6 @@ export function createAfterRound(deps: AfterRoundDeps) {
     if (arHook.action === 'reject') {
       await finish(inst, 'hook-reject-after-result', arHook.reason || 'AfterResult hook rejected')
       return
-    }
-    if ((arHook.hooksRun || 0) > 0) {
-      addTrace({
-        kind: 'loop',
-        summary: `🪝 AfterResult · ${arHook.hooksRun} 个 hook 通过`,
-        payload: { loopId: inst.id.value, loopRound: inst.round.value },
-      })
     }
 
     inst.round.value += 1
