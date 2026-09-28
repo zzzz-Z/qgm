@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
 import { getRoot } from '../config.js'
-import { injectAiJsdoc, scanNativeApisWithFallback, scanScriptHead } from './ai-guard.js'; // [ai-guard-v1]
+import { injectAiJsdoc, scanNativeApisWithFallback, scanScriptHead } from './ai-guard.js' // [ai-guard-v1]
 import { runProcess } from '../process/proc.js'
 import { buildWrapperCode } from './run-script-wrapper.js'
 
@@ -15,14 +15,17 @@ export interface RunResult {
 }
 
 /**
- * 运行 Script
- * @param scriptPath - script Path
- * @param timeoutMs - timeout Ms
- * @param signal - signal
- * @param overlayPath - overlay Path
- * @param toolLogPath - tool Log Path
- * @param onChunk - on Chunk
- * @param data - data
+ * 在受限沙箱中执行 cjs 脚本并收集结果
+ * [WHY] 执行前做脚本头契约校验（SCRIPT_META_MISSING）与原生 API 扫描，防止绕过 SYSTEM.md 约束
+ * [CONSTRAINT] 失败统一走 code=2 + JSON stderr；onChunk 用于 NDJSON 流式回传（缺省则只返回汇总结果）
+ * [CHANGE-IMPACT] 被 run.ts 的 EXECUTE 阶段消费；返回结构的 code / stdout / stderr 决定 pipeline 状态
+ * @param scriptPath 脚本文件绝对路径
+ * @param timeoutMs 执行超时毫秒数（默认 60s）
+ * @param signal 外部取消信号（来自 run.ts 的 AbortController）
+ * @param overlayPath 沙箱写操作的 overlay 落盘路径
+ * @param toolLogPath 工具调用 JSONL 日志路径
+ * @param onChunk stdout / stderr 流式回调；缺省则不流式回传
+ * @param sandbox 沙箱级别（read-only / workspace-write / full）
  */
 export async function runScript(scriptPath: string, timeoutMs = 60_000, signal?: AbortSignal, overlayPath?: string, toolLogPath?: string, onChunk?: (stream: 'stdout' | 'stderr', data: string) => void, sandbox?: string): Promise<RunResult> {
   try {

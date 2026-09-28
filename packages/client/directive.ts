@@ -9,8 +9,12 @@ interface TooltipEl extends HTMLElement {
 }
 
 /**
- * 确保 Handlers
- * @param el - el
+ * 为元素注册 tooltip 事件监听（幂等：已注册时直接返回）
+ * [WHY] 指令可能在 updated 钩子被反复调用；用 __ttOnEnter 字段作为"已挂载"标记避免重复 addEventListener
+ * [CONSTRAINT] 保留原生 addEventListener：指令作用在 el 元素而非组件 scope 上，
+ * vueuse useEventListener 依赖 setup scope 自动清理，此处不适用
+ * [CHANGE-IMPACT] 成对函数为 detach；新增事件须同时在 detach 中移除，否则内存泄漏
+ * @param el 指令绑定的 DOM 元素（TooltipEl 类型带 __tt* 缓存字段）
  */
 function ensureHandlers(el: TooltipEl) {
   if (el.__ttOnEnter) return
@@ -30,8 +34,11 @@ function ensureHandlers(el: TooltipEl) {
 }
 
 /**
- * 执行 detach
- * @param el - el
+ * 移除 tooltip 事件监听并清理 __tt* 缓存字段（幂等）
+ * [CONSTRAINT] 与 ensureHandlers 严格配对：新增/删除事件监听必须同步两侧，
+ * 移除后置 undefined 让下次 ensureHandlers 能重新挂载
+ * [CHANGE-IMPACT] 指令的 unmounted 钩子调用此函数；未调用会残留监听导致内存泄漏
+ * @param el 指令绑定的 DOM 元素
  */
 function detach(el: TooltipEl) {
   if (!el.__ttOnEnter) return
