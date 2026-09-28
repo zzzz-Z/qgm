@@ -24,11 +24,14 @@ export interface AiTransport {
   waitAck?: (t: string, sid: string, timeoutMs?: number) => Promise<boolean>
 }
 
-/** 键 */
+/** localStorage 键：transport 偏好（'headless' | 'tampermonkey'）；与 useDeepseekUrl 的 _isHeadless 读取同键 */
 const TRANSPORT_KEY = '__ai_transport'
 
+/** [skill-always] 常驻 skill 文本缓存；加载成功后被 sendFill 前缀拼接到 prompt */
 let alwaysSkillsText = ''
+/** [skill-always] 幂等标志：避免重复 fetch /__ai/skills/always（模块级 once） */
 let alwaysSkillsLoaded = false
+/** transport 单例；由 getTransport() 惰性创建，setTransportKind 时置空以触发切换 */
 let singleton: AiTransport | null = null
 
 // [skill-always] 常驻 skill 文本缓存
@@ -36,7 +39,9 @@ let singleton: AiTransport | null = null
 void loadAlwaysSkillsOnce()
 
 /**
- * 加载 Always Skills Once
+ * 拉取一次常驻 skill 文本（/__ai/skills/always）
+ * [WHY] 油猴通道直投不经服务端 loader，需前端预取后 prepend 到 prompt；失败降级为空串不阻断发送
+ * [CONSTRAINT] alwaysSkillsLoaded 先置位再 fetch，避免并发调用重复请求
  */
 async function loadAlwaysSkillsOnce() {
   if (alwaysSkillsLoaded) return
@@ -49,9 +54,10 @@ async function loadAlwaysSkillsOnce() {
 }
 
 /**
- * 执行 call Ds
- * @param name - name
- * @param args - args
+ * 反射调用 useDeepseekUrl 导出的发送函数（sendFill / sendStop / …）
+ * [WHY] 避免静态 import 引发循环依赖：useDeepseekUrl 与 transport 相互引用，动态取值可延迟到调用时
+ * [CONSTRAINT] 未知 name 或非函数时返回 false；返回 Promise 则 fire-and-forget 并吞掉 rejection
+ * [CHANGE-IMPACT] 被 sendFill/sendStop/sendRotate/sendNewSession 依赖，签名变化会破坏油猴通道
  */
 function callDs(name: string, ...args: unknown[]): boolean {
   const bag = ds as unknown as Record<string, unknown>
@@ -65,7 +71,9 @@ function callDs(name: string, ...args: unknown[]): boolean {
 }
 
 /**
- * 创建 Tampermonkey Transport
+ * 创建油猴通道 transport（window.postMessage 驱动）
+ * [CONSTRAINT] 返回单例对象，dispose() 后才释放 window message 监听与回调集合
+ * [CHANGE-IMPACT] 使用方需在卸载时调用 dispose()，否则 window message 监听泄漏
  */
 export function createTampermonkeyTransport(): AiTransport {
   const replyCbs = new Set<(r: unknown, sid: string) => void>()
@@ -87,6 +95,8 @@ export function createTampermonkeyTransport(): AiTransport {
     else if (t === 'ai-runner:summary') { for (const cb of summaryCbs) cb(String((d as { text?: string }).text || ''), sid, Boolean((d as { degraded?: boolean }).degraded)) }
     else if (t === 'ai-runner:new-session-created') { for (const cb of newSidCbs) cb(String((d as { url?: string }).url || ''), String((d as { id?: string }).id || '')) }
   }
+  // [no-vueuse] 保留原生 addEventListener：transport 工厂可在 setup scope 外被创建（模块级单例），
+  // vueuse useEventListener 依赖 effectScope 自动清理，此处改用 dispose() 显式成对移除
   if (typeof window !== 'undefined') window.addEventListener('message', onMessage)
 
   return {
@@ -124,8 +134,9 @@ export function createTampermonkeyTransport(): AiTransport {
 }
 
 /**
- * 创建 Headless Transport
- * @param wsUrl - ws Url
+ * 创建 headless 通道 transport（WebSocket 驱动）
+ * [CONSTRAINT] 未连接时消息进 queue，open 后自动 flush；同样需调用 dispose() 释放
+ * @param wsUrl 显式指定 WS 地址；省略时按 location 推导（https→wss）
  */
 export function createHeadlessTransport(wsUrl?: string): AiTransport {
   const replyCbs = new Set<(r: unknown, sid: string) => void>()
@@ -146,6 +157,7 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   function ensure(): WebSocket {
     if (ws && ws.readyState <= 1) return ws
     ws = new WebSocket(resolveUrl())
+    // [no-vueuse] WS 事件监听保留原生：生命周期随 transport 而非组件，且需在 dispose 时整体 close
     ws.addEventListener('open', () => {
       const pending = queue.splice(0)
       for (const m of pending) { try { ws!.send(m) } catch {} }
@@ -215,7 +227,10 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
 
 // __URL_TRANSPORT_AWARE__ transport 偏好支持 URL 参数（跨 origin 稳定）
 /**
- * 获取 Transport Kind
+ * 读取当前 transport 偏好
+ * [WHY] URL ?transport= 优先于 localStorage：URL 参数可跨 origin 稳定传递偏好（油猴直开 AI 站点场景）
+ * [CONSTRAINT] 判定值只接受 'headless' / 'tampermonkey'，其余一律回落 tampermonkey
+ * [CHANGE-IMPACT] 修改判定顺序会让用户已保存的偏好失效
  */
 export function getTransportKind(): AiTransportKind {
   try {
@@ -228,15 +243,17 @@ export function getTransportKind(): AiTransportKind {
   } catch { return 'tampermonkey' }
 }
 /**
- * 设置 Transport Kind
- * @param k - k
+ * 写入 transport 偏好并销毁现有单例
+ * [WHY] 单例销毁是必要的：transport 持有 window message 监听 / WS 连接，切换后必须释放
+ * [CONSTRAINT] 不立即重建单例，下次 getTransport() 时按新偏好惰性创建
  */
 export function setTransportKind(k: AiTransportKind): void {
   try { localStorage.setItem(TRANSPORT_KEY, k) } catch {}
   if (singleton) { singleton.dispose(); singleton = null }
 }
 /**
- * 获取 Transport
+ * 获取 transport 单例（惰性创建）
+ * [CONSTRAINT] 单例跨组件共享；setTransportKind 后为 null，下次调用按新偏好重建
  */
 export function getTransport(): AiTransport {
   if (singleton) return singleton
@@ -246,7 +263,8 @@ export function getTransport(): AiTransport {
 
 // 兼容 useDeepseekUrl 的动态调用约定：返回 { transport } 容器
 /**
- * 组合式函数 Ai Transport
+ * 组合式入口：返回 { transport } 容器（兼容 useDeepseekUrl 的动态调用约定）
+ * [CONSTRAINT] 返回的是模块级单例，多组件调用共享同一 transport
  */
 export function useAiTransport(): { transport: AiTransport } {
   return { transport: getTransport() }
