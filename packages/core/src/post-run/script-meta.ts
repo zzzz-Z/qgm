@@ -24,8 +24,11 @@ export interface ScriptMeta {
  */
 
 /**
- * 解析 Script Meta
- * @param script - script
+ * 从脚本头部提取全部 @xxx 元注释（desc / why / plan / state / done / mode / ctx / changes）
+ * [WHY] 元注释是脚本契约（SYSTEM.md §1.4）的载体，服务端据此决定输出裁剪、变更声明等行为
+ * [CONSTRAINT] js/cjs 与 bash 均识别（// 或 # 前缀）；每个字段只取首次出现；值截断至 200 字符
+ * [CHANGE-IMPACT] 新增字段须同步 ScriptMeta 接口；ctx='full' 会关闭 stdout 裁剪
+ * @param script 脚本原文
  */
 export function parseScriptMeta(script: string): ScriptMeta {
   const out: ScriptMeta = { desc: '', why: '', plan: '', state: '', done: '', mode: '', ctx: '', changes: '' }
@@ -38,8 +41,11 @@ export function parseScriptMeta(script: string): ScriptMeta {
   return out
 }
 /**
- * 解析 Claimed
- * @param script - script
+ * 从脚本头部提取 @changes 声明的文件路径列表
+ * [WHY] 与 git diff 实际变更对比可判断"声称改了但实际没动"，用于合规反馈
+ * [CONSTRAINT] 仅识别 // 注释形式（bash 的 # 不支持）；逗号分隔；反斜杠会规范化为正斜杠
+ * [CHANGE-IMPACT] 返回 null 表示"未声明"，返回 [] 不可能出现；调用方据此区分"未声明"与"声明为空"
+ * @param script 脚本原文
  */
 export function parseClaimed(script: string): string[] | null {
   const out: string[] = []

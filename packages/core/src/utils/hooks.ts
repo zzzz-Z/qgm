@@ -20,9 +20,12 @@ const HOOK_TIMEOUT_MS = 5000
 function readConfig(): ReturnType<typeof loadHooksConfig> { return loadHooksConfig(CONFIG_PATH) }
 
 /**
- * 运行 Hook
- * @param event - event
- * @param payload - payload
+ * 按 hooks 配置依次执行指定事件下的外部命令
+ * [WHY] hook 是用户自定义脚本入口（shell 命令），在循环各阶段（BeforeFill/AfterScript 等）插桩
+ * [CONSTRAINT] 事件未配置 hook 时直接返回 ok（不报错）；payload 会 JSON 序列化后经 stdin 传入子进程
+ * [CHANGE-IMPACT] 返回 action='reject' 会让调用方走失败分支（如 startLoop 提前 finish）
+ * @param event 生命周期事件名（须命中 hooks-config 的键）
+ * @param payload 事件体；任意可 JSON 序列化的值
  */
 export async function runHook(event: HookEvent, payload: unknown): Promise<HookResult> {
   const cfg = readConfig()
