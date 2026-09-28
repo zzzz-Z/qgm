@@ -1,6 +1,11 @@
 <script setup lang="ts">
 // [abnormal-view-v1] PLAN 5.2 异常视图：本轮异常聚合 + 按严重度排序 + 默认隐藏
 import { computed, ref, watch } from 'vue'
+import { useClipboard } from '@vueuse/core'
+
+// [copy-via-vueuse] 组件级单例 useClipboard：内部会注册 copy 事件监听，
+// 通过 setup scope 在组件卸载时自动清理；因此必须定义在 setup 顶层而非函数内
+const _clipboard = useClipboard()
 
 interface Props {
   result?: {
@@ -14,7 +19,7 @@ interface Props {
   } | null
 }
 
-/** 组件接收的 props 定义 */
+/** 上一轮运行结果；null 表示尚未运行，各子字段可能缺失由下方诊断逻辑兜底 */
 const props = withDefaults(defineProps<Props>(), { result: null })
 
 type Severity = 'error' | 'warning' | 'info'
@@ -26,13 +31,15 @@ interface Item {
   files?: string[]
 }
 
-/** 严重程度 */
+/** 严重度排序权重；[CHANGE-IMPACT] items 排序依赖此映射，改权重会改变 UI 首条展示项 */
 const severityOrder: Record<Severity, number> = { error: 0, warning: 1, info: 2 }
 
 /**
- * 执行 first Lines
- * @param text - text
- * @param n - n
+ * 取文本前 n 行（跳过空行）
+ * [WHY] stderr / tsc 输出常有前后空行；空白跳过可让摘要直接从错误行开始
+ * [CONSTRAINT] undefined / 空串返回空字符串，调用方需自行提供默认文案
+ * @param text 源文本；可为 undefined
+ * @param n 保留的非空行数量
  */
 function firstLines(text: string | undefined, n: number): string {
   if (!text) return ''
@@ -40,7 +47,7 @@ function firstLines(text: string | undefined, n: number): string {
   return ls.slice(0, n).join('\n')
 }
 
-/** 条目列表 */
+/** 汇总所有异常源（tsc / eslint / test / exit / errorFiles）并按严重度排序 */
 const items = computed<Item[]>(() => {
   const out: Item[] = []
   const r = props.result
@@ -85,23 +92,24 @@ const items = computed<Item[]>(() => {
   return out.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])
 })
 
-/** 是否含错误 */
+/** 是否至少有一条 error 级条目；决定头部图标用红叉还是黄叹号 */
 const hasError = computed(() => items.value.some(i => i.severity === 'error'))
-/** 是否展开 */
+/** 列表展开态；有 error 时会被下方 watch 强制置 true */
 const expanded = ref(false)
 
 // 有 error 时自动展开
 watch(items, (v) => { if (v.some(i => i.severity === 'error')) expanded.value = true })
 
-/** 派发 */
+/** 向父组件派发"跳转到错误文件"事件（父组件负责选中/滚动） */
 const emit = defineEmits<{ (e: 'jump', file: string): void }>()
 /**
- * 执行 jump To
- * @param f - f
+ * 请求父组件跳转到指定文件
+ * [CONSTRAINT] 纯事件转发，不校验路径存在性；父组件负责失败提示
+ * @param f 目标文件相对路径
  */
 function jumpTo(f: string): void { emit('jump', f) }
 
-/** 图标 */
+/** 严重度 → 展示图标；[CONSTRAINT] 三种 Severity 必须全覆盖，否则模板渲染 undefined */
 const SEV_ICON: Record<Severity, string> = { error: '✗', warning: '⚠', info: '⋯' }
 
 // [tier1c-3] 错误第一印象：一句话诊断 + 归因 + 行动建议 + 复现命令
@@ -113,15 +121,17 @@ interface Diagnosis {
 }
 
 /**
- * 执行 count Ts Errors
- * @param text - text
+ * 统计 tsc 输出中 `error TS####` 的出现次数
+ * [CONSTRAINT] 依赖 tsc 固定错误格式；改 format 会导致漏计（此处不兜底）
+ * [WHY] 用于在诊断卡片头部展示精确错误数，比"失败"更具体
+ * @param text tsc stdout 或 stderr；undefined 返回 0
  */
 function countTsErrors(text: string | undefined): number {
   if (!text) return 0
   return (text.match(/error TS\d+/g) || []).length
 }
 
-/** 诊断信息 */
+/** [tier1c-3] 一句话诊断：取最严重条目生成 归因 / 行动 / 复现命令 四段式；无异常时返回 null */
 const diagnosis = computed<Diagnosis | null>(() => {
   const list = items.value
   if (!list.length) return null
@@ -175,20 +185,20 @@ const diagnosis = computed<Diagnosis | null>(() => {
 })
 
 // 一键复制命令到剪贴板；不支持时退化到提示
-/** 提示 */
+/** 复制按钮的临时提示文案（"已复制: xxx" 或降级显示的原始命令）；2s 后自动清空 */
 const copiedTip = ref('')
 /**
- * 复制 Command
- * @param cmd - cmd
+ * 复制命令到剪贴板并给出 2s 临时反馈
+ * [copy-via-vueuse] 走 vueuse useClipboard：内部自动选 navigator.clipboard 或 execCommand 回退，
+ * 组件卸载时自动解绑 copy 监听
+ * [CONSTRAINT] 复制失败时降级为展示命令原文，让用户手动选择复制（不弹错）
+ * [CHANGE-IMPACT] 顶部 copiedTip 由定时器自动清空，频繁点击会延续显示（不主动 clearTimeout，与原行为一致）
+ * @param cmd 需要复制的命令行文本
  */
-function copyCommand(cmd: string): void {
+async function copyCommand(cmd: string): Promise<void> {
   try {
-    if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
-      void navigator.clipboard.writeText(cmd)
-      copiedTip.value = `已复制: ${cmd}`
-    } else {
-      copiedTip.value = cmd
-    }
+    await _clipboard.copy(cmd)
+    copiedTip.value = `已复制: ${cmd}`
   } catch {
     copiedTip.value = cmd
   }
@@ -196,7 +206,8 @@ function copyCommand(cmd: string): void {
 }
 
 /**
- * 执行 jump First
+ * 跳转到首个 errorFiles 条目
+ * [CONSTRAINT] errorFiles 为空时静默 no-op（模板已用 v-if 兜底按钮可见性）
  */
 function jumpFirst(): void {
   const fs2 = props.result?.errorFiles
