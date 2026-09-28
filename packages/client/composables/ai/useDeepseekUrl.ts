@@ -395,13 +395,22 @@ type FillResult = 'sent' | 'opened' | 'failed'
  */
 async function _prependFirstPromptRules(prompt: string): Promise<string> {
   try {
+    const parts: string[] = []
+    // [preset-rules-v1] SYSTEM.md 走应用预置源：即使工作区覆写根文件也不影响规则
+    try {
+      const presetRes = await fetch('/__ai/preset/system')
+      const preset = await presetRes.json()
+      if (preset && preset.ok && preset.content) {
+        parts.push(`<file path="SYSTEM.md">` + `\n${preset.content}\n` + `</file>`)
+      }
+    } catch { /* 预置源不可用则跳过，不阻断 */ }
+    // AGENTS.md 仍来自工作区（项目自述本就该由工作区提供）
     const res = await fetch('/__ai/files/read', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: ['SYSTEM.md', 'AGENTS.md'] }),
+      body: JSON.stringify({ paths: ['AGENTS.md'] }),
     })
     const data = await res.json()
-    const parts: string[] = []
     for (const f of data.files || []) {
       if (f.error || !f.content) continue
       parts.push(`<file path="${f.path}">` + `\n${f.content}\n` + `</file>`)
