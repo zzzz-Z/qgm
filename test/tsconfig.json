@@ -1,6 +1,0 @@
-// AIRUNNER-BATCH29-TEST-TSC-FIX: 供 VS Code 对 test/ 下 .ts 文件就近解析；继承 tsconfig.test.json
-{
-  "extends": "../tsconfig.test.json",
-  "include": ["**/*.ts"],
-  "exclude": ["node_modules"]
-}
