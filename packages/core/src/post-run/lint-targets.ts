@@ -14,8 +14,11 @@ export interface Change {
 export const LINT_EXTS = new Set(['.ts', '.tsx', '.vue', '.js', '.jsx', '.mjs', '.cjs'])
 
 /**
- * 选取 Lint Targets
- * @param changes - changes
+ * 从变更列表中挑出需要跑 eslint 的源文件
+ * [WHY] 全量 eslint 慢；只对变更文件跑可显著提速
+ * [CONSTRAINT] 排除 deleted；只留 LINT_EXTS 命中的扩展名
+ * [CHANGE-IMPACT] 结果被 run.ts 传给 runEslint；与 pickTscTargets 复用同一 changes 输入
+ * @param changes 本轮检测到的变更列表
  */
 export function pickLintTargets(changes: Change[]): string[] {
   return changes.filter(c => c.type !== 'deleted').map(c => c.path).filter(p => LINT_EXTS.has(path.extname(p).toLowerCase()))

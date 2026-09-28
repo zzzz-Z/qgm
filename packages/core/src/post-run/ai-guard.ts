@@ -52,8 +52,11 @@ export function scanScriptHead(code: string): HeadResult {
   return { ok: true }
 }
 /**
- * 执行 scan Native Apis
- * @param code - code
+ * 扫描脚本源码中的禁用的原生 API 调用（SYSTEM.md §4.3）
+ * [WHY] 沙箱运行时注入的是 __AI__ 命名空间，禁止直接 require fs / path / child_process；此扫描为编译前拦截
+ * [CONSTRAINT] 先 stripComments 再匹配，避免注释内示例触发误报；命中规则在 FORBIDDEN 表
+ * [CHANGE-IMPACT] 被 run-script 用于前置拦截；FORBIDDEN 表新增规则会波及既有脚本的兼容性
+ * @param code 脚本源码原文
  */
 export function scanNativeApis(code: string): ScanResult {
   const cleaned = stripComments(code)

@@ -4,8 +4,6 @@ import { useRuntime } from '../../stores/runtime'
 import { pushTerminalNotice, useRunner } from '../runner/useRunner'
 import { getTransport } from './useAiTransport.js'
 import { toast } from '../ui/useToast'
-import { useTraceLog } from '../ui/useTraceLog'
-import { syncTasks } from '../data/useTaskSync'
 import {
   buildRetryPrompt,
   isStrictDone,
@@ -55,7 +53,7 @@ export { bindKeyboard, unbindKeyboard } from './auto-loop/keyboard.js'
 // 传输层分流：tampermonkey | headless（见 useAiTransport.ts）
 /** 传输层 */
 const transport = getTransport()
-const { niumaMode, loopPaused, startWaiting } = useAiWaiting()
+const { loopPaused, startWaiting } = useAiWaiting()
 
 // ============================================================================
 // useAutoLoop —— 自动化循环状态机（v6 §6）
@@ -108,8 +106,6 @@ function resolveInst(_sid?: string): LoopInstance | null {
   return activeLoop.value
 }
 
-const { addTrace } = useTraceLog()
-
 /** 判断实例是否处于活动状态（非 idle/stopped/interrupted） */
 export function isInstActive(inst: LoopInstance | null): boolean {
   if (!inst) return false
@@ -124,7 +120,6 @@ export const isLoopActive = computed(() => isInstActive(activeLoop.value))
 let _finish: ((inst: LoopInstance, reason: string, detail?: string) => Promise<void>) | null = null
 const { enterWaiting, disarmTimer } = createWaiting({
   loopPaused,
-  niumaMode,
   persist,
   finish: (inst, reason, detail) => _finish ? _finish(inst, reason, detail) : Promise.resolve(),
   LOOP_ROUND_TIMEOUT_BASH_MS,
@@ -133,13 +128,10 @@ const { enterWaiting, disarmTimer } = createWaiting({
 
 // [stop-and-finish-v1] handleStopAfterRound / finish 已抽到 auto-loop/stop-and-finish.ts
 const { finish, handleStopAfterRound } = createStopAndFinish({
-  niumaMode,
   loopPaused,
-  addTrace,
   disarmTimer,
   persist,
   enterWaiting,
-  startWaiting,
   transport,
   toast,
   runHook,
@@ -149,7 +141,6 @@ _finish = finish
 
 // [round-guards-v1] 守卫函数已抽到 auto-loop/round-guards.ts
 const { ackFill } = createRoundGuards({
-  addTrace,
   transport,
 })
 
@@ -159,13 +150,11 @@ const { afterRound } = createAfterRound({
   finish,
   handleStopAfterRound,
   runHook,
-  addTrace,
   toast,
   persist,
   ackFill,
   transport,
   loopPaused,
-  niumaMode,
   stage,
   enterWaiting,
   LOOP_MAX_ROUNDS,
@@ -204,12 +193,10 @@ watch([
 // [start-family-v1] 启动族已抽到 auto-loop/start-family.ts
 const { initLoop, startLoop, startTakeover } = createStartFamily({
   loopPaused,
-  niumaMode,
   activeLoop,
   isLoopActive,
   persist,
   enterWaiting,
-  addTrace,
   runHook,
   finish,
   bindKeyboard,
@@ -220,12 +207,10 @@ const { initLoop, startLoop, startTakeover } = createStartFamily({
 // [reply-handlers-v1] 回复处理三入口
 const { onScriptArrival, onNonScriptReply, executeItem } = createReplyHandlers({
   loopPaused,
-  niumaMode,
   stage,
   planResumeAttempts,
   PLAN_RESUME_MAX,
   transport,
-  addTrace,
   toast,
   ackFill,
   afterRound,
@@ -240,7 +225,6 @@ const { onScriptArrival, onNonScriptReply, executeItem } = createReplyHandlers({
   persist,
   isStrictDone,
   buildRetryPrompt,
-  syncTasks,
   pushTerminalNotice,
   resolveInst,
   isInstActive,
@@ -267,7 +251,6 @@ const { resumeFromPause, clearSoftPause, exitPauseToIdle, resumeLoop, requestPau
   persist,
   enterWaiting,
   disarmTimer,
-  addTrace,
   ackFill,
   finish,
   bindKeyboard,
@@ -399,9 +382,12 @@ export function useAutoLoop() {
 
 // [P3-2c2] submitDecision 接入真实决策通道
 /**
- * 执行 submit Decision
- * @param id - id
- * @param customText - custom Text
+ * 用户对决策卡的回答入口（快捷选项 / 取消 / 自定义文本）
+ * [WHY] 决策卡由脚本的 __AI_RUNNER_DECISION__ 标记产生；用户的回答以文本形式回填给 AI 续推
+ * [CONSTRAINT] id 三档：'__cancel__' 表示停止循环、'__custom__' 用 customText、其余匹配 options.id 取 label
+ * [CHANGE-IMPACT] 会置 pendingDecision=null 并调用 transport.sendFill；回答内容格式是 AI 侧解析契约
+ * @param id 选项 id 或两个内建标识（__cancel__ / __custom__）
+ * @param customText 自定义回答文本；仅 id='__custom__' 时使用
  */
 function submitDecision(id: string, customText?: string): void {
   const pd = pendingDecision.value
@@ -417,7 +403,6 @@ function submitDecision(id: string, customText?: string): void {
   if (t) {
     const ok = loopPaused.value ? false : t.sendFill('', { prompt: `【决策回答】${answer}` })
     if (ok) {
-      addTrace({ kind: 'loop', summary: `💬 用户决策：${answer.slice(0, 60)}`, payload: {} })
       enterWaiting(activeLoop.value!)
     }
   }

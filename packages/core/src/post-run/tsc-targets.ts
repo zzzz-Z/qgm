@@ -19,8 +19,11 @@ export const TSC_SKIP_DIRS = ['client/e2e/', 'e2e/', 'test/', 'tests/']
 export const TSC_SKIP_RE = /\.(?:spec|test)\.(?:ts|tsx|mts|cts|vue)$/
 
 /**
- * 选取 Tsc Targets
- * @param changes - changes
+ * 从变更列表中挑出需要跑 tsc 的源文件
+ * [WHY] 全量 tsc 慢；按变更目标定向检查可极大缩短反馈时间
+ * [CONSTRAINT] 排除 deleted；只留 TSC_EXTS + .vue；跳过 TSC_SKIP_DIRS 与 TSC_SKIP_RE 命中的路径
+ * [CHANGE-IMPACT] 结果被 run.ts 传给 runTsc；过滤过严会漏检，过松会拖慢
+ * @param changes 本轮检测到的变更列表
  */
 export function pickTscTargets(changes: Change[]): string[] {
   return changes

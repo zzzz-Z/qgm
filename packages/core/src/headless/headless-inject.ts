@@ -7,8 +7,11 @@
 // 约束：纯函数、无外部闭包引用 —— 序列化后代码结构必须完整。
 
 /**
- * 执行 fill Prompt In Page
- * @param args - args
+ * 在页面上下文内填充提示词到输入框（Playwright evaluate 目标函数）
+ * [WHY] 必须走页面的原生 setter 并派发 input 事件，否则 React/Vue 双向绑定监听不到值变化
+ * [CONSTRAINT] 优先 textarea 再 contenteditable；未找到输入框或 prompt 为空返回 false
+ * [CHANGE-IMPACT] 返回值被 headless 池的 fillPrompt 判定为成功标志；改判定会让上游误认为已发送
+ * @param args Playwright evaluate 传入的 { prompt } 参数对象
  */
 export function fillPromptInPage(args) {
   const prompt = String((args && args.prompt) || '')

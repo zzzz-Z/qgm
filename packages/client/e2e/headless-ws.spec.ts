@@ -22,9 +22,11 @@ const HTTP_URL = `http://${HOST}:${PORT}/__ai/`
 let child: ChildProcess | null = null
 
 /**
- * 执行 wait For Http
- * @param url - url
- * @param timeoutMs - timeout Ms
+ * 轮询等待 HTTP 服务就绪（e2e 测试辅助）
+ * [WHY] dev server 启动需时间；固定 sleep 不可靠，用轮询 + 超时更稳
+ * [CONSTRAINT] 200ms 间隔；任何 HTTP 响应（含 4xx/5xx）都视为"已就绪"
+ * @param url 目标 URL（通常是健康检查端点）
+ * @param timeoutMs 最长等待毫秒数
  */
 async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
   const start = Date.now()
@@ -74,9 +76,12 @@ function openWs(): Promise<WebSocket> {
 }
 
 /**
- * 执行 next Message
- * @param ws - ws
- * @param predicate - predicate
+ * 等待 WebSocket 上下一条满足谓词的消息（e2e 测试辅助）
+ * [WHY] WS 消息是异步事件流；把"等下一条"包成 Promise 让测试逻辑线性化
+ * [CONSTRAINT] 谓词返回 true 时 off 监听并 resolve；超时 reject；JSON 解析失败的消息被忽略
+ * @param ws 已连接的 WebSocket 实例
+ * @param predicate 命中判定；返回 true 表示这就是期望的消息
+ * @param timeoutMs 最长等待毫秒数
  */
 function nextMessage(ws: WebSocket, predicate: (m: unknown) => boolean, timeoutMs: number): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
