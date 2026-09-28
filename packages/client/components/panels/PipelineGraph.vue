@@ -29,8 +29,11 @@ const STAGES: Array<{ key: string, label: string, segs: string[] }> = [
 ]
 
 /**
- * 执行 agg
- * @param states - states
+ * 聚合多个子段状态为本阶段单一状态
+ * [WHY] 阶段由多个 seg 组成，UI 只展示一个状态；优先级 failed > running > ok > pending
+ * [CONSTRAINT] 任一子段 failed 即整段 failed（错误优先）；全 ok/skipped 才 ok
+ * [CHANGE-IMPACT] 结果被 currentIdx 用于高亮当前阶段；改优先级会改变高亮位置
+ * @param states 子段状态列表；空数组返回 pending
  */
 function agg(states: Array<SegStatus>): SegStatus {
   if (states.some(s => s === 'failed')) return 'failed'
@@ -41,8 +44,10 @@ function agg(states: Array<SegStatus>): SegStatus {
 }
 
 /**
- * 执行 norm
- * @param raw - raw
+ * 把服务端下发的原始状态字符串规范化到 SegStatus 枚举
+ * [CONSTRAINT] 只接受 ok / running / failed 三个字面量；其余（含 undefined）一律回落 pending
+ * [WHY] 服务端可能新增状态值，此处做白名单过滤避免 UI 展示异常值
+ * @param raw 原始状态字符串；undefined 视为 pending
  */
 function norm(raw?: string): SegStatus {
   const s = String(raw || 'pending')

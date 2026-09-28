@@ -66,8 +66,11 @@ interface PushOptions {
  */
 
 /**
- * 执行 push
- * @param opts - opts
+ * 把 AI 回填的脚本推入 inbox（带去重）
+ * [WHY] 同脚本多次回填只保留一份；hash 用归一化后的内容计算，忽略 shebang/注释/空白的等价变形
+ * [CONSTRAINT] 空代码或 hash 已存在时返回 null（表示"未新增"），调用方据此跳过 UI 通知
+ * [CHANGE-IMPACT] 会写 inbox.value 引用；下游 watch / 模板列表依赖此次刷新
+ * @param opts 推送参数（code / lang / site 等）
  */
 export function push(opts: PushOptions): InboxItem | null {
   const code = opts.code
@@ -132,8 +135,10 @@ export function getLastAutoFilled(): string {
 }
 
 /**
- * 设置 Last Auto Filled
- * @param code - code
+ * 记录"上次自动填入编辑器的脚本"内容（覆盖策略的判定基准）
+ * [WHY] 用户跑完/切换脚本后此值会过期，必须及时更新，否则下次 AI 回填会误判为"用户手写"
+ * [CONSTRAINT] 只存内容快照不做 hash；与编辑器内容严格字符串比较
+ * @param code 上次自动填入的完整脚本内容（原始字符串）
  */
 export function setLastAutoFilled(code: string) {
   lastAutoFilled = code
