@@ -7,6 +7,7 @@ import { execHono } from './exec.js'
 import { tasksHono } from './tasks.js'
 import { filesHono } from './files.js'
 import { filesReadHono } from './files-read.js'
+import { presetHono } from './preset.js'
 import { logsHono } from './logs.js'
 import { searchHono } from './search.js'
 import { runHono } from './run.js'
@@ -23,6 +24,7 @@ export const HONO_SUB_APPS = [
   tasksHono,
   filesHono,
   filesReadHono,
+  presetHono,
   logsHono,
   searchHono,
   runHono,
@@ -48,4 +50,5 @@ export const HONO_PREFIXES = [
   '/search',
   '/diff-from-baseline',
   '/run',
+  '/preset',
 ]
