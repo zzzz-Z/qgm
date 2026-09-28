@@ -3,7 +3,6 @@ import type { LoopInstance } from './types.js'
 
 interface WaitingDeps {
   loopPaused: { value: boolean }
-  niumaMode: { value: boolean }
   persist: (inst: LoopInstance) => void
   finish: (inst: LoopInstance, reason: string, detail?: string) => Promise<void>
   LOOP_ROUND_TIMEOUT_BASH_MS: number
@@ -11,11 +10,15 @@ interface WaitingDeps {
 }
 
 /**
- * 创建 Waiting
- * @param deps - deps
+ * 组装等待族（enterWaiting 等），闭包持有 deps
+ * [WHY] 从 useAutoLoop.ts 抽出以降低单文件体积（HCLC 400 行约束）
+ * [CONSTRAINT] deps 全量由 useAutoLoop 注入；本模块无模块级状态，多次创建产生独立闭包；
+ * 超时时长按 lastExec.lang 区分（bash 180s vs cjs 90s）
+ * [CHANGE-IMPACT] 修改 WaitingDeps 结构须同步更新 useAutoLoop 的装配处
+ * @param deps 等待族依赖面（loopPaused / persist / finish / 两类超时常量）
  */
 export function createWaiting(deps: WaitingDeps) {
-  const { loopPaused, niumaMode, persist, finish, LOOP_ROUND_TIMEOUT_BASH_MS, LOOP_ROUND_TIMEOUT_MS } = deps
+  const { loopPaused, persist, finish, LOOP_ROUND_TIMEOUT_BASH_MS, LOOP_ROUND_TIMEOUT_MS } = deps
 
   /** 进入等待 AI 回复状态 */
   function enterWaiting(inst: LoopInstance) {
@@ -36,7 +39,7 @@ export function createWaiting(deps: WaitingDeps) {
     }, 1000)
     const round = inst.round.value
     inst.roundTimer = setTimeout(() => {
-      if (!niumaMode.value) void finish(inst, 'round-timeout', `第 ${round} 轮等待 AI 回复超过 ${Math.round(timeoutMs / 1000)}s`)
+      void finish(inst, 'round-timeout', `第 ${round} 轮等待 AI 回复超过 ${Math.round(timeoutMs / 1000)}s`)
     }, timeoutMs)
   }
 

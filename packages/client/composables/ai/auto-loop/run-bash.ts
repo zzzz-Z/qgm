@@ -11,8 +11,13 @@ interface BashExecResult {
 }
 
 /**
- * 运行 Bash
- * @param cmd - cmd
+ * 在自动循环中执行 bash 命令（带客户端 git 写操作二次拦截）
+ * [WHY] 服务端 bash-guard 黑名单按子串匹配，AI 可用 `git reset --hard origin/main`、
+ * `git push --force-with-lease` 等变形绕过；此处按命令词二次拦截所有 git 写操作
+ * [CONSTRAINT] 命中拦截返回 code=-1 + blacklistHit 标记，调用方据此提示人工审批；
+ * 白名单之外的 git 操作（read-only）放行
+ * [CHANGE-IMPACT] 拦截正则 GIT_WRITE_RE 覆盖的 git 子命令清单改动会影响合法命令的判定
+ * @param cmd 用户（或 AI）提供的 bash 命令原文
  */
 export async function runBash(cmd: string): Promise<BashExecResult> {
   const out: BashExecResult = { code: -1, stdout: '', stderr: '', dirtyFiles: [] }
