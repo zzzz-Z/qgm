@@ -79,9 +79,12 @@ const DEFAULT_JITTER_MIN_MS = 3500
 const DEFAULT_JITTER_MAX_MS = 6000
 
 /**
- * 执行 jitter Delay
- * @param minMs - min Ms
- * @param maxMs - max Ms
+ * 在 [minMs, maxMs) 区间内随机延迟后 resolve
+ * [WHY] 固定间隔易被服务端识别为脚本；随机抖动模拟真人操作节奏
+ * [CONSTRAINT] maxMs <= minMs 时按 minMs 恒定延迟；使用 Math.random 非加密随机
+ * [CHANGE-IMPACT] 影响 sendFill / rotate 的每次发送间隔；调小会增加被限流风险
+ * @param minMs 延迟下限（毫秒）
+ * @param maxMs 延迟上限（毫秒，不含）
  */
 function jitterDelay(minMs: number, maxMs: number): Promise<void> {
   const span = Math.max(0, maxMs - minMs)
@@ -90,8 +93,12 @@ function jitterDelay(minMs: number, maxMs: number): Promise<void> {
 }
 
 /**
- * 执行 with Backoff
- * @param fn - fn
+ * 指数退避重试封装（仅对 429 / rate-limit 生效）
+ * [WHY] 服务端限流是暂时性故障，重试比直接失败更符合用户预期
+ * [CONSTRAINT] 非 429 错误立即抛出（不做无意义重试）；退避序列 1s / 2s / 4s / 8s / 16s
+ * [CHANGE-IMPACT] 被 fillPrompt 调用；maxRetry 调大虽提升成功率但拖长单次操作耗时
+ * @param fn 待重试的异步操作
+ * @param maxRetry 最大重试次数（默认 5）
  */
 async function withBackoff<T>(fn: () => Promise<T>, maxRetry = 5): Promise<T> {
   for (let i = 0; i <= maxRetry; i++) {
@@ -111,15 +118,18 @@ async function withBackoff<T>(fn: () => Promise<T>, maxRetry = 5): Promise<T> {
 /** 速率窗口 */
 const rateWindow: number[] = []
 /**
- * 执行 record Request
- * @param is429 - is429
+ * 记录一次请求结果到滑动窗口（100 次容量）
+ * [WHY] 用近期 429 比例动态调整抖动下限，服务端限流时自动降频
+ * [CONSTRAINT] 窗口 FIFO 淘汰；只记录布尔（是否 429），不记录其他错误类型
+ * @param is429 本次请求是否被限流（429 / rate-limit）
  */
 function recordRequest(is429: boolean): void {
   rateWindow.push(is429 ? 1 : 0)
   if (rateWindow.length > 100) rateWindow.shift()
 }
 /**
- * 执行 rate Limited Ratio
+ * 计算滑动窗口内 429 占比
+ * [CONSTRAINT] 窗口为空时返回 0（视为无限流）；用于 fillPrompt 决定是否放大抖动倍率
  */
 function rateLimitedRatio(): number {
   if (rateWindow.length === 0) {
@@ -135,7 +145,10 @@ let pwCache: PlaywrightModule | null | undefined
 // 优先 CloakBrowser，fallback playwright
 // cloak 优先（仅 linux-x64 有 binary），否则 playwright
 /**
- * 加载 Playwright
+ * 惰性加载浏览器引擎（cloakbrowser 优先，playwright 兜底）
+ * [WHY] cloakbrowser 在 linux-x64 反检测能力更好，其他平台直接回落 playwright
+ * [CONSTRAINT] 结果缓存到 pwCache（含 null 表示永久失败，避免重复 import）
+ * [CHANGE-IMPACT] 返回 null 会让 launch 进入 error 态；上游应据此提示"请装 playwright"
  */
 async function loadPlaywright(): Promise<PlaywrightModule | null> {
   if (pwCache !== undefined) return pwCache
@@ -143,7 +156,7 @@ async function loadPlaywright(): Promise<PlaywrightModule | null> {
   if (process.platform === 'linux' && process.arch === 'x64') {
     try {
       const cloak = (await import('cloakbrowser')) as Record<string, unknown>
-      /** 信息 */
+      /** cloak 的 binaryInfo 检查本地是否有匹配平台的二进制；未安装走 playwright 兜底 */
       const info = (cloak.binaryInfo as () => { installed: boolean })()
       if (info.installed) {
         pwCache = (await import('playwright'))
@@ -167,8 +180,11 @@ async function loadPlaywright(): Promise<PlaywrightModule | null> {
 }
 
 /**
- * 创建 Headless Pool
- * @param opts - opts
+ * 创建无头浏览器会话池（含并发限流 + 排队 + 抖动）
+ * [WHY] 浏览器进程重且独占 profile，池化可避免并发 launch 互抢 user-data-dir
+ * [CONSTRAINT] 池满时排队等 queueTimeoutMs；open 走 openMutex 全局串行
+ * [CHANGE-IMPACT] 返回的 pool 生命周期与调用方一致；不显式 close 会残留浏览器进程
+ * @param opts 启动配置；未提供字段走 DEFAULT_* 常量
  */
 export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   const sessions = new Map<string, HeadlessSession>()
