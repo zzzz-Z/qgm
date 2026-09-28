@@ -44,8 +44,10 @@ export interface FileIndex {
 }
 
 /**
- * 判断是否为 Excluded Idx
- * @param rel - rel
+ * 判断相对路径是否命中排除规则（点目录 / EXCLUDE_DIRS / EXCLUDE_PREFIX）
+ * [CONSTRAINT] 按平台路径分隔符切分后逐段匹配；Windows 下依赖 node path 的 sep 常量正确解出多级目录
+ * [CHANGE-IMPACT] 修改排除集合会改变 scanIndex 遍历到的文件集，进而影响 diff 判定
+ * @param rel 相对项目根的路径
  */
 function isExcludedIdx(rel: string): boolean {
   if (EXCLUDE_PREFIX.some(p => rel === p || rel.startsWith(`${p}/`))) return true
@@ -53,7 +55,10 @@ function isExcludedIdx(rel: string): boolean {
   return parts.some(seg => EXCLUDE_DIRS.has(seg))
 }
 /**
- * 执行 scan Index
+ * 递归扫描项目，返回相对路径 → 元数据（inode / mtime / size）的映射
+ * [WHY] 元数据是 diff 的廉价输入：inode+mtime+size 三者任一变化才算疑似改动，避免全量读文件
+ * [CONSTRAINT] 跳过点目录 / EXCLUDE / 大于 500KB / 二进制扩展名；路径统一用正斜杠
+ * [CHANGE-IMPACT] 与 diffIndexes 严格配对；改过滤条件会导致历史 run 的索引与新版不兼容
  */
 export function scanIndex(): Map<string, FileIndex> {
   const map = new Map<string, FileIndex>()
@@ -78,11 +83,19 @@ export function scanIndex(): Map<string, FileIndex> {
   walk(ROOT)
   return map
 }
-/** 索引条目（接口） */
+/** 索引差异条目；[CONSTRAINT] type 与 config.ts 的 Change 类型对齐 */
 export interface IndexDiffEntry {
   path: string
   type: 'added' | 'modified' | 'deleted'
 }
+/**
+ * 对比前后两份索引，产出变更列表（按 path 升序）
+ * [WHY] 仅凭 inode / mtimeMs / size 判定，不读内容；如需内容级精确比较请用 snapshot.diffMeta
+ * [CONSTRAINT] 三者任一变化即视为 modified，可能包含"mtime 被 touch 但内容相同"的假阳性
+ * [CHANGE-IMPACT] 返回结构被 run.ts 消费驱动 tsc / lint 目标选择
+ * @param before 运行前索引（scanIndex 结果）
+ * @param after 运行后索引
+ */
 export function diffIndexes(
   before: Map<string, FileIndex>,
   after: Map<string, FileIndex>,
@@ -103,10 +116,11 @@ export function diffIndexes(
   return out.sort((x, y) => x.path.localeCompare(y.path))
 }
 /**
- * 执行 save Index
- * @param runId - run Id
- * @param idx - idx
- * @param dir - dir
+ * 把索引序列化为 {rel: FileIndex} JSON 落盘到 dir/_index.json
+ * [CONSTRAINT] Map 转普通对象时键顺序按插入序保留；写入不做缩进优化（体积优先）
+ * [CHANGE-IMPACT] 与 readIndex 严格配对；文件名 _index.json 硬编码，改名会导致历史 run 无法回读
+ * @param idx 索引 Map（来自 scanIndex）
+ * @param dir 目标目录；调用方负责保证已存在
  */
 export function saveIndex(runId: string, idx: Map<string, FileIndex>, dir: string): void {
   const out: Record<string, FileIndex> = {}
@@ -114,8 +128,9 @@ export function saveIndex(runId: string, idx: Map<string, FileIndex>, dir: strin
   fs.writeFileSync(path.join(dir, '_index.json'), JSON.stringify(out))
 }
 /**
- * 读取 Index
- * @param dir - dir
+ * 从 dir/_index.json 反序列化索引
+ * [CONSTRAINT] 文件缺失或 JSON 损坏时返回 null；调用方据此判"无历史索引"
+ * [CHANGE-IMPACT] 与 saveIndex 严格配对；返回的 Map 键为 POSIX 路径
  */
 export function readIndex(dir: string): Map<string, FileIndex> | null {
   const file = path.join(dir, '_index.json')
