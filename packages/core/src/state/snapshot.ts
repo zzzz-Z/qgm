@@ -45,8 +45,10 @@ const BINARY_EXT = new Set([
 ])
 
 /**
- * 判断是否为 Excluded
- * @param rel - rel
+ * 判断相对路径是否命中排除规则（点目录、EXCLUDE_DIRS、EXCLUDE_PREFIX）
+ * [CONSTRAINT] 按平台路径分隔符切分后逐段匹配；Windows 下依赖 node path 的 sep 常量正确解出多级目录
+ * [CHANGE-IMPACT] 修改排除集合会改变 scanMeta / snapshot 遍历到的文件集，进而影响 diff 判定
+ * @param rel 相对项目根的路径（正斜杠或平台分隔符）
  */
 export function isExcluded(rel: string): boolean {
   if (EXCLUDE_PREFIX.some(p => rel === p || rel.startsWith(`${p}/`))) return true
@@ -71,9 +73,11 @@ export interface SnapshotData {
 }
 
 /**
- * 执行 accept Snapshot File
- * @param name - name
- * @param stat - stat
+ * 判定某文件是否纳入快照（过滤大文件与二进制）
+ * [WHY] 二进制内容无 diff 语义、大文件会拖爆内存；两重过滤在 walk 早期生效，代价最小
+ * [CONSTRAINT] 阈值 MAX_SNAPSHOT_SIZE 硬编码；BINARY_EXT 只判扩展名（无 magic number 嗅探）
+ * @param name 文件名（用于取扩展名）
+ * @param stat node fs 的 Stat 对象；读取其 size 字段（字节数）
  */
 function acceptSnapshotFile(name: string, stat: fs.Stats): boolean {
   if (!stat.isFile()) return false
@@ -164,8 +168,9 @@ export function diffMeta(
 }
 
 /**
- * 执行 count Lines
- * @param s - s
+ * 统计字符串行数（换行符计数 + 1）
+ * [CONSTRAINT] 空串返回 0；不含末尾换行的单行文本返回 1；不处理 CRLF 差异
+ * [WHY] 手写而非 split('换行').length，避免大文件场景产生中间数组
  */
 function countLines(s: string): number {
   if (!s) return 0
@@ -177,7 +182,9 @@ function countLines(s: string): number {
 /** 日志文件保留天数（超过清理） */
 const LOG_KEEP_DAYS = 30
 /**
- * 执行 gc Logs
+ * 清理超过 LOG_KEEP_DAYS 的日志（仅 .jsonl）；由 ensureDirs 触发
+ * [CONSTRAINT] 单项失败不中断其余清理；目录不存在时静默返回
+ * [CHANGE-IMPACT] 修改 LOG_KEEP_DAYS 会影响历史日志保留窗口，但不动既存文件
  */
 function gcLogs() {
   try {
@@ -192,7 +199,9 @@ function gcLogs() {
   } catch { }
 }
 /**
- * 确保 Dirs
+ * 幂等创建 .ai-runner 下的 runs / scripts / logs 三个目录，并触发一次日志 GC
+ * [CONSTRAINT] 使用 recursive:true，已存在时不抛错
+ * [CHANGE-IMPACT] 由 run 路由 / server 启动路径调用；删除会破坏首次运行时目录缺失的兜底
  */
 export function ensureDirs() {
   fs.mkdirSync(getRunsDir(), { recursive: true })
@@ -202,16 +211,18 @@ export function ensureDirs() {
 }
 
 /**
- * 运行 Dir
- * @param runId - run Id
+ * 计算某次运行对应的快照目录绝对路径
+ * [CONSTRAINT] 不做存在性校验，调用方负责 mkdir；与 getRunsDir 相对布局配套
  */
 export function runDir(runId: string) {
   return path.join(getRunsDir(), runId)
 }
 
 /**
- * 执行 gc Snapshots
- * @param keep - keep
+ * 保留最近 keep 个快照目录，其余按 mtime 逆序删除
+ * [CONSTRAINT] keep=0 时清空全部；单项 stat 失败视为不可用条目，直接从候选集剔除
+ * [CHANGE-IMPACT] 会删除磁盘文件，误传 keep 会导致历史快照丢失
+ * @param keep 保留数量（正整数）
  */
 export function gcSnapshots(keep: number) {
   try {
@@ -230,10 +241,13 @@ export function gcSnapshots(keep: number) {
 }
 
 /**
- * 执行 save Snapshot
- * @param runId - run Id
- * @param before - before
- * @param changes - changes
+ * 保存变更前内容到快照目录，供 rollback 还原
+ * [WHY] 只对 modified / deleted 文件落盘：added 无历史内容、其他类型无意义
+ * [CONSTRAINT] before 缺失对应项时静默跳过（首次运行 / 快照被 GC 的边界）
+ * [CHANGE-IMPACT] 备份路径为 dir/{path}.before，rollback 侧按同规则回读，命名不可改
+ * @param runId 本次运行的唯一 id（与 runDir 一致）
+ * @param before 运行前全量内容（snapshot() 结果）
+ * @param changes 本次运行检测到的变更列表
  */
 export function saveSnapshot(runId: string, before: Map<string, string>, changes: Change[]) {
   const dir = runDir(runId)
@@ -251,8 +265,9 @@ export function saveSnapshot(runId: string, before: Map<string, string>, changes
 }
 
 /**
- * 读取 Manifest
- * @param runId - run Id
+ * 读取指定运行的 manifest.json 并解析
+ * [CONSTRAINT] 文件缺失或 JSON 损坏时返回 null；不抛错，调用方据此判"不可用"
+ * [CHANGE-IMPACT] 与 saveSnapshot 写入的 _manifest.json 严格配对
  */
 export function readManifest(runId: string): Manifest | null {
   const file = path.join(runDir(runId), '_manifest.json')
@@ -269,9 +284,11 @@ export function readManifest(runId: string): Manifest | null {
 export type LogChannel = 'runner' | 'pipeline' | 'decisions'
 
 /**
- * 写入 Channel Log
- * @param channel - channel
- * @param entry - entry
+ * 追加一条三通道结构化日志到 logs/{channel}.jsonl
+ * [CONSTRAINT] 自动注入 ts 字段，调用方 entry 若含 ts 会被覆盖；单行 JSON 便于后续流式解析
+ * [CHANGE-IMPACT] 每行必须单行（不得含换行符），否则 jsonl 结构破坏
+ * @param channel 通道名（runner / pipeline / decisions）
+ * @param entry 日志体；写入时会被展开到 { ts, ...entry }
  */
 export function writeChannelLog(channel: LogChannel, entry: Record<string, unknown>): void {
   try {
@@ -282,8 +299,9 @@ export function writeChannelLog(channel: LogChannel, entry: Record<string, unkno
   } catch { /* ignore */ }
 }
 /**
- * 写入 Run Log
- * @param entry - entry
+ * 追加一条运行日志到 logs/YYYY-MM-DD.jsonl（按 UTC 日期分片）
+ * [CONSTRAINT] 日期用 ISO 串截取前 10 位（UTC），与本地时区无关；跨天零点切换文件
+ * [CHANGE-IMPACT] 与 gcLogs 的 30 天保留策略配对：分片名变化会影响清理粒度
  */
 export function writeRunLog(entry: RunLogEntry) {
   try {
