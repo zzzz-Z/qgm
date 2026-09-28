@@ -9,7 +9,7 @@ const ROOT = path.dirname(HERE)
 console.log(`[build-all] ROOT=${ROOT}`)
 
 console.log('[build-all] step 1/3: SPA (vite build, root=packages/client)')
-await build({ configFile: path.join(ROOT, 'vite.config.ts') })
+await build({ configFile: path.join(ROOT, 'packages/client/vite.config.ts') })
 
 console.log('[build-all] step 2/3: server (vite SSR, config=apps/standalone/vite.config.ts)')
 await build({
