@@ -7,10 +7,7 @@
     >
       <!-- 终端 (上方) -->
       <TerminalPane
-        :main-status="mainStatus"
-        :status-active="statusActive"
-        :bar-meta="barMeta"
-        :phase-elapsed="phaseElapsed"
+
         :running="running"
         :tw-stdout="twStdout"
         :tw-stderr="twStderr"
@@ -38,7 +35,6 @@
         <AbnormalView :result="result" />
         <template #tpl-bar>
           <ScriptToolbar
-            v-model:niuma-mode="niumaMode"
             :templates="[]"
             :running="running"
             :is-loop-active="isLoopActive"
@@ -147,8 +143,9 @@ import ScriptToolbar from './ScriptToolbar.vue'
 import ScriptAttachBar from './ScriptAttachBar.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRunner } from '../../composables/runner/useRunner'
-import { currentLoopContext, useAutoLoop } from '../../composables/ai/useAutoLoop'
+import { useAutoLoop } from '../../composables/ai/useAutoLoop'
 import { useAiWaiting } from '../../composables/ai/useAiWaiting'
+import { copyAndFill } from '../../composables/ai/useDeepseekUrl'
 import { useAutoTakeover } from '../../composables/ai/useAutoTakeover'
 import { useEventBus } from '../../composables/ui/useEventStream'
 import { useCodeCleaner } from '../../composables/runner/useCodeCleaner'
@@ -159,7 +156,6 @@ import { isReadonlyResult } from '../../composables/runner/useRunFeedback'
 import { parseErrorLocations } from '../../utils/contextBuilder'
 import { fnv1a8 } from '../../utils/hash'
 import { useToast } from '../../composables/ui/useToast'
-import { useTraceLog } from '../../composables/ui/useTraceLog'
 import { setLastAutoFilled } from '../../composables/runner/useScriptInbox'
 import SidePane from '../panels/SidePane.vue'
 import DiffOverlay from '../diff/DiffOverlay.vue'
@@ -167,7 +163,6 @@ import DiffOverlay from '../diff/DiffOverlay.vue'
 defineOptions({ name: 'ScriptPanel' })
 
 /** 活动的 */
-const ACTIVE_CLS = new Set(['running', 'waiting', 'loop'])
 /** 键 */
 const SIDE_WIDTH_KEY = LS_SIDE_WIDTH_KEY
 /** 侧栏默认宽度（像素） */
@@ -211,7 +206,7 @@ const runningCommand = ref('')
 let elapsedTimer: ReturnType<typeof setInterval> | null = null
 let runStartAt = 0
 /** 侧栏标签页 */
-const sideTab = ref<'tree' | 'changes' | 'trace' | 'tasks'>('tree')
+const sideTab = ref<'tree' | 'changes'>('tree')
 /** 窄屏抽屉开合 */
 const sideDrawerOpen = ref(false)
 /** Diff 预览文件 */
@@ -253,12 +248,6 @@ const statusText = ref('')
 /** 状态样式类（ok/err） */
 const statusClass = ref('')
 /** 当前时间戳（用于刷新相对时间显示） */
-const _now = ref(Date.now())
-/** 阶段启动时间戳 */
-const _phaseStart = ref(Date.now())
-let _nowTimer: ReturnType<typeof setInterval> | null = null
-onMounted(() => { _nowTimer = setInterval(() => { _now.value = Date.now() }, 1000) })
-onBeforeUnmount(() => { if (_nowTimer) clearInterval(_nowTimer) })
 
 // 组合式函数：toast 在 script 早段被使用，此处集中初始化
 const { toast, confirmDialog } = useToast()
@@ -266,7 +255,6 @@ const { toast, confirmDialog } = useToast()
 
 const { script, lastRunCode, running, result, changes, rolling, busyAll, persistWarning, liveStdout, liveStderr, doneSummary, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback } = useRunner()
 const { enabled: autoTakeoverEnabled, countdown: autoTakeoverCountdown, enable: enableAutoTakeover, disable: disableAutoTakeover, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
-const { addTrace } = useTraceLog()
 // [cmd-history-v1] 命令历史簇
 const { pushCmdHistory, cmdHistoryPrev, cmdHistoryNext } = createCmdHistory({ script })
 // [attach-manager-v1] 附件簇（attachedFiles 由本组件持有，供 addTreePaths 等共享）
@@ -296,8 +284,7 @@ const { onSideDown, dispose: disposeSideResize } = createSideResize({
 
 // ── 领域 composable ──
 const { maybeRotateSession } = useSessionManager()
-const { waiting: aiWaiting, niumaMode, startWaiting: startAiWaiting } = useAiWaiting()
-const { pendingMeta: autoPendingMeta } = useAutoTakeover()
+const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
 const { events: busEvents } = useEventBus()
 const { stripComments, stripBlankLines } = useCodeCleaner()
 
@@ -319,7 +306,7 @@ const {
   clearSoftPause,
 } = useAutoLoop()
 // [exec-flow-v1] exec 全流程（refs 由本组件持有）
-const { execCmdInternal, execCmd, copyOutput } = createExecFlow({
+const { copyOutput } = createExecFlow({
   running,
   result,
   changes,
@@ -333,48 +320,6 @@ const { execCmdInternal, execCmd, copyOutput } = createExecFlow({
   startAiWaiting,
   softPause,
 })
-
-// ── computed（状态栏 / 元信息 / 阶段耗时 / 流标识）──
-
-// [statusbar] 主状态：图标 + 文本 + 语义色
-/** 状态 */
-// [usb-main-status-text-v1] 各状态文本简短醒目，配合 pill 样式
-const mainStatus = computed(() => {
-  if (running.value) return { icon: '\u2699\uFE0F', text: '脚本执行中', cls: 'running' }
-  if (aiWaiting.value) return { icon: '\u23F3', text: '等待 AI', cls: 'waiting' }
-  if (loopState.value === 'waiting-input') return { icon: '\u23F8\uFE0F', text: '待决策', cls: 'paused' }
-  if (loopState.value === 'budget-limited') return { icon: '\u26A0\uFE0F', text: '预算耗尽', cls: 'warn' }
-  if (isLoopActive.value) return { icon: '\u{1F504}', text: '循环中', cls: 'loop' }
-  if (stopReason.value) return { icon: '\u23F9\uFE0F', text: '已停止', cls: 'stop' }
-  return { icon: '\u25CB', text: '待命', cls: 'idle' }
-})
-
-// [status-active] 状态栏活跃态：运行/等待/循环时高亮
-/** 状态活动的 */
-const statusActive = computed(() => ACTIVE_CLS.has(mainStatus.value.cls))
-
-// [script-meta-row] 从当前脚本内容解析 @desc/@why/@plan/@done
-/** 脚本元信息 */
-const scriptMeta = computed(() => parseScriptMeta(String((script && script.value) || '')))
-// [statusbar] 优先展示待执行脚本（到达未执行），否则用编辑器内容
-/** 栏元信息 */
-const barMeta = computed(() => {
-  const p = autoPendingMeta.value
-  if (p && (p.desc || p.why || p.plan)) return { desc: p.desc, why: p.why, plan: p.plan }
-  return scriptMeta.value
-})
-// [statusbar] 阶段耗时：mainStatus 变化时重置，每秒更新
-/** 阶段 */
-const phaseElapsed = computed(() => {
-  const ms = _now.value - _phaseStart.value
-  const s = Math.floor(ms / 1000)
-  const m = Math.floor(s / 60)
-  const sec = s % 60
-  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
-})
-
-// [statusbar] 阶段切换时重置计时
-watch(() => mainStatus.value.cls, () => { _phaseStart.value = Date.now() })
 
 // [user-run-wait] 点运行 → 立即置“等待 AI 回复”loading
 
@@ -419,7 +364,7 @@ function toggleAutoTakeover() {
     }
     enableAutoTakeover()
     toast('已开启自动接管：立即执行当前脚本 → 结果发 AI → AI 回填后 3-10s 自动执行', 'success', 6000)
-    void runSmart({ bypassAutoGuard: true })
+    void runSmart()
   }
 }
 /** 当前 inbox 待取用条数（仅展示用，避免在模板里直接 inbox.value.length 触发响应式开销） */
@@ -453,7 +398,7 @@ function pauseAll() {
     }
     enableAutoTakeover()
     toast('已开启自动接管：立即执行当前脚本 → 结果发 AI → AI 回填后 3-10s 自动执行', 'success', 6000)
-    void runSmart({ bypassAutoGuard: true })
+    void runSmart()
     return
   }
   if (isLoopActive.value || running.value || autoTakeoverEnabled.value) {
@@ -494,32 +439,43 @@ async function buildAiPrompt(): Promise<string> {
 
 // [prompt-builder-v1] append* 系列已抽到 prompt-builder.ts
 
-// URL 长度安全上限。超过就打开首页，靠剪贴板兜底。
-/* __ai_removed: DEEPSEEK_URL_MAX */
-// URL 从全局 composable 读，在 App.vue 的 header 里配置
-/* __ai_removed: deepseekUrl ref */
-
 /**
- * 应用 Template
- * @param code - code
+ * 应用模板：把 code 写入编辑器 script
+ * [WHY] 模板按钮与"AI 回填"共用此入口；写值直接触发 watch 触发自动填充判定
+ * [CONSTRAINT] 不校验 code 是否合法，调用方负责保证
+ * @param code 待写入编辑器的主体代码
  */
 function applyTemplate(code: string) {
   script.value = code
 }
 
-/** 自动接管：收到 AI 脚本回填后，随机 3-10s 后自动运行 */
+/**
+ * [ai-autorun-server-exec-v1] 自动接管：AI 回填脚本后，延迟 3-10s 交服务端执行（非再发回 AI）
+ * [CONSTRAINT] 依赖 autoTakeoverEnabled；running 中跳过并 toast；空脚本跳过
+ * [CHANGE-IMPACT] 会清空 script，跑后由 scheduleAutoRun 回填 lastRunScript
+ */
 function onAutoRun() {
   if (!autoTakeoverEnabled.value) return
   if (running.value) { toast('脚本运行中，跳过本次自动执行', 'warn', 2000); return }
   scheduleAutoRun(() => {
     if (!autoTakeoverEnabled.value || running.value) return
-    void runSmart({ bypassAutoGuard: true })
+    const text = script.value.trim()
+    if (!text) {
+      toast('AI 回填为空，跳过自动执行', 'warn', 2000)
+      return
+    }
+    // [clear-after-run-v1] 与手动路径一致：跑后清空编辑器
+    runningCommand.value = ''
+    lastRunScript.value = text
+    script.value = ''
+    run({ script: text })
   })
 }
 
 /**
- * 响应 Global Key
- * @param e - e
+ * 全局键盘快捷键：Alt+R 触发智能发送
+ * [WHY] 挂在 window 级监听上，Alt+R 让用户不离开编辑器即可发送
+ * [CONSTRAINT] 只在无 ctrl / meta / shift 时响应，避免与浏览器快捷键冲突
  */
 function onGlobalKey(e: KeyboardEvent) {
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
@@ -528,37 +484,23 @@ function onGlobalKey(e: KeyboardEvent) {
   }
 }
 /**
- * 运行 Smart
- * @param opts - opts
+ * 发送编辑器内容到 AI 网页（不本地执行 cjs/bash）
  */
-async function runSmart(opts?: { bypassAutoGuard?: boolean }) {
-  // if (autoTakeoverEnabled.value && !opts?.bypassAutoGuard) {
-  //   toast('自动接管中，请先关闭接管再手动运行', 'warn', 2500)
-  //   return
-  // }
+async function runSmart() {
   const rawScript = script.value.trim()
-  if (!rawScript) return
-  const text = attachedFiles.value.length ? await buildScriptWithAttachments(rawScript, attachedFiles.value) : rawScript
-  const firstLine = text.split('\n', 1)[0].trim()
-  const isNode = /^#!\s*\/usr\/bin\/(?:env\s+)?node\b/.test(firstLine)
-  const isBash = /^#!\s*\/usr\/bin\/(?:env\s+)?bash\b/.test(firstLine)
-  if (isNode || isBash) {
-    runningCommand.value = ''
-    lastRunScript.value = text
-    // [clear-after-run-v1] 运行后清空编辑器
-    script.value = ''
-    run({ script: text })
+  if (!rawScript) {
+    toast('请先在编辑器写内容再发送', 'warn', 3000)
     return
   }
-  if (text.startsWith('!')) {
-    execCmd(text)
+  const text = attachedFiles.value.length
+    ? await buildScriptWithAttachments(rawScript, attachedFiles.value)
+    : rawScript
+  const r = await copyAndFill(text)
+  if (r === 'failed') {
+    toast('发送失败：AI 窗口未打开或已关闭', 'warn', 4000)
     return
   }
-  // 无 shebang：交给 interceptor 自动补 #! /usr/bin/env node 后走沙盒执行
-  runningCommand.value = ''
-  lastRunScript.value = text
-  script.value = ''
-  run({ script: text })
+  startAiWaiting()
 }
 
 watch(
@@ -575,15 +517,11 @@ watch(
   },
 )
 
-watch(sideTab, (v) => {
+watch(sideTab, () => {
   if (resizingSide.value) return
-  if (v === 'trace') {
-    sideWidth.value = Math.max(sideWidthBase.value, SIDE_WIDTH_DIFF)
-  } else {
-    sideWidth.value = previewFile.value
-      ? Math.max(sideWidthBase.value, SIDE_WIDTH_DIFF)
-      : sideWidthBase.value
-  }
+  sideWidth.value = previewFile.value
+    ? Math.max(sideWidthBase.value, SIDE_WIDTH_DIFF)
+    : sideWidthBase.value
 })
 
 watch(previewFile, (v) => {
@@ -720,37 +658,21 @@ watch(running, (v) => {
       const lang = detectLang(scriptSnapshot)
       // 计算 hash（与油猴脚本一致：FNV-1a 8 hex）
       const hash = fnv1a8(scriptSnapshot)
-      addTrace({
-        kind: 'run',
-        summary: desc || `运行脚本 · exit ${r.code}`,
-        payload: {
-          script: scriptSnapshot.slice(0, 4000),
-          stdout: (r.stdout || '').slice(-4000),
-          stderr: (r.stderr || '').slice(-4000),
-          exit: r.code,
-          ok: r.ok,
-          changes: changes.value.map(x => ({ path: x.path, type: x.type })),
-          desc,
-          why,
-          lang,
-          hash,
-          ...currentLoopContext(),
-        },
-      })
     }
   }
 })
 
 /**
- * 响应 Html Drag Over
- * @param e - e
+ * 拖拽悬停：阻止默认行为以允许 drop 事件
+ * [CONSTRAINT] 必须 preventDefault，否则浏览器默认在新标签页打开拖入的文件
  */
 function onHtmlDragOver(e: DragEvent) {
   e.preventDefault()
 }
 /**
- * 响应 Html Drop
- * @param e - e
+ * 处理从桌面拖入的文件：把文件名以注释形式插入编辑器
+ * [WHY] 只插文件名注释，不读文件内容 —— 内容由用户后续通过附件功能引入
+ * [CONSTRAINT] editorRef 为空时回落到 script.value 直接拼接；fileSuccess 标志 1.5s 后自动清除
  */
 function onHtmlDrop(e: DragEvent) {
   e.preventDefault()
@@ -864,12 +786,6 @@ function onHtmlDrop(e: DragEvent) {
   min-width: 0 !important;
   overflow: hidden !important;
 }
-
-/* usb-spin → 已迁至全局 style.css ([global-keyframes-v1]) */
-/* usb-pulse → 已迁至全局 style.css ([global-keyframes-v1]) */
-/* usb-blink → 已迁至全局 style.css ([global-keyframes-v1]) */
-/* usb-fade → 已迁至全局 style.css ([global-keyframes-v1]) */
-/* usb-breathe → 已迁至全局 style.css ([global-keyframes-v1]) */
 
 /* waiting-pulse → 已迁至全局 style.css ([global-keyframes-v1]) */
 
