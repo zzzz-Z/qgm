@@ -33,9 +33,11 @@ function _isHeadless() {
   } catch { return false }
 }
 /**
- * 执行 headless Send
- * @param fn - fn
- * @param args - args
+ * 通过 transport 层异步调用 headless 消息发送方法
+ * [WHY] transport 动态 import 是异步的，此函数 fire-and-forget 不阻塞调用方
+ * [CONSTRAINT] fn 在 transport 上不存在时静默忽略；新增协议字段时旧 transport 缺方法不应抛错
+ * @param fn transport 上的方法名（sendFill / sendStop / sendRotate / sendNewSession）
+ * @param args 透传参数；无类型校验，由 transport 侧契约保证
  */
 function _headlessSend(fn: string, ...args: unknown[]) {
   void _loadTransport().then((mod) => {
@@ -78,9 +80,10 @@ const STORAGE_KEY_MODEL = '__ai_model_id'
 const STORAGE_KEY_SESSION = '__ai_web_session_id'
 
 /**
- * 加载 Str
- * @param key - key
- * @param fallback - fallback
+ * 从 localStorage 读取字符串
+ * [WHY] 隐私模式 / 配额异常会抛错；调用方只关心有无值，不应被中断
+ * [CONSTRAINT] 返回 fallback 也覆盖"键不存在"，调用方无法区分二者
+ * @param fallback 键缺失或读取失败时的返回值
  */
 function loadStr(key: string, fallback: string): string {
   try {
@@ -99,8 +102,11 @@ const url = ref<string>(loadStr(STORAGE_KEY_URL, DEFAULT_URL))
 const sessionId = ref<string>(loadStr(STORAGE_KEY_SESSION, ''))
 
 /**
- * 设置 Model
- * @param id - id
+ * 切换到指定模型
+ * [WHY] 不同站点的会话 id 不通用，切模型必须重置 sessionId 以避免串号
+ * [CONSTRAINT] id 未命中 MODELS 时返回 false 且不改任何状态
+ * [CHANGE-IMPACT] 会同步清空并落盘 sessionId，App.vue 侧依赖此行为刷新会话历史
+ * @param id 目标模型 id；须命中 MODELS 中某项
  */
 function setModel(id: string): boolean {
   const m = MODELS.find(x => x.id === id)
@@ -117,8 +123,10 @@ function setModel(id: string): boolean {
 }
 
 /**
- * 设置 Url
- * @param next - next
+ * 校验并更新 AI 站点 URL
+ * [CONSTRAINT] 仅接受能被 URL() 解析的绝对地址；空串或非法输入返回 false 且不改状态
+ * [CHANGE-IMPACT] 落盘到 localStorage；url 变更后 targetOrigin 的计算随之变化
+ * @param next 用户输入 URL；首尾空白会被 trim
  */
 function setUrl(next: string): boolean {
   const trimmed = next.trim()
@@ -134,8 +142,10 @@ function setUrl(next: string): boolean {
 }
 
 /**
- * 设置 Session Id
- * @param next - next
+ * 更新会话 id，并按模型模板推导出对应会话 URL
+ * [WHY] 有 sessionTemplate 的模型可从 id 反推完整 URL，免去用户手填
+ * [CONSTRAINT] 空 sessionId 仅清状态不推导 URL；无 template 的模型只更新 sessionId
+ * @param next 新会话 id；空串表示清除会话
  */
 function setSessionId(next: string): void {
   const trimmed = next.trim()
@@ -149,8 +159,10 @@ function setSessionId(next: string): void {
 }
 
 /**
- * 执行 display
- * @param u - u
+ * 将完整 URL 折叠为便于展示的短串
+ * [WHY] 侧栏空间有限，长 URL 无法完整显示；保留 host + 路径尾段即可辨识会话
+ * [CONSTRAINT] 解析失败时原样返回，避免展示空白
+ * @param u 完整 URL
  */
 function display(u: string): string {
   try {
@@ -180,8 +192,9 @@ export function getActiveWinSid(): string {
   return activeWinSid.value
 }
 /**
- * 设置 Active Win Sid
- * @param sid - sid
+ * 切换激活槽位
+ * [CONSTRAINT] 不校验 sid 是否已存在于 windowTable —— 允许先切槽再 openDeepseek 绑定
+ * @param sid 目标槽位 id
  */
 export function setActiveWinSid(sid: string): void {
   activeWinSid.value = sid
@@ -191,8 +204,9 @@ export function removeWindowBySid(sid: string): void {
   windowTable.delete(sid)
 }
 /**
- * 获取 Window By Sid
- * @param sid - sid
+ * 取 sid 对应的 window 引用
+ * [WHY] 页面刷新后内存引用可能失效；此处惰性校验 closed，命中即清理并返回 null
+ * [CONSTRAINT] 跨域只允许读 win.closed，读其他属性会抛错
  */
 export function getWindowBySid(sid: string): Window | null {
   const entry = windowTable.get(sid)
@@ -221,8 +235,9 @@ export function getActiveWin(): Window | null {
   return getWindowBySid(activeWinSid.value)
 }
 /**
- * 设置 Active Win
- * @param win - win
+ * 绑定/解绑当前激活槽位的 window 引用
+ * [CONSTRAINT] win=null 时从表里删除对应条目，等价于解绑
+ * @param win window 引用；null 表示解绑
  */
 export function setActiveWin(win: Window | null): void {
   const sid = activeWinSid.value
@@ -262,9 +277,11 @@ function withSidHash(u: string, sid: string): string {
   }
 }
 /**
- * 打开 Deepseek
- * @param atUrl - at Url
- * @param sid - sid
+ * 打开 AI 站点窗口并按 sid 保存引用；headless 模式改走 WS
+ * [WHY] 传入 sid 便于多会话并存；不传时沿用当前激活槽位
+ * [CONSTRAINT] 无头模式返回 null（不产真实窗口）；被 popup blocker 拦截时也返回 null
+ * @param atUrl 可选目标 URL；省略时用当前 url.value
+ * @param sid 可选槽位；省略时用 activeWinSid.value
  */
 export function openDeepseek(atUrl?: string, sid?: string): Window | null {
   // 无头模式发 WS headless:open
@@ -312,8 +329,8 @@ export function sendFillTo(sid: string, payload: FillPayload): boolean {
   }
 }
 /**
- * 发送 Fill
- * @param payload - payload
+ * 向当前激活槽位发 fill；headless 时走 transport.sendFill
+ * [CONSTRAINT] headless 分支 fire-and-forget 恒返回 true；tampermonkey 分支返回实际发送结果
  */
 export function sendFill(payload: FillPayload): boolean {
   if (_isHeadless()) { _headlessSend('sendFill', activeWinSid.value, payload); return true }
@@ -343,9 +360,9 @@ export function sendStop(): boolean {
 
 interface RotatePayload { instruction: string }
 /**
- * 发送 Rotate To
- * @param sid - sid
- * @param payload - payload
+ * 向指定槽位发 rotate 指令（切换会话/话题）
+ * [CONSTRAINT] origin 无法解析时返回 false，不用 '*'（违反 v6 §3.4 安全约束）
+ * @param payload 指令体；instruction 字段由油猴侧解析
  */
 export function sendRotateTo(sid: string, payload: RotatePayload): boolean {
   const win = getWindowBySid(sid)
@@ -358,8 +375,8 @@ export function sendRotateTo(sid: string, payload: RotatePayload): boolean {
   } catch { return false }
 }
 /**
- * 发送 Rotate
- * @param payload - payload
+ * 向当前激活槽位发 rotate；headless 时走 transport.sendRotate
+ * [CONSTRAINT] headless 分支 fire-and-forget 恒返回 true
  */
 export function sendRotate(payload: RotatePayload): boolean {
   if (_isHeadless()) { _headlessSend('sendRotate', activeWinSid.value, payload); return true }
@@ -367,9 +384,10 @@ export function sendRotate(payload: RotatePayload): boolean {
 }
 interface NewSessionPayload { summary: string }
 /**
- * 发送 New Session To
- * @param sid - sid
- * @param payload - payload
+ * 通知指定槽位开启新会话
+ * [CONSTRAINT] summary 会被前缀 DEFAULT_SESSION_PROMPT，油猴侧不应再拼接
+ * [CHANGE-IMPACT] 油猴侧收到后应新建会话并用 summary 初始化上下文
+ * @param payload summary 字段承载会话摘要；内部会前置规则提示
  */
 export function sendNewSessionTo(sid: string, payload: NewSessionPayload): boolean {
   const win = getWindowBySid(sid)
@@ -382,8 +400,8 @@ export function sendNewSessionTo(sid: string, payload: NewSessionPayload): boole
   } catch { return false }
 }
 /**
- * 发送 New Session
- * @param payload - payload
+ * 向当前激活槽位发 new-session；headless 时走 transport.sendNewSession
+ * [CONSTRAINT] headless 分支 fire-and-forget 恒返回 true
  */
 export function sendNewSession(payload: NewSessionPayload): boolean {
   if (_isHeadless()) { _headlessSend('sendNewSession', activeWinSid.value, payload); return true }
@@ -431,9 +449,12 @@ async function _prependFirstPromptRules(prompt: string): Promise<string> {
 }
 
 /**
- * 复制 And Fill
- * @param prompt - prompt
- * @param opts - opts
+ * 复制 prompt 到剪贴板并发送到 AI 窗口
+ * [WHY] 剪贴板是油猴侧输入框粘贴的兜底路径；即便 postMessage 失败用户仍能手动粘贴
+ * [CONSTRAINT] 返回 'sent' 表示已注入运行中的窗口；'opened' 表示新开了窗口；'failed' 表示全失败
+ * [CHANGE-IMPACT] 内部会改动 _rulesInjectedSids / askCount / sessionId 状态，多次调用同一 prompt 会去重
+ * @param prompt 待发送的原始问题；空串直接返回 failed
+ * @param opts.count false 表示不计入 askCount（打招呼类消息）
  */
 export async function copyAndFill(prompt: string, opts?: { count?: boolean }): Promise<FillResult> {
   if (!prompt) return 'failed'
