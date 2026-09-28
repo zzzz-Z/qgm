@@ -34,8 +34,11 @@ interface EventStreamCallbacks {
 }
 
 /**
- * 组合式函数 Event Stream
- * @param cb - cb
+ * 事件流组合式函数：注册 window message 监听并校验来源
+ * [WHY] 只信任来自 MODELS 白名单 origin 且为当前激活窗口的消息，防止恶意站点注入
+ * [CONSTRAINT] cb 是回调集（isMockMode / onReply 等）；isMockMode 命中时跳过 origin 校验（测试模式）
+ * [CHANGE-IMPACT] MODELS 白名单来自 useDeepseekUrl；新增模型需同步；来源校验失败仅 warn 不抛错
+ * @param cb 事件回调集（含 isMockMode 与各事件处理函数）
  */
 export function useEventStream(cb: EventStreamCallbacks) {
   function isFromActiveAiSite(e: MessageEvent): boolean {

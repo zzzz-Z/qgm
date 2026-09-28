@@ -8,7 +8,6 @@ import { useRuntime } from '../../../stores/runtime'
 import { useRunner } from '../../runner/useRunner'
 
 type RoundGuards = ReturnType<typeof import('./round-guards.js').createRoundGuards>
-type TraceHook = ReturnType<typeof import('../../ui/useTraceLog.js').useTraceLog>
 
 /** pause/resume 家族依赖面：全部由 useAutoLoop.ts 注入，本模块无模块级状态 */
 interface PauseControlDeps {
@@ -19,18 +18,20 @@ interface PauseControlDeps {
   persist: (inst: LoopInstance) => void
   enterWaiting: (inst: LoopInstance) => void
   disarmTimer: (inst: LoopInstance) => void
-  addTrace: TraceHook['addTrace']
   ackFill: RoundGuards['ackFill']
   finish: (inst: LoopInstance, reason: string, detail?: string) => Promise<void>
   bindKeyboard: () => void
 }
 
 /**
- * 创建 Pause Control
- * @param deps - deps
+ * 组装暂停控制族（resume / pause / resumeLoop 等），闭包持有 deps
+ * [WHY] 从 useAutoLoop.ts 抽出以降低单文件体积（HCLC 400 行约束）
+ * [CONSTRAINT] deps 全量由 useAutoLoop 注入；本模块无模块级状态，多次创建产生独立闭包
+ * [CHANGE-IMPACT] 修改 PauseControlDeps 结构须同步更新 useAutoLoop 的装配处
+ * @param deps 暂停控制依赖面（loopPaused / activeLoop / transport / finish 等外部引用）
  */
 export function createPauseControl(deps: PauseControlDeps) {
-  const { loopPaused, activeLoop, isLoopActive, isInstActive, persist, enterWaiting, disarmTimer, addTrace, ackFill, finish, bindKeyboard } = deps
+  const { loopPaused, activeLoop, isLoopActive, isInstActive, persist, enterWaiting, disarmTimer, ackFill, finish, bindKeyboard } = deps
   // [resume-from-pause-v1]
   // 从暂停态恢复：复位 loopPaused、解除静音、重新进入 waiting
   // - 若处于 budget-limited，转到 resumeLoop()
@@ -50,11 +51,6 @@ export function createPauseControl(deps: PauseControlDeps) {
     inst.state.value = 'waiting'
     persist(inst)
     enterWaiting(inst)
-    addTrace({
-      kind: 'loop',
-      summary: '▶ 从暂停恢复 · 继续等待 AI 回复',
-      payload: { loopId: inst.id.value, loopRound: inst.round.value },
-    })
     toast('▶ 已恢复循环', 'success', 3000)
   }
 
@@ -98,11 +94,6 @@ export function createPauseControl(deps: PauseControlDeps) {
     inst.state.value = 'waiting'
     persist(inst)
     enterWaiting(inst)
-    addTrace({
-      kind: 'loop',
-      summary: `▶ 续跑 · 从第 ${inst.round.value} 轮`,
-      payload: { loopId: inst.id.value, loopRound: inst.round.value },
-    })
     toast(`▶ 续跑，从第 ${inst.round.value} 轮开始`, 'success', 4000)
   }
 

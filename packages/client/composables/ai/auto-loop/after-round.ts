@@ -27,8 +27,11 @@ interface AfterRoundDeps {
 }
 
 /**
- * 创建 After Round
- * @param deps - deps
+ * 组装轮末处理族（执行结果评估 / 熔断判定 / 下一轮调度），闭包持有 deps
+ * [WHY] 从 useAutoLoop.ts 抽出以降低单文件体积（HCLC 400 行约束）
+ * [CONSTRAINT] deps 全量由 useAutoLoop 注入；本模块无模块级状态，多次创建产生独立闭包
+ * [CHANGE-IMPACT] 修改 AfterRoundDeps 结构须同步更新 useAutoLoop 的装配处；LOOP_MAX_ROUNDS 注入后阶段预算判定依赖它
+ * @param deps 轮末处理依赖面（finish / runHook / transport / stage 等外部引用）
  */
 export function createAfterRound(deps: AfterRoundDeps) {
   const {
