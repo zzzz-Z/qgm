@@ -165,8 +165,12 @@ function readStateRaw(): TaskState {
 
 // 归一化标题用于匹配（去空白、去全/半角冒号差异）
 /**
- * 执行 norm Key
- * @param s - s
+ * 归一化待办项文本作为去重键
+ * [WHY] PLAN.md 的待办与 state.json 的 done 可能来自不同编辑（空格 / 冒号全半角差异），
+ * 归一后才能正确匹配"已完成"状态
+ * [CONSTRAINT] 去除所有空白、全角冒号统一为半角、截断至 80 字符；不做大小写归一
+ * [CHANGE-IMPACT] 改归一规则会让已有 done 记录匹配失败，导致待办重新出现
+ * @param s 原始待办文本
  */
 function normKey(s: string): string {
   return String(s || '').replace(/\s+/g, '').replace(/[：:]/g, ':').slice(0, 80)
@@ -245,8 +249,12 @@ function readDiskJson(): Record<string, unknown> {
 }
 
 /**
- * 写入 Task State
- * @param next - next
+ * 合并写回 state.json（保留磁盘其他字段 + version 自增）
+ * [WHY] 直接覆盖会丢 state.json 中本模块不管理的字段（如 sessionId 由他处维护），
+ * 因此用 disk 展开后再叠加 next
+ * [CONSTRAINT] version 每次自增（prevVersion + 1）；sessionId 由 getSessionId 强制同步
+ * [CHANGE-IMPACT] 会 mkdir -p 目标目录；写入格式为 2 空格缩进 JSON（人工可读）
+ * @param next 待写入的 TaskState 片段
  */
 export function writeTaskState(next: TaskState): void {
   fs.mkdirSync(path.dirname(statePath()), { recursive: true })

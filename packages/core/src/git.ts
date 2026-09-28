@@ -4,10 +4,12 @@ import { ROOT } from './config.js'
 import { runProcess } from './process/proc.js'
 
 /**
- * 运行
- * @param cmd - cmd
- * @param args - args
- * @param timeoutMs - timeout Ms
+ * 以项目根为 cwd 执行外部命令（git 专用封装）
+ * [CONSTRAINT] 不抛错 —— 进程失败由返回的 code 表达；超时标签固定 'git 超时'
+ * [CHANGE-IMPACT] 被 gitAvailable / gitSnapshot / gitCommitAfter 等消费；改签名需同步各处调用
+ * @param cmd 可执行名（如 'git'）
+ * @param args 参数数组；由 runProcess 负责转义
+ * @param timeoutMs 超时毫秒（默认 30s）
  */
 async function run(cmd: string, args: string[], timeoutMs = 30_000): Promise<{ code: number, stdout: string, stderr: string }> {
   const r = await runProcess(cmd, { args, cwd: ROOT, timeoutMs, timeoutLabel: 'git 超时' })
