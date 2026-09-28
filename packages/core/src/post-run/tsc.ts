@@ -5,17 +5,20 @@ import { runProcess } from '../process/proc.js'
 // AIRUNNER-BATCH10-3B-SPLIT-TARGETS: 类型与 root 派生已内联/外移，解除对 config.js 的依赖（strip-types 可加载）
 
 /**
- * 获取 Root
+ * 读取项目根目录（AI_RUNNER_ROOT → AIR_ROOT → cwd 逐级回落）
+ * [WHY] 内联而非 import config.ts：--experimental-strip-types 不重写 .js → .ts 路径，import 会失败
+ * [CONSTRAINT] 每次读 env 而非缓存常量，兼容 config.setRoot 的运行时改动
  */
 function getRoot(): string {
   return process.env.AI_RUNNER_ROOT || process.env.AIR_ROOT || process.cwd()
 }
 
 /**
- * 运行 Cmd
- * @param cmd - cmd
- * @param args - args
- * @param timeoutMs - timeout Ms
+ * 封装 runProcess：以项目根为 cwd，收拢 code/stdout/stderr
+ * [CONSTRAINT] 不抛错 —— 进程失败由返回的 code 表达，调用方需自行判 0
+ * @param cmd 可执行文件绝对路径（vue-tsc / tsc）
+ * @param args 命令行参数数组；由 runProcess 负责转义
+ * @param timeoutMs 超时毫秒数（默认 60s；批量运行 tsc 时调用方传 120s）
  */
 async function runCmd(cmd: string, args: string[], timeoutMs = 60_000): Promise<{ code: number, stdout: string, stderr: string }> {
   const r = await runProcess(cmd, { args, cwd: getRoot(), timeoutMs })
@@ -25,9 +28,13 @@ async function runCmd(cmd: string, args: string[], timeoutMs = 60_000): Promise<
 export { pickTscTargets, TSC_EXTS, TSC_SKIP_DIRS } from './tsc-targets.js'
 
 /**
- * 运行 Tsc
- * @param targets - targets
- * @param runId - run Id
+ * 对指定文件做定向类型检查
+ * [WHY] 全量 tsc 在大型仓库上很慢；按变更目标生成临时 tsconfig，只检必要文件
+ * [CONSTRAINT] client 与 server 分组走不同 tsconfig（bundler vs NodeNext）；
+ * 无目标 / 无可用 bin 时返回 null（不阻断 run.ts 主流程）
+ * [CHANGE-IMPACT] 定向失败且无 error TS 命中时会回退全量；此路径的 stdout 会被 run.ts 消费
+ * @param targets 待检文件相对路径列表（pickTscTargets 结果）
+ * @param runId 本轮运行 id，用于生成临时 tsconfig 文件名（避免并发冲突）
  */
 export async function runTsc(
   targets: string[],
