@@ -119,10 +119,13 @@ workspaceHono.post('/workspace/select', async (c) => {
 // [native-picker] 系统原生目录选择器（macOS osascript / Linux zenity / Windows PowerShell）
 
 /**
- * 执行 Cmd
- * @param cmd - cmd
- * @param args - args
- * @param timeoutMs - timeout Ms
+ * 执行命令并收敛为 {code, stdout, stderr}（execFile 封装）
+ * [WHY] execFile 的 err 里既有退出码也有异常信号，统一映射为数字 code 便于调用方判零
+ * [CONSTRAINT] maxBuffer 硬编码 1MB；超时通过 timeout 参数由 execFile 触发 kill
+ * [CHANGE-IMPACT] 被 nativePick 各平台分支消费；改返回结构需同步所有平台判定逻辑
+ * @param cmd 可执行名
+ * @param args 参数数组
+ * @param timeoutMs 超时毫秒
  */
 function execCmd(cmd: string, args: string[], timeoutMs: number): Promise<{ code: number, stdout: string, stderr: string }> {
   return new Promise((resolve) => {

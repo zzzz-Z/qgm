@@ -39,9 +39,13 @@ interface CdpMatchedResponse {
  */
 
 /**
- * 执行 cssom
- * @param url - url
- * @param selector - selector
+ * 通过 CDP 抓取指定选择器命中元素的匹配 CSS 规则
+ * [WHY] CDP 的 getMatchedStylesForNode 能拿到 computed 与 inherited 规则，
+ * 比 JS 遍历 document.styleSheets 更完整（含伪类 / 媒体查询）
+ * [CONSTRAINT] 选择器未命中会抛错；调用方负责 catch 并降级为截图模式
+ * [CHANGE-IMPACT] 返回结构被 browser.cssom 工具消费，改动会影响 AI 侧的诊断输出
+ * @param url 目标页面 URL
+ * @param selector CSS 选择器
  */
 export async function cssom(url: string, selector: string): Promise<CssomResult> {
   const browser = await getBrowser()
