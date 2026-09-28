@@ -14,8 +14,11 @@ export let LOGS_DIR = path.join(ROOT, '.ai-runner/logs')
 export let BACKUP_DIR = path.join(ROOT, '.ai-runner/backup')
 
 /**
- * 设置 Root
- * @param r - r
+ * 设置项目根目录并同步派生目录常量
+ * [WHY] strip-types 环境下部分模块无法 import config，靠 env.AI_RUNNER_ROOT 传值；此处写 env 作权威源
+ * [CONSTRAINT] 会同时重算 RUNS_DIR / SCRIPTS_DIR / LOGS_DIR / BACKUP_DIR；ESM live binding 让已 import 方读到新值
+ * [CHANGE-IMPACT] 影响所有依赖派生目录的模块（snapshot / timeline / run 等）；应在启动早期调用一次
+ * @param r 项目根目录；会被规范化为绝对路径
  */
 export function setRoot(r: string): void {
   ROOT = path.resolve(r)

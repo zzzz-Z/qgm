@@ -19,9 +19,12 @@ export interface AttachWsOptions {
 }
 
 /**
- * 执行 attach Ws
- * @param httpServer - http Server
- * @param opts - opts
+ * 把 WebSocket 服务挂载到已有 HTTP server 上
+ * [WHY] headless 通道用 WS 双向通信；挂在同一端口避免额外端口管理
+ * [CONSTRAINT] 内部创建独立 headless 浏览器池；返回的 dispose 函数必须被调用否则浏览器进程残留
+ * [CHANGE-IMPACT] 会创建 createHeadlessPool / replyPollers / _serverMsgBuf 等模块级状态，重复调用会产生多份互不干扰的会话
+ * @param httpServer Node 的 http / https server 实例
+ * @param opts 挂载选项（wsPath 前缀等）
  */
 export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsOptions = {}): () => void {
   const WS_PATH = opts.wsPath || `${PREFIX}/ws`

@@ -11,8 +11,11 @@ export interface Router {
 }
 
 /**
- * 创建 Router
- * @param options - options
+ * 创建 HTTP 请求路由（含 CSRF / DNS-rebinding 防护）
+ * [WHY] guardRequest 必须在业务分发前拦截跨域 / 非法 Content-Type / 非本机命令执行端点，集中在此处比散落到各路由更可靠
+ * [CONSTRAINT] guardRequest 返回 false 时表示已回写拒绝响应，此时 handle 不再执行
+ * [CHANGE-IMPACT] options.allowRemote 决定非 loopback Host 能否访问 /exec /run 端点
+ * @param options 服务配置（root / allowRemote 等）
  */
 export function createRouter(options: AiRunnerOptions = {}): Router {
   return {

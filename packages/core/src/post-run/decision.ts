@@ -18,8 +18,11 @@ export interface DecisionMarkers {
 /** 从脚本 stdout 提取 __AI_NEED_FILES__ / __AI_RUNNER_DECISION__ 单行 JSON */
 
 /**
- * 解析 Decision Markers
- * @param stdout - stdout
+ * 从脚本 stdout 中提取 __AI_NEED_FILES__ 与 __AI_RUNNER_DECISION__ 标记
+ * [WHY] 脚本可用这两个前缀行向工作台声明"还需要哪些文件"或"当前决策选项"，比 JSON 输出更不影响人类阅读日志
+ * [CONSTRAINT] 前缀后的载荷必须是单行 JSON；JSON 解析失败的行会被静默忽略，不影响其他行
+ * [CHANGE-IMPACT] 结果写入 run.ts 的 summary 帧；前端 useRunner 依赖此结构渲染决策卡片
+ * @param stdout 脚本的标准输出全文
  */
 export function parseDecisionMarkers(stdout: string): DecisionMarkers {
   let needFiles: string[] | null = null

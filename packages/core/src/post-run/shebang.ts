@@ -11,8 +11,11 @@ export interface ShebangSplit {
 /** 判断脚本是否需要补 node shebang（非 node shebang 由上层拦截） */
 
 /**
- * 切分 Shebang
- * @param script - script
+ * 分离脚本的 shebang 行与主体（含缺失 shebang 时补齐）
+ * [WHY] 执行前需保证 cjs 脚本以 node shebang 开头，否则 node 会按默认解析报错
+ * [CONSTRAINT] G2 收窄后 isNodeScript 恒 true（禁用 bash 分流）；缺 shebang 时自动补 node 头
+ * [CHANGE-IMPACT] 返回 effectiveScript 会被真正写入磁盘执行；修改补头逻辑需同步 run-script 的脚本头契约校验
+ * @param script 用户 / AI 提交的脚本原文
  */
 export function splitShebang(script: string): ShebangSplit {
   const firstLine = script.split('\n', 1)[0].trim()

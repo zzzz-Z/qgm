@@ -54,9 +54,12 @@ export function applyOverlay(overlayPath: string): { applied: number, failed?: s
   return { applied }
 }
 /**
- * 读取 Overlay Changes
- * @param overlayPath - overlay Path
- * @param before - before
+ * 从沙箱 overlay 文件解析出本次脚本试图写入的变更（未应用）
+ * [WHY] 脚本失败时 overlay 已记录写意图；据此判定"dry-run 声称的变更"，供合规反馈与用户回看
+ * [CONSTRAINT] overlay 键为绝对路径，需转换为项目内相对路径；越界路径会被跳过；读取 / 解析失败一律返回空数组
+ * [CHANGE-IMPACT] type='modified'/'added' 由 before 是否命中该路径决定；调用方依赖此语义做 diff 展示
+ * @param overlayPath overlay JSON 文件绝对路径
+ * @param before 运行前全量内容映射（键为相对路径）
  */
 export function readOverlayChanges(overlayPath: string, before: Map<string, string>): Change[] {
   if (!fs.existsSync(overlayPath)) return []
