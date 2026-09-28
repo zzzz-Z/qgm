@@ -6,7 +6,6 @@ import { DEFAULT_SESSION_PROMPT } from './composables/ai/loopLogic'
 import { copyAndFill, DEFAULT_URL, getWindowBySid, listWindows, MODELS, openDeepseek, setActiveWinSid, useDeepseekUrl } from './composables/ai/useDeepseekUrl'
 import { useScriptInbox } from './composables/runner/useScriptInbox'
 import {
-  autoRotateSession,
   createLoopInstanceFor,
   currentLoopContext,
   getLoopBySessionId,
@@ -25,19 +24,16 @@ import {
 import { useAutoTakeover } from './composables/ai/useAutoTakeover'
 import { useSessionManager } from './composables/ai/useSessionManager'
 import { useToast } from './composables/ui/useToast'
-import { useTasks } from './composables/data/useTasks' // [absent-summary-v1]
 import type { AiReply } from './composables/ai/auto-loop/types'
 import { log } from './utils/log'
-import { useTraceLog } from './composables/ui/useTraceLog'
 import { useCodeCleaner } from './composables/runner/useCodeCleaner'
 import { useRunner } from './composables/runner/useRunner'
-import { setAiWaitingWatchdog, useAiWaiting } from './composables/ai/useAiWaiting'
+import { loopPaused, useAiWaiting } from './composables/ai/useAiWaiting'
 import { emit as emitBus, takePendingAskKey } from './composables/ui/useEventStream'
 import { getTransport } from './composables/ai/useAiTransport' // [fix-headless-reply]
 import type { EventKind } from './composables/ui/useEventStream'
 import ToastHost from './components/feedback/ToastHost.vue'
 import TooltipHost from './components/feedback/TooltipHost.vue'
-import KeyboardHelp from './components/feedback/KeyboardHelp.vue'
 // [app-storage-extracted-v1]
 import { ACTIVE_SESSION_KEY, KEY_BASH_POLICY, KEY_SANDBOX, KEY_THEME, loadActiveSessionId, loadHistory, loadStr, loadTheme, saveHistory } from './composables/ui/useAppStorage'
 import type { SessionEntry } from './composables/ui/useAppStorage'
@@ -58,10 +54,8 @@ const { toast } = useToast()
 const { smokeEnabled, gitCommit, run: runScript } = useRunner()
 /** 脚本收件箱：来自 AI 的脚本队列 */
 const scriptInbox = useScriptInbox()
-const { addTrace } = useTraceLog()
 const { stopWaiting: stopAiWaiting } = useAiWaiting()
 // [absent-summary-v1] 缺席摘要：距离上次访问 ≥4h 则展示
-const { state: _absTaskState } = useTasks()
 const { stripComments, stripBlankLines, toggleStripComments, toggleStripBlankLines } = useCodeCleaner()
 // [app-storage-extracted-v1] SessionEntry/loadHistory/saveHistory 已抽至 useAppStorage
 const sessionHistory = ref<SessionEntry[]>(loadHistory())
@@ -71,8 +65,6 @@ const sessionHistory = ref<SessionEntry[]>(loadHistory())
 // [app-storage-extracted-v1] ACTIVE_SESSION_KEY/loadActiveSessionId 已抽至 useAppStorage
 /** 活动的会话标识 */
 const activeSessionId = ref<string>(loadActiveSessionId())
-/** 打开 */
-const settingsOpen = ref(false)
 // [app-storage-extracted-v1] KEY_SANDBOX/KEY_BASH_POLICY/loadStr 已抽至 useAppStorage
 const sandboxMode = ref(loadStr(KEY_SANDBOX, 'read-only'))
 /** bash 命令策略：白名单 / 黑名单 / 审批 */
@@ -80,7 +72,7 @@ const bashPolicy = ref(loadStr(KEY_BASH_POLICY, 'on-request'))
 /** 键盘帮助面板开关 */
 const keyboardHelpOpen = ref(false)
 /** 信息 */
-const absenceInfo = ref<{ daysAgo: number, pendingCount: number, lastGoal: string } | null>(null)
+const absenceInfo = ref<{ daysAgo: number } | null>(null)
 /** 离开提示是否已被用户关闭 */
 const absenceDismissed = ref(false)
 /** AI 传输链路类型 */
@@ -184,7 +176,6 @@ function onSessionIdMessage(e: MessageEvent) {
 
 /** 处理统一回复通道 ai-runner:reply（d 来自 MessageEvent.data） */
 function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
-  // [auto-handoff-at-40] 累计 40 次提问 → 自动轮转会话（总结 + 开新会话 + 续跑）
   if (askCount.value >= 10 && isLoopActive.value) {
     resetAskCount()
     void startHandoff()
@@ -228,18 +219,6 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
         emitBus('run:start', `等待执行：${item.desc || '脚本'}`, { payload: { desc: item.desc, why: item.why, plan, lang, lineCount, hash: item.hash, phase: 'pending', runKey, ...currentLoopContext() }, updateKey: runKey })
       } catch (e) { log.error('[run:start pending] failed:', e) }
       // 决策链路：脚本到达事件入 TraceLog（v6 §3.2），循环中盖 loopId/loopRound
-      addTrace({
-        kind: 'script',
-        summary: `📥 脚本到达 · ${lang} · ${lineCount} 行${item.desc ? ` · ${item.desc}` : ''}`,
-        payload: {
-          script: code.slice(0, 4000),
-          desc: item.desc,
-          why: item.why,
-          lang,
-          hash: item.hash,
-          ...currentLoopContext(),
-        },
-      })
       if (routedToLoop) {
         // 循环模式：状态机接管（不经编辑器覆盖策略）
         void onScriptArrival(item, sid)
@@ -430,6 +409,9 @@ async function onNewSession() {
     toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
     return
   }
+  askCount.value = 0
+  loopPaused.value = true
+  autoTakeover.disable()
   toast('已打开新会话，正在发送「开始聊天」…', 'info', 2000)
   const r = await copyAndFill(DEFAULT_SESSION_PROMPT, { count: false })
   if (r === 'sent' || r === 'opened') {
@@ -461,11 +443,7 @@ try {
   if (last) {
     const hours = (Date.now() - last) / 3_600_000
     if (hours >= 4) {
-      absenceInfo.value = {
-        daysAgo: Math.floor(hours / 24),
-        pendingCount: 0,
-        lastGoal: '',
-      }
+      absenceInfo.value = { daysAgo: Math.floor(hours / 24) }
     }
   }
   localStorage.setItem(LS_LAST_VISIT, String(Date.now()))
@@ -488,37 +466,11 @@ watch(theme, (v) => {
   try { localStorage.setItem(KEY_THEME, v) } catch { }
 }, { immediate: true })
 
-watch(() => _absTaskState.value.goal, (g) => {
-  if (absenceInfo.value && g) absenceInfo.value.lastGoal = String(g)
-}, { immediate: true })
-watch(() => _absTaskState.value.tiers, (tiers) => {
-  if (!absenceInfo.value || !Array.isArray(tiers)) return
-  let pend = 0
-  for (const t of tiers) { for (const it of (t.items || [])) { if (it.status === 'pending') pend++
-  }
-  }
-  absenceInfo.value.pendingCount = pend
-}, { immediate: true, deep: true })
-
 // [use-event-listener-v1] 窗口级监听改由 @vueuse 统一注册，unmount 自动清理
 useEventListener(window, 'message', onSessionIdMessage)
 useEventListener(window, 'keydown', onShiftQuestion)
 
 // auto resend after 3 min no reply
-setAiWaitingWatchdog(async () => {
-  // 每次自动发送写 trace
-  const t0 = Date.now()
-  // [askcount-unify] watchdog 重发不计入（同一轮重复，避免虚增）
-  const r = await copyAndFill('继续工作', { count: false })
-  try {
-    addTrace({
-      kind: 'ask',
-      summary: r === 'failed' ? '牛马模式：发送失败' : '牛马模式：已自动发送自驱指令',
-      payload: { auto: true, result: r, latencyMs: Date.now() - t0 },
-    })
-  } catch { /* ignore */ }
-  if (r === 'failed') log.warn('[niuma] 发送失败：找不到 AI 窗口')
-})
 
 onMounted(() => {
   // [auto-new-session-on-switch-v1] 切项目后：自动开新会话并连接
@@ -612,17 +564,6 @@ function onTransportChange(e: Event) {
 </script>
 
 <template>
-  <div v-if="absenceInfo && !absenceDismissed" class="absence-bar">
-    <span class="absence-ico">👋</span>
-    <span class="absence-text">
-      距上次访问 <b>{{ absenceInfo.daysAgo }} 天</b>
-      <template v-if="absenceInfo.pendingCount > 0"> · <b>{{ absenceInfo.pendingCount }}</b> 项计划待处理</template>
-      <template v-if="absenceInfo.lastGoal"> · 上次目标：{{ absenceInfo.lastGoal.slice(0, 60) }}</template>
-    </span>
-    <button class="absence-btn" @click="dismissAbsence">
-      知道了
-    </button>
-  </div>
   <header class="hdr">
     <div class="title">
       <span class="logo" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 2L4.5 13.5h6l-1 8.5L18.5 10.5h-6l1-8.5z" fill="url(#ai-runner-grad)" stroke="#4d8bff" stroke-width="1.2" stroke-linejoin="round" /><defs><linearGradient id="ai-runner-grad" x1="4" y1="2" x2="19" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#6b83ff" /><stop offset="100%" stop-color="#4d6bfe" /></linearGradient></defs></svg></span>
@@ -637,12 +578,6 @@ function onTransportChange(e: Event) {
       >
         <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
         <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
-      </button>
-      <button v-tooltip="settingsOpen ? '关闭设置1' : '打开设置（去注释 / 去空行）'" class="settings-toggle" aria-label="设置" @click="settingsOpen = !settingsOpen">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-        </svg>
       </button>
       <div class="ds-url" :class="{ editing: urlEditing }">
         <input
@@ -698,54 +633,6 @@ function onTransportChange(e: Event) {
     </div>
   </header>
 
-  <div v-if="settingsOpen" class="settings-mask" @click.self="settingsOpen = false">
-    <div class="settings-card">
-      <div class="settings-head">
-        <span class="settings-title">设置</span>
-        <button v-tooltip="'关闭设置'" aria-label="关闭设置" class="settings-close" @click="settingsOpen = false">
-          ×
-        </button>
-      </div>
-      <div class="settings-body">
-        <label v-tooltip="'发送前去掉注释（保护字符串字面量）'" class="settings-row">
-          <span class="settings-label">去注释</span>
-          <input type="checkbox" :checked="stripComments" @change="toggleStripComments(($event.target as HTMLInputElement).checked)">
-        </label>
-        <label v-tooltip="'发送前去掉空行'" class="settings-row">
-          <span class="settings-label">去空行</span>
-          <input type="checkbox" :checked="stripBlankLines" @change="toggleStripBlankLines(($event.target as HTMLInputElement).checked)">
-        </label>
-        <label v-tooltip="'脚本运行成功后无头访问 / 和 /__ai/，收集 pageerror / console.error / HTTP 4xx-5xx'" class="settings-row">
-          <span class="settings-label">运行脚本冒烟</span>
-          <input v-model="smokeEnabled" type="checkbox">
-        </label>
-        <label v-tooltip="'脚本运行前自动 git add -A && commit（仅 git 仓库生效）'" class="settings-row">
-          <span class="settings-label">Git 保护</span>
-          <input v-model="gitCommit" type="checkbox">
-        </label>
-        <label v-tooltip="'cjs 沙箱：read-only 只读（写走 overlay）/ workspace-write 允许写工作区 / full 无限制'" class="settings-row">
-          <span class="settings-label">cjs 沙箱</span>
-          <select v-model="sandboxMode" class="settings-select">
-            <option value="read-only">read-only</option>
-            <option value="workspace-write">workspace-write</option>
-            <option value="full">full</option>
-          </select>
-        </label>
-        <label v-tooltip="'bash 审批：never 拒绝黑名单 / on-request 命中弹窗 / always 全放行'" class="settings-row">
-          <span class="settings-label">bash 审批</span>
-          <select v-model="bashPolicy" class="settings-select">
-            <option value="never">never</option>
-            <option value="on-request">on-request</option>
-            <option value="always">always</option>
-          </select>
-        </label>
-        <label v-tooltip="'循环态下会话 token 达 40k（80%）自动触发轮转'" class="settings-row">
-          <span class="settings-label">会话自动轮转</span>
-          <input v-model="autoRotateSession" type="checkbox">
-        </label>
-      </div>
-    </div>
-  </div>
   <div class="layout-row">
     <div class="layout-main">
       <main class="main">
@@ -753,7 +640,6 @@ function onTransportChange(e: Event) {
       </main>
     </div>
   </div>
-  <KeyboardHelp v-if="keyboardHelpOpen" @close="keyboardHelpOpen = false" />
   <ToastHost />
   <TooltipHost />
 </template>
