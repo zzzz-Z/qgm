@@ -59,7 +59,7 @@ export function createStartFamily(deps: StartFamilyDeps) {
       const r = await fetch('/__ai/git/head')
       const d = await r.json()
       head = d.head || ''
-    } catch { }
+    } catch { /* swallow: git 不可用/非仓库，head 保持空串（无回滚基线） */ }
     inst.id.value = `${prefix}_${Date.now().toString(36)}`
     inst.goal.value = goal
     inst.round.value = 1

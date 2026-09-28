@@ -49,7 +49,7 @@ export async function getBrowser(): Promise<Browser> {
  */
 export async function closeBrowser(): Promise<void> {
   if (cachedBrowser) {
-    try { await cachedBrowser.close() } catch { }
+    try { await cachedBrowser.close() } catch { /* swallow: 浏览器已崩溃 / 已关闭，close 幂等失败忽略 */ }
     cachedBrowser = null
   }
 }

@@ -160,9 +160,9 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     // [no-vueuse] WS 事件监听保留原生：生命周期随 transport 而非组件，且需在 dispose 时整体 close
     ws.addEventListener('open', () => {
       const pending = queue.splice(0)
-      for (const m of pending) { try { ws!.send(m) } catch {} }
+      for (const m of pending) { try { ws!.send(m) } catch { /* swallow: 单个消息 send 失败不阻断其余 queue */ } }
       // 连上后请求服务端重放最近业务消息（reply/summary/new-session-created）
-      try { ws!.send(JSON.stringify({ t: 'headless:request-replay', sid: 'default' })) } catch {}
+      try { ws!.send(JSON.stringify({ t: 'headless:request-replay', sid: 'default' })) } catch { /* swallow: 重放请求失败无副作用，等待新事件即可 */ }
     })
     ws.addEventListener('message', (ev) => {
       let msg: Record<string, unknown> | null
@@ -219,7 +219,7 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     onTokenEstimate(cb) { tokenCbs.add(cb); return () => { tokenCbs.delete(cb) } },
     onSummary(cb) { summaryCbs.add(cb); return () => { summaryCbs.delete(cb) } },
     onNewSessionCreated(cb) { newSidCbs.add(cb); return () => { newSidCbs.delete(cb) } },
-    dispose() { try { if (ws) ws.close() } catch {} ws = null; replyCbs.clear(); tokenCbs.clear(); summaryCbs.clear(); newSidCbs.clear() },
+    dispose() { try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; replyCbs.clear(); tokenCbs.clear(); summaryCbs.clear(); newSidCbs.clear() },
     mute() { replyCbs.clear(); tokenCbs.clear(); summaryCbs.clear(); newSidCbs.clear() },
     unMute() { /* headless 无副作用恢复 */ },
   }
@@ -248,7 +248,7 @@ export function getTransportKind(): AiTransportKind {
  * [CONSTRAINT] 不立即重建单例，下次 getTransport() 时按新偏好惰性创建
  */
 export function setTransportKind(k: AiTransportKind): void {
-  try { localStorage.setItem(TRANSPORT_KEY, k) } catch {}
+  try { localStorage.setItem(TRANSPORT_KEY, k) } catch { /* swallow: 配额/隐私模式，仅丢失偏好持久化 */ }
   if (singleton) { singleton.dispose(); singleton = null }
 }
 /**

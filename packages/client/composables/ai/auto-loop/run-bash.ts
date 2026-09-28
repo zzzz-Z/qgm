@@ -45,7 +45,7 @@ export async function runBash(cmd: string): Promise<BashExecResult> {
     })
     if (!res.ok) {
       let detail: { blacklistHit?: string, dirty?: boolean, files?: string[], error?: string } = {}
-      try { detail = await res.json() } catch { }
+      try { detail = await res.json() } catch { /* swallow: 非 JSON 错误响应，走默认空对象 */ }
       if (detail.blacklistHit) out.blacklistHit = detail.blacklistHit
       if (detail.dirty) { out.dirty = true; out.dirtyFiles = detail.files || [] }
       out.stderr = detail.error || `HTTP ${res.status}`

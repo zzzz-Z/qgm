@@ -43,7 +43,7 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ref: inst.startCommit.value }),
           })
-        } catch { }
+        } catch { /* swallow: reset 失败仍走 finish，避免状态机卡在回滚中 */ }
       }
       await finish(inst, 'interrupted', '用户急停并回滚')
       return

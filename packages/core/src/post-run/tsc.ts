@@ -79,7 +79,7 @@ export async function runTsc(
       fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2))
       return await runCmd(bin, ['-p', tmp, '--noEmit'], 120_000)
     } finally {
-      try { fs.unlinkSync(tmp) } catch { }
+      try { fs.unlinkSync(tmp) } catch { /* swallow: 文件可能已被清理 / 权限异常，不掩盖主流程结果 */ }
     }
   }
 
