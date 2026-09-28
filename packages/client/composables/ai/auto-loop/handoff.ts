@@ -118,7 +118,7 @@ function handoffDisarm(inst: LoopInstance) {
  * 交接失败统一出口：置 stopped 并通知用户
  * [WHY] 三个失败点（send rotate / send new-session / 30s 超时）共用收尾，避免重复代码
  * [CONSTRAINT] loopPaused 时仅停状态不 sendStop（暂停中的循环不存在活动 socket）
- * [CHANGE-IMPACT] 会 unbi nd 键盘监听并 disarm 定时器；重复调用无副作用
+ * [CHANGE-IMPACT] 会 unbind 键盘监听并 disarm 定时器；重复调用无副作用
  */
 function handoffFail(inst: LoopInstance, reason: string) {
   handoffDisarm(inst)
