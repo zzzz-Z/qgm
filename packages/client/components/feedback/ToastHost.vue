@@ -6,16 +6,12 @@ defineOptions({ name: 'ToastHost' })
 const { toasts, confirmState, dismissToast, resolveConfirm } = useToast()
 
 /**
- * 响应 Toast Click
- * @param t - t
- * @param traceId - trace Id
+ * 点击 toast 时立即关闭
+ * [WHY] 长提示（8s）用户常常看够了想立即关掉；点击关闭比等待自然超时更友好
+ * [CONSTRAINT] 只做 dismissToast 转发，不清除定时器（dismissToast 内部已处理）
+ * @param t 被点击的 toast 项；只用到其 id 字段
  */
-function onToastClick(t: { id: number, traceId?: number }) {
-  if (t.traceId !== undefined) {
-    try {
-      window.dispatchEvent(new CustomEvent('ai-runner:open-trace', { detail: { id: t.traceId } }))
-    } catch { /* ignore */ }
-  }
+function onToastClick(t: { id: number }) {
   dismissToast(t.id)
 }
 </script>
@@ -28,7 +24,7 @@ function onToastClick(t: { id: number, traceId?: number }) {
           v-for="t in toasts"
           :key="t.id"
           class="toast"
-          :class="[t.type, { 'has-trace': t.traceId !== undefined }]"
+          :class="[t.type]"
           @click="onToastClick(t)"
         >
           <span class="toast-icon">{{ t.icon }}</span>
@@ -249,13 +245,6 @@ function onToastClick(t: { id: number, traceId?: number }) {
 }
 .modal-btn.primary.danger:hover {
   box-shadow: 0 6px 16px rgb(239 68 68 / 32%);
-}
-
-.toast.has-trace {
-  cursor: pointer;
-}
-.toast.has-trace:hover {
-  border-color: rgb(167 139 250 / 40%);
 }
 </style>
 <!-- tooltip-audit -->

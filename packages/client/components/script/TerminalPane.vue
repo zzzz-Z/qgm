@@ -2,25 +2,6 @@
   <section class="terminal">
     <!-- [flow-timeline] 全流程时间线 -->
     <div class="flow-timeline">
-      <!-- [statusbar] 常驻状态栏：左 主状态+元信息 · 右 时间 -->
-      <div class="unified-status-bar" :class="[`is-${mainStatus.cls}`, { 'is-active': statusActive }]">
-        <div class="usb-left">
-          <!-- [usb-optimize-v1] desc 常驻：即使未提供也保留占位，布局稳定 -->
-          <span class="usb-meta usb-desc" :class="{ 'is-empty': !barMeta.desc }" :title="barMeta.desc || '（未提供说明）'"><b>desc</b>{{ barMeta.desc || '（未提供说明）' }}</span>
-          <span v-if="barMeta.why" class="usb-meta" :title="barMeta.why"><b>why</b>{{ barMeta.why }}</span>
-          <span v-if="barMeta.plan" class="usb-meta" :title="barMeta.plan"><b>plan</b>{{ barMeta.plan }}</span>
-        </div>
-        <div class="usb-right">
-          <!-- [usb-optimize-v2] 主状态 pill + 分隔 + 时间：分层清晰 -->
-          <span class="usb-main" :class="`is-${mainStatus.cls}`">
-            <span class="usb-icon">{{ mainStatus.icon }}</span>
-            <span class="usb-text">{{ mainStatus.text }}</span>
-          </span>
-          <span class="usb-divider" aria-hidden="true" />
-          <span class="usb-time" title="当前阶段耗时">{{ phaseElapsed }}</span>
-        </div>
-      </div>
-
       <!-- [done-summary-channel-v1] DONE 总结：独立全文区块 -->
       <section v-if="doneSummary" class="done-summary">
         <div class="done-summary-head">
@@ -52,7 +33,7 @@
 
         <div v-else class="tree-empty">
           <div class="empty-title">
-            还没有会话记录
+            还没有执行记录
           </div>
           <div class="empty-sub">
             点击「运行」开始自动化循环
@@ -74,16 +55,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref } from 'vue'
 // [raw-output-fold-v1] PLAN 5.2 第四层：原始输出折叠
-import { useFoldState } from '../../composables/ui/useFoldState';
+import { useFoldState } from '../../composables/ui/useFoldState'
 
 /** 组件接收的 props 定义 */
 const props = defineProps<{
-  mainStatus: { icon: string, text: string, cls: string }
-  statusActive: boolean
-  barMeta: { desc?: string, why?: string, plan?: string }
-  phaseElapsed: string
+
   running: boolean
   twStdout: string
   twStderr: string
@@ -122,8 +100,10 @@ const chatListRef = ref<HTMLElement | null>(null)
  */
 function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 /**
- * 应用 Template
- * @param code - code
+ * 请求父组件把模板代码写入编辑器
+ * [CONSTRAINT] 纯事件转发 —— 真正的写入在 ScriptPanel 中处理（终端面板不应直接操作编辑器状态）
+ * [CHANGE-IMPACT] 事件名 'applyTemplate' 与父组件监听严格配对，改名需两侧同步
+ * @param code 待写入的模板代码文本
  */
 function applyTemplate(code: string): void { emit('applyTemplate', code) }
 </script>
@@ -190,210 +170,6 @@ function applyTemplate(code: string): void { emit('applyTemplate', code) }
 
 .status.err {
   color: var(--danger);
-}
-
-.unified-status-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 14px;
-  margin: 0 0 8px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-6);
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--text-2);
-  transition:
-    border-color 0.2s,
-    background 0.2s;
-}
-
-/* [usb-optimize-v1] 主状态 pill：底色 + 边框 + 加粗，各状态醒目 */
-.usb-main {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-  flex-shrink: 0;
-  padding: 4px 12px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--text-2);
-  letter-spacing: 0.4px;
-  transition: all 0.2s;
-}
-
-.usb-icon {
-  font-size: 13px;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-}
-
-.usb-main.is-running .usb-icon,
-.usb-main.is-loop .usb-icon {
-  animation: usb-spin 1.4s linear infinite;
-  display: inline-block;
-}
-
-.usb-main.is-waiting .usb-icon {
-  animation: usb-pulse 1.2s ease-in-out infinite;
-}
-
-.usb-main.is-paused .usb-icon {
-  animation: usb-blink 1.4s ease-in-out infinite;
-}
-
-.usb-main.is-warn .usb-icon {
-  animation: usb-pulse 0.9s ease-in-out infinite;
-}
-
-.usb-main.is-stop .usb-icon {
-  animation: usb-fade 2s ease-in-out infinite;
-}
-
-.usb-main.is-idle .usb-icon {
-  animation: usb-breathe 3s ease-in-out infinite;
-}
-
-.usb-text {
-  letter-spacing: 0.3px;
-}
-
-/* [usb-optimize-v1] 各状态独立底色 + 边框，让状态一眼可辨 */
-.usb-main.is-running {
-  color: #58a6ff;
-  background: rgb(88 166 255 / 12%);
-  border-color: rgb(88 166 255 / 45%);
-  box-shadow: 0 0 0 2px rgb(88 166 255 / 8%);
-}
-
-.usb-main.is-waiting {
-  color: #58a6ff;
-  background: rgb(88 166 255 / 10%);
-  border-color: rgb(88 166 255 / 40%);
-  animation: waiting-pulse 1.8s ease-in-out infinite;
-}
-
-.usb-main.is-loop {
-  color: #3fb950;
-  background: rgb(63 185 80 / 12%);
-  border-color: rgb(63 185 80 / 45%);
-  box-shadow: 0 0 0 2px rgb(63 185 80 / 8%);
-}
-
-.usb-main.is-paused {
-  color: #e0a875;
-  background: rgb(224 168 117 / 12%);
-  border-color: rgb(224 168 117 / 45%);
-}
-
-.usb-main.is-warn {
-  color: #e0a875;
-  background: rgb(224 168 117 / 12%);
-  border-color: rgb(224 168 117 / 45%);
-  box-shadow: 0 0 0 2px rgb(224 168 117 / 8%);
-}
-
-.usb-main.is-stop {
-  color: #e06c75;
-  background: rgb(224 108 117 / 12%);
-  border-color: rgb(224 108 117 / 45%);
-}
-
-/* [usb-optimize-v2] idle 更醒目：靛青淡底 + 描边光晕，保持中性观感 */
-.usb-main.is-idle {
-  color: #9aa5b8;
-  background: rgb(154 165 184 / 10%);
-  border-color: rgb(154 165 184 / 35%);
-  box-shadow: 0 0 0 2px rgb(154 165 184 / 6%);
-}
-
-.usb-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.usb-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-/* [usb-optimize-v2] 状态与时间之间的竖线分隔 */
-.usb-divider {
-  display: inline-block;
-  width: 1px;
-  height: 14px;
-  background: var(--border);
-  opacity: 0.7;
-  flex-shrink: 0;
-}
-
-/* [usb-optimize-v1] desc 常驻样式：空值时用占位色 */
-/* [usb-optimize-v2] desc 常驻：更克制溢出，空值斜体占位 */
-.usb-desc {
-  flex-shrink: 1;
-  min-width: 0;
-  max-width: 420px;
-  opacity: 0.95;
-}
-
-.usb-desc.is-empty {
-  color: var(--text-3);
-  font-style: italic;
-  opacity: 0.7;
-}
-
-.usb-meta {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 320px;
-}
-
-.usb-meta b {
-  color: var(--text-3);
-  font-weight: 600;
-  font-size: 11px;
-  flex-shrink: 0;
-}
-
-.usb-meta.usb-idle {
-  color: var(--text-3);
-  font-style: italic;
-}
-
-.usb-time {
-  font-family: var(--mono, monospace);
-  font-size: 11px;
-  color: var(--text-3);
-  flex-shrink: 0;
-  letter-spacing: 0.5px;
-}
-
-/* [usb-optimize-v2] 活跃态：更明显的边框 + 轻微外发光 */
-.unified-status-bar.is-active {
-  border-color: var(--primary);
-  background: var(--primary-bg);
-  box-shadow:
-    0 0 0 1px rgb(77 107 254 / 20%),
-    inset 0 0 12px rgb(77 107 254 / 6%);
 }
 
 .flow-timeline {
