@@ -1,8 +1,15 @@
 <template>
-  <section class="editor card" :class="{ 'is-running': isRunning }">
+  <section class="editor card" :class="{ 'is-running': isRunning, 'is-dragging': isDragging }">
     <slot name="tpl-bar" />
     <slot name="attach-bar" />
-    <div class="editor-body" @paste.capture="(e) => emit('paste', e)" @dragover.prevent @drop="(e) => emit('drop', e)">
+    <div
+      class="editor-body"
+      @paste.capture="(e) => emit('paste', e)"
+      @dragenter="onDragEnter"
+      @dragover.prevent="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
+    >
       <!-- @FILE_PICKER_V1 -->
       <div v-if="pickerOpen" ref="pickerRef" class="file-picker" :style="pickerStyle">
         <input
@@ -29,10 +36,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { FileNode } from '../../types';
-import type { Decoration, DecorationSet, EditorView, ViewUpdate } from '@codemirror/view';
-import type { Extension } from '@codemirror/state';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { FileNode } from '../../types'
+import type { Decoration, DecorationSet, EditorView, ViewUpdate } from '@codemirror/view'
+import type { Extension } from '@codemirror/state'
 
 /** 组件接收的 props 定义 */
 const props = defineProps<{
@@ -50,6 +57,53 @@ const emit = defineEmits<{
   'paste': [e: ClipboardEvent]
   'drop': [e: DragEvent]
 }>()
+
+/* [drag-drop-ux-v1] 文件拖入的视觉反馈 */
+// WHY: 原 editor-body 只挂 dragover.prevent + drop；无 dragenter 状态，CSS .is-dragging 系死代码
+// CONSTRAINT: 子元素进出会连发 dragenter/dragleave，用 dragDepth 计数抵消，归零才复位
+/** 是否处于「文件悬停输入框」态 */
+const isDragging = ref(false)
+/** dragenter 与 dragleave 的配对深度计数 */
+let dragDepth = 0
+
+/** 判定拖入是否携带文件（排除编辑器内文本选择产生的拖拽） */
+function hasFiles(e: DragEvent): boolean {
+  const dt = e.dataTransfer
+  if (!dt) return false
+  const types = Array.from(dt.types || [])
+  return types.includes('Files')
+}
+
+/** dragenter：仅文件类型才激活遮罩；多次嵌套进出自增 */
+function onDragEnter(e: DragEvent) {
+  if (!hasFiles(e)) return
+  dragDepth++
+  isDragging.value = true
+}
+
+/** dragover：只改光标为 copy，不切状态（enter/leave 已负责状态） */
+function onDragOver(e: DragEvent) {
+  if (!hasFiles(e)) return
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+
+/** dragleave：计数递减，归零后关闭遮罩（避免子元素间穿梭时闪烁） */
+function onDragLeave() {
+  dragDepth--
+  if (dragDepth <= 0) {
+    dragDepth = 0
+    isDragging.value = false
+  }
+}
+
+/** drop：先复位，再 stopPropagation 防冒泡到 ScriptPanel.mainRef 的双触发（旧行为会同时插文本） */
+function onDrop(e: DragEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  dragDepth = 0
+  isDragging.value = false
+  emit('drop', e)
+}
 
 // [p1-2-client-v3] CM 动态 import 聚合类型：从各包具名导出反推，杜绝 any
 interface CMModule {
@@ -461,26 +515,42 @@ onBeforeUnmount(() => {
   line-height: 1.6 !important;
 }
 
+/* [drag-drop-ux-v1] 悬停反馈：外发光 + 内部虚线框 + 脉冲 + 图标文案 */
 .editor.is-dragging {
-  border-color: rgb(88 166 255 / 60%) !important;
-  box-shadow: 0 0 0 3px rgb(88 166 255 / 12%) !important;
+  border-color: rgb(88 166 255 / 70%) !important;
+  box-shadow:
+    0 0 0 3px rgb(88 166 255 / 16%),
+    0 0 24px rgb(88 166 255 / 18%) !important;
   background: rgb(88 166 255 / 4%) !important;
 }
 
 .editor.is-dragging::after {
-  content: '松开以附加文件' !important;
+  content: '📎  松开鼠标以附加文件' !important;
   position: absolute !important;
-  inset: 0 !important;
+  inset: 6px !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
   background: rgb(88 166 255 / 8%) !important;
-  color: var(--primary-hover) !important;
+  border: 2px dashed rgb(88 166 255 / 65%) !important;
+  border-radius: 8px !important;
+  color: var(--primary-hover, #58a6ff) !important;
   font-size: 13px !important;
   font-weight: 600 !important;
+  letter-spacing: 0.3px !important;
   pointer-events: none !important;
   z-index: 10 !important;
-  border-radius: inherit !important;
+  animation: ai-drop-pulse 1.2s ease-in-out infinite !important;
+}
+
+@keyframes ai-drop-pulse {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .editor :deep(.editor-body),
