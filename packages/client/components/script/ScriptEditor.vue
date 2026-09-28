@@ -239,8 +239,10 @@ function pickerClose() {
 }
 
 /**
- * 执行 picker Move
- * @param d - d
+ * 在 @ 文件选择器中循环移动选中项
+ * [CONSTRAINT] 用模运算实现环回（末项继续下移回到首项）；空列表直接返回
+ * [WHY] +d+n 避免负数取模在不同语言下语义不一致
+ * @param d 位移量（+1 下移 / -1 上移）
  */
 function pickerMove(d: number) {
   const n = pickerFiltered.value.length
@@ -249,7 +251,8 @@ function pickerMove(d: number) {
 }
 
 /**
- * 执行 picker Confirm
+ * 确认当前选中的文件并插入路径（Enter 触发）
+ * [CONSTRAINT] 列表为空时静默 no-op；具体插入逻辑在 pickerPick 中
  */
 function pickerConfirm() {
   const f = pickerFiltered.value[pickerIndex.value]
@@ -273,8 +276,11 @@ function pickerPick(filePath: string) {
 }
 
 /**
- * 响应 Editor Update
- * @param u - u
+ * 编辑器内容/光标变更回调（驱动 @ 文件选择器）
+ * [WHY] 只在 docChanged 时处理：单纯光标移动不触发选择器逻辑，减少无谓计算
+ * [CONSTRAINT] @ 需位于光标前一个字符（pos-1）才算触发；空格/换行后跟 @ 时不被识别
+ * [CHANGE-IMPACT] 会写 pickerOpen / pickerQuery / pickerPos，模板中多个 UI 依赖这些 ref
+ * @param u CodeMirror ViewUpdate；含 docChanged / state.selection 等字段
  */
 function onEditorUpdate(u: ViewUpdate) {
   if (!u.docChanged) return
@@ -430,8 +436,11 @@ watch(() => props.modelValue, (v) => {
 })
 
 /**
- * 执行 insert Text
- * @param text - text
+ * 在光标处插入文本并把光标移到插入内容末尾
+ * [WHY] 供父组件通过 defineExpose 调用（拖拽插入 / 附件插入）；走 CM dispatch 保证 undo 历史完整
+ * [CONSTRAINT] cmView 未就绪时静默 no-op；不校验 text 是否为空
+ * [CHANGE-IMPACT] 通过 defineExpose 暴露给父组件；签名变更需同步 ScriptPanel 调用点
+ * @param text 待插入的字符串
  */
 function insertText(text: string): void {
   if (!cmView) return
