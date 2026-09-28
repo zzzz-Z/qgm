@@ -12,7 +12,9 @@ export const SEARCH_SKIP = new Set(['node_modules', '.git', 'dist', '.vite', '.t
 
 // 检索缓存：文件列表 5s TTL；文件内容按 mtimeMs 失效（Map 超容量淘汰最早条目）
 
+/** 检索中文件的最小元信息；mtimeMs 用于内容缓存失效判定（不读 stat 即失效） */
 interface SearchFile { abs: string, rel: string, mtimeMs: number }
+/** 文件列表缓存；at = 记录时刻，超 SEARCH_LIST_TTL 后由 getSearchFiles 重建 */
 let searchFileCache: { at: number, files: SearchFile[] } | null = null
 /** 搜索结果列表缓存存活时间（毫秒） */
 const SEARCH_LIST_TTL = 5000
@@ -22,10 +24,12 @@ const searchContentCache = new Map<string, { mtimeMs: number, content: string }>
 const SEARCH_CONTENT_CACHE_MAX = 800
 
 /**
- * 收集 Search Files
- * @param dir - dir
- * @param rel - rel
- * @param out - out
+ * 递归收集目录下所有可检索文本文件（跳过隐藏项 / SEARCH_SKIP / 二进制扩展名）
+ * [CONSTRAINT] 就地 push 到 out，调用方负责初始化空数组；递归深度受文件系统限制（无显式上限）
+ * [CHANGE-IMPACT] 命中 SEARCH_SKIP 或 BINARY_EXT 会静默跳过，新增类型须同步更新 config.ts
+ * @param dir 绝对路径起点
+ * @param rel 与 dir 对应的相对路径（用于拼 out.rel）
+ * @param out 收集容器，函数不返回
  */
 export function collectSearchFiles(dir: string, rel: string, out: SearchFile[]) {
   let entries: fs.Dirent[]
@@ -47,7 +51,9 @@ export function collectSearchFiles(dir: string, rel: string, out: SearchFile[]) 
 }
 
 /**
- * 获取 Search Files
+ * 获取文件列表（带 5s TTL 缓存）
+ * [WHY] grep / glob 单次会话内可能反复调用，5s 缓存可避免高频 walk 磁盘
+ * [CONSTRAINT] 缓存不区分调用方；同一会话内的两次调用返回同一数组引用，调用方不可就地修改
  */
 export function getSearchFiles(): SearchFile[] {
   const now = Date.now()
@@ -59,8 +65,11 @@ export function getSearchFiles(): SearchFile[] {
 }
 
 /**
- * 读取 Search Content Cached
- * @param f - f
+ * 读取文件内容（按 mtimeMs 缓存命中）
+ * [WHY] 内容缓存按 mtime 失效，文件被外部改动后能自动重读，无需显式失效接口
+ * [CONSTRAINT] 缓存容量 SEARCH_CONTENT_CACHE_MAX，超限时按插入顺序淘汰最早项（非 LRU）
+ * [CHANGE-IMPACT] 读取失败返回 null；调用方需区分"内容为空字符串"与"读取失败"
+ * @param f 由 getSearchFiles 产出的元信息（含 abs 与 mtimeMs）
  */
 export function readSearchContentCached(f: SearchFile): string | null {
   const hit = searchContentCache.get(f.abs)
@@ -76,8 +85,10 @@ export function readSearchContentCached(f: SearchFile): string | null {
 }
 
 /**
- * 执行 glob To Re
- * @param glob - glob
+ * 把 glob 模式编译为等价正则
+ * [CONSTRAINT] 只支持 `**` / `*` / `?` 三种通配；`*` 不跨 `/`，`**` 跨 `/`；无字符类 [a-z] 支持
+ * [CHANGE-IMPACT] 新增通配语义须同步 update 前端 useFileTree 的匹配逻辑（保持两侧一致）
+ * @param glob 用户输入的模式串；不区分大小写需调用方自行加 i 标志
  */
 export function globToRe(glob: string): RegExp {
   const SPECIAL = '\\^$.|?*+()[]{}'
@@ -104,16 +115,18 @@ export function globToRe(glob: string): RegExp {
   return new RegExp(out)
 }
 
-/** 文件树 / 检索 / 快照读取类路由；返回 true 表示已命中处理 */
-
+/** ast-grep 单条匹配结果的规范化结构；line 为 1-based，从 ast-grep 的 0-based 转换而来 */
 interface AstHit { path: string, line?: number, text?: string }
 let astGrepWarned = false
 /**
- * 运行 Ast Grep
- * @param pattern - pattern
- * @param lang - lang
- * @param glob - glob
- * @param max - max
+ * 调用本地 @ast-grep/cli 做结构化检索
+ * [WHY] 未安装时返回错误字符串而非抛异常，让 UI 层静默降级到 grep
+ * [CONSTRAINT] 首次缺失仅 warn 一次（astGrepWarned），避免控制台刷屏
+ * [CHANGE-IMPACT] sg 退出码 1 表示"无匹配"而非错误；扩展码解读需同步此处逻辑
+ * @param pattern ast-grep 结构化模式（如 `console.log($A)`）
+ * @param lang 目标语言（ts / js / vue 等，由 @ast-grep/cli 识别）
+ * @param glob 可选路径 glob；null 表示全仓库
+ * @param max 命中上限，超过后裁剪，防止超大结果集打爆内存
  */
 export async function runAstGrep(pattern: string, lang: string, glob: string | null, max: number): Promise<{ results: AstHit[], error?: string }> {
   const binName = process.platform === 'win32' ? 'sg.cmd' : 'sg'
