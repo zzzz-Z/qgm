@@ -1,6 +1,7 @@
 // [arch-hono/run-v1] POST /run —— node 沙盒 / shell 脚本执行（NDJSON 流式；Hono 版）
+// [g2-deadcode-cleanup-v1] G2 收窄后仅保留 node 脚本路径：bash 分支与 shell:true 的 runProcess 分支已删除
 import { Hono } from 'hono'
-import { scanScriptHead } from '../post-run/ai-guard.js'; // [g2-narrow-v1]
+import { scanScriptHead } from '../post-run/ai-guard.js' // [g2-narrow-v1]
 import {
   applyOverlay,
   checkScriptSyntax,
@@ -88,7 +89,6 @@ runHono.post('/run', async (c) => {
     const syntax = checkScriptSyntax(effectiveScript)
     if (!syntax.ok) return c.json({ error: `脚本语法错误：${syntax.error}`, syntaxError: true }, 400)
   }
-  // [g2-deadcode-cleanup-v1] bash 分支已删除（G2 收窄后为死代码）
 
   const enc = new TextEncoder()
   const ac = new AbortController()
@@ -102,8 +102,6 @@ runHono.post('/run', async (c) => {
       const writeFrame = (obj: unknown) => {
         try { controller.enqueue(enc.encode(`${JSON.stringify(obj)}\n`)) } catch { /* ignore */ }
       }
-
-      // [g2-deadcode-cleanup-v1] shell:true 的 runProcess 分支已删除
 
       const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
       const overlayPath = path.join(getRoot(), '.ai-runner/tmp', `${runId}-overlay.json`)
