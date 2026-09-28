@@ -1,47 +1,38 @@
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
+import { useSessionStorage } from '@vueuse/core'
 
-/** 跨组件共享的「等待 AI 回复」 + 牛马模式守夜（单一数据源） */
+/** 跨组件共享的「等待 AI 回复」（单一数据源） */
 
-// 3 分钟无回复则：若牛马模式开 → 重发提示并续订；否则仅复位 waiting
+// 3 分钟无回复则复位 waiting，避免永久卡死
 const WATCHDOG_MS = 180_000
-/** 键 */
-const NIumaKey = '__ai_niuma_mode'
-// loopPaused 持久化到 sessionStorage：刷新后仍保持暂停态
+/** sessionStorage 键：loopPaused 持久化；刷新后仍保持暂停态 */
 const LS_LOOP_PAUSED = '__ai_loop_paused'
 
-/** 是否处于等待 AI 回复状态 */
+/** 是否处于等待 AI 回复状态；内存态，不持久化 */
 const waiting = ref(false)
-/** 牛马模式开关（AI 持续自驱） */
-export const niumaMode = ref(false)
-/** 循环 */
-export const loopPaused = ref(false) // 暂停闸：阻断续推/发脚本/等待
-
-// 可观测状态
-const fireCount = ref(0)
-/** 上次看门狗触发的时间戳 */
-const lastFiredAt = ref(0)
-/** 下次看门狗触发的时间戳 */
-const nextFireAt = ref(0)
-
-let watchdogTimer: ReturnType<typeof setTimeout> | null = null
-let resendHandler: (() => Promise<void> | void) | null = null
-
-// 从 sessionStorage 恢复 loopPaused
-try {
-  if (sessionStorage.getItem(LS_LOOP_PAUSED) === '1') loopPaused.value = true
-} catch { /* sessionStorage 不可用时按未暂停处理 */ }
-watch(loopPaused, (v) => {
-  try { sessionStorage.setItem(LS_LOOP_PAUSED, v ? '1' : '0') } catch { /* 持久化失败不影响运行态 */ }
-})
-
-// 从 localStorage 恢复 niumaMode
-try { niumaMode.value = localStorage.getItem(NIumaKey) === '1' } catch { /* localStorage 不可用时按关闭处理 */ }
-watch(niumaMode, (v) => {
-  try { localStorage.setItem(NIumaKey, v ? '1' : '0') } catch { /* 持久化失败不影响运行态 */ }
-})
 
 /**
- * 启动 Waiting
+ * 暂停闸：阻断续推 / 发脚本 / 等待
+ * [WHY] 走 vueuse useSessionStorage 替换原手工 sessionStorage + watch：
+ * 自动惰性读写 + 序列化 + storage 事件跨标签页同步
+ * [CONSTRAINT] 用 '1' / '0' 兼容历史持久化格式（老版本写入 String(v ? '1' : '0')）；
+ * 未读过 sessionStorage 时初值为 false，与原行为一致
+ * [CHANGE-IMPACT] 多标签页共享 sessionStorage 时，一处改暂停会立即同步到另一处
+ */
+export const loopPaused = useSessionStorage<string>(LS_LOOP_PAUSED, '0', {
+  serializer: {
+    read: raw => (raw === '1' ? '1' : '0'),
+    write: v => (v === '1' ? '1' : '0'),
+  },
+})
+
+/** watchdog 定时器句柄；模块级单例，由 clearWatchdog / armWatchdog 成对管理 */
+let watchdogTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * 进入等待 AI 回复状态并重置看门狗
+ * [WHY] 单独 startWaiting 与 useAiWaiting 返回的同名方法并存：供 transport 层在 setup 外直接调用
+ * [CHANGE-IMPACT] 会清空并重设 watchdogTimer，重复调用等价于续期
  */
 export function startWaiting(): void {
   waiting.value = true
@@ -49,54 +40,37 @@ export function startWaiting(): void {
 }
 
 /**
- * 设置 Ai Waiting Watchdog
- * @param fn - fn
- */
-export function setAiWaitingWatchdog(fn: () => Promise<void> | void): void {
-  resendHandler = fn
-}
-
-/**
- * 清空 Watchdog
+ * 取消看门狗定时器；幂等
+ * [CONSTRAINT] watchdogTimer 置 null 以标记无挂起定时器；与 armWatchdog 配套
  */
 function clearWatchdog(): void {
   if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null }
 }
 
 /**
- * 武装 Watchdog
+ * 启动看门狗：WATCHDOG_MS 内未收到回复则复位 waiting
+ * [WHY] 防止 transport 层消息丢失导致 waiting 永久 true，卡死后续流程
+ * [CONSTRAINT] 内部先 clearWatchdog 保证同一时刻仅一个挂起定时器
+ * [CHANGE-IMPACT] 手动 stopWaiting 也会 clear，避免残留 timer 触发意外复位
  */
 function armWatchdog(): void {
-  nextFireAt.value = Date.now() + WATCHDOG_MS
   clearWatchdog()
-  watchdogTimer = setTimeout(async () => {
+  watchdogTimer = setTimeout(() => {
     watchdogTimer = null
     if (!waiting.value) return
-    if (niumaMode.value) {
-      try {
-        if (resendHandler) await resendHandler()
-        fireCount.value += 1
-        lastFiredAt.value = Date.now()
-      } catch { /* 重发失败不阻断后续守夜 */ }
-      if (waiting.value) armWatchdog()
-    } else {
-      // 未开牛马：只复位，避免永久卡死
-      waiting.value = false
-    }
+    waiting.value = false
   }, WATCHDOG_MS)
 }
 
 /**
- * 组合式函数 Ai Waiting
+ * useAiWaiting 组合式入口
+ * [CONSTRAINT] loopPaused / waiting 均为模块级单例，多组件共享同一状态；
+ * 返回的 startWaiting / stopWaiting 与导出的 startWaiting 语义一致（后者供非 setup 调用）
  */
 export function useAiWaiting() {
   return {
     loopPaused,
     waiting,
-    niumaMode,
-    fireCount,
-    lastFiredAt,
-    nextFireAt,
     startWaiting() {
       waiting.value = true
       armWatchdog()
