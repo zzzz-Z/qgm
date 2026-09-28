@@ -108,8 +108,10 @@ function _persistExpanded(): void {
 }
 
 /**
- * 切换
- * @param p - p
+ * 展开/折叠某目录；展开时按需拉取子节点
+ * [CONSTRAINT] 折叠不释放已加载的 children（useFileTree 缓存），再次展开无需重新请求
+ * [CHANGE-IMPACT] 每次切换调用 _persistExpanded 全量覆写 fold.all，避免拖拽/刷新后展开态丢失
+ * @param p 目录相对路径（与 isOpen / loadChildren 使用同一键）
  */
 function toggle(p: string) {
   if (expanded.has(p)) {
@@ -122,8 +124,8 @@ function toggle(p: string) {
 }
 
 /**
- * 判断是否为 Open
- * @param p - p
+ * 判断目录是否处于展开态
+ * [CONSTRAINT] 只读 expanded Set，不触发加载；首次渲染时未持久化的目录默认折叠
  */
 function isOpen(p: string): boolean { return expanded.has(p) }
 
@@ -147,8 +149,9 @@ const rootNode = computed(() => {
 })
 
 /**
- * 获取 File Icon
- * @param name - name
+ * 按文件名后缀映射图标 key
+ * [CONSTRAINT] 匹配顺序敏感：先具体后缀（.vue/.tsx）再通配；package.json 优先于 .json 分支
+ * [CHANGE-IMPACT] 返回 key 必须存在于 ICONS，否则 iconSvg 会回落到 file
  */
 function getFileIcon(name: string): string {
   const n = name.toLowerCase()
@@ -185,9 +188,10 @@ const ICONS: Record<string, string> = {
 }
 
 /**
- * 执行 icon Svg
- * @param name - name
- * @param cls - cls
+ * 生成图标 svg 字符串
+ * [WHY] 走字符串拼接而非 v-for 组件，避免为 12 个图标各建一个 Vue 组件
+ * [CONSTRAINT] name 未命中 ICONS 时回落 file；cls 会附加到 svg 的 class 属性
+ * @param cls 附加 CSS 类（如 'spin' / 'placeholder'），空串表示不附加
  */
 function iconSvg(name: string, cls = ''): string {
   const d = ICONS[name] || ICONS.file
@@ -197,8 +201,10 @@ function iconSvg(name: string, cls = ''): string {
 // 收集目录下所有文件路径。因懒加载，目录的 children 可能未拉取，
 // 所以遇目录时向后端请求完整子树（depth=32）。
 /**
- * 收集 File Paths Async
- * @param node - node
+ * 收集目录下所有文件路径（含懒加载未展开的子树）
+ * [WHY] 拖拽目录时需要完整文件列表，但 tree 内存中仅有已展开的 children；向后端请求 depth=32 全量树兜底
+ * [CONSTRAINT] 单次请求失败返回空数组，静默降级（拖拽会变成 no-op）
+ * @param node 目录节点；node.type='file' 时直接返回 [node.path]
  */
 async function collectFilePathsAsync(node: FileNode): Promise<string[]> {
   if (node.type === 'file') return [node.path]
@@ -239,9 +245,11 @@ const fileLoading = ref(false)
 /** 文件内容读取失败原因（HTTP status 或 Error.message） */
 const fileError = ref('')
 /**
- * 响应 File Dbl Click
- * @param node - node
- * @param path - path
+ * 双击文件：拉取内容并在弹窗中展示（含 hljs 高亮）
+ * [WHY] 快速预览文件内容 + 复制，避免切到编辑器
+ * [CONSTRAINT] 目录节点直接返回；读取失败写入 fileError 供模板展示
+ * [CHANGE-IMPACT] 会置 fileDialog / fileLoading / fileError 三个 ref，模板通过这三者判定状态
+ * @param node 文件节点；type='directory' 时不响应
  */
 async function onFileDblClick(node: { type?: string, path: string }) {
   if (!node || node.type === 'directory') return
@@ -280,8 +288,8 @@ async function copyFileContent() {
   try { await _clipboard.copy(fileDialog.value.content) } catch { /* ignore */ }
 }
 /**
- * 响应 Dialog Key
- * @param e - e
+ * 弹窗内键盘事件：仅响应 Escape 关闭
+ * [CONSTRAINT] 不阻止其他按键冒泡（Enter / 复制快捷键交给浏览器默认行为）
  */
 function onDialogKey(e: KeyboardEvent) { if (e.key === 'Escape') closeFileDialog() }
 
