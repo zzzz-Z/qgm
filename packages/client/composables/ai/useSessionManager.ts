@@ -158,9 +158,13 @@ export function useSessionManager() {
     const summary = generateHandoffSummary()
     // [copy-via-vueuse] 改用 useClipboard：自动选择 navigator.clipboard 或 execCommand 回退，
     // 且模块级单例避免反复注册 copy 事件监听
-    const ok = _clipboard.copy(summary)
-    if (ok) toast('交接总结已复制，请打开新聊天窗口粘贴', 'success')
-    else toast('复制失败，请手动复制', 'error')
+    // [CONSTRAINT] vueuse copy() 返回 Promise<void>，无返回值 —— 用 try/catch 判定失败
+    try {
+      await _clipboard.copy(summary)
+      toast('交接总结已复制，请打开新聊天窗口粘贴', 'success')
+    } catch {
+      toast('复制失败，请手动复制', 'error')
+    }
   }
 
   /**
