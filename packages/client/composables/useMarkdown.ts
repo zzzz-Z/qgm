@@ -3,14 +3,16 @@
 import { computed } from 'vue'
 import type { Ref } from 'vue'
 
-/** Markdown 代码围栏标记 */
+/** Markdown 围栏标记（三个反引号）；[WHY] 用 fromCharCode 而非字面量，避免本文件本身被误认为含代码块 */
 const FENCE = String.fromCharCode(96).repeat(3)
-/** 行内代码的 Markdown 勾号（`） */
+/** 行内代码标记（单个反引号）；同 FENCE 理由 */
 const INLINE_TICK = String.fromCharCode(96)
 
 /**
- * 执行 escape Html
- * @param s - s
+ * 将 HTML 特殊字符转义为实体
+ * [WHY] 内联而非跨文件导入：避免 strip-types 无法解析 .js 后缀 import 的问题
+ * [CONSTRAINT] 覆盖 & < > " ' 五种字符；不处理 \u00a0 等实体已表达字符
+ * @param s 待转义文本
  */
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, ch => ({
@@ -22,6 +24,7 @@ function escapeHtml(s: string): string {
   } as Record<string, string>)[ch] || ch)
 }
 
+/** 切分后的最小渲染单元；content 已去围栏标记，可直接 escapeHtml */
 interface MdSegment {
   type: 'text' | 'code'
   lang: string
@@ -29,8 +32,10 @@ interface MdSegment {
 }
 
 /**
- * 切分 Fences
- * @param src - src
+ * 按 ``` 围栏切分文本为 text / code 段
+ * [CONSTRAINT] 只识别行首的围栏（trimStart 后匹配）；不处理嵌套或未闭合围栏的错误恢复
+ * [CHANGE-IMPACT] 未闭合围栏的尾段会整块归入 code，AI 回复被截断时可能表现异常
+ * @param src 原始 markdown 文本
  */
 function splitFences(src: string): MdSegment[] {
   const out: MdSegment[] = []
@@ -66,8 +71,11 @@ function splitFences(src: string): MdSegment[] {
 }
 
 /**
- * 执行 inline Format
- * @param text - text
+ * 处理行内语法：`code` 与 **bold**
+ * [WHY] 先 escapeHtml 再做替换：替换目标为正则匹配字符，不会被转义为实体
+ * [CONSTRAINT] 只支持单层内联；嵌套加粗 / 内联代码中的反引号不解析
+ * [CHANGE-IMPACT] 新增语法须保证不会引入 XSS 风险（此处不做 sanitize）
+ * @param text 纯文本段（不含围栏代码）
  */
 function inlineFormat(text: string): string {
   let html = escapeHtml(text)
@@ -78,8 +86,10 @@ function inlineFormat(text: string): string {
 }
 
 /**
- * 渲染 Markdown
- * @param src - src
+ * 把 markdown 文本渲染为安全 HTML 字符串
+ * [WHY] 极简实现：只处理围栏代码 + 内联代码/加粗，够用即可，不引入 markdown 库
+ * [CONSTRAINT] 输出已对代码内容做 escapeHtml；但内联格式语法本身不校验，调用方需用 v-html 渲染
+ * @param src 原始 markdown；空串返回空串
  */
 export function renderMarkdown(src: string): string {
   if (!src) return ''
@@ -94,8 +104,9 @@ export function renderMarkdown(src: string): string {
 }
 
 /**
- * 组合式函数 Markdown
- * @param source - source
+ * 把 ref 包裹的 markdown 源转换为渲染后的 computed HTML
+ * [CONSTRAINT] 返回 computed，随 source 变化自动重算；source.value 为 undefined/null 时按空串处理
+ * @param source 响应式源文本；调用方需自行保证是 string 类型的 ref
  */
 export function useMarkdown(source: Ref<string>) {
   return computed(() => renderMarkdown(source.value || ''))
