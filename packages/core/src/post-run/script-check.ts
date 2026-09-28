@@ -4,8 +4,11 @@ import vm from 'node:vm'
 // 剥离失败时，附带前 80 字符预览便于定位非法字符
 
 /**
- * 校验 Script Syntax
- * @param code - code
+ * 用 node vm.Script 做语法预检（不执行）
+ * [WHY] 语法错误是 AI 回填脚本最常见的形态；预检能提前报错避免污染 execute 阶段
+ * [CONSTRAINT] 只做语法解析，不校验契约字段；多段尝试策略见函数体
+ * [CHANGE-IMPACT] 返回结构被 run.ts 用于 400 提前拦截；错误消息会作为 stderr 反馈给用户
+ * @param code 待检脚本原文
  */
 export function checkScriptSyntax(code: string): { ok: true } | { ok: false, error: string } {
   const tryParse = (src: string): string | null => {

@@ -21,8 +21,11 @@ export interface HookResult {
 /** 从原始文本解析 hooks 配置；坏 JSON 或非对象返回空。 */
 
 /**
- * 解析 Hooks Config
- * @param raw - raw
+ * 容错解析 hooks 配置 JSON 字符串
+ * [WHY] 配置文件由用户手写，格式错误不应导致启动失败；失败一律回落空对象
+ * [CONSTRAINT] 只接受纯对象（数组 / null / 基础类型均回落空对象）
+ * [CHANGE-IMPACT] 结果被 runHook 消费，空对象等价于"未配置任何 hook"
+ * @param raw hooks.json 的文本内容
  */
 export function parseHooksConfig(raw: string): Record<string, HookDef[]> {
   try {

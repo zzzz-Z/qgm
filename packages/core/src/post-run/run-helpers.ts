@@ -13,9 +13,12 @@ export interface ComplianceFlags {
 /** 从脚本原文与 desc 静态推断合规特征 */
 
 /**
- * 计算 Compliance
- * @param effectiveScript - effective Script
- * @param desc - desc
+ * 统计脚本的合规性标志（用于合规反馈与统计）
+ * [WHY] SYSTEM.md 要求脚本必须有 @desc、自带断言、决策走专有标记；此处正则粗判供 UI 展示
+ * [CONSTRAINT] 判定基于正则匹配而非 AST，存在极少数误判；仅作提示不阻断执行
+ * [CHANGE-IMPACT] 结果写入 compliance.jsonl；聚合统计会受影响
+ * @param effectiveScript 补 shebang 后的脚本原文
+ * @param desc 已解析出的 @desc 值（空串表示未声明）
  */
 export function computeCompliance(effectiveScript: string, desc: string): ComplianceFlags {
   return {

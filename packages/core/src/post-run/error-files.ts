@@ -16,8 +16,11 @@ function getRoot(): string {
 //   File "src/foo.ts", line 12
 // ponytail: 只提取真实存在的文件，最多 5 个。够了。
 /**
- * 提取 Error Files
- * @param text - text
+ * 从错误文本中提取涉及的文件路径列表（去重）
+ * [WHY] 供前端一键跳转首个错误文件，也用于 stats 展示"N 个文件涉及错误"
+ * [CONSTRAINT] 只匹配 ts/tsx/js/jsx/mjs/cjs/vue；跳过 node_modules 与 node: 前缀；绝对路径转相对
+ * [CHANGE-IMPACT] 返回数组被 run.ts 的 summary 帧与 UI AbnormalView 消费
+ * @param text 原始错误输出（stderr 或 stdout）
  */
 export function extractErrorFiles(text: string): string[] {
   const out = new Set<string>()

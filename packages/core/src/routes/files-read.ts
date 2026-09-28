@@ -20,8 +20,11 @@ const SENSITIVE_PATTERNS: RegExp[] = [
 ]
 
 /**
- * 判断是否为 Sensitive
- * @param rel - rel
+ * 判断相对路径是否命中敏感文件规则
+ * [WHY] /files/read 会读取文件内容回传给 AI，需屏蔽 .env / 私钥 / 凭证等敏感项
+ * [CONSTRAINT] 按 SENSITIVE_PATTERNS 正则列表逐条 test，命中即 true
+ * [CHANGE-IMPACT] 修改 SENSITIVE_PATTERNS 会改变可读取文件范围，影响 AI 上下文注入
+ * @param rel 项目内相对路径（POSIX 格式）
  */
 function isSensitive(rel: string): boolean {
   return SENSITIVE_PATTERNS.some(re => re.test(rel))
