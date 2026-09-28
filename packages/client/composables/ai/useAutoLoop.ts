@@ -399,11 +399,13 @@ function submitDecision(id: string, customText?: string): void {
       ? String(customText || '').trim() || '（空回答）'
       : opt ? opt.label : id
   pendingDecision.value = null
-  const t = activeLoop.value ? getTransport() : null
-  if (t) {
+  // [no-non-null-v1] 捕获局部变量：避免后续取 activeLoop.value! 时若被其他回调清空会拿到 null
+  const inst = activeLoop.value
+  const t = inst ? getTransport() : null
+  if (t && inst) {
     const ok = loopPaused.value ? false : t.sendFill('', { prompt: `【决策回答】${answer}` })
     if (ok) {
-      enterWaiting(activeLoop.value!)
+      enterWaiting(inst)
     }
   }
 }

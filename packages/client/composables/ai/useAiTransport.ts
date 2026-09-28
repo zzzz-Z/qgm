@@ -159,10 +159,13 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     ws = new WebSocket(resolveUrl())
     // [no-vueuse] WS 事件监听保留原生：生命周期随 transport 而非组件，且需在 dispose 时整体 close
     ws.addEventListener('open', () => {
+      // [no-non-null-v1] 捕获局部变量：回调执行前可能被 dispose 置 null；显式判空避免静默抛错
+      const sock = ws
+      if (!sock) return
       const pending = queue.splice(0)
-      for (const m of pending) { try { ws!.send(m) } catch { /* swallow: 单个消息 send 失败不阻断其余 queue */ } }
+      for (const m of pending) { try { sock.send(m) } catch { /* swallow: 单个消息 send 失败不阻断其余 queue */ } }
       // 连上后请求服务端重放最近业务消息（reply/summary/new-session-created）
-      try { ws!.send(JSON.stringify({ t: 'headless:request-replay', sid: 'default' })) } catch { /* swallow: 重放请求失败无副作用，等待新事件即可 */ }
+      try { sock.send(JSON.stringify({ t: 'headless:request-replay', sid: 'default' })) } catch { /* swallow: 重放请求失败无副作用，等待新事件即可 */ }
     })
     ws.addEventListener('message', (ev) => {
       let msg: Record<string, unknown> | null
