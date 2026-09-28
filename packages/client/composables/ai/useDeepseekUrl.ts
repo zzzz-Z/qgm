@@ -45,7 +45,7 @@ function _headlessSend(fn: string, ...args: unknown[]) {
       const t = mod.useAiTransport()
       const f = (t.transport as unknown as Record<string, (...a: unknown[]) => unknown>)[fn]
       if (typeof f === 'function') void f.apply(t.transport, args)
-    } catch {}
+    } catch { /* swallow: transport 未就绪 / 方法缺失，headless 发送本就 fire-and-forget */ }
   })
 }
 
@@ -118,7 +118,7 @@ function setModel(id: string): boolean {
     localStorage.setItem(STORAGE_KEY_MODEL, m.id)
     localStorage.setItem(STORAGE_KEY_URL, m.url)
     localStorage.setItem(STORAGE_KEY_SESSION, '')
-  } catch { }
+  } catch { /* swallow: 配额 / 隐私模式抛错，内存态已更新，仅持久化失败 */ }
   return true
 }
 
@@ -134,7 +134,7 @@ function setUrl(next: string): boolean {
   try {
     const u = new URL(trimmed)
     url.value = u.toString()
-    try { localStorage.setItem(STORAGE_KEY_URL, url.value) } catch { }
+    try { localStorage.setItem(STORAGE_KEY_URL, url.value) } catch { /* swallow: 配额/隐私模式，返回值已反映更新成功 */ }
     return true
   } catch {
     return false
@@ -150,12 +150,12 @@ function setUrl(next: string): boolean {
 function setSessionId(next: string): void {
   const trimmed = next.trim()
   sessionId.value = trimmed
-  try { localStorage.setItem(STORAGE_KEY_SESSION, trimmed) } catch { }
+  try { localStorage.setItem(STORAGE_KEY_SESSION, trimmed) } catch { /* swallow: 配额/隐私模式，UI 态已更新 */ }
   if (!trimmed) return
   const m = MODELS.find(x => x.id === modelId.value)
   if (!m || !m.sessionTemplate) return
   url.value = m.sessionTemplate.replace('{id}', encodeURIComponent(trimmed))
-  try { localStorage.setItem(STORAGE_KEY_URL, url.value) } catch { }
+  try { localStorage.setItem(STORAGE_KEY_URL, url.value) } catch { /* swallow: 配额/隐私模式，内存态已同步 */ }
 }
 
 /**
@@ -289,7 +289,7 @@ export function openDeepseek(atUrl?: string, sid?: string): Window | null {
     const useSid = sid ?? activeWinSid.value
     activeWinSid.value = useSid
     void _loadTransport().then((t) => {
-      try { t.useAiTransport().transport.sendOpen?.(useSid, { url: atUrl ?? url.value }) } catch {}
+      try { t.useAiTransport().transport.sendOpen?.(useSid, { url: atUrl ?? url.value }) } catch { /* swallow: WS 未就绪即丢弃；不阻断 open 调用 */ }
     })
     return null
   }
@@ -486,7 +486,7 @@ export async function copyAndFill(prompt: string, opts?: { count?: boolean }): P
         const tr = t.useAiTransport().transport
         tr.sendOpen?.(activeWinSid.value, { url: url.value })
         tr.sendFill(activeWinSid.value, { prompt: finalPrompt })
-      } catch {}
+      } catch { /* swallow: headless 通道无 ACK，发送异常不应回滚剪贴板已复制的内容 */ }
     })
     return 'sent'
   }
