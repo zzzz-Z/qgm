@@ -1,10 +1,12 @@
 import type { Change, RunResponse } from '../../types'
 
 /**
- * 判断是否需要 Include Changes
- * @param changes - changes
- * @param errorLocs - error Locs
- * @param Set - Set
+ * 判断本轮是否需要把 changes 内容回传给 AI
+ * [WHY] 单文件微改动（错误行附近的修复）无需整文件回传，可显著压缩 prompt
+ * [CONSTRAINT] 无变更 / 多文件变更一律 include；单文件时只要错误行落在此文件内即跳过
+ * [CHANGE-IMPACT] 决定 buildErrorContext 与 buildFullContext 的分支；影响 AI 收到的上下文规模
+ * @param changes 本轮变更列表
+ * @param errorLocs 错误位置映射（键为规范化路径，值为行号集合）
  */
 export function shouldIncludeChanges(
   changes: Change[],
@@ -24,9 +26,12 @@ export function shouldIncludeChanges(
 }
 
 /**
- * 判断是否为 Readonly Result
- * @param r - r
- * @param isLoopActive - is Loop Active
+ * 判断某次运行是否为"只读结果"（成功但无变更且不在循环中）
+ * [WHY] UI 据此走"只读展示"分支，不显示回滚 / 保存按钮
+ * [CONSTRAINT] 五个条件任一不满足即 false：无结果 / 非 ok / runId 空 / 有变更 / 循环活动中
+ * [CHANGE-IMPACT] 决定 UI 按钮可见性；改动条件会影响用户可执行的操作集
+ * @param r 最近一次运行结果；null 表示无结果
+ * @param isLoopActive 当前是否处于循环运行中
  */
 export function isReadonlyResult(r: RunResponse | null, isLoopActive: boolean): boolean {
   if (!r || !r.ok) return false
