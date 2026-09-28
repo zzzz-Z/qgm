@@ -15,8 +15,11 @@ export interface ScriptMeta {
 }
 
 /**
- * 解析 Script Meta
- * @param code - code
+ * 从前端视角解析脚本头部的 @xxx 元注释
+ * [WHY] 与 core/post-run/script-meta.ts 并行存在：前端需要在不调用服务端时也能读到 desc/why（模板预览等）
+ * [CONSTRAINT] js/cjs 用 // 前缀、bash 用 # 前缀；pick 每个字段只取首次出现；未命中返回空串
+ * [CHANGE-IMPACT] 与服务端版解析逻辑须保持字段集一致；新增元注释须两侧同步
+ * @param code 脚本原文
  */
 export function parseScriptMeta(code: string): ScriptMeta {
   const pick = (name: string): string => {

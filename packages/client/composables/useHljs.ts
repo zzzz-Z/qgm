@@ -17,8 +17,11 @@ hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('typescript', typescript)
 
 /**
- * 执行 escape Html
- * @param s - s
+ * 将 HTML 特殊字符转义为实体
+ * [WHY] hljs 未就绪 / 抛错时的降级渲染路径；避免 v-html 渲染原始标签造成 XSS
+ * [CONSTRAINT] 覆盖 & < > " ' 五种字符；不处理实体已表达字符
+ * [CHANGE-IMPACT] 与 DiffViewer.vue 内联版本功能重叠；若统一需同步两处
+ * @param s 待转义文本
  */
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, ch => ({
