@@ -19,11 +19,21 @@ interface StopAndFinishDeps {
 }
 
 /**
- * 创建 StopAndFinish
- * @param deps - deps
+ * 组装停止/终止族（handleStopAfterRound / finish），闭包持有 deps
+ * [WHY] 从 useAutoLoop.ts 抽出以降低单文件体积（PLAN P0-2 瘦身 / HCLC 400 行约束）
+ * [CONSTRAINT] deps 全量由 useAutoLoop 注入；本模块无模块级状态，多次创建产生独立闭包
+ * [CHANGE-IMPACT] 修改 StopAndFinishDeps 结构须同步更新 useAutoLoop 的装配处
+ * @param deps 停止族依赖面（loopPaused / transport / toast 等外部引用）
  */
 export function createStopAndFinish(deps: StopAndFinishDeps) {
   const { loopPaused, disarmTimer, persist, enterWaiting, transport, toast, runHook, unbindKeyboard } = deps
+  /**
+   * 每轮结束后按 stopRequest 决定是否回滚
+   * [WHY] 用户在本轮开始时点了"回滚急停"时，本轮变更需 git reset 到起始 commit 后再 finish
+   * [CONSTRAINT] rollback 且 startCommit 为空时跳过 git reset，仍走 finish（避免残留 half-state）
+   * [CHANGE-IMPACT] reason 固定为 'interrupted'，下游 finish 据此置 inst.state='interrupted'
+   * @param inst 当前循环实例；读取其 stopRequest / startCommit
+   */
   async function handleStopAfterRound(inst: LoopInstance): Promise<void> {
     if (inst.stopRequest.value === 'rollback') {
       if (inst.startCommit.value) {
@@ -45,10 +55,13 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
   // 终止 + 循环级 commit（v6 §6.10）
   // ============================================================================
   /**
-   * 执行 finish
-   * @param inst - inst
-   * @param reason - reason
-   * @param detail - detail
+   * 终止循环的统一出口：改状态 + 停 transport + 循环级 commit + 触发 LoopStop hook
+   * [WHY] 所有终止路径（用户急停 / 窗口丢失 / hook reject 等）共用一个收尾，避免状态机分支散落
+   * [CONSTRAINT] rollback 场景跳过 commit（改动已 reset）；其余终止一次性 commit，失败降级 toast
+   * [CHANGE-IMPACT] 会置 loopPaused=true 让 UI 回初始态；stopRequest 归 'none' 供下次循环复用
+   * @param inst 待终止的循环实例
+   * @param reason 终止原因短码（interrupted / hook-reject-* / window-lost 等）
+   * @param detail 可读补充说明；缺省时回落为 reason
    */
   async function finish(inst: LoopInstance, reason: string, detail?: string): Promise<void> {
     disarmTimer(inst)
