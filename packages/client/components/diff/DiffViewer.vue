@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useResizeObserver } from '@vueuse/core'
 import { highlightToHtml } from '../../composables/useHljs'
 import { diffLines as diffLinesLib } from 'diff'
 import { DEFAULT_HIGHLIGHT_HEAD, DEFAULT_HIGHLIGHT_TAIL } from './DiffViewer.constants'
@@ -24,8 +25,9 @@ interface DiffLine {
 // 升级路径：换 Myers O((N+M)D)，但代码复杂 3 倍。
 
 /**
- * 执行 escape Html
- * @param s - s
+ * 将 HTML 特殊字符转义为实体
+ * [WHY] 高亮失败时用本函数降级为纯文本，避免 v-html 渲染原始标签
+ * [CONSTRAINT] 覆盖 & < > " ' 五种字符；不处理 \u00a0 等实体已表达字符
  */
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, ch => ({
@@ -36,15 +38,17 @@ function escapeHtml(s: string): string {
     '\'': '&#39;',
   }[ch] as string))
 }
-/** 高亮 */
+/** 超高亮时保留头部行数（常量来源见 DiffViewer.constants） */
 const HIGHLIGHT_HEAD = DEFAULT_HIGHLIGHT_HEAD
-/** 高亮 */
+/** 超高亮时保留尾部行数（常量来源见 DiffViewer.constants） */
 const HIGHLIGHT_TAIL = DEFAULT_HIGHLIGHT_TAIL
-/** 高亮 */
+/** 触发"只高亮头尾"策略的行数阈值；超过时中段用 escapeHtml 降级，避免大文件卡顿 */
 const HIGHLIGHT_THRESHOLD = 400
 /**
- * 执行 highlight To Lines
- * @param text - text
+ * 将源码文本按行做 hljs 高亮，返回高亮后的 HTML 行数组
+ * [WHY] 行数超过 HIGHLIGHT_THRESHOLD 时只高亮头尾，中段用 escapeHtml 降级：hljs 对大文件代价高
+ * [CONSTRAINT] 返回的每项为 HTML 片段，调用方需用 v-html 渲染；行数与原文一致（split 后）
+ * [CHANGE-IMPACT] 头尾行为 HIGHLIGHT_HEAD / HIGHLIGHT_TAIL，改这两个常量会影响超高亮策略分界
  */
 function highlightToLines(text: string): string[] {
   if (!text) return []
@@ -65,9 +69,11 @@ function highlightToLines(text: string): string[] {
   return [...headHtml, ...mid, ...tailHtml]
 }
 /**
- * 计算 Diff
- * @param a - a
- * @param b - b
+ * 对比前后两份源码文本，产出逐行 diff 结果
+ * [WHY] 依赖 diff 库的 diffLines 算法；LCS DP 保对齐质量，大文件走全删全增降级
+ * [CONSTRAINT] 输入必须为行数组（外部已 split）；返回按原文顺序排列，同一行的 old/new 行号可能不等
+ * @param a 变更前文本行数组
+ * @param b 变更后文本行数组
  */
 function computeDiff(a: string[], b: string[]): DiffLine[] {
   const changes = diffLinesLib(a.join('\n'), b.join('\n'))
@@ -85,13 +91,15 @@ function computeDiff(a: string[], b: string[]): DiffLine[] {
   return out
 }
 
-/** 行集合 */
+/** 变更前源码的 hljs 高亮 HTML 行；由 scheduleHighlight 异步填充 */
 const beforeLines = ref<string[]>([])
-/** 行集合 */
+/** 变更后源码的 hljs 高亮 HTML 行；由 scheduleHighlight 异步填充 */
 const afterLines = ref<string[]>([])
 let idleHandle: number | ReturnType<typeof setTimeout> | null = null
 /**
- * 清空 Idle
+ * 取消挂起的空闲回调
+ * [CONSTRAINT] 幂等；requestIdleCallback 与 setTimeout 两条路径都正确清理（idleHandle 类型联合）
+ * [WHY] 高亮是重活，用 requestIdleCallback 空闲时执行；快速切换文件时需取消上一轮避免覆盖
  */
 function clearIdle() {
   if (idleHandle === null) return
@@ -100,11 +108,14 @@ function clearIdle() {
   idleHandle = null
 }
 /**
- * 执行 schedule Highlight
+ * 调度一次异步高亮（下一帧空闲或 0ms 延迟执行）
+ * [WHY] 高亮耗时随文件增大而线性增长，放空闲时段可避免阻塞首次渲染
+ * [CONSTRAINT] 重复调用会先取消上一轮（clearIdle），避免旧高亮结果覆盖新内容
+ * [CHANGE-IMPACT] watch props.before/after 时以 immediate 触发一次，首屏渲染依赖此路径
  */
 function scheduleHighlight() {
   clearIdle()
-  /** 运行 */
+  /** 空闲回调：读取最新 props 并刷新高亮结果；置 idleHandle 为 null 以标记"无挂起" */
   const run = () => {
     idleHandle = null
     beforeLines.value = highlightToLines(props.before)
@@ -127,8 +138,9 @@ const diffLines = computed((): DiffLine[] => {
 })
 
 /**
- * 渲染 Line
- * @param line - line
+ * 从预高亮结果中取某行的 HTML；未命中时回落 escapeHtml
+ * [WHY] 高亮是异步的，diff 结构先产出时 beforeLines/afterLines 可能还未填充，故需兜底
+ * [CONSTRAINT] 按行号索引（1-based 转 0-based）；超出数组边界或类型不匹配时回落到原始文本转义
  */
 function renderLine(line: DiffLine): string {
   if (line.type === 'add' && line.newLine !== undefined) return afterLines.value[line.newLine - 1] ?? escapeHtml(line.text)
@@ -141,9 +153,9 @@ function renderLine(line: DiffLine): string {
 const ROW_HEIGHT = 22
 /** 虚拟滚动的缓冲区行数（上下各预留） */
 const BUFFER = 20
-/** 差异引用 */
+/** diff 主体容器引用；虚拟滚动与视口高度测量均依赖此 ref */
 const diffBodyRef = ref<HTMLElement | null>(null)
-/** 滚动 */
+/** 当前滚动位置（像素）；由 onScroll 更新，visibleRange 计算依赖它 */
 const scrollTop = ref(0)
 /** 可视区域高度（像素） */
 const viewportHeight = ref(600)
@@ -153,34 +165,32 @@ const visibleRange = computed(() => {
   const end = Math.min(diffLines.value.length, Math.ceil((scrollTop.value + viewportHeight.value) / ROW_HEIGHT) + BUFFER)
   return { start, end }
 })
-/** 行集合 */
+/** 当前可视窗口内的差异行（虚拟滚动实际渲染集合） */
 const visibleLines = computed(() => diffLines.value.slice(visibleRange.value.start, visibleRange.value.end))
 /** 虚拟滚动顶部占位高度 */
 const spacerTop = computed(() => visibleRange.value.start * ROW_HEIGHT)
 /** 虚拟滚动底部占位高度 */
 const spacerBottom = computed(() => Math.max(0, diffLines.value.length - visibleRange.value.end) * ROW_HEIGHT)
 /**
- * 响应 Scroll
- * @param e - e
+ * 记录滚动位置以驱动虚拟滚动
+ * [CONSTRAINT] 事件绑定为 @scroll.passive，不可在内部 preventDefault（浏览器警告）
+ * @param e 来自 diff-body 容器的 scroll 事件；e.target 即容器元素
  */
 function onScroll(e: Event) {
   const el = e.target as HTMLElement
   scrollTop.value = el.scrollTop
 }
-let resizeObs: ResizeObserver | null = null
+// [use-resize-observer-v1] 用 vueuse useResizeObserver 替换手写 observer：
+// 内部自动 in-scope 清理（组件卸载时 disconnect），省掉 onBeforeUnmount 分支
+// [CONSTRAINT] target 传入 ref 对象本身（非 .value），vueuse 会 watch 引用变化后在 DOM 就绪时 observe
 onMounted(() => {
-  if (!diffBodyRef.value) return
-  viewportHeight.value = diffBodyRef.value.clientHeight
-  if (typeof ResizeObserver !== 'undefined') {
-    resizeObs = new ResizeObserver(() => {
-      if (diffBodyRef.value) viewportHeight.value = diffBodyRef.value.clientHeight
-    })
-    resizeObs.observe(diffBodyRef.value)
-  }
+  if (diffBodyRef.value) viewportHeight.value = diffBodyRef.value.clientHeight
+})
+useResizeObserver(diffBodyRef, () => {
+  if (diffBodyRef.value) viewportHeight.value = diffBodyRef.value.clientHeight
 })
 onBeforeUnmount(() => {
   clearIdle()
-  if (resizeObs) { resizeObs.disconnect(); resizeObs = null }
 })
 
 /** 统计信息 */
