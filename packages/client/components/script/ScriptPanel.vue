@@ -56,9 +56,6 @@
         <template #attach-bar>
           <ScriptAttachBar :files="attachedFiles" @remove="removeAttach" />
         </template>
-        <template #foot>
-          <ScriptFooter :persist-warning="persistWarning" :result="result" />
-        </template>
       </ScriptEditor>
 
       <div v-if="fileSuccess" class="overlay success">
@@ -148,7 +145,6 @@ import ScriptEditor from './ScriptEditor.vue'
 import AbnormalView from '../panels/AbnormalView.vue'
 import ScriptToolbar from './ScriptToolbar.vue'
 import ScriptAttachBar from './ScriptAttachBar.vue'
-import ScriptFooter from './ScriptFooter.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRunner } from '../../composables/runner/useRunner'
 import { currentLoopContext, useAutoLoop } from '../../composables/ai/useAutoLoop'
@@ -469,22 +465,6 @@ function pauseAll() {
   stop()
 }
 
-/** 是否已复制到剪贴板 */
-/** 文件成功 */
-
-// [attach-manager-v1] 附件簇函数已抽到 attach-manager.ts
-
-// [tree-attach-v1] 树/目录/脚本拼装已抽到 tree-attach.ts
-
-// ── computed（状态栏 / 元信息 / 阶段耗时 / 流标识）──
-
-/** 最新的 AI 流式文本（取最后一条 ai:stream 事件） */
-
-// [preview-manager-v1] 预览/撤回/变更类型已抽到 preview-manager.ts
-
-/**
- * 构建 Ai Prompt
- */
 async function buildAiPrompt(): Promise<string> {
   if (!result.value) return ''
   const errorLocs = parseErrorLocations(`${result.value.stderr || ''}\n${result.value.stdout || ''}`)
@@ -552,10 +532,10 @@ function onGlobalKey(e: KeyboardEvent) {
  * @param opts - opts
  */
 async function runSmart(opts?: { bypassAutoGuard?: boolean }) {
-  if (autoTakeoverEnabled.value && !opts?.bypassAutoGuard) {
-    toast('自动接管中，请先关闭接管再手动运行', 'warn', 2500)
-    return
-  }
+  // if (autoTakeoverEnabled.value && !opts?.bypassAutoGuard) {
+  //   toast('自动接管中，请先关闭接管再手动运行', 'warn', 2500)
+  //   return
+  // }
   const rawScript = script.value.trim()
   if (!rawScript) return
   const text = attachedFiles.value.length ? await buildScriptWithAttachments(rawScript, attachedFiles.value) : rawScript
@@ -581,19 +561,6 @@ async function runSmart(opts?: { bypassAutoGuard?: boolean }) {
   run({ script: text })
 }
 
-// 用户手选 + 后端按 question 自动匹配
-
-// [exec-flow-v1] exec 全流程已抽到 exec-flow.ts
-
-// stderr 里把 file.ts:12:34 变成可点击（点击复制路径）
-// ponytail: 不做跨文件跳转（无 Monaco，行号可能失准），只复制路径。
-
-// [draft-slots-v1] 草稿槽位读写已抽到 draft-slots.ts
-
-// [side-resize-v1] 侧栏拖拽已抽到 side-resize.ts
-
-// 预览 diff 时自动加宽（尊重用户手动拖过的基准宽度）
-// changes 为空时清空 diff 状态，避免残留
 watch(
   () => changes.value.length,
   (len, prevLen) => {

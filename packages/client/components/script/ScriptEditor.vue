@@ -29,10 +29,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { FileNode } from '../../types'
-import type { Decoration, DecorationSet, EditorView, ViewUpdate } from '@codemirror/view'
-import type { Extension } from '@codemirror/state'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import type { FileNode } from '../../types';
+import type { Decoration, DecorationSet, EditorView, ViewUpdate } from '@codemirror/view';
+import type { Extension } from '@codemirror/state';
 
 /** 组件接收的 props 定义 */
 const props = defineProps<{
@@ -278,7 +278,6 @@ async function createEditor() {
       /* editor-no-h-scroll */
       m.EditorView.lineWrapping,
       editableComp!.of(m.EditorView.editable.of(!props.isLoopActive)),
-      m.placeholder('写脚本或指令 · ↵ 发送给 AI · ⌘/Ctrl+↵ 本地执行  // [cm-placeholder-v2]'),
       m.EditorView.theme({
         '&': {
           height: '100%',

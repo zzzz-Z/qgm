@@ -74,9 +74,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref } from 'vue';
 // [raw-output-fold-v1] PLAN 5.2 第四层：原始输出折叠
-import { useFoldState } from '../../composables/ui/useFoldState'
+import { useFoldState } from '../../composables/ui/useFoldState';
 
 /** 组件接收的 props 定义 */
 const props = defineProps<{

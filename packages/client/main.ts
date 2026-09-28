@@ -1,6 +1,6 @@
 import 'virtual:uno.css'
 import { createApp } from 'vue'
-import { createPinia } from 'pinia' // [pinia-mount-v1]
+import { createPinia } from 'pinia'
 import App from './App.vue'
 import './style.css'
 import { vTooltip } from './directive'
