@@ -25,11 +25,16 @@ const TREE_EXCLUDE = new Set([
 ])
 
 /**
- * 构建 File Tree
- * @param dir - dir
- * @param rel - rel
- * @param depth - depth
- * @param maxDepth - max Depth
+ * 递归构建文件树（排序 + 排除 + 深度截断）
+ * [WHY] 目录优先 + 名字排序让前端展示稳定；叶子层用 hasChildren 标记"还有下一层"，
+ * 让懒加载 UI 无需再发请求即可知道是否显示展开箭头
+ * [CONSTRAINT] 隐藏项（以 . 开头）与 TREE_EXCLUDE 命中项被过滤；
+ * 符号链接仅当目标为目录/文件时纳入（断链会被跳过）
+ * [CHANGE-IMPACT] 返回结构被前端 FileNode 类型消费；叶子层的 hasChildren 字段是懒加载 UI 的关键
+ * @param dir 绝对路径起点
+ * @param rel 与 dir 对应的相对路径（用于生成 node.path）
+ * @param depth 当前递归深度（调用方传 0）
+ * @param maxDepth 最大深度；depth+1 >= maxDepth 时该子目录标记为叶子
  */
 function buildFileTree(dir: string, rel = '', depth = 0, maxDepth = 5): FileNode[] {
   const out: FileNode[] = []
