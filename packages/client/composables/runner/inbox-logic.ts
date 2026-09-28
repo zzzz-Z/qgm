@@ -4,7 +4,7 @@
 /**
  * 归一化脚本内容，用于 push 去重指纹
  * [WHY] 剔除 shebang / 注释 / 空白后比较，避免仅元信息变化被判为新脚本
- * [CONSTRAINT] 只去行首 shebang / // / # 注释；不剥离块注释（/* */）
+ * [CONSTRAINT] 只去行首 shebang 与单行注释；不剥离多行块注释
  * [CHANGE-IMPACT] 输出被 useScriptInbox 用作 Set 键；改归一规则会让历史去重失效（重新接受旧脚本）
  * @param code 原始脚本内容；null / undefined 会按空串处理
  */
