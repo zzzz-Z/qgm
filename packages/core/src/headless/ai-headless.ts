@@ -269,7 +269,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     try {
       const ctx = s.context as { close?: () => Promise<void> } | undefined
       await ctx?.close?.()
-    } catch {}
+    } catch { /* swallow: 上下文已崩溃 / 已关闭，close 失败不影响后续字段清理 */ }
     s.context = undefined
     s.page = undefined
   }

@@ -64,13 +64,13 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
     const send = (obj: ServerMessage | TransportMessage) => {
       const sid = String((obj as { sid?: string }).sid || '')
       if (sid) _bufferOut(sid, obj)
-      try { ws.send(JSON.stringify(obj)) } catch {}
+      try { ws.send(JSON.stringify(obj)) } catch { /* swallow: WS 已关闭 / 缓冲满，单条丢弃不阻断其余广播 */ }
     }
     switch (t) {
       case 'headless:request-replay': {
         const sid0 = String(msg.sid || 'default')
         const buf = _serverMsgBuf.get(sid0) || []
-        for (const m of buf) { try { ws.send(JSON.stringify(m)) } catch {} }
+        for (const m of buf) { try { ws.send(JSON.stringify(m)) } catch { /* swallow: 重放中单条失败不阻断后续 */ } }
         break
       }
       case 'headless:open': {
@@ -137,10 +137,10 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
             } else {
               send({ t: 'headless:reply', sid, reply: { kind: reply.kind, text: reply.text, reasoning: String((reply as { reasoning?: string }).reasoning || '') } })
             }
-          } catch {}
+          } catch { /* swallow: 页面导航/关闭期间 evaluate 抛错，等下一轮 tick */ }
         })
         const stopToken = pool.startTokenPoll(sid, (tokens) => {
-          try { send({ t: 'headless:token-estimate', sid, tokens }) } catch {}
+          try { send({ t: 'headless:token-estimate', sid, tokens }) } catch { /* swallow: 同上，轮询期间页面可能短暂不可用 */ }
         })
         replyPollers.set(sid, () => { stopReply(); stopToken() })
         break
@@ -182,7 +182,7 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
       try { msg = JSON.parse(String(data)) as TransportMessage }
       catch { return }
       handleMessage(ws, msg).catch((e: unknown) => {
-        try { ws.send(JSON.stringify({ t: 'headless:error', error: String(e) })) } catch {}
+        try { ws.send(JSON.stringify({ t: 'headless:error', error: String(e) })) } catch { /* swallow: 连接已断，错误回写失败属预期 */ }
       })
     })
     ws.on('error', () => {})

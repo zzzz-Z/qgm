@@ -194,9 +194,9 @@ function gcLogs() {
       const p = path.join(getLogsDir(), name)
       try {
         if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p)
-      } catch { }
+      } catch { /* swallow: 单条日志 stat/unlink 失败不中断其余清理 */ }
     }
-  } catch { }
+  } catch { /* swallow: 日志目录不存在 / 读取失败，GC 失败无副作用 */ }
 }
 /**
  * 幂等创建 .ai-runner 下的 runs / scripts / logs 三个目录，并触发一次日志 GC

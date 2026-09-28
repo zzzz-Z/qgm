@@ -69,7 +69,7 @@ test.afterAll(async () => {
 function openWs(): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(WS_URL, { headers: { Origin: `http://${HOST}:${PORT}` } })
-    const timer = setTimeout(() => { try { ws.terminate() } catch {} ; reject(new Error('ws 握手超时')) }, 5000)
+    const timer = setTimeout(() => { try { ws.terminate() } catch { /* swallow: e2e 测试清理，socket 可能已断 */ } ; reject(new Error('ws 握手超时')) }, 5000)
     ws.once('open', () => { clearTimeout(timer); resolve(ws) })
     ws.once('error', (e) => { clearTimeout(timer); reject(e) })
   })

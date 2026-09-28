@@ -113,7 +113,7 @@ export function detectReplyInPage() {
       const obs = new MutationObserver(() => { dedup._bodyVersion++ })
       obs.observe(document.body, { childList: true, subtree: true, characterData: true })
       dedup._observer = obs
-    } catch {}
+    } catch { /* swallow: document.body 未就绪 / Observer 不支持，dedup 退化为纯计数 */ }
   }
 
   function hash32(s) {
