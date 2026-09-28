@@ -94,10 +94,13 @@ const headerUrl = computed(() => {
   return s ? s.url : deepseekUrl.value
 })
 /**
- * 添加 Session To History
- * @param id - id
- * @param url - url
- * @param title - title
+ * 把一次会话加入历史记录（去重 + 上限 50 条）
+ * [WHY] 同 id 覆盖 —— 会话被反复打开/改名时只保留最新一条，避免历史膨胀
+ * [CONSTRAINT] 采用"最新在前"顺序（unshift 语义），超 50 条截断尾部；落盘到 localStorage 键 __ai_session_history
+ * [CHANGE-IMPACT] 会改动 sessionHistory.value 引用，UI 列表依赖此次刷新
+ * @param id 会话 id；用于去重
+ * @param url 会话对应站点完整地址
+ * @param title 展示用标题（通常来自 AI 站点标题回写）
  */
 function addSessionToHistory(id: string, url: string, title: string) {
   const entry: SessionEntry = { id, url, title, createdAt: Date.now() }
@@ -106,7 +109,8 @@ function addSessionToHistory(id: string, url: string, title: string) {
 }
 
 /**
- * 执行 dismiss Absence
+ * 用户忽略"久未活动"提示；置位后不再重复显示
+ * [CONSTRAINT] 只写一次标志；如需再次提醒应由上层重置 absenceDismissed
  */
 function dismissAbsence() { absenceDismissed.value = true }
 
