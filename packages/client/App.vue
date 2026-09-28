@@ -466,7 +466,8 @@ watch(theme, (v) => {
   try { localStorage.setItem(KEY_THEME, v) } catch { }
 }, { immediate: true })
 
-// [use-event-listener-v1] 窗口级监听改由 @vueuse 统一注册，unmount 自动清理
+// [use-event-listener-v1] 用 vueuse useEventListener 而非原生 addEventListener：
+// 组件 unmount 时自动 removeEventListener；HMR / 热重载下重复注册会引发 message 重复处理
 useEventListener(window, 'message', onSessionIdMessage)
 useEventListener(window, 'keydown', onShiftQuestion)
 
@@ -550,7 +551,6 @@ onMounted(() => {
     setDeepseekUrl(s.url)
   }
 })
-// [use-event-listener-v1] 手工清理块已移除，改由 @vueuse 接管
 
 /**
  * 响应 Transport Change
