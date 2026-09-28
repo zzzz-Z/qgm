@@ -158,8 +158,10 @@ function onUrlBlur() {
 }
 
 /**
- * 响应 Session Id Message
- * @param e - e
+ * 处理 AI 窗口通过 postMessage 发来的消息（单一入口，按 data.type 分发）
+ * [WHY] 油猴侧协议字段扩展频繁，集中分发可避免到处 addEventListener 造成重复注册
+ * [CONSTRAINT] d.type 未识别时静默忽略，不抛错；上游 handleXxx 各自处理 data 缺失
+ * [CHANGE-IMPACT] 新增消息类型须同时更新油猴侧发送方与下方 if 链
  */
 function onSessionIdMessage(e: MessageEvent) {
   const d = e.data
@@ -422,8 +424,9 @@ async function onNewSession() {
 }
 
 /**
- * 响应 Shift Question
- * @param e - e
+ * 全局键盘快捷键：Shift+? 开关快捷键帮助、Escape 关闭
+ * [WHY] 在输入框/可编辑元素内不劫持按键，避免用户输入问号时弹出帮助
+ * [CONSTRAINT] 只响应 shiftKey=true 且无 ctrl/meta/alt；Escape 只在帮助打开时吞掉
  */
 function onShiftQuestion(e: KeyboardEvent) {
   if (e.key === '?' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -553,8 +556,9 @@ onMounted(() => {
 })
 
 /**
- * 响应 Transport Change
- * @param e - e
+ * 切换 transport 偏好并刷新页面
+ * [WHY] transport 决定 useDeepseekUrl 的 _isHeadless 判定与传输层加载，reload 是最简可靠的生效方式
+ * [CONSTRAINT] 从 <select> 的 change 事件取值；非 "headless" 一律回落 "tampermonkey"
  */
 function onTransportChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
