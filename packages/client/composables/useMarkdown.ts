@@ -99,7 +99,7 @@ function blockFormat(text: string): string {
   }
   for (const line of text.split('\n')) {
     const t = line.trim()
-    const h = /^(#{1,3})\s+(.+)$/.exec(t)
+    const h = /^(#{1,3})[ \t]+(\S.*)$/.exec(t)
     if (h) {
       flushPara(); closeList()
       const lv = h[1].length
@@ -111,14 +111,14 @@ function blockFormat(text: string): string {
       out.push('<hr>')
       continue
     }
-    const ul = /^[-*+]\s+(.+)$/.exec(t)
+    const ul = /^[-*+][ \t]+(\S.*)$/.exec(t)
     if (ul) {
       flushPara()
       if (list !== 'ul') { closeList(); out.push('<ul>'); list = 'ul' }
       out.push(`<li>${inlineFormat(ul[1])}</li>`)
       continue
     }
-    const ol = /^\d+\.\s+(.+)$/.exec(t)
+    const ol = /^\d+\.[ \t]+(\S.*)$/.exec(t)
     if (ol) {
       flushPara()
       if (list !== 'ol') { closeList(); out.push('<ol>'); list = 'ol' }
