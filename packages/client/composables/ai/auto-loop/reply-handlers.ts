@@ -3,6 +3,10 @@ import type { Ref } from 'vue'
 import type { AiReply, LoopInstance, RoundOutcome } from './types.js'
 import type { InboxItem } from '../../runner/useScriptInbox'
 
+// [ask-dialog-v1] 交互提问通道；解析放 utils，弹窗状态走单例 composable
+import { parseAsk } from '../../../utils/ask-parser'
+import { askUser } from '../../ui/useAsk'
+
 type ToastFn = typeof import('../../ui/useToast.js').toast
 type Transport = ReturnType<typeof import('../useAiTransport.js').getTransport>
 
@@ -95,6 +99,27 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     if (!inst || !isInstActive(inst) || inst.state.value !== 'waiting') return
     disarmTimer(inst)
     if (inst.stopRequest.value !== 'none') { await handleStopAfterRound(inst); return }
+
+    // [ask-dialog-v1] 交互提问：AI 主动索要用户选择或信息；答案走 sendFill 回填后重入 waiting
+    // [CONSTRAINT] 只处理 kind=plain 且 text 命中提问前缀；不影响 done/multi 分类逻辑
+    // [CHANGE-IMPACT] 用户取消时仅 toast 提示并等待下一轮（不消耗重试预算）
+    if (reply.kind === 'plain' && reply.text && parseAsk(reply.text)) {
+      const ask = parseAsk(reply.text)
+      if (ask) {
+        const answer = await askUser(ask)
+        if (answer !== null) {
+          const ok = loopPaused.value ? false : transport.sendFill('', { prompt: `【@ask 回答】${answer}` })
+          if (ok) {
+            enterWaiting(inst)
+          } else {
+            await finish(inst, 'window-lost', '回答发送失败（窗口已关闭或发送失败）')
+          }
+        } else {
+          toast('用户已取消提问，等待下一轮', 'warn', 3000)
+        }
+        return
+      }
+    }
 
     if (reply.kind === 'done') {
       // [plan-resume-cap-v1] PLAN 续跑加硬上限：连续续跑 PLAN_RESUME_MAX 次后放行 DONE
