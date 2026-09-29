@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import ScriptPanel from './components/script/ScriptPanel.vue'
 import { DEFAULT_URL, MODELS, useDeepseekUrl } from './composables/ai/useDeepseekUrl'
-import { copyAndFill, getWindowBySid, listWindows, openDeepseek, setActiveWinSid } from './composables/ai/useAiWindow'
+import { getWindowBySid, listWindows, openAiSession, openDeepseek, setActiveWinSid } from './composables/ai/useAiWindow'
 import { useScriptInbox } from './composables/runner/useScriptInbox'
 import {
   createLoopInstanceFor,
@@ -383,20 +383,23 @@ async function onOpenAiWin() {
   const at = headerUrl.value || deepseekUrl.value
   // URL 无会话 ID 时，打开新会话并预填「开始聊天」
   const hasSession = /\/a\/chat\/s\/[\w-]{8,}/.test(at)
-  const w = openDeepseek(hasSession ? at : DEFAULT_URL)
-  if (!w) {
-    toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
-    return
-  }
   if (hasSession) {
+    const w = openDeepseek(at)
+    if (!w) {
+      toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
+      return
+    }
     toast('已打开 / 激活 AI 窗口', 'success', 2000)
     return
   }
+  // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 规则注入一次完成
+  const { win, fill } = await openAiSession({ atUrl: DEFAULT_URL, initialPrompt: '开始聊天', forceRules: true })
+  if (!win) {
+    toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
+    return
+  }
   toast('已打开新会话，正在发送「开始聊天」…', 'info', 2000)
-  // [force-rules-on-new-window] 需求：开新窗必须自动携带 SYSTEM.md + AGENTS.md；
-  // forceRules=true 绕过 copyAndFill 内的 sessionId 去重，否则同工作台会话内重开窗不带规则
-  const r = await copyAndFill('开始聊天', { forceRules: true })
-  if (r === 'sent' || r === 'opened') {
+  if (fill === 'sent' || fill === 'opened') {
     toast('已发送「开始聊天」，等待会话地址回写', 'success', 2500)
   } else {
     toast('发送失败，请检查 AI 窗口是否就绪', 'warn', 4000)
@@ -406,8 +409,9 @@ async function onOpenAiWin() {
  * 打开一个全新的 AI 会话窗口（强制新会话，无论当前是否有会话）
  */
 async function onNewSession() {
-  const w = openDeepseek(DEFAULT_URL)
-  if (!w) {
+  // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
+  const { win, fill } = await openAiSession({ atUrl: DEFAULT_URL, initialPrompt: '开始聊天', forceRules: true })
+  if (!win) {
     toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
     return
   }
@@ -415,10 +419,7 @@ async function onNewSession() {
   loopPaused.value = true
   autoTakeover.disable()
   toast('已打开新会话，正在发送「开始聊天」…', 'info', 2000)
-  // [force-rules-on-new-window] 需求：开新窗必须自动携带 SYSTEM.md + AGENTS.md；
-  // forceRules=true 绕过 copyAndFill 内的 sessionId 去重，否则同工作台会话内重开窗不带规则
-  const r = await copyAndFill('开始聊天', { forceRules: true })
-  if (r === 'sent' || r === 'opened') {
+  if (fill === 'sent' || fill === 'opened') {
     toast('已发送「开始聊天」，等待会话地址回写', 'success', 2500)
   } else {
     toast('发送失败，请检查 AI 窗口是否就绪', 'warn', 4000)
@@ -490,16 +491,15 @@ onMounted(() => {
       try { resetSession() } catch { /* 未就绪时忽略 */ }
       // 2) 打开新的 AI 会话窗口
       setTimeout(() => {
-        try {
-          const w = openDeepseek(DEFAULT_URL)
-          if (w) {
+        // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
+        void openAiSession({ atUrl: DEFAULT_URL, initialPrompt: '开始聊天', forceRules: true }).then(({ win }) => {
+          if (win) {
             // 3) 确保 headless 通道被激活（getTransport 懒创建，触发连接）
             try { getTransport() } catch { /* 油猴模式下无需 */ }
-            // 4) 预填开新会话的引导语
           } else {
             toast('新会话窗口打开失败（可能被浏览器拦截弹窗）', 'warn', 4000)
           }
-        } catch { /* 忽略 */ }
+        }).catch(() => { /* 忽略 */ })
       }, 600)
     }
   } catch { /* sessionStorage 不可用时静默 */ }
