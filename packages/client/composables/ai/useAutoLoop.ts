@@ -184,7 +184,7 @@ watch([
   }
 })
 
-// 首轮契约 prompt 由 loopLogic.buildInitialPrompt 构造（带单测锁定）
+// 首轮 prompt 由 session-prompt.buildLoopInitialPrompt 构造（SYSTEM.md + AGENTS.md + goal）
 
 // ============================================================================
 // 主入口

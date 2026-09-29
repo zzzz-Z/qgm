@@ -5,8 +5,6 @@
 // 修改熔断参数/判定规则只需改这里，行为被 loopLogic.node-test.ts 锁定。
 // ============================================================================
 
-interface FingerprintLite { file: string, line: number, symbol: string, kind?: string }
-
 /**
  * [drop-round-limit] 轮次上限已取消；保留常量名兼容引用，值 Infinity 表示无上限。
  *  循环终止改由「轮次上限」（LOOP_HARD_MAX_ROUNDS）负责。
