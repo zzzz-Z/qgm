@@ -136,19 +136,19 @@ importers:
 
   apps/standalone:
     dependencies:
-      '@qgm/ai-runner-client':
+      '@qgm/client':
         specifier: workspace:^
         version: link:../../packages/client
-      '@qgm/ai-runner-core':
+      '@qgm/core':
         specifier: workspace:^
         version: link:../../packages/core
 
   apps/vite-plugin:
     dependencies:
-      '@qgm/ai-runner-client':
+      '@qgm/client':
         specifier: workspace:^
         version: link:../../packages/client
-      '@qgm/ai-runner-core':
+      '@qgm/core':
         specifier: workspace:^
         version: link:../../packages/core
       vite:

@@ -70,11 +70,11 @@ curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5175/__ai/
 **C1. 作为 Vite 插件（挂到用户自己的项目）**
 
 ```bash
-pnpm add -D @qgm/vite-plugin-ai-runner
+pnpm add -D @qgm/vite-plugin
 ```
 
 ```ts
-import { aiRunner } from '@qgm/vite-plugin-ai-runner'
+import { aiRunner } from '@qgm/vite-plugin'
 
 export default defineConfig({ plugins: [aiRunner()] })
 ```
@@ -91,9 +91,9 @@ pnpm add -g @qgm/ai-runner && ai-runner
 
 **已完成（截至本轮）**
 
-- ✅ `packages/core` 独立 build：`pnpm --filter @qgm/ai-runner-core build` → `packages/core/dist/`（.js + .d.ts + runtime .cjs）
-- ✅ `packages/client` 独立 build：`pnpm --filter @qgm/ai-runner-client build` → `packages/client/dist/`
-- ✅ `apps/vite-plugin` 独立 build：`pnpm --filter @qgm/vite-plugin-ai-runner build` → `apps/vite-plugin/dist/`
+- ✅ `packages/core` 独立 build：`pnpm --filter @qgm/core build` → `packages/core/dist/`（.js + .d.ts + runtime .cjs）
+- ✅ `packages/client` 独立 build：`pnpm --filter @qgm/client build` → `packages/client/dist/`
+- ✅ `apps/vite-plugin` 独立 build：`pnpm --filter @qgm/vite-plugin build` → `apps/vite-plugin/dist/`
 - ✅ `apps/standalone` 独立 build：`pnpm --filter @qgm/ai-runner build` → `apps/standalone/dist/`（_server + client + runtime cjs）
 - ✅ `apps/standalone/bin/air-server.cjs` 自包含 launcher（`__dirname` 定位，发布态可用）
 - ✅ 根 `pnpm start` 指向包内 launcher
@@ -101,13 +101,13 @@ pnpm add -g @qgm/ai-runner && ai-runner
 
 **已完成（截至本轮）**
 
-- ✅ `packages/core` 独立 build：`pnpm --filter @qgm/ai-runner-core build` → `packages/core/dist/`（.js + .d.ts + runtime .cjs）
-- ✅ `packages/client` 独立 build：`pnpm --filter @qgm/ai-runner-client build` → `packages/client/dist/`
+- ✅ `packages/core` 独立 build：`pnpm --filter @qgm/core build` → `packages/core/dist/`（.js + .d.ts + runtime .cjs）
+- ✅ `packages/client` 独立 build：`pnpm --filter @qgm/client build` → `packages/client/dist/`
 - ✅ `apps/vite-plugin` 独立 build：vite SSR 打包内联 core → `apps/vite-plugin/dist/index.js`（不再 external core）
 - ✅ `apps/standalone` 独立 build：→ `apps/standalone/dist/`（_server + client + runtime cjs）
 - ✅ `apps/standalone/bin/air-server.cjs` 自包含 launcher（`__dirname` 定位）
 - ✅ 根 `pnpm start` 指向包内 launcher
-- ✅ `@qgm/ai-runner-core` / `@qgm/ai-runner-client` 去 private，补 description/license/publishConfig
+- ✅ `@qgm/core` / `@qgm/client` 去 private，补 description/license/publishConfig
 - ✅ 四个包 `pnpm publish --dry-run` 全部通过
 
 **唯一遗留：Vite 插件发布态的 client 托管**
@@ -116,7 +116,7 @@ dev 模式下（仓库内），`page.ts` 通过 `/@fs/${abs}` 引用 `packages/c
 发布到别的项目后：
 
 - `page.ts` 兜底的相对路径解析到 `node_modules/client/main.ts`（不存在）
-- `plugin.ts` 的 `createRequire.resolve("@qgm/ai-runner-client/main.ts")` 会失败（exports 声明该路径但 files 未带源码）
+- `plugin.ts` 的 `createRequire.resolve("@qgm/client/main.ts")` 会失败（exports 声明该路径但 files 未带源码）
 
 因此**发布态的 vite 插件模式下，工作台页面暂时无法加载**。standalone 模式不受影响（它走静态托管 `packages/client/dist`）。
 
@@ -140,7 +140,7 @@ pnpm link --global
 # 目标项目
 pnpm link --global @qgm/ai-runner       # 独立应用
 # 或
-pnpm link --global @qgm/vite-plugin-ai-runner  # Vite 插件
+pnpm link --global @qgm/vite-plugin  # Vite 插件
 ```
 
 ## 五、环境变量

@@ -7,7 +7,6 @@ import type { AiTransport } from '../useAiTransport.js'
 // [p1-2-client-v1] 从各源模块反推精确类型，杜绝 any；本文件对外只暴露 createAfterRound
 type HooksMod = typeof import('./hooks.js')
 type PersistMod = typeof import('./persist.js')
-type LoopLogicMod = typeof import('../loopLogic.js')
 type ToastFn = typeof import('../../ui/useToast.js').toast
 type RoundGuards = ReturnType<typeof import('./round-guards.js').createRoundGuards>
 type Waiting = ReturnType<typeof import('./waiting.js').createWaiting>
@@ -38,14 +37,9 @@ export function createAfterRound(deps: AfterRoundDeps) {
     finish,
     handleStopAfterRound,
     runHook,
-    toast,
     persist,
-    ackFill,
-    transport,
-    loopPaused,
     stage,
     enterWaiting,
-    LOOP_MAX_ROUNDS,
   } = deps
 
   // [loop-hard-limit-v1] 起跑时间：按 loopId 追踪，新循环重置

@@ -1,5 +1,5 @@
 {
-  "name": "@qgm/ai-runner-core",
+  "name": "@qgm/core",
   "type": "module",
   "version": "0.1.0",
   "description": "宿主无关核心：Hono 路由、脚本执行、post-run、状态、快照、回滚、AI 编排",

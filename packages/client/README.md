@@ -1,4 +1,4 @@
-# @qgm/ai-runner-client
+# @qgm/client
 
 唯一一份 SPA 构建产物，被两个宿主托管。
 

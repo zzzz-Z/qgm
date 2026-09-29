@@ -22,7 +22,8 @@ export default defineConfig({
   // [dev-hmr-core-v1-client] 让 client 侧插件加载 core 源码，改 core 免 build 生效
   resolve: {
     alias: {
-      '@qgm/ai-runner-core': path.join(PKG_ROOT, 'core', 'src', 'index.ts'),
+      '@qgm/core': path.join(PKG_ROOT, 'core', 'src', 'index.ts'),
+      '@': path.join(PKG_ROOT, 'client')
     },
   },
   server: {

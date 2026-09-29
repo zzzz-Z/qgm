@@ -3,19 +3,16 @@ import type { Ref } from 'vue'
 import type { AiReply, LoopInstance, RoundOutcome } from './types.js'
 import type { InboxItem } from '../../runner/useScriptInbox'
 
-type AddTraceFn = ReturnType<typeof import('../../ui/useTraceLog.js').useTraceLog>['addTrace']
 type ToastFn = typeof import('../../ui/useToast.js').toast
 type Transport = ReturnType<typeof import('../useAiTransport.js').getTransport>
 
 /** 回复处理三入口依赖面 */
 export interface ReplyHandlersDeps {
   loopPaused: Ref<boolean>
-  niumaMode: Ref<boolean>
   stage: Ref<'' | 'plan' | 'implement' | 'verify'>
   planResumeAttempts: Ref<number>
   PLAN_RESUME_MAX: number
   transport: Transport
-  addTrace: AddTraceFn
   toast: ToastFn
   ackFill: (inst: LoopInstance, label: string) => void
   afterRound: (inst: LoopInstance, o: RoundOutcome) => Promise<void>
@@ -30,7 +27,6 @@ export interface ReplyHandlersDeps {
   persist: typeof import('./persist.js').persist
   isStrictDone: (text: string) => boolean
   buildRetryPrompt: (detail: string) => string
-  syncTasks: typeof import('../../data/useTaskSync').syncTasks
   pushTerminalNotice: (msg: string, opts?: { divider?: boolean }) => void
   resolveInst: (sid?: string) => LoopInstance | null
   isInstActive: (inst: LoopInstance | null) => boolean
@@ -43,12 +39,10 @@ export interface ReplyHandlersDeps {
 export function createReplyHandlers(deps: ReplyHandlersDeps) {
   const {
     loopPaused,
-    niumaMode,
     stage,
     planResumeAttempts,
     PLAN_RESUME_MAX,
     transport,
-    addTrace,
     toast,
     ackFill,
     afterRound,
@@ -63,7 +57,6 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     persist,
     isStrictDone,
     buildRetryPrompt,
-    syncTasks,
     pushTerminalNotice,
     resolveInst,
     isInstActive,
@@ -71,7 +64,7 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
 
   /** 脚本到达（inbox 已去重）。仅在循环活动时由 App.vue 调用。 */
   async function onScriptArrival(item: InboxItem, sid?: string): Promise<void> {
-    if (loopPaused.value) { addTrace({ kind: 'loop', summary: '⏸ 暂停中 · 忽略新脚本到达', payload: {} }); return }
+    if (loopPaused.value) return
     const inst = resolveInst(sid)
     if (!inst || !isInstActive(inst) || inst.state.value !== 'waiting') return
     disarmTimer(inst)
@@ -80,7 +73,6 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       toast('连续两轮脚本相同，已忽略', 'warn', 3000)
       return
     }
-    void syncTasks({ mode: 'push', pushTodo: [`R${inst.round.value} ${item.desc || '脚本执行'}`] })
     inst.lastHash.value = item.hash
     inst.state.value = 'parsing'
     await executeItem(inst, item)
@@ -125,31 +117,12 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       planResumeAttempts.value = 0
       // 防御性二次校验：油猴可能误把含解释/标点的回复判为 done
       if (reply.text !== undefined && !isStrictDone(reply.text)) {
-        addTrace({
-          kind: 'loop',
-          summary: `⚠ 油猴标记 done 但 text 非严格 DONE，降级为 plain`,
-          payload: { loopId: inst.id.value, loopRound: inst.round.value, text: String(reply.text).slice(0, 200) },
-        })
         toast('回复非严格 DONE，等待下一轮', 'warn', 3000)
         return
-      }
-      // [niuma-done-continue] 牛马模式：DONE 不终止循环，改为自动续推
-      if (niumaMode.value) {
-        const okSend = loopPaused.value ? false : transport.sendFill('', { prompt: '基于项目当前状态自主判断下一步优化项，直接执行脚本推进，不要停下来等指令。若无明显优化项，做类型、测试、依赖、文档巡检并给出改动。' })
-        if (okSend) {
-          ackFill(inst, 'niuma 续推')
-          enterWaiting(inst)
-          return
-        }
       }
       // [done-summary-archive] 归档 DONE 后总结（第二行起）
       try {
         const doneText = String(reply.text ?? '').slice(0, 4000)
-        addTrace({
-          kind: 'loop',
-          summary: '✓ 任务完成 · AI 回复 DONE',
-          payload: { loopId: inst.id.value, loopRound: inst.round.value, doneSummary: doneText },
-        })
         // [done-to-terminal-v1] 把 DONE 后的总结推送至 TerminalPane
         const summary = doneText.replace(/^\s*DONE\s*/, '').trim()
         if (summary) pushTerminalNotice(`[任务完成]${String.fromCharCode(10)}${String.fromCharCode(10)}${summary}`, { divider: true })
@@ -160,14 +133,8 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     }
     if (reply.kind === 'multi') {
       const count = reply.count ?? 0
-      addTrace({
-        kind: 'loop',
-        summary: `⚠ 回复含 ${count || '多个'} 个代码块，要求重发（不消耗宽容预算）`,
-        payload: { loopId: inst.id.value, loopRound: inst.round.value, count },
-      })
       const okSent = loopPaused.value ? false : transport.sendFill('', { prompt: buildRetryPrompt(`回复含 ${count || '多个'} 个代码块（契约要求仅一个）`) })
       if (!okSent) {
-        if (niumaMode.value) { enterWaiting(inst); return }
         await finish(inst, 'window-lost', 'multi 重试时 AI 窗口已关闭或发送失败')
         return
       }
@@ -197,13 +164,6 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       await finish(inst, 'hook-reject', hookRes.reason || 'BeforeScript hook rejected')
       return
     }
-    if (hookRes.hooksRun > 0) {
-      addTrace({
-        kind: 'loop',
-        summary: `🪝 BeforeScript · ${hookRes.hooksRun} 个 hook 通过`,
-        payload: { loopId: inst.id.value, loopRound: inst.round.value },
-      })
-    }
     const startedAt = Date.now()
     const runner = useRunner()
 
@@ -221,21 +181,6 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       }
       const changeCount = runner.changes.value.length
       inst.lastExec.value = { lang: item.lang, exit: r.code, changes: changeCount, durationMs: Date.now() - startedAt }
-      addTrace({
-        kind: 'loop',
-        summary: `第 ${inst.round.value} 轮执行 · cjs · exit ${r.code} · ${changeCount} 文件变更`,
-        payload: {
-          loopId: inst.id.value,
-          loopRound: inst.round.value,
-          desc: item.desc,
-          why: item.why,
-          lang: item.lang,
-          hash: item.hash,
-          exit: r.code,
-          ok: r.ok,
-          changes: runner.changes.value.map(c => ({ path: c.path, type: c.type })),
-        },
-      })
       // [done-in-head-v1] 脚本头声明 @done：执行完即收尾，不再回填下一轮
       if (item.isDone) {
         // [done-in-head-v1] 把 @done 后续 md 总结推终端，供前端展示
@@ -272,11 +217,6 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       return
     }
     inst.lastExec.value = { lang: 'bash', exit: exec.code, changes: 0, durationMs: Date.now() - startedAt }
-    addTrace({
-      kind: 'loop',
-      summary: `第 ${inst.round.value} 轮执行 · bash · exit ${exec.code}`,
-      payload: { loopId: inst.id.value, loopRound: inst.round.value, desc: item.desc, why: item.why, lang: 'bash', hash: item.hash, exit: exec.code, ok: exec.code === 0 },
-    })
     // [done-in-head-v1] 脚本头声明 @done：执行完即收尾，不再回填下一轮
     if (item.isDone) {
       // [done-in-head-v1] 把 @done 后续 md 总结推终端，供前端展示

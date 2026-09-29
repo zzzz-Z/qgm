@@ -2,7 +2,7 @@
 import type { ComputedRef, Ref } from 'vue'
 import type { LoopInstance } from './types.js'
 import { toast } from '../../ui/useToast'
-import { getActiveWin } from '../useDeepseekUrl'
+import { getActiveWin } from '../useAiWindow'
 import { buildLoopInitialPrompt } from '../session-prompt.js'
 
 type RunHookFn = typeof import('./hooks.js').runHook

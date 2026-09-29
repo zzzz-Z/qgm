@@ -8,8 +8,6 @@
       {{ t.label }}
     </button>
     <div class="tpl-spacer" />
-    <!-- [decision-in-header-v1] 决策模式三档选择（输入框顶部） -->
-    <DecisionPolicySwitch class="tpl-dps" />
     <button
       v-tooltip="'清空编辑器与附件'"
       aria-label="清空编辑器与附件" class="ghost-btn"
@@ -25,14 +23,7 @@
       </svg>
       <span>清空</span>
     </button>
-    <!-- [niuma-mode] 牛马模式 -->
-    <label
-      v-tooltip="'牛马模式：开启后 AI 持续自驱不停（轮末续推 / 无回复重发 / DONE 不终止）；关闭后仅手动推进。'"
-      class="niuma-toggle"
-    >
-      <input :checked="niumaMode" type="checkbox" @change="emit('update:niumaMode', ($event.target as HTMLInputElement).checked)">
-      <span>牛马</span>
-    </label>
+
     <button
       v-if="running || isLoopActive || autoTakeoverEnabled"
       v-tooltip="loopPaused ? '发送：结束本次循环，回到待发状态' : '暂停：不取 AI 脚本、不接收工作台结果'"
@@ -54,7 +45,10 @@
     </button>
     <button
       v-else
-      v-tooltip="'开始：执行当前脚本，随后自动把结果发 AI 并执行下一轮'" aria-label="开始循环" class="primary-btn takeover head-run" data-mark="[run-btn-copy-v1]"
+      v-tooltip="'开始：执行当前脚本，随后自动把结果发 AI 并执行下一轮'"
+      aria-label="开始循环"
+      class="primary-btn takeover head-run"
+      data-mark="[run-btn-copy-v1]"
       @click="emit('toggleAutoTakeover')"
     >
       <svg
@@ -68,8 +62,6 @@
 </template>
 
 <script setup lang="ts">
-import DecisionPolicySwitch from '../panels/DecisionPolicySwitch.vue'
-
 interface Template { id: string, label: string, title: string, code: string }
 
 /** 组件接收的 props 定义 */
@@ -81,18 +73,16 @@ const props = defineProps<{
   // [loop-paused-toggle-v1] 循环暂停标志：按钮在「暂停 / 恢复」间切换
   loopPaused: boolean
   autoTakeoverCountdown: number
-  niumaMode: boolean
   script: string
   attachedFilesCount: number
 }>()
 
 /** 派发 */
 const emit = defineEmits<{
-  'applyTemplate': [code: string]
-  'clearAll': []
-  'pauseAll': []
-  'toggleAutoTakeover': []
-  'update:niumaMode': [v: boolean]
+  applyTemplate: [code: string]
+  clearAll: []
+  pauseAll: []
+  toggleAutoTakeover: []
 }>()
 </script>
 
@@ -248,8 +238,7 @@ const emit = defineEmits<{
 .tpl-bar button.ghost-btn > svg,
 .tpl-bar button.primary-btn > svg,
 .tpl-bar button.ghost-btn > span,
-.tpl-bar button.primary-btn > span,
-.tpl-bar .niuma-toggle input {
+.tpl-bar button.primary-btn > span {
   accent-color: var(--primary);
   cursor: pointer;
   margin: 0;
@@ -486,39 +475,9 @@ const emit = defineEmits<{
   cursor: not-allowed;
 }
 
-/* 牛马：胶囊式开关，选中绿色 */
-.tpl-bar .niuma-toggle {
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  border: 1px solid var(--border, #2a2d36);
-  background: transparent;
-  color: var(--fg-2, #b6b8bf);
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    color 0.15s,
-    border-color 0.15s;
-}
-.tpl-bar .niuma-toggle:hover {
-  background: rgb(255 255 255 / 6%);
-  color: var(--fg-1, #e6e7ea);
-}
-.tpl-bar .niuma-toggle:has(input:checked) {
-  background: rgb(74 222 128 / 12%);
-  border-color: rgb(74 222 128 / 45%);
-  color: #4ade80;
-}
-
 /* 键盘焦点环 */
 .tpl-bar button.primary-btn:focus-visible,
-.tpl-bar button.ghost-btn:focus-visible,
-.tpl-bar .niuma-toggle:focus-visible {
+.tpl-bar button.ghost-btn:focus-visible {
   outline: 2px solid var(--primary, #3b82f6);
   outline-offset: 2px;
 }
@@ -553,10 +512,4 @@ const emit = defineEmits<{
 }
 
 /* [decision-in-header-v1] 决策开关与模板条同行对齐 */
-.tpl-dps {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 4px;
-}
 </style>

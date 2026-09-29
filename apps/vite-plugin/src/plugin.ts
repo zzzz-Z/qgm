@@ -2,22 +2,22 @@
 // [workspace-core-v1] Vite 插件宿主专属逻辑；共享的 createRouter 抽自 router.ts。
 // [client-main-v1] 加载时解析 client 入口注入 env；page.ts 依赖此 env 定位 Vue SPA 根。
 import { createRequire } from 'node:module'
-import { __pkgDir, attachWs, closeBrowser, createRouter, PREFIX, sendJSON, setRoot } from '@qgm/ai-runner-core'
-import type { AiRunnerOptions } from '@qgm/ai-runner-core'
+import { __pkgDir, attachWs, closeBrowser, createRouter, PREFIX, sendJSON, setRoot } from '@qgm/core'
+import type { AiRunnerOptions } from '@qgm/core'
 import type { Plugin, ViteDevServer } from 'vite'
 
 /** __require（相关状态/数据） */
 const __require = createRequire(import.meta.url)
 if (!process.env.AI_RUNNER_CLIENT_MAIN) {
   try {
-    process.env.AI_RUNNER_CLIENT_MAIN = __require.resolve('@qgm/ai-runner-client/main.ts')
+    process.env.AI_RUNNER_CLIENT_MAIN = __require.resolve('@qgm/client/main.ts')
   } catch {
     // 发布态或 client 包缺 main.ts：page.ts 走相对路径兜底（仓库内有效）
   }
 }
 
-export { createRouter } from '@qgm/ai-runner-core'
-export type { Router } from '@qgm/ai-runner-core'
+export { createRouter } from '@qgm/core'
+export type { Router } from '@qgm/core'
 
 /**
  * 执行 ai Runner

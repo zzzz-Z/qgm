@@ -30,9 +30,9 @@
 ## 项目结构速览
 
 ```text
-packages/core/        @qgm/ai-runner-core          宿主无关核心（Hono 路由 / 脚本执行 / post-run / 状态 / 快照）
-packages/client/      @qgm/ai-runner-client        Vue 3 SPA 工作台（唯一一份产物）
-apps/vite-plugin/     @qgm/vite-plugin-ai-runner   Vite 插件宿主
+packages/core/        @qgm/core          宿主无关核心（Hono 路由 / 脚本执行 / post-run / 状态 / 快照）
+packages/client/      @qgm/client        Vue 3 SPA 工作台（唯一一份产物）
+apps/vite-plugin/     @qgm/vite-plugin   Vite 插件宿主
 apps/standalone/      @qgm/ai-runner               独立 Web 应用宿主（Node HTTP server + bin）
 bin/                  CLI 工具集（air-ask / air-check / air-log / air-recover / air-run-all）
 scripts/              build / dev / 分析 / 校验等辅助脚本

@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import type { Ref } from 'vue'
 import { useToast } from '../../composables/ui/useToast'
-import { copyAndFill, sendNewSession } from '../../composables/ai/useDeepseekUrl'
+import { copyAndFill, sendNewSession } from '../../composables/ai/useAiWindow'
 import { buildNewSessionPrompt } from '../../composables/ai/session-prompt'
 import { useSessionManager } from '../../composables/ai/useSessionManager'
 import { readNdjson } from '../../utils/stream'

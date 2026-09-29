@@ -2,7 +2,6 @@
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/useAiWaiting.node-test.ts 迁至 test/useAiWaiting.node-test.ts
 import { beforeAll as before, beforeEach, test, vi } from 'vitest'
 import assert from 'node:assert/strict'
-import { nextTick } from 'vue'
 
 // AIRUNNER-BATCH18-1-AI-WAITING
 
@@ -17,35 +16,26 @@ const lsMock = {
 }
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable: true, value: lsMock })
 
-const KEY = '__ai_niuma_mode'
-
-let mod: typeof import('../../packages/client/composables/ai/useAiWaiting.ts')
+let mod: typeof import('../composables/ai/useAiWaiting.js')
 before(async () => {
-  mod = await import('../../packages/client/composables/ai/useAiWaiting.ts')
+  mod = await import('../composables/ai/useAiWaiting.js')
 })
 
 beforeEach(() => {
-  // AIRUNNER-BATCH21-6-MOVE-TIMERS: 移入 hook
   vi.useFakeTimers()
-  // AIRUNNER-BATCH18-1-FIX-STOP: 模块未导出 stopWaiting，改走 useAiWaiting()
   mod.useAiWaiting().stopWaiting()
-  mod.niumaMode.value = false
   mod.loopPaused.value = false
-  vi.useFakeTimers()
-  vi.useFakeTimers()
 })
 
-test('导出集合：niumaMode / loopPaused / startWaiting / setAiWaitingWatchdog / useAiWaiting', () => {
-  assert.equal(typeof mod.niumaMode, 'object')
+test('导出集合：loopPaused / startWaiting / useAiWaiting', () => {
   assert.equal(typeof mod.loopPaused, 'object')
   assert.equal(typeof mod.startWaiting, 'function')
-  assert.equal(typeof mod.setAiWaitingWatchdog, 'function')
   assert.equal(typeof mod.useAiWaiting, 'function')
 })
 
 test('useAiWaiting 返回完整 API', () => {
   const r = mod.useAiWaiting()
-  for (const k of ['loopPaused', 'waiting', 'niumaMode', 'fireCount', 'lastFiredAt', 'nextFireAt', 'startWaiting', 'stopWaiting'] as const) {
+  for (const k of ['loopPaused', 'waiting', 'startWaiting', 'stopWaiting'] as const) {
     assert.ok(k in r, `missing key: ${k}`)
   }
 })
@@ -54,8 +44,6 @@ test('useAiWaiting 多次调用返回同一组 ref（模块单例）', () => {
   const a = mod.useAiWaiting()
   const b = mod.useAiWaiting()
   assert.equal(a.waiting, b.waiting)
-  assert.equal(a.niumaMode, b.niumaMode)
-  assert.equal(a.fireCount, b.fireCount)
 })
 
 test('loopPaused 默认 false，可独立写', () => {
@@ -72,13 +60,6 @@ test('startWaiting：设置 waiting = true', () => {
   assert.equal(r.waiting.value, true)
 })
 
-test('startWaiting：armWatchdog 后 nextFireAt 为未来时间戳', () => {
-  const r = mod.useAiWaiting()
-  const t0 = Date.now()
-  mod.startWaiting()
-  assert.ok(r.nextFireAt.value > t0, 'nextFireAt should be in the future')
-})
-
 test('stopWaiting：清 waiting 与 watchdog', () => {
   const r = mod.useAiWaiting()
   mod.startWaiting()
@@ -93,38 +74,4 @@ test('useAiWaiting().startWaiting 与模块级 startWaiting 等价', () => {
   assert.equal(r.waiting.value, true)
   r.stopWaiting()
   assert.equal(r.waiting.value, false)
-})
-
-test('niumaMode 默认 false（import 时 store 空）', () => {
-  assert.equal(mod.niumaMode.value, false)
-})
-
-test('niumaMode = true 触发 watch 写 localStorage 为 1', async () => {
-  mod.niumaMode.value = true
-  await nextTick()
-  assert.equal(store.get(KEY), '1')
-})
-
-test('niumaMode = false 触发 watch 写 localStorage 为 0', async () => {
-  mod.niumaMode.value = true
-  await nextTick()
-  mod.niumaMode.value = false
-  await nextTick()
-  assert.equal(store.get(KEY), '0')
-})
-
-test('setAiWaitingWatchdog：注册 handler 后不立即调用', () => {
-  let calls = 0
-  mod.setAiWaitingWatchdog(() => { calls++ })
-  assert.equal(calls, 0)
-})
-
-test('fireCount 初值 0', () => {
-  const r = mod.useAiWaiting()
-  assert.equal(r.fireCount.value, 0)
-})
-
-test('lastFiredAt 初值 0', () => {
-  const r = mod.useAiWaiting()
-  assert.equal(r.lastFiredAt.value, 0)
 })

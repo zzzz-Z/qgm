@@ -1,5 +1,5 @@
 // @desc vite-plugin 打包：把 core bundle 进 dist/index.js，external 仅保留 vite 与 node:
-// @why 发布态自包含，避免依赖 private 的 @qgm/ai-runner-core
+// @why 发布态自包含，避免依赖 private 的 @qgm/core
 import { defineConfig } from 'vite'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'

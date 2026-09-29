@@ -1,5 +1,5 @@
 {
-  "name": "@qgm/ai-runner-client",
+  "name": "@qgm/client",
   "type": "module",
   "version": "0.1.0",
   "description": "Vue 3 SPA：两个宿主共享的唯一视图产物",

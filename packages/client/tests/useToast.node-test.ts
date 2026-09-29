@@ -78,12 +78,6 @@ test('toast: 相同 key 更新时 type 与 icon 同步', () => {
   assert.equal(toasts.value[0].icon, '✗')
 })
 
-test('toast: traceId 被记录', () => {
-  const { toasts } = mod.useToast()
-  mod.toast('m', 'info', 3200, { traceId: 7 })
-  assert.equal(toasts.value[0].traceId, 7)
-})
-
 test('toast: 超出 MAX_VISIBLE=3 淘汰最旧', () => {
   const { toasts } = mod.useToast()
   mod.toast('t1')

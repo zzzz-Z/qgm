@@ -12,7 +12,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "paths": {
-      "@qgm/ai-runner-core": [
+      "@qgm/core": [
         "./packages/core/src/index.ts"
       ]
     },

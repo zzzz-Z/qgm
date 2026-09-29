@@ -1,4 +1,4 @@
-# @qgm/ai-runner-core
+# @qgm/core
 
 宿主无关核心层。vite-plugin 与 standalone 两个宿主共享的全部逻辑都在这里。
 

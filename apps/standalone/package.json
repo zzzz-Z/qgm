@@ -15,7 +15,7 @@
     "build": "node ./scripts/build.mjs"
   },
   "dependencies": {
-    "@qgm/ai-runner-client": "workspace:^",
-    "@qgm/ai-runner-core": "workspace:^"
+    "@qgm/client": "workspace:^",
+    "@qgm/core": "workspace:^"
   }
 }

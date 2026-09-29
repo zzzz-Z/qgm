@@ -1,5 +1,5 @@
 /* eslint-disable no-console -- 服务端日志 */
-import { attachWs, createRouter, PREFIX, ROOT } from '@qgm/ai-runner-core'
+import { attachWs, createRouter, PREFIX, ROOT } from '@qgm/core'
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'

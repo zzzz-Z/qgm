@@ -15,9 +15,9 @@ export default defineConfig({
   root: ROOT,
   resolve: {
     extensions: ['.ts', '.tsx', '.mjs', '.js', '.json'],
-    // [dev-hmr-core-v1-standalone] dev 态把 @qgm/ai-runner-core 指向源码，改 core 免 build 生效
+    // [dev-hmr-core-v1-standalone] dev 态把 @qgm/core 指向源码，改 core 免 build 生效
     alias: {
-      '@qgm/ai-runner-core': path.join(ROOT, 'packages', 'core', 'src', 'index.ts'),
+      '@qgm/core': path.join(ROOT, 'packages', 'core', 'src', 'index.ts'),
     },
   },
   build: {

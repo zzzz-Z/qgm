@@ -8,7 +8,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "paths": {
-      "@qgm/ai-runner-core": [
+      "@qgm/core": [
         "./packages/core/src/index.ts"
       ]
     },

@@ -6,17 +6,17 @@
 
 **两种宿主形态**：
 
-- **Vite 插件** `@qgm/vite-plugin-ai-runner` —— 挂到用户项目的 dev server
+- **Vite 插件** `@qgm/vite-plugin` —— 挂到用户项目的 dev server
 - **独立 Web 应用** `@qgm/ai-runner` —— 全局安装后直接 `air-runner` 启动
 
 本仓库为 pnpm workspace monorepo（根 name：`@qgm/ai-runner-workspace`，version `0.1.0`）：
 
-| 包                 | 名称                         | 角色                                                        |
-| :----------------- | :--------------------------- | :---------------------------------------------------------- |
-| `packages/core`    | `@qgm/ai-runner-core`        | 宿主无关核心：Hono 路由 / 脚本执行 / post-run / 状态 / 快照 |
-| `packages/client`  | `@qgm/ai-runner-client`      | Vue 3 SPA 工作台视图产物（唯一一份）                        |
-| `apps/vite-plugin` | `@qgm/vite-plugin-ai-runner` | Vite 插件宿主（对外 API `aiRunner()`）                      |
-| `apps/standalone`  | `@qgm/ai-runner`             | 独立 Web 应用宿主（唯一 bin：`air-runner`）                 |
+| 包                 | 名称               | 角色                                                        |
+| :----------------- | :----------------- | :---------------------------------------------------------- |
+| `packages/core`    | `@qgm/core`        | 宿主无关核心：Hono 路由 / 脚本执行 / post-run / 状态 / 快照 |
+| `packages/client`  | `@qgm/client`      | Vue 3 SPA 工作台视图产物（唯一一份）                        |
+| `apps/vite-plugin` | `@qgm/vite-plugin` | Vite 插件宿主（对外 API `aiRunner()`）                      |
+| `apps/standalone`  | `@qgm/ai-runner`   | 独立 Web 应用宿主（唯一 bin：`air-runner`）                 |
 
 **核心特性**：
 
@@ -35,8 +35,8 @@
 ### 安装
 
 ```bash
-pnpm add -D @qgm/vite-plugin-ai-runner
-# 或 npm i -D @qgm/vite-plugin-ai-runner
+pnpm add -D @qgm/vite-plugin
+# 或 npm i -D @qgm/vite-plugin
 ```
 
 ### 接入
@@ -44,7 +44,7 @@ pnpm add -D @qgm/vite-plugin-ai-runner
 ```ts
 // vite.config.ts
 import { defineConfig } from 'vite'
-import { aiRunner } from '@qgm/vite-plugin-ai-runner'
+import { aiRunner } from '@qgm/vite-plugin'
 
 export default defineConfig({
   plugins: [
@@ -226,7 +226,7 @@ ScriptPanel 编辑器里若脚本 **无 shebang**，点「运行」会走 `ask-f
 monorepo（pnpm workspace）：能力层 `packages/*` + 装配层 `apps/*`。
 
 ```text
-packages/core/                  # @qgm/ai-runner-core：宿主无关核心
+packages/core/                  # @qgm/core：宿主无关核心
 ├── src/
 │   ├── index.ts                # 公开 barrel：双宿主唯一契约入口
 │   ├── config.ts               # 常量（PREFIX=/__ai、排除目录、二进制后缀）
@@ -247,14 +247,14 @@ packages/core/                  # @qgm/ai-runner-core：宿主无关核心
 │   ├── interceptor.cjs         # 文件系统 overlay 拦截层（-r 预加载）
 │   └── helpers.cjs / logger.cjs
 
-packages/client/                # @qgm/ai-runner-client：唯一一份 SPA 产物
+packages/client/                # @qgm/client：唯一一份 SPA 产物
 ├── App.vue / main.ts / index.html
 ├── components/                 # diff / feedback / generate / panels / script 五个分区
 ├── composables/                # ai / runner / data / ui
 ├── utils/                      # contextBuilder / tokenEstimator / ...
 └── dist/                       # vite build 产物（被两宿主托管）
 
-apps/vite-plugin/               # @qgm/vite-plugin-ai-runner：Vite 插件宿主
+apps/vite-plugin/               # @qgm/vite-plugin：Vite 插件宿主
 └── src/
     ├── index.ts                # 对外 API：aiRunner()
     └── plugin.ts               # configureServer 中间件 + WS 挂载

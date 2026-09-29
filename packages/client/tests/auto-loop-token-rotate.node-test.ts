@@ -2,7 +2,7 @@
 import { beforeAll, test } from 'vitest'
 import assert from 'node:assert/strict'
 
-// localStorage + window mock 必须在 import 之前（useTraceLog / useAutoLoop 都会用到）
+// localStorage + window mock 必须在 import 之前（useAutoLoop 用到）
 const store = new Map<string, string>()
 const lsMock = {
   getItem: (k: string): string | null => (store.has(k) ? store.get(k)! : null),

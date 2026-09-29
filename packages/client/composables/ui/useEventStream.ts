@@ -1,6 +1,7 @@
 // AIRUNNER-BATCH19-2-FIX-TS-SUFFIX: 用 .ts 后缀，node strip-types 与 tsc allowImportingTsExtensions 均可解析
 // AIRUNNER-BATCH19-2-FIX5-JS: .js 后缀，tsc/vite 均接受
-import { getActiveWin, MODELS } from '../ai/useDeepseekUrl.js'
+import { MODELS } from '../ai/useDeepseekUrl.js'
+import { getActiveWin } from '../ai/useAiWindow.js'
 import { log } from '../../utils/log'
 
 // AIRUNNER-BATCH19-2-SPLIT-EVENT-STREAM: 实现已外移至 event-stream.ts，此处 re-export 保 API 稳定

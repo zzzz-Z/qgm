@@ -50,12 +50,10 @@ const LS_LAST_VISIT = '__ai_last_visit'
 
 const { url: deepseekUrl, setUrl: setDeepseekUrl, modelId } = useDeepseekUrl()
 const { toast } = useToast()
-const { smokeEnabled, gitCommit, run: runScript } = useRunner()
+const { run: runScript } = useRunner()
 /** 脚本收件箱：来自 AI 的脚本队列 */
 const scriptInbox = useScriptInbox()
 const { stopWaiting: stopAiWaiting } = useAiWaiting()
-// [absent-summary-v1] 缺席摘要：距离上次访问 ≥4h 则展示
-const { stripComments, stripBlankLines, toggleStripComments, toggleStripBlankLines } = useCodeCleaner()
 // [app-storage-extracted-v1] SessionEntry/loadHistory/saveHistory 已抽至 useAppStorage
 const sessionHistory = ref<SessionEntry[]>(loadHistory())
 // [ask-count] 当前会话收到的 AI 回复次数（每 reply +1）
@@ -72,8 +70,7 @@ const bashPolicy = ref(loadStr(KEY_BASH_POLICY, 'on-request'))
 const keyboardHelpOpen = ref(false)
 /** 信息 */
 const absenceInfo = ref<{ daysAgo: number } | null>(null)
-/** 离开提示是否已被用户关闭 */
-const absenceDismissed = ref(false)
+
 /** AI 传输链路类型 */
 const transportKind = ref<'tampermonkey' | 'headless'>(
   (() => { try { return localStorage.getItem('__ai_transport') === 'headless' ? 'headless' : 'tampermonkey' } catch { return 'tampermonkey' } })()

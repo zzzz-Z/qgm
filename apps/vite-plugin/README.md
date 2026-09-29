@@ -1,4 +1,4 @@
-# @qgm/vite-plugin-ai-runner
+# @qgm/vite-plugin
 
 Vite 插件宿主。对外 API 保持 aiRunner() 不变。
 

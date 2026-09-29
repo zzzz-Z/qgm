@@ -145,7 +145,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRunner } from '../../composables/runner/useRunner'
 import { useAutoLoop } from '../../composables/ai/useAutoLoop'
 import { useAiWaiting } from '../../composables/ai/useAiWaiting'
-import { copyAndFill } from '../../composables/ai/useDeepseekUrl'
+import { copyAndFill } from '../../composables/ai/useAiWindow'
 import { useAutoTakeover } from '../../composables/ai/useAutoTakeover'
 import { useEventBus } from '../../composables/ui/useEventStream'
 import { useCodeCleaner } from '../../composables/runner/useCodeCleaner'
@@ -233,11 +233,6 @@ const activeDraftId = ref<string>('default')
 /** 终端自动滚动开关 */
 const autoScroll = ref(true)
 
-// ── 模块级可变状态（let）──
-
-/** 命令执行策略覆盖（内部临时变量） */
-/** 最近一次自动回传 AI 的 runKey（防重复） */
-// [P2-2b] auto-persist active slot（debounce 400ms）
 /** 滚动锁时间戳（防高频 scrollTo） */
 let _scrollLock = 0
 

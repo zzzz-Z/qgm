@@ -1,5 +1,5 @@
 {
-  "name": "@qgm/vite-plugin-ai-runner",
+  "name": "@qgm/vite-plugin",
   "type": "module",
   "version": "0.1.0",
   "description": "Vite 插件宿主：把 core 挂成 dev server 中间件；对外 API aiRunner() 保持不变",
@@ -23,7 +23,7 @@
     "vite": ">=5"
   },
   "dependencies": {
-    "@qgm/ai-runner-client": "workspace:^",
-    "@qgm/ai-runner-core": "workspace:^"
+    "@qgm/client": "workspace:^",
+    "@qgm/core": "workspace:^"
   }
 }

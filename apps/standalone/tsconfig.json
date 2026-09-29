@@ -1,0 +1,30 @@
+// [tsc-standalone-ide-v1] IDE 向上只自动发现 tsconfig.json：
+// 根 tsconfig.json 的 include 仅覆盖 packages/core，tsconfig.apps.json 不会被 IDE 加载，
+// 故 standalone 需自带本配置（对齐 tsconfig.apps.json，@qgm/core 指向源码，改 core 免 build）。
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "paths": {
+      "@qgm/core": ["../../packages/core/src/index.ts"]
+    },
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "allowImportingTsExtensions": false,
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": false,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "vite.config.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

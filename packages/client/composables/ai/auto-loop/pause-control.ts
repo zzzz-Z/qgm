@@ -3,7 +3,7 @@ import { getTransport } from '../useAiTransport.js'
 import type { ComputedRef, Ref } from 'vue'
 import type { LoopInstance } from './types.js'
 import { toast } from '../../ui/useToast'
-import { getActiveWin } from '../useDeepseekUrl'
+import { getActiveWin } from '../useAiWindow'
 import { useRuntime } from '../../../stores/runtime'
 import { useRunner } from '../../runner/useRunner'
 

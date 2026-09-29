@@ -7,7 +7,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "paths": {
-      "@qgm/ai-runner-core": ["./packages/core/src/index.ts"]
+      "@qgm/core": ["./packages/core/src/index.ts"]
     },
     "resolveJsonModule": true,
     "types": ["node"],
