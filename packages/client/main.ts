@@ -15,7 +15,7 @@ app.mount('#app')
 // 手动触发 @ask 弹窗做端到端自测；条件限定 hostname 为 localhost/127.0.0.1，生产构建不挂载
 // [CHANGE-IMPACT] 仅影响调试体验；去掉此块不影响 @ask 主链路（reply-handlers 仍走 askUser）
 const _isLocalDev = typeof window !== 'undefined'
-  && /^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/.test(window.location.hostname)
+  && /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0)$/.test(window.location.hostname)
 if (_isLocalDev) {
   void import('./composables/ui/useAsk').then(({ askUser }) => {
     ;(window as Window & { __aiAsk?: typeof askUser }).__aiAsk = askUser
