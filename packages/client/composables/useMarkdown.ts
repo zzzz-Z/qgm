@@ -77,6 +77,66 @@ function splitFences(src: string): MdSegment[] {
  * [CHANGE-IMPACT] 新增语法须保证不会引入 XSS 风险（此处不做 sanitize）
  * @param text 纯文本段（不含围栏代码）
  */
+/**
+ * 块级 markdown 处理：标题 / 无序列表 / 有序列表 / 引用 / 分割线
+ * [WHY] DONE 总结与 AI 回复常用 ### 标题 + 列表结构，仅 inlineFormat 会原样输出标记字符
+ * [CONSTRAINT] 逐行处理不跨行合并；代码块已由 splitFences 剥离，不会进入本函数
+ * [CHANGE-IMPACT] renderMarkdown 输出结构变化，v-html 渲染方的 CSS 需覆盖 h1-h3/ul/ol/blockquote/hr
+ * @param text 纯文本段（不含围栏代码），可含多行
+ */
+function blockFormat(text: string): string {
+  const out: string[] = []
+  let list: 'ul' | 'ol' | null = null
+  let para: string[] = []
+  const flushPara = (): void => {
+    if (para.length) {
+      out.push(`<p>${inlineFormat(para.join('\n'))}</p>`)
+      para = []
+    }
+  }
+  const closeList = (): void => {
+    if (list) { out.push(`</${list}>`); list = null }
+  }
+  for (const line of text.split('\n')) {
+    const t = line.trim()
+    const h = /^(#{1,3})\s+(.+)$/.exec(t)
+    if (h) {
+      flushPara(); closeList()
+      const lv = h[1].length
+      out.push(`<h${lv}>${inlineFormat(h[2])}</h${lv}>`)
+      continue
+    }
+    if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(t)) {
+      flushPara(); closeList()
+      out.push('<hr>')
+      continue
+    }
+    const ul = /^[-*+]\s+(.+)$/.exec(t)
+    if (ul) {
+      flushPara()
+      if (list !== 'ul') { closeList(); out.push('<ul>'); list = 'ul' }
+      out.push(`<li>${inlineFormat(ul[1])}</li>`)
+      continue
+    }
+    const ol = /^\d+\.\s+(.+)$/.exec(t)
+    if (ol) {
+      flushPara()
+      if (list !== 'ol') { closeList(); out.push('<ol>'); list = 'ol' }
+      out.push(`<li>${inlineFormat(ol[1])}</li>`)
+      continue
+    }
+    if (/^>\s?/.test(t)) {
+      flushPara(); closeList()
+      out.push(`<blockquote>${inlineFormat(t.replace(/^>\s?/, ''))}</blockquote>`)
+      continue
+    }
+    if (!t) { flushPara(); closeList(); continue }
+    para.push(line)
+  }
+  flushPara(); closeList()
+  return out.join('')
+}
+
 function inlineFormat(text: string): string {
   let html = escapeHtml(text)
   const re = new RegExp(`${INLINE_TICK}([^${INLINE_TICK}\\n]+)${INLINE_TICK}`, 'g')
@@ -99,7 +159,7 @@ export function renderMarkdown(src: string): string {
       const cls = s.lang ? ` class="language-${escapeHtml(s.lang)}"` : ''
       return `<pre class="md-pre"><code${cls}>${escapeHtml(s.content)}</code></pre>`
     }
-    return inlineFormat(s.content)
+    return blockFormat(s.content)
   }).join('')
 }
 

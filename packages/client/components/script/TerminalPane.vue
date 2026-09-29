@@ -7,7 +7,8 @@
         <div class="done-summary-head">
           任务完成 · 总结
         </div>
-        <pre class="done-summary-body">{{ doneSummary }}</pre>
+        <!-- [done-summary-md-v1] renderMarkdown 内部对代码内容 escapeHtml，可安全 v-html -->
+        <div class="done-summary-body" v-html="doneSummaryHtml" />
       </section>
 
       <div ref="chatListRef" class="chat-list" @scroll="onChatScroll">
@@ -58,6 +59,8 @@
 import { computed, ref } from 'vue'
 // [raw-output-fold-v1] PLAN 5.2 第四层：原始输出折叠
 import { useFoldState } from '../../composables/ui/useFoldState'
+// [done-summary-md-v1] 复用项目已有极简 markdown 渲染器（不引入新依赖）
+import { renderMarkdown } from '../../composables/useMarkdown.js'
 
 /** 组件接收的 props 定义 */
 const props = defineProps<{
@@ -92,6 +95,10 @@ const rawStderrLines = computed(() => (props.twStderr || '').split('\n'))
 const rawTotal = computed(() => rawStdoutLines.value.length + rawStderrLines.value.length)
 /** 错误 */
 const rawHasError = computed(() => (props.twStderr || '').length > 0)
+
+// [done-summary-md-v1] DONE 总结 → HTML
+// [CONSTRAINT] 依赖 props.doneSummary（pushTerminalNotice 写入）；undefined 时安全回空串
+const doneSummaryHtml = computed(() => renderMarkdown(props.doneSummary || ''))
 
 /** 列表 */
 const chatListRef = ref<HTMLElement | null>(null)
@@ -768,11 +775,63 @@ function applyTemplate(code: string): void { emit('applyTemplate', code) }
 }
 .done-summary-body {
   margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
   font: 12px/1.6 var(--mono, monospace);
   color: var(--text);
   max-height: 320px;
   overflow-y: auto;
+  word-break: break-word;
+}
+/* [done-summary-md-v1] v-html 内容需 :deep 穿透 scoped；渲染产物来自 renderMarkdown */
+.done-summary-body :deep(p) {
+  margin: 0 0 6px;
+}
+.done-summary-body :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.done-summary-body :deep(h1),
+.done-summary-body :deep(h2),
+.done-summary-body :deep(h3) {
+  margin: 10px 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #3fb950;
+}
+.done-summary-body :deep(ul),
+.done-summary-body :deep(ol) {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+.done-summary-body :deep(li) {
+  margin: 2px 0;
+}
+.done-summary-body :deep(blockquote) {
+  margin: 4px 0;
+  padding: 2px 8px;
+  border-left: 3px solid var(--border, #334155);
+  color: var(--text-3, #94a3b8);
+}
+.done-summary-body :deep(hr) {
+  margin: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--border, #334155);
+}
+.done-summary-body :deep(.md-pre) {
+  margin: 6px 0;
+  padding: 8px 10px;
+  background: var(--surface, #1a1a1a);
+  border: 1px solid var(--border, #334155);
+  border-radius: 4px;
+  overflow-x: auto;
+  white-space: pre;
+}
+.done-summary-body :deep(.md-pre code) {
+  font: 11.5px/1.55 var(--mono, monospace);
+  color: var(--text-2, #cbd5e1);
+}
+.done-summary-body :deep(.md-inline) {
+  padding: 1px 5px;
+  background: var(--surface-2, #252525);
+  border-radius: 3px;
+  font-size: 11.5px;
 }
 </style>
