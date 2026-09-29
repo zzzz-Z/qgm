@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/ui/useToast'
+import AskDialog from './AskDialog.vue'
 
 defineOptions({ name: 'ToastHost' })
 
@@ -64,6 +65,7 @@ function onToastClick(t: { id: number }) {
       </div>
     </Transition>
   </Teleport>
+  <AskDialog />
 </template>
 
 <style scoped>
