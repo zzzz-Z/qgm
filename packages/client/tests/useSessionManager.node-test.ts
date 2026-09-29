@@ -55,9 +55,9 @@ Object.defineProperty(globalThis, 'crypto', {
   value: { randomUUID: (): string => '00000000-0000-0000-0000-000000000000' },
 })
 
-let mod: typeof import('../../packages/client/composables/ai/useSessionManager.ts')
+let mod: typeof import('../composables/ai/useSessionManager.ts')
 beforeAll(async () => {
-  mod = await import('../../packages/client/composables/ai/useSessionManager.ts')
+  mod = await import('../composables/ai/useSessionManager.ts')
 })
 
 beforeEach(() => {
