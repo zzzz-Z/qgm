@@ -9,7 +9,7 @@ import type { AttachedFile } from './attach-manager'
  * 拉取文件夹内所有文件的路径（递归）
  * @param rootPath - 根路径
  */
-export async function fetchTreePaths(rootPath: string): Promise<string[]> {
+async function fetchTreePaths(rootPath: string): Promise<string[]> {
   const out: string[] = []
   const walk = (nodes: FileNode[]) => {
     for (const n of nodes || []) {
@@ -29,7 +29,7 @@ export async function fetchTreePaths(rootPath: string): Promise<string[]> {
  * 读取若干文件的源码内容
  * @param paths - 文件路径列表
  */
-export async function fetchFolderContents(paths: string[]): Promise<Array<{ path: string, content: string }>> {
+async function fetchFolderContents(paths: string[]): Promise<Array<{ path: string, content: string }>> {
   try {
     const res = await fetch('/__ai/files/read', {
       method: 'POST',
