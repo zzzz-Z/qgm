@@ -1,6 +1,6 @@
 // handoff
 import { toast } from '../../ui/useToast.js'
-import { DEFAULT_SESSION_PROMPT } from '../loopLogic.js'
+import { buildNewSessionPrompt } from '../session-prompt.js'
 import { loopPaused } from '../useAiWaiting.js'
 import { getTransport } from '../useAiTransport.js'
 import type { LoopInstance } from '../useAutoLoop.js'
@@ -59,7 +59,8 @@ export async function onSummary(text: string, sessionId: string, degraded: boole
   const t = String(text || '').trim()
   const finalSummary = t || localFallbackSummary(inst)
   void degraded // [trace-removed] 形参保留以兼容调用方签名
-  const okSent = transport.sendNewSession('', { summary: `${DEFAULT_SESSION_PROMPT}\n\n${finalSummary}` })
+  const full = await buildNewSessionPrompt(finalSummary)
+  const okSent = transport.sendNewSession('', { summary: full })
   if (!okSent) { handoffFail(inst, '发送 new-session 失败'); return }
   handoffArm(inst, '新会话创建超时（30s）')
 }

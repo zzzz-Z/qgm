@@ -130,12 +130,12 @@ export function useSessionManager() {
    * [CONSTRAINT] 无论 sendFn 是否成功都重置 askCount，避免重复尝试发送
    * [CHANGE-IMPACT] 会调用 generateHandoffSummary 并触发 sendFn（通常为 sendNewSession）
    */
-  function maybeRotateSession(sendFn: (summary: string) => boolean) {
+  async function maybeRotateSession(sendFn: (summary: string) => boolean | Promise<boolean>) {
     if (askCount.value < ASK_ROTATE_THRESHOLD) return { fired: false, sent: false, overCount: 0 }
     const overCount = askCount.value
     resetAskCount()
     const summary = generateHandoffSummary()
-    const sent = Boolean(sendFn && sendFn(summary))
+    const sent = Boolean(sendFn && await sendFn(summary))
     return { fired: true, sent, overCount }
   }
   function generateHandoffSummary(): string {

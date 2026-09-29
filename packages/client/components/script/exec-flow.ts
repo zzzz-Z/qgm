@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import type { Ref } from 'vue'
 import { useToast } from '../../composables/ui/useToast'
 import { copyAndFill, sendNewSession } from '../../composables/ai/useDeepseekUrl'
+import { buildNewSessionPrompt } from '../../composables/ai/session-prompt'
 import { useSessionManager } from '../../composables/ai/useSessionManager'
 import { readNdjson } from '../../utils/stream'
 import { LS_BASH_POLICY_KEY } from '../../utils/storage'
@@ -138,7 +139,12 @@ export function createExecFlow(deps: ExecFlowDeps) {
         return
       }
       emit('ai:feedback', `📤 回传 AI：${changes.value.length} 文件 · exit ${result.value?.code ?? -1}`, { payload: { prompt: text.slice(0, 8000), changes: changes.value.map(c => ({ path: c.path, type: c.type })), exit: result.value?.code ?? -1, ok: result.value?.ok ?? false } })
-      try { maybeRotateSession(summary => sendNewSession({ summary })) } catch { /* 轮转失败不阻断 */ }
+      try {
+        await maybeRotateSession(async (summary) => {
+          const full = await buildNewSessionPrompt(summary)
+          return sendNewSession({ summary: full })
+        })
+      } catch { /* 轮转失败不阻断 */ }
       copied.value = true
       startAiWaiting()
       setTimeout(() => { copied.value = false }, 2000)

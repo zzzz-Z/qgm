@@ -395,7 +395,10 @@ export function sendNewSessionTo(sid: string, payload: NewSessionPayload): boole
   const origin = targetOrigin()
   if (!origin) return false
   try {
-    win.postMessage({ type: 'ai-runner:new-session', ...payload, summary: `${DEFAULT_SESSION_PROMPT}\n\n${String(payload?.summary || '')}` }, origin)
+    const s = String(payload?.summary || '')
+    // 已由 buildNewSessionPrompt 拼过 SYSTEM.md 则不再加兜底前缀，避免重复
+    const full = s.includes('<file path="SYSTEM.md">') ? s : (`${DEFAULT_SESSION_PROMPT}\n\n${s}`)
+    win.postMessage({ type: 'ai-runner:new-session', ...payload, summary: full }, origin)
     return true
   } catch { return false }
 }
