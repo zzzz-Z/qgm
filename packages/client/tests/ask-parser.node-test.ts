@@ -2,7 +2,7 @@
 // @why 新增交互通道（SYSTEM.md §1.5），锁定契约防止后续回归
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { parseAsk } from '../utils/ask-parser.ts'
+import { parseAsk } from '../utils/ask-parser'
 
 test('parseAsk: 非 @ask → null', () => {
   assert.equal(parseAsk(''), null)
