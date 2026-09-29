@@ -1,5 +1,5 @@
 import { promiseTimeout, useClipboard } from '@vueuse/core'
-import { url } from './useDeepseekUrl'
+import { DEFAULT_URL, url } from './useDeepseekUrl'
 import { useSessionManager } from './useSessionManager'
 import { log } from '../../utils/log'
 import {
@@ -213,6 +213,28 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean 
  * 组合式函数：窗口与发送 API 统一出口
  * [CHANGE-IMPACT] 实现分居 useAiWindowTable / useAiWindowSend；本函数保留原语义供组合式调用方使用
  */
+/**
+ * [session-open-facade] 统一开新会话入口：openDeepseek + 可选首问（可强制带规则）
+ * [WHY] 三处开窗入口（手动按钮 / 开新会话按钮 / 切项目自动）需一致走规则注入；
+ *       集中封装避免再出现"某条路径忘了带 SYSTEM.md/AGENTS.md"的漂移
+ * [CONSTRAINT] openDeepseek 返回 null（被拦截 / headless）时短路，不调 copyAndFill；
+ *              initialPrompt 为空时只开窗不发问；forceRules 透传给 copyAndFill 绕过去重
+ * [CHANGE-IMPACT] 返回 { win, fill } 二元组；调用方据此决定 toast 文案
+ */
+export async function openAiSession(opts?: {
+  atUrl?: string
+  sid?: string
+  initialPrompt?: string
+  forceRules?: boolean
+}): Promise<{ win: Window | null, fill: FillResult | null }> {
+  const win = openDeepseek(opts?.atUrl ?? DEFAULT_URL, opts?.sid)
+  if (!win) return { win: null, fill: null }
+  const p = opts?.initialPrompt
+  if (!p) return { win, fill: null }
+  const fill = await copyAndFill(p, { forceRules: opts?.forceRules })
+  return { win, fill }
+}
+
 export function useAiWindow() {
   return {
     getWindowBySid,
@@ -226,5 +248,6 @@ export function useAiWindow() {
     removeWindowBySid,
     openDeepseek,
     copyAndFill,
+    openAiSession,
   }
 }
