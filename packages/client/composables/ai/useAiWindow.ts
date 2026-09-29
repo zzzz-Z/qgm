@@ -1,6 +1,7 @@
 import { promiseTimeout, useClipboard } from '@vueuse/core'
 import { DEFAULT_URL, url } from './useDeepseekUrl'
 import { useSessionManager } from './useSessionManager'
+import { onNewSessionCreated as onNewSessionCreatedImpl } from './auto-loop/handoff.js'
 import { log } from '../../utils/log'
 import {
   getActiveWin,
@@ -235,6 +236,17 @@ export async function openAiSession(opts?: {
   return { win, fill }
 }
 
+/**
+ * [new-session-unified-v1] 新会话建立事件的统一入口（转发壳）
+ * [WHY] UI 层（App.vue）原本直接 import auto-loop 的 onNewSessionCreated，把状态机细节泄漏到窗口层；
+ *       收口到此处后，"窗口 → 新会话建立" 语义的调用方只看 useAiWindow
+ * [CONSTRAINT] 纯转发，不改变入参/返回语义；实现仍归 auto-loop/handoff.ts
+ * [CHANGE-IMPACT] App.vue 的 import 从 useAutoLoop 改为 useAiWindow；handoff 内部逻辑不受影响
+ */
+export async function onNewSessionCreated(url: string, id: string): Promise<void> {
+  return onNewSessionCreatedImpl(url, id)
+}
+
 export function useAiWindow() {
   return {
     getWindowBySid,
@@ -249,5 +261,6 @@ export function useAiWindow() {
     openDeepseek,
     copyAndFill,
     openAiSession,
+    onNewSessionCreated,
   }
 }

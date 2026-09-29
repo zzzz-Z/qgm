@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import ScriptPanel from './components/script/ScriptPanel.vue'
 import { DEFAULT_URL, MODELS, useDeepseekUrl } from './composables/ai/useDeepseekUrl'
-import { getWindowBySid, listWindows, openAiSession, openDeepseek, setActiveWinSid } from './composables/ai/useAiWindow'
+import { getWindowBySid, listWindows, onNewSessionCreated, openAiSession, openDeepseek, setActiveWinSid } from './composables/ai/useAiWindow'
 import { useScriptInbox } from './composables/runner/useScriptInbox'
 import {
   createLoopInstanceFor,
@@ -12,7 +12,6 @@ import {
   isInstActive,
   isLoopActive,
   killCurrent,
-  onNewSessionCreated,
   onNonScriptReply,
   onScriptArrival,
   onSummary,
