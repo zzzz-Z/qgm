@@ -2,7 +2,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import ScriptPanel from './components/script/ScriptPanel.vue'
-import { copyAndFill, DEFAULT_URL, getWindowBySid, listWindows, MODELS, openDeepseek, setActiveWinSid, useDeepseekUrl } from './composables/ai/useDeepseekUrl'
+import { DEFAULT_URL, MODELS, useDeepseekUrl } from './composables/ai/useDeepseekUrl'
+import { copyAndFill, getWindowBySid, listWindows, openDeepseek, setActiveWinSid } from './composables/ai/useAiWindow'
 import { useScriptInbox } from './composables/runner/useScriptInbox'
 import {
   createLoopInstanceFor,
@@ -392,7 +393,9 @@ async function onOpenAiWin() {
     return
   }
   toast('已打开新会话，正在发送「开始聊天」…', 'info', 2000)
-  const r = await copyAndFill('开始聊天', { count: false })
+  // [force-rules-on-new-window] 需求：开新窗必须自动携带 SYSTEM.md + AGENTS.md；
+  // forceRules=true 绕过 copyAndFill 内的 sessionId 去重，否则同工作台会话内重开窗不带规则
+  const r = await copyAndFill('开始聊天', { forceRules: true })
   if (r === 'sent' || r === 'opened') {
     toast('已发送「开始聊天」，等待会话地址回写', 'success', 2500)
   } else {
@@ -412,7 +415,9 @@ async function onNewSession() {
   loopPaused.value = true
   autoTakeover.disable()
   toast('已打开新会话，正在发送「开始聊天」…', 'info', 2000)
-  const r = await copyAndFill('开始聊天', { count: false })
+  // [force-rules-on-new-window] 需求：开新窗必须自动携带 SYSTEM.md + AGENTS.md；
+  // forceRules=true 绕过 copyAndFill 内的 sessionId 去重，否则同工作台会话内重开窗不带规则
+  const r = await copyAndFill('开始聊天', { forceRules: true })
   if (r === 'sent' || r === 'opened') {
     toast('已发送「开始聊天」，等待会话地址回写', 'success', 2500)
   } else {
