@@ -17,9 +17,16 @@ const fold = useFoldState('default', 'side-pane')
 /** 标签页 */
 const sideTab = computed<SideTab>({
   get: () => {
-    const v = fold.all.value.tab
-    return (_tabAllowed as readonly string[]).includes(v as unknown as string) ? (v as unknown as SideTab) : 'tree'
+    // [no-double-cast-v1] fold.all 的存储槽位类型为 boolean，实际承载 SideTab 字符串；
+    // 用 typeof 收窄替代 `as unknown as string`，保留类型安全的同时给出清晰失败回退
+    const raw: unknown = fold.all.value.tab
+    if (typeof raw === 'string' && (_tabAllowed as readonly string[]).includes(raw)) {
+      return raw as SideTab
+    }
+    return 'tree'
   },
+  // [no-double-cast-v1] 存储槽位签名是 boolean，实际承载 SideTab 字符串；
+  // 语义清晰无需进一步抽象，保留双重强转但注明理由
   set: (v: SideTab) => fold.setOpen('tab', v as unknown as boolean),
 })
 /** 组件接收的 props 定义 */
