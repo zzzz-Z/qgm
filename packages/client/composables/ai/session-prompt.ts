@@ -1,8 +1,8 @@
 // 会话提示词拼装：新会话 / 循环首轮统一携带 SYSTEM.md + AGENTS.md
-// [WHY] 手写契约（原 loopLogic CONTRACT_LINES / DEFAULT_SESSION_PROMPT）与首问加载不同源，
-//       切工作区 / 超 200 轮轮转时会造成 AI 缺失完整规则；统一从预设 SYSTEM.md + 工作区 AGENTS.md 拼装。
-// [CONSTRAINT] 两处 fetch 任一失败 → 只返回业务内容（summary / goal），不注入任何手写契约；
-//             fetch 指向同源 HTTP 服务，失败极罕见，不做重复手写兜底。
+// [WHY] 所有下发提示词都由预设 SYSTEM.md + 工作区 AGENTS.md 拼装，与首问加载同源，
+//       避免规则漂移；切工作区 / 超 200 轮轮转时 AI 上下文始终完整。
+// [CONSTRAINT] 两处 fetch 任一失败 → 只返回业务内容（summary / goal），不注入其它兜底；
+//             fetch 指向同源 HTTP 服务，失败极罕见。
 
 /** 读 SYSTEM.md（预设源）与 AGENTS.md（工作区）包成 <file> 块；任一失败返回空串 */
 async function loadRulesBlock(): Promise<string> {
@@ -40,7 +40,7 @@ export async function buildNewSessionPrompt(summary: string): Promise<string> {
 
 /**
  * 循环首轮：SYSTEM.md + AGENTS.md + 目标
- * [CHANGE-IMPACT] 被 auto-loop/start-family.ts 调用；替换原 loopLogic.buildInitialPrompt
+ * [CHANGE-IMPACT] 被 auto-loop/start-family.ts 调用；循环首轮的提示词入口
  * @param goal 用户填写的循环目标
  */
 export async function buildLoopInitialPrompt(goal: string): Promise<string> {

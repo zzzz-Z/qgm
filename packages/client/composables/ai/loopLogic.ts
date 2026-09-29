@@ -41,22 +41,6 @@ export function isStrictDone(text: string): boolean {
   return /^\s*DONE\s*$/.test(firstNonEmpty)
 }
 
-// 宽容预算判定：返回「重试（消耗一次）」或「熔断」
-type ToleranceResult
-  = | { action: 'retry', remaining: number }
-    | { action: 'break' }
-
-/**
- * 消耗一次宽容预算；无余量则熔断
- * [WHY] 用"重试"而非"静默跳过"，让 AI 有机会按契约重发；预算有限以防死循环
- * [CONSTRAINT] 返回 remaining 便于调用方持久化到 loop 状态；leftBefore<=0 直接 break
- * @param leftBefore 剩余宽容次数（调用方持有并递减）
- */
-export function decideTolerance(leftBefore: number): ToleranceResult {
-  if (leftBefore > 0) return { action: 'retry', remaining: leftBefore - 1 }
-  return { action: 'break' }
-}
-
 // 文本工具
 
 // 格式不符时的重试 prompt（宽容预算内唯一一次重试）

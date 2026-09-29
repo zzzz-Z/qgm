@@ -5,7 +5,6 @@ import { it } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   buildRetryPrompt,
-  decideTolerance,
   isStrictDone,
   LOOP_MAX_ROUNDS,
   LOOP_ROTATE_THRESHOLD,
@@ -29,15 +28,6 @@ it('DONE 严格匹配：含解释 / 小写 / 标点 均不算', () => {
   assert.equal(isStrictDone('好的，DONE'), false)
   assert.equal(isStrictDone('DONE\n（任务完成）'), true) // [contract] 首行 DONE + 总结行
   assert.equal(isStrictDone(''), false)
-})
-
-// decideTolerance：格式错误 / 纯文本 / 重复脚本共享的 1 次宽容
-it('宽容预算：还有 1 次 → retry 且消耗为 0', () => {
-  assert.deepEqual(decideTolerance(1), { action: 'retry', remaining: 0 })
-})
-
-it('宽容预算：剩余 0 → 直接熔断', () => {
-  assert.deepEqual(decideTolerance(0), { action: 'break' })
 })
 
 // buildRetryPrompt
