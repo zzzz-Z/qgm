@@ -2,7 +2,6 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import ScriptPanel from './components/script/ScriptPanel.vue'
-import { DEFAULT_SESSION_PROMPT } from './composables/ai/loopLogic'
 import { copyAndFill, DEFAULT_URL, getWindowBySid, listWindows, MODELS, openDeepseek, setActiveWinSid, useDeepseekUrl } from './composables/ai/useDeepseekUrl'
 import { useScriptInbox } from './composables/runner/useScriptInbox'
 import {
@@ -107,12 +106,6 @@ function addSessionToHistory(id: string, url: string, title: string) {
   sessionHistory.value = [entry, ...sessionHistory.value.filter(s => s.id !== id)].slice(0, 50)
   saveHistory(sessionHistory.value)
 }
-
-/**
- * 用户忽略"久未活动"提示；置位后不再重复显示
- * [CONSTRAINT] 只写一次标志；如需再次提醒应由上层重置 absenceDismissed
- */
-function dismissAbsence() { absenceDismissed.value = true }
 
 /**
  * 打开 Url Edit
@@ -399,7 +392,7 @@ async function onOpenAiWin() {
     return
   }
   toast('已打开新会话，正在发送「开始聊天」…', 'info', 2000)
-  const r = await copyAndFill(DEFAULT_SESSION_PROMPT, { count: false })
+  const r = await copyAndFill('开始聊天', { count: false })
   if (r === 'sent' || r === 'opened') {
     toast('已发送「开始聊天」，等待会话地址回写', 'success', 2500)
   } else {
@@ -419,7 +412,7 @@ async function onNewSession() {
   loopPaused.value = true
   autoTakeover.disable()
   toast('已打开新会话，正在发送「开始聊天」…', 'info', 2000)
-  const r = await copyAndFill(DEFAULT_SESSION_PROMPT, { count: false })
+  const r = await copyAndFill('开始聊天', { count: false })
   if (r === 'sent' || r === 'opened') {
     toast('已发送「开始聊天」，等待会话地址回写', 'success', 2500)
   } else {

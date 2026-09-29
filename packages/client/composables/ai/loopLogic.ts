@@ -61,56 +61,6 @@ export function decideTolerance(leftBefore: number): ToleranceResult {
 
 // 文本工具
 
-// 首轮 prompt：目标 + 输出契约（与 SYSTEM.md §1 对齐）
-// 契约文案：DONE + 总结
-/** 输出契约固定行（与 SYSTEM.md §1 契约部分对齐；DONE 规则见 CONTRACT_DONE_LINE） */
-const CONTRACT_LINES = [
-  '',
-  '【输出契约（必须严格遵守）】',
-  '1. 每次只回复一个代码块，语言标签只能是 js（cjs 兼容）',
-  '2. 首行 shebang 必须为 #! /usr/bin/env node；紧接 // @desc 与 // @why 注释',
-  '3. 脚本内禁止出现三个反引号；禁止 rm -rf/sudo/curl|sh/git push -f/git reset --hard 等破坏性命令',
-  '4. 每轮必须推进，禁止重复上一轮脚本',
-]
-
-/** 契约中的 DONE 标记行文本 */
-// [done-contract-v2] 强制首行只写 DONE，列举禁止变体，降低 isStrictDone 漏判
-const CONTRACT_DONE_LINE = [
-  '5. 任务完成时，回复格式必须严格如下：',
-  '   第 1 行：只写 DONE 三个大写字母（无标点、无前后缀、无缩进、无引号）',
-  '   第 2 行起：用 markdown 总结（完成了什么 / 解决了什么 / 遇到的问题）',
-  '   禁止写：完成 / DONE！ / DONE. / Task done / 已完成 / all done / 收工',
-  '   违反格式会导致循环无法识别完成信号而持续发消息。',
-].join('\n')
-
-/**
- * 构建新会话首问 prompt（含输出契约）
- * [WHY] 新会话 / 切换工作区后必须重新注入契约，否则 AI 不知道格式要求
- * [CONSTRAINT] CONTRACT_LINES + CONTRACT_DONE_LINE 拼接后作为会话启动提示词
- */
-export function buildSessionPrompt(): string {
-  return [
-    '【新会话启动 · 默认提示词】请按输出契约继续工作，等待用户指定任务。',
-    ...CONTRACT_LINES,
-    CONTRACT_DONE_LINE,
-  ].join('\n')
-}
-
-/** [done-summary-channel-v1] 新会话默认提示词；与 SYSTEM.md 契约同源，由 buildSessionPrompt 生成 */
-export const DEFAULT_SESSION_PROMPT = buildSessionPrompt()
-
-/**
- * 构建循环首轮 prompt：目标 + 输出契约
- * [CONSTRAINT] goal 前后空白会被 trim；空 goal 由调用方（startLoop）拦截
- * @param goal 用户填写的循环目标
- */
-export function buildInitialPrompt(goal: string): string {
-  return `${String(goal).trim()}\n${[
-    ...CONTRACT_LINES,
-    CONTRACT_DONE_LINE,
-  ].join('\n')}`
-}
-
 // 格式不符时的重试 prompt（宽容预算内唯一一次重试）
 /**
  * 构建格式重试 prompt（宽容预算内唯一一次）

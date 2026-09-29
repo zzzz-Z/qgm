@@ -1,6 +1,5 @@
 import { ref } from 'vue'
 import { useClipboard } from '@vueuse/core'
-import { DEFAULT_SESSION_PROMPT } from './loopLogic'
 import { useSessionManager } from './useSessionManager'
 import { log } from '../../utils/log'
 // [headless] 传输层路由：__ai_transport='headless' 时走 useAiTransport；默认 tampermonkey 保字节级一致
@@ -385,7 +384,7 @@ export function sendRotate(payload: RotatePayload): boolean {
 interface NewSessionPayload { summary: string }
 /**
  * 通知指定槽位开启新会话
- * [CONSTRAINT] summary 会被前缀 DEFAULT_SESSION_PROMPT，油猴侧不应再拼接
+ * [CONSTRAINT] summary 由 session-prompt.buildNewSessionPrompt 拼好（SYSTEM.md + AGENTS.md + 总结），油猴侧不应再拼接
  * [CHANGE-IMPACT] 油猴侧收到后应新建会话并用 summary 初始化上下文
  * @param payload summary 字段承载会话摘要；内部会前置规则提示
  */
@@ -395,10 +394,7 @@ export function sendNewSessionTo(sid: string, payload: NewSessionPayload): boole
   const origin = targetOrigin()
   if (!origin) return false
   try {
-    const s = String(payload?.summary || '')
-    // 已由 buildNewSessionPrompt 拼过 SYSTEM.md 则不再加兜底前缀，避免重复
-    const full = s.includes('<file path="SYSTEM.md">') ? s : (`${DEFAULT_SESSION_PROMPT}\n\n${s}`)
-    win.postMessage({ type: 'ai-runner:new-session', ...payload, summary: full }, origin)
+    win.postMessage({ type: 'ai-runner:new-session', ...payload }, origin)
     return true
   } catch { return false }
 }

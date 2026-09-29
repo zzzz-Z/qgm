@@ -3,7 +3,7 @@ import type { ComputedRef, Ref } from 'vue'
 import type { LoopInstance } from './types.js'
 import { toast } from '../../ui/useToast'
 import { getActiveWin } from '../useDeepseekUrl'
-import { buildInitialPrompt } from '../loopLogic.js'
+import { buildLoopInitialPrompt } from '../session-prompt.js'
 
 type RunHookFn = typeof import('./hooks.js').runHook
 type AiTransport = import('../useAiTransport.js').AiTransport
@@ -95,10 +95,11 @@ export function createStartFamily(deps: StartFamilyDeps) {
     stage.value = 'plan' // AIRUNNER-BATCH47-STAGE-WRITE
     persist(inst)
 
+    const initialPrompt = await buildLoopInitialPrompt(g)
     const bfHook = await runHook('BeforeFill', {
       loopId: inst.id.value,
       goal: g,
-      prompt: buildInitialPrompt(g),
+      prompt: initialPrompt,
     })
     if (bfHook.action === 'reject') {
       await finish(inst, 'hook-reject-before-fill', bfHook.reason || 'BeforeFill hook rejected')
@@ -106,7 +107,7 @@ export function createStartFamily(deps: StartFamilyDeps) {
     }
     // 新循环开始前恢复消息接收（防上次暂停后永久静音）
     transport.unMute?.()
-    const ok = loopPaused.value ? false : transport.sendFill('', { prompt: buildInitialPrompt(g) })
+    const ok = loopPaused.value ? false : transport.sendFill('', { prompt: initialPrompt })
     if (!ok) {
       await finish(inst, 'window-lost', 'AI 窗口已关闭或跨域发送失败')
       return
