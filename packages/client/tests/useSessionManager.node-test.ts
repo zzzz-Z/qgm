@@ -224,32 +224,32 @@ test('isOverLimit: 空会话为 false', () => {
 
 // ============ maybeRotateSession ============
 
-test('maybeRotateSession: askCount 低于阈值 → fired=false', () => {
+test('maybeRotateSession: askCount 低于阈值 → fired=false', async () => {
   const r = mod.useSessionManager()
   r.resetAskCount()
-  const res = r.maybeRotateSession(() => true)
+  const res = await r.maybeRotateSession(() => true)
   assert.equal(res.fired, false)
   assert.equal(res.sent, false)
   assert.equal(res.overCount, 0)
 })
 
-test('maybeRotateSession: askCount = 阈值 → fired=true 且重置计数', () => {
+test('maybeRotateSession: askCount = 阈值 → fired=true 且重置计数', async () => {
   const r = mod.useSessionManager()
   r.resetAskCount()
   for (let i = 0; i < mod.ASK_ROTATE_THRESHOLD; i++) r.trackMessage('user', `m${i}`)
   assert.equal(r.askCount.value, mod.ASK_ROTATE_THRESHOLD)
-  const res = r.maybeRotateSession(() => true)
+  const res = await r.maybeRotateSession(() => true)
   assert.equal(res.fired, true)
   assert.equal(res.sent, true)
   assert.equal(res.overCount, mod.ASK_ROTATE_THRESHOLD)
   assert.equal(r.askCount.value, 0)
 })
 
-test('maybeRotateSession: sendFn 返回 false → sent=false', () => {
+test('maybeRotateSession: sendFn 返回 false → sent=false', async () => {
   const r = mod.useSessionManager()
   r.resetAskCount()
   for (let i = 0; i < mod.ASK_ROTATE_THRESHOLD; i++) r.trackMessage('user', 'm')
-  const res = r.maybeRotateSession(() => false)
+  const res = await r.maybeRotateSession(() => false)
   assert.equal(res.fired, true)
   assert.equal(res.sent, false)
 })
