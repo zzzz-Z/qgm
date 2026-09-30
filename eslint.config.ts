@@ -1,7 +1,7 @@
 import antfu from '@antfu/eslint-config'
+import type { Linter } from 'eslint'
 
-const config = antfu({
-  ignores: ['skills/**/*.md'],
+const config: Promise<Linter.Config[]> = antfu({
   unocss: true,
   typescript: true,
   vue: true,
@@ -37,7 +37,7 @@ const config = antfu({
     'eslint-comments/no-unlimited-disable': 'off',
   }
 }).append({
-  files: ['scripts/**/*.{js,mjs,cjs}', 'skills/**/*.cjs'],
+  files: ['scripts/**/*.{js,mjs,cjs}'],
   rules: { 'no-console': 'off' },
 })
 // AIRUNNER-BATCH45-NO-CONSOLE-CLI: CLI 脚本允许 console 输出（antfu composer .append 形式）

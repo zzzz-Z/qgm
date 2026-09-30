@@ -28,7 +28,7 @@ test('clearRulesHashCache 后再次调用结果稳定', () => {
   assert.equal(a, b, '同一磁盘状态下两次清缓存后应得到相同 hash')
 })
 
-test('hashRules 不抛异常（无论 skills 目录是否存在）', () => {
+test('hashRules 不抛异常（用户 skills 目录缺失时）', () => {
   const prev = process.env.AI_RUNNER_ROOT
   process.env.AI_RUNNER_ROOT = '/tmp/nonexistent-ai-runner-root-xyz'
   try {

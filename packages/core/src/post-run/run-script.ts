@@ -2,7 +2,7 @@
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { getRoot } from '../config.js'
-import { injectAiJsdoc, scanNativeApisWithFallback, scanScriptHead } from './ai-guard.js' // [ai-guard-v1]
+import { injectAiJsdoc, scanNativeApisWithFallback, scanScriptHead } from './ai-guard.js'; // [ai-guard-v1]
 import { runProcess } from '../process/proc.js'
 import { buildWrapperCode } from './run-script-wrapper.js'
 
@@ -26,7 +26,15 @@ export interface RunResult {
  * @param onChunk stdout / stderr 流式回调；缺省则不流式回传
  * @param sandbox 沙箱级别（read-only / workspace-write / full）
  */
-export async function runScript(scriptPath: string, timeoutMs = 60_000, signal?: AbortSignal, overlayPath?: string, toolLogPath?: string, onChunk?: (stream: 'stdout' | 'stderr', data: string) => void, sandbox?: string): Promise<RunResult> {
+export async function runScript(
+  scriptPath: string,
+  timeoutMs = 60_000,
+  signal?: AbortSignal,
+  overlayPath?: string,
+  toolLogPath?: string,
+  onChunk?: (stream: 'stdout' | 'stderr', data: string) => void,
+  sandbox?: string
+): Promise<RunResult> {
   try {
     const raw = fs.readFileSync(scriptPath, 'utf8')
     // [script-head-contract-v1] 脚本头契约（先于 API 扫描与注入）

@@ -1,6 +1,6 @@
 // [arch-hono/git-v1] /git/* —— HEAD / commit-loop / reset
 import { Hono } from 'hono'
-import { gitCommitAll, gitHead, gitResetHard, gitWorklog } from '../git.js'
+import { gitCommitAll, gitHead, gitRawDiff, gitResetHard, gitWorklog } from '../git.js'
 
 /** git 路由的 Hono 实例 */
 export const gitHono = new Hono()
@@ -34,6 +34,19 @@ gitHono.post('/git/worklog', async (c) => {
     since: body?.since,
     until: body?.until,
     includeHistory: body?.includeHistory,
+  })
+  return c.json(r, r.ok ? 200 : 400)
+})
+
+// [git-diff-endpoint-v1] 专门获取原始 unified diff，供前端或 AI 直出使用
+// [WHY] 用户反馈 worklog markdown 链路看不到详细 diff；本端点直接返回 diff 原文，规避 markdown 渲染链路
+// [CONSTRAINT] 与 /git/worklog 共享 ref 白名单 + env 加固；不生成 markdown，仅返回 { ok, diff, filesCount }
+gitHono.post('/git/diff', async (c) => {
+  let body: { since?: string, until?: string } | null = null
+  try { body = await c.req.json() } catch { body = null }
+  const r = await gitRawDiff({
+    since: body?.since,
+    until: body?.until,
   })
   return c.json(r, r.ok ? 200 : 400)
 })

@@ -1,11 +1,9 @@
 // [attach-ws] WebSocket 无头链路——air-server 与 Vite dev 共用
-import path from 'node:path'
-import { createRequire } from 'node:module'
 import { WebSocketServer } from 'ws'
 import type { WebSocket } from 'ws'
 import type { Socket } from 'node:net'
 import type { Server as HttpServer, IncomingMessage } from 'node:http'
-import { PREFIX, ROOT } from '../config.js'
+import { PREFIX } from '../config.js'
 import { createHeadlessPool } from '../headless/ai-headless.js'
 import type { ServerMessage, TransportMessage } from './protocol.js'
 // Vite 可能是 HttpServer | Http2SecureServer，取交集的最小子集
@@ -94,17 +92,7 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
       case 'headless:fill': {
         const sid = String(msg.sid || 'default')
         const prompt = String(msg.prompt || '')
-        let finalPrompt = prompt
-        try {
-          const require = createRequire(import.meta.url)
-          const loader = require(path.join(ROOT, 'skills/_loader.cjs'))
-          const injected = loader.loadFor(prompt)
-          if (injected) {
-            finalPrompt = `[系统规则]\n${injected}\n\n[用户指令]\n${prompt}`
-          }
-        } catch (e) {
-          console.error('[ws-server] skill 加载失败:', e)
-        }
+        const finalPrompt = prompt
         if (!prompt) { send({ t: 'headless:state', sid, state: 'error', detail: 'prompt 为空' }); break }
         // session 未打开时自动先 open（前端 sendOpen+sendFill 同帧）
         let sess = pool.get(sid)

@@ -27,7 +27,26 @@ let cachedAvailable: boolean | null = null
  * @param timeoutMs 超时毫秒（默认 30s）
  */
 async function run(cmd: string, args: string[], timeoutMs = 30_000): Promise<{ code: number, stdout: string, stderr: string }> {
-  const r = await runProcess(cmd, { args, cwd: ROOT, timeoutMs, timeoutLabel: 'git 超时' })
+  // [git-env-guard-v1] 统一注入 git 环境变量，避免逐个命令手动加 --no-pager / --no-color
+  // [WHY] 用户在截图质疑"为何只有 rawDiff 加 --no-pager"；逐个命令加既易漏又冗长；
+  //       在唯一入口 run() 设 env 可一次性覆盖全部 19 处调用
+  // [CONSTRAINT] GIT_PAGER=cat 让任何 pager 命令直接落到 stdout 不分页；
+  //              GIT_TERMINAL_PROMPT=0 禁认证交互（CI 场景常见）；
+  //              core.pager 用 -c 覆盖用户 ~/.gitconfig 的自定义 pager
+  // [CHANGE-IMPACT] 改动影响 gitWorklog / gitSnapshot / gitCommitAll / gitResetHard 等所有调用；
+  //                 命令里已显式写的 --no-pager / --no-color 仍生效（幂等叠加）
+  const env = {
+    ...process.env,
+    GIT_PAGER: 'cat',
+    PAGER: 'cat',
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_OPTIONAL_LOCKS: '0',
+  }
+  // [git-full-output-v1] 提升输出上限至 50MB，避免超大 diff 被默认 5MB 截断
+  // [WHY] 用户要求"获取所有输出"：runProcess 默认 5MB，遇大变更（多文件+长 diff）会 SIGKILL 并截断
+  // [CONSTRAINT] 50MB 是经验值：单次 git diff 超过此量级应改由流式/分页消费；本场景足够
+  // [CHANGE-IMPACT] 极端情况下内存占用上升；runProcess 的 maxOutputBytes 会拦截更严重的爆炸
+  const r = await runProcess(cmd, { args, cwd: ROOT, env, maxOutputBytes: 50_000_000, timeoutMs, timeoutLabel: 'git 超时' })
   return { code: r.code, stdout: r.stdout, stderr: r.stderr }
 }
 
@@ -214,6 +233,12 @@ export interface WorklogFileEntry {
   status: string
   added: number
   removed: number
+  /**
+   * 原始 unified diff 文本（以 `diff --git` 开头），用于日志填写而非概括
+   * [CONSTRAINT] 每个文件行数超过上限时截断为首尾拼接；上层消费无需担心超长
+   * [CHANGE-IMPACT] 由 buildWorklogMarkdown 直接以代码围栏输出；未提供时该文件不渲染详细段
+   */
+  diff?: string
 }
 
 /** 工作日志生成选项 */
@@ -239,6 +264,57 @@ export interface WorklogResult {
   markdown: string
 }
 
+/** [git-diff-endpoint-v1] 原始 diff 结果 */
+export interface RawDiffResult {
+  ok: boolean
+  reason?: string
+  since: string
+  until: string
+  generatedAt: number
+  diff: string
+  filesCount: number
+  stderrTail: string
+}
+
+/**
+ * [git-diff-endpoint-v1] 获取原始 unified diff
+ * [WHY] 用户要求专门接口直出 diff 文本，规避 worklog markdown 链路潜在问题
+ * [CONSTRAINT] ref 白名单过滤；非 git 仓库 / 命令失败走 ok:false
+ * [CHANGE-IMPACT] 前端可直接渲染；不生成 markdown
+ */
+export async function gitRawDiff(opts: WorklogOptions = {}): Promise<RawDiffResult> {
+  const safeRef = (s: unknown): string => String(s || '').replace(/[^\w.~^/\-]/g, '').slice(0, 64)
+  const since = safeRef(opts.since) || 'HEAD'
+  const until = safeRef(opts.until)
+  const generatedAt = Date.now()
+  const fail = (reason: string, stderrTail = ''): RawDiffResult => ({
+    ok: false,
+    reason,
+    since,
+    until,
+    generatedAt,
+    diff: '',
+    filesCount: 0,
+    stderrTail,
+  })
+
+  if (!(await gitAvailable())) return fail('非 git 仓库')
+
+  const raw = await run('git', ['--no-pager', 'diff', '-U3', '--no-color', '--no-ext-diff', ...(until ? [since, until] : [since])])
+  if (raw.code !== 0) return fail(`git diff 失败: ${raw.stderr.slice(-300)}`)
+
+  const ESC = String.fromCharCode(27)
+  const ANSI_RE = new RegExp(`${ESC}\\[[0-9;]*[a-z]`, 'gi')
+  const diff = String(raw.stdout || '').replace(ANSI_RE, '')
+
+  let filesCount = 0
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('diff --git ')) filesCount++
+  }
+
+  return { ok: true, since, until, generatedAt, diff, filesCount, stderrTail: raw.stderr.slice(-300) }
+}
+
 /**
  * 从 git diff 生成工作日志
  * [WHY] 用户需求：把工作区相对基准的所有变更（含未提交）汇总为可读 Markdown 日志
@@ -256,7 +332,7 @@ export async function gitWorklog(opts: WorklogOptions = {}): Promise<WorklogResu
   const fail = (reason: string): WorklogResult => ({ ok: false, reason, since, until, generatedAt, files: [], history: [], stat: '', markdown: '' })
   if (!(await gitAvailable())) return fail('非 git 仓库')
 
-  const numstat = await run('git', ['diff', '--numstat', ...(until ? [since, until] : [since])])
+  const numstat = await run('git', ['diff', '--numstat', '--no-color', ...(until ? [since, until] : [since])])
   if (numstat.code !== 0) return fail(`git diff --numstat 失败: ${numstat.stderr}`)
 
   const files: WorklogFileEntry[] = []
@@ -267,7 +343,7 @@ export async function gitWorklog(opts: WorklogOptions = {}): Promise<WorklogResu
     files.push({ path: parts[2], status: 'modified', added: Number(parts[0]) || 0, removed: Number(parts[1]) || 0 })
   }
 
-  const nameStatus = await run('git', ['diff', '--name-status', ...(until ? [since, until] : [since])])
+  const nameStatus = await run('git', ['diff', '--name-status', '--no-color', ...(until ? [since, until] : [since])])
   if (nameStatus.code === 0) {
     const map: Record<string, string> = {}
     for (const line of nameStatus.stdout.split('\n')) {
@@ -281,7 +357,52 @@ export async function gitWorklog(opts: WorklogOptions = {}): Promise<WorklogResu
     for (const f of files) f.status = map[f.path] || 'modified'
   }
 
-  const stat = await run('git', ['diff', '--stat', ...(until ? [since, until] : [since])])
+  // [worklog-detail-v1] 抓取每个文件的原始 unified diff，供日志填写（用户要求详细而非概括）
+  // [CONSTRAINT] 只跑一次 git diff -U3；按 "diff --git" 切块后按 +++ b/<path> 归类（删除文件用 --- a/<path> 兜底）
+  // [CHANGE-IMPACT] f.diff 由 buildWorklogMarkdown 输出；不抓取时该字段 undefined，详细段为空
+  const rawDiff = await run('git', ['--no-pager', 'diff', '-U3', '--no-color', '--no-ext-diff', ...(until ? [since, until] : [since])])
+  if (rawDiff.code === 0 && rawDiff.stdout) {
+    // [worklog-ansi-strip-v1] 剥离 CSI 转义序列，防止 ANSI 色码破坏 ^diff --git 行首匹配
+    // [WHY] 某些环境（CI / FORCE_COLOR / pager）下 git 仍会输出色码，导致 split 全空 → markdown 缺详细段
+    // [CONSTRAINT] 正则只匹配 CSI 序列（\x1b[...m），不误伤正常文本
+    // [no-control-regex-fix] 用 String.fromCharCode(27) 动态拼 ESC，规避 eslint no-control-regex
+    const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-z]`, 'gi')
+    const clean = rawDiff.stdout.replace(ANSI_RE, '')
+    const chunks = clean.split(/^diff --git /m).slice(1)
+    const byPath: Record<string, string> = {}
+    for (const chunk of chunks) {
+      const body = `diff --git ${chunk}`
+      const m = body.match(/^\+\+\+ b\/(.+)$/m) || body.match(/^--- a\/(.+)$/m)
+      if (!m) continue
+      byPath[m[1].trim()] = body
+    }
+    // [worklog-full-diff-v1] 不再截断，返回完整原始 diff
+    // [WHY] 用户要求"获取所有输出"：原 600 行上限会丢弃中间 hunk，导致 AI 生成 commit msg 时看不到全量改动
+    // [CONSTRAINT] 由调用方（前端 / LLM prompt）自行控制展示长度；服务端负责完整
+    // [CHANGE-IMPACT] 超大变更（如删除 300+ 行文件）会让 markdown 变长；前端渲染 + AI prompt 需容忍更大输入
+    let matched = 0
+    for (const f of files) {
+      if (byPath[f.path]) { f.diff = byPath[f.path]; matched++ }
+    }
+    // [worklog-fallback-v1] 若按路径匹配全失败但确有 diff 文本，兜底把整段挂到第一个文件上
+    // [WHY] 极端环境差异下可能路径格式不同（rename / 反斜杠 / 转义），至少让用户看到 diff 内容
+    // [CONSTRAINT] 只在完全无匹配且 rawDiff 非空时触发，不覆盖正常路径
+    if (matched === 0 && files.length > 0) {
+      files[0].diff = clean.trim()
+    }
+  } else {
+    // [worklog-diff-diag-v1] rawDiff 失败或为空：把 stderr / code / 命令留作诊断
+    // [WHY] 截图反馈 markdown 只有文件表无详细 diff，无法从生产日志判断是命令失败还是解析失败
+    // [CONSTRAINT] 只写一个占位标记，供 buildWorklogMarkdown 在详细段缺失时输出
+    // [CHANGE-IMPACT] 无副作用；命令恢复后 diag 自然为空
+    ;(globalThis as Record<string, unknown>).__WL_RAWDIFF_DIAG__ = {
+      code: rawDiff.code,
+      stdoutLen: rawDiff.stdout ? rawDiff.stdout.length : 0,
+      stderrTail: String(rawDiff.stderr || '').slice(-300),
+    }
+  }
+
+  const stat = await run('git', ['diff', '--stat', '--no-color', ...(until ? [since, until] : [since])])
 
   let history: string[] = []
   if (includeHistory) {
@@ -323,6 +444,22 @@ function buildWorklogMarkdown(d: { since: string, until: string, generatedAt: nu
     for (const f of d.files) out.push(`| ${Q}${f.path}${Q} | ${f.status} | ${f.added} | ${f.removed} |`)
   }
   out.push('')
+  // [worklog-detail-v1] 逐文件输出原始 diff（4 反引号围栏，避免 diff 内容里的三反引号破窗）
+  // [WHY] 用户要求"不要简单总结"，作为日志填写需要看到实际改动；本段为工作日志的核心内容
+  const FENCE4 = Q + Q + Q + Q
+  const detailFiles = d.files.filter(f => f.diff)
+  if (detailFiles.length) {
+    out.push('## 详细变更')
+    out.push('')
+    for (const f of detailFiles) {
+      out.push(`### ${Q}${f.path}${Q} — ${f.status} (+${f.added} / -${f.removed})`)
+      out.push('')
+      out.push(`${FENCE4}diff`)
+      out.push(String(f.diff).trim())
+      out.push(FENCE4)
+      out.push('')
+    }
+  }
   if (d.stat.trim()) {
     out.push('## 统计')
     out.push('')

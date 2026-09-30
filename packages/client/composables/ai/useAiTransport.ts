@@ -7,7 +7,10 @@ type AiTransportKind = 'tampermonkey' | 'headless'
 /** AI（接口） */
 export interface AiTransport {
   readonly kind: AiTransportKind
-  sendFill: (sid: string, payload: { prompt: string, context?: string }) => boolean
+  // [image-channel-v3] images 与 FillPayload.images 同源（DataURL 数组）；油猴分支全量透传，headless 分支显式挑字段
+  // [CONSTRAINT] 字段可缺省，旧实现不识该字段不报错
+  // [CHANGE-IMPACT] 消费方 useAiWindowSend.sendFill / copyAndFill 传参处，及 headless send('headless:fill') 载荷
+  sendFill: (sid: string, payload: { prompt: string, context?: string, images?: string[] }) => boolean
   sendOpen?: (sid: string, payload: { url?: string }) => boolean
   sendStop: (sid: string) => boolean
   sendRotate: (sid: string, payload: { instruction: string }) => boolean
@@ -40,31 +43,8 @@ const TRANSPORT_KEY = '__ai_transport'
  */
 export const transportKind = useStorage<AiTransportKind>(TRANSPORT_KEY, 'tampermonkey')
 
-/** [skill-always] 常驻 skill 文本缓存；加载成功后被 sendFill 前缀拼接到 prompt */
-let alwaysSkillsText = ''
-/** [skill-always] 幂等标志：避免重复 fetch /__ai/skills/always（模块级 once） */
-let alwaysSkillsLoaded = false
 /** transport 单例；由 getTransport() 惰性创建，setTransportKind 时置空以触发切换 */
 let singleton: AiTransport | null = null
-
-// [skill-always] 常驻 skill 文本缓存
-// tampermonkey 通道走油猴直投，不经服务端 loader，因此前端需预取后 prepend
-void loadAlwaysSkillsOnce()
-
-/**
- * 拉取一次常驻 skill 文本（/__ai/skills/always）
- * [WHY] 油猴通道直投不经服务端 loader，需前端预取后 prepend 到 prompt；失败降级为空串不阻断发送
- * [CONSTRAINT] alwaysSkillsLoaded 先置位再 fetch，避免并发调用重复请求
- */
-async function loadAlwaysSkillsOnce() {
-  if (alwaysSkillsLoaded) return
-  alwaysSkillsLoaded = true
-  try {
-    const r = await fetch('/__ai/skills/always')
-    const d = await r.json()
-    if (d && d.ok && typeof d.text === 'string') alwaysSkillsText = d.text
-  } catch { /* ignore */ }
-}
 
 /**
  * 反射调用 useDeepseekUrl 导出的发送函数（sendFill / sendStop / …）
@@ -117,11 +97,7 @@ export function createTampermonkeyTransport(): AiTransport {
     sendFill(sid, payload) {
       if (loopPaused.value) return false
       void sid
-      const raw = String(payload.prompt || '')
-      const prompt = alwaysSkillsText
-        ? `[系统规则]` + `\n${alwaysSkillsText}\n\n` + `[用户指令]` + `\n${raw}`
-        : raw
-      return callDs('sendFill', { ...payload, prompt })
+      return callDs('sendFill', payload)
     },
     sendStop(sid) { void sid; return callDs('sendStop') },
     sendRotate(sid, payload) { void sid; return callDs('sendRotate', payload) },
@@ -222,7 +198,10 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   return {
     kind: 'headless',
     sendOpen(sid, p) { return send('headless:open', { sid, url: p.url }) },
-    sendFill(sid, p) { if (loopPaused.value) return false; return send('headless:fill', { sid, prompt: p.prompt, context: p.context }) },
+    // [image-channel-v3] 原实现显式只挑 prompt/context，images 被丢；改为条件展开
+    // [CONSTRAINT] images 缺省时不写入字段，保持旧载荷形状兼容旧服务端
+    // [CHANGE-IMPACT] 服务端 headless:fill handler 需识别并消费 images，否则静默忽略
+    sendFill(sid, p) { if (loopPaused.value) return false; return send('headless:fill', { sid, prompt: p.prompt, context: p.context, ...(p.images && p.images.length ? { images: p.images } : {}) }) },
     // [P3-1c] waitAck：等 headless:state 回包（filling/generating/error 任一），超时返回 false
     waitAck(_t, sid, timeoutMs = 3000) {
       return new Promise<boolean>((resolve) => {

@@ -31,11 +31,9 @@
         @paste="onEditorPaste"
         @drop="onDesktopDrop"
       >
-        <!-- [abnormal-mount-v1] -->
         <AbnormalView :result="result" />
         <template #action-bar>
           <ScriptToolbar
-            :templates="[]"
             :running="running"
             :is-loop-active="isLoopActive"
             :loop-paused="loopPaused"
@@ -76,6 +74,7 @@
     <!-- 右侧：变更列表 & Diff -->
     <!-- SIDE_VIF_CHANGES -->
     <SidePane
+      ref="sidePaneRef"
       v-model:side-drawer-open="sideDrawerOpen"
       :side-width="sideWidth"
       :changes="changes"
@@ -206,6 +205,20 @@ let runStartAt = 0
 const sideTab = ref<'tree' | 'changes'>('tree')
 /** 窄屏抽屉开合 */
 const sideDrawerOpen = ref(false)
+// [side-tab-facade-v1] 供 App.vue header 按钮触达 SidePane 的 selectTab
+// [WHY] 用户要求工作日志入口从弹窗改为侧栏 tab；父组件需通过 ref 调子组件方法，无需新增事件总线
+// [CONSTRAINT] SidePane 未挂载（如无工作区）时 sidePaneRef.value 为 null，需静默兜底
+// [CHANGE-IMPACT] 依赖 SidePane 的 defineExpose({ selectTab })
+const sidePaneRef = ref<{ selectTab: (t: 'tree' | 'changes' | 'worklog') => void } | null>(null)
+
+/** 打开侧栏并切到指定 tab；侧栏已收起时自动展开 */
+function openSideTab(tab: 'tree' | 'changes' | 'worklog'): void {
+  sideDrawerOpen.value = true
+  sidePaneRef.value?.selectTab(tab)
+}
+
+// [side-tab-facade-v1] 对外暴露给 App.vue 的 header 按钮使用
+defineExpose({ openSideTab })
 /** Diff 预览文件 */
 const previewFile = ref<string | null>(null)
 /** 差异预览：变更前内容 */
@@ -356,11 +369,11 @@ function toggleAutoTakeover() {
     toast('已关闭自动接管', 'info', 3000)
   } else {
     if (!script.value.trim()) {
-      toast('请先在编辑器写脚本再开启接管', 'warn', 3000)
+      toast('请先在输入提问再开启接管', 'warn', 3000)
       return
     }
     enableAutoTakeover()
-    toast('已开启自动接管：立即执行当前脚本 → 结果发 AI → AI 回填后 3-10s 自动执行', 'success', 6000)
+    toast('已开启自动接管：立即执行当前脚本 → 结果发 AI → AI 回填后  自动执行', 'success', 6000)
     void runSmart()
   }
 }
@@ -481,7 +494,7 @@ function onGlobalKey(e: KeyboardEvent) {
   }
 }
 /**
- * 发送编辑器内容到 AI 网页（不本地执行 cjs/bash）
+ * 发送编辑器内容到 AI 网页
  */
 async function runSmart() {
   const rawScript = script.value.trim()
@@ -492,7 +505,11 @@ async function runSmart() {
   const text = attachedFiles.value.length
     ? await buildPromptWithAttachments(rawScript, attachedFiles.value)
     : rawScript
-  const r = await copyAndFill(text)
+  // [image-channel-v2] 图片走独立 images 通道；prompt 只带位置提示，接收端负责转粘贴
+  // [CONSTRAINT] filter 只取 kind==='image'；content 为 readAsDataUrl 返回值
+  // [CHANGE-IMPACT] images 数组为空时传 undefined，保持旧行为（无图片路径零变化）
+  const images = attachedFiles.value.filter(f => f.kind === 'image').map(f => f.content)
+  const r = await copyAndFill(text, images.length ? { images } : undefined)
   if (r === 'failed') {
     toast('发送失败：AI 窗口未打开或已关闭', 'warn', 4000)
     return

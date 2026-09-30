@@ -398,80 +398,79 @@
   let handoffMode = 'off'
   let handoffReplyText = ''
 
-  let replyDebounce = null
+  // [debounce-flatten-v1] 单级 350ms 节流：原 replyObserver 与 classifyAndPost 共用 replyDebounce，
+  //   每次 DOM 变化都重设 2000ms；AI 流式期间 DOM 持续抖动 → 核心逻辑永远被推迟到"最后一次变化后再 2s"才执行。
+  // [CONSTRAINT] 350ms 是合并 token 级抖动的下限；lastBodySig / seenHashes / seenDoneMarkers 已保证同内容不重复 post。
+  // [CHANGE-IMPACT] 弹窗感知延迟 ~2s → ~0.35s；classifyAndPost 改为同步执行，节流由 observerDebounce 单点承担。
+  let observerDebounce = null
   function classifyAndPost() {
-    if (replyDebounce) clearTimeout(replyDebounce)
-    replyDebounce = setTimeout(() => {
-      replyDebounce = null
-      try {
-        if (!window.opener || window.opener.closed) return
-        if (handoffMode === 'waiting-summary') {
-          const replyText = extractLatestReplyText()
-          if (replyText && replyText.length > 30 && replyText === handoffReplyText) {
-            handoffMode = 'off'
-            handoffReplyText = ''
-            post({ type: 'ai-runner:summary', text: replyText, aiSiteId: extractId(), sessionId: extractSidFromHash(), degraded: false })
-          } else if (replyText && replyText.length > 30) {
-            handoffReplyText = replyText
-          }
-          return
+    try {
+      if (!window.opener || window.opener.closed) return
+      if (handoffMode === 'waiting-summary') {
+        const replyText = extractLatestReplyText()
+        if (replyText && replyText.length > 30 && replyText === handoffReplyText) {
+          handoffMode = 'off'
+          handoffReplyText = ''
+          post({ type: 'ai-runner:summary', text: replyText, aiSiteId: extractId(), sessionId: extractSidFromHash(), degraded: false })
+        } else if (replyText && replyText.length > 30) {
+          handoffReplyText = replyText
         }
+        return
+      }
 
-        const doneMarker = findNewDone()
-        console.log(doneMarker, 'doneMarker')
+      const doneMarker = findNewDone()
 
-        if (doneMarker) {
-          seenDoneMarkers.add(doneMarker.marker)
-          post({
-            type: 'ai-runner:reply',
-            kind: 'done',
-            site: location.origin,
-            sessionId: extractSidFromHash(),
-            reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
-            text: doneMarker.text,
-          })
-          lastBodySig = bodySignature()
-          return
-        }
+      if (doneMarker) {
+        seenDoneMarkers.add(doneMarker.marker)
+        post({
+          type: 'ai-runner:reply',
+          kind: 'done',
+          site: location.origin,
+          sessionId: extractSidFromHash(),
+          reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
+          text: doneMarker.text,
+        })
+        lastBodySig = bodySignature()
+        return
+      }
 
-        const s = extractLatestScript()
-        if (s && !seenHashes.has(s.hash)) {
-          seenHashes.add(s.hash)
-          post({
-            type: 'ai-runner:reply',
-            kind: 'script',
-            code: s.code,
-            lang: s.lang,
-            hash: s.hash,
-            site: location.origin,
-            sessionId: extractSidFromHash(),
-            reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
-          })
-          lastBodySig = bodySignature()
-          return
-        }
+      const s = extractLatestScript()
+      if (s && !seenHashes.has(s.hash)) {
+        seenHashes.add(s.hash)
+        post({
+          type: 'ai-runner:reply',
+          kind: 'script',
+          code: s.code,
+          lang: s.lang,
+          hash: s.hash,
+          site: location.origin,
+          sessionId: extractSidFromHash(),
+          reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
+        })
+        lastBodySig = bodySignature()
+        return
+      }
 
-        const sig = bodySignature()
-        if (sig !== lastBodySig) {
-          lastBodySig = sig
-          post({
-            type: 'ai-runner:reply',
-            kind: 'plain',
-            site: location.origin,
-            sessionId: extractSidFromHash(),
-            reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
-            // [ask-text-v1] 补 text：前端 parseAsk 依赖此字段识别交互提问
-            // [CONSTRAINT] extractLatestReplyText 返回最后 assistant 容器文本；缺失时前端退化为纯提示
-            text: (() => { try { return extractLatestReplyText() || '' } catch { return '' } })(),
-          })
-        }
-      } catch {}
-    }, 2000)
+      const sig = bodySignature()
+      if (sig !== lastBodySig) {
+        lastBodySig = sig
+        post({
+          type: 'ai-runner:reply',
+          kind: 'plain',
+          site: location.origin,
+          sessionId: extractSidFromHash(),
+          reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
+          // [ask-text-v1] 补 text：前端 parseAsk 依赖此字段识别交互提问
+          // [CONSTRAINT] extractLatestReplyText 返回最后 assistant 容器文本；缺失时前端退化为纯提示
+          text: (() => { try { return extractLatestReplyText() || '' } catch { return '' } })(),
+        })
+      }
+    } catch {}
   }
 
   const replyObserver = new MutationObserver(() => {
-    if (replyDebounce) clearTimeout(replyDebounce)
-    replyDebounce = setTimeout(classifyAndPost, 0)
+    if (observerDebounce) clearTimeout(observerDebounce)
+    observerDebounce = setTimeout(classifyAndPost, 350)
   })
   replyObserver.observe(document.body, { childList: true, subtree: true, characterData: true })
 
@@ -557,6 +556,62 @@
     box.dispatchEvent(new KeyboardEvent('keydown', opts))
     box.dispatchEvent(new KeyboardEvent('keypress', opts))
     box.dispatchEvent(new KeyboardEvent('keyup', opts))
+  }
+
+  // [image-paste-v2] DataURL → File：粘贴图片到富文本输入框（图片通道 L3 接收端）
+  // [WHY] 工作台 FillPayload.images 传 DataURL 数组，需转 File 才能经 paste 被 Slate/ProseMirror 消费
+  // [CONSTRAINT] 仅解析 data:image/*;base64 前缀；解析失败返回 null 由调用方跳过，不阻断文本填入
+  // [CHANGE-IMPACT] 与 fillInput 同级；新增消费方 pasteImages（ai-runner:fill 分支）
+  function dataUrlToFile(dataUrl, name) {
+    try {
+      const m = String(dataUrl || '').match(/^data:(image\/[\w.+-]+);base64,(.+)$/)
+      if (!m) return null
+      const mime = m[1]
+      const bin = atob(m[2])
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      const ext = (mime.split('/')[1] || 'png').replace('+xml', '')
+      return new File([bytes], `${name || 'image'}.${ext}`, { type: mime })
+    } catch { return null }
+  }
+
+  // [image-paste-v2] 把 DataURL 数组注入输入框
+  // [WHY] 不同站点图片上传路径不同：Slate/ProseMirror 认 paste 事件的 clipboardData.items；部分站点走隐藏 input[type=file]
+  // [CONSTRAINT] 先 paste 后 file-input 兜底；两步均失败静默（文本仍会照常填入，用户体验不倒退）
+  // [CHANGE-IMPACT] 消费 ai-runner:fill 的 images 字段；构造 File / DataTransfer / ClipboardEvent
+  function pasteImages(box, images) {
+    if (!box || !Array.isArray(images) || !images.length) return
+    const files = []
+    for (let i = 0; i < images.length; i++) {
+      const f = dataUrlToFile(images[i], `pasted-image-${i}`)
+      if (f) files.push(f)
+    }
+    if (!files.length) return
+
+    // 1) 优先 paste：Slate/ProseMirror 走此路径
+    try {
+      const dt = new DataTransfer()
+      for (const f of files) dt.items.add(f)
+      const ev = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: dt,
+      })
+      try { Object.defineProperty(ev, 'clipboardData', { value: dt }) } catch { /* clipboardData 构造后只读，defineProperty 兜底 */ }
+      box.focus()
+      box.dispatchEvent(ev)
+    } catch { /* fallthrough: paste 不被支持时走 file input */ }
+
+    // 2) 兜底：找隐藏 input[type=file] 塞 FileList + change 事件
+    try {
+      const input = document.querySelector('input[type=file]')
+      if (input) {
+        const dt2 = new DataTransfer()
+        for (const f of files) dt2.items.add(f)
+        try { input.files = dt2.files } catch { /* 部分浏览器 security 拒写 files，交由 change 事件触发站点自身逻辑 */ }
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+    } catch { /* ignore */ }
   }
 
   // ⭐ 核心修复：Slate.js / React 富文本用 ClipboardEvent('paste')
@@ -663,6 +718,11 @@
       if (!box) { console.warn('[ai-runner] 未找到输入框'); return }
       const prevHref = location.href
       const replySrc = e.source
+      // [image-paste-v2] 图片先于文本注入：图片上传多为异步，先占位可避免文本覆盖图片区
+      // [CONSTRAINT] images 缺省或非数组时短路，保持旧行为（无图片路径零变化）
+      // [CHANGE-IMPACT] 消费 FillPayload.images（v3 通道）；缺 images 字段时行为不变
+      const imgs = Array.isArray(d.images) ? d.images : []
+      if (imgs.length) pasteImages(box, imgs)
       fillInput(box, prompt)
       setTimeout(doSend, 300, box)
       // [url-updated] 发送后轮询 URL 变化并回传（最多 8s）
@@ -766,7 +826,7 @@
       lastBodySig = ''
       handoffMode = 'off'
       handoffReplyText = ''
-      if (replyDebounce) { clearTimeout(replyDebounce); replyDebounce = null }
+      if (observerDebounce) { clearTimeout(observerDebounce); observerDebounce = null }
     }
   })
 

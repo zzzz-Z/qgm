@@ -146,7 +146,6 @@ export DEEPSEEK_API_KEY=sk-xxxx
 
 ScriptPanel 编辑器里若脚本 **无 shebang**，点「运行」会走 `ask-flow.ts`：
 
-- 拼 skills（可手选）+ `@` 提及的文件 + 问题 → `copyAndFill` 直连 AI 窗口
 - 有 shebang（`#! /usr/bin/env node`）则走沙盒执行路径；`!命令` 走 shell
 - 会话首问自动携带 `SYSTEM.md` + `AGENTS.md` 全文（`askCount === 0` 时触发）
 
@@ -161,7 +160,6 @@ ScriptPanel 编辑器里若脚本 **无 shebang**，点「运行」会走 `ask-f
 | 前缀                                | 说明                                                 |
 | :---------------------------------- | :--------------------------------------------------- |
 | `/workspace`                        | 项目根切换与画像（`/`、`/list`、`/select`、`/pick`） |
-| `/skills`                           | 列出 / 新建 / 删除用户 skill                         |
 | `/script`                           | 脚本草稿落盘 `.ai-runner/scripts/draft-*.cjs`        |
 | `/rollback` `/rollback-all` `/save` | 单文件 / 整次回滚 / 确认改动                         |
 | `/ask`                              | DeepSeek Chat Completions 代理（SSE 流式）           |
@@ -211,7 +209,6 @@ ScriptPanel 编辑器里若脚本 **无 shebang**，点「运行」会走 `ask-f
 | `runs/<runId>/`            | 单次运行：`_manifest.json` + 各改动文件的 `.before` 快照 + 文件索引 | 保留最近 20 次 |
 | `scripts/draft-*.cjs`      | 编辑器保存的脚本草稿                                                | 手动管理       |
 | `logs/YYYY-MM-DD.jsonl`    | 结构化运行日志（desc / exit / 耗时 / changes / errorFiles）         | 保留 30 天     |
-| `skills/*.md`              | 用户自定义 skill（同名覆盖内置）                                    | —              |
 | `backup/`                  | 改动脚本按规则镜像备份                                              | —              |
 | `tmp/<runId>-overlay.json` | overlay 临时 dump                                                   | 运行后即删     |
 | `tmp/<runId>-tools.jsonl`  | 沙盒内文件系统调用日志                                              | 运行后即删     |
@@ -269,8 +266,7 @@ scripts/                        # build-all / dev-server / dev-all / copy-runtim
 test/
 ├── server/                     # 后端单测（node-test）
 └── web/                        # 前端单测（node-test）
-docs/                           # DOCS-INDEX / USAGE / skills-default-load
-skills/                         # 内置 skill 加载器（_loader.cjs）
+docs/                           # DOCS-INDEX / USAGE
 SYSTEM.md                       # 唯一规则来源（SSOT）
 AGENTS.md                       # 项目入口索引
 ```
@@ -361,7 +357,6 @@ pnpm retention:apply    # 保留策略执行
 
 - **加 HTTP 端点**：在 [`packages/core/src/routes/`](./packages/core/src/routes/) 新建或修改 Hono 路由，在 [`routes/index.ts`](./packages/core/src/routes/index.ts) 的 `HONO_SUB_APPS` 与 `HONO_PREFIXES` 注册
 - **加面板**：新建 `packages/client/components/panels/XxxPanel.vue`，在 [`packages/client/App.vue`](./packages/client/App.vue) 的 Tab 联合类型与 `<nav class="tabs">` 注册
-- **加 skill**：丢一个 `.md` 到 `skills/`（内置）或项目的 `.ai-runner/skills/`（用户级），刷新即加载
 - **加规则**：修改 [`SYSTEM.md`](./packages/core/src/rules/SYSTEM.md)，在头部 `version:` 字段升版，代码注释里的 `§N.M` 引用同步更新
 
 ---

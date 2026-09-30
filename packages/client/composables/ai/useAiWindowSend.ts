@@ -7,6 +7,13 @@ export interface FillPayload {
   prompt: string
   /** 可选：附加上下文/契约摘要，由调用方组装 */
   context?: string
+  /**
+   * 可选：图片 DataURL 数组（data:image/*;base64,...）
+   * [image-channel-v2] 图片走独立通道而非塞进 prompt，避免油猴侧需从文本 parse
+   * [CONSTRAINT] 单张大小 ≈ MAX_ATTACH_BYTES×4/3；接收端需实现 images→粘贴逻辑，否则静默丢弃
+   * [CHANGE-IMPACT] 消费方 sendFillTo / headless transport.sendFill；旧接收端不识该字段不报错
+   */
+  images?: string[]
 }
 
 /** rotate 消息载荷：切换会话/话题的指令 */

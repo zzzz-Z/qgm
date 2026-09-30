@@ -38,7 +38,6 @@ bin/                  CLI 工具集（air-ask / air-check / air-log / air-recove
 scripts/              build / dev / 分析 / 校验等辅助脚本
 test/server|web/      后端 / 前端 node-test 单测
 docs/                 USAGE.md / DOCS-INDEX.md
-skills/               内置 skill 加载器（_loader.cjs）
 SYSTEM.md             指针 → packages/core/src/rules/SYSTEM.md（SSOT）
 ```
 

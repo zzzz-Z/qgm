@@ -10,24 +10,30 @@
       @drop="onDrop"
     >
       <!-- @FILE_PICKER_V1 -->
-      <div v-if="pickerOpen" ref="pickerRef" class="file-picker" :style="pickerStyle">
-        <input
-          ref="pickerInputRef" v-model="pickerQuery" class="fp-input" placeholder="搜索文件，Enter 选择，Esc 取消"
-          @keydown.down.prevent="pickerMove(1)" @keydown.up.prevent="pickerMove(-1)"
-          @keydown.enter.prevent="pickerConfirm" @keydown.esc.prevent="pickerClose"
-        >
-        <div class="fp-list">
-          <div
-            v-for="(f, i) in pickerFiltered" :key="f" class="fp-item" :class="{ active: i === pickerIndex }"
-            @mousedown.prevent="pickerPick(f)"
+      <!-- [file-picker-fix-v3] Teleport 到 body：.editor-body 有 overflow:hidden + 祖先含 transform，
+           会让 absolute/fixed 定位被裁或错位；Teleport 后完全脱离组件树，只受视口坐标约束
+           [CONSTRAINT] 因脱离 scoped 祖先链，内部选择器必须去掉 :deep 前缀改用同元素 data-v 匹配
+           [CHANGE-IMPACT] pickerRef / pickerInputRef 仍指向原元素，无需改脚本逻辑 -->
+      <Teleport to="body">
+        <div v-if="pickerOpen" ref="pickerRef" class="file-picker" :style="pickerStyle">
+          <input
+            ref="pickerInputRef" v-model="pickerQuery" class="fp-input" placeholder="搜索文件，Enter 选择，Esc 取消"
+            @keydown.down.prevent="pickerMove(1)" @keydown.up.prevent="pickerMove(-1)"
+            @keydown.enter.prevent="pickerConfirm" @keydown.esc.prevent="pickerClose"
           >
-            {{ f }}
-          </div>
-          <div v-if="!pickerFiltered.length" class="fp-empty">
-            无匹配文件
+          <div class="fp-list">
+            <div
+              v-for="(f, i) in pickerFiltered" :key="f" class="fp-item" :class="{ active: i === pickerIndex }"
+              @mousedown.prevent="pickerPick(f)"
+            >
+              {{ f }}
+            </div>
+            <div v-if="!pickerFiltered.length" class="fp-empty">
+              无匹配文件
+            </div>
           </div>
         </div>
-      </div>
+      </Teleport>
       <div ref="cmHost" class="cm-host" tabindex="0" />
     </div>
     <!-- [chat-action-bar-v1] 底部操作条：纯图标按钮，右下角对齐（Codex / CC 风） -->
@@ -247,8 +253,27 @@ function pickerOpenAt(atPos: number) {
   if (cmView) {
     const coords = cmView.coordsAtPos(atPos)
     if (coords) {
-      pickerX.value = coords.left
-      pickerY.value = coords.bottom + 4
+      // [file-picker-fix-v2] 视口边界检测：下方空间不足则向上翻转，左右越界则贴边
+      // [CONSTRAINT] coordsAtPos 返回视口坐标（非文档坐标），与 position:fixed 天然对齐
+      // [CHANGE-IMPACT] 面板估算尺寸与 CSS max-height(240) / max-width(480) 保持一致
+      const M = 8
+      const EST_H = 240
+      const EST_W = 320
+      let left = coords.left
+      let top = coords.bottom + 4
+      if (typeof window !== 'undefined') {
+        // 右侧越界 → 贴右边
+        if (left + EST_W > window.innerWidth - M) {
+          left = Math.max(M, window.innerWidth - EST_W - M)
+        }
+        // 下方空间不足 → 翻到光标上方
+        if (top + EST_H > window.innerHeight - M) {
+          const above = coords.top - EST_H - 4
+          top = above >= M ? above : Math.max(M, window.innerHeight - EST_H - M)
+        }
+      }
+      pickerX.value = left
+      pickerY.value = top
     }
   }
   void pickerLoadFiles()
@@ -627,9 +652,13 @@ defineExpose({ insertText })
   overflow: hidden !important;
 }
 
-:deep(.file-picker) {
-  position: absolute !important;
-  z-index: 100 !important;
+.file-picker {
+  /* [file-picker-fix-v2] 改 absolute → fixed：.editor-body 有 overflow:hidden，
+   * 当光标贴近编辑器底部时向下弹出会被裁切，出现"只显示一半"的症状；
+   * fixed + 视口坐标（coordsAtPos 返回的即视口坐标）可完全规避该裁切
+   * z-index 提到 9999，避免被其他浮层（Tooltip/Toast）遮挡 */
+  position: fixed !important;
+  z-index: 9999 !important;
   min-width: 280px !important;
   max-width: 480px !important;
   max-height: 240px !important;
@@ -642,7 +671,7 @@ defineExpose({ insertText })
   overflow: hidden !important;
 }
 
-:deep(.fp-input) {
+.fp-input {
   padding: 8px 12px !important;
   border: 0 !important;
   border-bottom: 1px solid var(--border) !important;
@@ -652,7 +681,11 @@ defineExpose({ insertText })
   outline: 0 !important;
 }
 
-:deep(.fp-list) {
+.fp-list {
+  /* [file-picker-fix-v1] flex column 子项必须显式声明 flex-grow 与 min-height:0，
+   * 否则在父级 max-height + overflow:hidden 下会被压扁至内容塌陷，列表项渲染成灰色条 */
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
   overflow-y: auto !important;
   padding: 4px !important;
   display: flex !important;
@@ -660,7 +693,11 @@ defineExpose({ insertText })
   gap: 1px !important;
 }
 
-:deep(.fp-item) {
+.fp-item {
+  /* [file-picker-fix-v1] 阻止 flex column 收缩项高度；最小行高兜底避免被压缩成灰色条 */
+  flex-shrink: 0 !important;
+  min-height: 22px !important;
+  line-height: 1.2 !important;
   padding: 5px 10px !important;
   border-radius: var(--radius-4) !important;
   font-size: 12px !important;
@@ -672,13 +709,13 @@ defineExpose({ insertText })
   text-overflow: ellipsis !important;
 }
 
-:deep(.fp-item:hover),
-:deep(.fp-item.active) {
+.fp-item:hover,
+.fp-item.active {
   background: var(--primary-bg) !important;
   color: var(--primary) !important;
 }
 
-:deep(.fp-empty) {
+.fp-empty {
   padding: 12px !important;
   text-align: center !important;
   color: var(--text-3) !important;

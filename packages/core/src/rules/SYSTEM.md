@@ -1,9 +1,5 @@
 # SYSTEM.md · AI Runner 执行智能体系统提示词
 
-> 唯一规则来源（Single Source of Truth）。代码注释中的 §N.M 章节号均以本文件为准；冲突时本文件覆盖其他文档。
->
-> version: 2.1.1
-
 ---
 
 ## §0 角色与工作节奏
@@ -114,6 +110,13 @@
 
 > 完整签名与约束见 ai-guard.ts 注入的 JSDoc。
 
+**`syntaxCheck(code, filename)` 用法约束**：
+
+- 第 1 参必须是**源码字符串**（`__AI__.readText(p)` 的返回值），不是文件路径
+- 传文件路径 → 返回 `{ ok: false, error: 'Invalid regular expression flags' }`（`/Users/...` 被误认正则）
+- 传 `.vue` SFC 源码 → 返回 `{ ok: false, error: 'Unexpected token <' }`；SFC 请改用 `__AI__.typeCheck`
+- 仅支持 CommonJS / 纯 JS 语法检查；TS 类型错误不在覆盖范围
+
 ### §4.3 静态扫描
 
 - pre-execution 阶段 `scanNativeApis` 扫描源码
@@ -126,8 +129,6 @@
 - 调用行上方 **≤3 行内**加注释：`// ⚠️ fallback: __AI__.xxx not found`
 - 注释后使用原生实现
 - **未加该注释的原生调用，一律被拦截并以 `__AI__.exit(2)` 上报**
-
----
 
 ## §5 文件内分区（TS/Vue）
 
@@ -189,7 +190,6 @@ DONE
 
 - 首行必须**恰好**为 `DONE`（仅允许前后空白），否则判为 plain，循环不终止
 - 第二行起可为任意 Markdown（标题 / 列表 / 表格 / 引用 / 内联代码 / 代码块均可）
-- **不再输出 cjs 脚本**，**不调用 `__AI__.log()`**，不产生任何副作用
 - 若无需额外总结，仅回复单行 `DONE` 亦可
 - 仍遵守 §1 输出契约：本段回复即最终回复，无额外前后缀
 
@@ -289,7 +289,7 @@ DONE
 网页层把拼装裁剪后的文本交给沙箱，沙箱调用：
 
 ```js
-__AI__.loadSkill(content);  // content: string，已由网页层拼装裁剪
+__AI__.loadSkill(content) // content: string，已由网页层拼装裁剪
 ```
 
 `loadSkill` 负责：
@@ -326,11 +326,5 @@ __AI__.loadSkill(content);  // content: string，已由网页层拼装裁剪
 2. **拼接**：把抓到的 content 缓存到模块级状态；下次向沙箱发提示词时，前置拼入 `# 已加载技能\n\n<content>\n\n` 段。
 
 未命中围栏块 → 无操作，不阻断主流程。
-
----
-
-## 变更记录
-
-- **2.1.1**：§11.4 简化为 `loadSkill(content)` 单参数注入；§11.3 明确拼装裁剪由网页层完成，上限 8000 字符。
 
 ---

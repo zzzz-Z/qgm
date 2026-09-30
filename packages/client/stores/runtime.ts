@@ -143,5 +143,3 @@ export const useRuntime = defineStore('runtime-store', () => { // [runtime-fix2]
     setUserNote,
   }
 })
-
-// [runtime-transport-wire-v1] 占位实现已删：改用 useAiTransport.getTransport()

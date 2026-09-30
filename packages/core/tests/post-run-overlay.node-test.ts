@@ -146,3 +146,28 @@ test('readOverlayChanges: 坏 JSON → []', () => {
     assert.deepEqual(readOverlayChanges(p, new Map()), [])
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })
+
+test('applyOverlay: 白名单文件（.ai-runner/<tmp>/state.json）正常落盘', () => {
+  const subdir = path.join(process.cwd(), '.ai-runner', `test-overlay-keep-${Date.now()}`)
+  const target = path.join(subdir, 'state.json')
+  try { fs.unlinkSync(target) } catch { /* 不存在 */ }
+  const d = tmpDir()
+  try {
+    const payload = { [target]: { op: 'write', data: Buffer.from('{}').toString('base64') } }
+    const r = applyOverlay(writeOverlay(d, payload))
+    assert.equal(r.applied, 1)
+    assert.equal(fs.existsSync(target), true)
+  } finally { fs.rmSync(d, { recursive: true, force: true }); try { fs.rmSync(subdir, { recursive: true, force: true }) } catch { /* ignore */ } }
+})
+
+test('readOverlayChanges: 白名单文件正常出现在变更报告', () => {
+  const subdir = path.join(process.cwd(), '.ai-runner', `test-overlay-report-${Date.now()}`)
+  const target = path.join(subdir, 'changelog.jsonl')
+  const d = tmpDir()
+  try {
+    const payload = { [target]: { op: 'write', data: 'aGk=' } }
+    const r = readOverlayChanges(writeOverlay(d, payload), new Map())
+    assert.equal(r.length, 1)
+    assert.equal(r[0].type, 'added')
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})

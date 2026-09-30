@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useEventListener, useStorage } from '@vueuse/core'
 import ScriptPanel from './components/script/ScriptPanel.vue'
 import { DEFAULT_URL, MODELS, useDeepseekUrl } from './composables/ai/useDeepseekUrl'
-import { getActiveWinSid, getWindowBySid, listWindows, onNewSessionCreated, openAiSession, openDeepseek, setActiveWinSid } from './composables/ai/useAiWindow'
+import { copyAndFill, getActiveWinSid, getWindowBySid, listWindows, onNewSessionCreated, openAiSession, openDeepseek, setActiveWinSid } from './composables/ai/useAiWindow'
 import { useScriptInbox } from './composables/runner/useScriptInbox'
 import {
   createLoopInstanceFor,
@@ -30,7 +30,7 @@ import type { AiReply } from './composables/ai/auto-loop/types'
 import { log } from './utils/log'
 import { pushTerminalNotice, useRunner } from './composables/runner/useRunner'
 import { loopPaused, useAiWaiting } from './composables/ai/useAiWaiting'
-import { emit as emitBus, takePendingAskKey } from './composables/ui/useEventStream'
+import { clearEvents, emit as emitBus, takePendingAskKey } from './composables/ui/useEventStream'
 import { getTransport, transportKind } from './composables/ai/useAiTransport' // [fix-headless-reply]
 import type { EventKind } from './composables/ui/useEventStream'
 import ToastHost from './components/feedback/ToastHost.vue'
@@ -38,12 +38,9 @@ import TooltipHost from './components/feedback/TooltipHost.vue'
 // [workspace-mode-v1] 无工作区引导页：生产环境首启时让用户选择目录
 import WorkspaceGuide from './components/panels/WorkspaceGuide.vue'
 // [worklog-v1] 工作日志弹窗：header 按钮触发，git diff → Markdown
-import WorklogDialog from './components/feedback/WorklogDialog.vue'
 // [app-storage-extracted-v1]
 import { activeSessionId, loadHistory, saveHistory, theme } from './composables/ui/useAppStorage'
 import type { SessionEntry } from './composables/ui/useAppStorage'
-// [skill-injector-v1] §11.8：抓取 AI 回复里的 ai-skill 围栏块
-import { captureSkillFromReply } from './composables/ai/useSkillInjector'
 
 /** 自动接管模式开关 */
 const autoTakeover = useAutoTakeover()
@@ -73,7 +70,10 @@ const sessionHistory = ref<SessionEntry[]>(loadHistory())
 // [CONSTRAINT] 默认 true 避免首帧闪烁；onMounted 探测后按服务端返回值覆盖
 const hasWorkspace = ref(true)
 // [worklog-v1] 工作日志弹窗可见性
-const showWorklog = ref(false)
+// [side-worklog-tab-v1] 工作日志弹窗改为侧栏 tab；改由 ScriptPanel 暴露的 openSideTab 触达
+// [CONSTRAINT] ScriptPanel 未挂载时 scriptPanelRef.value 为 null，点击按钮需静默兜底
+// [CHANGE-IMPACT] 依赖 ScriptPanel defineExpose({ openSideTab })，SidePane 暴露 selectTab
+const scriptPanelRef = ref<{ openSideTab: (t: 'tree' | 'changes' | 'worklog') => void } | null>(null)
 
 /** 键盘帮助面板开关 */
 const keyboardHelpOpen = ref(false)
@@ -188,9 +188,26 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
   const inst = sid ? getLoopBySessionId(sid) : undefined
   const routedToLoop = Boolean(inst && isInstActive(inst))
   const kind = String(d.kind || '')
-  // [skill-injector-v1] §11.8：无论 kind 是 done/plain/multi，先尝试抓取 ai-skill 围栏块
-  // [CONSTRAINT] 纯读操作，仅写模块级缓存；失败不阻断主流程
-  try { captureSkillFromReply(String(d.text || '')) } catch { /* swallow: 抓取失败不阻断 */ }
+
+  // [ask-any-kind-v1] 弹窗优先于其他分支：任意 kind 只要正文含 @ask 就触发
+  // [WHY] AI 回复 @ask 时可能被归类为 plain/done/multi；原逻辑只在 plain 触发且 done 分支更早 return，导致弹窗不弹
+  // [CONSTRAINT] parseAsk 仅在 @ask 起始行返回非 null，不会误伤正常文本；命中后 return 不走后续分支
+  // [CHANGE-IMPACT] 从"仅 plain"扩为"任何 kind 只要 text 含 @ask"；依赖 copyAndFill / askUser 已 import
+  if (typeof d.text === 'string' && d.text) {
+    const _ask = parseAsk(d.text)
+    if (_ask) {
+      stopAiWaiting()
+      void askUser(_ask).then((answer) => {
+        if (answer === null) return
+        // [ask-answer-display-v1] 回答上屏：复用 ai:ask 事件通道，TerminalPane 已渲染该 kind 为用户消息卡
+        // [CONSTRAINT] payload.role 标记来源，便于后续视觉区分问/答；失败时静默不阻断发送
+        // [CHANGE-IMPACT] 与 TerminalPane.timelineItems 的 ai:ask 分支成对；不发事件时用户看不到自己的选择
+        try { emitBus('ai:ask', `回答：${String(answer).slice(0, 40)}`, { payload: { text: String(answer), role: 'user-answer' } }) } catch { /* swallow: 事件流失败不阻断发送 */ }
+        void copyAndFill(`【@ask 回答】${answer}`)
+      })
+      return
+    }
+  }
 
   // done / plain / multi 仅循环模式消费
   // DONE：彻底停止循环（先停循环态再 emit，避免残留状态）
@@ -266,21 +283,6 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
     emitBus((`ai:${kind}`) as EventKind, `AI 回复 · ${kind}`, { payload: { kind, text, count: Number(d.count) || 0 } })
   } else if (kind === 'done') {
     emitBus('ai:done', 'AI 回复 DONE', { payload: { kind: 'done', text: 'DONE' } })
-  }
-
-  // [ask-standalone-v1] 独立触发：手动模式下 AI 也能主动索要用户回答
-  // [CONSTRAINT] 命中即 return，避免落入 routedToLoop 分支造成重复处理
-  // [CHANGE-IMPACT] 依赖 parseAsk / askUser / getTransport；回答以固定前缀回填以区分正常消息
-  if (kind === 'plain' && text) {
-    const ask = parseAsk(text)
-    if (ask) {
-      void askUser(ask).then((answer) => {
-        if (answer === null) return
-        const t = getTransport()
-        if (t) t.sendFill('', { prompt: `【@ask 回答】${answer}` })
-      })
-      return
-    }
   }
 
   if (routedToLoop) {
@@ -458,6 +460,11 @@ async function onNewSession() {
     toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
     return
   }
+  // [new-session-reset-v1] 开新会话前彻底清空本地残留：事件流(localStorage.__ai_event_log) + skill 模块级缓存
+  // [WHY] 截图证据：新窗口仍渲染旧会话乱码事件卡；resetSession 只清 sessionStorage，漏清事件流与 loadedSkill
+  // [CHANGE-IMPACT] clearEvents 移除 localStorage 键并归零 seq；失败时静默
+  try { clearEvents() } catch { /* 未就绪时忽略 */ }
+  try { resetSession() } catch { /* 未就绪时忽略 */ }
   askCount.value = 0
   loopPaused.value = true
   autoTakeover.disable()
@@ -539,6 +546,8 @@ onMounted(async () => {
     if (flag === '1' && Date.now() - at < 15000) {
       // 1) 清空本地会话状态（消息 / token / askCount / sessionId）
       try { resetSession() } catch { /* 未就绪时忽略 */ }
+      // [new-session-reset-v1] 同步清事件流与 skill 缓存，避免新项目窗口渲染旧事件卡
+      try { clearEvents() } catch { /* 未就绪时忽略 */ }
       // 2) 打开新的 AI 会话窗口
       setTimeout(() => {
         // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
@@ -730,7 +739,7 @@ function onLoginGui() {
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
       </button>
-      <button v-tooltip="'从 git diff 生成工作日志'" aria-label="工作日志" class="worklog-toggle" @click="showWorklog = true">
+      <button v-tooltip="'打开工作日志侧栏'" aria-label="工作日志" class="worklog-toggle" @click="scriptPanelRef?.openSideTab('worklog')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="16" y2="17" /></svg>
       </button>
     </div>
@@ -741,13 +750,12 @@ function onLoginGui() {
   <div v-else class="layout-row">
     <div class="layout-main">
       <main class="main">
-        <ScriptPanel />
+        <ScriptPanel ref="scriptPanelRef" />
       </main>
     </div>
   </div>
   <ToastHost />
   <TooltipHost />
-  <WorklogDialog :visible="showWorklog" @close="showWorklog = false" />
 </template>
 
 <style scoped lang="scss" src="./App.scss">

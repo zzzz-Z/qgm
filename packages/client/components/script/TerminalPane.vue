@@ -2,33 +2,28 @@
   <section class="terminal">
     <!-- [flow-timeline] 全流程时间线 -->
     <div class="flow-timeline">
-      <!-- [ai-wait-banner-v1] 等待 AI 回复指示条：收到首 token / reply 后由 stopAiWaiting 关闭 -->
-      <div v-if="props.aiWaiting" class="wait-banner" role="status" aria-live="polite">
-        <span class="wait-spinner" aria-hidden="true" />
-        <span class="wait-text">{{ waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中' }}</span>
-        <span class="wait-dots" aria-hidden="true" />
-        <span v-if="waitElapsed > 0" class="wait-elapsed" aria-hidden="true">{{ waitElapsed }}s</span>
-      </div>
       <div ref="chatListRef" class="chat-list" @scroll="onChatScroll">
         <!-- [script-history-cards-v1] 每轮脚本 desc：Markdown 渲染；来源 busEvents（已持久化到 localStorage） -->
         <template v-for="card in timelineItems" :key="card.key">
           <div v-if="card.type === 'script'" class="script-card" :class="card.phaseClass">
-            <div class="script-card-head">
-              <!-- <span class="script-card-title">脚本</span> -->
-              <!-- <span class="script-card-badge">{{ card.langLabel }}</span> -->
+            <div
+              class="script-card-head"
+              :class="{ 'is-clickable': !!(card.stdoutTail || card.stderrTail || card.why) }"
+              @click="(card.stdoutTail || card.stderrTail || card.why) ? toggleCard(card.key) : null"
+            >
               <span class="script-card-phase">{{ card.phaseLabel }}</span>
+              <span class="script-card-desc">{{ card.desc }}</span>
               <span class="script-card-time">{{ card.timeLabel }}</span>
-              <button
-                v-if="card.stdoutTail || card.stderrTail"
-                class="script-card-toggle"
-                type="button"
-                @click="toggleCard(card.key)"
-              >
-                {{ isCardExpanded(card) ? '▾' : '▸' }} 输出
-              </button>
             </div>
-            <div class="script-card-body" v-html="card.html" />
-            <div v-if="isCardExpanded(card) && (card.stdoutTail || card.stderrTail)" class="script-card-tail">
+            <div
+              v-if="isCardExpanded(card) && (card.stdoutTail || card.stderrTail || card.why)"
+              class="script-card-tail"
+            >
+              <!-- [why-fold-v1] why 从卡片主体迁移至此：仅展开时可见，与输出同屏 -->
+              <div v-if="card.why" class="why-block">
+                <span class="why-label">WHY</span>
+                <span class="why-text">{{ card.why }}</span>
+              </div>
               <pre
                 v-if="card.stdoutTail"
                 class="tail-pre"
@@ -52,16 +47,14 @@
           <section v-else-if="card.type === 'text'" class="text-card">
             <header class="text-card-head">
               <span class="text-card-badge">AI</span>
-              <span class="text-card-kind">{{ card.kindLabel }}</span>
               <span class="script-card-time">{{ card.timeLabel }}</span>
             </header>
             <div class="done-summary-body" v-html="card.html" />
           </section>
-          <!-- [ask-display-v1] 用户提问卡：badge 用「你」区分 AI，其余结构与 text-card 一致 -->
-          <section v-else class="text-card ask-card">
+          <!-- [ask-display-v1] 用户提问/回答卡：badge 用「你」区分 AI；回答额外走 answer-card 视觉 -->
+          <section v-else class="text-card" :class="card.role === 'user-answer' ? 'answer-card' : 'ask-card'">
             <header class="text-card-head">
-              <span class="text-card-badge ask-badge">你</span>
-              <span class="text-card-kind">提问</span>
+              <span class="text-card-badge" :class="card.role === 'user-answer' ? 'answer-badge' : 'ask-badge'">你</span>
               <span class="script-card-time">{{ card.timeLabel }}</span>
             </header>
             <div class="done-summary-body" v-html="card.html" />
@@ -77,6 +70,13 @@
             点击「运行」开始自动化循环
           </div>
         </div>
+      </div>
+      <!-- [ai-wait-banner-v1] 等待 AI 回复指示条：收到首 token / reply 后由 stopAiWaiting 关闭；置于消息流底部 -->
+      <div v-if="props.aiWaiting" class="wait-banner" role="status" aria-live="polite">
+        <span class="wait-spinner" aria-hidden="true" />
+        <span class="wait-text">{{ waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中' }}</span>
+        <span class="wait-dots" aria-hidden="true" />
+        <span v-if="waitElapsed > 0" class="wait-elapsed" aria-hidden="true">{{ waitElapsed }}s</span>
       </div>
     </div>
   </section>
@@ -109,6 +109,38 @@ const props = defineProps<{
 // [emit-unused-v1] 去掉变量赋值：模板未消费此 emit，赋值触发 unused-imports warning
 defineEmits<{ (e: 'applyTemplate', code: string): void }>()
 
+interface ScriptItem {
+  type: 'script'
+  key: string
+  langLabel: string
+  phaseLabel: string
+  phaseClass: string
+  // [head-inline-v1] desc 从 body 前移到 header，与 phase / time 同行展示
+  desc: string
+  timeLabel: string
+  stdoutTail: string
+  stderrTail: string
+  // [why-fold-v1] why 从卡片主体迁移至展开区，避免每张卡都占两行；空串表示无 why
+  why: string
+}
+
+interface TextItem {
+  type: 'text'
+  key: string
+  timeLabel: string
+  html: string
+}
+
+interface DoneItem {
+  type: 'done'
+  key: string
+  timeLabel: string
+  html: string
+}
+// [ask-display-v1] 用户提问/回答卡：ScriptPanel.runSmart 与 App.vue ask 回答分支 emit('ai:ask')
+// [ask-answer-display-v1] role='user-answer' 时展示为「回答」+ answer-badge，区分于「提问」
+interface AskItem { type: 'ask', key: string, timeLabel: string, html: string, role?: 'user-answer' }
+
 const { events: busEvents } = useEventBus()
 
 // [ai-wait-timer-v1] 等待时长本地计时：aiWaiting 为 true 时启动，false 时停止并归零
@@ -139,11 +171,6 @@ const PHASE_LABEL: Record<string, string> = {
  * [CHANGE-IMPACT] 依赖 App.vue / useRunner 的 emit 契约（run:start + payload.desc/why/lang/phase）
  */
 const timelineItems = computed(() => {
-  interface ScriptItem { type: 'script', key: string, langLabel: string, phaseLabel: string, phaseClass: string, html: string, timeLabel: string, stdoutTail: string, stderrTail: string }
-  interface TextItem { type: 'text', key: string, kindLabel: string, timeLabel: string, html: string }
-  interface DoneItem { type: 'done', key: string, timeLabel: string, html: string }
-  // [ask-display-v1] 用户提问卡：ScriptPanel.runSmart 发送成功后 emit('ai:ask') 写入
-  interface AskItem { type: 'ask', key: string, timeLabel: string, html: string }
   const out: Array<ScriptItem | TextItem | DoneItem | AskItem> = []
   for (const ev of busEvents.value) {
     // [ask-display-v1] 用户提问卡：ScriptPanel.runSmart 成功 copyAndFill 后 emit('ai:ask')
@@ -155,11 +182,13 @@ const timelineItems = computed(() => {
       const d0 = new Date(ev.ts || Date.now())
       const pad0 = (n: number) => String(n).padStart(2, '0')
       const timeLabel0 = `${pad0(d0.getHours())}:${pad0(d0.getMinutes())}:${pad0(d0.getSeconds())}`
+      // [ask-answer-display-v1] role 分流：'user-answer' 走回答卡样式；缺省按提问卡
       out.push({
         type: 'ask',
         key: `ask-${ev.id}`,
         timeLabel: timeLabel0,
         html: renderMarkdown(text),
+        ...(tp.role === 'user-answer' ? { role: 'user-answer' as const } : {}),
       })
       continue
     }
@@ -189,11 +218,9 @@ const timelineItems = computed(() => {
       const d0 = new Date(ev.ts || Date.now())
       const pad0 = (n: number) => String(n).padStart(2, '0')
       const timeLabel0 = `${pad0(d0.getHours())}:${pad0(d0.getMinutes())}:${pad0(d0.getSeconds())}`
-      const kindLabel = ev.kind === 'ai:multi' ? '多块回复' : 'AI 回复'
       out.push({
         type: 'text',
         key: `text-${ev.id}`,
-        kindLabel,
         timeLabel: timeLabel0,
         html: renderMarkdown(text),
       })
@@ -211,16 +238,13 @@ const timelineItems = computed(() => {
     // [card-typewriter-v1] 提取打字机 tail：useRunner.emitStep 每次节流（250ms）携带
     const stdoutTail = String(p.stdoutTail || '')
     const stderrTail = String(p.stderrTail || '')
-    const parts: string[] = []
-    if (desc) parts.push(`**${desc}**`)
-    if (why) parts.push(`> ${why}`)
-    const md = parts.join('\n\n')
+    // [head-inline-v1] desc 不再走 body markdown；直接作为 header 文本字段
     const langLabel = lang === 'bash' ? 'BASH' : lang === 'cjs' ? 'CJS' : 'JS'
     // [card-ts-v1] 时间戳：HH:MM:SS，本地时区；ev.ts 为事件更新时刻（updateKey 命中时刷新）
     const d = new Date(ev.ts || Date.now())
     const pad = (n: number) => String(n).padStart(2, '0')
     const timeLabel = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-    out.push({ type: 'script', key, langLabel, phaseLabel: PHASE_LABEL[phase] || phase, phaseClass: `phase-${phase}`, html: renderMarkdown(md), timeLabel, stdoutTail, stderrTail })
+    out.push({ type: 'script', key, langLabel, phaseLabel: PHASE_LABEL[phase] || phase, phaseClass: `phase-${phase}`, desc, timeLabel, stdoutTail, stderrTail, why })
   }
 
   return out
@@ -390,26 +414,13 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   opacity: 0.9;
 }
 
-/* [codex-style-v1] 去卡片化：无边框无背景，仅左侧 3px 色条标识 phase 状态 */
+/* [no-border-v1] 移除卡片左侧竖条：用户要求删除状态色条 */
 .script-card {
   margin: 0;
-  padding: 8px 0 8px 12px;
+  padding: 8px 0;
   border: 0;
-  border-left: 3px solid var(--border, #30363d);
   border-radius: 0;
   background: transparent;
-}
-.script-card.phase-running {
-  border-left-color: var(--primary, #58a6ff);
-}
-.script-card.phase-pending {
-  border-left-color: var(--warning, #d29922);
-}
-.script-card.phase-done {
-  border-left-color: var(--success, #3fb950);
-}
-.script-card.phase-error {
-  border-left-color: var(--danger, #f85149);
 }
 .script-card-head {
   display: flex;
@@ -418,6 +429,11 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   margin-bottom: 8px;
   font-size: 12px;
   color: var(--text-3, #8b949e);
+}
+/* [head-click-toggle-v1] 头部整行可点击展开（去掉原「输出」按钮后替代交互入口） */
+.script-card-head.is-clickable {
+  cursor: pointer;
+  user-select: none;
 }
 .script-card-badge {
   padding: 1px 7px;
@@ -480,26 +496,12 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   margin-bottom: 0;
 }
 
-/* [card-ui-polish-v1] 时间戳 + 折叠按钮 + tail 区 */
+/* [card-ui-polish-v1] 时间戳 + tail 区（[head-click-toggle-v1] 交互已上移至卡片头整行） */
 .script-card-time {
   margin-left: auto;
   color: var(--text-3, #8b949e);
   font: 11px/1 var(--mono, monospace);
   opacity: 0.75;
-}
-.script-card-toggle {
-  padding: 2px 8px;
-  background: transparent;
-  border: 1px solid var(--border, #30363d);
-  border-radius: 4px;
-  color: var(--text-3, #8b949e);
-  font: 11px/1.4 inherit;
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-.script-card-toggle:hover {
-  border-color: var(--primary, #2563eb);
-  color: var(--primary, #2563eb);
 }
 .script-card-tail {
   padding: 8px 14px 12px;
@@ -520,12 +522,39 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   color: var(--danger, #ef4444);
 }
 
-/* [codex-style-v1] 去卡片化：与 script-card 统一，无框无底、仅左侧色条 */
+/* [why-fold-v1] why 从卡片主体迁移至展开区：徽章 + 正文同行，
+ * 视觉上用左边框色条与 tail-pre 输出区分；颜色取 text-3 弱化避免抢输出焦点 */
+.why-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px dashed var(--border, #30363d);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3, #8b949e);
+}
+.why-label {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--surface-3, #161b22);
+  font: 600 10px/1.4 var(--mono, monospace);
+  letter-spacing: 0.5px;
+  color: var(--text-3, #8b949e);
+}
+.why-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* [no-border-v1] 与 script-card 一致：去掉左侧竖条 */
 .text-card {
   margin: 0;
-  padding: 8px 0 8px 12px;
+  padding: 8px 0;
   border: 0;
-  border-left: 3px solid var(--border, #30363d);
   border-radius: 0;
   background: transparent;
 }
@@ -580,12 +609,11 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   color: var(--text-2, #c9d1d9);
 }
 
-/* [codex-style-v1] 去卡片化：与 script-card 统一；左侧绿色条标识成功总结 */
+/* [no-border-v1] 与 script-card 一致：去掉左侧竖条 */
 .done-summary {
   margin: 0;
-  padding: 8px 0 8px 12px;
+  padding: 8px 0;
   border: 0;
-  border-left: 3px solid var(--success, #3fb950);
   border-radius: 0;
   background: transparent;
 }
@@ -827,19 +855,13 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   padding: 20px 20px 32px !important;
 }
 
-/* ② 卡片：hover 时色条加亮 + 微右移，形成"这条消息在响应我"的反馈 */
-.script-card,
-.text-card,
-.done-summary {
-  transition:
-    border-left-color 0.15s ease,
-    transform 0.15s ease !important;
-}
-.script-card:hover,
-.text-card:hover,
-.done-summary:hover {
-  border-left-width: 4px !important;
-}
+/* ② 卡片 hover：完全无视觉变化
+ * [hover-static-v1] 用户明确要求 hover 时不出现任何色条变化或发光/阴影；
+ * 历史规则曾用 border-left-width 加粗（位移）或 border-left-color 加亮（发光感），
+ * 均已移除；卡片在 hover 时保持静止，不做任何视觉反馈
+ * [CONSTRAINT] 不再声明 transition（无 hover 反馈即无过渡需求）
+ * [CHANGE-IMPACT] 若后续产品要求 hover 反馈，建议用 box-shadow（不占布局）而非改几何属性
+ */
 
 /* ③ 卡片头部：时间戳与 phase 间距与对齐微调 */
 .script-card-head,
@@ -920,19 +942,7 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   color: var(--text-3) !important;
 }
 
-/* ⑧ 脚本卡片"输出"折叠按钮：轻量化 */
-.script-card-toggle {
-  border: 0 !important;
-  background: transparent !important;
-  color: var(--text-3) !important;
-  padding: 2px 6px !important;
-  opacity: 0.7 !important;
-  transition: opacity 0.15s ease !important;
-}
-.script-card-toggle:hover {
-  opacity: 1 !important;
-  color: var(--primary) !important;
-}
+/* ⑧ [head-click-toggle-v1] 输出按钮已删除；展开交互由卡片头整行承担（见 .script-card-head.is-clickable） */
 
 /* ⑨ script-card-tail：与卡片同底，弱化边界 */
 .script-card-tail {
@@ -944,24 +954,30 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 }
 
 /* ============================================================
- * [ai-wait-banner-v1] 等待 AI 回复指示条
- * [WHY] 用户需求：点击发送到收到 AI 回复之间应可视化等待态；此前 aiWaiting ref 存在于 ScriptPanel 但未透传
- * [CONSTRAINT] 置于 .flow-timeline 内、.chat-list 之上；v-if 由 props.aiWaiting 控制，随 stopAiWaiting 自动隐藏
+ * [ai-wait-banner-v1] 等待 AI 回复指示条（底部居中胶囊型）
+ * [WHY] 用户需求：点击发送到收到 AI 回复之间应可视化等待态；顶部固定条会抢占消息首行视线，改为底部居中胶囊
+ * [CONSTRAINT] 置于 .flow-timeline 末尾、.chat-list 之下；v-if 由 props.aiWaiting 控制，随 stopAiWaiting 自动隐藏；
+ *              父层 [flow-timeline-fix-v1] 有 align-items:stretch，需 align-self:center 抵消才能居中
  * [CHANGE-IMPACT] 与 ScriptPanel 的 <TerminalPane :ai-waiting> 成对；改颜色/布局需同步覆盖层可视优先级
  * ============================================================ */
 .wait-banner {
-  display: flex !important;
+  display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   gap: 8px !important;
-  padding: 10px 20px !important;
-  background: linear-gradient(90deg, transparent 0%, rgba(88, 166, 255, 0.06) 50%, transparent 100%) !important;
-  border-bottom: 1px dashed rgba(88, 166, 255, 0.18) !important;
+  align-self: center !important;
+  margin: 0 auto 14px !important;
+  padding: 7px 16px !important;
+  background: rgba(88, 166, 255, 0.08) !important;
+  border: 1px solid rgba(88, 166, 255, 0.24) !important;
+  border-radius: 999px !important;
   color: var(--primary, #58a6ff) !important;
-  font-size: 12.5px !important;
+  font-size: 12px !important;
   font-weight: 500 !important;
   letter-spacing: 0.2px !important;
   flex-shrink: 0 !important;
+  box-shadow: 0 4px 14px rgba(88, 166, 255, 0.1) !important;
+  backdrop-filter: blur(6px) !important;
   animation: wait-fadein 0.2s ease-out !important;
 }
 
@@ -1049,5 +1065,63 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   to {
     clip-path: inset(0 0 0 0);
   }
+}
+
+/* ============================================================
+ * [text-tone-v1] 文字降级：正文字号 -1px、主色阶下移一档
+ * [WHY] 用户要求「文字变小、颜色稍微暗一点」；纯视觉微调，不动结构与交互
+ * [CONSTRAINT] 置于样式段末尾，覆盖 [codex-final-v1]/[visual-polish-v2]；选择器与原定义一致，靠层叠顺序生效；全部 !important
+ * [CHANGE-IMPACT] 若后续重排样式段，本层须保留在末尾或并入主定义后删除
+ * ============================================================ */
+.chat-list,
+.flow-timeline .chat-list {
+  font-size: 13px !important;
+  color: var(--text-2) !important;
+}
+
+.script-card-body,
+.done-summary-body {
+  font-size: 13px !important;
+  color: var(--text-2) !important;
+}
+
+.script-card-head,
+.text-card-head {
+  font-size: 11px !important;
+}
+
+/* [head-compact-v1] 头部行紧凑：字号再降 0.5px、行高收紧、底部间距压到 2px、gap 6px
+ * [WHY] 用户要求 head 行更紧凑、字号更小，减少消息流的视觉噪音
+ * [CONSTRAINT] 置于样式段末尾，靠层叠覆盖 [visual-polish-v2] 的 margin-bottom:10px 与 gap:10px
+ * [CHANGE-IMPACT] 仅收紧时间戳/phase/底色间距；正文 body 与 tail 区不受影响
+ */
+.script-card-head,
+.text-card-head {
+  margin-bottom: 2px !important;
+  gap: 6px !important;
+  font-size: 10.5px !important;
+  line-height: 1.2 !important;
+}
+
+/* [head-compact-v1] 时间戳与 phase 同步收紧行高（避免其独立行盒把 head 撑高） */
+.script-card-time,
+.script-card-phase {
+  line-height: 1.1 !important;
+}
+
+/* [head-inline-v1] 状态 / 信息 / 时间同一行：desc 撑满中间、单行省略
+ * [WHY] 用户要求把状态、信息（desc）、时间合并到一行，卡片头部即完整语义
+ * [CONSTRAINT] desc 用 flex:1 + ellipsis 保持单行不换行；时间戳仍由 margin-left:auto 贴右
+ * [CHANGE-IMPACT] body 已不再渲染；renderMarkdown 仍被 ai:done / ai:plain / ai:ask 分支消费
+ */
+.script-card-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-2, #c9d1d9);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

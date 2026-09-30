@@ -1,7 +1,6 @@
 // overlay apply 与变更读取
 import fs from 'node:fs'
 import path from 'node:path'
-
 // AIRUNNER-BATCH10-9-INLINE-ROOT: 内联类型与 root 派生，解除 config.js 依赖（strip-types 可加载）
 
 /** 文件变更类型：新增 / 修改 / 删除 */

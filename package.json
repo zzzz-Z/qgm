@@ -34,7 +34,6 @@
     "test:watch": "vitest --config vitest.config.ts",
     "test:tsc": "tsc -p tsconfig.test.json --noEmit",
     "test:coverage": "vitest run --config vitest.config.ts --coverage",
-    "context-pack": "node scripts/context-pack.cjs",
     "dev:all": "node scripts/dev-all.mjs",
     "tsc:apps": "tsc -p tsconfig.apps.json",
     "check:plan": "node scripts/check-plan-consistency.cjs",

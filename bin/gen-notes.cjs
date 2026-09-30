@@ -75,7 +75,6 @@ function buildArchitecture() {
   if (fs.existsSync(path.join(ROOT, 'src'))) lines.push('- `src/` Vite 插件（Node 侧）')
   if (fs.existsSync(path.join(ROOT, 'client'))) lines.push('- `client/` 工作台 SPA（Vue 3）')
   if (fs.existsSync(path.join(ROOT, 'bin'))) lines.push('- `bin/` CLI 工具')
-  if (fs.existsSync(path.join(ROOT, 'skills'))) lines.push('- `skills/` AI 协作规则')
   if (!lines.length) return ['- （无）']
   return lines
 }

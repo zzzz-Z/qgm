@@ -35,6 +35,7 @@ async function loadRulesBlock(): Promise<string> {
  */
 export async function buildNewSessionPrompt(summary: string): Promise<string> {
   const rules = await loadRulesBlock()
+
   return rules ? `${rules}\n\n# 上一轮会话总结\n\n${summary}` : summary
 }
 
@@ -45,6 +46,7 @@ export async function buildNewSessionPrompt(summary: string): Promise<string> {
  */
 export async function buildLoopInitialPrompt(goal: string): Promise<string> {
   const rules = await loadRulesBlock()
+
   const g = String(goal).trim()
   return rules ? `${rules}\n\n# 目标\n\n${g}` : g
 }

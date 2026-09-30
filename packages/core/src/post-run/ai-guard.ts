@@ -21,7 +21,11 @@ const FORBIDDEN: { name: string, re: RegExp }[] = [
   { name: 'require(os)', re: /\brequire\s*\(\s*['"](?:node:)?os['"]\s*\)/ },
   { name: 'import from os', re: /\bimport\s+(?:[^\s;][^;\n]*)?\bfrom\s+['"](?:node:)?os['"]/ },
   { name: 'path.method', re: /\bpath\s*\.\s*[A-Za-z_$]/ },
-  { name: 'process.exit', re: /\bprocess\s*\.\s*exit\b/ },
+  // [guard-v2] exit 规则要求必须带调用括号：
+  //   WHY: 字符串字面量 'process.exit' / JSDoc 里的提及 process.exit 均不应视为原生调用，
+  //        旧正则把任意裸提及都判为命中而拦下合规脚本。
+  //   [CHANGE-IMPACT] 引用式 const e = 'process.exit' 不再拦截（极罕见），其余路径不变。
+  { name: 'process.exit', re: /\bprocess\s*\.\s*exit\s*\(/ },
 ]
 
 /** §4.4 降级标记匹配：`// __AI__.xxx not found` 形式的显式豁免注释 */
@@ -98,12 +102,19 @@ function hasFallbackNear(lines: string[], idx: number, lookback = 3): boolean {
 
 /** 带 §4.4 降级豁免的扫描：命中位置附近的显式降级标记可豁免该行 */
 export function scanNativeApisWithFallback(code: string): ScanResult {
-  const lines = code.split(/\r?\n/)
+  // [guard-v2] 先用 stripComments 处理整段再逐行——
+  //   WHY: 旧实现只剥行尾 //，导致 injectAiJsdoc 注入的头部 JSDoc 内关键字被命中，
+  //        每一条脚本都会被误报 NATIVE_API_FORBIDDEN，静态扫描形同虚设。
+  //   [CONSTRAINT] fallback 检查必须用原始行（注释原文），否则 §4.4 标记会随注释一起被剥掉。
+  //   [CHANGE-IMPACT] 影响所有经 run-script 前置校验的脚本；不再误伤含 JSDoc 的合规脚本。
+  const stripped = stripComments(code)
+  const strippedLines = stripped.split(/\r?\n/)
+  const origLines = code.split(/\r?\n/)
   const matches: string[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].replace(/\/\/[^\n]*$/, '')
+  for (let i = 0; i < strippedLines.length; i++) {
+    const line = strippedLines[i]
     for (const f of FORBIDDEN) {
-      if (f.re.test(line) && !hasFallbackNear(lines, i)) {
+      if (f.re.test(line) && !hasFallbackNear(origLines, i)) {
         matches.push(`${f.name} @L${i + 1}`)
         break
       }

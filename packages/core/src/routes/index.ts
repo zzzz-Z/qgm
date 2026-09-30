@@ -1,6 +1,5 @@
 // [arch-hono/barrel-v1] Hono 路由聚合 barrel（HCLC 豁免：index.ts）
 import { workspaceHono } from './workspace.js'
-import { skillsHono } from './skills.js'
 import { scriptHono } from './script.js'
 import { rollbackHono } from './rollback.js'
 import { execHono } from './exec.js'
@@ -17,7 +16,6 @@ import { hooksHono } from './hooks.js'
 /** 所有子路由 Hono 应用实例列表 */
 export const HONO_SUB_APPS = [
   workspaceHono,
-  skillsHono,
   scriptHono,
   rollbackHono,
   execHono,
@@ -36,7 +34,6 @@ export const HONO_SUB_APPS = [
 /** 已迁移到 Hono 的路径前缀列表 */
 export const HONO_PREFIXES = [
   '/workspace',
-  '/skills',
   '/script',
   '/rollback',
   '/rollback-all',

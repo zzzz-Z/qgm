@@ -1,8 +1,6 @@
 // 共享 localStorage 键常量。
 // 统一在此声明，避免各组件内联字面量导致拼写漂移。
 
-/** skill 列表键 */
-export const LS_SKILLS_KEY = '__ai_selected_skills'
 /** 键 */
 export const LS_SIDE_WIDTH_KEY = '__ai_runner_side_width'
 /** 键 */

@@ -82,15 +82,19 @@ function _execBin(bin, args) {
 
 const __AI__ = {
   readJSON(p) {
-    try { return JSON.parse(fs.readFileSync(p, 'utf8')) }
-    catch (e) { throw new Error(`${p}: ${e.message}`) }
+    try {
+      const s = fs.readFileSync(p, 'utf8')
+      return JSON.parse(s)
+    } catch (e) { throw new Error(`${p}: ${e.message}`) }
   },
   readText(p) { return fs.readFileSync(p, 'utf8') },
   writeText(p, s) { return _writeText(p, s) },
   join() { return path.join.apply(path, arguments) },
   tryReadFile(p) {
-    try { return { ok: true, content: fs.readFileSync(p, 'utf8') } }
-    catch (e) { return { ok: false, error: e.message } }
+    try {
+      const c = fs.readFileSync(p, 'utf8')
+      return { ok: true, content: c }
+    } catch (e) { return { ok: false, error: e.message } }
   },
   readFile(p) { return this.readText(p) }, // [OPT] readFile delegates readText
   writeFile(p, c) { return _writeText(p, c) },
@@ -101,9 +105,7 @@ const __AI__ = {
   exists(p) { return fs.existsSync(p) },
   listDir(p) {
     try {
-      return safeReaddir(p).map((e) => {
-        return { name: e.name, isDir: e.isDirectory(), isFile: e.isFile() }
-      })
+      return safeReaddir(p).map(e => ({ name: e.name, isDir: e.isDirectory(), isFile: e.isFile() }))
     } catch { return [] }
   },
   replaceInFile(p, opts) {
@@ -343,9 +345,21 @@ const __AI__ = {
   },
   // [ai-helper-v3] syntaxCheck / exec / assertCtx
   syntaxCheck(code, filename) {
+    // [syntax-check-guard-v1] 入参友好化：路径误传 / SFC 传入时给出明确错误
+    // [WHY] 传路径字符串 → vm.Script 把 /Users/... 的 / 当正则开头，抛 "Invalid regular expression flags" 无法自解释；
+    //        传 .vue SFC 源码 → 因 <script> 标签报 "Unexpected token '<'"
+    // [CONSTRAINT] 只在入参为单行短文本且指向真实存在的文件时才短路，避免误伤正常代码
+    // [CHANGE-IMPACT] 返回结构不变（{ ok, error }）；SYSTEM.md §4.2 需补充用法说明
+    const s = String(code)
+    if (!s.includes('\n') && s.length < 500) {
+      try { if (fs.existsSync(s)) return { ok: false, error: 'syntaxCheck 接收源码内容而非文件路径；请用 __AI__.readText(p) 读取后传入' } } catch { /* ignore */ }
+    }
+    if (/<script[\s>]|<template[\s>]|<style[\s>]/.test(s)) {
+      return { ok: false, error: 'syntaxCheck 不支持 .vue SFC；请改用 __AI__.typeCheck' }
+    }
     const vm = require('node:vm')
     try {
-      const compiled = new vm.Script(String(code), { filename: filename || 'script.cjs' })
+      const compiled = new vm.Script(s, { filename: filename || 'script.cjs' })
       void compiled
       return { ok: true }
     } catch (e) {

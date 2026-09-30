@@ -288,8 +288,15 @@ button {
     box-shadow var(--transition-fast);
 }
 
-[class*='card']:hover {
-  box-shadow: var(--shadow-md);
+/* [hover-shadow-off-v1] 原全局属性选择器会命中所有类名含 card 的常驻元素
+ * （.script-card / .text-card / .done-summary 等），导致 hover 时出现发光/阴影；
+ * 用户明确要求卡片 hover 视觉静止，故移除该通用规则。
+ * [CONSTRAINT] 不再使用宽泛属性选择器；如某浮层确需 hover 反馈，由该组件自行声明。
+ */
+.script-card:hover,
+.text-card:hover,
+.done-summary:hover {
+  box-shadow: none !important;
 }
 
 button:focus-visible,

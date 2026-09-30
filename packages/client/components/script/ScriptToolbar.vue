@@ -1,12 +1,5 @@
 <template>
   <div class="tpl-bar">
-    <!-- [fix-restore-templates] 模板按钮（删 draft-toolbar 时误删） -->
-    <button
-      v-for="t in templates" :key="t.id" v-tooltip="`模板：${t.label} — ${t.title}`" class="tpl-chip"
-      @click="emit('applyTemplate', t.code)"
-    >
-      {{ t.label }}
-    </button>
     <div class="tpl-spacer" />
     <button
       v-tooltip="'清空编辑器与附件'"
@@ -66,7 +59,6 @@
 <script setup lang="ts">
 // [toolbar-props-v2] 去 props 变量绑定：模板直接用解构名，赋值给 props 会触发 unused-imports warning
 defineProps<{
-  templates: Template[]
   running: boolean
   isLoopActive: boolean
   autoTakeoverEnabled: boolean

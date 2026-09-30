@@ -108,7 +108,7 @@ const openedCount = computed(() => items.value.filter(it => it.opened).length)
 
 <style scoped lang="scss">
 .ai-window-list {
-  flex: 0 0 200px;
+  flex: 0 0 250px;
   min-width: 160px;
   max-width: 260px;
   display: flex;

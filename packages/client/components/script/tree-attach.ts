@@ -111,7 +111,10 @@ export function createTreeAttach(deps: { attachedFiles: Ref<AttachedFile[]> }) {
         }
       } else if (f.kind === 'image') {
         parts.push(`═════ 附件图片 ${f.name} (${fmtSize(f.size)}) ═════`)
-        parts.push(`[图片数据无法嵌入，请在 AI 站点单独粘贴]`)
+        // [image-channel-v2] 图片改走 FillPayload.images 独立通道，prompt 只留位置提示；
+        // 避免 base64 在 prompt 与 images 双份携带导致剪贴板/上下文膨胀
+        // [CHANGE-IMPACT] 若接收端未消费 images，图片将丢失（此提示仍在 prompt 中作为可观察信号）
+        parts.push(`[图片已作为多模态附件随本请求发送]`)
       } else {
         parts.push(`═════ 附件 ${f.name} (${fmtSize(f.size)}) ═════`)
         for (const line of f.content.split('\n')) parts.push(`${line}`)
@@ -121,5 +124,9 @@ export function createTreeAttach(deps: { attachedFiles: Ref<AttachedFile[]> }) {
     return parts.join('\n') + scriptText
   }
 
-  return { addTreePaths, onTreeDrop, buildPromptWithAttachments }
+  return {
+    addTreePaths,
+    onTreeDrop,
+    buildPromptWithAttachments
+  }
 }

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// @desc 一键启动前后端分离双进程：backend + frontend，启动前探活端口避免占用
+// @desc 一键启动前后端分离双进程：backend + frontend，启动前探活端口
 // @why web SPA 与 API 服务分进程运行；前端 /__ai/* 通过 proxy 转发到后端。
 //      Ctrl+C 同时终止两侧，避免孤儿进程。
-//      [port-auto-v1] 启动前对 127.0.0.1 探活：若基准端口被占用则递增，显式传给两侧，
-//      避免 server.ts 自动切端口后 vite proxy 仍指向旧端口导致 /__ai/* 404。
+//      [port-kill-v1] 启动前对 127.0.0.1 探活：若基准端口被占用则 kill 占用进程，
+//      释放后仍用原端口启动，避免自动切端口后 vite proxy 指向旧端口导致 /__ai/* 404。
 
-import { spawn } from 'node:child_process'
+import { execSync, spawn } from 'node:child_process'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,7 +15,7 @@ const ROOT = path.dirname(HERE)
 
 const BACKEND_BASE = Number(process.env.AIR_SERVER_PORT) || 5175
 const FRONTEND_BASE = Number(process.env.AIR_WEB_PORT) || 5174
-const MAX_PORT_TRIES = 20
+const MAX_KILL_TRIES = 5
 
 function tag(prefix, str) {
   return String(str).split('\n').map(l => l ? `[${prefix}] ${l}` : '').join('\n')
@@ -40,28 +40,60 @@ function isPortFree(port) {
 }
 
 /**
- * 从 startPort 起找第一个可用端口
- * [CONSTRAINT] 上限 MAX_PORT_TRIES 防死循环；全占满则抛错由调用方处理
- * @param {number} startPort 基准端口
- * @returns {Promise<number>}
+ * 杀掉占用指定端口的进程
+ * [WHY] 端口占用时 kill 掉再启动，避免自动切端口导致 vite proxy 端口错位
+ * [CONSTRAINT] Unix 用 lsof -ti；Windows 用 netstat -ano + taskkill；无占用时静默返回 []
+ * @param {number} port 端口号
+ * @returns {number[]} 被杀的 PID 列表
  */
-async function findFreePort(startPort) {
-  for (let i = 0; i < MAX_PORT_TRIES; i++) {
-    const p = startPort + i
-    if (await isPortFree(p)) return p
+function killPortOccupant(port) {
+  const killed = []
+  try {
+    if (process.platform === 'win32') {
+      const out = execSync(`netstat -ano | findstr :${port}`, { encoding: 'utf8' })
+      const pids = new Set()
+      for (const line of out.split('\n')) {
+        const m = line.trim().match(/\s(\d+)\s*$/)
+        if (m && m[1] !== '0') pids.add(m[1])
+      }
+      for (const pid of pids) {
+        try { execSync(`taskkill /F /PID ${pid}`); killed.push(Number(pid)) } catch { /* ignore */ }
+      }
+    } else {
+      const out = execSync(`lsof -ti tcp:${port} -sTCP:LISTEN`, { encoding: 'utf8' }).trim()
+      if (out) {
+        for (const pid of out.split('\n').filter(Boolean)) {
+          try { process.kill(Number(pid), 'SIGKILL'); killed.push(Number(pid)) } catch { /* ignore */ }
+        }
+      }
+    }
+  } catch { /* 无占用或命令不可用 */ }
+  return killed
+}
+
+/**
+ * 确保端口可用：被占用则 kill 占用进程并等待释放
+ * [CONSTRAINT] 上限 MAX_KILL_TRIES 防死循环；占满则抛错由调用方处理
+ * @param {number} port 目标端口
+ * @returns {Promise<number>} 实际使用的端口（即入参）
+ */
+async function ensurePortFree(port) {
+  for (let i = 0; i < MAX_KILL_TRIES; i++) {
+    if (await isPortFree(port)) return port
+    const killed = killPortOccupant(port)
+    if (killed.length === 0) {
+      throw new Error(`端口 ${port} 被占用，但无法定位占用进程（可能权限不足）`)
+    }
+    console.log(`⚠ 端口 ${port} 被占用，已 kill 进程 PID: ${killed.join(', ')}`)
+    // [WHY] kill 后端口未必立即释放，留出 OS 回收窗口再探活
+    await new Promise(r => setTimeout(r, 300))
   }
-  throw new Error(`从 ${startPort} 起连续 ${MAX_PORT_TRIES} 个端口均被占用`)
+  throw new Error(`端口 ${port} 连续 ${MAX_KILL_TRIES} 次 kill 后仍被占用`)
 }
 
 async function main() {
-  const backendPort = await findFreePort(BACKEND_BASE)
-  if (backendPort !== BACKEND_BASE) {
-    console.warn(`⚠ 后端端口 ${BACKEND_BASE} 被占用，自动切到 ${backendPort}`)
-  }
-  const frontendPort = await findFreePort(FRONTEND_BASE)
-  if (frontendPort !== FRONTEND_BASE) {
-    console.warn(`⚠ 前端端口 ${FRONTEND_BASE} 被占用，自动切到 ${frontendPort}`)
-  }
+  const backendPort = await ensurePortFree(BACKEND_BASE)
+  const frontendPort = await ensurePortFree(FRONTEND_BASE)
 
   console.log(`启动后端 (port=${backendPort}) ...`)
   const backend = spawn(process.execPath, [path.join(ROOT, 'scripts/dev-server.mjs')], {

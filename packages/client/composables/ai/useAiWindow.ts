@@ -3,8 +3,6 @@ import { DEFAULT_URL, url } from './useDeepseekUrl'
 import { useSessionManager } from './useSessionManager'
 import { onNewSessionCreated as onNewSessionCreatedImpl } from './auto-loop/handoff.js'
 import { log } from '../../utils/log'
-// [skill-injector-v1] §11.8：发送前把网页层已抓取的 skill 拼进 prompt
-import { prependLoadedSkill } from './useSkillInjector'
 import {
   getActiveWin,
   getActiveWinSid,
@@ -124,9 +122,13 @@ async function _prependFirstPromptRules(prompt: string): Promise<string> {
  * @param prompt 待发送的原始问题；空串直接返回 failed
  * @param opts.forceRules true 时绕过 sid 去重，开新窗时强制注入规则
  */
-export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean }): Promise<FillResult> {
+export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean, images?: string[] }): Promise<FillResult> {
   if (!prompt) return 'failed'
   let finalPrompt = prompt
+  // [image-channel-v2] 图片独立通道 payload；无图片时展开为空对象，不污染 postMessage 载荷
+  // [CONSTRAINT] images 为 DataURL 数组（来自 kind==='image' 的 AttachedFile.content 收集）
+  // [CHANGE-IMPACT] 消费方 sendFillTo / transport.sendFill；接收端未实现则图片丢失，prompt 不受影响
+  const imagePayload = opts?.images?.length ? { images: opts.images } : {}
   try {
     const { sessionId } = useSessionManager()
     const sid = sessionId.value
@@ -137,19 +139,13 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean 
       finalPrompt = await _prependFirstPromptRules(prompt)
     }
   } catch { /* ignore */ }
-  // [skill-injector-v1] §11.8：把网页层抓到的 skill 段拼到 prompt 前（无缓存时原样返回）
-  // [CONSTRAINT] 无条件执行 —— 无论是首问注入规则还是普通发送，只要缓存非空就带上
-  finalPrompt = prependLoadedSkill(finalPrompt)
   useSessionManager().trackMessage('user', finalPrompt)
   await _clipboard.copy(finalPrompt)
   if (isHeadless()) {
-    void loadTransport().then((t) => {
-      try {
-        const tr = t.useAiTransport().transport
-        tr.sendOpen?.(getActiveWinSid(), { url: url.value })
-        tr.sendFill(getActiveWinSid(), { prompt: finalPrompt })
-      } catch { /* swallow: headless 通道无 ACK，发送异常不应回滚剪贴板已复制的内容 */ }
-    })
+    const t = await loadTransport()
+    const tr = t.useAiTransport().transport
+    tr.sendOpen?.(getActiveWinSid(), { url: url.value })
+    tr.sendFill(getActiveWinSid(), { prompt: finalPrompt, ...imagePayload })
     return 'sent'
   }
 
@@ -159,7 +155,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean 
   // 1. 内存里有引用且活着
   let win = getActiveWin()
   if (win && !win.closed) {
-    const r = sendFill({ prompt: finalPrompt }) ? 'sent' : 'failed'
+    const r = sendFill({ prompt: finalPrompt, ...imagePayload }) ? 'sent' : 'failed'
     if (r === 'failed') log.warn('[copyAndFill] B1 sendFill failed sid=', sid, 'name=', name)
     return r
   }
@@ -176,7 +172,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean 
   } catch { /* cross-origin 抛错视为找回失败 */ }
 
   if (win && !win.closed) {
-    const ok1 = sendFill({ prompt: finalPrompt })
+    const ok1 = sendFill({ prompt: finalPrompt, ...imagePayload })
     if (ok1) return 'sent'
   }
 
@@ -184,7 +180,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean 
   const w = openDeepseek()
   if (w) {
     await promiseTimeout(1500)
-    return sendFill({ prompt: finalPrompt }) ? 'opened' : 'failed'
+    return sendFill({ prompt: finalPrompt, ...imagePayload }) ? 'opened' : 'failed'
   }
 
   // 4. 全失败
