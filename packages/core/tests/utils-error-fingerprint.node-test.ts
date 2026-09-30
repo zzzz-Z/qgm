@@ -5,7 +5,7 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fingerprintErrors } from '../../packages/core/src/utils/error-fingerprint.ts'
+import { fingerprintErrors } from '../../../packages/core/src/utils/error-fingerprint.js'
 
 // AIRUNNER-BATCH12-1-EF-COVERAGE
 

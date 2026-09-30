@@ -1,6 +1,21 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Change, Manifest, RunLogEntry } from '../config.js'
+
+/** 文件快照元数据：路径、大小、修改时间、哈希 */
+export interface FileMeta {
+  size: number
+  mtimeMs: number
+  ino: number
+}
+
+/** 工作区快照数据：文件集合 + 统计 */
+export interface SnapshotData {
+  contents: Map<string, string>
+  meta: Map<string, FileMeta>
+}
+
+export type LogChannel = 'runner' | 'pipeline' | 'decisions'
 // AIRUNNER-BATCH4-3A-INLINE-CONST
 // 从 src/config.ts 内联常量；strip-types 无法解析 .js 后缀 import（T6）。
 // 可变路径用 getter（config.setRoot 会写 AI_RUNNER_ROOT 到 env；避免 ESM 常量快照）。
@@ -44,6 +59,11 @@ const BINARY_EXT = new Set([
   '.docx',
 ])
 
+/** 单个快照文件的最大字节数（超过跳过） */
+const MAX_SNAPSHOT_SIZE = 500_000
+/** 日志保留天数 */
+const LOG_KEEP_DAYS = 30
+
 /**
  * 判断相对路径是否命中排除规则（点目录、EXCLUDE_DIRS、EXCLUDE_PREFIX）
  * [CONSTRAINT] 按平台路径分隔符切分后逐段匹配；Windows 下依赖 node path 的 sep 常量正确解出多级目录
@@ -54,22 +74,6 @@ export function isExcluded(rel: string): boolean {
   if (EXCLUDE_PREFIX.some(p => rel === p || rel.startsWith(`${p}/`))) return true
   const parts = rel.split(path.sep)
   return parts.some(seg => EXCLUDE_DIRS.has(seg))
-}
-
-/** 单个快照文件的最大字节数（超过跳过） */
-const MAX_SNAPSHOT_SIZE = 500_000
-
-/** 文件快照元数据：路径、大小、修改时间、哈希 */
-export interface FileMeta {
-  size: number
-  mtimeMs: number
-  ino: number
-}
-
-/** 工作区快照数据：文件集合 + 统计 */
-export interface SnapshotData {
-  contents: Map<string, string>
-  meta: Map<string, FileMeta>
 }
 
 /**
@@ -179,13 +183,11 @@ function countLines(s: string): number {
   }
   return n
 }
-/** 日志文件保留天数（超过清理） */
-const LOG_KEEP_DAYS = 30
-/**
- * 清理超过 LOG_KEEP_DAYS 的日志（仅 .jsonl）；由 ensureDirs 触发
- * [CONSTRAINT] 单项失败不中断其余清理；目录不存在时静默返回
- * [CHANGE-IMPACT] 修改 LOG_KEEP_DAYS 会影响历史日志保留窗口，但不动既存文件
- */
+/** 日志文件保留天数（超过清理） *//**
+                      * 清理超过 LOG_KEEP_DAYS 的日志（仅 .jsonl）；由 ensureDirs 触发
+                      * [CONSTRAINT] 单项失败不中断其余清理；目录不存在时静默返回
+                      * [CHANGE-IMPACT] 修改 LOG_KEEP_DAYS 会影响历史日志保留窗口，但不动既存文件
+                      */
 function gcLogs() {
   try {
     const cutoff = Date.now() - LOG_KEEP_DAYS * 86400000
@@ -281,8 +283,6 @@ export function readManifest(runId: string): Manifest | null {
 
 // [channel-log-v1] PLAN 7.D2 三通道结构化日志（runner/pipeline/decisions）
 /** 日志通道枚举：runner / pipeline / decisions 等 */
-export type LogChannel = 'runner' | 'pipeline' | 'decisions'
-
 /**
  * 追加一条三通道结构化日志到 logs/{channel}.jsonl
  * [CONSTRAINT] 自动注入 ts 字段，调用方 entry 若含 ts 会被覆盖；单行 JSON 便于后续流式解析

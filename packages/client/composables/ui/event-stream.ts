@@ -29,39 +29,14 @@ const MAX_EVENTS = 500
 /** localStorage 键；[CONSTRAINT] 与 loadEvents / saveEvents / clearEvents 三处严格配对，改名会丢历史事件 */
 const STORAGE_KEY = '__ai_event_log'
 
-/**
- * 从 localStorage 反序列化历史事件（最多保留 MAX_EVENTS 条）
- * [CONSTRAINT] SSR / 隐私模式 / 解析失败一律返回空数组，不抛错
- * [CHANGE-IMPACT] 返回数组直接作为 events.value 初值；修改过滤逻辑会影响 seq 峰值计算
- */
-function loadEvents(): StreamEvent[] {
-  try {
-    if (typeof localStorage === 'undefined') return []
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    const arr = JSON.parse(raw)
-    if (!Array.isArray(arr)) return []
-    return arr.slice(-MAX_EVENTS)
-  } catch { return [] }
-}
-
-/**
- * 序列化事件列表到 localStorage（写入前裁剪至 MAX_EVENTS）
- * [CONSTRAINT] 配额超限时静默忽略，事件队列的运行时状态不受影响
- * [WHY] 持久化是为刷新页面后恢复时间线，非业务关键路径，失败不回滚
- * @param list 全量事件列表；内部 slice(-MAX_EVENTS) 后写入
- */
-function saveEvents(list: StreamEvent[]): void {
-  try {
-    if (typeof localStorage === 'undefined') return
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(-MAX_EVENTS)))
-  } catch { /* ignore */ }
-}
-
 /** 事件队列（模块级单例）；[CONSTRAINT] 更新走引用替换（`events.value = [...]`）而非就地 push，确保 shallowRef 语义下的依赖追踪 */
 const events = ref<StreamEvent[]>(loadEvents())
 /** 下一个事件 id；从历史事件峰值续接，避免刷新后 id 重复 */
 let seq = events.value.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0)
+
+// [ask-pending-card] 用户提问 → 生成等待卡 → AI 回复后同 key 原地替换
+/** 本次提问对应的 pending 事件 updateKey；模块级单例，由 useRunner 写入、App.vue 消费 */
+const pendingAskKey = ref('')
 
 /**
  * 派发一个事件入队（可含 updateKey 做原地更新）
@@ -112,9 +87,34 @@ export function clearEvents(): void {
  */
 export function useEventBus() { return { events, emit, clearEvents } }
 
-// [ask-pending-card] 用户提问 → 生成等待卡 → AI 回复后同 key 原地替换
-/** 本次提问对应的 pending 事件 updateKey；模块级单例，由 useRunner 写入、App.vue 消费 */
-const pendingAskKey = ref('')
+/**
+ * 从 localStorage 反序列化历史事件（最多保留 MAX_EVENTS 条）
+ * [CONSTRAINT] SSR / 隐私模式 / 解析失败一律返回空数组，不抛错
+ * [CHANGE-IMPACT] 返回数组直接作为 events.value 初值；修改过滤逻辑会影响 seq 峰值计算
+ */
+function loadEvents(): StreamEvent[] {
+  try {
+    if (typeof localStorage === 'undefined') return []
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return []
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return []
+    return arr.slice(-MAX_EVENTS)
+  } catch { return [] }
+}
+
+/**
+ * 序列化事件列表到 localStorage（写入前裁剪至 MAX_EVENTS）
+ * [CONSTRAINT] 配额超限时静默忽略，事件队列的运行时状态不受影响
+ * [WHY] 持久化是为刷新页面后恢复时间线，非业务关键路径，失败不回滚
+ * @param list 全量事件列表；内部 slice(-MAX_EVENTS) 后写入
+ */
+function saveEvents(list: StreamEvent[]): void {
+  try {
+    if (typeof localStorage === 'undefined') return
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(-MAX_EVENTS)))
+  } catch { /* ignore */ }
+}
 /**
  * 记录本次提问的事件 updateKey（供后续 AI 回包原地替换卡片）
  * [CONSTRAINT] 单值语义 —— 同一时刻只追踪一次提问；并发提问会覆盖上一个 key

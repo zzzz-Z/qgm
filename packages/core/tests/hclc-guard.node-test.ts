@@ -17,7 +17,8 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 // AIRUNNER-BATCH26-5-FIX-PATH-HCLC: 测试在 test/server/，源根在 ../../
-const ROOT = path.resolve(__dirname, '..', '..')
+// [mig-path-v1] 测试从 test/server/ 迁到 packages/core/tests/，__dirname 深一级 → ROOT 需 3 级上溯
+const ROOT = path.resolve(__dirname, '..', '..', '..')
 const SRC = path.join(ROOT, 'packages', 'core', 'src')
 const LIMIT = 8
 

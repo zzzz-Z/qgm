@@ -11,7 +11,7 @@ import {
   markRunning,
   nextRetryDelay,
   SEGMENTS,
-} from '../../packages/core/src/state/pipeline'
+} from '../../../packages/core/src/state/pipeline.js'
 
 const CFG = {
   timeouts: {},

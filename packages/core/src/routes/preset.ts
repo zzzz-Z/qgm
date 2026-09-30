@@ -7,6 +7,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+/** preset 路由的 Hono 实例 */
+export const presetHono = new Hono()
+
 /**
  * 从当前文件位置向上回溯定位 rules/SYSTEM.md
  * @returns 绝对路径；不存在时返回 null（调用方转 404，不抛出以免中断请求）
@@ -23,9 +26,6 @@ function resolvePresetSystemPath(): string | null {
   }
   return null
 }
-
-/** preset 路由的 Hono 实例 */
-export const presetHono = new Hono()
 
 presetHono.get('/preset/system', (c) => {
   const p = resolvePresetSystemPath()

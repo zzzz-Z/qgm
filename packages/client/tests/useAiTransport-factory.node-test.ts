@@ -86,9 +86,9 @@ class WSStub {
 }
 ;(globalThis as unknown as { WebSocket: unknown }).WebSocket = WSStub
 
-let mod: typeof import('../../packages/client/composables/ai/useAiTransport.ts')
+let mod: typeof import('../../../packages/client/composables/ai/useAiTransport')
 beforeAll(async () => {
-  mod = await import('../../packages/client/composables/ai/useAiTransport.ts')
+  mod = await import('../../../packages/client/composables/ai/useAiTransport')
 })
 
 beforeEach(() => {

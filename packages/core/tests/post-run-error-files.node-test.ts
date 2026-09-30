@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/post-run/error-files.node-test.ts 迁至 client/test/post-run-error-files.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { extractErrorFiles } from '../../packages/core/src/post-run/error-files.ts'
+import { extractErrorFiles } from '../../../packages/core/src/post-run/error-files.js'
 
 // 使用项目内确实存在的文件作为命中的目标
 const KNOWN = 'packages/core/src/post-run/error-files.ts'

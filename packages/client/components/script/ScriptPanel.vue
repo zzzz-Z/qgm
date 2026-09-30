@@ -1,5 +1,7 @@
 <template>
   <div ref="paneRef" class="bg-\[var\(--bg\)\] flex pane h-screen overflow-hidden" :class="{ 'is-resizing-side': resizingSide }">
+    <!-- [ai-window-list-v1] 左侧常驻：多 AI 窗口列表（展示 + 激活切换） -->
+    <AiWindowList />
     <!-- 左侧主区域 -->
     <div
       ref="mainRef" class="flex flex-col pane-main flex-1 min-w-0 overflow-hidden" :class="{ 'is-success': fileSuccess }"
@@ -7,7 +9,6 @@
     >
       <!-- 终端 (上方) -->
       <TerminalPane
-
         :running="running"
         :tw-stdout="twStdout"
         :tw-stderr="twStderr"
@@ -15,8 +16,7 @@
         :tw-err-lines="twErrLines"
         :done-summary="doneSummary"
         :line-class="lineClass"
-        :chat-items="[]"
-        :templates="[]"
+        :ai-waiting="aiWaiting"
         @apply-template="applyTemplate"
       />
       <!-- 编辑器 (下方) -->
@@ -33,16 +33,16 @@
       >
         <!-- [abnormal-mount-v1] -->
         <AbnormalView :result="result" />
-        <template #tpl-bar>
+        <template #action-bar>
           <ScriptToolbar
             :templates="[]"
             :running="running"
             :is-loop-active="isLoopActive"
             :loop-paused="loopPaused"
             :auto-takeover-enabled="autoTakeoverEnabled"
-            :auto-takeover-countdown="autoTakeoverCountdown"
             :script="script"
             :attached-files-count="attachedFiles.length"
+            :ai-waiting="aiWaiting"
             @apply-template="applyTemplate"
             @clear-all="clearAll"
             @pause-all="pauseAll"
@@ -126,13 +126,12 @@ import type { AttachedFile } from './attach-manager'
 import { createTreeAttach } from './tree-attach'
 // [preview-manager-v1] 预览/撤回/变更类型已抽到 preview-manager.ts
 import { createPreviewManager } from './preview-manager'
-// [draft-slots-v1] 草稿槽位读写/防抖持久化已抽到 draft-slots.ts
-import { createDraftSlots } from './draft-slots'
 // [side-resize-v1] 侧栏拖拽已抽到 side-resize.ts
 import { createSideResize } from './side-resize'
 // [exec-flow-v1] exec 全流程已抽到 exec-flow.ts
 import { createExecFlow } from './exec-flow'
-import type { DraftSlot } from './draft-slots'
+// [vueuse-timers-v1] 组件内定时器统一走 vueuse：随组件卸载自动清理，省去手动 clear
+import { useIntervalFn, useTimeoutFn } from '@vueuse/core'
 // [script-panel-utils-v2-extracted]
 import { useTwDisplay } from '../../composables/ui/useTwDisplay'
 import TerminalPane from './TerminalPane.vue'
@@ -147,17 +146,16 @@ import { useAutoLoop } from '../../composables/ai/useAutoLoop'
 import { useAiWaiting } from '../../composables/ai/useAiWaiting'
 import { copyAndFill } from '../../composables/ai/useAiWindow'
 import { useAutoTakeover } from '../../composables/ai/useAutoTakeover'
-import { useEventBus } from '../../composables/ui/useEventStream'
+import { emit as emitBus, useEventBus } from '../../composables/ui/useEventStream'
 import { useCodeCleaner } from '../../composables/runner/useCodeCleaner'
-import { useSessionManager } from '../../composables/ai/useSessionManager'
-import { detectLang, parseScriptMeta } from '../../utils/scriptMeta'
 import { LS_SIDE_WIDTH_KEY } from '../../utils/storage'
 import { isReadonlyResult } from '../../composables/runner/useRunFeedback'
 import { parseErrorLocations } from '../../utils/contextBuilder'
-import { fnv1a8 } from '../../utils/hash'
 import { useToast } from '../../composables/ui/useToast'
 import { setLastAutoFilled } from '../../composables/runner/useScriptInbox'
 import SidePane from '../panels/SidePane.vue'
+// [ai-window-list-v1] 左侧常驻多窗口面板
+import AiWindowList from '../panels/AiWindowList.vue'
 import DiffOverlay from '../diff/DiffOverlay.vue'
 
 defineOptions({ name: 'ScriptPanel' })
@@ -203,7 +201,6 @@ const lastDuration = ref('')
 const runningElapsed = ref('')
 /** 当前正在执行的命令 */
 const runningCommand = ref('')
-let elapsedTimer: ReturnType<typeof setInterval> | null = null
 let runStartAt = 0
 /** 侧栏标签页 */
 const sideTab = ref<'tree' | 'changes'>('tree')
@@ -220,16 +217,11 @@ const chatListRef = ref<HTMLElement | null>(null)
 /** 树展开的 stream id 集合 */
 const treeExpanded = ref<Set<number>>(new Set())
 
-// ── 附件 / 命令历史 / 草稿 / 滚动 ref ──
+// ── 附件 / 命令历史 / 滚动 ref ──
 
 /* [attachments] 附件：粘贴图片 / 拖文件 → tag 展示；发送时文本内容拼入脚本 */
 /** 附件列表 */
 const attachedFiles = ref<AttachedFile[]>([])
-// [P2-2b] draft slots API
-/** 草稿槽位列表（多份草稿切换） */
-const draftSlots = ref<DraftSlot[]>([])
-/** 活动草稿 id */
-const activeDraftId = ref<string>('default')
 /** 终端自动滚动开关 */
 const autoScroll = ref(true)
 
@@ -248,14 +240,16 @@ const statusClass = ref('')
 const { toast, confirmDialog } = useToast()
 // U.3: CodeMirror 全家桶懒加载——首建编辑器时才 await import，CM 打进独立 chunk
 
-const { script, lastRunCode, running, result, changes, rolling, busyAll, persistWarning, liveStdout, liveStderr, doneSummary, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback } = useRunner()
-const { enabled: autoTakeoverEnabled, countdown: autoTakeoverCountdown, enable: enableAutoTakeover, disable: disableAutoTakeover, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
+// [unused-cleanup-v1] 已删 persistWarning：文件内无消费点
+const { script, lastRunCode, running, result, changes, rolling, busyAll, liveStdout, liveStderr, doneSummary, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback } = useRunner()
+// [no-delay-v2] 已删除 countdown（延迟机制移除）
+const { enabled: autoTakeoverEnabled, enable: enableAutoTakeover, disable: disableAutoTakeover, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
 // [cmd-history-v1] 命令历史簇
 const { pushCmdHistory, cmdHistoryPrev, cmdHistoryNext } = createCmdHistory({ script })
 // [attach-manager-v1] 附件簇（attachedFiles 由本组件持有，供 addTreePaths 等共享）
 const { removeAttach, clearAll, onEditorPaste, onDesktopDrop } = createAttachManager({ attachedFiles, script, fileSuccess })
 // [tree-attach-v1] 树拖入 / 目录展开 / 脚本拼装（attachedFiles 由本组件持有）
-const { onTreeDrop, buildScriptWithAttachments } = createTreeAttach({ attachedFiles })
+const { onTreeDrop, buildPromptWithAttachments } = createTreeAttach({ attachedFiles })
 // [preview-manager-v1] 预览/撤回（previewFile/Before/After 由本组件持有）
 const { getChangeType, onPreviewFile, onRollback, onRollbackAll } = createPreviewManager({
   changes,
@@ -266,8 +260,6 @@ const { getChangeType, onPreviewFile, onRollback, onRollbackAll } = createPrevie
   rollback,
   rollbackAll,
 })
-// [draft-slots-v1] 草稿槽位（script/draftSlots/activeDraftId 由本组件持有）
-const { readDraftSlots, readActiveDraftId, upsertDraftSlot } = createDraftSlots({ script, draftSlots, activeDraftId })
 // [side-resize-v1] 侧栏拖拽（paneRef/sideWidth/sideWidthBase/resizingSide 由本组件持有）
 const { onSideDown, dispose: disposeSideResize } = createSideResize({
   paneRef,
@@ -278,7 +270,7 @@ const { onSideDown, dispose: disposeSideResize } = createSideResize({
 })
 
 // ── 领域 composable ──
-const { maybeRotateSession } = useSessionManager()
+// [unused-cleanup-v1] 已删 maybeRotateSession：文件内无消费点
 const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
 const { events: busEvents } = useEventBus()
 const { stripComments, stripBlankLines } = useCodeCleaner()
@@ -287,7 +279,6 @@ const { stripComments, stripBlankLines } = useCodeCleaner()
 const { twStdout, twStderr, twLines, twErrLines } = useTwDisplay(liveStdout, liveStderr)
 const {
   loopState,
-  stopReason,
   isLoopActive,
   // [sp-autopause-v1] 回车/发送后进入暂停态：暴露 loopPaused 与 requestPause
   requestPause,
@@ -300,6 +291,17 @@ const {
   // [sp-send-after-softpause-v1] 无活跃循环时复位 softPause 残留
   clearSoftPause,
 } = useAutoLoop()
+// [vueuse-timers-v1] 运行计时器：组件级 scope，卸载自动清理（等价原 onBeforeUnmount clearInterval）
+const { pause: pauseElapsed, resume: resumeElapsed } = useIntervalFn(() => {
+  const s = (performance.now() - runStartAt) / 1000
+  runningElapsed.value = `${s.toFixed(1)}s`
+}, 100, { immediate: false })
+
+// [vueuse-timers-v1] fileSuccess 闪烁复位：1500ms 后置 false；重复 start 内部自动重启
+const { start: scheduleFileSuccessReset } = useTimeoutFn(() => {
+  fileSuccess.value = false
+}, 1500, { immediate: false })
+
 // [exec-flow-v1] exec 全流程（refs 由本组件持有）
 const { copyOutput } = createExecFlow({
   running,
@@ -488,14 +490,23 @@ async function runSmart() {
     return
   }
   const text = attachedFiles.value.length
-    ? await buildScriptWithAttachments(rawScript, attachedFiles.value)
+    ? await buildPromptWithAttachments(rawScript, attachedFiles.value)
     : rawScript
   const r = await copyAndFill(text)
   if (r === 'failed') {
     toast('发送失败：AI 窗口未打开或已关闭', 'warn', 4000)
     return
   }
+  // [ask-display-v1] 提问上屏：发送成功后写 ai:ask 事件，由 TerminalPane.timelineItems 渲染
+  // [CONSTRAINT] 必须在 copyAndFill 成功后（失败已 return）；payload.text 用 rawScript 原文而非拼接后 text
+  // [CHANGE-IMPACT] 与 TerminalPane 的 ai:ask 渲染分支成对；kind 已在 EventKind 白名单
+  emitBus('ai:ask', rawScript.slice(0, 40), { payload: { text: rawScript } })
   startAiWaiting()
+  // [clear-after-send-v3] 发送成功后清空编辑器；草稿槽位功能已移除
+  // [WHY] 用户明确不需要草稿；清空即为最终状态，不再被 onMounted 回填
+  // [CONSTRAINT] 仅在 copyAndFill 成功后执行（失败分支已提前 return，不误清用户内容）
+  // [CHANGE-IMPACT] 移除了对 draft-slots 的依赖；AI 回填仍走 inbox.applyToEditor 的 current==='' 安全覆盖分支
+  script.value = ''
 }
 
 watch(
@@ -557,18 +568,6 @@ if (typeof window !== 'undefined') {
 }
 
 onMounted(() => {
-  // [P2-2b] 草稿槽位恢复
-  try {
-    draftSlots.value = readDraftSlots()
-    const activeSaved = readActiveDraftId()
-    if (activeSaved) activeDraftId.value = activeSaved
-    const cur = draftSlots.value.find(s => s.id === activeDraftId.value)
-    if (cur && !script.value) script.value = cur.text
-    // 首启：当前 script 内容入 default 槽
-    if (!draftSlots.value.some(s => s.id === activeDraftId.value)) {
-      upsertDraftSlot(activeDraftId.value, script.value || '')
-    }
-  } catch { /* ignore */ }
   try {
     const savedW = localStorage.getItem(SIDE_WIDTH_KEY)
     if (savedW) {
@@ -588,7 +587,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disposeSideResize()
-  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
+  // [vueuse-timers-v1] elapsedTimer 已由 useIntervalFn 内部在组件卸载时自动 pause，无需手动清理
 
   window.removeEventListener('ai-runner:auto-run', onAutoRun)
   window.removeEventListener('keydown', onGlobalKey)
@@ -602,13 +601,10 @@ watch(running, (v) => {
     statusClass.value = ''
     lastDuration.value = ''
     runningElapsed.value = '0.0s'
-    if (elapsedTimer) clearInterval(elapsedTimer)
-    elapsedTimer = setInterval(() => {
-      const s = (performance.now() - runStartAt) / 1000
-      runningElapsed.value = `${s.toFixed(1)}s`
-    }, 100)
+    // [vueuse-timers-v1] resume 等价 setInterval 启动；重复 resume 幂等（内部判断 isActive）
+    resumeElapsed()
   } else if (result.value) {
-    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
+    pauseElapsed()
     runningElapsed.value = ''
     const ms = performance.now() - runStartAt
     lastDuration.value = ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`
@@ -645,14 +641,7 @@ watch(running, (v) => {
       const scriptSnapshot = lastRunCode.value || lastRunScript.value || script.value
       // 把跑过的脚本记为「已消费」，让后续 AI 回填能直接覆盖（不误伤手动编辑）
       setLastAutoFilled(scriptSnapshot)
-      const r = result.value
-      // 兼容旧脚本只写 // @desc；新脚本可能 // 或 #，从 result.value.scriptDesc/scriptWhy 拿（server 已解析）
-      const sm = parseScriptMeta(scriptSnapshot)
-      const desc = r.scriptDesc || sm.desc
-      const why = r.scriptWhy || sm.why
-      const lang = detectLang(scriptSnapshot)
-      // 计算 hash（与油猴脚本一致：FNV-1a 8 hex）
-      const hash = fnv1a8(scriptSnapshot)
+      // [dead-code-v3] 已删 desc/why/lang/hash 块：grep 证实在文件内无第二消费点
     }
   }
 })
@@ -681,7 +670,7 @@ function onHtmlDrop(e: DragEvent) {
     script.value += text
   }
   fileSuccess.value = true
-  setTimeout(() => { fileSuccess.value = false }, 1500)
+  scheduleFileSuccessReset()
 }
 </script>
 

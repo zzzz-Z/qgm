@@ -132,6 +132,20 @@ export function detectReplyInPage() {
     return null
   }
 
+  // [code-text-clean-v1] 从 <code class="language-xxx"> 直接判语言
+  // [WHY] DeepSeek 代码块头的语言标签/复制按钮不进入 <code> 元素，取 className 比邻近 DOM 探测更可靠
+  // [CONSTRAINT] 只认 js/bash 两种（与 extractLatestScript 白名单一致），其余返回 null 交给后续探测
+  // [CHANGE-IMPACT] 与 guessLangFromDom / guessLangFromContent 组成三级回退，改单级不影响其他级；
+  //                与 scripts/tampermonkey-session-id.user.js 同名函数保持同步，避免双通道行为分叉
+  function guessLangFromClass(el: Element | null): string | null {
+    if (!el || !el.className) return null
+    const m = String(el.className).match(/(?:language|lang)-([a-z0-9+#-]+)/i)
+    if (!m) return null
+    const raw = m[1].toLowerCase()
+    if (raw === 'bash' || raw === 'sh' || raw === 'shell' || raw === 'zsh') return 'bash'
+    if (raw === 'js' || raw === 'javascript' || raw === 'node' || raw === 'mjs' || raw === 'cjs') return 'js'
+    return null
+  }
   function guessLangFromDom(pre) {
     let sib = pre.previousElementSibling
     for (let i = 0; i < 3 && sib; i++, sib = sib.previousElementSibling) {
@@ -161,39 +175,18 @@ export function detectReplyInPage() {
     return null
   }
 
-  // [done-in-head-v1] 从脚本头提取 @done 标记 + 后续连续注释作为 md 总结
-  function extractDoneFromHead(code: string): { md: string, tags: Record<string, string> } | null {
-    const lines = String(code || '').split(/\r?\n/)
-    let start = -1
-    for (let i = 0; i < lines.length; i++) {
-      if (/^[ \t]*(?:\/\/|#)[ \t]*@done\b/.test(lines[i])) { start = i; break }
-    }
-    if (start === -1) return null
-    const raw: string[] = []
-    const tags: Record<string, string> = {}
-    let curTag: string | null = null
-    let curVal: string[] = []
-    for (let i = start; i < lines.length; i++) {
-      const m = lines[i].match(/^[ \t]*(?:\/\/|#)[ \t]?(.*)$/)
-      if (!m) break
-      const content = m[1]
-      raw.push(content)
-      const tagPrefix = content.match(/^@([\w-]+)/)
-      if (tagPrefix) {
-        if (curTag) tags[curTag] = curVal.join('\n').trim()
-        curTag = tagPrefix[1]
-        curVal = [content.slice(tagPrefix[0].length).trim()]
-      } else if (curTag) {
-        curVal.push(content)
-      }
-    }
-    if (curTag) tags[curTag] = curVal.join('\n').trim()
-    return { md: raw.join('\n'), tags }
-  }
-
   /** 检测文本是否含 js 代码块（SYSTEM.md §1 接收端容错） */
   function hasJsFence(text: string): boolean {
     return /```js\b/.test(String(text || ''))
+  }
+
+  // [ask-in-plain-v1] 交互提问豁免：纯 Markdown 无围栏同样需推送
+  // [WHY] hasJsFence 门槛是为过滤纯问候语，但以指定前缀开头的文本是需用户响应的正式指令，必须放行
+  // [CONSTRAINT] 只匹配首个非空行的前缀（词边界）；与 utils/ask-parser.ts 对齐
+  function isAskPrefix(text: string): boolean {
+    const s = String(text || '')
+    const firstLine = s.split(/\r?\n/).find(l => l.trim().length > 0) || ''
+    return /^\s*@ask\b/i.test(firstLine)
   }
 
   function extractLatestScript() {
@@ -204,17 +197,21 @@ export function detectReplyInPage() {
     let last = null
     let lastMarked = null
     for (const pre of pres) {
-      const text = (pre.textContent || '').replace(/^\n+|\n+$/g, '')
+      // [code-text-clean-v1] 优先从 <pre><code> 取文本，避开代码块头的语言标签与「复制/下载」按钮文字
+      // [WHY] pre.textContent 会把头部按钮文字并入首行，污染后 #! 锚点失配、语言判定失败导致整块跳过
+      // [CONSTRAINT] 无 code 子元素时回退 pre 本身；text 变量名保持，后续 hash/done 提取均复用同一字符串
+      const codeEl = pre.querySelector('code') || pre
+      const text = (codeEl.textContent || '').replace(/^\n+|\n+$/g, '')
       if (!text) continue
       if (!text.includes('\n') && text.length < 120) continue
-      const lang = guessLangFromDom(pre) || guessLangFromContent(text) || null
+      // [code-text-clean-v1] 语言判定三级回退：className → DOM 邻近探测 → 内容特征
+      const lang = guessLangFromClass(codeEl) || guessLangFromDom(pre) || guessLangFromContent(text) || null
       if (lang !== 'js' && lang !== 'bash') continue
       let _h
       const _cached = dedup._preCache.get(pre)
       if (_cached && _cached.len === text.length) { _h = _cached.hash }
       else { _h = hash32(text); dedup._preCache.set(pre, { len: text.length, hash: _h }) }
-      const _headDone = extractDoneFromHead(text)
-      const item = { lang, code: text, hash: _h, isDone: Boolean(_headDone), doneMd: _headDone ? _headDone.md : '' }
+      const item = { lang, code: text, hash: _h }
       last = item
       const marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
         || /^\s*\/\/\s*@desc\s*:/m.test(text)
@@ -265,22 +262,75 @@ export function detectReplyInPage() {
       return ''
     } catch { return '' }
   }
-  /** 查找新已完成 */
+  /**
+   * DOM → Markdown 反推：SYSTEM.md §8 允许 AI 输出纯 Markdown 总结，但 DOM 抓取会丢换行
+   * [WHY] textContent 会把 <h3>/<p>/<ul> 全部粘成一整行；需按标签结构重建 Markdown 源码
+   * [CONSTRAINT] 只覆盖 DeepSeek 渲染使用的常见标签；未知标签递归取子节点文本（兜底）
+   * [CHANGE-IMPACT] 输出直接喂给前端 renderMarkdown，标签→语法映射必须与其对齐
+   */
+  function elToMd(node: Node | null): string {
+    if (!node) return ''
+    if (node.nodeType === 3) return node.textContent || ''
+    if (node.nodeType !== 1) return ''
+    const el = node as Element
+    const tag = el.tagName.toLowerCase()
+    const inner = (): string => Array.from(el.childNodes).map(c => elToMd(c)).join('')
+    if (tag === 'br') return '\n'
+    if (tag === 'hr') return '\n---\n\n'
+    if (/^h[1-6]$/.test(tag)) return `${'#'.repeat(Number(tag.charAt(1)))} ${inner().trim()}\n\n`
+    if (tag === 'p') return `${inner().trim()}\n\n`
+    if (tag === 'ul' || tag === 'ol') {
+      const out: string[] = []
+      let i = 1
+      for (const c of Array.from(el.children)) {
+        if (c.tagName.toLowerCase() !== 'li') continue
+        out.push((tag === 'ul' ? '- ' : `${i++}. `) + elToMd(c).trim())
+      }
+      return `${out.join('\n')}\n\n`
+    }
+    if (tag === 'pre') {
+      const code = el.querySelector('code')
+      const cls = code ? String(code.className || '') : ''
+      const m = cls.match(/language-([a-z0-9]+)/i)
+      const src = (code || el).textContent || ''
+      return `\`\`\`${m ? m[1] : ''}\n${src.replace(/\n+$/g, '')}\n\`\`\`\n\n`
+    }
+    if (tag === 'code') return `\`${el.textContent || ''}\``
+    if (tag === 'blockquote') return `${inner().split('\n').map((l: string) => `> ${l}`).join('\n')}\n\n`
+    if (tag === 'table') {
+      const rows: string[] = []
+      for (const tr of Array.from(el.querySelectorAll('tr'))) {
+        rows.push(`| ${Array.from(tr.children).map(c => elToMd(c).trim()).join(' | ')} |`)
+      }
+      return `${rows.join('\n')}\n\n`
+    }
+    return inner()
+  }
+
+  /** 从容器节点提取 Markdown；传入 document 时自动取 body */
+  function extractReplyMd(root: Node | null): string {
+    if (!root) return ''
+    const node: Node | null = root.nodeType === 9 ? (root as Document).body : root
+    if (!node) return ''
+    return elToMd(node).replace(/\n{3,}/g, '\n\n').trim()
+  }
+
+  /**
+   * 查找新已完成
+   * [done-plain-v1] SYSTEM.md §8 新协议：首行严格 DONE + 后续 Markdown 总结（无需 js 围栏）
+   * [CONSTRAINT] 只取最后一条 assistant 消息；首非空行 trim 后必须恰为 DONE
+   * [CHANGE-IMPACT] marker 用首 200 字符 + 全长拼接；text 为 DOM→Markdown 反推结果（含换行）
+   */
   function findNewDone() {
-    // 只扫最后一条 assistant 消息
     const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
     const root = blocks.length > 0 ? blocks[blocks.length - 1] : document
-    const nodes = root.querySelectorAll('div,p,span,li')
-    let found = null
-    for (const el of nodes) {
-      if (el.children.length > 0) continue
-      const t = (el.textContent || '').trim()
-      if (!/^\s*DONE\s*$/.test(t)) continue
-      const marker = hash32(`${t}|${(el.outerHTML || '').slice(0, 120)}`)
-      if (dedup.seenDoneMarkers.includes(marker)) continue
-      found = { marker, text: String(root.textContent || '').trim() } // [done-with-summary]
-    }
-    return found
+    const full = extractReplyMd(root)
+    if (!full) return null
+    const firstLine = full.split(/\r?\n/).find(l => l.trim().length > 0) || ''
+    if (!/^\s*DONE\s*$/.test(firstLine)) return null
+    const marker = hash32(`done-head|${full.slice(0, 200)}|${full.length}`)
+    if (dedup.seenDoneMarkers.includes(marker)) return null
+    return { marker, text: full }
   }
 
   function bodySignature() {
@@ -300,7 +350,7 @@ export function detectReplyInPage() {
       dedup._pendingScriptHash = null
       dedup.seenHashes.push(script.hash)
       dedup.lastBodySig = bodySignature()
-      return { kind: 'script', code: script.code, lang: script.lang, hash: script.hash, isDone: Boolean((script as { isDone?: boolean }).isDone), doneMd: String((script as { doneMd?: string }).doneMd || ''), reasoning: extractLatestReasoning() }
+      return { kind: 'script', code: script.code, lang: script.lang, hash: script.hash, reasoning: extractLatestReasoning() }
     }
     dedup._pendingScriptHash = script.hash
     return null
@@ -310,7 +360,7 @@ export function detectReplyInPage() {
   if (doneMarker) {
     dedup.seenDoneMarkers.push(doneMarker.marker)
     dedup.lastBodySig = bodySignature()
-    if (!hasJsFence(doneMarker.text)) return null
+    // [done-plain-v1] 不再要求 js 围栏：SYSTEM.md §8 已允许纯 Markdown 总结
     return { kind: 'done', text: doneMarker.text, reasoning: extractLatestReasoning() }
   }
 
@@ -327,7 +377,7 @@ export function detectReplyInPage() {
   dedup._stableCount = (dedup._stableCount || 0) + 1
   if (dedup._stableCount < 3) return null
   const plainText = getMainText()
-  if (!hasJsFence(plainText)) return null
+  if (!hasJsFence(plainText) && !isAskPrefix(plainText)) return null
   dedup._plainSentInCycle = true
   return { kind: 'plain', text: plainText, reasoning: extractLatestReasoning() }
 

@@ -7,15 +7,6 @@ import ts from 'typescript'
 // 与 config.ts 的初始值一致（setRoot 未调用时）
 // 从 env 读 ROOT，避免 strip-types 下 import config 失败
 
-/**
- * 读取项目根目录（优先 env.AI_RUNNER_ROOT，回落 cwd）
- * [WHY] 内联而非 import config.ts：--experimental-strip-types 不重写 .js → .ts 路径，import 会失败
- * [CONSTRAINT] config.setRoot 调用后 env 会变，此处每次读 env 以保证与主进程一致
- */
-function getRoot(): string {
-  return process.env.AI_RUNNER_ROOT || process.cwd()
-}
-
 /** 失败指纹：错误位置与所属符号的规范化表示 */
 export interface Fingerprint {
   file: string
@@ -25,6 +16,14 @@ export interface Fingerprint {
   kind: 'function' | 'class' | 'method' | 'arrow' | 'variable' | 'top'
 }
 
+/**
+ * 读取项目根目录（优先 env.AI_RUNNER_ROOT，回落 cwd）
+ * [WHY] 内联而非 import config.ts：--experimental-strip-types 不重写 .js → .ts 路径，import 会失败
+ * [CONSTRAINT] config.setRoot 调用后 env 会变，此处每次读 env 以保证与主进程一致
+ */
+function getRoot(): string {
+  return process.env.AI_RUNNER_ROOT || process.cwd()
+}
 /**
  * 用 TS AST 定位某行所属的最内层具名符号
  * [WHY] 遍历所有节点，取包含目标行且跨度最小的符号 —— 保证拿到最内层嵌套函数而非外层类

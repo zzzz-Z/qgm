@@ -2,7 +2,7 @@
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/scriptMeta.node-test.ts 迁至 test/scriptMeta.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { detectLang, parseScriptMeta } from '../../packages/client/utils/scriptMeta.ts'
+import { detectLang, parseScriptMeta } from '../../../packages/client/utils/scriptMeta'
 
 // AIRUNNER-BATCH15-5-SCRIPT-META
 const NL = String.fromCharCode(10)
@@ -12,7 +12,7 @@ test('parseScriptMeta: 空字符串 → 全字段空串', () => {
 })
 
 test('parseScriptMeta: js 风格 // 注释解析', () => {
-  const code = ['#!/usr/bin/env node', '// @desc: 解析脚本头', '// @why: 需要展示', '// @plan: b1', '// @done: 无错', 'console.log(1)'].join(NL)
+  const code = ['#!/usr/bin/env node', '// @desc: 解析脚本头', '// @why: 需要展示', '// @plan: b1', 'console.log(1)'].join(NL)
   const m = parseScriptMeta(code)
   assert.equal(m.desc, '解析脚本头')
   assert.equal(m.why, '需要展示')

@@ -8,7 +8,6 @@ import UnoCSS from 'unocss/vite'
 import vue from '@vitejs/plugin-vue'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { aiRunner } from '../../apps/vite-plugin/src/index.js'
 
 /** client根目录 */
 const CLIENT_ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -56,7 +55,5 @@ export default defineConfig({
   plugins: [
     UnoCSS({ configFile: path.resolve(CLIENT_ROOT, 'uno.config.ts') }),
     vue(),
-    // 若 BACKEND 未启动，可设 AIR_INPROCESS_PLUGIN=1 让 aiRunner 插件内嵌兜底
-    ...(process.env.AIR_INPROCESS_PLUGIN ? [aiRunner({ root: PKG_ROOT })] : []),
   ],
 })

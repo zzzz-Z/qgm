@@ -14,6 +14,23 @@ interface ToastItem {
   icon: string
 }
 
+interface ConfirmOptions {
+  detail?: string
+  okText?: string
+  cancelText?: string
+  type?: 'danger' | 'default'
+}
+
+interface ConfirmState {
+  msg: string
+  detail?: string
+  okText: string
+  cancelText: string
+  danger: boolean
+  icon: string
+  resolve: (v: boolean) => void
+}
+
 /** toast 类型 → 单字符图标；扩 ToastType 时必须同步补 key，否则渲染 undefined */
 const ICONS: Record<ToastType, string> = {
   info: 'i',
@@ -22,13 +39,17 @@ const ICONS: Record<ToastType, string> = {
   error: '✗',
 }
 
-/** 当前展示的提示列表；模块级单例，多组件共享同一队列 */
-const toasts = ref<ToastItem[]>([])
 let toastSeq = 0
 /** 最多同时可见条数；超出时淘汰最旧（见 evict） */
 const MAX_VISIBLE = 3
 /** 每条提示的自动关闭定时器；[CONSTRAINT] key = toast.id，随 toast 生命周期同步 set/delete，防 Map 泄漏 */
 const timers = new Map<number, ReturnType<typeof setTimeout>>()
+
+/** 当前展示的提示列表；模块级单例，多组件共享同一队列 */
+const toasts = ref<ToastItem[]>([])
+
+/** 全局确认弹窗状态；null 表示未展示，同一时刻仅一个（见 confirmDialog 的单例约定） */
+const confirmState = ref<ConfirmState | null>(null)
 
 /** 停止并移除某条 toast 的关闭定时器；[CONSTRAINT] 必须与 timers.delete 同时调用，否则旧 timer 会残留触发 */
 function clearTimer(id: number) {
@@ -89,26 +110,6 @@ export function dismissToast(id: number) {
   if (i >= 0) toasts.value.splice(i, 1)
   clearTimer(id)
 }
-
-interface ConfirmOptions {
-  detail?: string
-  okText?: string
-  cancelText?: string
-  type?: 'danger' | 'default'
-}
-
-interface ConfirmState {
-  msg: string
-  detail?: string
-  okText: string
-  cancelText: string
-  danger: boolean
-  icon: string
-  resolve: (v: boolean) => void
-}
-
-/** 全局确认弹窗状态；null 表示未展示，同一时刻仅一个（见 confirmDialog 的单例约定） */
-const confirmState = ref<ConfirmState | null>(null)
 
 /**
  * 打开确认弹窗并返回用户选择

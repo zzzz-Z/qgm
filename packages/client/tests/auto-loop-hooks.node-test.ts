@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { runHook } from '../../packages/client/composables/ai/auto-loop/hooks.ts'
+import { runHook } from '../../../packages/client/composables/ai/auto-loop/hooks'
 
 // AIRUNNER-BATCH34-2-AUTO-LOOP-HOOKS
 

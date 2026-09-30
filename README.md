@@ -27,7 +27,7 @@
 
 ---
 
-> 规则契约与 AI 协作约定见 [`SYSTEM.md`](./SYSTEM.md) 与 [`AGENTS.md`](./AGENTS.md)。
+> 规则契约与 AI 协作约定见 [`SYSTEM.md`](./packages/core/src/rules/SYSTEM.md) 与 [`AGENTS.md`](./AGENTS.md)。
 > 打包使用 / 环境变量 / 部署见 [`docs/USAGE.md`](./docs/USAGE.md)。
 
 ## 一、快速开始
@@ -362,7 +362,7 @@ pnpm retention:apply    # 保留策略执行
 - **加 HTTP 端点**：在 [`packages/core/src/routes/`](./packages/core/src/routes/) 新建或修改 Hono 路由，在 [`routes/index.ts`](./packages/core/src/routes/index.ts) 的 `HONO_SUB_APPS` 与 `HONO_PREFIXES` 注册
 - **加面板**：新建 `packages/client/components/panels/XxxPanel.vue`，在 [`packages/client/App.vue`](./packages/client/App.vue) 的 Tab 联合类型与 `<nav class="tabs">` 注册
 - **加 skill**：丢一个 `.md` 到 `skills/`（内置）或项目的 `.ai-runner/skills/`（用户级），刷新即加载
-- **加规则**：修改 [`SYSTEM.md`](./SYSTEM.md)，在头部 `version:` 字段升版，代码注释里的 `§N.M` 引用同步更新
+- **加规则**：修改 [`SYSTEM.md`](./packages/core/src/rules/SYSTEM.md)，在头部 `version:` 字段升版，代码注释里的 `§N.M` 引用同步更新
 
 ---
 

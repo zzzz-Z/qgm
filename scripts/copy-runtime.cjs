@@ -15,4 +15,14 @@ for (const f of files) {
   if (fs.existsSync(src)) { fs.copyFileSync(src, dst); console.log(`copied ${f}`); copied++ }
   else { console.log(`skip (missing) ${f}`) }
 }
+// [preset-rules-fix] 原注释承诺复制 rules/SYSTEM.md，但代码遗漏 → /__ai/preset/system 404
+const rulesSrc = path.join(ROOT, 'packages', 'core', 'src', 'rules', 'SYSTEM.md')
+const rulesDstDir = path.join(distDir, 'rules')
+if (fs.existsSync(rulesSrc)) {
+  fs.mkdirSync(rulesDstDir, { recursive: true })
+  fs.copyFileSync(rulesSrc, path.join(rulesDstDir, 'SYSTEM.md'))
+  console.log('copied rules/SYSTEM.md')
+} else {
+  console.log('skip (missing) rules/SYSTEM.md')
+}
 console.log(`copy-runtime done: ${copied}/${files.length}`)

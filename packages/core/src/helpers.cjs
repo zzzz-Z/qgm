@@ -290,7 +290,26 @@ const __AI__ = {
   // [browser-api-v1] 三通道并列：browser.cssom/screenshot（走独立 CLI 子进程）
   browser: {
     _run(cmd, args) {
-      const bin = path.join(__dirname, '..', 'bin', 'headless-cli.cjs')
+      // [browser-cli-path-fix] 原写法「从 __dirname 上溯 ../bin」依赖相对位置；
+      //   standalone 宿主下 __dirname 为 apps/standalone/dist，推导出 apps/standalone/bin/...（不存在，MODULE_NOT_FOUND）。
+      //   改为多候选探测：env 显式指定 → 从 __dirname 逐级上溯找 bin/headless-cli.cjs → cwd/bin → 保底原逻辑。
+      const bin = (function resolveHeadlessCli() {
+        const fsx = require('node:fs')
+        if (process.env.AI_RUNNER_HEADLESS_CLI && fsx.existsSync(process.env.AI_RUNNER_HEADLESS_CLI)) {
+          return process.env.AI_RUNNER_HEADLESS_CLI
+        }
+        let d = __dirname
+        for (let i = 0; i < 6; i++) {
+          const p = path.join(d, 'bin', 'headless-cli.cjs')
+          if (fsx.existsSync(p)) return p
+          const up = path.dirname(d)
+          if (up === d) break
+          d = up
+        }
+        const c = path.resolve(process.cwd(), 'bin', 'headless-cli.cjs')
+        if (fsx.existsSync(c)) return c
+        return path.join(__dirname, '..', 'bin', 'headless-cli.cjs')
+      })()
       const r = execFileSync(process.execPath, [bin, cmd].concat(args), {
         cwd: process.cwd(),
         encoding: 'utf8',
@@ -505,6 +524,27 @@ const __AI__ = {
   clearReadCache() {
     for (const k in _rcMem) delete _rcMem[k]
     return true
+  },
+  // [skill-load-v1] SYSTEM.md §11.4：沙箱侧唯一职责 —— 接收网页层已拼装裁剪的 content，幂等追加到文件
+  // [CONSTRAINT] 只做：非空校验 + 完全一致去重 + 追加落盘；不解析格式、不校验来源、不二次裁剪
+  // [CHANGE-IMPACT] 落盘路径 .ai-runner/loaded-skill.md 会被后续脚本通过 __AI__.readText 消费
+  loadSkill(content) {
+    const s = typeof content === 'string' ? content : ''
+    if (!s) return { ok: false, reason: 'invalid-content' }
+    const p = path.join(process.cwd(), '.ai-runner', 'loaded-skill.md')
+    let prev = ''
+    try { prev = fs.readFileSync(p, 'utf8') } catch { prev = '' }
+    // 完全一致 → 幂等跳过
+    if (prev === s || prev.endsWith(`\n\n---\n\n${s}`)) return { ok: true, skipped: true }
+    const next = prev ? `${prev}\n\n---\n\n${s}` : s
+    try {
+      fs.mkdirSync(path.dirname(p), { recursive: true })
+      fs.writeFileSync(p, next, 'utf8')
+      _changelog('skill-load', p, { bytes: s.length })
+      return { ok: true, bytes: s.length, path: p }
+    } catch (e) {
+      return { ok: false, reason: String(e) }
+    }
   },
 }
 global.__AI__ = __AI__

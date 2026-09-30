@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @desc 能力自知：从 @desc/@why/@done 抽「把握度代理信号」，对比实际 exitCode，输出校准曲线
+// @desc 能力自知：从 @desc/@why 抽「把握度代理信号」，对比实际 exitCode，输出校准曲线
 // @why tier3-1：元机制三 能力自知；把握度自评 + 校准曲线 + 不确定性传递
 // 用法: node scripts/analyze-confidence.cjs
 
@@ -34,10 +34,10 @@ const EVIDENCE = /(?:exit|code)[^\n]*\d|tsc.*(?:0|通过)|lint.*通过|test.*pas
 
 // 综合等级：strong > hedged 优先；无信号时按 done 存在性
 function classifyConfidence(c) {
-  const bag = (`${c.desc} ${c.why} ${c.done}`).trim()
+  const bag = (`${c.desc} ${c.why}`).trim()
   const hedged = HEDGE.test(bag)
   const strong = STRONG.test(bag)
-  const done = Boolean(c.done) || DONE_SIG.test(bag)
+  const done = DONE_SIG.test(bag)
   const evidence = EVIDENCE.test(bag)
   // 四档：high / medium / low / unknown
   let tier = 'unknown'
@@ -60,7 +60,7 @@ function main() {
       const m = re.exec(head)
       return m ? m[1].trim().slice(0, 200) : ''
     }
-    const c = { desc: g('desc'), why: g('why'), done: g('done') }
+    const c = { desc: g('desc'), why: g('why') }
     const conf = classifyConfidence(c)
     const exit = Number(j.exitCode ?? 0)
     recs.push({ runId: j.runId || path.basename(path.dirname(f)), round: j.round, exit, tier: conf.tier, conf })
@@ -121,7 +121,7 @@ function main() {
   w('## 反推建议', '')
   if (result.overconfident.length) {
     for (const g of result.overconfident) {
-      w(`- **${g.tier}** 档实际成功率 ${g.actual}% vs 预期 ${g.expected}% → 过自信；应提升校准精度（在 @done 里写具体证据而非笼统断言）`, '')
+      w(`- **${g.tier}** 档实际成功率 ${g.actual}% vs 预期 ${g.expected}% → 过自信；应提升校准精度（在 @desc/@why 里写具体证据而非笼统断言）`, '')
     }
   } else {
     w('- 所有档位校准良好（偏差 < 10 个百分点），暂无需干预', '')

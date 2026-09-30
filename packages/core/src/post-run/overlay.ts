@@ -2,12 +2,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-/**
- * 获取 Root
- */
-function getRoot(): string {
-  return process.env.AI_RUNNER_ROOT || process.env.AIR_ROOT || process.cwd()
-}
 // AIRUNNER-BATCH10-9-INLINE-ROOT: 内联类型与 root 派生，解除 config.js 依赖（strip-types 可加载）
 
 /** 文件变更类型：新增 / 修改 / 删除 */
@@ -17,6 +11,13 @@ export interface Change {
   path: string
   type: ChangeType
   afterLines?: number
+}
+
+/**
+ * 获取 Root
+ */
+function getRoot(): string {
+  return process.env.AI_RUNNER_ROOT || process.env.AIR_ROOT || process.cwd()
 }
 
 /**

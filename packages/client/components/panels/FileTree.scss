@@ -685,6 +685,132 @@ html.ai-runner-dragging body {
   color: var(--text-1, inherit);
 }
 
+/* [ft-md-render-v1] Markdown 预览样式；与 TerminalPane.done-summary-body 对齐
+   [WHY] v-html 注入的标签无 data-v-xxx，scoped 下必须 :deep 才能命中子元素 */
+.ft-md {
+  margin: 0;
+  font:
+    13.5px/1.75 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    sans-serif;
+  color: var(--text-1, inherit);
+  word-break: break-word;
+}
+.ft-md :deep(p) {
+  margin: 0 0 10px;
+}
+.ft-md :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.ft-md :deep(h1) {
+  margin: 22px 0 12px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.ft-md :deep(h2) {
+  margin: 20px 0 10px;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.ft-md :deep(h3) {
+  margin: 18px 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.ft-md :deep(h4) {
+  margin: 16px 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.ft-md :deep(h1:first-child),
+.ft-md :deep(h2:first-child),
+.ft-md :deep(h3:first-child),
+.ft-md :deep(h4:first-child) {
+  margin-top: 0;
+}
+.ft-md :deep(a) {
+  color: var(--primary, #58a6ff);
+  text-decoration: none;
+}
+.ft-md :deep(a:hover) {
+  text-decoration: underline;
+}
+.ft-md :deep(strong) {
+  font-weight: 600;
+}
+.ft-md :deep(em) {
+  font-style: italic;
+}
+.ft-md :deep(ul),
+.ft-md :deep(ol) {
+  margin: 6px 0 10px;
+  padding-left: 22px;
+}
+.ft-md :deep(li) {
+  margin: 3px 0;
+}
+.ft-md :deep(blockquote) {
+  margin: 8px 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--border, #30363d);
+  color: var(--text-2, #c9d1d9);
+}
+.ft-md :deep(hr) {
+  margin: 14px 0;
+  border: 0;
+  border-top: 1px solid var(--border, #30363d);
+}
+.ft-md :deep(table) {
+  width: 100%;
+  margin: 10px 0 14px;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: auto;
+}
+.ft-md :deep(th),
+.ft-md :deep(td) {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, #30363d);
+  text-align: left;
+  vertical-align: top;
+}
+.ft-md :deep(th) {
+  font-weight: 600;
+  color: var(--text-2, #c9d1d9);
+}
+.ft-md :deep(.md-pre) {
+  margin: 10px 0;
+  padding: 12px 14px;
+  background: var(--surface-2, #0d1117);
+  border: 1px solid var(--border, #30363d);
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre;
+}
+.ft-md :deep(.md-pre code) {
+  font:
+    12px/1.6 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: var(--text-2, #c9d1d9);
+}
+.ft-md :deep(.md-inline) {
+  padding: 1px 6px;
+  background: rgb(110 118 129 / 25%);
+  border-radius: 4px;
+  font:
+    12px/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+
 /* [ft-hljs] 弹窗内容 hljs 颜色（与 DiffViewer 一致） */
 .tree-head .refresh {
   margin-left: auto;
@@ -700,31 +826,33 @@ html.ai-runner-dragging body {
   font-weight: 600;
 }
 
-/* [ft-hljs-global] FileTree 弹窗高亮颜色（全局，避免 Teleport + scoped :deep 失配） */
-.ft-pre .hljs-keyword,
-.ft-pre .hljs-literal {
+/* [ft-hljs-deep] FileTree 弹窗高亮颜色
+   [WHY] v-html 注入的 hljs span 无 data-v-xxx，scoped 编译后选择器末端属性无法命中；
+        必须 :deep() 剥离子选择器 scoped 属性，与 DiffViewer.vue 保持一致 */
+.ft-pre :deep(.hljs-keyword),
+.ft-pre :deep(.hljs-literal) {
   color: #569cd6;
 }
-.ft-pre .hljs-string {
+.ft-pre :deep(.hljs-string) {
   color: #ce9178;
 }
-.ft-pre .hljs-number {
+.ft-pre :deep(.hljs-number) {
   color: #b5cea8;
 }
-.ft-pre .hljs-comment {
+.ft-pre :deep(.hljs-comment) {
   color: #6a9955;
   font-style: italic;
 }
-.ft-pre .hljs-function,
-.ft-pre .hljs-title {
+.ft-pre :deep(.hljs-function),
+.ft-pre :deep(.hljs-title) {
   color: #dcdcaa;
 }
-.ft-pre .hljs-variable,
-.ft-pre .hljs-params,
-.ft-pre .hljs-attr {
+.ft-pre :deep(.hljs-variable),
+.ft-pre :deep(.hljs-params),
+.ft-pre :deep(.hljs-attr) {
   color: #9cdcfe;
 }
-.ft-pre .hljs-built_in,
-.ft-pre .hljs-type {
+.ft-pre :deep(.hljs-built_in),
+.ft-pre :deep(.hljs-type) {
   color: #4ec9b0;
 }

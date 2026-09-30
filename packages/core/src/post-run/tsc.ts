@@ -25,8 +25,6 @@ async function runCmd(cmd: string, args: string[], timeoutMs = 60_000): Promise<
   return { code: r.code, stdout: r.stdout, stderr: r.stderr }
 }
 
-export { pickTscTargets, TSC_EXTS, TSC_SKIP_DIRS } from './tsc-targets.js'
-
 /**
  * 对指定文件做定向类型检查
  * [WHY] 全量 tsc 在大型仓库上很慢；按变更目标生成临时 tsconfig，只检必要文件
@@ -72,7 +70,13 @@ export async function runTsc(
       extends: `./${base}`,
       compilerOptions: co,
       files: [],
-      include: list.map(p => `./${p}`),
+      include: [
+        ...list.map(p => `./${p}`),
+        // [tsc-global-dts-fix] TS extends 语义下 include 是全量覆盖而非合并：精确 include 变更文件
+        // 会挤掉 base 的 .d.ts glob，env.d.ts / *.d.ts 等全局声明不参与模块依赖图，脱管后
+        // 变更文件引用 import.meta.env / *.vue 会报 TS2339 / TS2307 假阳性
+        client ? './packages/client/**/*.d.ts' : './packages/core/src/**/*.d.ts',
+      ],
       exclude: ['node_modules', 'dist', '.ai-runner', '.vite'],
     }
     try {
@@ -106,3 +110,6 @@ export async function runTsc(
   const head = `[ai-runner] 仅检查本次变更的 ${targets.length} 个文件（server=${serverTargets.length} client=${clientTargets.length}）\n${vueTscNote}`
   return { ok: code === 0, stdout: head + out, stderr: errs }
 }
+
+// ── [§5 分区] 顶层 re-export 集中区 ──
+export { pickTscTargets, TSC_EXTS, TSC_SKIP_DIRS } from './tsc-targets.js'

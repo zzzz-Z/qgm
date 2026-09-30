@@ -9,7 +9,7 @@
 | 场景               | 先看                                                                                                  |
 | :----------------- | :---------------------------------------------------------------------------------------------------- |
 | 第一次接手项目     | [`AGENTS.md`](../AGENTS.md) → [`README.md`](../README.md) → [`PROJECT-NOTES.md`](../PROJECT-NOTES.md) |
-| 让 AI 干活         | [`SYSTEM.md`](../SYSTEM.md)（常驻规则）                                                   |
+| 让 AI 干活         | [`SYSTEM.md`](../packages/core/src/rules/SYSTEM.md)（常驻规则）                                       |
 | 打包后怎么用       | [`docs/USAGE.md`](USAGE.md)                                                                           |
 | 现在进度如何       | [`docs/plan/CURRENT-STATUS.md`](plan/CURRENT-STATUS.md)                                               |
 | 默认加载哪些 skill | [`docs/skills-default-load.md`](skills-default-load.md)                                               |
@@ -62,12 +62,12 @@
 
 ## skills/
 
-| 路径                         | 行数 | 作用                                                                                                                         |
-| :--------------------------- | ---: | :--------------------------------------------------------------------------------------------------------------------------- |
-| `skills/AI-API.md`           |   77 | 完整 **AI** API 手册（按需加载）。                                                                                           |
-| `skills/PITFALLS-ARCHIVE.md` |   47 | 已修复坑档案（E/T/P/A 分类）。                                                                                               |
-| `SYSTEM.md` | — | AI 行为单一权威（零 ~ 十一共 12 章）。**常驻加载**。 |
-| `skills/UI-LESSONS.md`       |  332 | UI/CSS/Vue 详细复盘与排查命令（按需加载）。                                                                                  |
+| 路径                         | 行数 | 作用                                                 |
+| :--------------------------- | ---: | :--------------------------------------------------- |
+| `skills/AI-API.md`           |   77 | 完整 **AI** API 手册（按需加载）。                   |
+| `skills/PITFALLS-ARCHIVE.md` |   47 | 已修复坑档案（E/T/P/A 分类）。                       |
+| `SYSTEM.md`                  |    — | AI 行为单一权威（零 ~ 十一共 12 章）。**常驻加载**。 |
+| `skills/UI-LESSONS.md`       |  332 | UI/CSS/Vue 详细复盘与排查命令（按需加载）。          |
 
 ## apps/ 与 packages/
 

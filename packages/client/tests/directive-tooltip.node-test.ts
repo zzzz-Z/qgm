@@ -66,9 +66,9 @@ interface AnyObjDirective {
 }
 let vT: AnyObjDirective
 
-let mod: typeof import('../../packages/client/directive.ts')
+let mod: typeof import('../../../packages/client/directive')
 beforeAll(async () => {
-  mod = await import('../../packages/client/directive.ts')
+  mod = await import('../../../packages/client/directive')
   vT = mod.vTooltip as unknown as AnyObjDirective
 })
 

@@ -4,19 +4,6 @@ import type { Browser } from 'playwright'
 
 type PlaywrightModule = typeof import('playwright')
 
-let pwModule: PlaywrightModule | null | undefined
-
-/**
- * 加载 Playwright
- */
-async function loadPlaywright(): Promise<PlaywrightModule | null> {
-  if (pwModule === undefined) {
-    try { pwModule = await import('playwright') }
-    catch { pwModule = null }
-  }
-  return pwModule
-}
-
 /** 冒烟-页面级结果：URL、状态码、关键选择器是否可交互 */
 export interface SmokePageResult {
   url: string
@@ -31,7 +18,19 @@ export interface SmokeResult {
   error?: string
 }
 
+let pwModule: PlaywrightModule | null | undefined
 let cachedBrowser: Browser | null = null
+
+/**
+ * 加载 Playwright
+ */
+async function loadPlaywright(): Promise<PlaywrightModule | null> {
+  if (pwModule === undefined) {
+    try { pwModule = await import('playwright') }
+    catch { pwModule = null }
+  }
+  return pwModule
+}
 
 /**
  * 获取 Browser

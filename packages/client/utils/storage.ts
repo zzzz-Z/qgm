@@ -8,8 +8,4 @@ export const LS_SIDE_WIDTH_KEY = '__ai_runner_side_width'
 /** 键 */
 export const LS_CMD_HISTORY_KEY = '__ai_cmd_history'
 /** 键 */
-export const LS_DRAFT_SLOTS_KEY = '__ai_script_drafts'
-/** 活动的键 */
-export const LS_DRAFT_ACTIVE_KEY = '__ai_script_draft_active'
-/** 键 */
 export const LS_BASH_POLICY_KEY = '__ai_bash_policy'

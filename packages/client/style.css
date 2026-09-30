@@ -308,7 +308,6 @@ button:focus-visible:where([class*='chip']) {
   outline-offset: 1px;
 }
 
-
 /* [a11y-reduce-motion-v1] 无障碍：尊重系统"减少动态效果"偏好，关闭动画与过渡 */
 @media (prefers-reduced-motion: reduce) {
   *,

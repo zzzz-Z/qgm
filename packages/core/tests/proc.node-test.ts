@@ -19,7 +19,8 @@ let proc: any = null
 async function loadProc() {
   if (proc) return proc
   // AIRUNNER-BATCH26-5-FIX-PATH-PROC: 测试在 test/server/，源在 ../../packages/core/src/process/proc.ts
-  const tsPath = path.join(__dirname, '..', '..', 'packages', 'core', 'src', 'process', 'proc.ts')
+  // [mig-path-v1] 测试从 test/server/ 迁到 packages/core/tests/，路径多 1 级上溯
+  const tsPath = path.join(__dirname, '..', '..', '..', 'packages', 'core', 'src', 'process', 'proc.ts')
   const tsSrc = fs.readFileSync(tsPath, 'utf8')
   const { stripTypeScriptTypes } = nodeModule
   const js = stripTypeScriptTypes(tsSrc, { mode: 'strip' })

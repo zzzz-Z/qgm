@@ -1,7 +1,19 @@
 // [workspace-core-barrel-v1] packages/core 公开 API 的唯一契约入口。
 // 铁律：只导出双宿主共享的宿主无关 API；宿主专属逻辑（Vite / Node listen）留在 apps/*。
 
-export { EXCLUDE_DIRS, EXCLUDE_PREFIX, getRoot, PREFIX, ROOT, setRoot } from './config.js'
+export {
+  clearPersistedWorkspace,
+  clearWorkspace,
+  EXCLUDE_DIRS,
+  EXCLUDE_PREFIX,
+  getHasWorkspace,
+  getRoot,
+  loadPersistedWorkspace,
+  persistWorkspace,
+  PREFIX,
+  ROOT,
+  setRoot,
+} from './config.js'
 
 // 资源清理钩子（宿主 close 时调用）
 export { closeBrowser } from './headless/smoke.js'

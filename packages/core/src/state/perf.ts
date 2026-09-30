@@ -17,6 +17,14 @@ export interface PerfStore {
   baselines: Record<string, PerfBaseline>
 }
 
+/** 慢操作检测结果：操作名、当前耗时、基线倍数 */
+export interface SlowCheck {
+  slow: boolean
+  ratio: number
+  baselineMs: number
+  thresholdMs: number
+}
+
 /** 性能基线默认存储对象 */
 export const DEFAULT_STORE: PerfStore = {
   version: 1,
@@ -66,14 +74,6 @@ export function recordSample(store: PerfStore, segment: string, durationMs: numb
     updatedAt: now,
   }
   return store
-}
-
-/** 慢操作检测结果：操作名、当前耗时、基线倍数 */
-export interface SlowCheck {
-  slow: boolean
-  ratio: number
-  baselineMs: number
-  thresholdMs: number
 }
 
 /**

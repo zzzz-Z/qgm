@@ -6,6 +6,16 @@ import { readTaskPlan, readTaskState, readTrustSnapshot, writeTaskState } from '
 import { getRoot } from '../config.js'
 import type { TaskDoneItem, TaskState } from '../state/task-store.js'
 
+interface Body {
+  mode?: 'set' | 'push' | 'complete'
+  todo?: string[]
+  done?: TaskDoneItem[]
+  status?: string
+  round?: number
+  pushTodo?: string[]
+  complete?: string[]
+}
+
 /** tasks 路由的 Hono 实例 */
 export const tasksHono = new Hono()
 
@@ -31,16 +41,6 @@ tasksHono.get('/tasks', (c) => {
   } catch { /* ignore */ }
   return c.json({ ...st, goal })
 })
-
-interface Body {
-  mode?: 'set' | 'push' | 'complete'
-  todo?: string[]
-  done?: TaskDoneItem[]
-  status?: string
-  round?: number
-  pushTodo?: string[]
-  complete?: string[]
-}
 
 tasksHono.post('/tasks', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as Body

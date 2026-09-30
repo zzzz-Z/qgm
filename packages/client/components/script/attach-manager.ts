@@ -14,15 +14,15 @@ export interface AttachedFile {
   paths?: string[]
 }
 
-/** 单文件上限：500KB */
-export const MAX_ATTACH_BYTES = 500 * 1024
-
 /** 附件簇依赖面 */
 export interface AttachManagerDeps {
   attachedFiles: Ref<AttachedFile[]>
   script: Ref<string>
   fileSuccess: Ref<boolean>
 }
+
+/** 单文件上限：500KB */
+export const MAX_ATTACH_BYTES = 500 * 1024
 
 /**
  * 创建附件管理器

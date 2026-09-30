@@ -2,7 +2,7 @@
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/pricing.node-test.ts 迁至 test/pricing.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { estimateCost, formatCost } from '../../packages/client/utils/pricing.ts'
+import { estimateCost, formatCost } from '../../../packages/client/utils/pricing'
 
 // AIRUNNER-BATCH15-5-PRICING
 

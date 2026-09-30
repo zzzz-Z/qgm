@@ -2,7 +2,7 @@
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/tokenEstimator.node-test.ts 迁至 test/tokenEstimator.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { estimateTokens, fallbackEstimate } from '../../packages/client/utils/tokenEstimator.ts'
+import { estimateTokens, fallbackEstimate } from '../../../packages/client/utils/tokenEstimator'
 
 // AIRUNNER-BATCH16-2-TOKEN-EST
 

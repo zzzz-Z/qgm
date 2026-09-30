@@ -35,10 +35,10 @@ Object.defineProperty(globalThis, 'navigator', {
   },
 })
 
-let useFileTree: typeof import('../../packages/client/composables/data/useFileTree.ts').useFileTree
+let useFileTree: typeof import('../../../packages/client/composables/data/useFileTree').useFileTree
 
 before(async () => {
-  const mod = await import('../../packages/client/composables/data/useFileTree.ts')
+  const mod = await import('../../../packages/client/composables/data/useFileTree')
   useFileTree = mod.useFileTree
 })
 

@@ -1,6 +1,16 @@
 import { ref } from 'vue'
 import { url } from './useDeepseekUrl'
 
+// [ai-window-list-v1] 响应式信号：Map 增删触发 UI 刷新
+// [WHY] windowTable 是普通 Map 非 ref，Map.set/delete 不触发 Vue 依赖；
+//       加一个单调递增的 tick ref 作为刷新信号，组件 computed 里访问即可关联
+// [CONSTRAINT] bump 只在 mutation 路径调用；不改 Map 结构，仅通知
+// [CHANGE-IMPACT] AiWindowList.vue 消费此信号；去掉后列表不随窗口开关更新
+/** 响应式刷新信号；任何窗口表 mutation 都 +1 */
+export const windowsTick = ref(0)
+/** 通知所有消费方：窗口表已变化 */
+function bumpWindows(): void { windowsTick.value++ }
+
 // ============================================================================
 // 活动窗口引用管理 —— postMessage 的目标 window 必须精确，否则跨域无法操作 DOM
 // 新窗口覆盖旧引用（简化：只跟最新一个），与油猴侧 window.opener 一一对应
@@ -19,10 +29,12 @@ export function getActiveWinSid(): string {
  */
 export function setActiveWinSid(sid: string): void {
   activeWinSid.value = sid
+  bumpWindows()
 }
 // [multi-loop-step7-url] 删除窗口表条目（供 App.vue 删会话时同步清理）
 export function removeWindowBySid(sid: string): void {
   windowTable.delete(sid)
+  bumpWindows()
 }
 /**
  * 取 sid 对应的 window 引用
@@ -34,6 +46,7 @@ export function getWindowBySid(sid: string): Window | null {
   if (!entry) return null
   if (entry.win.closed) {
     windowTable.delete(sid)
+    bumpWindows()
     return null
   }
   return entry.win
@@ -42,8 +55,9 @@ export function getWindowBySid(sid: string): Window | null {
 export function listWindows(): Array<{ sid: string, url: string }> {
   const out: Array<{ sid: string, url: string }> = []
   for (const [sid, v] of windowTable) {
-    if (!v.win.closed) out.push({ sid, url: v.url })
-    else windowTable.delete(sid)
+    if (!v.win.closed) { out.push({ sid, url: v.url })
+    }
+    else { windowTable.delete(sid); bumpWindows() }
   }
   return out
 }
@@ -57,21 +71,40 @@ export function getActiveWin(): Window | null {
  */
 export function setActiveWin(win: Window | null): void {
   const sid = activeWinSid.value
-  if (!win) { windowTable.delete(sid); return }
+  if (!win) { windowTable.delete(sid); bumpWindows(); return }
   windowTable.set(sid, { win, url: url.value })
+  bumpWindows()
 }
 // [split-send-v1] 供 useAiWindow 写回 windowTable（页面刷新后按 name 找回窗口时用）
 export function setWindowEntry(sid: string, entry: { win: Window, url: string }): void {
   windowTable.set(sid, entry)
+  bumpWindows()
 }
 
-/** 计算 postMessage 的目标 origin：从当前 url.value 提取 protocol://host */
-export function targetOrigin(): string {
+/**
+ * 计算指定 sid 的 postMessage 目标 origin
+ * [WHY] 多站点并存时不能读全局 url.value（openDeepseek 不改它）；
+ *       每个 sid 在 windowTable 内已存自己的 url，从那里提取才是正确的 origin
+ * [CONSTRAINT] sid 不存在 / url 解析失败 → 返回空串（调用方跳过发送，不用 '*' 兜底）
+ * [CHANGE-IMPACT] useAiWindowSend 全部 send*To 依赖本函数计算 origin；
+ *                与旧 targetOrigin() 语义一致，仅改为按 sid 取 url
+ * @param sid 目标窗口 sid
+ */
+export function targetOriginFor(sid: string): string {
+  const entry = windowTable.get(sid)
+  if (!entry) return ''
   try {
-    const u = new URL(url.value)
+    const u = new URL(entry.url)
     return `${u.protocol}//${u.host}`
   } catch {
-    // 退化：origin 未知则不发，避免用 '*'（违反 v6 §3.4 安全约束）
     return ''
   }
+}
+
+/**
+ * 计算 postMessage 的目标 origin（当前激活槽位）
+ * [CONSTRAINT] 保留旧 API 供 useAiWindow / 测试调用；内部转为 targetOriginFor(activeWinSid)
+ */
+export function targetOrigin(): string {
+  return targetOriginFor(activeWinSid.value)
 }

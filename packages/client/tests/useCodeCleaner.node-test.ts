@@ -23,9 +23,10 @@ const localStorageMock = {
 
 // 模块级单例在首次 import 时初始化（此时 store 为空），因此初始值均为 true（fallback）
 // AIRUNNER-BATCH17-4-FIX-TLA: 去掉顶层 await；改用 before 钩子动态加载（模块单例仅初始化一次）
-let useCodeCleaner: typeof import('../composables/runner/useCodeCleaner.ts').useCodeCleaner
+// [ts5097-fix] 去 .ts 后缀：tsconfig.client.json 未启用 allowImportingTsExtensions
+let useCodeCleaner: typeof import('../composables/runner/useCodeCleaner').useCodeCleaner
 before(async () => {
-  const mod = await import('../composables/runner/useCodeCleaner.ts')
+  const mod = await import('../composables/runner/useCodeCleaner')
   useCodeCleaner = mod.useCodeCleaner
 })
 

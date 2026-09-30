@@ -7,13 +7,18 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { getRoot } from '../config.js'
 import { clearRulesHashCache } from '../post-run/compliance.js'
+import { installFromGithub, searchGithubSkills } from '../skills/github-skills.js'
+import type { GithubSkillCandidate } from '../skills/github-skills.js'
+
+interface SkillEntry { name: string, content: string, source: string }
 
 /** 默认加载的 skill 名称列表 */
 const DEFAULT_SKILLS = new Set(['core-behavior', 'core-loop-protocol', 'script-standards', 'script-ai-api', 'env-preflight'])
 
-interface SkillEntry { name: string, content: string, source: string }
-
 /** skills 路由的 Hono 实例 */
+/** skills 路由的 Hono 实例 */
+export const skillsHono = new Hono()
+
 /** [runner-own-skills-v1] 从 AI Runner 自身安装位置解析 skills 目录（向上最多 6 层找含 _loader.cjs 的 skills/） */
 function resolveRunnerSkillsDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url))
@@ -27,7 +32,6 @@ function resolveRunnerSkillsDir(): string {
   }
   return path.join(getRoot(), 'skills') // 兜底：兼容旧行为
 }
-export const skillsHono = new Hono()
 
 skillsHono.get('/skills/always', (c) => {
   try {
@@ -95,6 +99,28 @@ skillsHono.get('/skills', (c) => {
   ]
   merged.sort((a, b) => a.name.localeCompare(b.name))
   return c.json(merged.map(s => ({ ...s, default: DEFAULT_SKILLS.has(s.name) })))
+})
+
+/** [github-skills-v1] GET /skills/github/search?q=<keyword>&limit=<n>：搜索 GitHub 上的 SKILL.md */
+skillsHono.get('/skills/github/search', async (c) => {
+  const q = String(c.req.query('q') || '').trim()
+  if (!q) return c.json({ ok: false, items: [], total: 0, error: 'q 为空' }, 400)
+  const limit = Math.max(1, Math.min(30, Number(c.req.query('limit') || 10) || 10))
+  const r = await searchGithubSkills(q, limit)
+  return c.json(r, r.ok ? 200 : (r.rateLimited ? 429 : 502))
+})
+
+/** [github-skills-v1] POST /skills/github/install { candidate, name? }：拉取并落盘到 .ai-runner/skills/ */
+skillsHono.post('/skills/github/install', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { candidate?: GithubSkillCandidate, name?: string } | null
+  const cand = body && body.candidate
+  if (!cand || !cand.repo || !cand.filePath) {
+    return c.json({ ok: false, error: 'candidate.repo / candidate.filePath 必填' }, 400)
+  }
+  const r = await installFromGithub(cand, body && body.name ? String(body.name) : undefined)
+  if (!r.ok) return c.json(r, 400)
+  clearRulesHashCache()
+  return c.json(r)
 })
 
 skillsHono.post('/skills', async (c) => {

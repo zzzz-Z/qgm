@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/post-run/compliance.node-test.ts 迁至 client/test/post-run-compliance.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { clearRulesHashCache, hashRules } from '../../packages/core/src/post-run/compliance.ts'
+import { clearRulesHashCache, hashRules } from '../../../packages/core/src/post-run/compliance.js'
 
 // AIRUNNER-BATCH10-7-INLINE-ROOT-TEST
 test('hashRules 返回 8 位十六进制或 unknown', () => {

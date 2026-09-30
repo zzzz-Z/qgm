@@ -24,7 +24,10 @@ export type { Router } from '@qgm/core'
  * @param options - options
  */
 export function aiRunner(options: AiRunnerOptions = {}): Plugin {
-  if (options.root) setRoot(options.root)
+  // [workspace-mode-v1] 开发环境默认绑定当前项目：options.root 优先，其次 process.cwd()
+  // [WHY] vite-plugin 只在 serve 阶段生效（apply: 'serve'），宿主项目就是工作区；无需用户额外选择
+  // [CHANGE-IMPACT] hasWorkspace 置 true 后所有工作区相关路由放行；与 standalone 的"默认无工作区"策略对称
+  setRoot(options.root || process.cwd())
   const router = createRouter(options)
   return {
     name: 'vite-plugin-ai-runner',

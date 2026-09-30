@@ -4,19 +4,12 @@ import { useClipboard } from '@vueuse/core'
 // [filetree-fold-v1] PLAN 5.4 目录展开态持久化
 import { useFoldState } from '../../composables/ui/useFoldState'
 import { highlightToHtml } from '../../composables/useHljs'
+// [ft-md-render-v1] .md 文件走 markdown 渲染；其余走 hljs 源码高亮
+import { renderMarkdown } from '../../composables/useMarkdown'
 import { useFileTree } from '../../composables/data/useFileTree'
 // [drag-controller-v1] 拖拽逻辑已抽到 drag-controller.ts
 import { createDragController } from './drag-controller'
 import type { FileNode } from '../../types'
-
-// [copy-via-vueuse] 组件级单例 useClipboard：内部会注册 copy 事件监听，
-// 通过 setup scope 在组件卸载时自动清理；因此必须定义在 setup 顶层而非函数内
-const _clipboard = useClipboard()
-
-/** 单条文件读取结果；content 缺失表示未读到（二进制/权限不足等） */
-interface FileReadItem { path?: string, content?: string }
-/** /__ai/files/read 的响应（兼容 {files:[...]} 与裸数组两种历史格式） */
-interface FileReadResponse { files?: FileReadItem[] }
 
 defineOptions({ name: 'FileTree' })
 
@@ -33,10 +26,95 @@ const props = defineProps<{
   draggable?: boolean
 }>()
 
+/** 单条文件读取结果；content 缺失表示未读到（二进制/权限不足等） */
+interface FileReadItem { path?: string, content?: string }
+
+/** /__ai/files/read 的响应（兼容 {files:[...]} 与裸数组两种历史格式） */
+interface FileReadResponse { files?: FileReadItem[] }
+
+// [copy-via-vueuse] 组件级单例 useClipboard：内部会注册 copy 事件监听，
+// 通过 setup scope 在组件卸载时自动清理；因此必须定义在 setup 顶层而非函数内
+const _clipboard = useClipboard()
+
+/** 文件树图标映射（按扩展名） */
+const ICONS: Record<string, string> = {
+  vue: '<path fill="#42b883" d="M2 2h4l6 10 6-10h4L12 22 2 2z"/><path fill="#35495e" d="M4.5 2h3L12 10l4.5-8h3L12 18 4.5 2z"/>',
+  ts: '<path fill="#3178c6" d="M2 2h20v20H2V2zm10 14h-2v-4H8v-2h6v2h-2v4zm4-6h-2v6h-2v-6h-2V8h6v2z"/>',
+  js: '<path fill="#f7df1e" d="M2 2h20v20H2V2zm14.5 15c0-1.5-1-2.2-2.5-2.8l-.8-.4c-.7-.3-1-.6-1-1.1 0-.5.4-.9 1.1-.9.7 0 1.2.4 1.3 1h1.8c-.1-1.4-1.2-2.3-3-2.3-1.7 0-2.9 1-2.9 2.5 0 1.4 1 2.1 2.4 2.7l.9.4c.7.3 1 .7 1 1.2 0 .6-.5 1-1.3 1-.9 0-1.4-.5-1.5-1.2h-1.9c.1 1.6 1.3 2.6 3.3 2.6 1.8 0 3.1-1 3.1-2.7zM9 17H7v-7H5V8h4v2H9v7z"/>',
+  style: '<path fill="#563d7c" d="M12 2L2 6l2 12 8 4 8-4 2-12-10-4zm0 2.3l7.5 3-1.5 9L12 19l-6-2.7-1.5-9L12 4.3z"/>',
+  json: '<path fill="#cbcb41" d="M4 4h16v16H4V4zm3 10c0-1.5 1-2.5 2.5-2.5S12 12.5 12 14s-1 2.5-2.5 2.5S7 15.5 7 14zm5 0c0-1.5 1-2.5 2.5-2.5s2.5 1 2.5 2.5-1 2.5-2.5 2.5-2.5-1-2.5-2.5z"/>',
+  md: '<path fill="#519aba" d="M4 4h16v16H4V4zm3 12V8l3 4 3-4v8h-2v-5l-1 1.5L9 11v5H7zm8 0h-2v-4h2v4z"/>',
+  html: '<path fill="#e34c26" d="M4 2l1.8 18L12 22l6.2-2L20 2H4zm12.5 15.5L12 19l-4.5-1.5L6.8 5h10.4l-.7 12.5z"/>',
+  image: '<path fill="#a074c4" d="M4 4h16v16H4V4zm3 12l3-4 2 2.5 3-4 3 5.5H7z"/>',
+  config: '<path fill="#858585" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 3a2 2 0 110 4 2 2 0 010-4zm0 10a5 5 0 01-4-2h8a5 5 0 01-4 2z"/>',
+  pkg: '<path fill="#cb3837" d="M4 4h16v16H4V4zm3 3v10h10V7H7zm2 2h6v6H9V9z"/>',
+  file: '<path fill="#9ca3af" d="M6 2h8l6 6v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2zm7 1v5h5"/>',
+  folder: '<path fill="#dcb67a" d="M2 6a2 2 0 012-2h5l2 2h7a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>',
+  folderOpen: '<path fill="#dcb67a" d="M2 6a2 2 0 012-2h5l2 2h7a2 2 0 012 2v1H8l-2 3H2V6zm0 7h6l2-3h10v7a2 2 0 01-2 2H4a2 2 0 01-2-2v-7z"/>',
+  chevronRight: '<path fill="currentColor" d="M9 6l6 6-6 6V6z"/>',
+}
+
 const { tree, loading, copiedPath, load, loadChildren, getChildren, isChildrenLoading, copyPath } = useFileTree()
+
+// [filetree-fold-v1] 从 localStorage 恢复展开态
+const fold = useFoldState('default', 'filetree')
 
 /** 当前工作区项目名；初值兜底 '工作区'，onMounted 后按 /__ai/workspace 或 package.json name 修正 */
 const projectName = ref('工作区')
+
+/** 是否展开 */
+const expanded = reactive(new Set<string>())
+// 初始化：把所有 true 的 key 塞入 expanded
+for (const [k, v] of Object.entries(fold.all.value)) {
+  if (v) expanded.add(k)
+}
+
+// [file-dialog] 双击文件弹窗查看详情 + 复制
+/** 双击文件后的查看弹窗状态；null 表示未打开 */
+const fileDialog = ref<{ path: string, content: string } | null>(null)
+/** 文件内容请求中标志；用于显示"加载中"占位 */
+const fileLoading = ref(false)
+/** 文件内容读取失败原因（HTTP status 或 Error.message） */
+const fileError = ref('')
+
+/** 根节点 */
+const rootPath = computed(() => {
+  if (!tree.value.length) return '.'
+  const first = String(tree.value[0].path || '')
+  if (!first.startsWith('/')) return '.'
+  const idx = first.lastIndexOf('/')
+  return idx > 0 ? first.slice(0, idx) : '.'
+})
+
+/** 根节点节点 */
+const rootNode = computed(() => {
+  if (!props.root) return null
+  return {
+    name: projectName.value,
+    path: rootPath.value,
+    type: 'directory'
+  } as FileNode
+})
+
+// [ft-md-render-v1] 是否为 Markdown 文件：仅按扩展名判定（.md / .markdown）
+// [CONSTRAINT] 大小写不敏感；URL 参数无扩展名时不走 md 分支
+const isMarkdown = computed(() => /\.(?:md|markdown)$/i.test(fileDialog.value?.path || ''))
+
+// [ft-hljs] 弹窗内容渲染：.md 走 renderMarkdown，其余走 hljs 高亮（与 DiffViewer 同款）
+// [WHY] markdown 的 heading/list/表格/链接需要标签级样式；hljs 只做源码 token 着色
+// [CONSTRAINT] html:false 由 useMarkdown 内部保证，不透传原始 HTML
+const fileDialogHtml = computed(() => {
+  const c = fileDialog.value?.content || ''
+  if (!c) return ''
+  if (isMarkdown.value) {
+    try { return renderMarkdown(c) } catch { /* md 渲染异常回退到源码高亮 */ }
+  }
+  try {
+    return highlightToHtml(c)
+  } catch {
+    return c.replace(/[&<>]/g, m => (m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;'))
+  }
+})
 
 if (props.root) {
   onMounted(async () => {
@@ -78,23 +156,29 @@ if (props.root) {
   })
 }
 
+// [drag-controller-v1] 拖拽控制器（须在 rootNode/getFileIcon/iconSvg/collectFilePathsAsync/toggle/copyPath 声明之后）
+const dragCtl = createDragController({
+  isDraggable: () => !!props.draggable,
+  rootNode,
+  getFileIcon,
+  iconSvg,
+  collectFilePathsAsync,
+  toggle,
+  copyPath,
+})
+const { onRootPointerDown, onPointerDown } = dragCtl
+
+onBeforeUnmount(() => dragCtl.dispose())
+
 /**
  * 执行 list
  */
 function list(): FileNode[] { return props.root ? tree.value : (props.nodes || []) }
+
 /**
  * 执行 level
  */
 function level(): number { return props.depth || 0 }
-
-// [filetree-fold-v1] 从 localStorage 恢复展开态
-const fold = useFoldState('default', 'filetree')
-/** 是否展开 */
-const expanded = reactive(new Set<string>())
-// 初始化：把所有 true 的 key 塞入 expanded
-for (const [k, v] of Object.entries(fold.all.value)) {
-  if (v) expanded.add(k)
-}
 
 /**
  * 执行 persist Expanded
@@ -129,25 +213,6 @@ function toggle(p: string) {
  */
 function isOpen(p: string): boolean { return expanded.has(p) }
 
-/** 根节点 */
-const rootPath = computed(() => {
-  if (!tree.value.length) return '.'
-  const first = String(tree.value[0].path || '')
-  if (!first.startsWith('/')) return '.'
-  const idx = first.lastIndexOf('/')
-  return idx > 0 ? first.slice(0, idx) : '.'
-})
-
-/** 根节点节点 */
-const rootNode = computed(() => {
-  if (!props.root) return null
-  return {
-    name: projectName.value,
-    path: rootPath.value,
-    type: 'directory'
-  } as FileNode
-})
-
 /**
  * 按文件名后缀映射图标 key
  * [CONSTRAINT] 匹配顺序敏感：先具体后缀（.vue/.tsx）再通配；package.json 优先于 .json 分支
@@ -167,24 +232,6 @@ function getFileIcon(name: string): string {
   if (n === 'package.json' || n === 'pnpm-lock.yaml') return 'pkg'
   if (n.startsWith('.') || n === 'tsconfig.json' || n === 'vite.config.ts' || n === 'eslint.config.ts') return 'config'
   return 'file'
-}
-
-/** 文件树图标映射（按扩展名） */
-const ICONS: Record<string, string> = {
-  vue: '<path fill="#42b883" d="M2 2h4l6 10 6-10h4L12 22 2 2z"/><path fill="#35495e" d="M4.5 2h3L12 10l4.5-8h3L12 18 4.5 2z"/>',
-  ts: '<path fill="#3178c6" d="M2 2h20v20H2V2zm10 14h-2v-4H8v-2h6v2h-2v4zm4-6h-2v6h-2v-6h-2V8h6v2z"/>',
-  js: '<path fill="#f7df1e" d="M2 2h20v20H2V2zm14.5 15c0-1.5-1-2.2-2.5-2.8l-.8-.4c-.7-.3-1-.6-1-1.1 0-.5.4-.9 1.1-.9.7 0 1.2.4 1.3 1h1.8c-.1-1.4-1.2-2.3-3-2.3-1.7 0-2.9 1-2.9 2.5 0 1.4 1 2.1 2.4 2.7l.9.4c.7.3 1 .7 1 1.2 0 .6-.5 1-1.3 1-.9 0-1.4-.5-1.5-1.2h-1.9c.1 1.6 1.3 2.6 3.3 2.6 1.8 0 3.1-1 3.1-2.7zM9 17H7v-7H5V8h4v2H9v7z"/>',
-  style: '<path fill="#563d7c" d="M12 2L2 6l2 12 8 4 8-4 2-12-10-4zm0 2.3l7.5 3-1.5 9L12 19l-6-2.7-1.5-9L12 4.3z"/>',
-  json: '<path fill="#cbcb41" d="M4 4h16v16H4V4zm3 10c0-1.5 1-2.5 2.5-2.5S12 12.5 12 14s-1 2.5-2.5 2.5S7 15.5 7 14zm5 0c0-1.5 1-2.5 2.5-2.5s2.5 1 2.5 2.5-1 2.5-2.5 2.5-2.5-1-2.5-2.5z"/>',
-  md: '<path fill="#519aba" d="M4 4h16v16H4V4zm3 12V8l3 4 3-4v8h-2v-5l-1 1.5L9 11v5H7zm8 0h-2v-4h2v4z"/>',
-  html: '<path fill="#e34c26" d="M4 2l1.8 18L12 22l6.2-2L20 2H4zm12.5 15.5L12 19l-4.5-1.5L6.8 5h10.4l-.7 12.5z"/>',
-  image: '<path fill="#a074c4" d="M4 4h16v16H4V4zm3 12l3-4 2 2.5 3-4 3 5.5H7z"/>',
-  config: '<path fill="#858585" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 3a2 2 0 110 4 2 2 0 010-4zm0 10a5 5 0 01-4-2h8a5 5 0 01-4 2z"/>',
-  pkg: '<path fill="#cb3837" d="M4 4h16v16H4V4zm3 3v10h10V7H7zm2 2h6v6H9V9z"/>',
-  file: '<path fill="#9ca3af" d="M6 2h8l6 6v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2zm7 1v5h5"/>',
-  folder: '<path fill="#dcb67a" d="M2 6a2 2 0 012-2h5l2 2h7a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>',
-  folderOpen: '<path fill="#dcb67a" d="M2 6a2 2 0 012-2h5l2 2h7a2 2 0 012 2v1H8l-2 3H2V6zm0 7h6l2-3h10v7a2 2 0 01-2 2H4a2 2 0 01-2-2v-7z"/>',
-  chevronRight: '<path fill="currentColor" d="M9 6l6 6-6 6V6z"/>',
 }
 
 /**
@@ -224,26 +271,6 @@ async function collectFilePathsAsync(node: FileNode): Promise<string[]> {
   }
 }
 
-// [drag-controller-v1] 拖拽控制器（须在 rootNode/getFileIcon/iconSvg/collectFilePathsAsync/toggle/copyPath 声明之后）
-const dragCtl = createDragController({
-  isDraggable: () => !!props.draggable,
-  rootNode,
-  getFileIcon,
-  iconSvg,
-  collectFilePathsAsync,
-  toggle,
-  copyPath,
-})
-const { onRootPointerDown, onPointerDown } = dragCtl
-onBeforeUnmount(() => dragCtl.dispose())
-
-// [file-dialog] 双击文件弹窗查看详情 + 复制
-/** 双击文件后的查看弹窗状态；null 表示未打开 */
-const fileDialog = ref<{ path: string, content: string } | null>(null)
-/** 文件内容请求中标志；用于显示"加载中"占位 */
-const fileLoading = ref(false)
-/** 文件内容读取失败原因（HTTP status 或 Error.message） */
-const fileError = ref('')
 /**
  * 双击文件：拉取内容并在弹窗中展示（含 hljs 高亮）
  * [WHY] 快速预览文件内容 + 复制，避免切到编辑器
@@ -273,10 +300,12 @@ async function onFileDblClick(node: { type?: string, path: string }) {
     fileLoading.value = false
   }
 }
+
 /**
  * 关闭 File Dialog
  */
 function closeFileDialog() { fileDialog.value = null }
+
 /**
  * 复制弹窗中展示的文件内容到剪贴板
  * [copy-via-vueuse] 走 vueuse useClipboard：内部自动选择 navigator.clipboard 或 execCommand 回退，
@@ -287,22 +316,13 @@ async function copyFileContent() {
   if (!fileDialog.value) return
   try { await _clipboard.copy(fileDialog.value.content) } catch { /* ignore */ }
 }
+
 /**
  * 弹窗内键盘事件：仅响应 Escape 关闭
  * [CONSTRAINT] 不阻止其他按键冒泡（Enter / 复制快捷键交给浏览器默认行为）
  */
 function onDialogKey(e: KeyboardEvent) { if (e.key === 'Escape') closeFileDialog() }
 
-// [ft-hljs] 弹窗内容按 hljs 高亮（与 DiffViewer 同款）
-const fileDialogHtml = computed(() => {
-  const c = fileDialog.value?.content || ''
-  if (!c) return ''
-  try {
-    return highlightToHtml(c)
-  } catch {
-    return c.replace(/[&<>]/g, m => (m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;'))
-  }
-})
 // [native-picker] 调用系统原生文件夹选择器（macOS osascript / Windows / Linux 各平台实现）；
 // 不支持平台或用户取消时静默返回，本组件不提供浏览器式回退
 /**
@@ -443,6 +463,8 @@ async function chooseWorkspace(): Promise<void> {
           <div v-else-if="fileError" class="ft-error">
             {{ fileError }}
           </div>
+          <!-- [ft-md-render-v1] .md 用普通 div（<pre> 会禁掉标题/列表的默认排版）；其余用 <pre> 保源码缩进 -->
+          <div v-else-if="isMarkdown" class="ft-md" v-html="fileDialogHtml" />
           <pre v-else class="ft-pre" v-html="fileDialogHtml" />
         </div>
       </div>

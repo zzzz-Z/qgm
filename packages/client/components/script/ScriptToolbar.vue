@@ -21,7 +21,6 @@
         <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
         <path d="M10 11v6M14 11v6" />
       </svg>
-      <span>清空</span>
     </button>
 
     <button
@@ -29,6 +28,8 @@
       v-tooltip="loopPaused ? '发送：结束本次循环，回到待发状态' : '暂停：不取 AI 脚本、不接收工作台结果'"
       :aria-label="loopPaused ? '发送脚本' : '暂停循环'"
       class="primary-btn stop head-run"
+      :class="{ 'is-waiting': aiWaiting }"
+      :aria-busy="aiWaiting"
       @click="emit('pauseAll')"
     >
       <svg
@@ -41,13 +42,14 @@
           <line x1="15" y1="4" x2="15" y2="20" />
         </template>
       </svg>
-      <span data-mark="[pause-toggle-label-v1]">{{ autoTakeoverEnabled ? '暂停' : (loopPaused ? '发送' : '暂停') }}</span>
     </button>
     <button
       v-else
       v-tooltip="'开始：执行当前脚本，随后自动把结果发 AI 并执行下一轮'"
       aria-label="开始循环"
       class="primary-btn takeover head-run"
+      :class="{ 'is-waiting': aiWaiting }"
+      :aria-busy="aiWaiting"
       data-mark="[run-btn-copy-v1]"
       @click="emit('toggleAutoTakeover')"
     >
@@ -56,25 +58,24 @@
         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
       >
         <polygon points="6 4 20 12 6 20 6 4" />
-      </svg><span>发送</span>
+      </svg>
     </button>
   </div>
 </template>
 
 <script setup lang="ts">
-interface Template { id: string, label: string, title: string, code: string }
-
-/** 组件接收的 props 定义 */
-const props = defineProps<{
+// [toolbar-props-v2] 去 props 变量绑定：模板直接用解构名，赋值给 props 会触发 unused-imports warning
+defineProps<{
   templates: Template[]
   running: boolean
   isLoopActive: boolean
   autoTakeoverEnabled: boolean
   // [loop-paused-toggle-v1] 循环暂停标志：按钮在「暂停 / 恢复」间切换
   loopPaused: boolean
-  autoTakeoverCountdown: number
   script: string
   attachedFilesCount: number
+  // [ai-wait-btn-v1] 等待 AI 回复中：主按钮显示 spinner，视觉反馈与顶部 banner 呼应
+  aiWaiting: boolean
 }>()
 
 /** 派发 */
@@ -84,43 +85,23 @@ const emit = defineEmits<{
   pauseAll: []
   toggleAutoTakeover: []
 }>()
+
+interface Template { id: string, label: string, title: string, code: string }
 </script>
 
 <style scoped lang="scss">
+// [chat-action-bar-v1] 工具条移到底部 action-bar 容器内；padding 归零交由父容器控制
 .tpl-bar {
   display: flex !important;
   align-items: center !important;
+  justify-content: flex-end !important;
   gap: 6px !important;
-  padding: 8px 14px !important;
-  background: var(--surface) !important;
-  border-bottom: 1px solid var(--border) !important;
-  flex-shrink: 0 !important;
-  min-height: 40px !important;
-}
-
-.tpl-chip {
-  display: inline-flex !important;
-  align-items: center !important;
-  padding: 4px 10px !important;
-  font-size: 12px !important;
-  font-family: var(--mono, monospace) !important;
-  color: var(--text-3) !important;
+  padding: 0 !important;
   background: transparent !important;
-  border: 1px solid transparent !important;
-  border-radius: var(--radius-6) !important;
-  cursor: pointer !important;
-  transition: all 0.15s ease !important;
-}
-
-.tpl-chip:hover {
-  color: var(--text) !important;
-  background: var(--surface-2) !important;
-  border-color: var(--border) !important;
-}
-
-.tpl-spacer {
-  flex: 1 1 auto !important;
-  min-width: 8px !important;
+  border-bottom: 0 !important;
+  flex-shrink: 0 !important;
+  min-height: auto !important;
+  width: 100% !important;
 }
 
 .tpl-bar .ghost-btn:hover:not(:disabled),
@@ -183,11 +164,6 @@ const emit = defineEmits<{
   background: var(--primary-bg) !important;
 }
 
-.tpl-bar .primary-btn.cancel {
-  color: var(--danger) !important;
-  border-color: var(--danger) !important;
-}
-
 .tpl-bar .tpl-chip {
   display: inline-flex !important;
   align-items: center !important;
@@ -216,14 +192,6 @@ const emit = defineEmits<{
   min-width: 12px !important;
 }
 
-.tpl-bar .kbd-hint {
-  flex-shrink: 0 !important;
-  color: var(--text-3) !important;
-  font-size: 11px !important;
-  font-family: var(--mono, monospace) !important;
-  opacity: 0.6 !important;
-}
-
 .tpl-bar button.ghost-btn,
 .tpl-bar button.primary-btn,
 .tpl-bar button.tpl-chip,
@@ -244,14 +212,9 @@ const emit = defineEmits<{
   margin: 0;
 }
 
-.tpl-chip {
-  padding: 2px 8px !important;
-  font-size: 11px !important;
-}
-
 .tpl-bar {
-  padding: 5px 12px !important;
-  gap: 4px !important;
+  padding: 0 !important;
+  gap: 6px !important;
 }
 
 .primary-btn {
@@ -333,9 +296,10 @@ const emit = defineEmits<{
 }
 
 .ghost-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%);
+  // [chat-input-v4] 用 CSS 变量替代硬编码深色，浅色模式下 hover 可见
+  background: var(--surface-hover, rgba(127, 127, 127, 0.08));
   color: var(--text);
-  border-color: rgb(255 255 255 / 8%);
+  border-color: var(--border, rgba(127, 127, 127, 0.18));
 }
 
 .ghost-btn:disabled {
@@ -466,9 +430,10 @@ const emit = defineEmits<{
   color: var(--fg-2, #b6b8bf);
 }
 .tpl-bar button.ghost-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%);
-  border-color: var(--border-hover, #3a3d46);
-  color: var(--fg-1, #e6e7ea);
+  // [chat-input-v4] 硬编码深色假设改 CSS 变量，浅色模式 hover 可见
+  background: var(--surface-hover, rgba(127, 127, 127, 0.08));
+  border-color: var(--border-hover, rgba(127, 127, 127, 0.22));
+  color: var(--text);
 }
 .tpl-bar button.ghost-btn:disabled {
   opacity: 0.4;
@@ -482,9 +447,36 @@ const emit = defineEmits<{
   outline-offset: 2px;
 }
 
-/* [dsh-theme-toolbar-v1] 底部控制条对齐 dsh dock */
+/* ============================================================
+ * [ai-wait-btn-v1] 等待 AI 回复时按钮 spinner
+ * [WHY] 用户需要从按钮本身感知等待态；与 TerminalPane 顶部 wait-banner 形成"按钮 + 顶部条"双反馈
+ * [CONSTRAINT] 不禁用按钮 —— 用户在等待期仍可点击暂停/中断；spinner 仅替换图标不改按钮尺寸
+ * [CHANGE-IMPACT] 与 ScriptPanel 的 :ai-waiting 透传成对；去掉后 is-waiting 永不生效
+ * ============================================================ */
+.tpl-bar button.primary-btn.is-waiting > svg {
+  display: none !important;
+}
+.tpl-bar button.primary-btn.is-waiting::after {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: tb-spin 0.85s linear infinite;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+@keyframes tb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* [chat-input-v4] 圆角从 999px 收敛到 10px：与输入卡片的 20px 圆角同族，不抢视觉 */
 .primary-btn {
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--dsw-specific-input-major, var(--bg-2, rgba(127, 127, 127, 0.05)));
   border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.2));
   color: var(--dsw-alias-label-primary, inherit);

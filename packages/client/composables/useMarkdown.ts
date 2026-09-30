@@ -1,166 +1,83 @@
-// @desc 极简 markdown 渲染器：仅处理围栏代码块与内联代码，够用即可，不引入新依赖
-// @why AI 回复含围栏脚本，需转 <pre><code> 才能正确显示为代码块；escapeHtml 内联以避免跨文件导入的扩展名问题
+// @desc 用 markdown-it 渲染 Markdown（GFM 表格 / 删除线 / 链接 / 代码块全套）
+// @why 自研极简渲染器只覆盖围栏+内联，表格/链接/删除线缺失；markdown-it 是标准实现，依赖已装
+// @change-impact 输出 HTML 由 v-html 消费；TerminalPane / TimelineItem / AskDialog 依赖此模块；签名保持 renderMarkdown(src) 不变
+
+import MarkdownIt from 'markdown-it'
 import { computed } from 'vue'
 import type { Ref } from 'vue'
 
-/** Markdown 围栏标记（三个反引号）；[WHY] 用 fromCharCode 而非字面量，避免本文件本身被误认为含代码块 */
-const FENCE = String.fromCharCode(96).repeat(3)
-/** 行内代码标记（单个反引号）；同 FENCE 理由 */
-const INLINE_TICK = String.fromCharCode(96)
-
 /**
- * 将 HTML 特殊字符转义为实体
- * [WHY] 内联而非跨文件导入：避免 strip-types 无法解析 .js 后缀 import 的问题
- * [CONSTRAINT] 覆盖 & < > " ' 五种字符；不处理 \u00a0 等实体已表达字符
- * @param s 待转义文本
+ * markdown-it 单例
+ * [WHY] html:false 关闭内联 HTML 透传 —— 防止 AI 回复中的 <script> 等注入；linkify 自动识别裸 URL
+ * [CONSTRAINT] breaks:true 让 \n 视作 <br>（AI 常以单换行分隔条目）；不在构造期做 sanitize，靠 html:false 兜底
+ * [CHANGE-IMPACT] 修改 options 会同时影响 TerminalPane / TimelineItem / AskDialog 三处的渲染结果
  */
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, ch => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    '\'': '&#39;'
-  } as Record<string, string>)[ch] || ch)
+const md = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true,
+  typographer: false,
+})
+
+// [md-class-compat-v1] 为 fenced code / inline code 补回自定义类名
+// [WHY] markdown-it 默认输出 <pre><code class="language-x"> / 裸 <code>，与既有 CSS 的 .md-pre / .md-inline 不匹配
+// [CONSTRAINT] 用 default renderer 保证转义与属性拼接逻辑不变；只追加 class
+// [CHANGE-IMPACT] 三处消费方（TerminalPane / TimelineItem / AskDialog）依赖 .md-pre / .md-inline 样式生效
+const _defaultFence = md.renderer.rules.fence!
+md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+  const html = _defaultFence(tokens, idx, options, env, self)
+  return html.replace('<pre>', '<pre class="md-pre">')
+}
+const _defaultCodeInline = md.renderer.rules.code_inline!
+md.renderer.rules.code_inline = (tokens, idx, options, env, self) => {
+  const html = _defaultCodeInline(tokens, idx, options, env, self)
+  return html.replace('<code>', '<code class="md-inline">')
 }
 
-/** 切分后的最小渲染单元；content 已去围栏标记，可直接 escapeHtml */
-interface MdSegment {
-  type: 'text' | 'code'
-  lang: string
-  content: string
-}
-
 /**
- * 按 ``` 围栏切分文本为 text / code 段
- * [CONSTRAINT] 只识别行首的围栏（trimStart 后匹配）；不处理嵌套或未闭合围栏的错误恢复
- * [CHANGE-IMPACT] 未闭合围栏的尾段会整块归入 code，AI 回复被截断时可能表现异常
- * @param src 原始 markdown 文本
+ * 把 markdown 文本渲染为 HTML 字符串
+ * [WHY] html:false 已阻断原始 HTML；代码块内容由 markdown-it 自带 escape 保护
+ * [CONSTRAINT] 空串返回空串（调用方 v-html 遇空串不渲染任何节点）
+ * @param src 原始 markdown；空串返回空串
  */
-function splitFences(src: string): MdSegment[] {
-  const out: MdSegment[] = []
-  if (!src) return out
+/**
+ * 补全缺失的 GFM 表格分隔行
+ * [WHY] AI 生成总结时常省略分隔行；markdown-it 严格按 GFM 规范不识别 → 表格退化为纯文本（管道符原样显示）
+ * [CONSTRAINT] 只在「连续 ≥2 行以 | 开头」且下一行非分隔行时补首行；跳过 fenced code 区块
+ * [CHANGE-IMPACT] 影响所有消费方；若 AI 已正确输出分隔行，本函数为 no-op
+ * @param src 原始 markdown
+ */
+function normalizeTables(src: string): string {
   const lines = src.split('\n')
-  let buf: string[] = []
-  let inCode = false
-  let lang = ''
-  const flush = (type: 'text' | 'code', l: string): void => {
-    if (buf.length) {
-      out.push({ type, lang: l, content: buf.join('\n') })
-      buf = []
-    }
-  }
-  for (const line of lines) {
-    const t = line.trimStart()
-    if (t.startsWith(FENCE)) {
-      if (!inCode) {
-        flush('text', '')
-        inCode = true
-        lang = t.slice(FENCE.length).trim()
-      } else {
-        flush('code', lang)
-        inCode = false
-        lang = ''
-      }
-      continue
-    }
-    buf.push(line)
-  }
-  if (buf.length) out.push({ type: inCode ? 'code' : 'text', lang, content: buf.join('\n') })
-  return out
-}
-
-/**
- * 处理行内语法：`code` 与 **bold**
- * [WHY] 先 escapeHtml 再做替换：替换目标为正则匹配字符，不会被转义为实体
- * [CONSTRAINT] 只支持单层内联；嵌套加粗 / 内联代码中的反引号不解析
- * [CHANGE-IMPACT] 新增语法须保证不会引入 XSS 风险（此处不做 sanitize）
- * @param text 纯文本段（不含围栏代码）
- */
-/**
- * 块级 markdown 处理：标题 / 无序列表 / 有序列表 / 引用 / 分割线
- * [WHY] DONE 总结与 AI 回复常用 ### 标题 + 列表结构，仅 inlineFormat 会原样输出标记字符
- * [CONSTRAINT] 逐行处理不跨行合并；代码块已由 splitFences 剥离，不会进入本函数
- * [CHANGE-IMPACT] renderMarkdown 输出结构变化，v-html 渲染方的 CSS 需覆盖 h1-h3/ul/ol/blockquote/hr
- * @param text 纯文本段（不含围栏代码），可含多行
- */
-function blockFormat(text: string): string {
   const out: string[] = []
-  let list: 'ul' | 'ol' | null = null
-  let para: string[] = []
-  const flushPara = (): void => {
-    if (para.length) {
-      out.push(`<p>${inlineFormat(para.join('\n'))}</p>`)
-      para = []
-    }
+  let inFence = false
+  for (let i = 0; i < lines.length; i++) {
+    const cur = lines[i]
+    if (/^\s*```/.test(cur)) inFence = !inFence
+    out.push(cur)
+    if (inFence) continue
+    if (!/^\s*\|/.test(cur)) continue
+    const next = lines[i + 1]
+    if (!next) continue
+    if (!/^\s*\|/.test(next)) continue
+    // 已是分隔行：仅含 |、-、:、空白
+    if (/^\s*\|[-\s:|]+\|\s*$/.test(next)) continue
+    const cellCount = cur.split('|').length - 2
+    if (cellCount < 2) continue
+    out.push(`| ${Array.from({ length: cellCount }).fill('---').join(' | ')} |`)
   }
-  const closeList = (): void => {
-    if (list) { out.push(`</${list}>`); list = null }
-  }
-  for (const line of text.split('\n')) {
-    const t = line.trim()
-    const h = /^(#{1,3})[ \t]+(\S.*)$/.exec(t)
-    if (h) {
-      flushPara(); closeList()
-      const lv = h[1].length
-      out.push(`<h${lv}>${inlineFormat(h[2])}</h${lv}>`)
-      continue
-    }
-    if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(t)) {
-      flushPara(); closeList()
-      out.push('<hr>')
-      continue
-    }
-    const ul = /^[-*+][ \t]+(\S.*)$/.exec(t)
-    if (ul) {
-      flushPara()
-      if (list !== 'ul') { closeList(); out.push('<ul>'); list = 'ul' }
-      out.push(`<li>${inlineFormat(ul[1])}</li>`)
-      continue
-    }
-    const ol = /^\d+\.[ \t]+(\S.*)$/.exec(t)
-    if (ol) {
-      flushPara()
-      if (list !== 'ol') { closeList(); out.push('<ol>'); list = 'ol' }
-      out.push(`<li>${inlineFormat(ol[1])}</li>`)
-      continue
-    }
-    if (/^>\s?/.test(t)) {
-      flushPara(); closeList()
-      out.push(`<blockquote>${inlineFormat(t.replace(/^>\s?/, ''))}</blockquote>`)
-      continue
-    }
-    if (!t) { flushPara(); closeList(); continue }
-    para.push(line)
-  }
-  flushPara(); closeList()
-  return out.join('')
-}
-
-function inlineFormat(text: string): string {
-  let html = escapeHtml(text)
-  const re = new RegExp(`${INLINE_TICK}([^${INLINE_TICK}\\n]+)${INLINE_TICK}`, 'g')
-  html = html.replace(re, '<code class="md-inline">$1</code>')
-  html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-  return html
+  return out.join('\n')
 }
 
 /**
- * 把 markdown 文本渲染为安全 HTML 字符串
- * [WHY] 极简实现：只处理围栏代码 + 内联代码/加粗，够用即可，不引入 markdown 库
- * [CONSTRAINT] 输出已对代码内容做 escapeHtml；但内联格式语法本身不校验，调用方需用 v-html 渲染
+ * 把 markdown 文本渲染为 HTML 字符串
+ * [WHY] html:false 阻断原始 HTML；normalizeTables 兜底 AI 偷懒省略的表格分隔行
+ * [CONSTRAINT] 空串返回空串（调用方 v-html 遇空串不渲染任何节点）
  * @param src 原始 markdown；空串返回空串
  */
 export function renderMarkdown(src: string): string {
   if (!src) return ''
-  const segs = splitFences(src)
-  return segs.map((s) => {
-    if (s.type === 'code') {
-      const cls = s.lang ? ` class="language-${escapeHtml(s.lang)}"` : ''
-      return `<pre class="md-pre"><code${cls}>${escapeHtml(s.content)}</code></pre>`
-    }
-    return blockFormat(s.content)
-  }).join('')
+  return md.render(normalizeTables(src))
 }
 
 /**

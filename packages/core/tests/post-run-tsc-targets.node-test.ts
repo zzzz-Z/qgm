@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/post-run/tsc-targets.node-test.ts 迁至 client/test/post-run-tsc-targets.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { pickTscTargets, TSC_EXTS, TSC_SKIP_DIRS } from '../../packages/core/src/post-run/tsc-targets.ts'
+import { pickTscTargets, TSC_EXTS, TSC_SKIP_DIRS } from '../../../packages/core/src/post-run/tsc-targets.js'
 
 // AIRUNNER-BATCH10-3B-TEST-TYPES: 显式类型，避免 TS7006
 function ch(path: string, type: 'added' | 'modified' | 'deleted') {

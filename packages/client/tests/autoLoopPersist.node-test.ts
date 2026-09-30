@@ -6,8 +6,8 @@
 
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import type { LoopInstance } from '../../packages/client/composables/ai/auto-loop/types.ts'
-import { persist, restore } from '../../packages/client/composables/ai/auto-loop/persist.ts'
+import type { LoopInstance } from '../../../packages/client/composables/ai/auto-loop/types'
+import { persist, restore } from '../../../packages/client/composables/ai/auto-loop/persist'
 
 const STORAGE_KEY = '__ai_runner_loop'
 

@@ -4,6 +4,20 @@ import path from 'node:path'
 // 从 src/config.ts 内联；strip-types 无法解析 .js 后缀 import（T6）；改常量需同步 config.ts
 
 /** 项目根目录（进程启动时的 cwd） */
+/** 文件索引条目：相对路径 + 元数据 */
+export interface FileIndex {
+  inode: number
+  mtimeMs: number
+  size: number
+}
+
+/** 索引差异条目；[CONSTRAINT] type 与 config.ts 的 Change 类型对齐 */
+export interface IndexDiffEntry {
+  path: string
+  type: 'added' | 'modified' | 'deleted'
+}
+
+/** 项目根目录（进程启动时的 cwd） */
 const ROOT = process.env.AI_RUNNER_ROOT || process.cwd()
 /** 遍历项目时跳过的目录 */
 const EXCLUDE_DIRS = new Set(['node_modules', '.git', 'dist', '.vite', '.turbo', '.cache'])
@@ -35,13 +49,6 @@ const BINARY_EXT = new Set([
   '.doc',
   '.docx',
 ])
-
-/** 文件索引条目：相对路径 + 元数据 */
-export interface FileIndex {
-  inode: number
-  mtimeMs: number
-  size: number
-}
 
 /**
  * 判断相对路径是否命中排除规则（点目录 / EXCLUDE_DIRS / EXCLUDE_PREFIX）
@@ -82,11 +89,6 @@ export function scanIndex(): Map<string, FileIndex> {
   }
   walk(ROOT)
   return map
-}
-/** 索引差异条目；[CONSTRAINT] type 与 config.ts 的 Change 类型对齐 */
-export interface IndexDiffEntry {
-  path: string
-  type: 'added' | 'modified' | 'deleted'
 }
 /**
  * 对比前后两份索引，产出变更列表（按 path 升序）

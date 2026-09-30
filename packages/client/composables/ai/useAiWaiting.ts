@@ -1,5 +1,5 @@
-import { ref } from 'vue'
-import { useSessionStorage } from '@vueuse/core'
+import { effectScope, ref } from 'vue'
+import { useSessionStorage, useTimeoutFn } from '@vueuse/core'
 
 /** 跨组件共享的「等待 AI 回复」（单一数据源） */
 
@@ -10,6 +10,17 @@ const LS_LOOP_PAUSED = '__ai_loop_paused'
 
 /** 是否处于等待 AI 回复状态；内存态，不持久化 */
 const waiting = ref(false)
+
+// [module-scope-vueuse-timer] vueuse 定时器需在 effectScope 内创建；本模块为跨组件单例
+// [WHY] useTimeoutFn 在组件 setup 内会注册 onScopeDispose；若模块首次导入发生在某组件 setup 中，
+//       该组件卸载会连带清理 watchdog → 3 分钟兜底失效
+// [CONSTRAINT] effectScope(true) 创建 detached scope；WATCHDOG_MS 为常量，无需动态延迟 ref
+// [CHANGE-IMPACT] 原 watchdogTimer 显式句柄语义由 timeoutFn.start()/stop() 等价替代
+const scope = effectScope(true)
+const timeoutFn = scope.run(() => useTimeoutFn(() => {
+  if (!waiting.value) return
+  waiting.value = false
+}, WATCHDOG_MS, { immediate: false }))!
 
 /**
  * 暂停闸：阻断续推 / 发脚本 / 等待
@@ -25,13 +36,10 @@ export const loopPaused = useSessionStorage<boolean>(LS_LOOP_PAUSED, false, {
   },
 })
 
-/** watchdog 定时器句柄；模块级单例，由 clearWatchdog / armWatchdog 成对管理 */
-let watchdogTimer: ReturnType<typeof setTimeout> | null = null
-
 /**
  * 进入等待 AI 回复状态并重置看门狗
  * [WHY] 单独 startWaiting 与 useAiWaiting 返回的同名方法并存：供 transport 层在 setup 外直接调用
- * [CHANGE-IMPACT] 会清空并重设 watchdogTimer，重复调用等价于续期
+ * [CHANGE-IMPACT] 内部先 timeoutFn.stop() 再 start()，重复调用等价于续期
  */
 export function startWaiting(): void {
   waiting.value = true
@@ -40,10 +48,10 @@ export function startWaiting(): void {
 
 /**
  * 取消看门狗定时器；幂等
- * [CONSTRAINT] watchdogTimer 置 null 以标记无挂起定时器；与 armWatchdog 配套
+ * [use-timeout-fn-v1] useTimeoutFn.stop() 内部等价 clearTimeout + 置空句柄
  */
 function clearWatchdog(): void {
-  if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null }
+  timeoutFn.stop()
 }
 
 /**
@@ -53,12 +61,9 @@ function clearWatchdog(): void {
  * [CHANGE-IMPACT] 手动 stopWaiting 也会 clear，避免残留 timer 触发意外复位
  */
 function armWatchdog(): void {
-  clearWatchdog()
-  watchdogTimer = setTimeout(() => {
-    watchdogTimer = null
-    if (!waiting.value) return
-    waiting.value = false
-  }, WATCHDOG_MS)
+  // [use-timeout-fn-v1] 重入安全：先 stop 再 start，等价原 clearTimeout + setTimeout
+  timeoutFn.stop()
+  timeoutFn.start()
 }
 
 /**

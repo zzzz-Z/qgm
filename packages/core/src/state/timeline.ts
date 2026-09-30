@@ -29,6 +29,16 @@ export interface TimelinePaths {
   indexPath: string
 }
 
+/** 时间线 _index.json 单条记录；供 listRounds 快速读取 */
+interface IndexEntry {
+  round: number
+  ts: number
+  exitCode: number | null
+  durationMs: number
+  rulesVersion: string
+  file: string
+}
+
 /**
  * 计算单轮快照的三个落盘路径（目录 + round-N.json + _index.json）
  * [CONSTRAINT] 目录布局 .ai-runner/runs/{sessionId}/{runId} 与 run.ts 的 runDir 保持兼容；
@@ -64,15 +74,6 @@ export function writeRoundSnapshot(root: string, snap: RoundSnapshot): string {
     file: path.basename(p.roundFile),
   })
   return p.roundFile
-}
-
-interface IndexEntry {
-  round: number
-  ts: number
-  exitCode: number | null
-  durationMs: number
-  rulesVersion: string
-  file: string
 }
 
 /**

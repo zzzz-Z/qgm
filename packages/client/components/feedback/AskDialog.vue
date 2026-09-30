@@ -211,6 +211,7 @@ function onKey(e: KeyboardEvent): void {
   padding: 0 20px 12px;
 }
 .ask-input {
+  display: block;
   width: 100%;
   box-sizing: border-box;
   padding: 8px 12px;
@@ -218,7 +219,13 @@ function onKey(e: KeyboardEvent): void {
   border: 1px solid var(--border-2, #d0d7de);
   border-radius: var(--radius-8);
   color: var(--text, #1f2d3d);
-  font: 13px/1.4 inherit;
+  /* [ask-input-font-fix] 原 `font: 13px/1.4 inherit` 是非法简写：
+     CSS-wide 关键字 inherit 不能与其他值混用，浏览器整条丢弃该声明，
+     input 回退到 UA 默认字体 → 字号/行盒与 .ask-opt / .ask-body 不一致，视觉错位。
+     改为显式声明三属性并让 family 继承面板字体。 */
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
   outline: none;
 }
 .ask-input:focus {

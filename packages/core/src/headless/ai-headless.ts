@@ -54,6 +54,8 @@ export interface HeadlessPool {
   fillPrompt: (sid: string, prompt: string) => Promise<boolean>
   stopGenerating: (sid: string) => Promise<boolean>
   newSession: (sid: string) => Promise<{ url: string, id: string } | null>
+  /** [headless-login-gui-v1] 引导式登录：有头窗口打开站点，用户登录后关窗，登录态落盘 */
+  openLoginGui: (sid: string, url?: string) => Promise<{ ok: boolean, detail?: string }>
   rotate: (sid: string, instruction: string) => Promise<boolean>
   /** 启动回复轮询（每 800ms 扫页面）。返回停止函数。 */
   startReplyPoll: (sid: string, cb: (reply: HeadlessReply) => void) => () => void
@@ -274,6 +276,44 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     s.page = undefined
   }
 
+  /**
+   * [headless-login-gui-v1] 引导式登录
+   * [WHY] DeepSeek 登录带验证码/滑块，无法自动填表；用有头窗口让用户手动登录一次，
+   *       登录态落到同一 userDataDir，无头 headless 复用同一 profile 即可保持登录。
+   * [CONSTRAINT] 若 sid 已有活跃会话先 shutdown（Chromium 单 profile 独占，不能同时开两份）；
+   *              内部阻塞直到用户关闭窗口，不设超时——误中断会丢登录进度。
+   * [CHANGE-IMPACT] 依赖 DEFAULT_USER_DATA_DIR 与 userDataDirFor；同 sid 的 headless 会话与本函数互斥。
+   */
+  async function openLoginGui(sid: string, url?: string): Promise<{ ok: boolean, detail?: string }> {
+    // 释放 profile 独占锁
+    const existing = sessions.get(sid)
+    if (existing) { await shutdown(existing); sessions.delete(sid); releaseSlot() }
+
+    const pw = await loadPlaywright()
+    if (!pw) return { ok: false, detail: 'playwright 未安装' }
+
+    const userDataDir = userDataDirFor(sid)
+    fs.mkdirSync(userDataDir, { recursive: true })
+
+    let ctx: Awaited<ReturnType<typeof pw.chromium.launchPersistentContext>> | null = null
+    try {
+      ctx = await pw.chromium.launchPersistentContext(userDataDir, {
+        headless: false,
+        viewport: { width: 1280, height: 900 },
+        args: ['--disable-blink-features=AutomationControlled', '--no-first-run', '--no-default-browser-check'],
+      } as Parameters<typeof pw.chromium.launchPersistentContext>[1])
+      const page = ctx.pages()[0] || await ctx.newPage()
+      await page.goto(url || defaultUrl, { waitUntil: 'domcontentloaded', timeout: LAUNCH_TIMEOUT_MS })
+      // 等用户关窗：close 是唯一退出信号
+      const ctxLocal = ctx
+      await new Promise<void>((resolve) => { ctxLocal.on('close', () => resolve()) })
+      return { ok: true, detail: '登录窗口已关闭，登录态已落盘' }
+    } catch (e) {
+      try { if (ctx) await ctx.close() } catch { /* swallow: ctx 已关闭，close 失败忽略 */ }
+      return { ok: false, detail: String((e as Error).message || e).slice(0, 200) }
+    }
+  }
+
   return {
     async open(sid, url) {
       // 全局串行，防并发 launch 抢 profile
@@ -333,6 +373,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
         return ok === true
       } catch { return false }
     },
+    openLoginGui,
     async newSession(sid) {
       const page = _getPage(sid)
       if (!page) {

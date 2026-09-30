@@ -32,6 +32,9 @@ export interface PromptResult {
 /** 错误位置（来自 parseErrorLocations 的返回） */
 type ErrorLocs = ReturnType<typeof import('../../utils/contextBuilder').parseErrorLocations>
 
+/** 预算裁剪：超预算时对「相关文件源码」块做二次裁剪；toast 由调用方传入 */
+type ToastFn = typeof import('../../composables/ui/useToast').toast
+
 /** 失败时把相关文件源码块追加到 prompt 数组（去重后取前 5 个路径） */
 export async function appendFailedSourceFiles(
   p: string[],
@@ -217,9 +220,6 @@ export function appendRawOutputs(p: string[], r: PromptResult | null): void {
   if (r.stderr) p.push('# 错误输出 (stderr)', '```', trimOutput(r.stderr, r.ok, 3000, 12000, r.scriptCtx), '```', '')
   if (r.stdout) p.push('# Stdout', '```', trimOutput(r.stdout, r.ok, 3000, 12000, r.scriptCtx), '```', '')
 }
-
-/** 预算裁剪：超预算时对「相关文件源码」块做二次裁剪；toast 由调用方传入 */
-type ToastFn = typeof import('../../composables/ui/useToast').toast
 
 export function trimPromptIfOverBudget(
   text: string,

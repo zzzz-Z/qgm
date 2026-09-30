@@ -133,7 +133,7 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         const stopReply = pool.startReplyPoll(sid, (reply) => {
           try {
             if (reply.kind === 'script' && reply.code) {
-              send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now(), isDone: Boolean((reply as { isDone?: boolean }).isDone), doneMd: String((reply as { doneMd?: string }).doneMd || ''), reasoning: String((reply as { reasoning?: string }).reasoning || '') } } })
+              send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now(), reasoning: String((reply as { reasoning?: string }).reasoning || '') } } })
             } else {
               send({ t: 'headless:reply', sid, reply: { kind: reply.kind, text: reply.text, reasoning: String((reply as { reasoning?: string }).reasoning || '') } })
             }
@@ -167,6 +167,15 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         } else {
           send({ t: 'headless:state', sid, state: 'error', detail: 'new-session 失败' })
         }
+        break
+      }
+      case 'headless:login-gui': {
+        const sid = String(msg.sid || 'default')
+        const url = typeof msg.url === 'string' ? msg.url : undefined
+        // [headless-login-gui-v1] 阻塞直到用户关窗；期间其他消息仍可并发进入 handleMessage
+        send({ t: 'headless:state', sid, state: 'filling', detail: '等待用户在有头窗口登录…' })
+        const r = await pool.openLoginGui(sid, url)
+        send({ t: 'headless:state', sid, state: r.ok ? 'idle' : 'error', detail: r.ok ? '登录流程结束' : (r.detail || '登录失败') })
         break
       }
       default: {

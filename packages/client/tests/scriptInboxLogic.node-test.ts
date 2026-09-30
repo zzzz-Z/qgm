@@ -6,7 +6,7 @@
 
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { normalizeForHash, parseMeta } from '../../packages/client/composables/runner/inbox-logic.ts'
+import { normalizeForHash, parseMeta } from '../../../packages/client/composables/runner/inbox-logic'
 
 test('normalizeForHash 剔除空行与 // 注释行、压缩空白', () => {
   const src = ['// header', '', 'const a = 1', '  const b = 2  ', '// trailing'].join('\n')

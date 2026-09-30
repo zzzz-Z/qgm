@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/post-run/decision.node-test.ts 迁至 client/test/post-run-decision.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { parseDecisionMarkers } from '../../packages/core/src/post-run/decision.ts'
+import { parseDecisionMarkers } from '../../../packages/core/src/post-run/decision.js'
 
 const NL = String.fromCharCode(10)
 const NEED = '__AI_NEED_FILES__'

@@ -1,4 +1,4 @@
-// 脚本头元数据解析（@desc / @why / @plan / @done）与语言识别。
+// 脚本头元数据解析（@desc / @why / @plan）与语言识别。
 // 兼容 // 与 # 两种注释前缀（js / bash / cjs）。
 
 // [meta-schema-unify-v1] 字段集与 core/post-run/script-meta.ts 对齐（8 字段）

@@ -1,6 +1,6 @@
 // [proc-rlimit-test-v1] D3 maxOutputBytes 行为锁定
 import { describe, expect, it } from 'vitest'
-import { runProcess } from '../../packages/core/src/process/proc'
+import { runProcess } from '../../../packages/core/src/process/proc.js'
 
 describe('proc: maxOutputBytes', () => {
   it('正常输出不超限时 truncated 为 false', async () => {

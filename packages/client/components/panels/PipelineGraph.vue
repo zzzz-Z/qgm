@@ -2,6 +2,13 @@
 // [pipeline-graph-v1] PLAN 5.2 链路图（五段聚合）
 import { computed } from 'vue'
 
+/** 组件接收的 props 定义 */
+const props = withDefaults(defineProps<Props>(), {
+  pipeline: () => ({}),
+  round: 0,
+  elapsedMs: 0,
+})
+
 type SegStatus = 'pending' | 'running' | 'ok' | 'failed' | 'skipped' | 'manual'
 
 interface Props {
@@ -10,13 +17,6 @@ interface Props {
   round?: number
   elapsedMs?: number
 }
-
-/** 组件接收的 props 定义 */
-const props = withDefaults(defineProps<Props>(), {
-  pipeline: () => ({}),
-  round: 0,
-  elapsedMs: 0,
-})
 
 // 五段聚合：内部 11 段 → 用户视角 5 段
 /** 流水线阶段名称列表 */
@@ -27,6 +27,37 @@ const STAGES: Array<{ key: string, label: string, segs: string[] }> = [
   { key: 'exe', label: '执行', segs: ['EXECUTE', 'COLLECT'] },
   { key: 'back', label: '回传', segs: ['RESULT_RELAY', 'RESULT_INJECT'] },
 ]
+
+/** 图标 */
+const ICON: Record<SegStatus, string> = {
+  pending: '·',
+  running: '●',
+  ok: '✓',
+  failed: '✗',
+  skipped: '!',
+  manual: '⚠',
+}
+
+/** 流水线各阶段状态列表 */
+const stages = computed(() => STAGES.map((st) => {
+  const ss = st.segs.map(k => norm(props.pipeline?.[k]?.status))
+  return { ...st, status: agg(ss) }
+}))
+
+/** 当前阶段索引 */
+const currentIdx = computed(() => stages.value.findIndex(s => s.status === 'running'))
+
+/** 是否含 */
+const hasAny = computed(() => stages.value.some(s => s.status !== 'pending'))
+
+/** 格式化已用时长 */
+const fmtElapsed = computed(() => {
+  const ms = props.elapsedMs
+  if (!ms) return ''
+  const s = Math.floor(ms / 1000)
+  const m = Math.floor(s / 60)
+  return m > 0 ? `${m}m${s % 60}s` : `${s}s`
+})
 
 /**
  * 聚合多个子段状态为本阶段单一状态
@@ -54,36 +85,6 @@ function norm(raw?: string): SegStatus {
   if (s === 'ok' || s === 'running' || s === 'failed') return s
   return 'pending'
 }
-
-/** 流水线各阶段状态列表 */
-const stages = computed(() => STAGES.map((st) => {
-  const ss = st.segs.map(k => norm(props.pipeline?.[k]?.status))
-  return { ...st, status: agg(ss) }
-}))
-
-/** 当前阶段索引 */
-const currentIdx = computed(() => stages.value.findIndex(s => s.status === 'running'))
-/** 是否含 */
-const hasAny = computed(() => stages.value.some(s => s.status !== 'pending'))
-
-/** 图标 */
-const ICON: Record<SegStatus, string> = {
-  pending: '·',
-  running: '●',
-  ok: '✓',
-  failed: '✗',
-  skipped: '!',
-  manual: '⚠',
-}
-
-/** 格式化已用时长 */
-const fmtElapsed = computed(() => {
-  const ms = props.elapsedMs
-  if (!ms) return ''
-  const s = Math.floor(ms / 1000)
-  const m = Math.floor(s / 60)
-  return m > 0 ? `${m}m${s % 60}s` : `${s}s`
-})
 </script>
 
 <template>

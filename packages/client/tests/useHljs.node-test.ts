@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { escapeHtml, highlightToHtml } from '../../packages/client/composables/useHljs.ts'
+import { escapeHtml, highlightToHtml } from '../../../packages/client/composables/useHljs'
 
 // AIRUNNER-BATCH35-3-USE-HLJS
 

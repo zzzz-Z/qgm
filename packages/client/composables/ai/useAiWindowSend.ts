@@ -1,6 +1,19 @@
 import { log } from '../../utils/log'
-import { url } from './useDeepseekUrl'
-import { getActiveWinSid, getWindowBySid, targetOrigin } from './useAiWindowTable'
+import { transportKind } from './useAiTransport'
+import { getActiveWinSid, getWindowBySid, targetOriginFor } from './useAiWindowTable'
+
+/** fill 消息载荷：向 AI 窗口投递的提问文本 */
+export interface FillPayload {
+  prompt: string
+  /** 可选：附加上下文/契约摘要，由调用方组装 */
+  context?: string
+}
+
+/** rotate 消息载荷：切换会话/话题的指令 */
+export interface RotatePayload { instruction: string }
+
+/** new-session 消息载荷：开启新会话时携带的上下文总结 */
+export interface NewSessionPayload { summary: string }
 
 let _transportMod: Promise<typeof import('./useAiTransport.js')> | null = null
 
@@ -18,7 +31,8 @@ export function isHeadless(): boolean {
       if (v === 'headless') return true
       if (v === 'tampermonkey') return false
     }
-    return typeof localStorage !== 'undefined' && localStorage.getItem('__ai_transport') === 'headless'
+    // [use-storage-v1] 消费 useAiTransport 导出的单例 ref；URL 优先语义保留在上方
+    return transportKind.value === 'headless'
   } catch { return false }
 }
 /**
@@ -36,12 +50,6 @@ function headlessSend(fn: string, ...args: unknown[]) {
   })
 }
 
-export interface FillPayload {
-  prompt: string
-  /** 可选：附加上下文/契约摘要，由调用方组装 */
-  context?: string
-}
-
 /**
  * 向 AI 站点窗口发送 fill 消息。
  * - origin 精确到 protocol://host，不用 '*'
@@ -50,8 +58,9 @@ export interface FillPayload {
 export function sendFillTo(sid: string, payload: FillPayload): boolean {
   const win = getWindowBySid(sid)
   if (!win) { log.warn('[sendFillTo] win=null sid=', sid, 'active=', getActiveWinSid()); return false }
-  const origin = targetOrigin()
-  if (!origin) { log.warn('[sendFillTo] origin="" url=', url.value); return false }
+  // [per-sid-origin-v1] 按 sid 查 windowTable 中的 url 计算 origin；多站点并存不再错发
+  const origin = targetOriginFor(sid)
+  if (!origin) { log.warn('[sendFillTo] origin="" sid=', sid); return false }
   try {
     win.postMessage({ type: 'ai-runner:fill', ...payload }, origin)
     return true
@@ -73,7 +82,7 @@ export function sendFill(payload: FillPayload): boolean {
 export function sendStopTo(sid: string): boolean {
   const win = getWindowBySid(sid)
   if (!win) return false
-  const origin = targetOrigin()
+  const origin = targetOriginFor(sid)
   if (!origin) return false
   try {
     win.postMessage({ type: 'ai-runner:stop' }, origin)
@@ -88,7 +97,6 @@ export function sendStop(): boolean {
   return sendStopTo(getActiveWinSid())
 }
 
-export interface RotatePayload { instruction: string }
 /**
  * 向指定槽位发 rotate 指令（切换会话/话题）
  * [CONSTRAINT] origin 无法解析时返回 false，不用 '*'（违反 v6 §3.4 安全约束）
@@ -96,7 +104,7 @@ export interface RotatePayload { instruction: string }
 export function sendRotateTo(sid: string, payload: RotatePayload): boolean {
   const win = getWindowBySid(sid)
   if (!win) return false
-  const origin = targetOrigin()
+  const origin = targetOriginFor(sid)
   if (!origin) return false
   try {
     win.postMessage({ type: 'ai-runner:rotate', ...payload }, origin)
@@ -109,7 +117,6 @@ export function sendRotate(payload: RotatePayload): boolean {
   return sendRotateTo(getActiveWinSid(), payload)
 }
 
-export interface NewSessionPayload { summary: string }
 /**
  * 通知指定槽位开启新会话
  * [CONSTRAINT] summary 由 session-prompt.buildNewSessionPrompt 拼好（SYSTEM.md + AGENTS.md + 总结），油猴侧不应再拼接
@@ -117,7 +124,7 @@ export interface NewSessionPayload { summary: string }
 export function sendNewSessionTo(sid: string, payload: NewSessionPayload): boolean {
   const win = getWindowBySid(sid)
   if (!win) return false
-  const origin = targetOrigin()
+  const origin = targetOriginFor(sid)
   if (!origin) return false
   try {
     win.postMessage({ type: 'ai-runner:new-session', ...payload }, origin)

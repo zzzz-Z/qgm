@@ -2,7 +2,7 @@
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/contextErrorLocations.node-test.ts 迁至 test/contextErrorLocations.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { parseErrorLocations } from '../../packages/client/utils/context-error-locations.ts'
+import { parseErrorLocations } from '../../../packages/client/utils/context-error-locations'
 
 // AIRUNNER-BATCH16-3-SPLIT-ERR-LOCS
 

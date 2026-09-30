@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @desc 契约验证：从 round-N.json 抽 @plan/@done/@verify 声明，与实际 exitCode/pipeline/changes 对比，累积偏差
+// @desc 契约验证：从 round-N.json 抽 @plan/@verify/@desc 声明，与实际 exitCode/pipeline/changes 对比，累积偏差
 // @why tier2b-2：反推误判场景，识别「声称完成但失败」「声称验证但无 verify」两类偏差
 
 const fs = require('node:fs')
@@ -19,7 +19,7 @@ function walkRounds(d, out) {
   }
 }
 
-// 从 script.head 抽声明（@plan/@done/@verify/@desc）
+// 从 script.head 抽声明（@plan/@verify/@desc）
 // [tier2b-2-fix] 抽出 head 归一化，避免 && / || 混用触发 no-mixed-operators
 function pickHead(head) {
   if (typeof head === 'string') return head
@@ -38,21 +38,19 @@ function parseClaims(head) {
   return {
     desc: g('desc'),
     plan: g('plan'),
-    done: g('done'),
     verify: g('verify'),
   }
 }
 
-// 判断本轮是否"声称完成"：@done 非空，或 @desc/@plan 里含"收尾/finish/done/完成"
+// 判断本轮是否"声称完成"：@desc/@plan 里含"收尾/finish/done/完成"
 function looksLikeCompletion(c) {
-  if (c.done) return true
   const t = (`${c.desc} ${c.plan}`)
   return /收尾|done|完成|全部完成|收工|finish/i.test(t)
 }
 
-// 判断本轮是否"声称验证"：@done 或 @verify 里含验证词
+// 判断本轮是否"声称验证"：@verify 或 @desc 里含验证词
 function looksLikeVerified(c) {
-  const t = (`${c.done} ${c.verify} ${c.desc}`)
+  const t = (`${c.verify} ${c.desc}`)
   return /闸门|verify|通过|全绿|test|tsc|lint|校验/i.test(t)
 }
 
@@ -118,7 +116,6 @@ function main() {
       exit: r.exit,
       changeCount: r.changeCount,
       desc: r.claims.desc,
-      done: r.claims.done,
       drift: r.drift,
     })),
   }
@@ -148,13 +145,12 @@ function main() {
   for (const s of result.sampleDrift) {
     w(`### ${s.runId} R${s.round} exit=${s.exit} 改动=${s.changeCount}`, '')
     w(`- desc: ${s.desc || '(空)'}`)
-    w(`- done: ${s.done || '(空)'}`)
     w(`- drift: ${s.drift.join(' / ')}`)
     w('')
   }
   w('## 反推建议', '')
-  w('- 「声称完成但 exit≠0」→ 收尾轮的 @done 与实际不符，需修 RULES 的发送前自查清单', '')
-  w('- 「声称验证但 pipeline 失败」→ 验证词被滥用，应在 @done 里明确写出证据（命令 + 退出码）', '')
+  w('- 「声称完成但 exit≠0」→ 收尾轮的 @plan/@desc 与实际不符，需修 RULES 的发送前自查清单', '')
+  w('- 「声称验证但 pipeline 失败」→ 验证词被滥用，应在 @plan 里明确写出证据（命令 + 退出码）', '')
   w('- 「声称完成但零改动」→ 空转轮，可能是重复脚本（SHA-256 去重未生效）或只读探针误标', '')
   w('')
   fs.writeFileSync(OUT_MD, out.join('\n'), 'utf8')

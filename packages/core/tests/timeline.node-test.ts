@@ -9,8 +9,8 @@ import {
   resolvePaths,
 
   writeRoundSnapshot
-} from '../../packages/core/src/state/timeline'
-import type { RoundSnapshot } from '../../packages/core/src/state/timeline'
+} from '../../../packages/core/src/state/timeline.js'
+import type { RoundSnapshot } from '../../../packages/core/src/state/timeline.js'
 
 function mkSnap(round: number, overrides: Partial<RoundSnapshot> = {}): RoundSnapshot {
   return {

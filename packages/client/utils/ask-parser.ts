@@ -15,7 +15,10 @@ export interface AskPayload {
  * 识别 @ask 起始：trim 后整段以 @ask 开头（带词边界，@asks 不匹配）
  * [CONSTRAINT] 只匹配首个；行内出现的 "@ask" 不算触发
  */
-const ASK_HEAD_RE = /^\s*@ask\b[ \t]*/i
+// [ask-multiline-v1] 支持 @ask 出现在多段文本的任意行（AI 常先说理再提问）
+// [WHY] 原正则无 m flag 只匹配整段开头；AI 回复常以多段铺垫开始，@ask 实际在第 N 段
+// [CONSTRAINT] m flag 允许逐行匹配；[^\S\n]* 不跨行（比 [ \t]* 宽松，容忍全角空格等）
+const ASK_HEAD_RE = /^[^\S\n]*@ask\b[^\S\n]*/im
 
 /**
  * 匹配列表项（- / * / + / 1. ），与 useMarkdown.ts 的块级列表识别保持同构
@@ -34,7 +37,9 @@ export function parseAsk(text: string): AskPayload | null {
   const m = ASK_HEAD_RE.exec(raw)
   if (!m) return null
 
-  const body = raw.slice(m[0].length).trim()
+  // [ask-multiline-v1] m flag 下 m.index 可能非 0；从匹配结束处截取（含跨段正确性）
+  const startIdx = m.index + m[0].length
+  const body = raw.slice(startIdx).trim()
   if (!body) return { question: '', options: [] }
 
   const questionLines: string[] = []

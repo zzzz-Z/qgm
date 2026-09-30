@@ -3,7 +3,7 @@ import {
   BASH_WHITELIST_CMDS,
   checkBashWhitelist,
   splitCommands,
-} from '../../packages/core/src/process/bash-guard'
+} from '../../../packages/core/src/process/bash-guard.js'
 
 describe('bash-guard: splitCommands', () => {
   it('按换行分', () => {

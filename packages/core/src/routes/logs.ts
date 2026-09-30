@@ -4,9 +4,6 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { getRoot } from '../config.js'
 
-/** logs 路由的 Hono 实例 */
-export const logsHono = new Hono()
-
 interface LogEntry {
   ts: number
   runId?: string
@@ -20,6 +17,9 @@ interface LogEntry {
   changes?: Array<{ path: string, type: string }>
   [k: string]: unknown
 }
+
+/** logs 路由的 Hono 实例 */
+export const logsHono = new Hono()
 
 // 读取 logs 目录下的 .jsonl 文件清单
 logsHono.get('/logs/list', (c) => {

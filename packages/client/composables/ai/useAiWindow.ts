@@ -3,6 +3,8 @@ import { DEFAULT_URL, url } from './useDeepseekUrl'
 import { useSessionManager } from './useSessionManager'
 import { onNewSessionCreated as onNewSessionCreatedImpl } from './auto-loop/handoff.js'
 import { log } from '../../utils/log'
+// [skill-injector-v1] §11.8：发送前把网页层已抓取的 skill 拼进 prompt
+import { prependLoadedSkill } from './useSkillInjector'
 import {
   getActiveWin,
   getActiveWinSid,
@@ -29,29 +31,17 @@ import {
 
 export type { FillPayload, NewSessionPayload, RotatePayload } from './useAiWindowSend'
 
-// [split-send-v2] 顶层 re-export：外部消费者继续从本文件 import（exec-flow / ScriptPanel / App.vue 等）
-export {
-  getActiveWin,
-  getActiveWinSid,
-  getWindowBySid,
-  listWindows,
-  removeWindowBySid,
-  sendFill,
-  sendFillTo,
-  sendNewSession,
-  sendNewSessionTo,
-  sendRotate,
-  sendRotateTo,
-  sendStop,
-  sendStopTo,
-  setActiveWin,
-  setActiveWinSid,
-  targetOrigin,
-}
+// ── 类型 ──
+type FillResult = 'sent' | 'opened' | 'failed'
 
+// ── 模块级常量 ──
 // [copy-via-vueuse] 模块级单例：useClipboard 内部会注册 copy 事件监听，
 // 在 setup 外反复构造会残留 listener；提升为模块级只注册一次
 const _clipboard = useClipboard()
+
+// [rules-always-v1] 每会话首次发送必带规则：以 sessionId 为键去重；
+// 切换工作区触发 reload 后 useSessionManager 会重新 generateId → 新键 → 规则自动重新注入
+const _rulesInjectedSids = new Set<string>()
 
 /**
  * 打开 AI 站点窗口并按 sid 保存引用；headless 模式改走 WS
@@ -94,12 +84,6 @@ function withSidHash(u: string, sid: string): string {
     return u
   }
 }
-
-type FillResult = 'sent' | 'opened' | 'failed'
-
-// [rules-always-v1] 每会话首次发送必带规则：以 sessionId 为键去重；
-// 切换工作区触发 reload 后 useSessionManager 会重新 generateId → 新键 → 规则自动重新注入
-const _rulesInjectedSids = new Set<string>()
 
 /**
  * [first-prompt-rules] 会话首问前置规则：读 SYSTEM.md 与 AGENTS.md 全文包成 <file> 块拼在问题前
@@ -153,6 +137,9 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean 
       finalPrompt = await _prependFirstPromptRules(prompt)
     }
   } catch { /* ignore */ }
+  // [skill-injector-v1] §11.8：把网页层抓到的 skill 段拼到 prompt 前（无缓存时原样返回）
+  // [CONSTRAINT] 无条件执行 —— 无论是首问注入规则还是普通发送，只要缓存非空就带上
+  finalPrompt = prependLoadedSkill(finalPrompt)
   useSessionManager().trackMessage('user', finalPrompt)
   await _clipboard.copy(finalPrompt)
   if (isHeadless()) {
@@ -228,9 +215,17 @@ export async function openAiSession(opts?: {
   initialPrompt?: string
   forceRules?: boolean
 }): Promise<{ win: Window | null, fill: FillResult | null }> {
-  const win = openDeepseek(opts?.atUrl ?? DEFAULT_URL, opts?.sid)
-  if (!win) return { win: null, fill: null }
   const p = opts?.initialPrompt
+  const win = openDeepseek(opts?.atUrl ?? DEFAULT_URL, opts?.sid)
+  // [headless-rules-fix] headless 下 openDeepseek 恒返回 null（不产真实窗口）——
+  // 旧逻辑 if(!win)return 会短路掉 copyAndFill，导致规则永不注入；此处显式分流。
+  // [CHANGE-IMPACT] headless 用户从"完全无规则"→"首问带 SYSTEM.md+AGENTS.md"
+  if (isHeadless()) {
+    if (!p) return { win: null, fill: null }
+    const fill = await copyAndFill(p, { forceRules: opts?.forceRules })
+    return { win: null, fill }
+  }
+  if (!win) return { win: null, fill: null }
   if (!p) return { win, fill: null }
   const fill = await copyAndFill(p, { forceRules: opts?.forceRules })
   return { win, fill }
@@ -263,4 +258,26 @@ export function useAiWindow() {
     openAiSession,
     onNewSessionCreated,
   }
+}
+
+// ── 顶层 re-export ──
+// [split-send-v2] 外部消费者（exec-flow / ScriptPanel / App.vue 等）继续从本文件 import，
+// 保证 API 稳定；实现分居 useAiWindowTable / useAiWindowSend 两个子模块
+export {
+  getActiveWin,
+  getActiveWinSid,
+  getWindowBySid,
+  listWindows,
+  removeWindowBySid,
+  sendFill,
+  sendFillTo,
+  sendNewSession,
+  sendNewSessionTo,
+  sendRotate,
+  sendRotateTo,
+  sendStop,
+  sendStopTo,
+  setActiveWin,
+  setActiveWinSid,
+  targetOrigin,
 }

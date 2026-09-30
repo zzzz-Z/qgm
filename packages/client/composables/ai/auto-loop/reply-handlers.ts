@@ -206,14 +206,6 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       }
       const changeCount = runner.changes.value.length
       inst.lastExec.value = { lang: item.lang, exit: r.code, changes: changeCount, durationMs: Date.now() - startedAt }
-      // [done-in-head-v1] 脚本头声明 @done：执行完即收尾，不再回填下一轮
-      if (item.isDone) {
-        // [done-in-head-v1] 把 @done 后续 md 总结推终端，供前端展示
-        if (item.doneMd) pushTerminalNotice(`[任务完成]\n\n${item.doneMd}`, { divider: true })
-        else pushTerminalNotice('[任务完成] AI 声明 @done', { divider: true })
-        await finish(inst, 'done', 'AI 声明 @done')
-        return
-      }
       await afterRound(inst, {
         lang: item.lang,
         desc: item.desc,
@@ -242,14 +234,6 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       return
     }
     inst.lastExec.value = { lang: 'bash', exit: exec.code, changes: 0, durationMs: Date.now() - startedAt }
-    // [done-in-head-v1] 脚本头声明 @done：执行完即收尾，不再回填下一轮
-    if (item.isDone) {
-      // [done-in-head-v1] 把 @done 后续 md 总结推终端，供前端展示
-      if (item.doneMd) pushTerminalNotice(`[任务完成]\n\n${item.doneMd}`, { divider: true })
-      else pushTerminalNotice('[任务完成] AI 声明 @done', { divider: true })
-      await finish(inst, 'done', 'AI 声明 @done')
-      return
-    }
     await afterRound(inst, {
       lang: 'bash',
       desc: item.desc,

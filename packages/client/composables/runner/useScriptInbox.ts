@@ -22,10 +22,14 @@ export interface InboxItem {
   why: string
   /** 到达时间戳 */
   ts: number
-  /** [done-in-head-v1] 脚本头含 @done：执行完就收尾，不再进下一轮 */
-  isDone?: boolean
-  /** [done-in-head-v1] @done 后续连续注释（md 文本，供前端展示总结） */
-  doneMd?: string
+}
+
+interface PushOptions {
+  code: string
+  lang: 'js' | 'cjs' | 'bash'
+  site: string
+  /** 油猴传入的原始 hash（保留为元数据），重复判定始终用归一化 hash */
+  hash?: string
 }
 
 /**
@@ -35,27 +39,16 @@ export interface InboxItem {
  * 避免通过改注释绕过「连续两轮相同」的重复判定。
  */
 
-/** 收件箱 */
-const inbox = ref<InboxItem[]>([])
 /** 上次自动填入编辑器的内容；用于覆盖保护策略判断 */
 let lastAutoFilled = ''
+
+/** 收件箱 */
+const inbox = ref<InboxItem[]>([])
 
 /**
  * 解析 AI 回复中首部的 @desc / @why 元注释（与 src/index.ts parseScriptMeta 对齐）。
  * cjs 用 //，bash 用 #。
  */
-
-interface PushOptions {
-  code: string
-  lang: 'js' | 'cjs' | 'bash'
-  site: string
-  /** 油猴传入的原始 hash（保留为元数据），重复判定始终用归一化 hash */
-  hash?: string
-  /** [done-in-head-v1] 是否收尾轮 */
-  isDone?: boolean
-  /** [done-in-head-v1] @done 后续 md 文本 */
-  doneMd?: string
-}
 
 /**
  * 油猴抓到 AI 脚本后调用此方法入队。
@@ -90,8 +83,6 @@ export function push(opts: PushOptions): InboxItem | null {
     desc: meta.desc,
     why: meta.why,
     ts: Date.now(),
-    isDone: Boolean(opts.isDone),
-    doneMd: typeof opts.doneMd === 'string' ? opts.doneMd : undefined,
   }
   inbox.value = [...inbox.value, item]
   return item

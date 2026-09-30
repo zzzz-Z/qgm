@@ -16,9 +16,9 @@ const windowMock = {
 }
 Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: windowMock })
 
-let mod: typeof import('../../packages/client/composables/ai/auto-loop/keyboard.ts')
+let mod: typeof import('../../../packages/client/composables/ai/auto-loop/keyboard')
 beforeAll(async () => {
-  mod = await import('../../packages/client/composables/ai/auto-loop/keyboard.ts')
+  mod = await import('../../../packages/client/composables/ai/auto-loop/keyboard')
 })
 
 beforeEach(() => {

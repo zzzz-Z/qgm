@@ -17,7 +17,7 @@ function useTmp(): void {
 }
 
 function mkMeta(ino: number, mtimeMs: number, size: number) {
-  return { ino, mtimeMs, size } as unknown as import('../../packages/core/src/state/snapshot.ts').FileMeta
+  return { ino, mtimeMs, size } as unknown as import('../../../packages/core/src/state/snapshot.js').FileMeta
 }
 
 function writeFixture(rel: string, content: string): void {
@@ -27,13 +27,13 @@ function writeFixture(rel: string, content: string): void {
 }
 
 test('snapshot: isExcluded .ai-runner prefix', async () => {
-  const { isExcluded } = await import('../../packages/core/src/state/snapshot.ts')
+  const { isExcluded } = await import('../../../packages/core/src/state/snapshot.js')
   assert.equal(isExcluded('.ai-runner/state.json'), true)
   assert.equal(isExcluded('.ai-runner'), true)
 })
 
 test('snapshot: isExcluded node_modules / .git / dist', async () => {
-  const { isExcluded } = await import('../../packages/core/src/state/snapshot.ts')
+  const { isExcluded } = await import('../../../packages/core/src/state/snapshot.js')
   assert.equal(isExcluded('node_modules/foo'), true)
   assert.equal(isExcluded('a/node_modules/b'), true)
   assert.equal(isExcluded('.git/HEAD'), true)
@@ -41,13 +41,13 @@ test('snapshot: isExcluded node_modules / .git / dist', async () => {
 })
 
 test('snapshot: isExcluded normal files -> false', async () => {
-  const { isExcluded } = await import('../../packages/core/src/state/snapshot.ts')
+  const { isExcluded } = await import('../../../packages/core/src/state/snapshot.js')
   assert.equal(isExcluded('src/index.ts'), false)
   assert.equal(isExcluded('README.md'), false)
 })
 
 test('snapshot: diffMeta empty -> []', async () => {
-  const { diffMeta } = await import('../../packages/core/src/state/snapshot.ts')
+  const { diffMeta } = await import('../../../packages/core/src/state/snapshot.js')
   const r = diffMeta(new Map(), new Map(), new Map())
   assert.deepEqual(r, [])
 })
@@ -56,7 +56,7 @@ test('snapshot: diffMeta added reads disk + counts lines', async () => {
   useTmp()
   const NL = String.fromCharCode(10)
   writeFixture('new.ts', `a${NL}b`)
-  const { diffMeta } = await import('../../packages/core/src/state/snapshot.ts')
+  const { diffMeta } = await import('../../../packages/core/src/state/snapshot.js')
   const before = new Map<string, string>()
   const bMeta = new Map<string, ReturnType<typeof mkMeta>>()
   const aMeta = new Map([['new.ts', mkMeta(1, 1, 3)]])
@@ -69,7 +69,7 @@ test('snapshot: diffMeta added reads disk + counts lines', async () => {
 
 test('snapshot: diffMeta deleted', async () => {
   useTmp()
-  const { diffMeta } = await import('../../packages/core/src/state/snapshot.ts')
+  const { diffMeta } = await import('../../../packages/core/src/state/snapshot.js')
   const before = new Map<string, string>()
   const bMeta = new Map([['gone.ts', mkMeta(1, 1, 1)]])
   const aMeta = new Map<string, ReturnType<typeof mkMeta>>()
@@ -81,7 +81,7 @@ test('snapshot: diffMeta modified when meta and content change', async () => {
   useTmp()
   const NL = String.fromCharCode(10)
   writeFixture('mod.ts', `new line 1${NL}new line 2`)
-  const { diffMeta } = await import('../../packages/core/src/state/snapshot.ts')
+  const { diffMeta } = await import('../../../packages/core/src/state/snapshot.js')
   const before = new Map([['mod.ts', 'old content']])
   const bMeta = new Map([['mod.ts', mkMeta(1, 100, 11)]])
   const aMeta = new Map([['mod.ts', mkMeta(1, 200, 22)]])
@@ -94,7 +94,7 @@ test('snapshot: diffMeta modified when meta and content change', async () => {
 test('snapshot: diffMeta meta change but same content -> []', async () => {
   useTmp()
   writeFixture('same.ts', 'unchanged')
-  const { diffMeta } = await import('../../packages/core/src/state/snapshot.ts')
+  const { diffMeta } = await import('../../../packages/core/src/state/snapshot.js')
   const before = new Map([['same.ts', 'unchanged']])
   const bMeta = new Map([['same.ts', mkMeta(1, 100, 9)]])
   const aMeta = new Map([['same.ts', mkMeta(1, 200, 9)]])
@@ -105,7 +105,7 @@ test('snapshot: diffMeta meta change but same content -> []', async () => {
 test('snapshot: diffMeta sorted by path', async () => {
   useTmp()
   writeFixture('b.ts', 'b')
-  const { diffMeta } = await import('../../packages/core/src/state/snapshot.ts')
+  const { diffMeta } = await import('../../../packages/core/src/state/snapshot.js')
   const before = new Map([['z.ts', 'old z']])
   const bMeta = new Map([['z.ts', mkMeta(1, 1, 1)]])
   const aMeta = new Map([['a.ts', mkMeta(1, 1, 1)], ['b.ts', mkMeta(1, 1, 1)]])
@@ -115,7 +115,7 @@ test('snapshot: diffMeta sorted by path', async () => {
 
 test('snapshot: runDir joins correctly', async () => {
   useTmp()
-  const { runDir } = await import('../../packages/core/src/state/snapshot.ts')
+  const { runDir } = await import('../../../packages/core/src/state/snapshot.js')
   const d = runDir('run-test-1')
   assert.ok(d.includes('.ai-runner'))
   assert.ok(d.endsWith('run-test-1'))
@@ -123,14 +123,14 @@ test('snapshot: runDir joins correctly', async () => {
 
 test('snapshot: readManifest missing -> null', async () => {
   useTmp()
-  const { readManifest } = await import('../../packages/core/src/state/snapshot.ts')
+  const { readManifest } = await import('../../../packages/core/src/state/snapshot.js')
   const r = readManifest('__no_such_run__')
   assert.equal(r, null)
 })
 
 test('snapshot: saveSnapshot + readManifest roundtrip', async () => {
   useTmp()
-  const { saveSnapshot, readManifest } = await import('../../packages/core/src/state/snapshot.ts')
+  const { saveSnapshot, readManifest } = await import('../../../packages/core/src/state/snapshot.js')
   const before = new Map([['src/x.ts', 'old x']])
   const changes = [{ path: 'src/x.ts', type: 'modified' as const, afterLines: 3 }]
   saveSnapshot('run-rt-1', before, changes as never)

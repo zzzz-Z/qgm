@@ -2,7 +2,7 @@
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/format.node-test.ts 迁至 test/format.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { fmtSize } from '../../packages/client/utils/format.ts'
+import { fmtSize } from '../../../packages/client/utils/format'
 
 // AIRUNNER-BATCH15-4-FORMAT
 test('fmtSize: < 1024 字节显示为 NNB', () => {

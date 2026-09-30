@@ -1,5 +1,5 @@
 // [tree-attach-v1] 从 ScriptPanel.vue 抽出：文件树拖拽 → 附件 / 目录展开 / 脚本拼装
-import { isBashScript, isInEditor } from './script-panel-utils'
+import { isInEditor } from './script-panel-utils'
 import { fmtSize } from '../../utils/format'
 import type { FileNode, FilesReadResponse } from '../../types'
 import type { Ref } from 'vue'
@@ -97,30 +97,29 @@ export function createTreeAttach(deps: { attachedFiles: Ref<AttachedFile[]> }) {
   }
 
   /** 脚本 + 附件 → 拼装成最终脚本文本（bash 用 #、cjs 用 //） */
-  async function buildScriptWithAttachments(scriptText: string, files: AttachedFile[]): Promise<string> {
+  async function buildPromptWithAttachments(scriptText: string, files: AttachedFile[]): Promise<string> {
     if (!files.length) return scriptText
-    const isBash = isBashScript(scriptText)
-    const p = isBash ? '#' : '//'
+    // const p = isBash ? '#' : '//'
     const parts: string[] = []
     for (const f of files) {
       if (f.kind === 'folder' && f.paths && f.paths.length) {
-        parts.push(`${p} ═════ 附件目录 ${f.name} (${f.paths.length} 文件) ═════`)
+        parts.push(`═════ 附件目录 ${f.name} (${f.paths.length} 文件) ═════`)
         const contents = await fetchFolderContents(f.paths)
         for (const cf of contents) {
-          parts.push(`${p} ----- ${cf.path} -----`)
-          for (const line of cf.content.split('\n')) parts.push(`${p} ${line}`)
+          parts.push(`----- ${cf.path} -----`)
+          for (const line of cf.content.split('\n')) parts.push(`${line}`)
         }
       } else if (f.kind === 'image') {
-        parts.push(`${p} ═════ 附件图片 ${f.name} (${fmtSize(f.size)}) ═════`)
-        parts.push(`${p} [图片数据无法嵌入，请在 AI 站点单独粘贴]`)
+        parts.push(`═════ 附件图片 ${f.name} (${fmtSize(f.size)}) ═════`)
+        parts.push(`[图片数据无法嵌入，请在 AI 站点单独粘贴]`)
       } else {
-        parts.push(`${p} ═════ 附件 ${f.name} (${fmtSize(f.size)}) ═════`)
-        for (const line of f.content.split('\n')) parts.push(`${p} ${line}`)
+        parts.push(`═════ 附件 ${f.name} (${fmtSize(f.size)}) ═════`)
+        for (const line of f.content.split('\n')) parts.push(`${line}`)
       }
     }
     parts.push('')
     return parts.join('\n') + scriptText
   }
 
-  return { addTreePaths, onTreeDrop, buildScriptWithAttachments }
+  return { addTreePaths, onTreeDrop, buildPromptWithAttachments }
 }

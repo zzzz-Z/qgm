@@ -7,6 +7,10 @@ import path from 'node:path'
 /** 包资源目录（用于定位内置页面与静态文件） */
 export const __pkgDir = path.dirname(fileURLToPath(import.meta.url))
 
+// 兼容旧调用：模块加载时求一次
+/** 内嵌首页 HTML 内容 */
+export const PAGE = buildPage()
+
 /**
  * 解析为 Client Main
  */
@@ -38,7 +42,3 @@ export function buildPage(clientMainAbs?: string): string {
     '</html>',
   ].join('\\n')
 }
-
-// 兼容旧调用：模块加载时求一次
-/** 内嵌首页 HTML 内容 */
-export const PAGE = buildPage()

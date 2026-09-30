@@ -1,23 +1,20 @@
 // token 估算与自动轮转
 import { LOOP_ROTATE_THRESHOLD } from '../loopLogic.js'
-import { ref, watch } from 'vue'
+import { useStorage } from '@vueuse/core'
 import { activeLoop, isLoopActive } from '../useAutoLoop.js'
 import { startHandoff } from './handoff.js'
 
 /** 键 */
 const KEY_AUTO_ROTATE = '__ai_auto_rotate_session'
-// 已移至 loopLogic.ts，见下方 import
-function loadBoolSetting(key: string, fallback: boolean): boolean {
-  try {
-    const v = localStorage.getItem(key)
-    return v === null ? fallback : v === '1'
-  } catch { return fallback }
+// [use-storage-v1] 布尔持久化改用 @vueuse useStorage；serializer 兼容历史 '1'/'0' 存储格式
+// [CONSTRAINT] 与 useAutoTakeover.ts 的 BOOL_SERIALIZER 保持同构，避免两处格式漂移
+// [CHANGE-IMPACT] 模块顶层调用（无 setup 上下文亦可）；内部无 onScopeDispose 依赖，SSR 安全
+const BOOL_SERIALIZER = {
+  read: (v: string) => v === '1',
+  write: (v: boolean) => (v ? '1' : '0'),
 }
 /** 会话 */
-export const autoRotateSession = ref<boolean>(loadBoolSetting(KEY_AUTO_ROTATE, true))
-watch(autoRotateSession, (v) => {
-  try { localStorage.setItem(KEY_AUTO_ROTATE, v ? '1' : '0') } catch { /* swallow: 配额/隐私模式，开关仅在内存态生效 */ }
-})
+export const autoRotateSession = useStorage<boolean>(KEY_AUTO_ROTATE, true, undefined, { serializer: BOOL_SERIALIZER })
 
 /**
  * 更新本轮 token 估算值，并在超阈值时触发会话轮转

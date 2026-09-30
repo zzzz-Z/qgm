@@ -19,7 +19,8 @@ const __dirname = path.dirname(__filename)
 
 // AIRUNNER-BATCH26-9-INTER: 测试在 test/server/，interceptor.cjs 在仓库根
 // AIRUNNER-BATCH27-5: interceptor.cjs 真身在 src/，非仓库根
-const interceptor = path.resolve(__dirname, '..', '..', 'packages', 'core', 'src', 'interceptor.cjs')
+// [mig-path-v1] 测试从 test/server/ 迁到 packages/core/tests/，__dirname 深一级 → 路径多 1 级上溯
+const interceptor = path.resolve(__dirname, '..', '..', '..', 'packages', 'core', 'src', 'interceptor.cjs')
 
 function runInSandbox(scriptBody: string, setup?: (dir: string) => void) {
   // realpath：macOS 下 /var、/tmp 是软链，子进程 process.cwd() 返回物理路径

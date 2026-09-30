@@ -5,7 +5,7 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadHooksConfig, parseHooksConfig } from '../../packages/core/src/utils/hooks-config.ts'
+import { loadHooksConfig, parseHooksConfig } from '../../../packages/core/src/utils/hooks-config.js'
 
 // AIRUNNER-BATCH11-1-HOOKS-CONFIG-TEST
 

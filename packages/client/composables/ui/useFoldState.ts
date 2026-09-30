@@ -2,9 +2,6 @@
 import type { Ref } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 
-/** localStorage 键前缀（按模块区分） */
-const PREFIX = 'airunner:fold:'
-
 /** 折叠状态（接口） */
 export interface FoldState {
   isOpen: (key: string, fallback?: boolean) => boolean
@@ -13,6 +10,9 @@ export interface FoldState {
   all: Ref<Record<string, boolean>>
   clear: () => void
 }
+
+/** localStorage 键前缀（按模块区分） */
+const PREFIX = 'airunner:fold:'
 
 /**
  * 折叠面板状态（sessionId + scope 维度持久化到 localStorage）

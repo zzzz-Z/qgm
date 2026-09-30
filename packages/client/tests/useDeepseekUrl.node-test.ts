@@ -46,9 +46,16 @@ Object.defineProperty(globalThis, 'crypto', {
   value: { randomUUID: (): string => '00000000-0000-0000-0000-000000000000' },
 })
 
-let mod: typeof import('../../packages/client/composables/ai/useDeepseekUrl.ts')
+// [split-fix-v1] useAiWindow 已按职责拆分为 Table（窗口引用）+ Send（发送协议）
+// [WHY] 本测试 split 前针对单一 useDeepseekUrl.ts 编写；split 后 API 迁至 useAiWindow 门面
+// [CONSTRAINT] 用交叉类型 + 动态合并，兼顾 MODELS/DEFAULT_URL（旧）与窗口/发送 API（新）
+type DsMod = typeof import('../../../packages/client/composables/ai/useDeepseekUrl')
+type WinMod = typeof import('../../../packages/client/composables/ai/useAiWindow')
+let mod: DsMod & WinMod
 beforeAll(async () => {
-  mod = await import('../../packages/client/composables/ai/useDeepseekUrl.ts')
+  const ds = await import('../../../packages/client/composables/ai/useDeepseekUrl')
+  const win = await import('../../../packages/client/composables/ai/useAiWindow')
+  mod = { ...ds, ...win } as DsMod & WinMod
 })
 
 beforeEach(() => { lsStore.clear() })
@@ -73,7 +80,8 @@ test('DEFAULT_URL: 为合法 URL 字符串', () => {
   assert.match(mod.DEFAULT_URL, /^https?:\/\//)
 })
 
-test('useDeepseekUrl: 返回完整 API 面', () => {
+// [split-facades-v1] 拆分后 useDeepseekUrl 只负责 URL/model；窗口 API 归 useAiWindow
+test('useDeepseekUrl: 返回 URL/model 门面（9 项）', () => {
   const r = mod.useDeepseekUrl()
   for (const k of [
     'modelId',
@@ -85,6 +93,14 @@ test('useDeepseekUrl: 返回完整 API 面', () => {
     'display',
     'MODELS',
     'DEFAULT_URL',
+  ] as const) {
+    assert.ok(k in r, `missing key: ${k}`)
+  }
+})
+
+test('useAiWindow: 返回窗口/发送门面（9 项）', () => {
+  const r = mod.useAiWindow()
+  for (const k of [
     'getWindowBySid',
     'listWindows',
     'getActiveWinSid',

@@ -17,6 +17,15 @@ export interface SegmentState {
 /** 完整流水线：阶段列表 + 当前进度 */
 export type Pipeline = Record<string, SegmentState>
 
+/** 流水线阶段名称枚举 */
+export type SegmentName = typeof SEGMENTS[number]
+
+/** 流水线配置：阶段列表与默认超时 */
+export interface PipelineConfig {
+  timeouts: Record<string, number>
+  retries: Record<string, { count: number, backoff: number[] }>
+}
+
 /** 流水线阶段名称列表（顺序敏感） */
 export const SEGMENTS = [
   'ASK_LOCAL',
@@ -31,15 +40,6 @@ export const SEGMENTS = [
   'RESULT_RELAY',
   'RESULT_INJECT',
 ] as const
-
-/** 流水线阶段名称枚举 */
-export type SegmentName = typeof SEGMENTS[number]
-
-/** 流水线配置：阶段列表与默认超时 */
-export interface PipelineConfig {
-  timeouts: Record<string, number>
-  retries: Record<string, { count: number, backoff: number[] }>
-}
 
 /**
  * 初始化一个全新的流水线（所有阶段 pending）

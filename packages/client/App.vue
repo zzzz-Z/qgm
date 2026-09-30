@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useEventListener } from '@vueuse/core'
+import { useEventListener, useStorage } from '@vueuse/core'
 import ScriptPanel from './components/script/ScriptPanel.vue'
 import { DEFAULT_URL, MODELS, useDeepseekUrl } from './composables/ai/useDeepseekUrl'
-import { getWindowBySid, listWindows, onNewSessionCreated, openAiSession, openDeepseek, setActiveWinSid } from './composables/ai/useAiWindow'
+import { getActiveWinSid, getWindowBySid, listWindows, onNewSessionCreated, openAiSession, openDeepseek, setActiveWinSid } from './composables/ai/useAiWindow'
 import { useScriptInbox } from './composables/runner/useScriptInbox'
 import {
   createLoopInstanceFor,
@@ -23,19 +23,27 @@ import {
 import { useAutoTakeover } from './composables/ai/useAutoTakeover'
 import { useSessionManager } from './composables/ai/useSessionManager'
 import { useToast } from './composables/ui/useToast'
+// [ask-standalone-v1] 交互提问独立通道：手动模式同样生效，不再依赖 loop 状态
+import { parseAsk } from './utils/ask-parser'
+import { askUser } from './composables/ui/useAsk'
 import type { AiReply } from './composables/ai/auto-loop/types'
 import { log } from './utils/log'
-import { useCodeCleaner } from './composables/runner/useCodeCleaner'
-import { useRunner } from './composables/runner/useRunner'
+import { pushTerminalNotice, useRunner } from './composables/runner/useRunner'
 import { loopPaused, useAiWaiting } from './composables/ai/useAiWaiting'
 import { emit as emitBus, takePendingAskKey } from './composables/ui/useEventStream'
-import { getTransport } from './composables/ai/useAiTransport' // [fix-headless-reply]
+import { getTransport, transportKind } from './composables/ai/useAiTransport' // [fix-headless-reply]
 import type { EventKind } from './composables/ui/useEventStream'
 import ToastHost from './components/feedback/ToastHost.vue'
 import TooltipHost from './components/feedback/TooltipHost.vue'
+// [workspace-mode-v1] 无工作区引导页：生产环境首启时让用户选择目录
+import WorkspaceGuide from './components/panels/WorkspaceGuide.vue'
+// [worklog-v1] 工作日志弹窗：header 按钮触发，git diff → Markdown
+import WorklogDialog from './components/feedback/WorklogDialog.vue'
 // [app-storage-extracted-v1]
-import { ACTIVE_SESSION_KEY, KEY_BASH_POLICY, KEY_SANDBOX, KEY_THEME, loadActiveSessionId, loadHistory, loadStr, loadTheme, saveHistory } from './composables/ui/useAppStorage'
+import { activeSessionId, loadHistory, saveHistory, theme } from './composables/ui/useAppStorage'
 import type { SessionEntry } from './composables/ui/useAppStorage'
+// [skill-injector-v1] §11.8：抓取 AI 回复里的 ai-skill 围栏块
+import { captureSkillFromReply } from './composables/ai/useSkillInjector'
 
 /** 自动接管模式开关 */
 const autoTakeover = useAutoTakeover()
@@ -59,24 +67,18 @@ const sessionHistory = ref<SessionEntry[]>(loadHistory())
 // [ask-count] 当前会话收到的 AI 回复次数（每 reply +1）
 // [ask-count-persist] 提问次数持久化到 localStorage，刷新不重置
 
-// [app-storage-extracted-v1] ACTIVE_SESSION_KEY/loadActiveSessionId 已抽至 useAppStorage
-/** 活动的会话标识 */
-const activeSessionId = ref<string>(loadActiveSessionId())
-// [app-storage-extracted-v1] KEY_SANDBOX/KEY_BASH_POLICY/loadStr 已抽至 useAppStorage
-const sandboxMode = ref(loadStr(KEY_SANDBOX, 'read-only'))
-/** bash 命令策略：白名单 / 黑名单 / 审批 */
-const bashPolicy = ref(loadStr(KEY_BASH_POLICY, 'on-request'))
+// [use-storage-v1] activeSessionId / sandboxMode / theme 均为 useAppStorage 的 useStorage 单例（跨标签页同步）
+// [use-storage-v1] transportKind 已迁移到 useAiTransport 的 useStorage 单例
+// [workspace-mode-v1] 工作区绑定状态：无工作区时渲染引导页
+// [CONSTRAINT] 默认 true 避免首帧闪烁；onMounted 探测后按服务端返回值覆盖
+const hasWorkspace = ref(true)
+// [worklog-v1] 工作日志弹窗可见性
+const showWorklog = ref(false)
+
 /** 键盘帮助面板开关 */
 const keyboardHelpOpen = ref(false)
 /** 信息 */
 const absenceInfo = ref<{ daysAgo: number } | null>(null)
-
-/** AI 传输链路类型 */
-const transportKind = ref<'tampermonkey' | 'headless'>(
-  (() => { try { return localStorage.getItem('__ai_transport') === 'headless' ? 'headless' : 'tampermonkey' } catch { return 'tampermonkey' } })()
-)
-/** 主题（light / dark） */
-const theme = ref<'light' | 'dark'>(loadTheme())
 /** URL 是否处于编辑态 */
 const urlEditing = ref(false)
 /** URL 编辑中的临时值 */
@@ -186,6 +188,9 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
   const inst = sid ? getLoopBySessionId(sid) : undefined
   const routedToLoop = Boolean(inst && isInstActive(inst))
   const kind = String(d.kind || '')
+  // [skill-injector-v1] §11.8：无论 kind 是 done/plain/multi，先尝试抓取 ai-skill 围栏块
+  // [CONSTRAINT] 纯读操作，仅写模块级缓存；失败不阻断主流程
+  try { captureSkillFromReply(String(d.text || '')) } catch { /* swallow: 抓取失败不阻断 */ }
 
   // done / plain / multi 仅循环模式消费
   // DONE：彻底停止循环（先停循环态再 emit，避免残留状态）
@@ -196,6 +201,26 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
     if (autoTakeover.enabled.value) {
       autoTakeover.disable()
     }
+    // [done-summary-manual-v1] 手动/循环两种模式下都要把总结写入 doneSummary 通道
+    // [CONSTRAINT] 首行 DONE 剥离后剩余内容即总结；缺失时降级为占位文案
+    const doneText = String(d.text || '')
+    const summary = doneText.replace(/^\s*DONE\s*/, '').trim()
+    // [done-summary-sanitize-v2] 过滤脚本源码残留：仅按首行判定，避免误伤含代码片段的正常总结
+    // [WHY] 首版含全文围栏检查，把「AI 总结里引用脚本片段」也判为残留 → 正常总结被降级为占位
+    // [CONSTRAINT] 仅当首非空行是 shebang 或 @desc/@why 注释时才视为脚本；总结正文首行通常为 ### 标题
+    // [CHANGE-IMPACT] 命中过滤时降级为占位文案，不影响 done 终止逻辑
+    const firstLine = summary.split(/\r?\n/).find(l => l.trim().length > 0) || ''
+    const looksLikeScript = /^#!\s*\//.test(firstLine.trim())
+      || /^\s*(?:\/\/|#)\s*@(?:desc|why)\b/.test(firstLine)
+    const cleanSummary = summary && summary !== 'DONE' && !looksLikeScript ? summary : ''
+    // [done-persist-v1] 总结写入事件流：与 ai:plain/ai:multi 共用 localStorage 通道，刷新页面仍可见
+    // [WHY] 方案 A：统一事件流路径，TerminalPane 消费 ai:done 渲染为带 ✓ 徽章的总结卡
+    // [CONSTRAINT] cleanSummary 已 strip 首行 DONE + 过滤脚本源码；空串时前端跳过该卡
+    try {
+      emitBus('ai:done', '任务完成 · 总结', { payload: { kind: 'done', text: cleanSummary } })
+    } catch (e) { log.error('[done-emit] failed:', e) }
+    const display = cleanSummary ? `[任务完成]\n\n${cleanSummary}` : '[任务完成] AI 回复 DONE'
+    pushTerminalNotice(display, { divider: true })
     return
   }
 
@@ -203,7 +228,12 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
     const code = String(d.code || '')
     const lang = (d.lang === 'bash' ? 'bash' : d.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
     const site = String(d.site || e.origin || '')
-    const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined, isDone: Boolean(d.isDone), doneMd: d.doneMd ? String(d.doneMd) : undefined })
+    const item = scriptInbox.push({
+      code,
+      lang,
+      site,
+      hash: d.hash ? String(d.hash) : undefined,
+    })
     if (item) {
       const lineCount = code.split('\n').length
       toast(`📥 脚本 · ${lang} · ${lineCount} 行${item.desc ? ` · ${item.desc}` : ''}`, 'info', 3500)
@@ -212,19 +242,20 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
       // 若用户刚发过提问，复用那条等待卡的 key —— 原地替换为执行卡
       const runKey = takePendingAskKey() || (`run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`)
       try {
-        emitBus('run:start', `等待执行：${item.desc || '脚本'}`, { payload: { desc: item.desc, why: item.why, plan, lang, lineCount, hash: item.hash, phase: 'pending', runKey, ...currentLoopContext() }, updateKey: runKey })
+        emitBus('run:start', `等待执行：${item.desc || '脚本'}`, {
+          payload: { desc: item.desc, why: item.why, plan, lang, lineCount, hash: item.hash, phase: 'pending', runKey, ...currentLoopContext() },
+          updateKey: runKey
+        })
       } catch (e) { log.error('[run:start pending] failed:', e) }
       // 决策链路：脚本到达事件入 TraceLog（v6 §3.2），循环中盖 loopId/loopRound
       if (routedToLoop) {
         // 循环模式：状态机接管（不经编辑器覆盖策略）
         void onScriptArrival(item, sid)
       } else {
-        // 手动模式：不回填编辑器，延迟 3-7s 直接执行
-        // 用 scheduleAutoRun 统一倒计时，状态栏可展示
-        autoTakeover.scheduleAutoRun(
-          () => { void runScript({ script: code, runKey, autoFeedback: true }) },
-          { desc: item.desc, why: item.why, plan, lang, lineCount },
-        )
+        // [no-delay-v2] 手动模式：不回填编辑器，scheduleAutoRun 已无延迟无 meta，立即执行
+        autoTakeover.scheduleAutoRun(() => {
+          void runScript({ script: code, runKey, autoFeedback: true })
+        })
       }
     }
     return
@@ -236,6 +267,22 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
   } else if (kind === 'done') {
     emitBus('ai:done', 'AI 回复 DONE', { payload: { kind: 'done', text: 'DONE' } })
   }
+
+  // [ask-standalone-v1] 独立触发：手动模式下 AI 也能主动索要用户回答
+  // [CONSTRAINT] 命中即 return，避免落入 routedToLoop 分支造成重复处理
+  // [CHANGE-IMPACT] 依赖 parseAsk / askUser / getTransport；回答以固定前缀回填以区分正常消息
+  if (kind === 'plain' && text) {
+    const ask = parseAsk(text)
+    if (ask) {
+      void askUser(ask).then((answer) => {
+        if (answer === null) return
+        const t = getTransport()
+        if (t) t.sendFill('', { prompt: `【@ask 回答】${answer}` })
+      })
+      return
+    }
+  }
+
   if (routedToLoop) {
     void onNonScriptReply({
       kind: kind as 'done' | 'plain' | 'multi',
@@ -345,7 +392,7 @@ function handleSessionIdUpdate(d: MessageEvent['data']) {
 }
 function isFromActiveAiSite(e: MessageEvent): boolean {
   // 无头模式：WS 内部消息，跳过 origin/source 校验
-  if ((() => { try { return localStorage.getItem('__ai_transport') === 'headless' } catch { return false } })()) return true
+  if (transportKind.value === 'headless') return true
   // mock 模式：跳过来源校验，让合成 MessageEvent 直走完整链路
   if (MOCK_MODE) return true
   const AI_ORIGINS = MODELS
@@ -439,33 +486,31 @@ function onShiftQuestion(e: KeyboardEvent) {
   }
 }
 
-try {
-  const raw = localStorage.getItem(LS_LAST_VISIT)
-  const last = raw ? Number(raw) : 0
+// [use-storage-v1] LS_LAST_VISIT 迁移到 useStorage<number>；写入即持久化，语义等价
+// [CONSTRAINT] 单例初始化时自动读旧值（缺失走默认 0）；读→算→写三步在模块初始化时同步完成
+{
+  const lastVisit = useStorage<number>(LS_LAST_VISIT, 0)
+  const last = Number(lastVisit.value) || 0
   if (last) {
     const hours = (Date.now() - last) / 3_600_000
     if (hours >= 4) {
       absenceInfo.value = { daysAgo: Math.floor(hours / 24) }
     }
   }
-  localStorage.setItem(LS_LAST_VISIT, String(Date.now()))
-} catch { /* ignore */ }
+  lastVisit.value = Date.now()
+}
 watch(activeSessionId, (v) => {
-  try {
-    if (v) localStorage.setItem(ACTIVE_SESSION_KEY, v)
-    else localStorage.removeItem(ACTIVE_SESSION_KEY)
-  } catch { /* swallow: localStorage 配额 / 隐私模式抛错，不阻断 watch 后续逻辑 */ }
+  // [use-storage-v1] 落盘由 useStorage 托管；此处仅保留 loop/window 表同步副作用
   // 同步到 loop 实例表与窗口表（多循环并发的前提）
   const sid = v || 'default'
   setActiveLoopSessionId(sid)
   createLoopInstanceFor(sid)
   setActiveWinSid(sid)
 }, { immediate: true })
-watch(sandboxMode, (v) => { try { localStorage.setItem(KEY_SANDBOX, v) } catch { /* swallow: 配额/隐私模式 */ } })
-watch(bashPolicy, (v) => { try { localStorage.setItem(KEY_BASH_POLICY, v) } catch { /* swallow: 配额/隐私模式 */ } })
+// [use-storage-v1] sandboxMode / bashPolicy 落盘均由 useStorage 托管，不再手动 watch
+// [use-storage-v1] theme 仅保留 DOM data-theme 副作用；落盘由 useStorage 托管
 watch(theme, (v) => {
   document.documentElement.setAttribute('data-theme', v)
-  try { localStorage.setItem(KEY_THEME, v) } catch { /* swallow: 配额/隐私模式 */ }
 }, { immediate: true })
 
 // [use-event-listener-v1] 用 vueuse useEventListener 而非原生 addEventListener：
@@ -475,7 +520,16 @@ useEventListener(window, 'keydown', onShiftQuestion)
 
 // auto resend after 3 min no reply
 
-onMounted(() => {
+onMounted(async () => {
+  // [workspace-mode-v1] 探测工作区状态：无工作区时渲染引导页
+  // [CONSTRAINT] 网络失败默认 true 避免误锁用户；探测成功才覆盖
+  try {
+    const r = await fetch('/__ai/workspace', { headers: { accept: 'application/json' } })
+    if (r.ok) {
+      const j = await r.json() as { hasWorkspace?: boolean }
+      hasWorkspace.value = j.hasWorkspace !== false
+    }
+  } catch { /* ignore: 探测失败保持默认放行 */ }
   // [auto-new-session-on-switch-v1] 切项目后：自动开新会话并连接
   try {
     const flag = sessionStorage.getItem('__ai_switch_project')
@@ -501,7 +555,7 @@ onMounted(() => {
   } catch { /* sessionStorage 不可用时静默 */ }
   // 无头模式：订阅 transport.onReply，转成 MessageEvent 格式喂给同一处理器
   try {
-    if (localStorage.getItem('__ai_transport') === 'headless') {
+    if (transportKind.value === 'headless') {
       const t = getTransport()
       t.onReply((raw: unknown, sid: string) => {
         // [p1-2-client-v2] transport 回调签名声明 unknown（逆变）；此处一次性收窄为 AiReply|null
@@ -523,6 +577,14 @@ onMounted(() => {
           source: null,
         } as unknown as MessageEvent
         try { onSessionIdMessage(fake) } catch (e) { log.error('[headless-reply] 处理失败:', e) }
+      })
+      // [headless-state-err-v1] error 状态必须显式提示，否则用户只看到"发送无回应"
+      t.onState?.((state: string, detail: string, sid: string) => {
+        if (state === 'error') {
+          const msg = detail || '无头链路异常'
+          try { toast(`无头链路错误：${msg}`, 'error', 6000) } catch { /* swallow: toast 未就绪 */ }
+          log.error('[headless-state] sid=', sid, 'detail=', detail)
+        }
       })
       log.warn('[ai-runner] 无头 reply 订阅已注册')
     }
@@ -560,8 +622,34 @@ onMounted(() => {
  */
 function onTransportChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
-  try { localStorage.setItem('__ai_transport', v === 'headless' ? 'headless' : 'tampermonkey') } catch { /* swallow: 仅影响下次刷新偏好，不阻断 reload */ }
+  // [use-storage-v1] ref 赋值即持久化，无需手动 setItem
+  transportKind.value = v === 'headless' ? 'headless' : 'tampermonkey'
   window.location.reload()
+}
+
+/**
+ * [headless-login-gui-v1] 触发引导式登录
+ * [WHY] 用户手动在有头窗口登录一次 → profile 落盘 → 后续 headless 复用同一 userDataDir 即已登录
+ * [CONSTRAINT] [headless-login-gui-v2] sid 取 getActiveWinSid()，必须与 openDeepseek 的
+ *              无头 open 一致；硬编码 'default' 时多会话下 open 用会话 id 的 profile，
+ *              登录态落不到同一目录 → 反复提示未登录。
+ *              sendLoginGui 可选，tampermonkey 未实现时不弹窗，只提示。
+ * [CHANGE-IMPACT] 依赖 getTransport 单例与 toast；不修改 transportKind，不触发 reload。
+ */
+function onLoginGui() {
+  try {
+    const t = getTransport()
+    // [headless-login-gui-v2] 与无头 open 保持同一 sid：登录态落盘到 userDataDirFor(sid)，两处不一致则永久未登录
+    const sid = getActiveWinSid()
+    const ok = t.sendLoginGui?.(sid)
+    if (!ok) {
+      toast('当前通道不支持引导登录', 'warn', 4000)
+      return
+    }
+    toast('已打开有头窗口，请登录 DeepSeek 后关闭该窗口', 'info', 8000)
+  } catch (e) {
+    log.error('[headless-login-gui] 触发失败:', e)
+  }
 }
 </script>
 
@@ -632,10 +720,25 @@ function onTransportChange(e: Event) {
           <option value="headless">无头</option>
         </select>
       </label>
+      <!-- [headless-login-gui-v1] 无头模式下引导用户在有头窗口完成一次登录 -->
+      <button
+        v-if="transportKind === 'headless'"
+        v-tooltip="'引导登录：打开有头窗口，登录后关窗即可（登录态落盘复用）'"
+        aria-label="引导登录"
+        class="login-gui-toggle"
+        @click="onLoginGui"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
+      </button>
+      <button v-tooltip="'从 git diff 生成工作日志'" aria-label="工作日志" class="worklog-toggle" @click="showWorklog = true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="16" y2="17" /></svg>
+      </button>
     </div>
   </header>
 
-  <div class="layout-row">
+  <!-- [workspace-mode-v1] 无工作区：渲染引导页；有工作区：正常布局 -->
+  <WorkspaceGuide v-if="!hasWorkspace" />
+  <div v-else class="layout-row">
     <div class="layout-main">
       <main class="main">
         <ScriptPanel />
@@ -644,6 +747,7 @@ function onTransportChange(e: Event) {
   </div>
   <ToastHost />
   <TooltipHost />
+  <WorklogDialog :visible="showWorklog" @close="showWorklog = false" />
 </template>
 
 <style scoped lang="scss" src="./App.scss">

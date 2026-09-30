@@ -1,9 +1,6 @@
 import { cleanCode } from './codeCleaner'
 import { fallbackEstimate } from './tokenEstimator'
 
-/** 单次构建上下文的 token 预算上限；[CHANGE-IMPACT] 调大需同步评估模型上下文窗口，否则发送会被服务端截断 */
-const PROMPT_BUDGET = 32000
-
 interface ContextFile {
   path: string
   content: string
@@ -14,6 +11,9 @@ export interface CleanOptions {
   stripComments: boolean
   stripBlankLines: boolean
 }
+
+/** 单次构建上下文的 token 预算上限；[CHANGE-IMPACT] 调大需同步评估模型上下文窗口，否则发送会被服务端截断 */
+const PROMPT_BUDGET = 32000
 
 /**
  * 把单个文件渲染成 <file> 块（含行号）
@@ -51,9 +51,6 @@ export function buildFullContext(files: ContextFile[], opts: CleanOptions): stri
   }
   return out.join('\n')
 }
-// AIRUNNER-BATCH16-3-SPLIT-ERR-LOCS: 实现已外移至 context-error-locations.ts
-
-export { parseErrorLocations } from './context-error-locations.js'
 /**
  * 拼装错误上下文（仅渲染已知错误位置，供 lint/type 修复场景使用）
  * [WHY] 与 buildFullContext 互补：错误场景下按 locs 精准渲染，减少无关 token
@@ -83,3 +80,6 @@ export function enforceBudget(text: string): { ok: boolean, size: number, budget
   const size = fallbackEstimate(text)
   return { ok: size <= PROMPT_BUDGET, size, budget: PROMPT_BUDGET }
 }
+
+// AIRUNNER-BATCH16-3-SPLIT-ERR-LOCS: 实现已外移至 context-error-locations.ts
+export { parseErrorLocations } from './context-error-locations.js'

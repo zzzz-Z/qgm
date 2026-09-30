@@ -5,7 +5,7 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { detectPackageManager } from '../../packages/core/src/process/proc.ts'
+import { detectPackageManager } from '../../../packages/core/src/process/proc.js'
 
 // AIRUNNER-BATCH13-1-DETECT-PM
 

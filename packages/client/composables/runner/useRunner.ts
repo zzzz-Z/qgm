@@ -17,6 +17,8 @@ const STORAGE_KEY_SMOKE = '__ai_runner_smoke'
 const STORAGE_KEY_BASELINE = '__ai_runner_baseline'
 /** sessionStorage 键：git 提交开关 */
 const GIT_KEY = '__ai_runner_git_commit'
+/** 运行中止控制器；非响应式模块单例，与 stop() 成对管理 */
+let abortController: AbortController | null = null
 
 // ============================================================================
 // 模块级单例状态 —— 与 useSessionManager 惯例一致
@@ -57,12 +59,6 @@ const liveStdout = ref('')
 /** [done-summary-channel-v1] DONE 后的总结：独立通道，不混入 raw stdout */
 export const doneSummary = ref('')
 
-/** [done-summary-channel-v1] 写入总结（走独立 ref，不追加 stdout） */
-export function pushTerminalNotice(text: string, _opts?: { divider?: boolean }): void {
-  const raw = String(text || '')
-  if (!raw) return
-  doneSummary.value = raw
-}
 /** 实时 stderr 缓冲区（流式累积，刷新会清空） */
 const liveStderr = ref('')
 /** 冒烟测试开关；持久化到 sessionStorage */
@@ -75,8 +71,6 @@ const autoFeedbackRequested = ref(false)
 /** 是否启用 git 提交（每轮打点）；持久化到 sessionStorage */
 const gitCommit = useSessionStorage<boolean>(GIT_KEY, false)
 
-let abortController: AbortController | null = null
-
 // 脚本持久化：仅 script 一项需要手工 watch（见上方注释）；其余键由 useSessionStorage 内部管理
 watch(script, (v) => {
   try {
@@ -87,6 +81,13 @@ watch(script, (v) => {
     log.warn('[ai-runner] sessionStorage 写入失败:', e)
   }
 })
+
+/** [done-summary-channel-v1] 写入总结（走独立 ref，不追加 stdout） */
+export function pushTerminalNotice(text: string, _opts?: { divider?: boolean }): void {
+  const raw = String(text || '')
+  if (!raw) return
+  doneSummary.value = raw
+}
 
 /**
  * 中止当前运行
@@ -122,8 +123,15 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   liveStderr.value = ''
   doneSummary.value = '' // [done-summary-channel-v1] 新一轮清空上轮总结
 
-  const metaM = code.match(/^[^\S\n]*(?:\/\/|#)[^\S\n]*@desc[^\S\n]*:[^\S\n]*(\S[^\n]*)$/m)
-  const desc = metaM ? metaM[1].trim().slice(0, 80) : '执行脚本'
+  // [desc-colon-opt-v1] SYSTEM.md §1.4 规定 `// @desc <做什么>`（无冒号）；兼容历史 `@desc:` 写法
+  // [WHY] 原正则强制冒号，AI 按 §1.4 输出无冒号时匹配失败 → 卡片永远显示 fallback
+  // [CONSTRAINT] 冒号可选：`@desc xxx` 与 `@desc: xxx` 均可；[ \t]* 允许冒号两侧空白
+  const metaM = code.match(/^[^\S\n]*(?:\/\/|#)[^\S\n]*@desc[^\S\n]*(?::[^\S\n]*)?(\S[^\n]*)$/m)
+  const desc = metaM ? metaM[1].trim().slice(0, 200) : '执行脚本'
+  // [script-card-payload-v1] 提取 @why 与语言，供 TerminalPane 脚本卡片渲染（Markdown 化）
+  const whyM = code.match(/^[^\S\n]*(?:\/\/|#)[^\S\n]*@why[^\S\n]*(?::[^\S\n]*)?(\S[^\n]*)$/m)
+  const why = whyM ? whyM[1].trim().slice(0, 200) : ''
+  const lang = /^#!\s*\/usr\/bin\/env\s+(?:bash|sh)\b/m.test(code) ? 'bash' : 'cjs'
   // [run-uk-unique] 每次运行唯一 key，避免同 key 覆盖历史事件导致位置错乱
   const UK = opts?.runKey || (`run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`)
   let lastStage = ''
@@ -139,7 +147,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   const emitStep = (phase: string, over: Record<string, unknown> = {}) => {
     if (typeof over.currentStage === 'string') lastStage = over.currentStage
     emit('run:start', titleOf(), {
-      payload: { desc, phase, stdoutTail: liveStdout.value.slice(-400), stderrTail: liveStderr.value.slice(-400), ...over },
+      payload: { desc, why, lang, phase, stdoutTail: liveStdout.value.slice(-400), stderrTail: liveStderr.value.slice(-400), ...over },
       updateKey: UK,
     })
   }

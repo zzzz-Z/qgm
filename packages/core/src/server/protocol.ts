@@ -75,6 +75,7 @@ export type ClientMessage
     | { t: 'headless:stop', sid: string }
     | { t: 'headless:rotate', sid: string, instruction: string }
     | { t: 'headless:new-session', sid: string, summary: string }
+    | { t: 'headless:login-gui', sid: string, url?: string }
 
 /** 服务端 → 客户端消息联合类型 */
 export type ServerMessage

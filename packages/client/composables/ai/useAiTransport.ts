@@ -1,5 +1,6 @@
 import * as ds from './useDeepseekUrl'
 import { loopPaused } from './useAiWaiting.js'
+import { useStorage } from '@vueuse/core'
 
 type AiTransportKind = 'tampermonkey' | 'headless'
 
@@ -11,9 +12,13 @@ export interface AiTransport {
   sendStop: (sid: string) => boolean
   sendRotate: (sid: string, payload: { instruction: string }) => boolean
   sendNewSession: (sid: string, payload: { summary: string }) => boolean
+  /** [headless-login-gui-v1] 引导式登录：请服务端起有头窗口让用户手动登录 */
+  sendLoginGui?: (sid: string, url?: string) => boolean
   onReply: (cb: (r: unknown, sid: string) => void) => () => void
   onTokenEstimate: (cb: (n: number, sid: string) => void) => () => void
   onSummary: (cb: (text: string, sid: string, degraded: boolean) => void) => () => void
+  /** [headless-state-err-v1] 订阅服务端 headless:state，UI 侧据此显示 error（如未登录） */
+  onState?: (cb: (state: string, detail: string, sid: string) => void) => () => void
   onNewSessionCreated: (cb: (url: string, id: string) => void) => () => void
   dispose: () => void
   /** [hardpause] 静音消息接收（暂停时不再接收油猴/AI 回包） */
@@ -24,8 +29,16 @@ export interface AiTransport {
   waitAck?: (t: string, sid: string, timeoutMs?: number) => Promise<boolean>
 }
 
-/** localStorage 键：transport 偏好（'headless' | 'tampermonkey'）；与 useDeepseekUrl 的 _isHeadless 读取同键 */
+/** 存储键：transport 偏好（'headless' | 'tampermonkey'） */
 const TRANSPORT_KEY = '__ai_transport'
+
+/**
+ * transport 偏好响应式 ref（useStorage 托管）
+ * [WHY] 原 3 文件 7 处命令式读写分散，无跨标签页同步；改用单例 ref 统一消费
+ * [CONSTRAINT] URL ?transport= 参数优先级仍由 getTransportKind 保持，此 ref 仅承载 localStorage 层
+ * [CHANGE-IMPACT] App.vue 4 处 + useAiWindowSend.isHeadless 均改为消费此 ref；移除后需同步清理
+ */
+export const transportKind = useStorage<AiTransportKind>(TRANSPORT_KEY, 'tampermonkey')
 
 /** [skill-always] 常驻 skill 文本缓存；加载成功后被 sendFill 前缀拼接到 prompt */
 let alwaysSkillsText = ''
@@ -143,6 +156,8 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   const tokenCbs = new Set<(n: number, sid: string) => void>()
   const summaryCbs = new Set<(t: string, sid: string, d: boolean) => void>()
   const newSidCbs = new Set<(url: string, id: string) => void>()
+  // [headless-state-err-v1] 服务端 state 订阅（error 用于 UI 反馈）
+  const stateCbs = new Set<(state: string, detail: string, sid: string) => void>()
   let ws: WebSocket | null = null
   const queue: string[] = []
   const ackWaiters: Array<{ sid: string, resolve: (ok: boolean) => void, timer: ReturnType<typeof setTimeout> }> = []
@@ -188,6 +203,10 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
             ackWaiters.splice(i, 1)
           }
         }
+        // [headless-state-err-v1] 把 state 派发给 UI；error 让用户看到具体原因（如未登录）
+        const _st = String((msg as Record<string, unknown>).state || '')
+        const _dt = String((msg as Record<string, unknown>).detail || '')
+        for (const cb of stateCbs) { try { cb(_st, _dt, sid) } catch { /* swallow: 单订阅者异常不阻断其他 */ } }
       }
     })
     return ws
@@ -218,12 +237,14 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     sendStop(sid) { return send('headless:stop', { sid }) },
     sendRotate(sid, p) { return send('headless:rotate', { sid, instruction: p.instruction }) },
     sendNewSession(sid, p) { return send('headless:new-session', { sid, summary: p.summary }) },
+    sendLoginGui(sid, url) { return send('headless:login-gui', { sid, url }) },
     onReply(cb) { replyCbs.add(cb); return () => { replyCbs.delete(cb) } },
     onTokenEstimate(cb) { tokenCbs.add(cb); return () => { tokenCbs.delete(cb) } },
     onSummary(cb) { summaryCbs.add(cb); return () => { summaryCbs.delete(cb) } },
     onNewSessionCreated(cb) { newSidCbs.add(cb); return () => { newSidCbs.delete(cb) } },
-    dispose() { try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; replyCbs.clear(); tokenCbs.clear(); summaryCbs.clear(); newSidCbs.clear() },
-    mute() { replyCbs.clear(); tokenCbs.clear(); summaryCbs.clear(); newSidCbs.clear() },
+    onState(cb) { stateCbs.add(cb); return () => { stateCbs.delete(cb) } },
+    dispose() { try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; replyCbs.clear(); tokenCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear() },
+    mute() { replyCbs.clear(); tokenCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear() },
     unMute() { /* headless 无副作用恢复 */ },
   }
 }
@@ -242,7 +263,8 @@ export function getTransportKind(): AiTransportKind {
       if (v === 'headless') return 'headless'
       if (v === 'tampermonkey') return 'tampermonkey'
     }
-    return localStorage.getItem(TRANSPORT_KEY) === 'headless' ? 'headless' : 'tampermonkey'
+    // [use-storage-v1] 由 useStorage ref 提供值；URL 优先语义保留在上方
+    return transportKind.value
   } catch { return 'tampermonkey' }
 }
 /**
@@ -251,7 +273,8 @@ export function getTransportKind(): AiTransportKind {
  * [CONSTRAINT] 不立即重建单例，下次 getTransport() 时按新偏好惰性创建
  */
 export function setTransportKind(k: AiTransportKind): void {
-  try { localStorage.setItem(TRANSPORT_KEY, k) } catch { /* swallow: 配额/隐私模式，仅丢失偏好持久化 */ }
+  // [use-storage-v1] ref 赋值即持久化（useStorage 内部兜底配额/隐私模式异常）
+  transportKind.value = k
   if (singleton) { singleton.dispose(); singleton = null }
 }
 /**

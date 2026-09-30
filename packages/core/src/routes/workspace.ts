@@ -2,7 +2,7 @@
 import { Hono } from 'hono'
 import fs from 'node:fs'
 import path from 'node:path'
-import { getRoot, setRoot } from '../config.js'
+import { clearPersistedWorkspace, clearWorkspace, getHasWorkspace, getRoot, persistWorkspace, setRoot } from '../config.js'
 import { execFile } from 'node:child_process'
 
 /** workspace 路由的 Hono 实例 */
@@ -77,7 +77,8 @@ function collectProjectInfo(root: string): ProjectInfo {
 }
 export const workspaceHono = new Hono()
 
-workspaceHono.get('/workspace', c => c.json({ root: getRoot() }))
+// [workspace-mode-v1] 返回 hasWorkspace：UI 据此判定是否渲染"选择工作区"引导页
+workspaceHono.get('/workspace', c => c.json({ root: getRoot(), hasWorkspace: getHasWorkspace() }))
 
 workspaceHono.get('/workspace/list', (c) => {
   const q = c.req.query('path') || getRoot()
@@ -112,6 +113,8 @@ workspaceHono.post('/workspace/select', async (c) => {
   try { stat = fs.statSync(target) } catch { return c.json({ error: '无法访问路径' }, 400) }
   if (!stat.isDirectory()) return c.json({ error: '不是目录' }, 400)
   setRoot(target)
+  // [workspace-mode-v1] 用户显式选择即持久化，供下次启动恢复
+  persistWorkspace()
   // [workspace-project-info-v1] 切换后即读取新项目画像
   const project = collectProjectInfo(target)
   return c.json({ ok: true, root: getRoot(), project })
@@ -169,6 +172,13 @@ async function nativePick(): Promise<{ ok: true, path: string } | { ok: false, e
   return { ok: false, error: 'unsupported platform', unsupported: true }
 }
 
+// [workspace-mode-v1] 退出工作区：清运行时标志 + 清持久化文件；UI 随即回到"请选择工作区"引导
+workspaceHono.post('/workspace/clear', (c) => {
+  clearWorkspace()
+  clearPersistedWorkspace()
+  return c.json({ ok: true, hasWorkspace: getHasWorkspace() })
+})
+
 workspaceHono.post('/workspace/pick', async (c) => {
   const r = await nativePick()
   if (!r.ok) {
@@ -183,6 +193,8 @@ workspaceHono.post('/workspace/pick', async (c) => {
     if (!st.isDirectory()) return c.json({ ok: false, error: '不是目录' }, 400)
   } catch { return c.json({ ok: false, error: '路径不存在' }, 400) }
   setRoot(r.path)
+  // [workspace-mode-v1] 系统选择器路径同样持久化
+  persistWorkspace()
   // [workspace-project-info-v1] 系统选择器切换后同样采集画像
   const project = collectProjectInfo(r.path)
   return c.json({ ok: true, path: r.path, root: getRoot(), project })

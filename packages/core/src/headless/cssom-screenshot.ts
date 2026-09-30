@@ -33,6 +33,14 @@ interface CdpMatchedResponse {
   inlineStyle?: { cssProperties: CdpProperty[] }
 }
 
+/** 截图结果：输出文件路径、图像尺寸、耗时 */
+export interface ScreenshotResult {
+  ok: boolean
+  path: string
+  bytes: number
+  error?: string
+}
+
 /**
  * 用 CDP 的 CSS.getMatchedStylesForNode 拿「哪条规则生效、来自哪张样式表」。
  * 替代 SYSTEM.md 第八章的 DevTools 人肉排查。
@@ -74,14 +82,6 @@ export async function cssom(url: string, selector: string): Promise<CssomResult>
   } finally {
     await page.close()
   }
-}
-
-/** 截图结果：输出文件路径、图像尺寸、耗时 */
-export interface ScreenshotResult {
-  ok: boolean
-  path: string
-  bytes: number
-  error?: string
 }
 
 /**

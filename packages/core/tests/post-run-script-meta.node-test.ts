@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/post-run/script-meta.node-test.ts 迁至 client/test/post-run-script-meta.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { parseClaimed, parseScriptMeta } from '../../packages/core/src/post-run/script-meta.ts'
+import { parseClaimed, parseScriptMeta } from '../../../packages/core/src/post-run/script-meta.js'
 
 const NL = String.fromCharCode(10)
 

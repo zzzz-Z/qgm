@@ -1,6 +1,6 @@
 // [ai-guard-fallback-v2] ai-guard 单测：§4.3 严格扫描、§4.4 降级豁免、§4.2 幂等注入
 import { describe, expect, it } from 'vitest'
-import { injectAiJsdoc, scanNativeApis, scanNativeApisWithFallback } from '../../packages/core/src/post-run/ai-guard.js'
+import { injectAiJsdoc, scanNativeApis, scanNativeApisWithFallback } from '../../../packages/core/src/post-run/ai-guard.js'
 
 describe('scanNativeApis (§4.3)', () => {
   it('合规 __AI__ 脚本通过', () => {

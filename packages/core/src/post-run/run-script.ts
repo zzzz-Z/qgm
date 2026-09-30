@@ -1,7 +1,6 @@
 // 子进程脚本执行（overlay 沙盒）
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
-import path from 'node:path'
 import { getRoot } from '../config.js'
 import { injectAiJsdoc, scanNativeApisWithFallback, scanScriptHead } from './ai-guard.js' // [ai-guard-v1]
 import { runProcess } from '../process/proc.js'
@@ -57,9 +56,8 @@ export async function runScript(scriptPath: string, timeoutMs = 60_000, signal?:
     }
     const next = injectAiJsdoc(raw)
     if (next !== raw) {
-      const bakDir = path.join(getRoot(), '.ai-runner', 'backup')
-      try { fs.mkdirSync(bakDir, { recursive: true }) } catch { /* 备份失败不阻断执行 */ }
-      try { fs.writeFileSync(path.join(bakDir, `${path.basename(scriptPath)}.pre-inject.${Date.now()}`), raw) } catch { /* 同上 */ }
+      // [no-backup-v1] 取消 pre-inject 备份：注入内容为固定 JSDoc，幂等且无副作用；
+      // 备份会在每轮累积 .pre-inject.<ts> 文件撑爆 .ai-runner/backup（用户要求执行结束即视为无用）
       fs.writeFileSync(scriptPath, next)
     }
   } catch (e) {

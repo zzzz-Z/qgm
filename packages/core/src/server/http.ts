@@ -1,5 +1,21 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
+/** AiRunner 服务配置：端口、工作目录、日志、白名单 */
+export interface AiRunnerOptions {
+  root?: string
+  /**
+   * 允许非本机 Host（DNS rebinding / --host 暴露到局域网）访问写接口与命令执行端点。
+   * 默认 false：检测到 Host 不是 loopback 时，/exec 与 /run 的 shell 分支直接 403。
+   */
+  allowRemote?: boolean
+}
+
+/** 请求体最大字节数（防止超大请求耗尽内存） */
+const MAX_BODY = 5 * 1024 * 1024
+
+/** 允许的本机回环主机名（防止 SSRF） */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+
 /**
  * 写出 JSON 响应
  * [CONSTRAINT] Content-Type 固定 application/json + charset=utf-8；响应体走 JSON.stringify，
@@ -21,9 +37,6 @@ export function sendHTML(res: ServerResponse, html: string) {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
   res.end(html)
 }
-
-/** 请求体最大字节数（防止超大请求耗尽内存） */
-const MAX_BODY = 5 * 1024 * 1024
 /**
  * 读取请求体文本，超过 MAX_BODY 立即中断
  * [WHY] 缓冲超大请求会耗尽内存；达到上限时 destroy 连接并 resolve 空串（调用方判空即为拒绝）
@@ -62,19 +75,6 @@ export function parseJSON<T = any>(raw: string): T | null {
     return null
   }
 }
-
-/** AiRunner 服务配置：端口、工作目录、日志、白名单 */
-export interface AiRunnerOptions {
-  root?: string
-  /**
-   * 允许非本机 Host（DNS rebinding / --host 暴露到局域网）访问写接口与命令执行端点。
-   * 默认 false：检测到 Host 不是 loopback 时，/exec 与 /run 的 shell 分支直接 403。
-   */
-  allowRemote?: boolean
-}
-
-/** 允许的本机回环主机名（防止 SSRF） */
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
 
 /**
  * 判断 Host 头是否指向本机回环地址

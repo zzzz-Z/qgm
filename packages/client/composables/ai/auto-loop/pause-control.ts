@@ -31,7 +31,8 @@ interface PauseControlDeps {
  * @param deps 暂停控制依赖面（loopPaused / activeLoop / transport / finish 等外部引用）
  */
 export function createPauseControl(deps: PauseControlDeps) {
-  const { loopPaused, activeLoop, isLoopActive, isInstActive, persist, enterWaiting, disarmTimer, ackFill, finish, bindKeyboard } = deps
+  // [unused-cleanup-v2] 已删 ackFill：本文件仅解构点，接口字段保留供上游契约
+  const { loopPaused, activeLoop, isLoopActive, isInstActive, persist, enterWaiting, disarmTimer, finish, bindKeyboard } = deps
   // [resume-from-pause-v1]
   // 从暂停态恢复：复位 loopPaused、解除静音、重新进入 waiting
   // - 若处于 budget-limited，转到 resumeLoop()

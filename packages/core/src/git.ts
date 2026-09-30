@@ -3,6 +3,21 @@ import path from 'node:path'
 import { ROOT } from './config.js'
 import { runProcess } from './process/proc.js'
 
+/** git 状态快照：当前 commit、未提交变更数、工作区是否干净 */
+export interface GitSnapshotResult {
+  ok: boolean
+  commit?: string
+  reason?: string
+  changed: number
+}
+
+export type GitPreExecResult
+  = | { ok: true, rollbackRef: string }
+    | { ok: false, dirty?: boolean, files?: string[], reason?: string }
+
+/** git 可用性缓存；null 表示尚未探测 */
+let cachedAvailable: boolean | null = null
+
 /**
  * 以项目根为 cwd 执行外部命令（git 专用封装）
  * [CONSTRAINT] 不抛错 —— 进程失败由返回的 code 表达；超时标签固定 'git 超时'
@@ -16,8 +31,6 @@ async function run(cmd: string, args: string[], timeoutMs = 30_000): Promise<{ c
   return { code: r.code, stdout: r.stdout, stderr: r.stderr }
 }
 
-let cachedAvailable: boolean | null = null
-
 /** 检查：是否在 git 仓库且 git 命令可用 */
 export async function gitAvailable(): Promise<boolean> {
   if (cachedAvailable !== null) return cachedAvailable
@@ -25,14 +38,6 @@ export async function gitAvailable(): Promise<boolean> {
   const r = await run('git', ['rev-parse', '--is-inside-work-tree'])
   cachedAvailable = r.code === 0 && r.stdout.trim() === 'true'
   return cachedAvailable
-}
-
-/** git 状态快照：当前 commit、未提交变更数、工作区是否干净 */
-export interface GitSnapshotResult {
-  ok: boolean
-  commit?: string
-  reason?: string
-  changed: number
 }
 
 /**
@@ -142,9 +147,6 @@ export async function gitHead(): Promise<string | null> {
  *   （先 stash / 取消 / 强行执行并标注「含用户未提交改动」）。
  * - 非 git 仓库 → `{ ok: false, reason }`，bash 仍可执行（无 git 兜底）。
  */
-export type GitPreExecResult
-  = | { ok: true, rollbackRef: string }
-    | { ok: false, dirty?: boolean, files?: string[], reason?: string }
 
 /**
  * 执行 git Pre Exec Check
@@ -203,4 +205,137 @@ export async function gitResetHard(ref: string): Promise<{ ok: boolean, reason?:
   const r = await run('git', ['reset', '--hard', safeRef])
   if (r.code !== 0) return { ok: false, reason: `git reset 失败: ${r.stderr}` }
   return { ok: true }
+}
+
+/** 单个文件在工作日志中的变更记录 */
+export interface WorklogFileEntry {
+  path: string
+  /** added / modified / deleted / renamed / copied */
+  status: string
+  added: number
+  removed: number
+}
+
+/** 工作日志生成选项 */
+export interface WorklogOptions {
+  /** 起点 ref；默认 'HEAD'（即只统计未提交变更） */
+  since?: string
+  /** 终点 ref；默认空串（工作区，含未提交与未跟踪） */
+  until?: string
+  /** 是否附带 git log 最近提交；默认 true */
+  includeHistory?: boolean
+}
+
+/** 工作日志生成结果 */
+export interface WorklogResult {
+  ok: boolean
+  reason?: string
+  since: string
+  until: string
+  generatedAt: number
+  files: WorklogFileEntry[]
+  history: string[]
+  stat: string
+  markdown: string
+}
+
+/**
+ * 从 git diff 生成工作日志
+ * [WHY] 用户需求：把工作区相对基准的所有变更（含未提交）汇总为可读 Markdown 日志
+ * [CONSTRAINT] since / until 均经 ref 白名单过滤；非 git 仓库 / 非法 ref 走 ok:false
+ * [CHANGE-IMPACT] 输出 markdown 直接供前端展示或落盘；改格式需同步前端消费
+ * @param opts since / until / includeHistory
+ */
+export async function gitWorklog(opts: WorklogOptions = {}): Promise<WorklogResult> {
+  const safeRef = (s: unknown): string => String(s || '').replace(/[^\w.~^/\-]/g, '').slice(0, 64)
+  const since = safeRef(opts.since) || 'HEAD'
+  const until = safeRef(opts.until)
+  const includeHistory = opts.includeHistory !== false
+  const generatedAt = Date.now()
+
+  const fail = (reason: string): WorklogResult => ({ ok: false, reason, since, until, generatedAt, files: [], history: [], stat: '', markdown: '' })
+  if (!(await gitAvailable())) return fail('非 git 仓库')
+
+  const numstat = await run('git', ['diff', '--numstat', ...(until ? [since, until] : [since])])
+  if (numstat.code !== 0) return fail(`git diff --numstat 失败: ${numstat.stderr}`)
+
+  const files: WorklogFileEntry[] = []
+  for (const line of numstat.stdout.split('\n')) {
+    if (!line.trim()) continue
+    const parts = line.split('\t')
+    if (parts.length < 3) continue
+    files.push({ path: parts[2], status: 'modified', added: Number(parts[0]) || 0, removed: Number(parts[1]) || 0 })
+  }
+
+  const nameStatus = await run('git', ['diff', '--name-status', ...(until ? [since, until] : [since])])
+  if (nameStatus.code === 0) {
+    const map: Record<string, string> = {}
+    for (const line of nameStatus.stdout.split('\n')) {
+      if (!line.trim()) continue
+      const parts = line.split('\t')
+      if (parts.length < 2) continue
+      const flag = parts[0].charAt(0)
+      const p = parts[parts.length - 1]
+      map[p] = flag === 'A' ? 'added' : flag === 'D' ? 'deleted' : flag === 'R' ? 'renamed' : flag === 'C' ? 'copied' : 'modified'
+    }
+    for (const f of files) f.status = map[f.path] || 'modified'
+  }
+
+  const stat = await run('git', ['diff', '--stat', ...(until ? [since, until] : [since])])
+
+  let history: string[] = []
+  if (includeHistory) {
+    const log = await run('git', ['log', '--oneline', '-20'])
+    if (log.code === 0) history = log.stdout.split('\n').filter(Boolean)
+  }
+
+  const markdown = buildWorklogMarkdown({ since, until, generatedAt, files, history, stat: stat.stdout })
+  return { ok: true, since, until, generatedAt, files, history, stat: stat.stdout, markdown }
+}
+
+/**
+ * 组装工作日志 Markdown
+ * [CONSTRAINT] 与 gitWorklog 返回结构严格配对；字段重命名需同步本函数
+ */
+function buildWorklogMarkdown(d: { since: string, until: string, generatedAt: number, files: WorklogFileEntry[], history: string[], stat: string }): string {
+  // [worklog-v1] Q = 反引号字符；FENCE = 三反引号代码围栏；避免模板字符串内转义
+  const Q = String.fromCharCode(96)
+  const FENCE = Q + Q + Q
+  const dt = new Date(d.generatedAt)
+  const pad = (n: number): string => String(n).padStart(2, [48].map(c => String.fromCharCode(c)).join(''))
+  const dateStr = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+  const timeStr = `${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`
+  const stamp = `${dateStr} ${timeStr}`
+  const out: string[] = []
+  out.push(`# 工作日志 · ${stamp}`)
+  out.push('')
+  const scope = d.until ? d.until : '工作区（含未提交与未跟踪）'
+  out.push(`**范围**: ${Q}${d.since}${Q} → ${d.until ? Q + d.until + Q : scope}`)
+  out.push(`**文件数**: ${d.files.length}`)
+  out.push('')
+  out.push('## 变更概览')
+  out.push('')
+  if (d.files.length === 0) {
+    out.push('（无变更）')
+  } else {
+    out.push('| 文件 | 状态 | +行 | -行 |')
+    out.push('| :--- | :--- | ---: | ---: |')
+    for (const f of d.files) out.push(`| ${Q}${f.path}${Q} | ${f.status} | ${f.added} | ${f.removed} |`)
+  }
+  out.push('')
+  if (d.stat.trim()) {
+    out.push('## 统计')
+    out.push('')
+    out.push(FENCE)
+    out.push(d.stat.trim())
+    out.push(FENCE)
+    out.push('')
+  }
+  if (d.history.length) {
+    out.push('## 最近提交')
+    out.push('')
+    for (const h of d.history) out.push(`- ${h}`)
+    out.push('')
+  }
+  return out.join('\n')
 }

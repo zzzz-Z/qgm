@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/routes/run-helpers.node-test.ts 迁至 client/test/routes-run-helpers.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { computeClaimMismatch, computeCompliance } from '../../packages/core/src/post-run/run-helpers.ts'
+import { computeClaimMismatch, computeCompliance } from '../../../packages/core/src/post-run/run-helpers.js'
 
 // AIRUNNER-BATCH20-6-RUN-HELPERS
 

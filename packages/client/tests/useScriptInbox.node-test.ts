@@ -52,11 +52,11 @@ Object.defineProperty(globalThis, 'crypto', {
   },
 })
 
-let mod: typeof import('../../packages/client/composables/runner/useScriptInbox.ts')
-let useRunnerMod: typeof import('../../packages/client/composables/runner/useRunner.ts')
+let mod: typeof import('../../../packages/client/composables/runner/useScriptInbox')
+let useRunnerMod: typeof import('../../../packages/client/composables/runner/useRunner')
 beforeAll(async () => {
-  mod = await import('../../packages/client/composables/runner/useScriptInbox.ts')
-  useRunnerMod = await import('../../packages/client/composables/runner/useRunner.ts')
+  mod = await import('../../../packages/client/composables/runner/useScriptInbox')
+  useRunnerMod = await import('../../../packages/client/composables/runner/useRunner')
 })
 
 beforeEach(() => {

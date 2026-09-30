@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { useStorage } from '@vueuse/core'
 
 interface ModelOption {
   id: string
@@ -30,28 +30,18 @@ const STORAGE_KEY_MODEL = '__ai_model_id'
 /** 存储键会话 */
 const STORAGE_KEY_SESSION = '__ai_web_session_id'
 
-/**
- * 从 localStorage 读取字符串
- * [WHY] 隐私模式 / 配额异常会抛错；调用方只关心有无值，不应被中断
- * [CONSTRAINT] 返回 fallback 也覆盖"键不存在"，调用方无法区分二者
- * @param fallback 键缺失或读取失败时的返回值
- */
-function loadStr(key: string, fallback: string): string {
-  try {
-    const v = localStorage.getItem(key)
-    return v === null ? fallback : v
-  } catch {
-    return fallback
-  }
-}
-
 /** 标识 */
-const modelId = ref<string>(loadStr(STORAGE_KEY_MODEL, DEFAULT_MODEL_ID))
+// [use-storage-v1] 三个模块级 ref 迁移到 @vueuse useStorage
+// [WHY] 手写 loadStr + setItem 的读写对是重复样板；useStorage 覆盖读写 + JSON 序列化 + storage 事件同步
+// [CONSTRAINT] useStorage 内部 try/catch 已兜底配额 / 隐私模式异常，语义与原 loadStr 兜底一致；
+//             模块顶层可直接调用（无 onScopeDispose 依赖），SSR / Node 测试环境安全
+// [CHANGE-IMPACT] 移除了 loadStr 与全部 setItem；副作用时机由 ref 赋值触发，调用方行为不变
+const modelId = useStorage<string>(STORAGE_KEY_MODEL, DEFAULT_MODEL_ID)
 /** URL 地址 */
 // [window-extracted-v1] url 提升为模块级 export，供 useAiWindow 计算 targetOrigin / 开窗默认地址
-export const url = ref<string>(loadStr(STORAGE_KEY_URL, DEFAULT_URL))
+export const url = useStorage<string>(STORAGE_KEY_URL, DEFAULT_URL)
 /** 会话标识 */
-const sessionId = ref<string>(loadStr(STORAGE_KEY_SESSION, ''))
+const sessionId = useStorage<string>(STORAGE_KEY_SESSION, '')
 
 /**
  * 切换到指定模型
@@ -63,14 +53,10 @@ const sessionId = ref<string>(loadStr(STORAGE_KEY_SESSION, ''))
 function setModel(id: string): boolean {
   const m = MODELS.find(x => x.id === id)
   if (!m) return false
+  // [use-storage-v1] ref 赋值即持久化：三处 useStorage 各自 write，不再手动 setItem
   modelId.value = m.id
   url.value = m.url
   sessionId.value = ''
-  try {
-    localStorage.setItem(STORAGE_KEY_MODEL, m.id)
-    localStorage.setItem(STORAGE_KEY_URL, m.url)
-    localStorage.setItem(STORAGE_KEY_SESSION, '')
-  } catch { /* swallow: 配额 / 隐私模式抛错，内存态已更新，仅持久化失败 */ }
   return true
 }
 
@@ -86,7 +72,6 @@ function setUrl(next: string): boolean {
   try {
     const u = new URL(trimmed)
     url.value = u.toString()
-    try { localStorage.setItem(STORAGE_KEY_URL, url.value) } catch { /* swallow: 配额/隐私模式，返回值已反映更新成功 */ }
     return true
   } catch {
     return false
@@ -102,12 +87,10 @@ function setUrl(next: string): boolean {
 function setSessionId(next: string): void {
   const trimmed = next.trim()
   sessionId.value = trimmed
-  try { localStorage.setItem(STORAGE_KEY_SESSION, trimmed) } catch { /* swallow: 配额/隐私模式，UI 态已更新 */ }
   if (!trimmed) return
   const m = MODELS.find(x => x.id === modelId.value)
   if (!m || !m.sessionTemplate) return
   url.value = m.sessionTemplate.replace('{id}', encodeURIComponent(trimmed))
-  try { localStorage.setItem(STORAGE_KEY_URL, url.value) } catch { /* swallow: 配额/隐私模式，内存态已同步 */ }
 }
 
 /**

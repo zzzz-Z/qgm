@@ -2,15 +2,15 @@
 import { computed, ref } from 'vue'
 import { renderMarkdown } from '../../composables/useMarkdown.js'
 
+/** 组件接收的 props 定义 */
+const props = defineProps<{ item: Item }>()
+
 interface Item {
   kind?: string
   role?: string
   ts?: number
   payload?: Record<string, unknown>
 }
-
-/** 组件接收的 props 定义 */
-const props = defineProps<{ item: Item }>()
 
 /** 是否展开 */
 const expanded = ref(false)
@@ -80,7 +80,7 @@ const tsLabel = computed(() => {
     const h = String(d.getHours()).padStart(2, '0')
     const m = String(d.getMinutes()).padStart(2, '0')
     return `${h}:${m}`
-  } catch (e) { return '' }
+  } catch { return '' }
 })
 
 /**

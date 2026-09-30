@@ -6,6 +6,11 @@ export interface ScanResult {
   matches: string[]
 }
 
+export interface HeadResult {
+  ok: boolean
+  reason?: string
+}
+
 /** 原生 API 黑名单（SYSTEM.md §4.1）：fs / path / child_process / os / process.exit */
 const FORBIDDEN: { name: string, re: RegExp }[] = [
   { name: 'require(fs)', re: /\brequire\s*\(\s*['"](?:node:)?fs['"]\s*\)/ },
@@ -19,6 +24,24 @@ const FORBIDDEN: { name: string, re: RegExp }[] = [
   { name: 'process.exit', re: /\bprocess\s*\.\s*exit\b/ },
 ]
 
+/** §4.4 降级标记匹配：`// __AI__.xxx not found` 形式的显式豁免注释 */
+const FALLBACK_RE = /\/\/\s*(?:[\u26A0!]\s*)?__AI__\.\w+\s+not found/i
+
+/** 注入标识：命中后 injectAiJsdoc 幂等 */
+const INJECT_MARK = '[__AI__-injected-v1]'
+
+/** 注入到脚本顶部的 __AI__ API 速查 JSDoc（SYSTEM.md §4.2） */
+const AI_JSDOC = [
+  '/**',
+  ' * [__AI__ 运行时沙箱 · SYSTEM.md §4]',
+  ' * 禁用：node 原生 fs / path / child_process / os / process.exit',
+  ' * 可用：__AI__.readText(p) / writeText(p, s) / exists(p) / readJSON(p)',
+  ' *       __AI__.atomicWrite(p, s) / patchFile(p, { find, replace })',
+  ' *       __AI__.join(...parts) / cwdMust() / listDir(p)',
+  ' *       __AI__.ok(msg) / warn(msg) / err(msg) / skip(msg)',
+  ' */',
+].join('\n')
+
 /** 剥离注释，避免把说明性文字里的 fs. 当调用命中 */
 function stripComments(code: string): string {
   return code.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ')
@@ -26,11 +49,6 @@ function stripComments(code: string): string {
 
 /** 扫描脚本源码，返回是否命中禁用 API 及命中清单（SYSTEM.md §4.3） */
 // [script-head-contract-v1] SYSTEM.md §1.4 脚本头契约：shebang 唯一合法 + @desc/@why 必需
-export interface HeadResult {
-  ok: boolean
-  reason?: string
-}
-
 /** 校验脚本头（SYSTEM.md §1.4）：shebang 只允许 node；@desc 与 @why 必需 */
 export function scanScriptHead(code: string): HeadResult {
   let first = String(code).split(/\r?\n/, 1)[0] || ''
@@ -69,9 +87,6 @@ export function scanNativeApis(code: string): ScanResult {
 
 // [ai-guard-fallback-v2] SYSTEM.md §4.4 降级协议：显式标记才允许豁免原生 API
 // 命中原生 API 的行，向上回溯 3 行内若出现 `// __AI__.xxx not found`，该行豁免
-/** §4.4 降级标记匹配：`// __AI__.xxx not found` 形式的显式豁免注释 */
-const FALLBACK_RE = /\/\/\s*(?:[\u26A0!]\s*)?__AI__\.\w+\s+not found/i
-
 /** 从给定行向上回溯 lookback 行，判断是否出现 §4.4 降级标记 */
 function hasFallbackNear(lines: string[], idx: number, lookback = 3): boolean {
   const from = Math.max(0, idx - lookback)
@@ -96,21 +111,6 @@ export function scanNativeApisWithFallback(code: string): ScanResult {
   }
   return { hit: matches.length > 0, matches }
 }
-
-/** 注入标识：命中后 injectAiJsdoc 幂等 */
-const INJECT_MARK = '[__AI__-injected-v1]'
-
-/** 注入到脚本顶部的 __AI__ API 速查 JSDoc（SYSTEM.md §4.2） */
-const AI_JSDOC = [
-  '/**',
-  ' * [__AI__ 运行时沙箱 · SYSTEM.md §4]',
-  ' * 禁用：node 原生 fs / path / child_process / os / process.exit',
-  ' * 可用：__AI__.readText(p) / writeText(p, s) / exists(p) / readJSON(p)',
-  ' *       __AI__.atomicWrite(p, s) / patchFile(p, { find, replace })',
-  ' *       __AI__.join(...parts) / cwdMust() / listDir(p)',
-  ' *       __AI__.ok(msg) / warn(msg) / err(msg) / skip(msg)',
-  ' */',
-].join('\n')
 
 /** 将 __AI__ 速查 JSDoc 幂等注入脚本头部；保留 shebang 行在其后（SYSTEM.md §4.2） */
 export function injectAiJsdoc(code: string): string {

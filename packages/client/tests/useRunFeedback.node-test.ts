@@ -3,8 +3,8 @@
 // AIRUNNER-BATCH14-2-FIX-EMPTY-SET: 显式 Set<number> 避免 TS2345
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { isReadonlyResult, shouldIncludeChanges } from '../../packages/client/composables/runner/useRunFeedback.ts'
-import type { Change, RunResponse } from '../../packages/client/types.ts'
+import { isReadonlyResult, shouldIncludeChanges } from '../../../packages/client/composables/runner/useRunFeedback'
+import type { Change, RunResponse } from '../../../packages/client/types'
 
 // AIRUNNER-BATCH14-2-USE-RUN-FEEDBACK
 

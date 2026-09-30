@@ -4,15 +4,6 @@ import path from 'node:path'
 import { getRoot } from '../config.js'
 import { parsePlanTodo } from '../utils/plan-parser.js'
 
-// 惰性求值，感知 setRoot
-
-/**
- * 执行 state Path
- */
-export function statePath(): string {
-  return path.join(getRoot(), '.ai-runner', 'state.json')
-}
-
 /** 已完成任务条目：ID、标题、完成时间 */
 export interface TaskDoneItem {
   item: string
@@ -61,6 +52,19 @@ export interface TrustSnapshot {
   calibration: Array<{ tier: string, n: number, expected: number, actual: number, gap: number, verdict: string }>
   drift: { totalRounds: number, driftRounds: number, driftRate: number, verdict: string }
   updatedAt: string
+}
+
+// AIRUNNER-STATE-V2: version + sessionId
+
+let _sessionId: string | null = null
+
+// 惰性求值，感知 setRoot
+
+/**
+ * 执行 state Path
+ */
+export function statePath(): string {
+  return path.join(getRoot(), '.ai-runner', 'state.json')
 }
 
 // [tier1c-5] 读校准与契约偏差，合成信任快照（缺失则返回 null）
@@ -224,9 +228,6 @@ export function readTaskState(): TaskState {
   }
 }
 
-// AIRUNNER-STATE-V2: version + sessionId
-
-let _sessionId: string | null = null
 /**
  * 获取 Session Id
  */

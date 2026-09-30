@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/post-run/run-script-wrapper.node-test.ts 迁至 client/test/post-run-run-script-wrapper.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { buildWrapperCode } from '../../packages/core/src/post-run/run-script-wrapper.ts'
+import { buildWrapperCode } from '../../../packages/core/src/post-run/run-script-wrapper.js'
 
 // AIRUNNER-BATCH11-4-WRAPPER-TEST
 const SAMPLE = '/tmp/x/script.cjs'

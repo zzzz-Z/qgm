@@ -1,11 +1,6 @@
 // [side-resize-v1] 从 ScriptPanel.vue 抽出：侧栏拖拽改宽（pointer 事件）
 import type { Ref } from 'vue'
 
-/** 侧栏宽度的最小/最大比例（视觉合理区） */
-const MIN_SIDE_WIDTH = 280
-const MAX_SIDE_WIDTH_RATIO = 0.6
-const HANDLE_CENTER_OFFSET = 7
-
 /** 侧栏拖拽依赖面 */
 export interface SideResizeDeps {
   paneRef: Ref<HTMLElement | null>
@@ -15,6 +10,11 @@ export interface SideResizeDeps {
   /** 持久化回调（写入 localStorage） */
   persistWidth: (w: number) => void
 }
+
+/** 侧栏宽度的最小/最大比例（视觉合理区） */
+const MIN_SIDE_WIDTH = 280
+const MAX_SIDE_WIDTH_RATIO = 0.6
+const HANDLE_CENTER_OFFSET = 7
 
 /**
  * 创建侧栏拖拽控制器

@@ -44,16 +44,11 @@ import {
   userNote,
 } from './auto-loop/state.js'
 
-export { activeLoop }
-
-export type { HookEvent, HookResult } from './auto-loop/hooks.js'
-
-export { bindKeyboard, unbindKeyboard } from './auto-loop/keyboard.js'
-
 // 传输层分流：tampermonkey | headless（见 useAiTransport.ts）
 /** 传输层 */
 const transport = getTransport()
-const { loopPaused, startWaiting } = useAiWaiting()
+// [unused-cleanup-v2] 已删 startWaiting：文件内仅定义点，无消费
+const { loopPaused } = useAiWaiting()
 
 // ============================================================================
 // useAutoLoop —— 自动化循环状态机（v6 §6）
@@ -98,20 +93,6 @@ setTimeout(() => {
 
 let _getActiveSessionId: () => string = () => ''
 
-/**
- * 解析为 Inst
- * @param _sid - sid
- */
-function resolveInst(_sid?: string): LoopInstance | null {
-  return activeLoop.value
-}
-
-/** 判断实例是否处于活动状态（非 idle/stopped/interrupted） */
-export function isInstActive(inst: LoopInstance | null): boolean {
-  if (!inst) return false
-  const s = inst.state.value
-  return s !== 'idle' && s !== 'stopped' && s !== 'interrupted'
-}
 /** 循环活动的 */
 export const isLoopActive = computed(() => isInstActive(activeLoop.value))
 
@@ -191,7 +172,8 @@ watch([
 // ============================================================================
 
 // [start-family-v1] 启动族已抽到 auto-loop/start-family.ts
-const { initLoop, startLoop, startTakeover } = createStartFamily({
+// [unused-cleanup-v2] 已删 initLoop：start-family 内部自持
+const { startLoop, startTakeover } = createStartFamily({
   loopPaused,
   activeLoop,
   isLoopActive,
@@ -205,7 +187,8 @@ const { initLoop, startLoop, startTakeover } = createStartFamily({
   setOriginalTitle: (v: string) => { originalTitle.value = v },
 })
 // [reply-handlers-v1] 回复处理三入口
-const { onScriptArrival, onNonScriptReply, executeItem } = createReplyHandlers({
+// [unused-cleanup-v2] 已删 executeItem：reply-handlers 内部自持
+const { onScriptArrival, onNonScriptReply } = createReplyHandlers({
   loopPaused,
   stage,
   planResumeAttempts,
@@ -229,10 +212,6 @@ const { onScriptArrival, onNonScriptReply, executeItem } = createReplyHandlers({
   resolveInst,
   isInstActive,
 })
-export { onNonScriptReply, onScriptArrival }
-// [start-family-v1] startLoop 为对外导出，re-export 保持契约
-export { startLoop }
-
 // ============================================================================
 // 回复入口（App.vue 消息桥接调用）
 // ============================================================================
@@ -255,9 +234,22 @@ const { resumeFromPause, clearSoftPause, exitPauseToIdle, resumeLoop, requestPau
   finish,
   bindKeyboard,
 })
-// [pause-control-v1] 保持对外契约
-// keyboard.ts 等旧路径通过 useAutoLoop 导入这 8 个符号，re-export 保持契约稳定
-export { clearSoftPause, exitPauseToIdle, killCurrent, requestPause, resumeFromPause, resumeLoop, softPause, stopAndRollback }
+
+// ── [§5 分区] 模块工具函数 ──
+/**
+ * 解析为 Inst
+ * @param _sid - sid
+ */
+function resolveInst(_sid?: string): LoopInstance | null {
+  return activeLoop.value
+}
+
+/** 判断实例是否处于活动状态（非 idle/stopped/interrupted） */
+export function isInstActive(inst: LoopInstance | null): boolean {
+  if (!inst) return false
+  const s = inst.state.value
+  return s !== 'idle' && s !== 'stopped' && s !== 'interrupted'
+}
 
 // [stop-and-finish-v1] handleStopAfterRound / finish 已抽到 auto-loop/stop-and-finish.ts
 
@@ -288,12 +280,7 @@ export function setActiveSessionIdGetter(fn: () => string): void {
  * - 循环模式 + 油猴传 sessionId：必须与当前循环实例的 sessionId 一致才接受
  *   （同 origin 多窗口情况下 source 比对可能失效，靠 sessionId 兜底）
  */
-function isFromCurrentLoop(sessionId: string): boolean {
-  if (!isLoopActive.value) return true
-  const sid = String(sessionId || '')
-  if (!sid) return true
-  return true
-}
+// [unused-cleanup-v2] 已删 isFromCurrentLoop 函数体：文件内仅定义点（第二处为注释提及）
 
 // [multi-loop-step1]
 // 单例桩函数（PLAN #17 回退后多循环 Map 已删，保留接口给 App.vue/ScriptPanel 调用）
@@ -412,9 +399,29 @@ function submitDecision(id: string, customText?: string): void {
 export { onNewSessionCreated, onSummary, startHandoff, SUMMARY_INSTRUCTION }
 export { autoRotateSession, setTokenEstimate }
 
+// 类型 re-export
+export type { HookEvent, HookResult } from './auto-loop/hooks.js'
+
+// 键盘绑定
+export { bindKeyboard, unbindKeyboard } from './auto-loop/keyboard.js'
+
+// [waiting-v1] re-export 供 handoff.ts 复用
+export { disarmTimer, enterWaiting }
+
+// ── [§5 分区] 顶层 re-export 集中区 ──
+// [state-extract-v1] activeLoop re-export 保持外部契约（实现归 auto-loop/state.ts）
+export { activeLoop }
+
 export { persist } from './auto-loop/persist.js' // AIRUNNER-BATCH5-0D-PERSIST-compat
 
 export type { AiReply, LoopInstance, LoopState, RoundOutcome, StopRequest } from './auto-loop/types.js'
 
-// [waiting-v1] re-export 供 handoff.ts 复用
-export { disarmTimer, enterWaiting }
+// 启动族
+// [start-family-v1] startLoop 为对外导出，re-export 保持契约
+export { startLoop }
+
+// 回复处理
+export { onNonScriptReply, onScriptArrival }
+
+// 暂停控制：keyboard.ts 等旧路径通过 useAutoLoop 导入这 8 个符号
+export { clearSoftPause, exitPauseToIdle, killCurrent, requestPause, resumeFromPause, resumeLoop, softPause, stopAndRollback }

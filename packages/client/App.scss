@@ -716,3 +716,142 @@
 .main {
   padding: 8px 10px !important;
 }
+
+/* ============================================================
+ * [header-polish-v1] 顶部栏精修：与 Codex 风统一
+ * [WHY] TerminalPane / ScriptEditor 已改聊天框家族；header 图标按钮尺寸不一、worklog 带文字、字体未对齐
+ * [CONSTRAINT] 仅调视觉参数；按钮去文字由 App.vue 模板改动配合
+ * [CHANGE-IMPACT] 与 [codex-final-v1] / [visual-polish-v2] 同层叠加
+ * ============================================================ */
+
+/* ① 顶部栏：细边框、系统字体、稍高呼吸 */
+.hdr {
+  padding: 10px 20px !important;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui,
+    sans-serif !important;
+  gap: 16px !important;
+}
+.hdr .title h1 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.1px !important;
+}
+.hdr .env {
+  padding: 2px 8px !important;
+  font-size: 10.5px !important;
+  border-radius: 999px !important;
+  letter-spacing: 0.4px !important;
+  opacity: 0.85 !important;
+}
+
+/* ② 右侧容器：统一 gap + 垂直居中 */
+.hdr-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+/* ③ 所有图标按钮：统一 28×28 正方形，圆角 8px，hover 柔和高亮 */
+.hdr .theme-toggle,
+.hdr .open-ai-toggle,
+.hdr .new-session-toggle,
+.hdr .worklog-toggle {
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: var(--text-2, rgba(127, 127, 127, 0.9)) !important;
+  cursor: pointer !important;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease !important;
+}
+.hdr .theme-toggle:hover,
+.hdr .open-ai-toggle:hover,
+.hdr .new-session-toggle:hover,
+.hdr .worklog-toggle:hover {
+  background: rgba(127, 127, 127, 0.1) !important;
+  color: var(--text, inherit) !important;
+}
+.hdr .theme-toggle svg,
+.hdr .open-ai-toggle svg,
+.hdr .new-session-toggle svg,
+.hdr .worklog-toggle svg {
+  width: 15px !important;
+  height: 15px !important;
+  flex-shrink: 0 !important;
+}
+
+/* ④ URL 显示区：胶囊样式，微弱背景 */
+.hdr .ds-url {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 4px 10px !important;
+  border-radius: 8px !important;
+  background: rgba(127, 127, 127, 0.06) !important;
+  border: 1px solid transparent !important;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease !important;
+}
+.hdr .ds-url:hover {
+  background: rgba(127, 127, 127, 0.1) !important;
+}
+.hdr .ds-url.editing {
+  background: var(--surface) !important;
+  border-color: var(--primary, #58a6ff) !important;
+}
+.hdr .ds-value-static {
+  font-size: 12.5px !important;
+  color: var(--text-2) !important;
+  max-width: 320px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  cursor: pointer !important;
+}
+.hdr .ds-input {
+  padding: 2px 6px !important;
+  font:
+    12.5px/1.4 ui-monospace,
+    monospace !important;
+  background: transparent !important;
+  border: 0 !important;
+  outline: 0 !important;
+  color: var(--text, inherit) !important;
+  min-width: 240px !important;
+}
+.hdr .ask-count {
+  font-size: 11px !important;
+  color: var(--text-3) !important;
+  opacity: 0.85 !important;
+  white-space: nowrap !important;
+}
+
+/* ⑤ transport 下拉：与图标按钮同高 */
+.hdr .transport-switch {
+  display: inline-flex !important;
+  align-items: center !important;
+}
+.hdr .transport-switch select {
+  height: 28px !important;
+  padding: 0 8px !important;
+  font-size: 12px !important;
+  background: rgba(127, 127, 127, 0.06) !important;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  color: var(--text-2) !important;
+  cursor: pointer !important;
+  outline: 0 !important;
+  transition: background 0.15s ease !important;
+}
+.hdr .transport-switch select:hover {
+  background: rgba(127, 127, 127, 0.1) !important;
+}

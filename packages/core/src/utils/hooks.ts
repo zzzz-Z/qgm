@@ -5,8 +5,6 @@ import { runProcess } from '../process/proc.js'
 import type { HookEvent, HookResult } from './hooks-config.js'
 import { loadHooksConfig } from './hooks-config.js'
 
-export type { HookDef, HookEvent, HookResult } from './hooks-config.js'
-
 /** 钩子配置文件路径 */
 const CONFIG_PATH = path.join(ROOT, '.ai-runner/hooks.json')
 /** 单个钩子执行的超时上限（毫秒） */
@@ -77,3 +75,6 @@ export async function runHook(event: HookEvent, payload: unknown): Promise<HookR
 
   return { event, action: 'ok', hooksRun: run }
 }
+
+// ── [§5 分区] 顶层 re-export 集中区 ──
+export type { HookDef, HookEvent, HookResult } from './hooks-config.js'

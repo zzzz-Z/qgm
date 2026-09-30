@@ -4,15 +4,15 @@ import { useClipboard, useLocalStorage } from '@vueuse/core'
 import { estimateTokens } from '../../utils/tokenEstimator.js'
 import { toast } from '../ui/useToast.js'
 
-// [copy-via-vueuse] 模块级单例：useClipboard 内部会注册 copy 事件监听，
-// 在 setup 外反复构造会残留 listener；提升为模块级只注册一次
-const _clipboard = useClipboard()
-
 /** 消息 */
 export interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
 }
+
+// [copy-via-vueuse] 模块级单例：useClipboard 内部会注册 copy 事件监听，
+// 在 setup 外反复构造会残留 listener；提升为模块级只注册一次
+const _clipboard = useClipboard()
 
 /** 预警阈值（达到后提示轮转） */
 export const WARN_THRESHOLD = 40000
@@ -39,6 +39,13 @@ const askCount = useLocalStorage<number>(ASK_COUNT_KEY, 0, {
   },
 })
 
+/** 会话标识；模块级单例，多组件共享 */
+const sessionId = ref<string>(generateId())
+/** 会话 URL；初值取 window.location.href，刷新后由 restoreFromStorage 覆写 */
+const sessionUrl = ref<string>(typeof window !== 'undefined' ? window.location.href : '')
+/** 会话消息列表；内存态，持久化由 saveToStorage 收口 */
+const messages = ref<Message[]>([])
+
 /**
  * 生成新会话 id
  * [WHY] crypto.randomUUID 全局唯一；截取前 8 位足以区分单机会话，且便于肉眼阅读
@@ -47,13 +54,6 @@ const askCount = useLocalStorage<number>(ASK_COUNT_KEY, 0, {
 function generateId(): string {
   return `sess_${crypto.randomUUID().slice(0, 8)}`
 }
-
-/** 会话标识；模块级单例，多组件共享 */
-const sessionId = ref<string>(generateId())
-/** 会话 URL；初值取 window.location.href，刷新后由 restoreFromStorage 覆写 */
-const sessionUrl = ref<string>(typeof window !== 'undefined' ? window.location.href : '')
-/** 会话消息列表；内存态，持久化由 saveToStorage 收口 */
-const messages = ref<Message[]>([])
 
 /**
  * 归零提问计数

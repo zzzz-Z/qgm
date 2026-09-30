@@ -19,6 +19,9 @@ const SENSITIVE_PATTERNS: RegExp[] = [
   /(^|\/)(credentials|secrets?)\.(\.json|ya?ml|txt)$/,
 ]
 
+/** files-read 路由的 Hono 实例 */
+export const filesReadHono = new Hono()
+
 /**
  * 判断相对路径是否命中敏感文件规则
  * [WHY] /files/read 会读取文件内容回传给 AI，需屏蔽 .env / 私钥 / 凭证等敏感项
@@ -29,9 +32,6 @@ const SENSITIVE_PATTERNS: RegExp[] = [
 function isSensitive(rel: string): boolean {
   return SENSITIVE_PATTERNS.some(re => re.test(rel))
 }
-
-/** files-read 路由的 Hono 实例 */
-export const filesReadHono = new Hono()
 
 filesReadHono.post('/files/read', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { paths?: string[] } | null

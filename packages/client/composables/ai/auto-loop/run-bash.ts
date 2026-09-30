@@ -1,5 +1,6 @@
 // [run-bash-v1] 从 useAutoLoop.ts 抽出（PLAN 4.7 阈值整改）
 import { readNdjson } from '../../../utils/stream'
+import { bashPolicy } from '../../ui/useAppStorage'
 
 interface BashExecResult {
   code: number
@@ -36,12 +37,8 @@ export async function runBash(cmd: string): Promise<BashExecResult> {
     const res = await fetch('/__ai/exec', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cmd, bashPolicy: (() => {
-        try {
-          const p = localStorage.getItem('__ai_bash_policy') || 'on-request'
-          return p === 'on-request' ? 'never' : p
-        } catch { return 'never' }
-      })() }),
+      // [use-storage-v1] 消费 useAppStorage 单例；自动循环模式下 'on-request' 语义转为 'never'（无人值守审批）
+      body: JSON.stringify({ cmd, bashPolicy: bashPolicy.value === 'on-request' ? 'never' : bashPolicy.value }),
     })
     if (!res.ok) {
       let detail: { blacklistHit?: string, dirty?: boolean, files?: string[], error?: string } = {}

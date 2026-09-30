@@ -4,12 +4,6 @@ import { MODELS } from '../ai/useDeepseekUrl.js'
 import { getActiveWin } from '../ai/useAiWindow.js'
 import { log } from '../../utils/log'
 
-// AIRUNNER-BATCH19-2-SPLIT-EVENT-STREAM: 实现已外移至 event-stream.ts，此处 re-export 保 API 稳定
-
-export type { EventKind, StreamEvent } from './event-stream.js'
-
-export { clearEvents, emit, peekPendingAskKey, setPendingAskKey, takePendingAskKey, useEventBus } from './event-stream.js'
-
 interface EventStreamMessage {
   type: string
   kind?: string
@@ -100,3 +94,9 @@ export function useEventStream(cb: EventStreamCallbacks) {
 
   return { bind, unbind, onMessage, isFromActiveAiSite }
 }
+
+// ── [§5 分区] 顶层 re-export 集中区 ──
+// AIRUNNER-BATCH19-2-SPLIT-EVENT-STREAM: 实现已外移至 event-stream.ts，此处 re-export 保 API 稳定
+export type { EventKind, StreamEvent } from './event-stream.js'
+
+export { clearEvents, emit, peekPendingAskKey, setPendingAskKey, takePendingAskKey, useEventBus } from './event-stream.js'

@@ -1,5 +1,6 @@
 // [app-storage-v1] PLAN 4.7 阈值整改：从 App.vue 抽出的 localStorage 纯函数
 // 所有访问都在 try/catch 内，SSR/无 localStorage 环境安全降级
+import { useStorage } from '@vueuse/core'
 
 /** 会话（接口） */
 export interface SessionEntry {
@@ -19,8 +20,38 @@ export const ACTIVE_SESSION_KEY = '__ai_active_session_id'
 export const KEY_SANDBOX = '__ai_sandbox'
 /** Bash 策略的存储键 */
 export const KEY_BASH_POLICY = '__ai_bash_policy'
+
+/**
+ * Bash 策略响应式单例（'on-request' | 'always' | 'never'）
+ * [use-storage-v1] 集中托管：原 App.vue（ref+watch 落盘）/ exec-flow / run-bash 三处各自读写，无跨标签页同步
+ * [CONSTRAINT] default 为字符串 → useStorage 走 string serializer，写入 localStorage 保持裸值不带引号（兼容旧格式）
+ * [CHANGE-IMPACT] 3 处消费方统一改为消费本 ref；移除后需同步清理 KEY_BASH_POLICY / LS_BASH_POLICY_KEY 常量
+ */
+export const bashPolicy = useStorage<string>(KEY_BASH_POLICY, 'on-request')
 /** 主题偏好的存储键（'light' | 'dark'） */
 export const KEY_THEME = '__ai_theme'
+
+/**
+ * 沙箱模式响应式单例
+ * [use-storage-v1] 集中托管：原 App.vue ref + watch 落盘
+ * [CONSTRAINT] 默认 'read-only' 字符串 → useStorage 走 string serializer，写入裸值兼容旧格式
+ * [CHANGE-IMPACT] 消费点从本地 ref 改为导入本单例后，App.vue 的 KEY_SANDBOX watch 需删除
+ */
+export const sandboxMode = useStorage<string>(KEY_SANDBOX, 'read-only')
+
+/**
+ * 主题响应式单例（'light' | 'dark'）
+ * [use-storage-v1] 集中托管：原 App.vue ref + watch 落盘
+ * [CONSTRAINT] DOM 属性 data-theme 的写入仍需 App.vue 侧 watch 保留（本单例不代理 DOM 副作用）
+ */
+export const theme = useStorage<'light' | 'dark'>(KEY_THEME, 'dark')
+
+/**
+ * 当前活动会话 id 响应式单例
+ * [use-storage-v1] 集中托管：原 App.vue ref + watch 落盘；loop/window 表同步副作用仍由 App.vue watch 保留
+ * [CHANGE-IMPACT] 空串不再触发 removeItem（useStorage 写空串），读取语义等价（均为"未选择"）
+ */
+export const activeSessionId = useStorage<string>(ACTIVE_SESSION_KEY, '')
 
 /**
  * 读取 localStorage 并吞掉所有异常

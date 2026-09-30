@@ -26,7 +26,8 @@ interface StopAndFinishDeps {
  * @param deps 停止族依赖面（loopPaused / transport / toast 等外部引用）
  */
 export function createStopAndFinish(deps: StopAndFinishDeps) {
-  const { loopPaused, disarmTimer, persist, enterWaiting, transport, toast, runHook, unbindKeyboard } = deps
+  // [unused-cleanup-v2] 已删 enterWaiting：本文件仅解构点，接口字段保留供上游契约
+  const { loopPaused, disarmTimer, persist, transport, toast, runHook, unbindKeyboard } = deps
   /**
    * 每轮结束后按 stopRequest 决定是否回滚
    * [WHY] 用户在本轮开始时点了"回滚急停"时，本轮变更需 git reset 到起始 commit 后再 finish

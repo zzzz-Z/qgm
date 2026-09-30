@@ -6,7 +6,7 @@ import {
   recordSample,
   serialize,
   summarize,
-} from '../../packages/core/src/state/perf'
+} from '../../../packages/core/src/state/perf.js'
 
 describe('perf: createStore', () => {
   it('默认 maxSamples=20 slowFactor=2', () => {

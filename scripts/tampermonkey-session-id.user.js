@@ -239,6 +239,19 @@
     if (/^(?:js|javascript|cjs|commonjs|node|nodejs)\b/.test(t)) return 'js'
     return null
   }
+  // [code-text-clean-v1] 从 <code class="language-xxx"> 直接判语言
+  // [WHY] DeepSeek 代码块头的语言标签/复制按钮不进入 <code> 元素，取 className 比邻近 DOM 探测更可靠
+  // [CONSTRAINT] 只认 cjs/js/bash 三种（与 extractLatestScript 白名单一致），其余返回 null 交给后续探测
+  // [CHANGE-IMPACT] 与 guessLangFromDom / guessLangFromContent 组成三级回退，改单级不影响其他级
+  function guessLangFromClass(el) {
+    if (!el || !el.className) return null
+    const m = String(el.className).match(/(?:language|lang)-([a-z0-9+#-]+)/i)
+    if (!m) return null
+    const raw = m[1].toLowerCase()
+    if (raw === 'bash' || raw === 'sh' || raw === 'shell' || raw === 'zsh') return 'bash'
+    if (raw === 'js' || raw === 'javascript' || raw === 'node' || raw === 'mjs' || raw === 'cjs') return 'js'
+    return null
+  }
   function guessLangFromDom(pre) {
     let sib = pre.previousElementSibling
     for (let i = 0; i < 3 && sib; i++, sib = sib.previousElementSibling) {
@@ -271,10 +284,15 @@
     let last = null
     let lastMarked = null
     for (const pre of pres) {
-      const text = (pre.textContent || '').replace(/^\n+|\n+$/g, '')
+      // [code-text-clean-v1] 优先从 <pre><code> 取文本，避开代码块头的语言标签与「复制/下载」按钮文字
+      // [WHY] pre.textContent 会把头部按钮文字并入首行，污染后 #! 锚点失配、语言判定失败导致整块跳过
+      // [CONSTRAINT] 无 code 子元素时回退 pre 本身；去首尾空行逻辑保持原样
+      const codeEl = pre.querySelector('code') || pre
+      const text = (codeEl.textContent || '').replace(/^\n+|\n+$/g, '')
       if (!text) continue
       if (!text.includes('\n') && text.length < 120) continue
-      const lang = guessLangFromDom(pre) || guessLangFromContent(text) || null
+      // [code-text-clean-v1] 语言判定三级回退：className → DOM 邻近探测 → 内容特征
+      const lang = guessLangFromClass(codeEl) || guessLangFromDom(pre) || guessLangFromContent(text) || null
       if (lang !== 'cjs' && lang !== 'js' && lang !== 'bash') continue
       const item = { lang, code: text, hash: hash32(text) }
       last = item
@@ -288,145 +306,88 @@
 
   // [fix-undef] 从页面取最新一条回复的纯文本（排除 pre 代码块，用于 handoff 总结判定）
   function extractLatestReplyText() {
+    // [ask-full-text-v1] 返回最后一条 assistant 容器的完整 Markdown（含段落换行）
+    // [WHY] 原实现只取全局最后一个叶子节点 → 多段回复被截成末段，@ask 前缀丢失
+    // [CONSTRAINT] 复用 extractReplyMd（DOM→Markdown 反推）；容器缺失时回退 document
     try {
-      const nodes = document.querySelectorAll('div,p,li')
-      let last = ''
-      for (const el of nodes) {
-        if (el.children.length > 0) continue
-        if (el.closest('pre')) continue
-        const t = (el.textContent || '').trim()
-        if (!t || t.length < 20) continue
-        if (/^\s*DONE\s*$/.test(t)) continue
-        last = t
-      }
-      return last
+      const _blocks = document.querySelectorAll('.ds-assistant-message-main-content')
+      const _root = _blocks.length > 0 ? _blocks[_blocks.length - 1] : document
+      return extractReplyMd(_root)
     } catch { return '' }
   }
 
   // [done-comments] 从代码块中提取「DONE 起始的连续注释块」
   // 返回：{ raw: string[], tagged: { [tag]: string }, text: string, firstLine: string }
-  function extractDoneComments(code) {
-    const lines = String(code || '').split(/\r?\n/)
 
-    // 1) 定位含 DONE 的注释行（行首 // 或 #）
-    let start = -1
-    for (let i = 0; i < lines.length; i++) {
-      if (/^[ \t]*(?:\/\/|#)[ \t]*DONE\b/i.test(lines[i])) { start = i; break }
-    }
-    if (start === -1) return null
-
-    // 2) 从 DONE 行开始，连续收集注释行（遇到第一个非注释行即停）
-    const raw = []
-    const tagged = {}
-    let curTag = null
-    let curVal = []
-
-    for (let i = start; i < lines.length; i++) {
-      const m = lines[i].match(/^[ \t]*(?:\/\/|#)[ \t]?(.*)$/)
-      if (!m) break
-      const content = m[1] // 已剥离行注释前缀
-      raw.push(content)
-
-      const tag = content.match(/^@([\w-]+)/)
-      if (tag) {
-        if (curTag) tagged[curTag] = curVal.join('\n').trim()
-        curTag = tag[1]
-        curVal = [content.slice(tag[0].length).trim()]
-      } else if (curTag) {
-        curVal.push(content)
+  // [done-md-reconstruct-v1] DOM → Markdown 反推：SYSTEM.md §8 允许 AI 输出纯 Markdown 总结，
+  // 但 textContent 会把 <h3>/<p>/<ul> 粘成一行；需按标签结构重建 Markdown 源码
+  // [CONSTRAINT] 只覆盖 DeepSeek 常用标签；未知标签递归取子节点文本（兜底）
+  // [CHANGE-IMPACT] 输出直接喂给前端 renderMarkdown；改这里必须同步 headless-inject 的 elToMd
+  function elToMd(node) {
+    if (!node) return ''
+    if (node.nodeType === 3) return node.textContent || ''
+    if (node.nodeType !== 1) return ''
+    const el = node
+    const tag = el.tagName.toLowerCase()
+    const inner = () => Array.from(el.childNodes).map(c => elToMd(c)).join('')
+    if (tag === 'br') return '\n'
+    if (tag === 'hr') return '\n---\n\n'
+    if (/^h[1-6]$/.test(tag)) return `${'#'.repeat(Number(tag.charAt(1)))} ${inner().trim()}\n\n`
+    if (tag === 'p') return `${inner().trim()}\n\n`
+    if (tag === 'ul' || tag === 'ol') {
+      const out = []
+      let i = 1
+      for (const c of Array.from(el.children)) {
+        if (c.tagName.toLowerCase() !== 'li') continue
+        out.push((tag === 'ul' ? '- ' : `${i++}. `) + elToMd(c).trim())
       }
+      return `${out.join('\n')}\n\n`
     }
-    if (curTag) tagged[curTag] = curVal.join('\n').trim()
-
-    return {
-      raw,
-      tagged,
-      text: raw.join('\n'),
-      firstLine: raw[0] || '',
+    if (tag === 'pre') {
+      const code = el.querySelector('code')
+      const cls = code ? String(code.className || '') : ''
+      const m = cls.match(/language-([a-z0-9]+)/i)
+      const src = (code || el).textContent || ''
+      return `\`\`\`${m ? m[1] : ''}\n${src.replace(/\n+$/g, '')}\n\`\`\`\n\n`
     }
+    if (tag === 'code') return `\`${el.textContent || ''}\``
+    if (tag === 'blockquote') return `${inner().split('\n').map(l => `> ${l}`).join('\n')}\n\n`
+    if (tag === 'table') {
+      const rows = []
+      for (const tr of Array.from(el.querySelectorAll('tr'))) {
+        rows.push(`| ${Array.from(tr.children).map(c => elToMd(c).trim()).join(' | ')} |`)
+      }
+      return `${rows.join('\n')}\n\n`
+    }
+    return inner()
   }
 
-  // [done-in-head-v1] 从脚本头提取 @done 标记 + 后续连续注释作为 md 总结
-  // 返回：{ marker, md, tags } | null
-  // md: @done 那一行 + 后续所有连续注释（去前缀），用 \n 拼接；作为任务总结文本供前端展示
-  function extractDoneFromHead(code) {
-    const lines = String(code || '').split(/\r?\n/)
-    let start = -1
-    for (let i = 0; i < lines.length; i++) {
-      if (/^[ \t]*(?:\/\/|#)[ \t]*@done\b/.test(lines[i])) { start = i; break }
-    }
-    if (start === -1) return null
-
-    const raw = []
-    const tags = {}
-    let curTag = null
-    let curVal = []
-    for (let i = start; i < lines.length; i++) {
-      const m = lines[i].match(/^[ \t]*(?:\/\/|#)[ \t]?(.*)$/)
-      if (!m) break
-      const content = m[1]
-      raw.push(content)
-      const tag = content.match(/^@([\w-]+)/)
-      if (tag) {
-        if (curTag) tags[curTag] = curVal.join('\n').trim()
-        curTag = tag[1]
-        curVal = [content.slice(tag[0].length).trim()]
-      } else if (curTag) {
-        curVal.push(content)
-      }
-    }
-    if (curTag) tags[curTag] = curVal.join('\n').trim()
-
-    return {
-      marker: hash32(`head-done|${hash32(String(code || ''))}`),
-      md: raw.join('\n'),
-      tags,
-    }
+  function extractReplyMd(root) {
+    if (!root) return ''
+    const node = root.nodeType === 9 ? root.body : root
+    if (!node) return ''
+    return elToMd(node).replace(/\n{3,}/g, '\n\n').trim()
   }
 
   function findNewDone() {
     const _blocks = document.querySelectorAll('.ds-assistant-message-main-content')
     const _root = _blocks.length > 0 ? _blocks[_blocks.length - 1] : document
-    const summary = String(_root.textContent || '').trim()
+    // [done-md-reconstruct-v1] 用 DOM→Markdown 反推替代 textContent（保留换行与结构）
+    const summary = extractReplyMd(_root)
 
-    let found = null
-
-    // 1) 原逻辑：独立文本节点恰好为 DONE
-    const nodes = document.querySelectorAll('div,p,span,li')
-    for (const el of nodes) {
-      if (el.children.length > 0) continue
-      const t = (el.textContent || '').trim()
-      if (!/^\s*DONE\s*$/.test(t)) continue
-      const marker = hash32(`text|${t}|${(el.outerHTML || '').slice(0, 120)}`)
-      if (seenDoneMarkers.has(marker)) continue
-      found = { marker, text: summary, doneComments: null }
-    }
-    if (found) return found
-
-    // 2) 从 <pre> 代码块注释里抓 DONE + 后续所有注释行
-    const pres = document.querySelectorAll('pre')
-    for (const pre of pres) {
-      const raw = (pre.textContent || '').replace(/^\n+|\n+$/g, '')
-      if (!raw) continue
-
-      const comments = extractDoneComments(raw)
-      if (!comments) continue
-
-      // 用整段代码的哈希去重（React re-render 不重复上报）
-      const marker = hash32(`code-done|${hash32(raw)}`)
-      if (seenDoneMarkers.has(marker)) continue
-
-      found = {
-        marker,
-        text: summary,
-        doneText: comments.firstLine, // "DONE"
-        doneComments: comments.raw, // 全部注释行（已去前缀）
-        doneCommentsText: comments.text, // 拼好的纯文本
-        doneTags: comments.tagged, // { desc, why, mode, ... }
+    // [done-plain-v1] SYSTEM.md §8 新协议：首行严格 DONE + 后续 Markdown 总结
+    // [CONSTRAINT] 只匹配首个非空行恰好为 DONE；避免"我做了 DONE"类误判
+    if (summary) {
+      const firstLine = summary.split(/\r?\n/).find(l => l.trim().length > 0) || ''
+      if (/^\s*DONE\s*$/.test(firstLine)) {
+        const headMarker = hash32(`done-head|${summary.slice(0, 200)}|${summary.length}`)
+        if (!seenDoneMarkers.has(headMarker)) {
+          return { marker: headMarker, text: summary }
+        }
       }
-      break
     }
-    return found
+
+    return null
   }
 
   function bodySignature() {
@@ -467,11 +428,7 @@
             site: location.origin,
             sessionId: extractSidFromHash(),
             reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
-            text: doneMarker.text, // assistant 容器全文（兼容旧字段）
-            doneText: doneMarker.doneText || '', // 首行，如 "DONE"
-            doneComments: doneMarker.doneComments || [], // 字符串数组，去前缀
-            doneCommentsText: doneMarker.doneCommentsText || '', // 拼好的整块注释
-            doneTags: doneMarker.doneTags || {}, // { desc, why, mode, ... }
+            text: doneMarker.text,
           })
           lastBodySig = bodySignature()
           return
@@ -479,8 +436,6 @@
 
         const s = extractLatestScript()
         if (s && !seenHashes.has(s.hash)) {
-          // [done-in-head-v1] 脚本头含 @done → 收尾轮：仍发 script（要执行）+ isDone/doneMd
-          const headDone = extractDoneFromHead(s.code)
           seenHashes.add(s.hash)
           post({
             type: 'ai-runner:reply',
@@ -491,9 +446,6 @@
             site: location.origin,
             sessionId: extractSidFromHash(),
             reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
-            isDone: Boolean(headDone),
-            doneMd: headDone ? headDone.md : '',
-            doneTags: headDone ? headDone.tags : {},
           })
           lastBodySig = bodySignature()
           return
@@ -508,6 +460,9 @@
             site: location.origin,
             sessionId: extractSidFromHash(),
             reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
+            // [ask-text-v1] 补 text：前端 parseAsk 依赖此字段识别交互提问
+            // [CONSTRAINT] extractLatestReplyText 返回最后 assistant 容器文本；缺失时前端退化为纯提示
+            text: (() => { try { return extractLatestReplyText() || '' } catch { return '' } })(),
           })
         }
       } catch {}

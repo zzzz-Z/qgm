@@ -6,15 +6,33 @@ import { useFoldState } from '../../composables/ui/useFoldState'
 
 defineOptions({ name: 'SidePane' })
 
-/** v-model 绑定的双向值 */
 const model = defineModel<boolean>('sideDrawerOpen', { required: true })
-/** 标签页 */
+
+const props = defineProps<{
+  changes: { path: string, type: 'added' | 'modified' | 'deleted' }[]
+  rolling: Record<string, boolean>
+  busyAll: boolean
+  previewFile: string | null
+  result: { tools?: unknown[] } | null
+  sideWidth: number
+}>()
+
+const emit = defineEmits<{
+  rollback: [file: string]
+  rollbackAll: []
+  save: [file?: string]
+  preview: [file: string]
+}>()
+
+/** 标签页类型：从 _tabAllowed 派生，保证与运行时白名单一致 */
+// [WHY] TS 类型别名编译期惰性求值，`typeof _tabAllowed` 引用后置 const 无 TDZ 风险
+type SideTab = typeof _tabAllowed[number]
+
 const _tabAllowed = ['tree', 'changes'] as const
 
-type SideTab = typeof _tabAllowed[number]
-/** 折叠 */
+// [side-fold-v1] 折叠 + tab 选择持久化（PLAN 5.4）
 const fold = useFoldState('default', 'side-pane')
-/** 标签页 */
+
 const sideTab = computed<SideTab>({
   get: () => {
     // [no-double-cast-v1] fold.all 的存储槽位类型为 boolean，实际承载 SideTab 字符串；
@@ -29,41 +47,14 @@ const sideTab = computed<SideTab>({
   // 语义清晰无需进一步抽象，保留双重强转但注明理由
   set: (v: SideTab) => fold.setOpen('tab', v as unknown as boolean),
 })
-/** 组件接收的 props 定义 */
-const props = defineProps<{
-  changes: { path: string, type: 'added' | 'modified' | 'deleted' }[]
-  rolling: Record<string, boolean>
-  busyAll: boolean
-  previewFile: string | null
-  result: { tools?: unknown[] } | null
-  sideWidth: number
-}>()
 
-/** 实际显示宽度（像素） */
 const displayWidth = computed(() => props.sideWidth || 320)
 
-// [side-fold-v1] 折叠 + tab 选择持久化（PLAN 5.4）
-/** 是否已折叠 */
 const collapsed = computed({
   get: () => !fold.isOpen('expanded', true),
   set: (v: boolean) => fold.setOpen('expanded', !v),
 })
 
-/** 派发 */
-const emit = defineEmits<{
-  rollback: [file: string]
-  rollbackAll: []
-  save: [file?: string]
-  preview: [file: string]
-}>()
-
-/**
- * 切换侧栏 tab（并自动展开侧栏）
- * [WHY] 折叠态下点击 tab 说明用户想用那个面板，自动展开可省一步操作
- * [CONSTRAINT] tab 类型派生自 sideTab 的 ref 类型，新增 tab 须同步 sideTab 联合类型
- * [CHANGE-IMPACT] 会写 sideTab.value 与 collapsed.value，模板的 tab 高亮与宽度依赖这两处
- * @param tab 目标 tab 名（'tree' / 其他 sideTab 联合值）
- */
 function selectTab(tab: (typeof sideTab)['value']): void {
   sideTab.value = tab
   if (collapsed.value)

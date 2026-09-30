@@ -7,13 +7,16 @@ import { runProcess } from '../process/proc.js'
 // 全局检索（glob / grep）
 // ============================================================================
 
+/** 检索中文件的最小元信息；mtimeMs 用于内容缓存失效判定（不读 stat 即失效） */
+interface SearchFile { abs: string, rel: string, mtimeMs: number }
+/** ast-grep 单条匹配结果的规范化结构；line 为 1-based，从 ast-grep 的 0-based 转换而来 */
+interface AstHit { path: string, line?: number, text?: string }
+
 /** 搜索时跳过的目录名集合 */
 export const SEARCH_SKIP = new Set(['node_modules', '.git', 'dist', '.vite', '.turbo', '.cache', 'coverage'])
 
 // 检索缓存：文件列表 5s TTL；文件内容按 mtimeMs 失效（Map 超容量淘汰最早条目）
 
-/** 检索中文件的最小元信息；mtimeMs 用于内容缓存失效判定（不读 stat 即失效） */
-interface SearchFile { abs: string, rel: string, mtimeMs: number }
 /** 文件列表缓存；at = 记录时刻，超 SEARCH_LIST_TTL 后由 getSearchFiles 重建 */
 let searchFileCache: { at: number, files: SearchFile[] } | null = null
 /** 搜索结果列表缓存存活时间（毫秒） */
@@ -22,6 +25,8 @@ const SEARCH_LIST_TTL = 5000
 const searchContentCache = new Map<string, { mtimeMs: number, content: string }>()
 /** 文件内容缓存的最大条目数 */
 const SEARCH_CONTENT_CACHE_MAX = 800
+/** ast-grep 缺失时仅 warn 一次（避免控制台刷屏） */
+let astGrepWarned = false
 
 /**
  * 递归收集目录下所有可检索文本文件（跳过隐藏项 / SEARCH_SKIP / 二进制扩展名）
@@ -114,10 +119,6 @@ export function globToRe(glob: string): RegExp {
   }
   return new RegExp(out)
 }
-
-/** ast-grep 单条匹配结果的规范化结构；line 为 1-based，从 ast-grep 的 0-based 转换而来 */
-interface AstHit { path: string, line?: number, text?: string }
-let astGrepWarned = false
 /**
  * 调用本地 @ast-grep/cli 做结构化检索
  * [WHY] 未安装时返回错误字符串而非抛异常，让 UI 层静默降级到 grep

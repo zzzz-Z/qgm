@@ -6,7 +6,7 @@ import { copyAndFill, sendNewSession } from '../../composables/ai/useAiWindow'
 import { buildNewSessionPrompt } from '../../composables/ai/session-prompt'
 import { useSessionManager } from '../../composables/ai/useSessionManager'
 import { readNdjson } from '../../utils/stream'
-import { LS_BASH_POLICY_KEY } from '../../utils/storage'
+import { bashPolicy } from '../../composables/ui/useAppStorage'
 import { log } from '../../utils/log'
 import { emit } from '../../composables/ui/useEventStream'
 import type { ChangeType } from '../../types'
@@ -77,7 +77,8 @@ export function createExecFlow(deps: ExecFlowDeps) {
       const res = await fetch('/__ai/exec', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cmd, bashPolicy: execPolicyOverride.value || (() => { try { return localStorage.getItem(LS_BASH_POLICY_KEY) || 'on-request' } catch { return 'on-request' } })() }),
+        // [use-storage-v1] 消费 useAppStorage 单例 ref（默认 'on-request' 由 useStorage 兜底）
+        body: JSON.stringify({ cmd, bashPolicy: execPolicyOverride.value || bashPolicy.value }),
       })
       if (!res.ok || !res.body) {
         let approval: { needsApproval?: boolean, blacklistHit?: string } | null = null

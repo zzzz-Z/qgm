@@ -16,6 +16,11 @@
 <script setup lang="ts">
 import { fmtSize } from '../../utils/format'
 
+defineProps<{ files: AttachedFile[] }>()
+
+/** 派发 */
+const emit = defineEmits<{ remove: [id: string] }>()
+
 interface AttachedFile {
   id: string
   name: string
@@ -23,37 +28,41 @@ interface AttachedFile {
   kind: 'image' | 'text' | 'folder'
   content: string
 }
-
-defineProps<{ files: AttachedFile[] }>()
-
-/** 派发 */
-const emit = defineEmits<{ remove: [id: string] }>()
 </script>
 
 <style scoped lang="scss">
+// [chat-input-v2] 附件条与输入框卡片同体：透明背景 + 无底部分界线
 .attach-bar {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border, var(--border));
-  background: var(--surface-2, var(--surface-2));
+  padding: 4px 16px 0;
+  background: transparent;
   max-height: 120px;
   overflow-y: auto;
 }
 
+// [chat-input-v5] 附件标签圆角 10px 与卡片同族；半透明底更融入输入框
 .attach-tag {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
-  border-radius: var(--radius-6);
-  background: var(--surface, var(--surface));
-  border: 1px solid var(--border, var(--border));
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: rgba(127, 127, 127, 0.08);
+  border: 1px solid transparent;
   font-size: 11.5px;
-  color: var(--text, var(--text));
+  color: var(--text, inherit);
   max-width: 260px;
   justify-content: center;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.attach-tag:hover {
+  background: rgba(127, 127, 127, 0.14);
+  border-color: rgba(127, 127, 127, 0.2);
 }
 
 .attach-tag.kind-image {
@@ -91,36 +100,27 @@ const emit = defineEmits<{ remove: [id: string] }>()
 
 .attach-del {
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-4);
+  border-radius: 50%;
   background: transparent;
-  color: var(--text-3, var(--text-3));
+  color: var(--text-3, rgba(127, 127, 127, 0.7));
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .attach-del:hover {
-  color: var(--danger);
-  background: rgb(248 81 73 / 12%);
-}
-
-.attach-tag .attach-img {
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.attach-tag .attach-del {
-  align-self: center;
-  line-height: 1.2;
+  color: var(--danger, #f85149);
+  background: rgba(248, 81, 73, 0.14);
 }
 
 .attach-tag .attach-ico,

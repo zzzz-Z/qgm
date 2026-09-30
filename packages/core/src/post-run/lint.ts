@@ -9,8 +9,6 @@ import { detectPackageManager, runProcess } from '../process/proc.js'
 
 /** 从 changes 里挑出需要 lint 的源文件（排除已删除的） */
 
-export { LINT_EXTS, pickLintTargets } from './lint-targets.js'
-
 /** 项目是否有 eslint 配置（无配置不跑，避免 eslint 初始化向导） */
 
 /**
@@ -70,3 +68,6 @@ export async function runEslint(files: string[], timeoutMs = 60_000): Promise<{ 
   })
   return { code: r.code, stdout: r.stdout, stderr: r.stderr }
 }
+
+// ── [§5 分区] 顶层 re-export 集中区 ──
+export { LINT_EXTS, pickLintTargets } from './lint-targets.js'

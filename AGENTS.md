@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> 项目入口索引。**唯一规则来源（SSOT）为 [`SYSTEM.md`](./SYSTEM.md)**；冲突时以 SYSTEM.md 为准。
+> 项目入口索引。**唯一规则来源（SSOT）为 [`SYSTEM.md`](./packages/core/src/rules/SYSTEM.md)**；冲突时以 SYSTEM.md 为准。
 > 本文件缺失仅警告，不中断。
 
 ## 首轮加载顺序
@@ -22,7 +22,7 @@
 | 文件分区   | TS/Vue 固定顺序，节间空行                                      | SYSTEM.md §5   |
 | 架构约束   | 单文件 import ≤ 8；普通 ≤ 400 行、组件 ≤ 500 行                | SYSTEM.md §6   |
 | 调试排查   | `__AI__.browser.*` 优先；grep → dump ±20                       | SYSTEM.md §7   |
-| 收尾轮     | 三条件齐备 + `// @done` + 固定 Markdown 结构                   | SYSTEM.md §8   |
+| 收尾轮     | 首行严格 `DONE` + 后续 Markdown 总结；不写脚本、不调 log       | SYSTEM.md §8   |
 | 注释规范   | 三问（WHY / CONSTRAINT / CHANGE-IMPACT）取其二                 | SYSTEM.md §9   |
 
 ---
@@ -39,7 +39,7 @@ scripts/              build / dev / 分析 / 校验等辅助脚本
 test/server|web/      后端 / 前端 node-test 单测
 docs/                 USAGE.md / DOCS-INDEX.md
 skills/               内置 skill 加载器（_loader.cjs）
-SYSTEM.md             唯一规则来源
+SYSTEM.md             指针 → packages/core/src/rules/SYSTEM.md（SSOT）
 ```
 
 三条架构铁律（由 `test/server/workspace-guard.node-test.ts` 覆盖）：
@@ -77,5 +77,5 @@ pnpm test:unit    # vitest（test/web + test/server）
 
 ## 详见
 
-完整规则、`__AI__` API 映射表、架构约束、UI/Vue/CSS 速查、踩坑库索引（E/T/P/A）见 [`SYSTEM.md`](./SYSTEM.md)。
+完整规则、`__AI__` API 映射表、架构约束、UI/Vue/CSS 速查、踩坑库索引（E/T/P/A）见 [`SYSTEM.md`](./packages/core/src/rules/SYSTEM.md)。
 打包使用 / 环境变量 / 部署见 [`docs/USAGE.md`](./docs/USAGE.md)。
