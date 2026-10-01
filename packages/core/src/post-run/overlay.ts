@@ -20,6 +20,22 @@ function getRoot(): string {
 }
 
 /**
+ * [probe-redirect-v1] 根级 .ai-* 文件（如 AI 脚本探测生成的 .ai-probe.json）重定向到 .ai-runner/probe/
+ * WHY: 探测产物落项目根会污染目标仓库 git status（用户截图反馈 product-manage 出现 .ai-probe.json / .ai-env-probe.json）
+ * CONSTRAINT: 仅匹配根目录一层、且排除 .ai-runner 自身；子目录内的同名文件不动（可能是业务文件）
+ * CHANGE-IMPACT: 被重定向文件的 diff / 回滚按重定向后路径记录；applyOverlay 与 readOverlayChanges 必须同一规则
+ */
+const AI_PROBE_ROOT_RE = /^\.ai-(?!runner[/\\]).+/
+
+/**
+ * 把根级 .ai-* 路径重写到 .ai-runner/probe/ 下；其他路径原样返回
+ * @param rel 相对项目根的路径（正斜杠或平台分隔符）
+ */
+export function redirectProbePath(rel: string): string {
+  return AI_PROBE_ROOT_RE.test(rel) ? `.ai-runner/probe/${rel}` : rel
+}
+
+/**
  * 应用 Overlay
  * @param overlayPath - overlay Path
  */
@@ -33,16 +49,17 @@ export function applyOverlay(overlayPath: string): { applied: number, failed?: s
   for (const [abs, v] of Object.entries(entries)) {
     const rel = path.relative(getRoot(), abs)
     if (rel.startsWith('..') || path.isAbsolute(rel)) continue
+    const dst = path.join(getRoot(), redirectProbePath(rel))
     try {
       if (v.op === 'delete') {
         // 目录（rmSync recursive）→ 整目录删除；文件 → unlink
-        if (fs.existsSync(abs)) {
-          if (v.dir || fs.statSync(abs).isDirectory()) fs.rmSync(abs, { recursive: true, force: true })
-          else fs.unlinkSync(abs)
+        if (fs.existsSync(dst)) {
+          if (v.dir || fs.statSync(dst).isDirectory()) fs.rmSync(dst, { recursive: true, force: true })
+          else fs.unlinkSync(dst)
         }
       } else if (v.op === 'write' && v.data) {
-        fs.mkdirSync(path.dirname(abs), { recursive: true })
-        fs.writeFileSync(abs, Buffer.from(v.data, 'base64'))
+        fs.mkdirSync(path.dirname(dst), { recursive: true })
+        fs.writeFileSync(dst, Buffer.from(v.data, 'base64'))
       } else {
         continue
       }
@@ -69,7 +86,7 @@ export function readOverlayChanges(overlayPath: string, before: Map<string, stri
   try { entries = JSON.parse(raw) } catch { return [] }
   const out: Change[] = []
   for (const [abs, v] of Object.entries(entries)) {
-    const rel = path.relative(getRoot(), abs).replace(/\\/g, '/')
+    const rel = redirectProbePath(path.relative(getRoot(), abs).replace(/\\/g, '/'))
     if (rel.startsWith('..') || path.isAbsolute(rel)) continue
     if (v.op === 'delete') out.push({ path: rel, type: 'deleted' })
     else if (v.op === 'write') out.push({ path: rel, type: before.has(rel) ? 'modified' : 'added' })
