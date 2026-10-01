@@ -4,6 +4,9 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import './style.css'
 import { vTooltip } from './directive'
+// [ask-static-import-v1] useAsk 已被 App.vue 等静态引入、本就在主 chunk；
+// 此处再用动态 import 会触发 INEFFECTIVE_DYNAMIC_IMPORT 警告且零拆包收益，故静态引入
+import { askUser } from './composables/ui/useAsk'
 
 /** app（相关状态/数据） */
 const app = createApp(App)
@@ -17,7 +20,5 @@ app.mount('#app')
 const _isLocalDev = typeof window !== 'undefined'
   && /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0)$/.test(window.location.hostname)
 if (_isLocalDev) {
-  void import('./composables/ui/useAsk').then(({ askUser }) => {
-    ;(window as Window & { __aiAsk?: typeof askUser }).__aiAsk = askUser
-  })
+  ;(window as Window & { __aiAsk?: typeof askUser }).__aiAsk = askUser
 }

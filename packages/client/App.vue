@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 'vue'
 import { useEventListener, useStorage } from '@vueuse/core'
 import ScriptPanel from './components/script/ScriptPanel.vue'
-import { DEFAULT_URL, MODELS, useDeepseekUrl } from './composables/ai/useDeepseekUrl'
-import { copyAndFill, getActiveWinSid, getWindowBySid, listWindows, onNewSessionCreated, openAiSession, openDeepseek, setActiveWinSid } from './composables/ai/useAiWindow'
+import { currentSiteUrl, MODELS, useAiSite } from './composables/ai/useAiSite'
+import { copyAndFill, getActiveWinSid, getWindowBySid, listWindows, onNewSessionCreated, openAiSession, openSite, setActiveWinSid } from './composables/ai/useAiWindow'
 import { useScriptInbox } from './composables/runner/useScriptInbox'
 import {
   createLoopInstanceFor,
@@ -35,12 +35,12 @@ import { getTransport, transportKind } from './composables/ai/useAiTransport' //
 import type { EventKind } from './composables/ui/useEventStream'
 import ToastHost from './components/feedback/ToastHost.vue'
 import TooltipHost from './components/feedback/TooltipHost.vue'
-// [workspace-mode-v1] 无工作区引导页：生产环境首启时让用户选择目录
-import WorkspaceGuide from './components/panels/WorkspaceGuide.vue'
 // [worklog-v1] 工作日志弹窗：header 按钮触发，git diff → Markdown
 // [app-storage-extracted-v1]
 import { activeSessionId, loadActiveSessionIdBySite, loadHistoryBySite, saveActiveSessionIdBySite, saveHistoryBySite, theme } from './composables/ui/useAppStorage'
 import type { SessionEntry } from './composables/ui/useAppStorage'
+// [workspace-guide-lazy-v1] 引导页仅 !hasWorkspace 时渲染（v-if 闸门），异步拆包不进首屏 chunk
+const WorkspaceGuide = defineAsyncComponent(() => import('./components/panels/WorkspaceGuide.vue'))
 
 /** 自动接管模式开关 */
 const autoTakeover = useAutoTakeover()
@@ -53,7 +53,7 @@ const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.lo
 /** localStorage 键：上次访问时间 */
 const LS_LAST_VISIT = '__ai_last_visit'
 
-const { url: deepseekUrl, setUrl: setDeepseekUrl, modelId } = useDeepseekUrl()
+const { url: siteUrl, setUrl: setSiteUrl, modelId } = useAiSite()
 const { toast } = useToast()
 const { run: runScript } = useRunner()
 /** 脚本收件箱：来自 AI 的脚本队列 */
@@ -96,7 +96,7 @@ const urlInputRef = ref<HTMLInputElement | null>(null)
 /** 顶部 AI 会话地址显示 */
 const headerUrl = computed(() => {
   const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
-  return s ? s.url : deepseekUrl.value
+  return s ? s.url : siteUrl.value
 })
 /**
  * [site-isolate-v1] 按当前站点写入会话历史
@@ -146,7 +146,7 @@ function cancelUrl() {
 function saveUrl() {
   const v = urlDraft.value.trim()
   if (!v) { cancelUrl(); return }
-  if (!setDeepseekUrl(v)) {
+  if (!setSiteUrl(v)) {
     try { toast('URL 格式不合法', 'error') } catch { /* ignore */ }
     return
   }
@@ -379,7 +379,7 @@ function handleNewSessionCreated(payload: MessageEvent['data']) {
     addSessionToHistory(id, url, `轮转 · ${hhmm}`)
     activeSessionId.value = id
     // 新会话建立 → 立即回写完整 URL 到工作台
-    setDeepseekUrl(url)
+    setSiteUrl(url)
   }
   // [reset-askcount-new-session] 新会话建立 → URL 旁提问计数清零
   resetAskCount()
@@ -390,7 +390,7 @@ function handleNewSessionCreated(payload: MessageEvent['data']) {
 function handleUrlUpdated(payload: MessageEvent['data']) {
   // [url-updated] 油猴发送后回传完整 URL，写入工作台
   const u = String(payload.url || '')
-  if (u && u !== deepseekUrl.value) setDeepseekUrl(u)
+  if (u && u !== siteUrl.value) setSiteUrl(u)
 }
 
 /** 处理 ai-runner:session-id 会话 ID 回写 */
@@ -406,7 +406,7 @@ function handleSessionIdUpdate(payload: MessageEvent['data']) {
   sessionHistory.value[idx] = { ...sessionHistory.value[idx], url }
   sessionHistory.value = [...sessionHistory.value]
   saveHistoryScoped()
-  setDeepseekUrl(url)
+  setSiteUrl(url)
 }
 function isFromActiveAiSite(e: MessageEvent): boolean {
   // 无头模式：WS 内部消息，跳过 origin/source 校验
@@ -441,11 +441,11 @@ function isFromActiveAiSite(e: MessageEvent): boolean {
  * 响应 Open Ai Win
  */
 async function onOpenAiWin() {
-  const at = headerUrl.value || deepseekUrl.value
+  const at = headerUrl.value || siteUrl.value
   // URL 无会话 ID 时，打开新会话并预填「开始聊天」
   const hasSession = /\/a\/chat\/s\/[\w-]{8,}/.test(at)
   if (hasSession) {
-    const w = openDeepseek(at)
+    const w = openSite(at)
     if (!w) {
       toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
       return
@@ -453,8 +453,12 @@ async function onOpenAiWin() {
     toast('已打开 / 激活 AI 窗口', 'success', 2000)
     return
   }
+  // [new-session-clear-first-v1] 无会话分支等同开新会话：先清事件流残留，避免旧 js 卡随新窗口上屏
+  // [WHY] 与 onNewSession 保持一致；不清 sessionStorage 会话上下文（用户可能想保留当前对话历史）
+  // [CHANGE-IMPACT] 只清事件流，不动 sessionId / messages；影响面小于 onNewSession
+  try { clearEvents() } catch { /* 未就绪时忽略 */ }
   // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 规则注入一次完成
-  const { win, fill } = await openAiSession({ atUrl: DEFAULT_URL, initialPrompt: '开始聊天', forceRules: true })
+  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '开始聊天', forceRules: true })
   if (!win) {
     toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
     return
@@ -470,20 +474,22 @@ async function onOpenAiWin() {
  * 打开一个全新的 AI 会话窗口（强制新会话，无论当前是否有会话）
  */
 async function onNewSession() {
-  // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
-  const { win, fill } = await openAiSession({ atUrl: DEFAULT_URL, initialPrompt: '开始聊天', forceRules: true })
-  if (!win) {
-    toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
-    return
-  }
-  // [new-session-reset-v1] 开新会话前彻底清空本地残留：事件流(localStorage.__ai_event_log) + skill 模块级缓存
-  // [WHY] 截图证据：新窗口仍渲染旧会话乱码事件卡；resetSession 只清 sessionStorage，漏清事件流与 loadedSkill
-  // [CHANGE-IMPACT] clearEvents 移除 localStorage 键并归零 seq；失败时静默
+  // [new-session-clear-first-v1] 顺序修正：先清残留再开新会话
+  // [WHY] 原顺序 openAiSession → clearEvents：copyAndFill 内部 trackMessage 把 finalPrompt 写入消息队列，
+  //       随后 clearEvents 只清事件流不清 messages；且 resetSession 会换 sessionId → 规则去重键击穿（用户报告）
+  // [CONSTRAINT] clearEvents 需在 openAiSession 之前调用，否则新会话事件流被同步清空
+  // [CHANGE-IMPACT] 与 useAiWindow.copyAndFill 的 track-original-prompt / rules-dedup-key-v2 配套
   try { clearEvents() } catch { /* 未就绪时忽略 */ }
   try { resetSession() } catch { /* 未就绪时忽略 */ }
   askCount.value = 0
   loopPaused.value = true
   autoTakeover.disable()
+  // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
+  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '开始聊天', forceRules: true })
+  if (!win) {
+    toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
+    return
+  }
   toast('已打开新会话，正在发送「开始聊天」…', 'info', 2000)
   if (fill === 'sent' || fill === 'opened') {
     toast('已发送「开始聊天」，等待会话地址回写', 'success', 2500)
@@ -580,7 +586,7 @@ onMounted(async () => {
       // 2) 打开新的 AI 会话窗口
       setTimeout(() => {
         // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
-        void openAiSession({ atUrl: DEFAULT_URL, initialPrompt: '开始聊天', forceRules: true }).then(({ win }) => {
+        void openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '开始聊天', forceRules: true }).then(({ win }) => {
           if (win) {
             // 3) 确保 headless 通道被激活（getTransport 懒创建，触发连接）
             try { getTransport() } catch { /* 油猴模式下无需 */ }
@@ -648,14 +654,14 @@ onMounted(async () => {
   })
   if (!activeSessionId.value) return
   const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
-  if (s && s.url && deepseekUrl.value !== s.url) {
-    setDeepseekUrl(s.url)
+  if (s && s.url && siteUrl.value !== s.url) {
+    setSiteUrl(s.url)
   }
 })
 
 /**
  * 切换 transport 偏好并刷新页面
- * [WHY] transport 决定 useDeepseekUrl 的 _isHeadless 判定与传输层加载，reload 是最简可靠的生效方式
+ * [WHY] transport 决定 useAiSite 的 _isHeadless 判定与传输层加载，reload 是最简可靠的生效方式
  * [CONSTRAINT] 从 <select> 的 change 事件取值；非 "headless" 一律回落 "tampermonkey"
  */
 function onTransportChange(e: Event) {
@@ -668,7 +674,7 @@ function onTransportChange(e: Event) {
 /**
  * [headless-login-gui-v1] 触发引导式登录
  * [WHY] 用户手动在有头窗口登录一次 → profile 落盘 → 后续 headless 复用同一 userDataDir 即已登录
- * [CONSTRAINT] [headless-login-gui-v2] sid 取 getActiveWinSid()，必须与 openDeepseek 的
+ * [CONSTRAINT] [headless-login-gui-v2] sid 取 getActiveWinSid()，必须与 openSite 的
  *              无头 open 一致；硬编码 'default' 时多会话下 open 用会话 id 的 profile，
  *              登录态落不到同一目录 → 反复提示未登录。
  *              sendLoginGui 可选，tampermonkey 未实现时不弹窗，只提示。

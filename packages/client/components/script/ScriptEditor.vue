@@ -10,7 +10,7 @@
       @drop="onDrop"
     >
       <!-- @FILE_PICKER_V1 -->
-      <!-- [file-picker-fix-v3] Teleport 到 body：.editor-body 有 overflow:hidden + 祖先含 transform，
+      <!-- Teleport 到 body：.editor-body 有 overflow:hidden + 祖先含 transform，
            会让 absolute/fixed 定位被裁或错位；Teleport 后完全脱离组件树，只受视口坐标约束
            [CONSTRAINT] 因脱离 scoped 祖先链，内部选择器必须去掉 :deep 前缀改用同元素 data-v 匹配
            [CHANGE-IMPACT] pickerRef / pickerInputRef 仍指向原元素，无需改脚本逻辑 -->
@@ -36,7 +36,7 @@
       </Teleport>
       <div ref="cmHost" class="cm-host" tabindex="0" />
     </div>
-    <!-- [chat-action-bar-v1] 底部操作条：纯图标按钮，右下角对齐（Codex / CC 风） -->
+    <!-- 底部操作条：纯图标按钮，右下角对齐（Codex / CC 风） -->
     <div class="editor-actions">
       <slot name="action-bar" />
     </div>
@@ -66,7 +66,7 @@ const emit = defineEmits<{
   'drop': [e: DragEvent]
 }>()
 
-// [p1-2-client-v3] CM 动态 import 聚合类型：从各包具名导出反推，杜绝 any
+// CM 动态 import 聚合类型：从各包具名导出反推，杜绝 any
 interface CMModule {
   EditorView: typeof import('@codemirror/view').EditorView
   keymap: typeof import('@codemirror/view').keymap
@@ -92,7 +92,7 @@ let fileTagPlugin: Extension | null = null
 /** dragenter 与 dragleave 的配对深度计数 */
 let dragDepth = 0
 
-/* [drag-drop-ux-v1] 文件拖入的视觉反馈 */
+/* 文件拖入的视觉反馈 */
 // WHY: 原 editor-body 只挂 dragover.prevent + drop；无 dragenter 状态，CSS .is-dragging 系死代码
 // CONSTRAINT: 子元素进出会连发 dragenter/dragleave，用 dragDepth 计数抵消，归零才复位
 /** 是否处于「文件悬停输入框」态 */
@@ -253,7 +253,7 @@ function pickerOpenAt(atPos: number) {
   if (cmView) {
     const coords = cmView.coordsAtPos(atPos)
     if (coords) {
-      // [file-picker-fix-v2] 视口边界检测：下方空间不足则向上翻转，左右越界则贴边
+      // 视口边界检测：下方空间不足则向上翻转，左右越界则贴边
       // [CONSTRAINT] coordsAtPos 返回视口坐标（非文档坐标），与 position:fixed 天然对齐
       // [CHANGE-IMPACT] 面板估算尺寸与 CSS max-height(240) / max-width(480) 保持一致
       const M = 8
@@ -386,9 +386,9 @@ async function createEditor() {
       m.cmJavascript(),
       /* editor-no-h-scroll */
       m.EditorView.lineWrapping,
-      // [chat-input-v1] 智能体风：placeholder 提示 Enter 发送 / Shift+Enter 换行
-      m.placeholder('输入消息，Enter 发送 · Shift+Enter 换行'),
-      // [no-non-null-v1] 显式空检查：editableComp 依赖 @codemirror 动态 import，失败时为 undefined；
+      // 智能体风：placeholder 提示 Enter 发送 / Shift+Enter 换行
+      m.placeholder('输入消息…  Enter 发送 / Shift+Enter 换行'),
+      // 显式空检查：editableComp 依赖 @codemirror 动态 import，失败时为 undefined；
       // 用 ! 会让 state 创建得到非法 extension 参数（静默失效）；此处提前抛出让错误位置清晰
       (editableComp ?? (() => { throw new Error('cm-editable 扩展未加载') }))
         .of(m.EditorView.editable.of(!props.isLoopActive)),
@@ -427,7 +427,7 @@ async function createEditor() {
         '.cm-activeLine': {
           backgroundColor: 'rgb(88 166 255 / 5%)',
         },
-        // [chat-input-v7] activeLineGutter 已随 gutter 隐藏移除（此处曾配置底色，现无 DOM 承载）
+        // activeLineGutter 已随 gutter 隐藏移除（此处曾配置底色，现无 DOM 承载）
         '.cm-cursor, .cm-dropCursor': {
           borderLeftColor: 'var(--primary)',
         },
@@ -456,7 +456,7 @@ async function createEditor() {
         { key: 'Alt-ArrowUp', preventDefault: true, run: () => { props.onHistoryPrev?.(); return true } },
         { key: 'Alt-ArrowDown', preventDefault: true, run: () => { props.onHistoryNext?.(); return true } },
 
-        // [enter-send-v2] 回车直接发送（Shift-Enter / Alt-Enter 走 CM 默认换行）
+        // 回车直接发送（Shift-Enter / Alt-Enter 走 CM 默认换行）
         { key: 'Enter', preventDefault: true, run: () => { props.onRun?.(); return true } },
         { key: 'Shift-Enter', run: () => false },
         { key: 'Alt-Enter', run: () => false },
@@ -521,10 +521,10 @@ defineExpose({ insertText })
   border-color: rgb(88 166 255 / 40%);
 }
 .editor.card:focus-within {
-  border-color: var(--border);
+  border-color: rgb(88 166 255 / 32%);
   box-shadow:
     0 1px 2px rgb(15 17 21 / 6%),
-    0 0 0 3px rgb(88 166 255 / 12%);
+    0 0 0 3px rgb(88 166 255 / 18%);
 }
 html[data-theme='dark'] .editor.card {
   background: rgb(127 127 127 / 8%);
@@ -586,6 +586,16 @@ html[data-theme='dark'] .editor.card {
   border-left-width: 2px;
   border-left-color: var(--primary, #58a6ff);
   border-radius: 1px;
+  animation: cm-caret-pulse 1.2s ease-in-out infinite;
+}
+@keyframes cm-caret-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 .editor :deep(.cm-selectionBackground),
 .editor :deep(.cm-content ::selection) {
@@ -602,10 +612,7 @@ html[data-theme='dark'] .editor.card {
   gap: 8px;
 }
 .editor-actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 4px;
+  @apply flex justify-end items-center gap-1;
   padding: 6px 20px 12px;
 }
 .editor-actions :deep(.ghost-btn),
@@ -623,8 +630,12 @@ html[data-theme='dark'] .editor.card {
   display: none;
 }
 .editor-actions :deep(.ghost-btn:hover:not(:disabled)) {
-  background: rgb(127 127 127 / 12%);
+  background: rgb(127 127 127 / 14%);
+  color: var(--text);
   border-color: transparent;
+}
+.editor-actions :deep(.primary-btn:hover:not(:disabled)) {
+  filter: brightness(1.08);
 }
 .editor.is-dragging {
   border-color: rgb(88 166 255 / 70%);
@@ -684,9 +695,7 @@ html[data-theme='dark'] .editor.card {
   border: 1px solid var(--border);
   border-radius: var(--radius-8);
   box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  @apply flex flex-col overflow-hidden;
 }
 .fp-input {
   padding: 8px 12px;

@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { url } from './useDeepseekUrl'
+import { url } from './useAiSite'
 
 // [ai-window-list-v1] 响应式信号：Map 增删触发 UI 刷新
 // [WHY] windowTable 是普通 Map 非 ref，Map.set/delete 不触发 Vue 依赖；
@@ -25,7 +25,7 @@ export function getActiveWinSid(): string {
 }
 /**
  * 切换激活槽位
- * [CONSTRAINT] 不校验 sid 是否已存在于 windowTable —— 允许先切槽再 openDeepseek 绑定
+ * [CONSTRAINT] 不校验 sid 是否已存在于 windowTable —— 允许先切槽再 openSite 绑定
  */
 export function setActiveWinSid(sid: string): void {
   activeWinSid.value = sid
@@ -83,7 +83,7 @@ export function setWindowEntry(sid: string, entry: { win: Window, url: string })
 
 /**
  * 计算指定 sid 的 postMessage 目标 origin
- * [WHY] 多站点并存时不能读全局 url.value（openDeepseek 不改它）；
+ * [WHY] 多站点并存时不能读全局 url.value（openSite 不改它）；
  *       每个 sid 在 windowTable 内已存自己的 url，从那里提取才是正确的 origin
  * [CONSTRAINT] sid 不存在 / url 解析失败 → 返回空串（调用方跳过发送，不用 '*' 兜底）
  * [CHANGE-IMPACT] useAiWindowSend 全部 send*To 依赖本函数计算 origin；

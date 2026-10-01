@@ -1,13 +1,13 @@
 <script setup lang="ts">
 // @desc 左侧常驻 AI 站点面板：固定展示 MODELS 全列表，每站点单窗口单激活
 // @why  用户需求"显示固定网站 + 每网站只允许一个激活会话"；
-//       用固定 sid `win_${model.id}` 与 openDeepseek 的 windowName 复用机制配合，保证同站点单窗口
+//       用固定 sid `win_${model.id}` 与 openSite 的 windowName 复用机制配合，保证同站点单窗口
 // @change-impact 依赖 MODELS 常量与 useAiWindowTable 的响应式信号；
 //                与主流程（useSessionManager 随机 sid）并存，两者互不覆盖
 import { computed } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
-import { MODELS, url } from '../../composables/ai/useDeepseekUrl'
-import { openDeepseek } from '../../composables/ai/useAiWindow'
+import { MODELS, url } from '../../composables/ai/useAiSite'
+import { openSite } from '../../composables/ai/useAiWindow'
 import { getActiveWinSid, getWindowBySid, listWindows, removeWindowBySid, setActiveWinSid, windowsTick } from '../../composables/ai/useAiWindowTable'
 import { useToast } from '../../composables/ui/useToast'
 
@@ -41,7 +41,7 @@ const items = computed(() => {
 /**
  * 点击某站点：
  * - 已开窗口 → 激活切换
- * - 未开窗口 → openDeepseek(url, sid) 打开；成功则激活
+ * - 未开窗口 → openSite(url, sid) 打开；成功则激活
  */
 async function onClick(item: { id: string, label: string, url: string, sid: string, opened: boolean }): Promise<void> {
   if (item.opened) {
@@ -49,7 +49,7 @@ async function onClick(item: { id: string, label: string, url: string, sid: stri
     windowsTick.value++
     return
   }
-  const win = openDeepseek(item.url, item.sid)
+  const win = openSite(item.url, item.sid)
   if (!win) {
     toast(`打开 ${item.label} 失败（可能被浏览器拦截弹窗）`, 'warn', 4000)
     return

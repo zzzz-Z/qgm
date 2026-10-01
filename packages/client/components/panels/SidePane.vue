@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, defineAsyncComponent, shallowRef, watch } from 'vue'
 import FileTree from './FileTree.vue'
 import FileList from './FileList.vue'
-import WorklogPane from './WorklogPane.vue'
 import { useFoldState } from '../../composables/ui/useFoldState'
 
 defineOptions({ name: 'SidePane' })
@@ -31,12 +30,12 @@ type SideTab = typeof _tabAllowed[number]
 
 const _tabAllowed = ['tree', 'changes', 'worklog'] as const
 
-// [side-fold-v1] 折叠 + tab 选择持久化（PLAN 5.4）
+// 折叠 + tab 选择持久化（PLAN 5.4）
 const fold = useFoldState('default', 'side-pane')
 
 const sideTab = computed<SideTab>({
   get: () => {
-    // [no-double-cast-v1] fold.all 的存储槽位类型为 boolean，实际承载 SideTab 字符串；
+    // fold.all 的存储槽位类型为 boolean，实际承载 SideTab 字符串；
     // 用 typeof 收窄替代 `as unknown as string`，保留类型安全的同时给出清晰失败回退
     const raw: unknown = fold.all.value.tab
     if (typeof raw === 'string' && (_tabAllowed as readonly string[]).includes(raw)) {
@@ -44,10 +43,20 @@ const sideTab = computed<SideTab>({
     }
     return 'tree'
   },
-  // [no-double-cast-v1] 存储槽位签名是 boolean，实际承载 SideTab 字符串；
+  // 存储槽位签名是 boolean，实际承载 SideTab 字符串；
   // 语义清晰无需进一步抽象，保留双重强转但注明理由
   set: (v: SideTab) => fold.setOpen('tab', v as unknown as boolean),
 })
+
+// [worklog-lazy-v1] WorklogPane（含 markdown-it 渲染链）仅首次切到 worklog tab 才加载
+// [WHY] worklogLoaded 闸门 v-if 保证 defineAsyncComponent 的 loader 到首切才触发；
+//       加载后 v-if 恒真、由 v-show 保活，保留结果/展开状态（不能只用 v-if，否则切走即丢状态）
+// [CHANGE-IMPACT] 首切 tab 多一次 chunk 请求；WorklogPane 自身 watch 改 immediate 以适配"挂载即激活"
+const worklogLoaded = shallowRef(false)
+watch(sideTab, (tab) => {
+  if (tab === 'worklog') worklogLoaded.value = true
+}, { immediate: true })
+const WorklogPane = defineAsyncComponent(() => import('./WorklogPane.vue'))
 
 const displayWidth = computed(() => props.sideWidth || 320)
 
@@ -62,7 +71,7 @@ function selectTab(tab: (typeof sideTab)['value']): void {
     collapsed.value = false
 }
 
-// [side-worklog-tab-v1] 供父组件（App.vue）从 header 按钮直接切到指定 tab；
+// 供父组件（App.vue）从 header 按钮直接切到指定 tab；
 // [CHANGE-IMPACT] 依赖 Vue 3 的 defineExpose；父组件通过 ref 调用，无需额外事件通道
 defineExpose({ selectTab })
 </script>
@@ -77,7 +86,7 @@ defineExpose({ selectTab })
       <button v-tooltip="'变更列表'" :class="{ 'side-tab-active': sideTab === 'changes' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('changes')">
         <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg></span><span v-if="props.changes.length" class="side-tab-badge text-[10px] text-[var(--bg)] leading-none font-bold px-1 rounded-full bg-[var(--primary)] inline-flex h-4 min-w-4 shadow-[0_0_0_2px_var(--surface)] items-center justify-center absolute tabular-nums -right-1 -top-1">{{ props.changes.length }}</span>
       </button>
-      <!-- [side-worklog-tab-v1] 工作日志 tab：VSCode 源码管理风格（提交框 + 变更列表 + 行级 diff）
+      <!-- 工作日志 tab：VSCode 源码管理风格（提交框 + 变更列表 + 行级 diff）
            [WHY] 用户要求把原 WorklogDialog 弹窗改为侧栏 tab，与树/变更列表并列
            [CHANGE-IMPACT] 内容由 WorklogPane.vue 提供；active 由 sideTab 派生，非活动时不发请求 -->
       <button v-tooltip="'工作日志'" :class="{ 'side-tab-active': sideTab === 'worklog' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('worklog')">
@@ -118,9 +127,9 @@ defineExpose({ selectTab })
         @preview="(f) => emit('preview', f)"
       />
     </div>
-    <!-- [side-worklog-tab-v1] 工作日志面板：内部自行按需拉取 /__ai/git/worklog -->
+    <!-- 工作日志面板：内部自行按需拉取 /__ai/git/worklog -->
     <div v-show="sideTab === 'worklog'" class="side-worklog flex flex-col flex-1 min-h-0 overflow-hidden">
-      <WorklogPane :active="sideTab === 'worklog'" />
+      <WorklogPane v-if="worklogLoaded" v-show="sideTab === 'worklog'" :active="sideTab === 'worklog'" />
     </div>
   </aside>
 </template>

@@ -17,14 +17,19 @@ export const MODELS: ModelOption[] = [
   { id: 'tongyi', label: '通义千问', url: 'https://www.tongyi.com/' },
   { id: 'gemini', label: 'Gemini', url: 'https://gemini.google.com/app', sessionTemplate: 'https://gemini.google.com/app/{id}' },
   { id: 'zhipu', label: '智谱清言', url: 'https://chatglm.cn/main/alltoolsdetail' },
+  // [site-agnostic-v1] 千问网页版（qianwen.com）—— 独立于 tongyi.com 老域名
+  // WHY: 千问新版前端 UmiJS + React，与 tongyi.com 老版本不同；两者需并列供用户选择
+  // CONSTRAINT: origin 会被 useEventStream 白名单收录；sid 沿用 win_ 前缀
+  // CHANGE-IMPACT: AiWindowList 列表长度与来源白名单同步变化
+  { id: 'qianwen', label: '千问', url: 'https://www.qianwen.com/', sessionTemplate: 'https://www.qianwen.com/chat/{id}' },
 ]
 
 /** 标识 */
 const DEFAULT_MODEL_ID = 'deepseek'
 /** 默认URL */
-export const DEFAULT_URL = 'https://chat.deepseek.com/'
+export const DEFAULT_SITE_URL = 'https://chat.deepseek.com/'
 /** 存储键URL */
-const STORAGE_KEY_URL = '__ai_deepseek_url'
+const STORAGE_KEY_URL = '__ai_site_url'
 /** 存储键 */
 const STORAGE_KEY_MODEL = '__ai_model_id'
 /** 存储键会话 */
@@ -39,7 +44,7 @@ const STORAGE_KEY_SESSION = '__ai_web_session_id'
 const modelId = useStorage<string>(STORAGE_KEY_MODEL, DEFAULT_MODEL_ID)
 /** URL 地址 */
 // [window-extracted-v1] url 提升为模块级 export，供 useAiWindow 计算 targetOrigin / 开窗默认地址
-export const url = useStorage<string>(STORAGE_KEY_URL, DEFAULT_URL)
+export const url = useStorage<string>(STORAGE_KEY_URL, DEFAULT_SITE_URL)
 /** 会话标识 */
 const sessionId = useStorage<string>(STORAGE_KEY_SESSION, '')
 
@@ -94,6 +99,18 @@ function setSessionId(next: string): void {
 }
 
 /**
+ * [site-agnostic-v1] 取"当前模型对应站点首页 URL"
+ * WHY: 三处开窗入口（开窗按钮 / 开新会话 / 切项目）曾硬编码 DEFAULT_SITE_URL；
+ *      抽出本函数后新增站点只需往 MODELS 加一行即可自动生效
+ * CONSTRAINT: modelId 未命中 MODELS 时回退 DEFAULT_SITE_URL（向后兼容）
+ * CHANGE-IMPACT: openAiSession 默认值 / App.vue 三处入口依赖此函数
+ */
+export function currentSiteUrl(): string {
+  const m = MODELS.find(x => x.id === modelId.value)
+  return m ? m.url : DEFAULT_SITE_URL
+}
+
+/**
  * 将完整 URL 折叠为便于展示的短串
  * [WHY] 侧栏空间有限，长 URL 无法完整显示；保留 host + 路径尾段即可辨识会话
  * [CONSTRAINT] 解析失败时原样返回，避免展示空白
@@ -115,7 +132,7 @@ function display(url: string): string {
  * 组合式函数 Deepseek Url
  * [CHANGE-IMPACT] 窗口/发送职责已抽至 useAiWindow（§6 行数上限）；本函数仅保留 URL/模型状态
  */
-export function useDeepseekUrl() {
+export function useAiSite() {
   return {
     modelId,
     setModel,
@@ -125,6 +142,7 @@ export function useDeepseekUrl() {
     setSessionId,
     display,
     MODELS,
-    DEFAULT_URL,
+    DEFAULT_SITE_URL,
+    currentSiteUrl,
   }
 }

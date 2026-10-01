@@ -1,5 +1,5 @@
 import { promiseTimeout, useClipboard } from '@vueuse/core'
-import { DEFAULT_URL, url } from './useDeepseekUrl'
+import { currentSiteUrl, url } from './useAiSite'
 import { useSessionManager } from './useSessionManager'
 import { onNewSessionCreated as onNewSessionCreatedImpl } from './auto-loop/handoff.js'
 import { log } from '../../utils/log'
@@ -46,7 +46,7 @@ const _rulesInjectedSids = new Set<string>()
  * [WHY] 传入 sid 便于多会话并存；不传时沿用当前激活槽位
  * [CONSTRAINT] 无头模式返回 null（不产真实窗口）；被 popup blocker 拦截时也返回 null
  */
-export function openDeepseek(atUrl?: string, sid?: string): Window | null {
+export function openSite(atUrl?: string, sid?: string): Window | null {
   if (isHeadless()) {
     const useSid = sid ?? getActiveWinSid()
     setActiveWinSid(useSid)
@@ -68,7 +68,7 @@ export function openDeepseek(atUrl?: string, sid?: string): Window | null {
 
 /** window 名称：default 用固定名；其他 sid 后缀拼接，避免覆盖 */
 function windowName(sid: string): string {
-  return sid === 'default' ? 'ai-runner-deepseek' : `ai-runner-deepseek-${sid}`
+  return sid === 'default' ? 'ai-runner-site' : `ai-runner-site-${sid}`
 }
 // [multi-loop-step5-url] 把 sid 拼进 hash，供油猴读取（AI 站点忽略未知 hash）
 function withSidHash(url: string, sid: string): string {
@@ -88,6 +88,11 @@ function withSidHash(url: string, sid: string): string {
  * 读取失败或文件缺失时降级返回原 prompt，不阻断发送
  */
 async function _prependFirstPromptRules(prompt: string): Promise<string> {
+  // [rules-idempotent-v1] 幂等守卫：prompt 已含 SYSTEM.md 块 → 直接返回
+  // [WHY] 多条开窗路径（onNewSession / onOpenAiWin / 切项目）可能并发触发；
+  //       同一 prompt 被拼两次会向 AI 重复投喂规则头，此处兜底
+  // [CHANGE-IMPACT] 幂等语义；即使调用方误传已拼装 prompt 也不会二次注入
+  if (prompt.includes('<file path="SYSTEM.md">')) return prompt
   try {
     const parts: string[] = []
     try {
@@ -131,15 +136,21 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
   const imagePayload = opts?.images?.length ? { images: opts.images } : {}
   try {
     const { sessionId } = useSessionManager()
-    const sid = sessionId.value
-    // [force-rules-v1] opts.forceRules=true 时绕过 sid 去重：开新窗需强制带上规则；
-    // 仍保留 _rulesInjectedSids.add，同会话后续普通调用不会重复注入
+    // [rules-dedup-key-v2] 去重键改用「窗口 sid + 会话 id」组合：
+    // [WHY] 仅 sessionId 会因 resetSession() 换 id 而击穿去重 → 同一窗口重复注入（用户报告 bug）；
+    //       组合键下同一窗口同一会话只注入一次；切窗口 / 换会话 id 视为新会话重新注入
+    // [CHANGE-IMPACT] _rulesInjectedSids 内容格式变化；语义仍为「已注入规则头的会话标识」
+    const sid = `${getActiveWinSid()}:${sessionId.value}`
     if (sid && (opts?.forceRules || !_rulesInjectedSids.has(sid))) {
       _rulesInjectedSids.add(sid)
       finalPrompt = await _prependFirstPromptRules(prompt)
     }
   } catch { /* ignore */ }
-  useSessionManager().trackMessage('user', finalPrompt)
+  // [track-original-prompt] 只记录原始 prompt：UI 展示 / token 估算不应包含自动携带的规则头
+  // [WHY] 用户报告「打开新会话 发了两次 SYSTEM.md」实为 finalPrompt 上屏；
+  //       语义上「用户消息」是原始输入，「规则头」是系统提示，不该混入用户消息卡
+  // [CHANGE-IMPACT] messages 数组存的是原始 prompt；token 估算随之偏小（更贴近用户视角）
+  useSessionManager().trackMessage('user', prompt)
   await _clipboard.copy(finalPrompt)
   if (isHeadless()) {
     const t = await loadTransport()
@@ -177,7 +188,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
   }
 
   // 3. 都失败 → 尝试开新窗口（可能被 popup blocker 拦截）
-  const w = openDeepseek()
+  const w = openSite()
   if (w) {
     await promiseTimeout(1500)
     return sendFill({ prompt: finalPrompt, ...imagePayload }) ? 'opened' : 'failed'
@@ -188,7 +199,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     activeWinSid: getActiveWinSid(),
     winName: name,
     urlValue: url.value,
-    hint: '若 AI 窗口是手动打开的（非本工作台 openDeepseek 开），请点工作台右上角「打开 AI 窗口」重建引用',
+    hint: '若 AI 窗口是手动打开的（非本工作台 openSite 开），请点工作台右上角「打开 AI 窗口」重建引用',
   })
   return 'failed'
 }
@@ -198,10 +209,10 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
  * [CHANGE-IMPACT] 实现分居 useAiWindowTable / useAiWindowSend；本函数保留原语义供组合式调用方使用
  */
 /**
- * [session-open-facade] 统一开新会话入口：openDeepseek + 可选首问（可强制带规则）
+ * [session-open-facade] 统一开新会话入口：openSite + 可选首问（可强制带规则）
  * [WHY] 三处开窗入口（手动按钮 / 开新会话按钮 / 切项目自动）需一致走规则注入；
  *       集中封装避免再出现"某条路径忘了带 SYSTEM.md/AGENTS.md"的漂移
- * [CONSTRAINT] openDeepseek 返回 null（被拦截 / headless）时短路，不调 copyAndFill；
+ * [CONSTRAINT] openSite 返回 null（被拦截 / headless）时短路，不调 copyAndFill；
  *              initialPrompt 为空时只开窗不发问；forceRules 透传给 copyAndFill 绕过去重
  * [CHANGE-IMPACT] 返回 { win, fill } 二元组；调用方据此决定 toast 文案
  */
@@ -219,8 +230,8 @@ export async function openAiSession(opts?: {
   // [CHANGE-IMPACT] 三个调用方（onNewSession / onOpenAiWin 无会话分支 / onMounted 切项目）一致受益。
   const preSid = opts?.sid ?? getActiveWinSid()
   const preWin = getWindowBySid(preSid)
-  const win = openDeepseek(opts?.atUrl ?? DEFAULT_URL, opts?.sid)
-  // [headless-rules-fix] headless 下 openDeepseek 恒返回 null（不产真实窗口）——
+  const win = openSite(opts?.atUrl ?? currentSiteUrl(), opts?.sid)
+  // [headless-rules-fix] headless 下 openSite 恒返回 null（不产真实窗口）——
   // 旧逻辑 if(!win)return 会短路掉 copyAndFill，导致规则永不注入；此处显式分流。
   // [CHANGE-IMPACT] headless 用户从"完全无规则"→"首问带 SYSTEM.md+AGENTS.md"
   if (isHeadless()) {
@@ -257,7 +268,7 @@ export function useAiWindow() {
     sendRotateTo,
     sendNewSessionTo,
     removeWindowBySid,
-    openDeepseek,
+    openSite,
     copyAndFill,
     openAiSession,
     onNewSessionCreated,

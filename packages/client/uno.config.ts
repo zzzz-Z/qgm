@@ -1,10 +1,12 @@
-import { defineConfig, presetIcons, presetWind4 } from 'unocss'
+import { defineConfig, presetIcons, presetWind4, transformerDirectives } from 'unocss'
 
 export default defineConfig({
   presets: [
     presetWind4(),
     presetIcons(),
   ],
+  // [apply-v1] transformerDirectives 启用 CSS @apply：让 <style scoped> 内引用 shortcuts
+  transformers: [transformerDirectives()],
   shortcuts: {
     'flex-center': 'flex justify-center items-center',
     'flex-col': 'flex flex-col',
@@ -20,5 +22,12 @@ export default defineConfig({
     'text-muted': 'text-[var(--text-3)]',
     'text-mono': 'font-mono tabular-nums',
     'scrollbar-none': '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+    // [shortcuts-v2] 全仓高频复用模式（来源：components/*.vue style 段统计）
+    'card-head': 'flex items-center gap-1.5 mb-0.5 text-[10.5px] text-[var(--text-3)] tracking-wide',
+    'chip-badge': 'px-1.5 py-px rounded bg-[var(--surface-3)] text-[var(--text-3)] font-mono tracking-wide',
+    'flex-fill': 'flex-1 min-w-0 min-h-0',
+    'code-inline': 'px-1 py-px rounded bg-[var(--surface-3)] font-mono text-[0.92em]',
+    'code-block': 'my-2.5 px-3 py-2.5 bg-[var(--surface-2)] border border-[var(--border)] rounded-md overflow-x-auto whitespace-pre font-mono text-xs leading-relaxed',
+    'scroll-thin': '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-[rgb(127_127_127/22%)] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-[rgb(127_127_127/38%)] [&::-webkit-scrollbar-track]:bg-transparent',
   },
 })

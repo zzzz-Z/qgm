@@ -1,6 +1,6 @@
 <template>
   <div ref="paneRef" class="bg-\[var\(--bg\)\] flex pane h-screen overflow-hidden" :class="{ 'is-resizing-side': resizingSide }">
-    <!-- [ai-window-list-v1] 左侧常驻：多 AI 窗口列表（展示 + 激活切换） -->
+    <!-- 左侧常驻：多 AI 窗口列表（展示 + 激活切换） -->
     <AiWindowList />
     <!-- 左侧主区域 -->
     <div
@@ -101,7 +101,7 @@
 
 <script setup lang="ts">
 import { lineClass } from './output-utils'
-// [prompt-builder-v1] append* 系列已抽到 prompt-builder.ts
+// append* 系列已抽到 prompt-builder.ts
 import {
   appendBaselineChanges,
   appendChangeList,
@@ -116,30 +116,29 @@ import {
   appendTscReport,
   trimPromptIfOverBudget,
 } from './prompt-builder'
-// [cmd-history-v1] 命令历史簇
+// 命令历史簇
 import { createCmdHistory } from './cmd-history'
-// [attach-manager-v1] 附件簇已抽到 attach-manager.ts
+// 附件簇已抽到 attach-manager.ts
 import { createAttachManager } from './attach-manager'
 import type { AttachedFile } from './attach-manager'
-// [tree-attach-v1] 树/目录/脚本拼装
+// 树/目录/脚本拼装
 import { createTreeAttach } from './tree-attach'
-// [preview-manager-v1] 预览/撤回/变更类型已抽到 preview-manager.ts
+// 预览/撤回/变更类型已抽到 preview-manager.ts
 import { createPreviewManager } from './preview-manager'
-// [side-resize-v1] 侧栏拖拽已抽到 side-resize.ts
+// 侧栏拖拽已抽到 side-resize.ts
 import { createSideResize } from './side-resize'
-// [exec-flow-v1] exec 全流程已抽到 exec-flow.ts
+// exec 全流程已抽到 exec-flow.ts
 import { createExecFlow } from './exec-flow'
-// [vueuse-timers-v1] 组件内定时器统一走 vueuse：随组件卸载自动清理，省去手动 clear
+// 组件内定时器统一走 vueuse：随组件卸载自动清理，省去手动 clear
 import { useIntervalFn, useTimeoutFn } from '@vueuse/core'
 // [script-panel-utils-v2-extracted]
 import { useTwDisplay } from '../../composables/ui/useTwDisplay'
 import TerminalPane from './TerminalPane.vue'
 import ScriptEditor from './ScriptEditor.vue'
-// [abnormal-mount-v1]
-import AbnormalView from '../panels/AbnormalView.vue'
+// import AbnormalView from '../panels/AbnormalView.vue'
 import ScriptToolbar from './ScriptToolbar.vue'
 import ScriptAttachBar from './ScriptAttachBar.vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRunner } from '../../composables/runner/useRunner'
 import { useAutoLoop } from '../../composables/ai/useAutoLoop'
 import { useAiWaiting } from '../../composables/ai/useAiWaiting'
@@ -153,9 +152,10 @@ import { parseErrorLocations } from '../../utils/contextBuilder'
 import { useToast } from '../../composables/ui/useToast'
 import { setLastAutoFilled } from '../../composables/runner/useScriptInbox'
 import SidePane from '../panels/SidePane.vue'
-// [ai-window-list-v1] 左侧常驻多窗口面板
+// 左侧常驻多窗口面板
 import AiWindowList from '../panels/AiWindowList.vue'
-import DiffOverlay from '../diff/DiffOverlay.vue'
+// [diff-lazy-v1] DiffOverlay（含 DiffViewer/hljs 高亮链）仅预览文件时才异步加载
+const DiffOverlay = defineAsyncComponent(() => import('../diff/DiffOverlay.vue'))
 
 defineOptions({ name: 'ScriptPanel' })
 
@@ -205,7 +205,7 @@ let runStartAt = 0
 const sideTab = ref<'tree' | 'changes'>('tree')
 /** 窄屏抽屉开合 */
 const sideDrawerOpen = ref(false)
-// [side-tab-facade-v1] 供 App.vue header 按钮触达 SidePane 的 selectTab
+// 供 App.vue header 按钮触达 SidePane 的 selectTab
 // [WHY] 用户要求工作日志入口从弹窗改为侧栏 tab；父组件需通过 ref 调子组件方法，无需新增事件总线
 // [CONSTRAINT] SidePane 未挂载（如无工作区）时 sidePaneRef.value 为 null，需静默兜底
 // [CHANGE-IMPACT] 依赖 SidePane 的 defineExpose({ selectTab })
@@ -217,7 +217,7 @@ function openSideTab(tab: 'tree' | 'changes' | 'worklog'): void {
   sidePaneRef.value?.selectTab(tab)
 }
 
-// [side-tab-facade-v1] 对外暴露给 App.vue 的 header 按钮使用
+// 对外暴露给 App.vue 的 header 按钮使用
 defineExpose({ openSideTab })
 /** Diff 预览文件 */
 const previewFile = ref<string | null>(null)
@@ -253,17 +253,17 @@ const statusClass = ref('')
 const { toast, confirmDialog } = useToast()
 // U.3: CodeMirror 全家桶懒加载——首建编辑器时才 await import，CM 打进独立 chunk
 
-// [unused-cleanup-v1] 已删 persistWarning：文件内无消费点
+// 已删 persistWarning：文件内无消费点
 const { script, lastRunCode, running, result, changes, rolling, busyAll, liveStdout, liveStderr, doneSummary, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback } = useRunner()
-// [no-delay-v2] 已删除 countdown（延迟机制移除）
+// 已删除 countdown（延迟机制移除）
 const { enabled: autoTakeoverEnabled, enable: enableAutoTakeover, disable: disableAutoTakeover, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
-// [cmd-history-v1] 命令历史簇
+// 命令历史簇
 const { pushCmdHistory, cmdHistoryPrev, cmdHistoryNext } = createCmdHistory({ script })
-// [attach-manager-v1] 附件簇（attachedFiles 由本组件持有，供 addTreePaths 等共享）
+// 附件簇（attachedFiles 由本组件持有，供 addTreePaths 等共享）
 const { removeAttach, clearAll, onEditorPaste, onDesktopDrop } = createAttachManager({ attachedFiles, script, fileSuccess })
-// [tree-attach-v1] 树拖入 / 目录展开 / 脚本拼装（attachedFiles 由本组件持有）
+// 树拖入 / 目录展开 / 脚本拼装（attachedFiles 由本组件持有）
 const { onTreeDrop, buildPromptWithAttachments } = createTreeAttach({ attachedFiles })
-// [preview-manager-v1] 预览/撤回（previewFile/Before/After 由本组件持有）
+// 预览/撤回（previewFile/Before/After 由本组件持有）
 const { getChangeType, onPreviewFile, onRollback, onRollbackAll } = createPreviewManager({
   changes,
   result,
@@ -273,7 +273,7 @@ const { getChangeType, onPreviewFile, onRollback, onRollbackAll } = createPrevie
   rollback,
   rollbackAll,
 })
-// [side-resize-v1] 侧栏拖拽（paneRef/sideWidth/sideWidthBase/resizingSide 由本组件持有）
+// 侧栏拖拽（paneRef/sideWidth/sideWidthBase/resizingSide 由本组件持有）
 const { onSideDown, dispose: disposeSideResize } = createSideResize({
   paneRef,
   sideWidth,
@@ -283,39 +283,39 @@ const { onSideDown, dispose: disposeSideResize } = createSideResize({
 })
 
 // ── 领域 composable ──
-// [unused-cleanup-v1] 已删 maybeRotateSession：文件内无消费点
+// 已删 maybeRotateSession：文件内无消费点
 const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
 const { events: busEvents } = useEventBus()
 const { stripComments, stripBlankLines } = useCodeCleaner()
 
-// [script-panel-tw-extracted-v1] 初始化打字机
+// 初始化打字机
 const { twStdout, twStderr, twLines, twErrLines } = useTwDisplay(liveStdout, liveStderr)
 const {
   loopState,
   isLoopActive,
-  // [sp-autopause-v1] 回车/发送后进入暂停态：暴露 loopPaused 与 requestPause
+  // 回车/发送后进入暂停态：暴露 loopPaused 与 requestPause
   requestPause,
-  // [soft-pause-v1] 发送给 AI 后软暂停（不发 stop、不静音，避免取消刚发出的 fill）
+  // 发送给 AI 后软暂停（不发 stop、不静音，避免取消刚发出的 fill）
   softPause,
-  // [loop-paused-toggle-v1] 真暂停/恢复
+  // 真暂停/恢复
   loopPaused,
-  // [pause-to-idle-v2] 暂停点击 = 完全结束循环，回到待发状态（不再软恢复等待）
+  // 暂停点击 = 完全结束循环，回到待发状态（不再软恢复等待）
   exitPauseToIdle,
-  // [sp-send-after-softpause-v1] 无活跃循环时复位 softPause 残留
+  // 无活跃循环时复位 softPause 残留
   clearSoftPause,
 } = useAutoLoop()
-// [vueuse-timers-v1] 运行计时器：组件级 scope，卸载自动清理（等价原 onBeforeUnmount clearInterval）
+// 运行计时器：组件级 scope，卸载自动清理（等价原 onBeforeUnmount clearInterval）
 const { pause: pauseElapsed, resume: resumeElapsed } = useIntervalFn(() => {
   const s = (performance.now() - runStartAt) / 1000
   runningElapsed.value = `${s.toFixed(1)}s`
 }, 100, { immediate: false })
 
-// [vueuse-timers-v1] fileSuccess 闪烁复位：1500ms 后置 false；重复 start 内部自动重启
+// fileSuccess 闪烁复位：1500ms 后置 false；重复 start 内部自动重启
 const { start: scheduleFileSuccessReset } = useTimeoutFn(() => {
   fileSuccess.value = false
 }, 1500, { immediate: false })
 
-// [exec-flow-v1] exec 全流程（refs 由本组件持有）
+// exec 全流程（refs 由本组件持有）
 const { copyOutput } = createExecFlow({
   running,
   result,
@@ -382,7 +382,7 @@ function toggleAutoTakeover() {
 
 /** 最后一个运行脚本 */
 
-// [loop-paused-toggle-v1] 真暂停：已暂停则恢复；否则置 paused（不终止循环）
+// 真暂停：已暂停则恢复；否则置 paused（不终止循环）
 /**
  * 执行 pause All
  */
@@ -393,12 +393,12 @@ function pauseAll() {
     return
   }
   if (loopPaused.value) {
-    // [pause-to-idle-v2] 有活跃循环 + 暂停态：点击即完全退出循环，复位到待发状态
+    // 有活跃循环 + 暂停态：点击即完全退出循环，复位到待发状态
     if (isLoopActive.value || running.value) {
       void exitPauseToIdle()
       return
     }
-    // [sp-send-after-softpause-v1] 无活跃循环但 loopPaused 被 softPause 残留置真：
+    // 无活跃循环但 loopPaused 被 softPause 残留置真：
     // 视为用户点「发送」——复位 paused，走重新发送路径（等价 toggleAutoTakeover 的 else 分支）
     clearSoftPause()
     if (autoTakeoverEnabled.value) disableAutoTakeover()
@@ -447,7 +447,7 @@ async function buildAiPrompt(): Promise<string> {
   return trimPromptIfOverBudget(text, toast)
 }
 
-// [prompt-builder-v1] append* 系列已抽到 prompt-builder.ts
+// append* 系列已抽到 prompt-builder.ts
 
 /**
  * 应用模板：把 code 写入编辑器 script
@@ -460,7 +460,7 @@ function applyTemplate(code: string) {
 }
 
 /**
- * [ai-autorun-server-exec-v1] 自动接管：AI 回填脚本后，延迟 3-10s 交服务端执行（非再发回 AI）
+ * 自动接管：AI 回填脚本后，延迟 3-10s 交服务端执行（非再发回 AI）
  * [CONSTRAINT] 依赖 autoTakeoverEnabled；running 中跳过并 toast；空脚本跳过
  * [CHANGE-IMPACT] 会清空 script，跑后由 scheduleAutoRun 回填 lastRunScript
  */
@@ -474,7 +474,7 @@ function onAutoRun() {
       toast('AI 回填为空，跳过自动执行', 'warn', 2000)
       return
     }
-    // [clear-after-run-v1] 与手动路径一致：跑后清空编辑器
+    // 与手动路径一致：跑后清空编辑器
     runningCommand.value = ''
     lastRunScript.value = text
     script.value = ''
@@ -505,7 +505,7 @@ async function runSmart() {
   const text = attachedFiles.value.length
     ? await buildPromptWithAttachments(rawScript, attachedFiles.value)
     : rawScript
-  // [image-channel-v2] 图片走独立 images 通道；prompt 只带位置提示，接收端负责转粘贴
+  // 图片走独立 images 通道；prompt 只带位置提示，接收端负责转粘贴
   // [CONSTRAINT] filter 只取 kind==='image'；content 为 readAsDataUrl 返回值
   // [CHANGE-IMPACT] images 数组为空时传 undefined，保持旧行为（无图片路径零变化）
   const images = attachedFiles.value.filter(f => f.kind === 'image').map(f => f.content)
@@ -514,12 +514,12 @@ async function runSmart() {
     toast('发送失败：AI 窗口未打开或已关闭', 'warn', 4000)
     return
   }
-  // [ask-display-v1] 提问上屏：发送成功后写 ai:ask 事件，由 TerminalPane.timelineItems 渲染
+  // 提问上屏：发送成功后写 ai:ask 事件，由 TerminalPane.timelineItems 渲染
   // [CONSTRAINT] 必须在 copyAndFill 成功后（失败已 return）；payload.text 用 rawScript 原文而非拼接后 text
   // [CHANGE-IMPACT] 与 TerminalPane 的 ai:ask 渲染分支成对；kind 已在 EventKind 白名单
   emitBus('ai:ask', rawScript.slice(0, 40), { payload: { text: rawScript } })
   startAiWaiting()
-  // [clear-after-send-v3] 发送成功后清空编辑器；草稿槽位功能已移除
+  // 发送成功后清空编辑器；草稿槽位功能已移除
   // [WHY] 用户明确不需要草稿；清空即为最终状态，不再被 onMounted 回填
   // [CONSTRAINT] 仅在 copyAndFill 成功后执行（失败分支已提前 return，不误清用户内容）
   // [CHANGE-IMPACT] 移除了对 draft-slots 的依赖；AI 回填仍走 inbox.applyToEditor 的 current==='' 安全覆盖分支
@@ -604,7 +604,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disposeSideResize()
-  // [vueuse-timers-v1] elapsedTimer 已由 useIntervalFn 内部在组件卸载时自动 pause，无需手动清理
+  // elapsedTimer 已由 useIntervalFn 内部在组件卸载时自动 pause，无需手动清理
 
   window.removeEventListener('ai-runner:auto-run', onAutoRun)
   window.removeEventListener('keydown', onGlobalKey)
@@ -618,7 +618,7 @@ watch(running, (v) => {
     statusClass.value = ''
     lastDuration.value = ''
     runningElapsed.value = '0.0s'
-    // [vueuse-timers-v1] resume 等价 setInterval 启动；重复 resume 幂等（内部判断 isActive）
+    // resume 等价 setInterval 启动；重复 resume 幂等（内部判断 isActive）
     resumeElapsed()
   } else if (result.value) {
     pauseElapsed()
@@ -658,7 +658,7 @@ watch(running, (v) => {
       const scriptSnapshot = lastRunCode.value || lastRunScript.value || script.value
       // 把跑过的脚本记为「已消费」，让后续 AI 回填能直接覆盖（不误伤手动编辑）
       setLastAutoFilled(scriptSnapshot)
-      // [dead-code-v3] 已删 desc/why/lang/hash 块：grep 证实在文件内无第二消费点
+      // 已删 desc/why/lang/hash 块：grep 证实在文件内无第二消费点
     }
   }
 })
@@ -786,7 +786,7 @@ function onHtmlDrop(e: DragEvent) {
   overflow: hidden;
 }
 
-/* waiting-pulse / cursor-blink / dot-pulse 已迁至全局 style.css ([global-keyframes-v1]) */
+/* waiting-pulse / cursor-blink / dot-pulse 已迁至全局 style.css () */
 
 .overlay {
   position: absolute;

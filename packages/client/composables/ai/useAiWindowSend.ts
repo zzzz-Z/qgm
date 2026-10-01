@@ -1,5 +1,8 @@
 import { log } from '../../utils/log'
-import { transportKind } from './useAiTransport'
+// [transport-static-import-v1] useAiTransport 已被 App.vue/WorklogPane 等多处静态引入，
+// 动态 import 只会触发 INEFFECTIVE_DYNAMIC_IMPORT；改为命名空间静态导入，
+// loadTransport() 以 Promise.resolve 保留异步签名，调用方零改动
+import * as transportMod from './useAiTransport.js'
 import { getActiveWinSid, getWindowBySid, targetOriginFor } from './useAiWindowTable'
 
 /** fill 消息载荷：向 AI 窗口投递的提问文本 */
@@ -22,11 +25,11 @@ export interface RotatePayload { instruction: string }
 /** new-session 消息载荷：开启新会话时携带的上下文总结 */
 export interface NewSessionPayload { summary: string }
 
-let _transportMod: Promise<typeof import('./useAiTransport.js')> | null = null
+/** Transport 模块（已静态化；保留 Promise 形态兼容既有 await loadTransport() 调用点） */
+const _transportMod: Promise<typeof import('./useAiTransport.js')> = Promise.resolve(transportMod)
 
-/** 动态加载 Transport（模块级单例） */
+/** 加载 Transport（模块级单例；静态导入后此函数等价于常量 Promise） */
 export function loadTransport() {
-  if (!_transportMod) _transportMod = import('./useAiTransport.js')
   return _transportMod
 }
 // __URL_TRANSPORT_AWARE__ transport 偏好支持 URL 参数（跨 origin 稳定）
@@ -39,7 +42,7 @@ export function isHeadless(): boolean {
       if (v === 'tampermonkey') return false
     }
     // [use-storage-v1] 消费 useAiTransport 导出的单例 ref；URL 优先语义保留在上方
-    return transportKind.value === 'headless'
+    return transportMod.transportKind.value === 'headless'
   } catch { return false }
 }
 /**

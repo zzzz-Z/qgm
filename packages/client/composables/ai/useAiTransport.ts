@@ -1,4 +1,4 @@
-import * as ds from './useDeepseekUrl'
+import * as ds from './useAiSite'
 import { loopPaused } from './useAiWaiting.js'
 import { useStorage } from '@vueuse/core'
 
@@ -47,8 +47,8 @@ export const transportKind = useStorage<AiTransportKind>(TRANSPORT_KEY, 'tamperm
 let singleton: AiTransport | null = null
 
 /**
- * 反射调用 useDeepseekUrl 导出的发送函数（sendFill / sendStop / …）
- * [WHY] 避免静态 import 引发循环依赖：useDeepseekUrl 与 transport 相互引用，动态取值可延迟到调用时
+ * 反射调用 useAiSite 导出的发送函数（sendFill / sendStop / …）
+ * [WHY] 避免静态 import 引发循环依赖：useAiSite 与 transport 相互引用，动态取值可延迟到调用时
  * [CONSTRAINT] 未知 name 或非函数时返回 false；返回 Promise 则 fire-and-forget 并吞掉 rejection
  * [CHANGE-IMPACT] 被 sendFill/sendStop/sendRotate/sendNewSession 依赖，签名变化会破坏油猴通道
  */
@@ -266,9 +266,9 @@ export function getTransport(): AiTransport {
   return singleton
 }
 
-// 兼容 useDeepseekUrl 的动态调用约定：返回 { transport } 容器
+// 兼容 useAiSite 的动态调用约定：返回 { transport } 容器
 /**
- * 组合式入口：返回 { transport } 容器（兼容 useDeepseekUrl 的动态调用约定）
+ * 组合式入口：返回 { transport } 容器（兼容 useAiSite 的动态调用约定）
  * [CONSTRAINT] 返回的是模块级单例，多组件调用共享同一 transport
  */
 export function useAiTransport(): { transport: AiTransport } {

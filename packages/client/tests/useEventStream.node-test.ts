@@ -1,6 +1,6 @@
 // AIRUNNER-BATCH24-3-WEB-SERVER: web 侧测试（原 test/useEventStream.node-test.ts）
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/useEventStream.node-test.ts 迁至 test/useEventStream.node-test.ts
-// AIRUNNER-BATCH19-2-FIX5-TEST-PATH: 测试直连 event-stream.ts（无 useDeepseekUrl 依赖）
+// AIRUNNER-BATCH19-2-FIX5-TEST-PATH: 测试直连 event-stream.ts（无 useAiSite 依赖）
 import { beforeAll as before, beforeEach, test } from 'vitest'
 import assert from 'node:assert/strict'
 

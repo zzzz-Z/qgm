@@ -4,7 +4,7 @@
 // @change-impact 依赖 /__ai/git/worklog 端点；父组件 SidePane 通过 v-show 切换本面板可见性
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { renderMarkdown } from '../../composables/useMarkdown'
-// [commit-msg-ai-v1] 用户要求生成按钮改为"发 git diff 给 AI → 拿回复"；需发送与收包 API
+// 用户要求生成按钮改为"发 git diff 给 AI → 拿回复"；需发送与收包 API
 import { copyAndFill } from '../../composables/ai/useAiWindow'
 import { getTransport } from '../../composables/ai/useAiTransport'
 
@@ -34,11 +34,11 @@ const result = ref<WorklogResult | null>(null)
 const error = ref('')
 const commitMsg = ref('')
 const expanded = ref<Set<string>>(new Set())
-// [commit-msg-ai-v1] AI 生成 commit msg 的独立状态；与 commitMsg 解耦，避免污染用户输入
+// AI 生成 commit msg 的独立状态；与 commitMsg 解耦，避免污染用户输入
 const aiGenerating = ref(false)
 const aiCommitMsg = ref('')
 const aiError = ref('')
-// [commit-msg-ai-v1] 请求门控：置 true 时接受下一条 onReply 作为本次回复；收到即置 false
+// 请求门控：置 true 时接受下一条 onReply 作为本次回复；收到即置 false
 // [CONSTRAINT] 用门控而非 sid 过滤，因为 sid 在无头通道与油猴通道下语义可能不一致
 const pendingCommitRequest = ref(false)
 let pendingTimer: ReturnType<typeof setTimeout> | null = null
@@ -100,7 +100,7 @@ function toggleFile(p: string): void {
 }
 
 /**
- * [worklog-diff-direct-v1] 把 /git/diff 返回的原始 diff 文本按文件切分
+ * 把 /git/diff 返回的原始 diff 文本按文件切分
  * [WHY] 后端 /git/diff 直出 unified diff 原文，前端按 ^diff --git 切块后与 worklog 的 files 列表对齐
  * [CONSTRAINT] 只做字符串切分与正则匹配，不依赖 markdown-it；重复文件路径后者覆盖前者
  * [CHANGE-IMPACT] 结果填充到 files[].diff，供 fileDiffHtml 渲染行级高亮
@@ -129,7 +129,7 @@ function fileDiffHtml(p: string): string {
 }
 
 async function load(): Promise<void> {
-  // [worklog-diff-direct-v1] 并行请求 worklog 与原始 diff；后者填充 files[].diff
+  // 并行请求 worklog 与原始 diff；后者填充 files[].diff
   // [WHY] worklog 的 markdown 链路在某些环境看不到详细段；/git/diff 直出 unified diff 规避该问题
   // [CONSTRAINT] 两个请求都失败才算加载失败；diff 请求失败时仅警告不阻断（保留文件列表）
   // [CHANGE-IMPACT] 每次 load() 发起 2 个 HTTP 请求；result.files[].diff 从 /git/diff 填充而非 worklog
@@ -182,19 +182,19 @@ async function doCommit(): Promise<void> {
 }
 
 /**
- * [commit-msg-gen-v2] 基于 git diff 内容生成 Conventional Commits 风格 message
+ * 基于 git diff 内容生成 Conventional Commits 风格 message
  * [WHY] v1 一律 chore: update N files 无语义；v2 按文件类型分组 + diff 关键词推断 type/scope
  * [CONSTRAINT] 纯前端启发式：不解析 AST，仅依据扩展名 + diff 行首字符与 fix/bug 关键词；不联网、不调 LLM
  * [CHANGE-IMPACT] 生成结果直接覆盖 commitMsg；用户手动编辑后再点会覆盖，属预期行为
  */
 /**
- * [commit-msg-ai-v1] 生成按钮入口：把 git diff 全量内容拼成提问发送给 AI 网页
+ * 生成按钮入口：把 git diff 全量内容拼成提问发送给 AI 网页
  * [WHY] 用户要求由 AI 生成 commit msg，本地启发式仅作 fallback（generateLocalCommitMsg）
  * [CONSTRAINT] 依赖 transport 通道（无头 / 油猴）已建立；发送失败时降级到本地启发式
  * [CHANGE-IMPACT] 会写 pendingCommitRequest/aiGenerating/aiCommitMsg；由 onReply 订阅消费
  */
 async function generateCommitMsg(): Promise<void> {
-  // [commit-msg-refresh-v1] 先主动拉取最新 git diff，避免使用陈旧缓存
+  // 先主动拉取最新 git diff，避免使用陈旧缓存
   // [WHY] 用户点按钮时看到 loading 但实际未执行 git diff 命令；根因是直接读 result.value 缓存
   // [CONSTRAINT] load() 内已处理 loading/error；失败时走 error 分支不上屏
   // [CHANGE-IMPACT] 每次点击都会新增一次 POST /__ai/git/worklog 请求；result.value 随之刷新
@@ -291,7 +291,7 @@ async function generateCommitMsg(): Promise<void> {
 }
 
 /**
- * [commit-msg-ai-v1] 从 AI 回复文本中提取单行 commit message
+ * 从 AI 回复文本中提取单行 commit message
  * [WHY] AI 可能返回多余的解释 / 代码块 / 反引号；只取第一条非空、非围栏、非标题行
  * [CONSTRAINT] 去掉首尾反引号与常见前缀；无可用行时返回原文本首段
  * [CHANGE-IMPACT] 结果写入 commitMsg 与 aiCommitMsg；两处渲染共享同一份清洗逻辑
@@ -315,7 +315,7 @@ function extractCommitLine(text: string): string {
 }
 
 /**
- * [commit-msg-ai-v1] 订阅 transport onReply：pendingCommitRequest 为 true 时消费下一条作为 commit message
+ * 订阅 transport onReply：pendingCommitRequest 为 true 时消费下一条作为 commit message
  * [WHY] 用户要求生成按钮改为'发 git diff 给 AI → 拿回复'；用一次性门控避免拦截其它无关回复
  * [CONSTRAINT] 仅 kind 为 plain/multi/done 且 text 非空时消费；消费后立即关闭门控避免重复触发
  * [CHANGE-IMPACT] 写 aiCommitMsg/commitMsg/aiGenerating；成功后会触发一次 load() 拉取最新状态
@@ -348,7 +348,7 @@ onUnmounted(() => {
 })
 
 /**
- * [commit-msg-ai-v1] 本地启发式 fallback（发送失败时使用），保留原 v2 逻辑
+ * 本地启发式 fallback（发送失败时使用），保留原 v2 逻辑
  * [WHY] 网络/窗口不可用时至少给用户草稿；不覆盖已成功获取的 AI 结果
  */
 function generateLocalCommitMsg(): void {
@@ -403,7 +403,7 @@ function generateLocalCommitMsg(): void {
   commitMsg.value = scope ? `${type}(${scope}): ${summary}` : `${type}: ${summary}`
 }
 
-/** [commit-split-btn-v1] 复制完整工作日志 Markdown，供窄区按钮消费 */
+/** 复制完整工作日志 Markdown，供窄区按钮消费 */
 async function copyFullLog(): Promise<void> {
   if (!result.value || !result.value.markdown) return
   try {
@@ -411,7 +411,8 @@ async function copyFullLog(): Promise<void> {
   } catch { /* ignore: 剪贴板不可用时静默 */ }
 }
 
-watch(() => props.active, (v) => { if (v && !result.value && !loading.value) void load() })
+// [worklog-lazy-v1] immediate：组件在 tab 激活时才异步挂载，挂载即 active=true，非 immediate watch 不会触发
+watch(() => props.active, (v) => { if (v && !result.value && !loading.value) void load() }, { immediate: true })
 </script>
 
 <template>
@@ -428,7 +429,7 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
           @keydown.meta.enter.prevent="doCommit"
           @keydown.ctrl.enter.prevent="doCommit"
         >
-        <!-- [commit-msg-gen-v2] 根据变更生成 commit message -->
+        <!-- 根据变更生成 commit message -->
         <button
           class="wl-commit-gen"
           type="button"
@@ -459,8 +460,8 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
           </svg>
         </button>
       </div>
-      <!-- [commit-split-btn-v1] 分体式：主区提交、窄区复制完整日志；分隔线用半透明白 -->
-      <!-- [commit-msg-ai-v1] AI 生成结果展示：生成中 / 成功 / 失败 -->
+      <!-- 分体式：主区提交、窄区复制完整日志；分隔线用半透明白 -->
+      <!-- AI 生成结果展示：生成中 / 成功 / 失败 -->
       <div v-if="aiGenerating || aiCommitMsg || aiError" class="wl-ai-result">
         <div v-if="aiGenerating" class="wl-ai-loading">
           <span class="wl-ai-spinner" aria-hidden="true" />
@@ -562,7 +563,7 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
 }
 
 /* ── 顶部提交区（VSCode 风格） ── */
-/* [commit-ui-v2] 拆为三行：输入 + 生成、分体提交按钮；列布局容纳 */
+/* 拆为三行：输入 + 生成、分体提交按钮；列布局容纳 */
 .wl-commit {
   display: flex;
   flex-direction: column;
@@ -571,8 +572,7 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
   flex-shrink: 0;
 }
 .wl-commit-row {
-  display: flex;
-  gap: 6px;
+  @apply flex gap-1.5;
 }
 .wl-commit-input {
   flex: 1;
@@ -591,11 +591,9 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
 .wl-commit-input::placeholder {
   color: var(--text-3);
 }
-/* [commit-msg-gen-v2] 生成 commit message 按钮：与输入框同高，方形 */
+/* 生成 commit message 按钮：与输入框同高，方形 */
 .wl-commit-gen {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  @apply inline-flex items-center justify-center;
   width: 30px;
   height: 30px;
   flex-shrink: 0;
@@ -619,18 +617,14 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
   cursor: not-allowed;
 }
 
-/* [commit-split-btn-v1] 分体按钮：主区 + 窄区共享底色；中间分隔线用半透明白 */
+/* 分体按钮：主区 + 窄区共享底色；中间分隔线用半透明白 */
 .wl-commit-btn-row {
-  display: flex;
-  width: 100%;
+  @apply flex w-full;
 }
 .wl-commit-btn {
   flex: 1 1 auto;
   min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
+  @apply inline-flex items-center justify-center gap-1.5;
   height: 32px;
   padding: 0 12px;
   font-size: 12.5px;
@@ -673,16 +667,14 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
   cursor: not-allowed;
 }
 
-/* [commit-msg-ai-v1] AI 生成结果区：生成中 / 成功 / 失败三态 */
+/* AI 生成结果区：生成中 / 成功 / 失败三态 */
 .wl-ai-result {
   padding: 6px 10px 0;
   font-size: 12px;
   line-height: 1.5;
 }
 .wl-ai-loading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  @apply flex items-center gap-1.5;
   color: var(--text-3);
 }
 .wl-ai-spinner {
@@ -703,9 +695,7 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
   color: var(--danger, #f85149);
 }
 .wl-ai-ok {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  @apply flex items-center gap-1.5;
   padding: 5px 8px;
   background: rgb(88 166 255 / 8%);
   border: 1px solid rgb(88 166 255 / 22%);
@@ -844,9 +834,7 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
 }
 .wl-chev {
   flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  @apply inline-flex items-center justify-center;
   width: 12px;
   height: 12px;
   color: var(--text-3);
@@ -857,8 +845,7 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
 }
 .wl-doc {
   flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
+  @apply inline-flex items-center;
   color: var(--text-3);
 }
 .wl-doc.st-mod {

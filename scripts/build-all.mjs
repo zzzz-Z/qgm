@@ -2,6 +2,7 @@ import { build } from 'vite'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { syncClientDist } from './sync-client-dist.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.dirname(HERE)
@@ -20,27 +21,6 @@ await build({
 
 console.log('[build-all] step 2.5/3: sync SPA to apps/standalone/dist/client')
 syncClientDist()
-
-function syncClientDist() {
-  const src = path.join(ROOT, 'packages', 'client', 'dist')
-  const dst = path.join(ROOT, 'apps', 'standalone', 'dist', 'client')
-  if (!fs.existsSync(src)) { console.log('[build-all] skip (no client dist)'); return }
-  // 清空旧目标
-  if (fs.existsSync(dst)) fs.rmSync(dst, { recursive: true, force: true })
-  fs.mkdirSync(dst, { recursive: true })
-  copyDirSync(src, dst)
-  console.log('[build-all] synced client dist -> apps/standalone/dist/client')
-}
-
-function copyDirSync(s, d) {
-  for (const e of fs.readdirSync(s, { withFileTypes: true })) {
-    const sp = path.join(s, e.name)
-    const dp = path.join(d, e.name)
-    if (e.isDirectory()) { fs.mkdirSync(dp, { recursive: true }); copyDirSync(sp, dp) }
-    else { fs.copyFileSync(sp, dp)
-    }
-  }
-}
 
 console.log('[build-all] step 3/3: copy runtime .cjs')
 const distRoot = path.join(ROOT, 'apps', 'standalone', 'dist')

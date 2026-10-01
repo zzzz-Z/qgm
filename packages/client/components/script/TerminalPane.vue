@@ -3,12 +3,13 @@
     <!-- [flow-timeline] 全流程时间线 -->
     <div class="flow-timeline">
       <div ref="chatListRef" class="chat-list" @scroll="onChatScroll">
-        <!-- [script-history-cards-v1] 每轮脚本 desc：Markdown 渲染；来源 busEvents（已持久化到 localStorage） -->
+        <!-- 每轮脚本 desc：Markdown 渲染；来源 busEvents（已持久化到 localStorage） -->
         <template v-for="card in timelineItems" :key="card.key">
           <div v-if="card.type === 'script'" class="script-card" :class="card.phaseClass">
             <div
               class="script-card-head"
               :class="{ 'is-clickable': !!(card.stdoutTail || card.stderrTail || card.why) }"
+              :aria-expanded="(card.stdoutTail || card.stderrTail || card.why) ? isCardExpanded(card) : undefined"
               @click="(card.stdoutTail || card.stderrTail || card.why) ? toggleCard(card.key) : null"
             >
               <span class="script-card-phase">{{ card.phaseLabel }}</span>
@@ -19,7 +20,7 @@
               v-if="isCardExpanded(card) && (card.stdoutTail || card.stderrTail || card.why)"
               class="script-card-tail"
             >
-              <!-- [why-fold-v1] why 从卡片主体迁移至此：仅展开时可见，与输出同屏 -->
+              <!-- why 从卡片主体迁移至此：仅展开时可见，与输出同屏 -->
               <div v-if="card.why" class="why-block">
                 <span class="why-label">WHY</span>
                 <span class="why-text">{{ card.why }}</span>
@@ -27,23 +28,21 @@
               <pre
                 v-if="card.stdoutTail"
                 class="tail-pre"
-                :style="{ '--tw-duration': `${Math.min(2.5, Math.max(0.4, card.stdoutTail.length / 300))}s` }"
               >{{ card.stdoutTail }}</pre>
               <pre
                 v-if="card.stderrTail"
                 class="tail-pre err"
-                :style="{ '--tw-duration': `${Math.min(2.5, Math.max(0.4, card.stderrTail.length / 300))}s` }"
               >{{ card.stderrTail }}</pre>
             </div>
           </div>
-          <!-- [done-persist-v1] 总结卡片（来自事件流，刷新后保留） -->
+          <!-- 总结卡片（来自事件流，刷新后保留） -->
           <section v-else-if="card.type === 'done'" class="done-summary">
             <div class="done-summary-head">
               任务完成 · 总结
             </div>
             <div class="done-summary-body" v-html="card.html" />
           </section>
-          <!-- [non-cjs-render-v1] 非 cjs 文本卡片：与总结同排版 -->
+          <!-- 非 cjs 文本卡片：与总结同排版 -->
           <section v-else-if="card.type === 'text'" class="text-card">
             <header class="text-card-head">
               <span class="text-card-badge">AI</span>
@@ -51,7 +50,7 @@
             </header>
             <div class="done-summary-body" v-html="card.html" />
           </section>
-          <!-- [ask-display-v1] 用户提问/回答卡：badge 用「你」区分 AI；回答额外走 answer-card 视觉 -->
+          <!-- 用户提问/回答卡：badge 用「你」区分 AI；回答额外走 answer-card 视觉 -->
           <section v-else class="text-card" :class="card.role === 'user-answer' ? 'answer-card' : 'ask-card'">
             <header class="text-card-head">
               <span class="text-card-badge" :class="card.role === 'user-answer' ? 'answer-badge' : 'ask-badge'">你</span>
@@ -61,7 +60,7 @@
           </section>
         </template>
 
-        <!-- [empty-state-v2] 空态：无卡片 / 无输出 / 无总结 -->
+        <!-- 空态：无卡片 / 无输出 / 无总结 -->
         <div v-if="!running && !twStdout && !twStderr && timelineItems.length === 0" class="tree-empty">
           <div class="empty-title">
             还没有执行记录
@@ -71,7 +70,7 @@
           </div>
         </div>
       </div>
-      <!-- [ai-wait-banner-v1] 等待 AI 回复指示条：收到首 token / reply 后由 stopAiWaiting 关闭；置于消息流底部 -->
+      <!-- 等待 AI 回复指示条：收到首 token / reply 后由 stopAiWaiting 关闭；置于消息流底部 -->
       <div v-if="props.aiWaiting" class="wait-banner" role="status" aria-live="polite">
         <span class="wait-spinner" aria-hidden="true" />
         <span class="wait-text">{{ waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中' }}</span>
@@ -83,12 +82,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
-// [raw-output-fold-v1] PLAN 5.2 第四层：原始输出折叠
-// [done-summary-md-v1] 复用项目已有极简 markdown 渲染器（不引入新依赖）
+// PLAN 5.2 第四层：原始输出折叠
+// 复用项目已有极简 markdown 渲染器（不引入新依赖）
 import { renderMarkdown } from '../../composables/useMarkdown.js'
-// [script-history-cards-v1] 事件流单例（localStorage 持久化），用于渲染每轮脚本 desc
+// 事件流单例（localStorage 持久化），用于渲染每轮脚本 desc
 import { useEventBus } from '../../composables/ui/useEventStream'
 
 /** 组件接收的 props 定义 */
@@ -99,14 +98,13 @@ const props = defineProps<{
   twStderr: string
   twLines: string[]
   twErrLines: string[]
-  doneSummary?: string // [done-summary-channel-v1]
-  lineClass: (line: string) => string
-  // [ai-wait-banner-v1] 等待 AI 回复中；由 ScriptPanel 透传 useAiWaiting().waiting
+  doneSummary?: string // lineClass: (line: string) => string
+  // 等待 AI 回复中；由 ScriptPanel 透传 useAiWaiting().waiting
   aiWaiting?: boolean
 }>()
 
 /** 派发 */
-// [emit-unused-v1] 去掉变量赋值：模板未消费此 emit，赋值触发 unused-imports warning
+// 去掉变量赋值：模板未消费此 emit，赋值触发 unused-imports warning
 defineEmits<{ (e: 'applyTemplate', code: string): void }>()
 
 interface ScriptItem {
@@ -115,12 +113,12 @@ interface ScriptItem {
   langLabel: string
   phaseLabel: string
   phaseClass: string
-  // [head-inline-v1] desc 从 body 前移到 header，与 phase / time 同行展示
+  // desc 从 body 前移到 header，与 phase / time 同行展示
   desc: string
   timeLabel: string
   stdoutTail: string
   stderrTail: string
-  // [why-fold-v1] why 从卡片主体迁移至展开区，避免每张卡都占两行；空串表示无 why
+  // why 从卡片主体迁移至展开区，避免每张卡都占两行；空串表示无 why
   why: string
 }
 
@@ -137,13 +135,13 @@ interface DoneItem {
   timeLabel: string
   html: string
 }
-// [ask-display-v1] 用户提问/回答卡：ScriptPanel.runSmart 与 App.vue ask 回答分支 emit('ai:ask')
-// [ask-answer-display-v1] role='user-answer' 时展示为「回答」+ answer-badge，区分于「提问」
+// 用户提问/回答卡：ScriptPanel.runSmart 与 App.vue ask 回答分支 emit('ai:ask')
+// role='user-answer' 时展示为「回答」+ answer-badge，区分于「提问」
 interface AskItem { type: 'ask', key: string, timeLabel: string, html: string, role?: 'user-answer' }
 
 const { events: busEvents } = useEventBus()
 
-// [ai-wait-timer-v1] 等待时长本地计时：aiWaiting 为 true 时启动，false 时停止并归零
+// 等待时长本地计时：aiWaiting 为 true 时启动，false 时停止并归零
 // [WHY] 用本地 interval 而非改 useAiWaiting 契约（避免污染其他消费方）；仅用于展示层
 // [CONSTRAINT] useIntervalFn 组件卸载自动清理；watch 双向同步启停
 // [CHANGE-IMPACT] 与 wait-banner 模板成对；去掉 watch 会让秒数永远为 0
@@ -173,7 +171,7 @@ const PHASE_LABEL: Record<string, string> = {
 const timelineItems = computed(() => {
   const out: Array<ScriptItem | TextItem | DoneItem | AskItem> = []
   for (const ev of busEvents.value) {
-    // [ask-display-v1] 用户提问卡：ScriptPanel.runSmart 成功 copyAndFill 后 emit('ai:ask')
+    // 用户提问卡：ScriptPanel.runSmart 成功 copyAndFill 后 emit('ai:ask')
     // [CONSTRAINT] 只收 payload.text 非空事件，避免空卡；与 ai:done 同结构仅 badge 不同
     if (ev.kind === 'ai:ask') {
       const tp = (ev.payload || {}) as Record<string, unknown>
@@ -182,7 +180,7 @@ const timelineItems = computed(() => {
       const d0 = new Date(ev.ts || Date.now())
       const pad0 = (n: number) => String(n).padStart(2, '0')
       const timeLabel0 = `${pad0(d0.getHours())}:${pad0(d0.getMinutes())}:${pad0(d0.getSeconds())}`
-      // [ask-answer-display-v1] role 分流：'user-answer' 走回答卡样式；缺省按提问卡
+      // role 分流：'user-answer' 走回答卡样式；缺省按提问卡
       out.push({
         type: 'ask',
         key: `ask-${ev.id}`,
@@ -192,7 +190,7 @@ const timelineItems = computed(() => {
       })
       continue
     }
-    // [done-persist-v1] 总结卡片：来自 ai:done 事件（方案 A，持久化）
+    // 总结卡片：来自 ai:done 事件（方案 A，持久化）
     // [CONSTRAINT] text 为空表示纯占位（AI 只回复 DONE 无总结），跳过不渲染
     if (ev.kind === 'ai:done') {
       const tp = (ev.payload || {}) as Record<string, unknown>
@@ -209,7 +207,7 @@ const timelineItems = computed(() => {
       })
       continue
     }
-    // [non-cjs-render-v1] 非 cjs 文本（ai:plain / ai:multi）按时间顺序混排为 Markdown 卡片
+    // 非 cjs 文本（ai:plain / ai:multi）按时间顺序混排为 Markdown 卡片
     // [CONSTRAINT] 只收 payload.text 非空的事件
     if (ev.kind === 'ai:plain' || ev.kind === 'ai:multi') {
       const tp = (ev.payload || {}) as Record<string, unknown>
@@ -233,14 +231,14 @@ const timelineItems = computed(() => {
     const lang = String(p.lang || 'js')
     const phase = String(p.phase || 'running')
     const key = String(p.updateKey || `ev-${ev.id}`)
-    // [script-cards-filter-v1] 跳过旧事件（payload 无 why 且 desc 为默认值）产生的空卡
+    // 跳过旧事件（payload 无 why 且 desc 为默认值）产生的空卡
     if (!why && (!desc || desc === '执行脚本')) continue
-    // [card-typewriter-v1] 提取打字机 tail：useRunner.emitStep 每次节流（250ms）携带
+    // 提取打字机 tail：useRunner.emitStep 每次节流（250ms）携带
     const stdoutTail = String(p.stdoutTail || '')
     const stderrTail = String(p.stderrTail || '')
-    // [head-inline-v1] desc 不再走 body markdown；直接作为 header 文本字段
+    // desc 不再走 body markdown；直接作为 header 文本字段
     const langLabel = lang === 'bash' ? 'BASH' : lang === 'cjs' ? 'CJS' : 'JS'
-    // [card-ts-v1] 时间戳：HH:MM:SS，本地时区；ev.ts 为事件更新时刻（updateKey 命中时刷新）
+    // 时间戳：HH:MM:SS，本地时区；ev.ts 为事件更新时刻（updateKey 命中时刷新）
     const d = new Date(ev.ts || Date.now())
     const pad = (n: number) => String(n).padStart(2, '0')
     const timeLabel = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
@@ -250,10 +248,10 @@ const timelineItems = computed(() => {
   return out
 })
 
-// [card-typewriter-v1] 折叠展开的卡片 key 集合；用 Set 替换触发响应
+// 折叠展开的卡片 key 集合；用 Set 替换触发响应
 const expandedCards = ref<Set<string>>(new Set())
 
-// [default-collapsed-v1] 已删 latestScriptKey 自动展开：用户需求"输出默认全部收起"，所有卡初始收起，需手动点开
+// 已删 latestScriptKey 自动展开：用户需求"输出默认全部收起"，所有卡初始收起，需手动点开
 /**
  * 切换卡片输出的折叠状态
  * [CONSTRAINT] 必须替换引用（Set 非响应式内部变更），否则模板不重渲染
@@ -273,14 +271,14 @@ function toggleCard(key: string): void {
  * @param card scriptCards 单项；只用 key 与 phaseClass
  */
 function isCardExpanded(card: { key: string }): boolean {
-  // [default-collapsed-v1] 仅凭用户手动展开记录；不再按 phase 自动展开
+  // 仅凭用户手动展开记录；不再按 phase 自动展开
   return expandedCards.value.has(card.key)
 }
 
 /** 列表 */
 const chatListRef = ref<HTMLElement | null>(null)
 
-// [done-summary-bottom-v1] 总结写入后自动滚到底部，确保用户第一眼看到
+// 总结写入后自动滚到底部，确保用户第一眼看到
 // [CONSTRAINT] 需 nextTick 等 DOM 更新完成后再滚；仅当有新内容时触发（props.doneSummary 从空→非空 或 变内容）
 // [CHANGE-IMPACT] 若父组件清空 doneSummary（新一轮开始）不滚动；避免滚动位置抖动
 watch(
@@ -292,6 +290,21 @@ watch(
     if (el) el.scrollTop = el.scrollHeight
   },
 )
+// 页面刷新时自动滚到最后一条：
+// [WHY] 上面的 watch 非 immediate，刷新时 busEvents 若同步恢复则不触发；需挂载后主动滚一次
+// [CONSTRAINT] rAF 二次滚动兜底字体/异步渲染造成的高度变化；一次性，不持续 watch
+// [CHANGE-IMPACT] 与上面的 watch 互补：watch 管运行时新增，onMounted 管首次挂载
+onMounted(async () => {
+  await nextTick()
+  // 连续 3 帧滚动：兜底字体/异步渲染/图片导致的高度变化
+  for (let i = 0; i < 3; i++) {
+    requestAnimationFrame(() => {
+      const el = chatListRef.value
+      if (el) el.scrollTop = el.scrollHeight
+    })
+  }
+})
+
 /**
  * 响应 Chat Scroll
  */
@@ -313,23 +326,15 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   padding: 0 50px;
   flex: 1 1 0;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  @apply flex flex-col overflow-hidden;
   background: var(--bg);
 }
 
 .flow-timeline {
-  display: flex;
-  flex-direction: column;
-  flex-wrap: nowrap;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 0;
+  @apply flex flex-col flex-nowrap items-stretch justify-start gap-0 overflow-hidden;
   padding: 0;
   min-height: 0;
   max-height: none;
-  overflow: hidden;
   background: transparent;
   flex: 1 1 0;
   font-size: 12px;
@@ -347,8 +352,8 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   width: 100%;
   max-width: 820px;
   margin: 0 auto;
-  padding: 20px 24px 32px;
-  gap: 16px;
+  padding: 14px 24px 20px;
+  gap: 6px;
   text-align: left;
   background: transparent;
   font-family:
@@ -357,20 +362,8 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   font-size: 13px;
   line-height: 1.7;
   color: var(--text-2);
-}
-
-.chat-list::-webkit-scrollbar {
-  width: 6px;
-}
-.chat-list::-webkit-scrollbar-thumb {
-  background: rgb(127 127 127 / 22%);
-  border-radius: 999px;
-}
-.chat-list::-webkit-scrollbar-thumb:hover {
-  background: rgb(127 127 127 / 38%);
-}
-.chat-list::-webkit-scrollbar-track {
-  background: transparent;
+  /* 滚动条细淡（替代 4 条 ::-webkit-scrollbar 规则） */
+  @apply scroll-thin;
 }
 
 /* ── 空态 ─────────────────────────────────────────── */
@@ -403,35 +396,49 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 .text-card,
 .done-summary {
   margin: 0;
-  padding: 8px 0;
+  padding: 4px 0;
   border: 0;
   border-radius: 0;
   background: transparent;
+  transition: background-color 0.14s ease;
 }
-
-.script-card,
-.text-card,
-.done-summary {
-  margin: 0;
-  padding: 8px 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+.script-card:hover {
+  background: rgb(127 127 127 / 3%);
 }
 .script-card-head,
 .text-card-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 2px;
-  font-size: 10.5px;
-  line-height: 1.2;
+  @apply flex items-center gap-1.5 mb-0.5 text-[10.5px] leading-[1.2];
   color: var(--text-3);
   letter-spacing: 0.2px;
 }
 .script-card-head.is-clickable {
   cursor: pointer;
   user-select: none;
+  margin: -2px -6px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: background-color 0.14s ease;
+}
+.script-card-head.is-clickable:hover {
+  background: rgb(127 127 127 / 6%);
+}
+.script-card-head.is-clickable:focus-visible {
+  outline: 2px solid var(--primary, #58a6ff);
+  outline-offset: 2px;
+}
+/* [collapse-indicator] 折叠态指示：可展开卡片右缘显示 ▸，展开时旋转为 ▾ */
+.script-card-head.is-clickable::after {
+  content: '▸';
+  flex: 0 0 auto;
+  margin-left: 4px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-3);
+  opacity: 0.6;
+  transition: transform 0.15s ease;
+}
+.script-card-head.is-clickable[aria-expanded='true']::after {
+  transform: rotate(90deg);
 }
 .script-card-badge,
 .text-card-badge {
@@ -449,13 +456,11 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 }
 .script-card-phase {
   flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10.5px;
+  @apply inline-flex items-center gap-[4px];
+  font-size: 10px;
   font-weight: 600;
-  line-height: 1.1;
-  letter-spacing: 0.3px;
+  line-height: 1.2;
+  letter-spacing: 0.2px;
   color: var(--text-3, #8b949e);
 }
 .script-card.phase-running .script-card-phase {
@@ -499,24 +504,24 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 .script-card-time {
   flex: 0 0 auto;
   margin-left: auto;
-  font: 10.5px/1.1 var(--mono, monospace);
+  font: 500 11px/1.1 var(--mono, monospace);
   color: var(--text-3, #8b949e);
-  opacity: 0.65;
+  opacity: 0.62;
+  font-variant-numeric: tabular-nums;
 }
 .script-card-desc {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--text-2, #c9d1d9);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
+  line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .why-block {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  @apply flex items-start gap-2;
   padding: 4px 0 8px;
   margin-bottom: 4px;
   border-bottom: 1px dashed var(--border, #30363d);
@@ -544,72 +549,24 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   background: transparent;
   border-top: 1px dashed var(--border, #30363d);
   border-radius: 0;
+  max-height: 360px;
+  overflow-y: auto;
+  @apply scroll-thin;
 }
 .script-card-tail .tail-pre {
   margin: 0;
-  padding: 4px 0;
-  font: 11.5px/1.55 var(--mono, monospace);
+  padding: 2px 0;
+  font: 12px/1.6 var(--mono, monospace);
   color: var(--text-2, #c9d1d9);
   white-space: pre-wrap;
-  word-break: break-all;
-  animation: tail-typing var(--tw-duration, 0.8s) steps(40, end) both;
-}
-.script-card-tail .tail-pre.err {
-  color: var(--danger, #ef4444);
-}
-@keyframes tail-typing {
-  from {
-    clip-path: inset(0 100% 0 0);
-  }
-  to {
-    clip-path: inset(0 0 0 0);
-  }
-}
-.why-label {
-  flex: 0 0 auto;
-  padding: 1px 6px;
-  border-radius: 3px;
-  background: var(--surface-3, #161b22);
-  font: 600 10px/1.4 var(--mono, monospace);
-  letter-spacing: 0.5px;
-  color: var(--text-3, #8b949e);
-}
-.why-text {
-  flex: 1 1 auto;
-  min-width: 0;
   word-break: break-word;
-}
-.script-card-tail {
-  margin-top: 8px;
-  padding: 8px 0 0;
-  background: transparent;
-  border-top: 1px dashed var(--border, #30363d);
-  border-radius: 0;
-}
-.script-card-tail .tail-pre {
-  margin: 0;
-  padding: 4px 0;
-  font: 11.5px/1.55 var(--mono, monospace);
-  color: var(--text-2, #c9d1d9);
-  white-space: pre-wrap;
-  word-break: break-all;
-  animation: tail-typing var(--tw-duration, 0.8s) steps(40, end) both;
+  tab-size: 2;
 }
 .script-card-tail .tail-pre.err {
   color: var(--danger, #ef4444);
-}
-@keyframes tail-typing {
-  from {
-    clip-path: inset(0 100% 0 0);
-  }
-  to {
-    clip-path: inset(0 0 0 0);
-  }
 }
 .done-summary-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  @apply flex items-center gap-2;
   font:
     600 14px/1.5 -apple-system,
     BlinkMacSystemFont,
@@ -765,33 +722,6 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   box-shadow: 0 4px 14px rgb(88 166 255 / 10%);
   backdrop-filter: blur(6px);
   animation: wait-fadein 0.2s ease-out;
-}
-@keyframes wait-fadein {
-  from {
-    opacity: 0;
-    transform: translateY(-2px) scale(0.995);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-.wait-spinner {
-  display: inline-block;
-  box-sizing: border-box;
-  width: 12px;
-  height: 12px;
-  border: 2px solid rgb(88 166 255 / 18%);
-  border-top-color: var(--primary, #58a6ff);
-  border-right-color: rgb(88 166 255 / 55%);
-  border-radius: 50%;
-  animation: wait-spin 0.9s linear infinite;
-  flex-shrink: 0;
-}
-@keyframes wait-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 @keyframes wait-fadein {
   from {

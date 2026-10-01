@@ -50,10 +50,47 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boole
   const abs = path.resolve(CLIENT_DIST, `.${rel}`)
   if (!abs.startsWith(CLIENT_DIST)) return false
   if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return false
+  // [precompress-negotiate-v1] 优先回源 vite-plugin-compression2 生成的 .br/.gz（br 优先，压缩率更高）
+  // [WHY] 预压缩零运行时 CPU；Content-Type 仍按原文件扩展名判定
+  // [CHANGE-IMPACT] 无预压缩产物或客户端不支持时自动回退原始文件，行为与旧实现一致
+  const acceptEncoding = String(req.headers['accept-encoding'] || '')
+  let served = abs
+  let encoding: string | null = null
+  if (/\bbr\b/.test(acceptEncoding) && fs.existsSync(`${abs}.br`)) {
+    served = `${abs}.br`
+    encoding = 'br'
+  } else if (/\bgzip\b/.test(acceptEncoding) && fs.existsSync(`${abs}.gz`)) {
+    served = `${abs}.gz`
+    encoding = 'gzip'
+  }
+  const st = fs.statSync(served)
+  // [cache-headers-v1] ETag 走弱校验（size+mtimeMs），命中 If-None-Match 直接 304
+  const etag = `W/"${st.size.toString(16)}-${Math.round(st.mtimeMs).toString(16)}"`
+  // [cache-headers-v1] /assets/* 文件名带内容 hash → 一年 immutable；index.html 必须 no-cache 保证版本即时可见
+  const cacheControl = rel.startsWith('/assets/')
+    ? 'public, max-age=31536000, immutable'
+    : 'no-cache'
+  const baseHeaders: Record<string, string> = {
+    'Cache-Control': cacheControl,
+    'ETag': etag,
+  }
+  if (encoding) {
+    baseHeaders['Content-Encoding'] = encoding
+    baseHeaders.Vary = 'Accept-Encoding'
+  }
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, baseHeaders)
+    res.end()
+    return true
+  }
   const ext = path.extname(abs).toLowerCase()
   const t: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.mjs': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' }
-  res.writeHead(200, { 'Content-Type': t[ext] || 'application/octet-stream' })
-  fs.createReadStream(abs).pipe(res)
+  res.writeHead(200, {
+    'Content-Type': t[ext] || 'application/octet-stream',
+    'Content-Length': String(st.size),
+    ...baseHeaders,
+  })
+  fs.createReadStream(served).pipe(res)
   return true
 }
 

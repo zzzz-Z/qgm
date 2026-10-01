@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// [abnormal-view-v1] PLAN 5.2 异常视图：本轮异常聚合 + 按严重度排序 + 默认隐藏
+// PLAN 5.2 异常视图：本轮异常聚合 + 按严重度排序 + 默认隐藏
 import { computed, ref, watch } from 'vue'
 import { useClipboard } from '@vueuse/core'
 

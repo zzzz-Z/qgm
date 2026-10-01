@@ -29,7 +29,12 @@
     { re: /kimi\.moonshot\.cn\/chat\/([\w-]+)/, n: 1 },
     { re: /gemini\.google\.com\/app\/([\w-]+)/, n: 1 },
     { re: /tongyi\.aliyun\.com\/qianwen\/([\w-]+)/, n: 1 },
-    { re: /qianwen\.aliyun\.com\/[\w-]*\/?([\w-]{20,})/, n: 1 }
+    { re: /qianwen\.aliyun\.com\/[\w-]*\/?([\w-]{20,})/, n: 1 },
+    // [qianwen-web-v1] 千问网页版（qianwen.com）会话 URL 规则
+    // WHY: 主域名切换至 qianwen.com，会话形如 /chat/{id} 或 /c/{id} 或 /q/{id}
+    // CONSTRAINT: 域名锚定 qianwen.com，避免误匹配其他站点；顺序置末尾保留既有优先级
+    // CHANGE-IMPACT: 影响 extractId() 返回；未命中返回 ''，不影响其他站点
+    { re: /(?:www\.)?qianwen\.com\/(?:chat|c|q)\/([\w-]+)/, n: 1 }
   ]
 
   const RATIO_CJK = 0.6
@@ -693,6 +698,25 @@
       } catch (e) {
         box.dispatchEvent(new Event('input', { bubbles: true }))
       }
+
+      // [qianwen-react-v1] React 受控 contenteditable 兜底
+      // WHY: 千问输入框为 React + Tailwind 实现，上方 paste/insertText 若被 React 合成事件吞掉需显式告知状态变化
+      // CONSTRAINT: 仅在 box 具备 React fiber/props 内部属性、且内容仍为空时激活；无属性时跳过，避免污染非 React 站点
+      // CHANGE-IMPACT: 与上方 paste/insertText 为"或"关系，任一成功即可；不影响既有站点行为
+      try {
+        const _isReactBox = Object.keys(box).some(k =>
+          k.startsWith('__reactFiber$') || k.startsWith('__reactProps$'))
+        if (_isReactBox && (box.textContent || '').trim().length === 0) {
+          box.focus()
+          document.execCommand('insertText', false, text)
+          box.dispatchEvent(new InputEvent('input', {
+            bubbles: true,
+            cancelable: true,
+            inputType: 'insertText',
+            data: text,
+          }))
+        }
+      } catch { /* React 兜底失败不阻断主流程 */ }
     }
   }
 

@@ -42,7 +42,7 @@ it('SM: 导出 resetAskCount', () => {
 })
 
 it('DU: copyAndFill 统一计数（自动路径不再漏）', () => {
-  const DU = readFileSync(join(ROOT, 'packages/client/composables/ai/useDeepseekUrl.ts'), 'utf8')
+  const DU = readFileSync(join(ROOT, 'packages/client/composables/ai/useAiSite.ts'), 'utf8')
   assert.ok(DU.includes('useSessionManager'), '应引 useSessionManager')
   assert.ok(DU.includes('trackMessage'), 'copyAndFill 内应调 trackMessage')
   assert.ok(DU.includes('count?: boolean'), '应有 count 开关')

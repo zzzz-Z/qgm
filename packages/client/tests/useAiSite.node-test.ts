@@ -1,4 +1,4 @@
-// AIRUNNER-BATCH44-1-USE-DEEPSEEK-URL: useDeepseekUrl.ts Characterization Test (同步 API 面)
+// AIRUNNER-BATCH44-1-USE-DEEPSEEK-URL: useAiSite.ts Characterization Test (同步 API 面)
 import { beforeAll, beforeEach, test } from 'vitest'
 import assert from 'node:assert/strict'
 
@@ -47,13 +47,13 @@ Object.defineProperty(globalThis, 'crypto', {
 })
 
 // [split-fix-v1] useAiWindow 已按职责拆分为 Table（窗口引用）+ Send（发送协议）
-// [WHY] 本测试 split 前针对单一 useDeepseekUrl.ts 编写；split 后 API 迁至 useAiWindow 门面
-// [CONSTRAINT] 用交叉类型 + 动态合并，兼顾 MODELS/DEFAULT_URL（旧）与窗口/发送 API（新）
-type DsMod = typeof import('../../../packages/client/composables/ai/useDeepseekUrl')
+// [WHY] 本测试 split 前针对单一 useAiSite.ts 编写；split 后 API 迁至 useAiWindow 门面
+// [CONSTRAINT] 用交叉类型 + 动态合并，兼顾 MODELS/DEFAULT_SITE_URL（旧）与窗口/发送 API（新）
+type DsMod = typeof import('../../../packages/client/composables/ai/useAiSite')
 type WinMod = typeof import('../../../packages/client/composables/ai/useAiWindow')
 let mod: DsMod & WinMod
 beforeAll(async () => {
-  const ds = await import('../../../packages/client/composables/ai/useDeepseekUrl')
+  const ds = await import('../../../packages/client/composables/ai/useAiSite')
   const win = await import('../../../packages/client/composables/ai/useAiWindow')
   mod = { ...ds, ...win } as DsMod & WinMod
 })
@@ -75,14 +75,14 @@ test('MODELS: 每项含 id / label / url', () => {
   }
 })
 
-test('DEFAULT_URL: 为合法 URL 字符串', () => {
-  assert.equal(typeof mod.DEFAULT_URL, 'string')
-  assert.match(mod.DEFAULT_URL, /^https?:\/\//)
+test('DEFAULT_SITE_URL: 为合法 URL 字符串', () => {
+  assert.equal(typeof mod.DEFAULT_SITE_URL, 'string')
+  assert.match(mod.DEFAULT_SITE_URL, /^https?:\/\//)
 })
 
-// [split-facades-v1] 拆分后 useDeepseekUrl 只负责 URL/model；窗口 API 归 useAiWindow
-test('useDeepseekUrl: 返回 URL/model 门面（9 项）', () => {
-  const r = mod.useDeepseekUrl()
+// [split-facades-v1] 拆分后 useAiSite 只负责 URL/model；窗口 API 归 useAiWindow
+test('useAiSite: 返回 URL/model 门面（9 项）', () => {
+  const r = mod.useAiSite()
   for (const k of [
     'modelId',
     'setModel',
@@ -92,7 +92,7 @@ test('useDeepseekUrl: 返回 URL/model 门面（9 项）', () => {
     'setSessionId',
     'display',
     'MODELS',
-    'DEFAULT_URL',
+    'DEFAULT_SITE_URL',
   ] as const) {
     assert.ok(k in r, `missing key: ${k}`)
   }
@@ -183,13 +183,13 @@ test('sendNewSession: 无 active 窗口 → false', () => {
 
 // ============ url / setUrl / sessionId / setSessionId ============
 
-test('url 默认 DEFAULT_URL', () => {
-  const r = mod.useDeepseekUrl()
+test('url 默认 DEFAULT_SITE_URL', () => {
+  const r = mod.useAiSite()
   assert.equal(typeof r.url.value, 'string')
 })
 
 test('setUrl 更新 url ref', () => {
-  const r = mod.useDeepseekUrl()
+  const r = mod.useAiSite()
   const prev = r.url.value
   const ok = r.setUrl('https://example.test/x')
   assert.equal(typeof ok, 'boolean')
@@ -198,27 +198,27 @@ test('setUrl 更新 url ref', () => {
 })
 
 test('sessionId / setSessionId 往返', () => {
-  const r = mod.useDeepseekUrl()
+  const r = mod.useAiSite()
   r.setSessionId('sid-1')
   assert.equal(r.sessionId.value, 'sid-1')
   r.setSessionId('')
 })
 
 test('modelId 默认在 MODELS 内', () => {
-  const r = mod.useDeepseekUrl()
+  const r = mod.useAiSite()
   const ids = mod.MODELS.map(m => m.id)
   assert.ok(ids.includes(r.modelId.value), `unexpected: ${r.modelId.value}`)
 })
 
 test('setModel 切换到合法 id', () => {
-  const r = mod.useDeepseekUrl()
+  const r = mod.useAiSite()
   const target = mod.MODELS[mod.MODELS.length - 1].id
   r.setModel(target)
   assert.equal(r.modelId.value, target)
 })
 
 test('display: 为函数，调用返回非空字符串', () => {
-  const r = mod.useDeepseekUrl()
+  const r = mod.useAiSite()
   assert.equal(typeof r.display, 'function')
   const out = r.display('https://chat.deepseek.com/a/chat/s/abc-123')
   assert.equal(typeof out, 'string')

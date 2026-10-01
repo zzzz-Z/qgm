@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useClipboard } from '@vueuse/core'
-// [filetree-fold-v1] PLAN 5.4 目录展开态持久化
+// PLAN 5.4 目录展开态持久化
 import { useFoldState } from '../../composables/ui/useFoldState'
 import { highlightToHtml } from '../../composables/useHljs'
-// [ft-md-render-v1] .md 文件走 markdown 渲染；其余走 hljs 源码高亮
+// .md 文件走 markdown 渲染；其余走 hljs 源码高亮
 import { renderMarkdown } from '../../composables/useMarkdown'
 import { useFileTree } from '../../composables/data/useFileTree'
-// [drag-controller-v1] 拖拽逻辑已抽到 drag-controller.ts
+// 拖拽逻辑已抽到 drag-controller.ts
 import { createDragController } from './drag-controller'
 import type { FileNode } from '../../types'
 
@@ -56,7 +56,7 @@ const ICONS: Record<string, string> = {
 
 const { tree, loading, copiedPath, load, loadChildren, getChildren, isChildrenLoading, copyPath } = useFileTree()
 
-// [filetree-fold-v1] 从 localStorage 恢复展开态
+// 从 localStorage 恢复展开态
 const fold = useFoldState('default', 'filetree')
 
 /** 当前工作区项目名；初值兜底 '工作区'，onMounted 后按 /__ai/workspace 或 package.json name 修正 */
@@ -96,7 +96,7 @@ const rootNode = computed(() => {
   } as FileNode
 })
 
-// [ft-md-render-v1] 是否为 Markdown 文件：仅按扩展名判定（.md / .markdown）
+// 是否为 Markdown 文件：仅按扩展名判定（.md / .markdown）
 // [CONSTRAINT] 大小写不敏感；URL 参数无扩展名时不走 md 分支
 const isMarkdown = computed(() => /\.(?:md|markdown)$/i.test(fileDialog.value?.path || ''))
 
@@ -119,7 +119,7 @@ const fileDialogHtml = computed(() => {
 if (props.root) {
   onMounted(async () => {
     await load()
-    // [root-name-v2] 优先用 /__ai/workspace 返回的 root 目录名；其次 package.json name
+    // 优先用 /__ai/workspace 返回的 root 目录名；其次 package.json name
     try {
       const ws = await fetch('/__ai/workspace', { headers: { accept: 'application/json' } })
       if (ws.ok) {
@@ -156,7 +156,7 @@ if (props.root) {
   })
 }
 
-// [drag-controller-v1] 拖拽控制器（须在 rootNode/getFileIcon/iconSvg/collectFilePathsAsync/toggle/copyPath 声明之后）
+// 拖拽控制器（须在 rootNode/getFileIcon/iconSvg/collectFilePathsAsync/toggle/copyPath 声明之后）
 const dragCtl = createDragController({
   isDraggable: () => !!props.draggable,
   rootNode,
@@ -340,7 +340,7 @@ async function chooseWorkspace(): Promise<void> {
     if (r.ok) {
       const j = await r.json().catch(() => ({})) as { ok?: boolean, canceled?: boolean }
       if (j && j.ok) {
-        // [auto-new-session-on-switch-v1] 切项目后：写标记，让 reload 后的 App 开新会话并连接
+        // 切项目后：写标记，让 reload 后的 App 开新会话并连接
         try {
           sessionStorage.setItem('__ai_switch_project', '1')
           sessionStorage.setItem('__ai_switch_project_at', String(Date.now()))
@@ -463,7 +463,7 @@ async function chooseWorkspace(): Promise<void> {
           <div v-else-if="fileError" class="ft-error">
             {{ fileError }}
           </div>
-          <!-- [ft-md-render-v1] .md 用普通 div（<pre> 会禁掉标题/列表的默认排版）；其余用 <pre> 保源码缩进 -->
+          <!-- .md 用普通 div（<pre> 会禁掉标题/列表的默认排版）；其余用 <pre> 保源码缩进 -->
           <div v-else-if="isMarkdown" class="ft-md" v-html="fileDialogHtml" />
           <pre v-else class="ft-pre" v-html="fileDialogHtml" />
         </div>
@@ -475,7 +475,7 @@ async function chooseWorkspace(): Promise<void> {
 <style scoped lang="scss" src="./FileTree.scss" />
 
 <style lang="scss">
-/* [drag-ghost-global-v1] ghost 挂载到 document.body，必须非 scoped 才能命中 */
+/* ghost 挂载到 document.body，必须非 scoped 才能命中 */
 // WHY: FileTree.scss 现由 scoped 引入，选择器会被加 [data-v-xxx]；ghost 无此属性 → 完全失效 → 拖动时鼠标旁看不到文件
 // CONSTRAINT: 与 FileTree.scss 内同名规则并存（scoped 那份不生效），后续清理时先确认本块已生效再删旧版
 html.ai-runner-dragging,

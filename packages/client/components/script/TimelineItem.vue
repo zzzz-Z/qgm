@@ -107,7 +107,7 @@ function toggle(): void {
 </template>
 
 <style scoped>
-/* [dsh-timeline-v2] dsh 风格气泡：AI 左对齐，user 右对齐 */
+/* dsh 风格气泡：AI 左对齐，user 右对齐 */
 .tl-row {
   display: flex;
   width: 100%;

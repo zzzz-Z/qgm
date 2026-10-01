@@ -43,7 +43,7 @@
       class="primary-btn takeover head-run"
       :class="{ 'is-waiting': aiWaiting }"
       :aria-busy="aiWaiting"
-      data-mark="[run-btn-copy-v1]"
+      data-mark=""
       @click="emit('toggleAutoTakeover')"
     >
       <svg
@@ -57,16 +57,16 @@
 </template>
 
 <script setup lang="ts">
-// [toolbar-props-v2] 去 props 变量绑定：模板直接用解构名，赋值给 props 会触发 unused-imports warning
+// 去 props 变量绑定：模板直接用解构名，赋值给 props 会触发 unused-imports warning
 defineProps<{
   running: boolean
   isLoopActive: boolean
   autoTakeoverEnabled: boolean
-  // [loop-paused-toggle-v1] 循环暂停标志：按钮在「暂停 / 恢复」间切换
+  // 循环暂停标志：按钮在「暂停 / 恢复」间切换
   loopPaused: boolean
   script: string
   attachedFilesCount: number
-  // [ai-wait-btn-v1] 等待 AI 回复中：主按钮显示 spinner，视觉反馈与顶部 banner 呼应
+  // 等待 AI 回复中：主按钮显示 spinner，视觉反馈与顶部 banner 呼应
   aiWaiting: boolean
 }>()
 
@@ -83,10 +83,7 @@ interface Template { id: string, label: string, title: string, code: string }
 
 <style scoped>
 .tpl-bar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
+  @apply flex items-center justify-end gap-1.5;
   padding: 0;
   background: transparent;
   border-bottom: 0;

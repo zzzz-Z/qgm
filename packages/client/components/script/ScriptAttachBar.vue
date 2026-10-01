@@ -31,7 +31,7 @@ interface AttachedFile {
 </script>
 
 <style scoped lang="scss">
-// [chat-input-v2] 附件条与输入框卡片同体：透明背景 + 无底部分界线
+// 附件条与输入框卡片同体：透明背景 + 无底部分界线
 .attach-bar {
   display: flex;
   flex-wrap: wrap;
@@ -42,7 +42,7 @@ interface AttachedFile {
   overflow-y: auto;
 }
 
-// [chat-input-v5] 附件标签圆角 10px 与卡片同族；半透明底更融入输入框
+// 附件标签圆角 10px 与卡片同族；半透明底更融入输入框
 .attach-tag {
   display: inline-flex;
   align-items: center;

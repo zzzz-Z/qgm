@@ -1,4 +1,4 @@
-// AIRUNNER-BATCH19-2-SPLIT-EVENT-STREAM: 从 useEventStream.ts 抽出的纯模块级状态与函数（无 useDeepseekUrl 依赖）
+// AIRUNNER-BATCH19-2-SPLIT-EVENT-STREAM: 从 useEventStream.ts 抽出的纯模块级状态与函数（无 useAiSite 依赖）
 import { ref } from 'vue'
 
 /** 事件类型枚举（ai: = AI 回包；run: = 运行阶段；loop: = 循环状态；rules: = 规则变化） */

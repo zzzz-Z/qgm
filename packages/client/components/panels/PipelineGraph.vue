@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// [pipeline-graph-v1] PLAN 5.2 链路图（五段聚合）
+// PLAN 5.2 链路图（五段聚合）
 import { computed } from 'vue'
 
 /** 组件接收的 props 定义 */
@@ -175,8 +175,8 @@ function norm(raw?: string): SegStatus {
 .pg-link-ok {
   background: #22c55e;
 }
-/* [pg-narrow-v1] PLAN 5.4 窄屏（<768px）链路图纵向 */
-/* [pg-mid-v1] PLAN 5.4 中屏（768-1200）链路图横向滚动 */
+/* PLAN 5.4 窄屏（<768px）链路图纵向 */
+/* PLAN 5.4 中屏（768-1200）链路图横向滚动 */
 @media (min-width: 769px) and (max-width: 1200px) {
   .pg-row {
     overflow-x: auto;

@@ -120,19 +120,14 @@ function splitPath(p: string) {
 }
 
 .changes-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  @apply flex items-center justify-between gap-3;
   height: 40px;
   padding: 0 12px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
 .summary {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  @apply flex items-center gap-2.5;
   font-size: 13px;
 }
 .summary-title {
@@ -140,9 +135,7 @@ function splitPath(p: string) {
   color: var(--text);
 }
 .summary-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  @apply inline-flex items-center justify-center;
   min-width: 20px;
   height: 20px;
   padding: 0 7px;
@@ -154,13 +147,10 @@ function splitPath(p: string) {
   font-variant-numeric: tabular-nums;
 }
 .summary-dots {
-  display: flex;
-  gap: 6px;
+  @apply flex gap-1.5;
 }
 .s-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  @apply inline-flex items-center gap-1;
   padding: 2px 8px;
   border-radius: var(--radius-10);
   font-size: 11px;
@@ -187,49 +177,32 @@ function splitPath(p: string) {
 }
 
 .bar-actions {
-  display: flex;
-  gap: 6px;
+  @apply flex gap-1.5;
 }
 
-.ghost-btn {
-  padding: 4px 10px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-4);
-  color: var(--text-2);
-  font-size: 12px;
-  cursor: pointer;
-  transition: 0.12s;
-}
-.ghost-btn:hover:not(:disabled) {
-  background: rgb(239 68 68 / 8%);
-  color: var(--danger);
-  border-color: rgb(239 68 68 / 20%);
-}
-.ghost-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.save-btn {
+.save-btn,
+.btn-primary {
   padding: 4px 12px;
-  background: var(--primary);
-  color: #fff;
-  border: 0;
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--primary);
   border-radius: var(--radius-4);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: 0.12s;
-  box-shadow: 0 1px 2px rgb(37 99 235 / 25%);
+  box-shadow: none;
 }
-.save-btn:hover:not(:disabled) {
-  background: var(--primary-hover);
+.save-btn:hover:not(:disabled),
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-bg);
+  color: var(--primary-hover);
+  border-color: var(--primary-hover);
 }
-.save-btn:disabled {
+.save-btn:disabled,
+.btn-primary:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
 .file-list {
@@ -248,9 +221,7 @@ function splitPath(p: string) {
 }
 
 .file-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  @apply flex items-center gap-2.5;
   padding: 6px 12px;
   font: 12px/1.5 var(--mono);
   border-bottom: 1px solid var(--border);
@@ -270,9 +241,7 @@ function splitPath(p: string) {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  @apply flex items-center justify-center;
   border-radius: var(--radius-4);
   font: 11px/1 var(--mono);
   font-weight: 700;
@@ -309,9 +278,7 @@ function splitPath(p: string) {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  @apply flex items-center justify-center;
   border: 0;
   border-radius: var(--radius-4);
   background: transparent;
@@ -324,8 +291,8 @@ function splitPath(p: string) {
     color 0.12s;
 }
 .undo-btn:hover:not(:disabled) {
+  background: rgb(224 108 117 / 14%);
   color: var(--danger);
-  background: var(--danger-bg);
 }
 .undo-btn:disabled {
   opacity: 0.5;
@@ -375,45 +342,6 @@ function splitPath(p: string) {
 .ghost-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-.save-btn,
-.btn-primary {
-  background: var(--primary);
-  color: #fff;
-  border: 0;
-  box-shadow: none;
-  border-radius: var(--radius-6);
-}
-.save-btn:hover:not(:disabled),
-.btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover);
-  box-shadow: none;
-}
-
-.undo-btn {
-  background: transparent;
-  border: 0;
-  color: var(--text-3);
-}
-.undo-btn:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%);
-  color: var(--danger);
-}
-
-.save-btn,
-.btn-primary {
-  background: transparent;
-  color: var(--primary);
-  border: 1px solid var(--primary);
-  box-shadow: none;
-}
-.save-btn:hover:not(:disabled),
-.btn-primary:hover:not(:disabled) {
-  background: var(--primary-bg);
-  color: var(--primary-hover);
-  border-color: var(--primary-hover);
-  box-shadow: none;
 }
 </style>
 <!-- tooltip-audit -->

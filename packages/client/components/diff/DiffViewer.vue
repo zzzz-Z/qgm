@@ -82,7 +82,7 @@ const stats = computed(() => {
 
 watch(() => [props.before, props.after] as const, scheduleHighlight, { immediate: true })
 
-// [use-resize-observer-v1] 用 vueuse useResizeObserver 替换手写 observer：
+// 用 vueuse useResizeObserver 替换手写 observer：
 // 内部自动 in-scope 清理（组件卸载时 disconnect），省掉 onBeforeUnmount 分支
 // [CONSTRAINT] target 传入 ref 对象本身（非 .value），vueuse 会 watch 引用变化后在 DOM 就绪时 observe
 onMounted(() => {
