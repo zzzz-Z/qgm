@@ -23,16 +23,20 @@ export function clearRulesHashCache() { _rulesHashCache = null }
 export function hashRules(): string {
   if (_rulesHashCache !== null) return _rulesHashCache
   try {
+    // [rules-hash-v2] SSOT 是 SYSTEM.md；skills 目录作为补充参与 hash
+    // [WHY] 原实现只读 .ai-runner/skills（目录不存在）→ 恒返回 sha256('')=e3b0c442，分组失效
+    // [CHANGE-IMPACT] compliance.jsonl 的 rulesHash 会从 e3b0c442 变为 SYSTEM.md 内容哈希
+    const sources: string[] = []
+    const sysPath = path.join(getRoot(), 'packages/core/src/rules/SYSTEM.md')
+    if (fs.existsSync(sysPath)) sources.push(sysPath)
     const userDir = path.join(getRoot(), '.ai-runner/skills')
-    const files: string[] = []
-    for (const dir of [userDir]) {
-      if (!fs.existsSync(dir)) continue
-      for (const f of fs.readdirSync(dir)) {
-        if (f.endsWith('.md')) files.push(path.join(dir, f))
+    if (fs.existsSync(userDir)) {
+      for (const f of fs.readdirSync(userDir)) {
+        if (f.endsWith('.md')) sources.push(path.join(userDir, f))
       }
     }
-    files.sort()
-    const content = files.map((f) => {
+    sources.sort()
+    const content = sources.map((f) => {
       try { return fs.readFileSync(f, 'utf8') } catch { return '' }
     }).join('\n---\n')
     _rulesHashCache = crypto.createHash('sha256').update(content).digest('hex').slice(0, 8)

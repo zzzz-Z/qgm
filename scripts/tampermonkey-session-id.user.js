@@ -40,6 +40,8 @@
   const _MSG_BUF_MAX = 50
   // [c1-bridge-v1] 消息去重（msgId）+ 断链队列 + 定期 drain
   let _msgSeq = 0
+  // [fill-dedup-v1] 入站 fill/rotate 去重，防止 postMessage 重试/多窗口重复消费
+  const _seenInbound = new Set()
   const _pending = []
   const _PENDING_MAX = 200
   function _nextMsgId() {
@@ -292,7 +294,16 @@
       if (!text) continue
       if (!text.includes('\n') && text.length < 120) continue
       // [code-text-clean-v1] 语言判定三级回退：className → DOM 邻近探测 → 内容特征
-      const lang = guessLangFromClass(codeEl) || guessLangFromDom(pre) || guessLangFromContent(text) || null
+      let lang = guessLangFromClass(codeEl) || guessLangFromDom(pre) || guessLangFromContent(text) || null
+      // [script-head-contract-fallback-v1] SYSTEM.md §1.4 脚本头契约：与 headless-inject.ts 该段保持严格同构
+      // [WHY] 同款漏识别：AI 用非白名单语言标签（javascript/node/无标签）时三级判定得 null → 代码块被跳过 →
+      //   前端只收到 plain 走 Markdown 渲染不执行（表现为「渲染了但没跑」）
+      // [CONSTRAINT] 只认 §1.4 允许的两种契约（shebang / @desc）；本段与 headless-inject.ts 必须同改，避免双通道分叉
+      // [CHANGE-IMPACT] 影响 classifyAndPost 的 kind 分流（line 429 kind:'script'）
+      const _marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
+        || /^\s*\/\/\s*@desc\s*:/m.test(text)
+        || /^\s*#\s*@desc\s*:/m.test(text)
+      if (!lang && _marked) lang = 'js'
       if (lang !== 'cjs' && lang !== 'js' && lang !== 'bash') continue
       const item = { lang, code: text, hash: hash32(text) }
       last = item
@@ -395,9 +406,6 @@
     return hash32(t.slice(-300))
   }
 
-  let handoffMode = 'off'
-  let handoffReplyText = ''
-
   // [debounce-flatten-v1] 单级 350ms 节流：原 replyObserver 与 classifyAndPost 共用 replyDebounce，
   //   每次 DOM 变化都重设 2000ms；AI 流式期间 DOM 持续抖动 → 核心逻辑永远被推迟到"最后一次变化后再 2s"才执行。
   // [CONSTRAINT] 350ms 是合并 token 级抖动的下限；lastBodySig / seenHashes / seenDoneMarkers 已保证同内容不重复 post。
@@ -406,17 +414,6 @@
   function classifyAndPost() {
     try {
       if (!window.opener || window.opener.closed) return
-      if (handoffMode === 'waiting-summary') {
-        const replyText = extractLatestReplyText()
-        if (replyText && replyText.length > 30 && replyText === handoffReplyText) {
-          handoffMode = 'off'
-          handoffReplyText = ''
-          post({ type: 'ai-runner:summary', text: replyText, aiSiteId: extractId(), sessionId: extractSidFromHash(), degraded: false })
-        } else if (replyText && replyText.length > 30) {
-          handoffReplyText = replyText
-        }
-        return
-      }
 
       const doneMarker = findNewDone()
 
@@ -472,7 +469,20 @@
     if (observerDebounce) clearTimeout(observerDebounce)
     observerDebounce = setTimeout(classifyAndPost, 350)
   })
-  replyObserver.observe(document.body, { childList: true, subtree: true, characterData: true })
+
+  // [stop-v2] 监听生命周期标志 + 重挂入口
+  // [WHY] stop 需 disconnect 防止旧回复重放；下次 fill/rotate 前须能恢复监听
+  // [CONSTRAINT] 声明顺序固定在 replyObserver 之后，避免 no-use-before-define
+  // [CHANGE-IMPACT] 被 stop / fill / rotate 三个分支引用，改此处必须同步改三个触发点
+  let _replyObserving = false
+  function resumeReplyObserver() {
+    if (_replyObserving) return
+    try {
+      replyObserver.observe(document.body, { childList: true, subtree: true, characterData: true })
+      _replyObserving = true
+    } catch { /* body 未就绪，下次 fill/rotate 再试 */ }
+  }
+  resumeReplyObserver()
 
   // ===== fill / rotate / new-session / stop =====
   function clickStopGenerating() {
@@ -497,24 +507,19 @@
       return /新建对话|新对话|新建聊天|新建会话|开启新对话|new\s*chat|new\s*conversation/i.test(lbl)
     }) || null
   }
-  // [newchat-fallback] 找不到按钮则降级跳站点首页
-  // [fallback-handoff] 找不到按钮则：存 summary → 跳站点首页
-  function fallbackNewChat(summary) {
-    const url = `${location.origin}/`
-    if (location.href !== url && location.pathname !== '/') {
-      try { sessionStorage.setItem('__ai_pending_new_session', String(summary || '')) } catch { /* ignore */ }
-      location.href = url
-      return true
-    }
-    return false
-  }
-  function clickNewSession(summary) {
+  // [no-summary-v1] 删除总结交接：new-session 只切换会话，不再搬运 summary
+  // [CHANGE-IMPACT] 上游 useAiWindowSend.sendNewSession 的 summary 字段到此为止不再消费
+  function clickNewSession() {
     const btn = findNewChatButton()
     if (btn && !btn.disabled) {
       try { btn.click(); return true } catch { /* ignore */ }
     }
-    // [fallback-handoff] 降级带 summary
-    return fallbackNewChat(summary)
+    const url = `${location.origin}/`
+    if (location.href !== url && location.pathname !== '/') {
+      location.href = url
+      return true
+    }
+    return false
   }
 
   function findInputBox() {
@@ -699,7 +704,7 @@
       sendEnter(box)
     }
     setTimeout(() => {
-      const stillHas = box.textContent || box.value.trim().length > 0
+      const stillHas = (box.textContent || box.value || '').trim().length > 0
       if (stillHas) {
         console.warn('[ai-runner] 发送可能失败，补一次 Enter')
         sendEnter(box)
@@ -712,6 +717,9 @@
     if (!d || typeof d !== 'object') return
 
     if (d.type === 'ai-runner:fill') {
+      resumeReplyObserver() // [stop-v2] stop 后首次 fill 恢复回复监听
+      if (d.msgId && _seenInbound.has(d.msgId)) return
+      if (d.msgId) { _seenInbound.add(d.msgId); if (_seenInbound.size > 200) _seenInbound.delete(_seenInbound.values().next().value) }
       const prompt = String(d.prompt || '')
       if (!prompt) return
       const box = findInputBox()
@@ -744,30 +752,23 @@
     }
 
     if (d.type === 'ai-runner:rotate') {
+      resumeReplyObserver() // [stop-v2] stop 后首次 rotate 恢复回复监听
+      if (d.msgId && _seenInbound.has(d.msgId)) return
+      if (d.msgId) { _seenInbound.add(d.msgId); if (_seenInbound.size > 200) _seenInbound.delete(_seenInbound.values().next().value) }
       const instruction = String(d.instruction || '')
       if (!instruction) return
       const box = findInputBox()
       if (!box) { console.warn('[ai-runner] rotate: 未找到输入框'); return }
-      handoffReplyText = ''
-      handoffMode = 'waiting-summary'
       fillInput(box, instruction)
       setTimeout(doSend, 300, box)
       return
     }
 
     if (d.type === 'ai-runner:new-session') {
-      const summary = String(d.summary || '')
-      const clicked = clickNewSession(summary)
+      // [no-summary-v1] 不再搬运 summary；仅切换会话并回执
+      const clicked = clickNewSession()
       if (clicked) {
         setTimeout(() => {
-          const box = findInputBox()
-          if (!box) {
-            post({ type: 'ai-runner:new-session-created', url: location.href, id: extractId(), sessionId: extractSidFromHash() })
-            return
-          }
-          const prefix = '这是上一个会话的上下文总结，请基于此继续工作：\n'
-          fillInput(box, prefix + summary)
-          setTimeout(doSend, 300, box)
           post({ type: 'ai-runner:new-session-created', url: location.href, id: extractId(), sessionId: extractSidFromHash() })
         }, 1500)
       } else {
@@ -780,7 +781,7 @@
       // [replay] 工作台刷新后请求重发最近消息
       try {
         for (const m of _msgBuf) {
-          if (m && (m.type === 'ai-runner:reply' || m.type === 'ai-runner:summary' || m.type === 'ai-runner:session-id')) {
+          if (m && (m.type === 'ai-runner:reply' || m.type === 'ai-runner:session-id')) {
             if (window.opener && !window.opener.closed) window.opener.postMessage(m, '*')
           }
         }
@@ -820,32 +821,16 @@
       return
     }
     if (d.type === 'ai-runner:stop') {
+      // [stop-v2] 清缓冲 + 保留去重集 + disconnect
+      // [WHY] replyObserver 常驻 body；清空 seenHashes/lastBodySig 会让旧回复被重判为新回复 post
+      // [CONSTRAINT] 保留 seenHashes / seenDoneMarkers / lastBodySig；下次 fill/rotate 由 resumeReplyObserver 恢复
+      // [CHANGE-IMPACT] 与 resumeReplyObserver 成对；改此处必须同步改 resume 触发点
       clickStopGenerating()
-      seenHashes.clear()
-      seenDoneMarkers.clear()
-      lastBodySig = ''
-      handoffMode = 'off'
-      handoffReplyText = ''
+      _msgBuf.length = 0
+      _pending.length = 0
       if (observerDebounce) { clearTimeout(observerDebounce); observerDebounce = null }
+      try { replyObserver.disconnect() } catch { /* ignore */ }
+      _replyObserving = false
     }
   })
-
-  // [fallback-handoff] 页面加载时若有 pending summary，等输入框就绪后填入并回执
-  ;(function consumePendingNewSession() {
-    let pending = ''
-    try { pending = sessionStorage.getItem('__ai_pending_new_session') || '' } catch { /* ignore */ }
-    if (!pending) return
-    try { sessionStorage.removeItem('__ai_pending_new_session') } catch { /* ignore */ }
-    let tries = 0
-    const t = setInterval(() => {
-      tries += 1
-      const box = findInputBox()
-      if (!box) { if (tries > 40) clearInterval(t); return }
-      clearInterval(t)
-      const prefix = `这是上一个会话的上下文总结，请基于此继续工作：${String.fromCharCode(10)}`
-      fillInput(box, prefix + pending)
-      setTimeout(doSend, 300, box)
-      try { if (window.opener) post({ type: 'ai-runner:new-session-created', url: location.href, id: extractId(), sessionId: extractSidFromHash() }) } catch { /* ignore */ }
-    }, 250)
-  })()
 })()

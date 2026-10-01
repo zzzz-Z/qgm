@@ -71,15 +71,15 @@ function windowName(sid: string): string {
   return sid === 'default' ? 'ai-runner-deepseek' : `ai-runner-deepseek-${sid}`
 }
 // [multi-loop-step5-url] 把 sid 拼进 hash，供油猴读取（AI 站点忽略未知 hash）
-function withSidHash(u: string, sid: string): string {
+function withSidHash(url: string, sid: string): string {
   try {
-    const parsed = new URL(u)
+    const parsed = new URL(url)
     const parts = parsed.hash.replace(/^#/, '').split('&').filter(p => p && !p.startsWith('sid='))
     parts.push(`sid=${encodeURIComponent(sid)}`)
     parsed.hash = parts.join('&')
     return parsed.toString()
   } catch {
-    return u
+    return url
   }
 }
 
@@ -212,6 +212,13 @@ export async function openAiSession(opts?: {
   forceRules?: boolean
 }): Promise<{ win: Window | null, fill: FillResult | null }> {
   const p = opts?.initialPrompt
+  // [window-ready-wait-v1] 记录调用前该 sid 是否已有窗口引用；无则视为本次新开窗口
+  // [WHY] 新窗口内 tampermonkey 尚未加载时，fill postMessage 会被丢弃——表现为"首问未带 SYSTEM.md"；
+  //       用户报告"刷新工作台后才带规则"即复用了已就绪的旧窗口，postMessage 才被接收。
+  // [CONSTRAINT] 只在 preWin 为空（新窗口）时等待；已存在的活窗口 tampermonkey 已就绪，不引入额外延迟。
+  // [CHANGE-IMPACT] 三个调用方（onNewSession / onOpenAiWin 无会话分支 / onMounted 切项目）一致受益。
+  const preSid = opts?.sid ?? getActiveWinSid()
+  const preWin = getWindowBySid(preSid)
   const win = openDeepseek(opts?.atUrl ?? DEFAULT_URL, opts?.sid)
   // [headless-rules-fix] headless 下 openDeepseek 恒返回 null（不产真实窗口）——
   // 旧逻辑 if(!win)return 会短路掉 copyAndFill，导致规则永不注入；此处显式分流。
@@ -223,6 +230,7 @@ export async function openAiSession(opts?: {
   }
   if (!win) return { win: null, fill: null }
   if (!p) return { win, fill: null }
+  if (!preWin) await promiseTimeout(1500)
   const fill = await copyAndFill(p, { forceRules: opts?.forceRules })
   return { win, fill }
 }

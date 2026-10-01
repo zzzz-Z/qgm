@@ -269,8 +269,8 @@ export function currentLoopContext(): { loopId?: string, loopRound?: number } {
  * 用于循环启动时把当前活动会话 id 绑定到 ''，
  * 配合 isFromCurrentLoop 做多 AI 窗口隔离。
  */
-export function setActiveSessionIdGetter(fn: () => string): void {
-  _getActiveSessionId = fn
+export function setActiveSessionIdGetter(getter: () => string): void {
+  _getActiveSessionId = getter
 }
 
 /**

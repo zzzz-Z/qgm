@@ -27,8 +27,8 @@ const stripBlankLines = useStorage(KEY_BLANKS, true, undefined, { serializer: BO
  * [CHANGE-IMPACT] 会写 localStorage；其他标签页通过 useStorage 自动同步
  * @param v 目标状态；true=去注释，false=保留
  */
-function toggleStripComments(v: boolean) {
-  stripComments.value = v
+function toggleStripComments(on: boolean) {
+  stripComments.value = on
 }
 
 /**
@@ -36,8 +36,8 @@ function toggleStripComments(v: boolean) {
  * [CONSTRAINT] 不做取反；与 toggleStripComments 保持一致的入参语义
  * @param v 目标状态；true=去空行，false=保留
  */
-function toggleStripBlankLines(v: boolean) {
-  stripBlankLines.value = v
+function toggleStripBlankLines(on: boolean) {
+  stripBlankLines.value = on
 }
 
 /**

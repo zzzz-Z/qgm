@@ -100,8 +100,8 @@ export const useRuntime = defineStore('runtime-store', () => { // [runtime-fix2]
   }
 
   /** 设置当前轮次（非负数，非法输入视为 0） */
-  function setRound(n: number): void {
-    state.value.loopRound = Math.max(0, Number(n) || 0)
+  function setRound(round: number): void {
+    state.value.loopRound = Math.max(0, Number(round) || 0)
   }
 
   /** 轮次 +1：每完成一轮调用 */
@@ -110,8 +110,8 @@ export const useRuntime = defineStore('runtime-store', () => { // [runtime-fix2]
   }
 
   /** 设置流水线阶段：plan / implement / verify 或空 */
-  function setStage(s: RuntimeStage): void {
-    state.value.stage = s
+  function setStage(stage: RuntimeStage): void {
+    state.value.stage = stage
   }
 
   /** 设置循环标识（每次 start 后由外部回填） */
@@ -120,8 +120,8 @@ export const useRuntime = defineStore('runtime-store', () => { // [runtime-fix2]
   }
 
   /** 设置用户备注：随下一轮反馈带给 AI */
-  function setUserNote(t: string): void {
-    state.value.userNote = String(t || '')
+  function setUserNote(note: string): void {
+    state.value.userNote = String(note || '')
   }
 
   return {

@@ -24,8 +24,8 @@ export const autoRotateSession = useStorage<boolean>(KEY_AUTO_ROTATE, true, unde
  * [CHANGE-IMPACT] 触发 startHandoff 会改变 inst.state；阈值 LOOP_ROTATE_THRESHOLD 由 loopLogic 提供
  * @param n 本轮累计 token 估算值；负数与 NaN 会被兜底为 0
  */
-export function setTokenEstimate(n: number): void {
-  const v = Math.max(0, Number(n) || 0)
+export function setTokenEstimate(tokens: number): void {
+  const v = Math.max(0, Number(tokens) || 0)
   const inst = activeLoop.value
   if (!inst) return
   if (!autoRotateSession.value) return

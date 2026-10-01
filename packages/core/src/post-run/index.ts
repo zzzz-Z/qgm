@@ -9,8 +9,8 @@ export type { DecisionMarkers, DecisionOption, DecisionPayload } from './decisio
 export { extractErrorFiles } from './error-files.js'
 export { hasEslint, pickLintTargets, runEslint } from './lint.js'
 export { applyOverlay, readOverlayChanges } from './overlay.js'
-// [run-helpers] /run 纯计算辅助
-export { type ComplianceFlags, computeClaimMismatch, computeCompliance } from './run-helpers.js'
+// [run-compliance] /run 合规校验辅助
+export { type ComplianceFlags, computeClaimMismatch, computeCompliance } from './run-compliance.js'
 export { runScript } from './run-script.js'
 export type { RunResult } from './run-script.js'
 export { checkScriptSyntax } from './script-check.js'

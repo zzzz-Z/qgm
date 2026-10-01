@@ -126,8 +126,8 @@ export function listRounds(root: string, sessionId: string, runId: string): numb
  * [CONSTRAINT] 输出定长 8 字符；不同内容可能碰撞（非加密哈希）
  * [CHANGE-IMPACT] 输出被 RoundSnapshot.script.hash 消费；换算法会让历史 hash 全部失配
  */
-export function hashScript(s: string): string {
+export function hashScript(text: string): string {
   let h = 0
-  for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0 }
+  for (let i = 0; i < text.length; i++) { h = ((h << 5) - h + text.charCodeAt(i)) | 0 }
   return (h >>> 0).toString(16).padStart(8, '0')
 }

@@ -21,8 +21,8 @@ function getRoot(): string {
  * @param timeoutMs 超时毫秒数（默认 60s；批量运行 tsc 时调用方传 120s）
  */
 async function runCmd(cmd: string, args: string[], timeoutMs = 60_000): Promise<{ code: number, stdout: string, stderr: string }> {
-  const r = await runProcess(cmd, { args, cwd: getRoot(), timeoutMs })
-  return { code: r.code, stdout: r.stdout, stderr: r.stderr }
+  const proc = await runProcess(cmd, { args, cwd: getRoot(), timeoutMs })
+  return { code: proc.code, stdout: proc.stdout, stderr: proc.stderr }
 }
 
 /**

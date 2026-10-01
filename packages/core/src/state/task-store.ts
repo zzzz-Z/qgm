@@ -93,7 +93,6 @@ export function readTrustSnapshot(): TrustSnapshot | null {
     updatedAt: new Date().toISOString(),
   }
 }
-// [plan-tiers-v1] 读 plan.json（静态计划；缺失或损坏返回 null）
 /**
  * 读取 Task Plan
  */
@@ -174,10 +173,10 @@ function readStateRaw(): TaskState {
  * 归一后才能正确匹配"已完成"状态
  * [CONSTRAINT] 去除所有空白、全角冒号统一为半角、截断至 80 字符；不做大小写归一
  * [CHANGE-IMPACT] 改归一规则会让已有 done 记录匹配失败，导致待办重新出现
- * @param s 原始待办文本
+ * @param key 原始待办文本
  */
-function normKey(s: string): string {
-  return String(s || '').replace(/\s+/g, '').replace(/[：:]/g, ':').slice(0, 80)
+function normKey(key: string): string {
+  return String(key || '').replace(/\s+/g, '').replace(/[：:]/g, ':').slice(0, 80)
 }
 
 // 合并 PLAN.md 待办 + state.json

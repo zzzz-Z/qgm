@@ -32,11 +32,17 @@ Object.defineProperty(globalThis, 'sessionStorage', {
   },
 })
 
+// [__ai_runner_doc_stub__] vueuse isClient 需 document；缺失则 useSessionStorage 走内存兜底，断言恒红
+;(globalThis as unknown as { document: unknown }).document = { createElement: () => ({ style: {} }), addEventListener: () => {}, removeEventListener: () => {} }
+
 Object.defineProperty(globalThis, 'window', {
   configurable: true,
   writable: true,
   value: {
     location: { href: 'http://localhost/' },
+    // [__ai_runner_win_bridge__] vueuse useSessionStorage/useStorage 读 window.*；桥接避免内存兜底
+    get localStorage() { return globalThis.localStorage },
+    get sessionStorage() { return globalThis.sessionStorage },
     addEventListener: (): void => {},
     removeEventListener: (): void => {},
   },

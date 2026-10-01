@@ -135,9 +135,9 @@ export function confirmDialog(msg: string, opts: ConfirmOptions = {}): Promise<b
 }
 
 /** 关闭确认弹窗并回传用户选择；[CONSTRAINT] 与 confirmDialog 成对使用，弹窗未开时静默 */
-export function resolveConfirm(v: boolean) {
+export function resolveConfirm(confirmed: boolean) {
   if (!confirmState.value) return
-  confirmState.value.resolve(v)
+  confirmState.value.resolve(confirmed)
   confirmState.value = null
 }
 

@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { EXCLUDE_DIRS, ROOT } from '../config.js'
 import { runDir } from '../state/snapshot.js'
-import { diffIndexes, readIndex, scanIndex } from '../utils/index-index.js'
+import { diffIndexes, readIndex, scanIndex } from '../utils/file-index.js'
 
 interface FileNode {
   name: string

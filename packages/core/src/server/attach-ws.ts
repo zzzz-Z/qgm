@@ -33,14 +33,14 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
   // 缓存最近外发消息（per-sid），供客户端重连后请求重放
   const _serverMsgBuf = new Map<string, unknown[]>()
   const _SRV_BUF_MAX = 30
-  function _bufferOut(sid: string, obj: unknown) {
+  function _bufferOut(sid: string, payload: unknown) {
     if (!sid) return
-    const t = (obj as { t?: string }).t || ''
+    const t = (payload as { t?: string }).t || ''
     // 仅缓存业务消息，不缓存 state/hello 等瞬态
     if (t !== 'headless:reply' && t !== 'headless:script' && t !== 'headless:summary' && t !== 'headless:new-session-created') return
     let arr = _serverMsgBuf.get(sid)
     if (!arr) { arr = []; _serverMsgBuf.set(sid, arr) }
-    arr.push(obj)
+    arr.push(payload)
     if (arr.length > _SRV_BUF_MAX) arr.shift()
   }
 
@@ -59,10 +59,10 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
   async function handleMessage(ws: WebSocket, msg: TransportMessage): Promise<void> {
     const t = String(msg.t || '')
     // 发送消息契约见 protocol.ts ServerMessage
-    const send = (obj: ServerMessage | TransportMessage) => {
-      const sid = String((obj as { sid?: string }).sid || '')
-      if (sid) _bufferOut(sid, obj)
-      try { ws.send(JSON.stringify(obj)) } catch { /* swallow: WS 已关闭 / 缓冲满，单条丢弃不阻断其余广播 */ }
+    const send = (msg: ServerMessage | TransportMessage) => {
+      const sid = String((msg as { sid?: string }).sid || '')
+      if (sid) _bufferOut(sid, msg)
+      try { ws.send(JSON.stringify(msg)) } catch { /* swallow: WS 已关闭 / 缓冲满，单条丢弃不阻断其余广播 */ }
     }
     switch (t) {
       case 'headless:request-replay': {

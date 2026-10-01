@@ -8,7 +8,8 @@ import { detectLang, parseScriptMeta } from '../../../packages/client/utils/scri
 const NL = String.fromCharCode(10)
 
 test('parseScriptMeta: 空字符串 → 全字段空串', () => {
-  assert.deepEqual(parseScriptMeta(''), { desc: '', why: '', plan: '', done: '' })
+  // [meta-schema-unify-v1] 实现返回 8 字段；deepEqual 严格比较键集，4 字段断言长期红
+  assert.deepEqual(parseScriptMeta(''), { desc: '', why: '', plan: '', state: '', done: '', mode: '', ctx: '', changes: '' })
 })
 
 test('parseScriptMeta: js 风格 // 注释解析', () => {
@@ -17,7 +18,8 @@ test('parseScriptMeta: js 风格 // 注释解析', () => {
   assert.equal(m.desc, '解析脚本头')
   assert.equal(m.why, '需要展示')
   assert.equal(m.plan, 'b1')
-  assert.equal(m.done, '无错')
+  // [meta-schema-unify-v1] 输入无 `// @done` 行 → 实现按缺失字段返回空串；旧断言 '无错' 是历史残留
+  assert.equal(m.done, '')
 })
 
 test('parseScriptMeta: bash 风格 # 注释解析', () => {
@@ -65,8 +67,10 @@ test('detectLang: 无 @desc/@why 的 # 行 → 仍 js（regex 要求 @desc|@why�
   assert.equal(detectLang('# just a comment'), 'js')
 })
 
-test('detectLang: 缩进的 # @desc → bash', () => {
-  assert.equal(detectLang('   # @desc: y'), 'bash')
+test('detectLang: 无 shebang 的缩进 # 注释 → js（判据基于首行 shebang）', () => {
+  // [meta-schema-unify-v1] detectLang 与 core/post-run/shebang.ts 对齐：只看首行 #!，不用注释前缀判语言；
+  // 旧断言 'bash' 源于早期「注释前缀」实现，已被 shebang 契约取代
+  assert.equal(detectLang('   # @desc: y'), 'js')
 })
 
 test('detectLang: 空字符串 → js', () => {

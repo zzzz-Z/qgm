@@ -47,21 +47,21 @@ export const SEGMENTS = [
  * [CHANGE-IMPACT] 新增阶段必须同步补 SEGMENTS，否则状态机不会为该阶段初始化状态槽
  */
 export function createPipeline(): Pipeline {
-  const p: Pipeline = {}
-  for (const s of SEGMENTS) p[s] = { status: 'pending', retries: 0, error: null }
-  return p
+  const pipeline: Pipeline = {}
+  for (const s of SEGMENTS) pipeline[s] = { status: 'pending', retries: 0, error: null }
+  return pipeline
 }
 
 /**
  * 将某阶段置为 running 并记录起始时间
  * [CONSTRAINT] 会清空 error 字段，使重复运行不复用上次失败信息
- * [CHANGE-IMPACT] 变更返回 p 的引用语义（当前原地改）会影响调用方是否需重新赋值
+ * [CHANGE-IMPACT] 变更返回 pipeline 的引用语义（当前原地改）会影响调用方是否需重新赋值
  * @param now 时间戳，默认 Date.now()；测试时可注入固定值
  */
-export function markRunning(p: Pipeline, seg: SegmentName, now: number = Date.now()): Pipeline {
-  const cur = p[seg] || { status: 'pending' as SegmentStatus }
-  p[seg] = { ...cur, status: 'running', startedAt: now, error: null }
-  return p
+export function markRunning(pipeline: Pipeline, segment: SegmentName, now: number = Date.now()): Pipeline {
+  const cur = pipeline[segment] || { status: 'pending' as SegmentStatus }
+  pipeline[segment] = { ...cur, status: 'running', startedAt: now, error: null }
+  return pipeline
 }
 
 /**
@@ -70,11 +70,11 @@ export function markRunning(p: Pipeline, seg: SegmentName, now: number = Date.no
  * [CHANGE-IMPACT] durationMs 被 run.ts 用于慢阶段识别与前端展示
  * @param now 结束时间戳；测试时可注入固定值
  */
-export function markOk(p: Pipeline, seg: SegmentName, now: number = Date.now()): Pipeline {
-  const cur = p[seg] || { status: 'pending' as SegmentStatus, startedAt: now }
+export function markOk(pipeline: Pipeline, segment: SegmentName, now: number = Date.now()): Pipeline {
+  const cur = pipeline[segment] || { status: 'pending' as SegmentStatus, startedAt: now }
   const started = cur.startedAt ?? now
-  p[seg] = { ...cur, status: 'ok', finishedAt: now, durationMs: now - started, error: null }
-  return p
+  pipeline[segment] = { ...cur, status: 'ok', finishedAt: now, durationMs: now - started, error: null }
+  return pipeline
 }
 
 /**
@@ -84,19 +84,19 @@ export function markOk(p: Pipeline, seg: SegmentName, now: number = Date.now()):
  * @param error 失败原因（建议单行化，避免换行破坏 NDJSON）
  * @param now 结束时间戳；测试时可注入固定值
  */
-export function markFailed(p: Pipeline, seg: SegmentName, error: string, now: number = Date.now()): Pipeline {
-  const cur = p[seg] || { status: 'pending' as SegmentStatus, startedAt: now }
+export function markFailed(pipeline: Pipeline, segment: SegmentName, error: string, now: number = Date.now()): Pipeline {
+  const cur = pipeline[segment] || { status: 'pending' as SegmentStatus, startedAt: now }
   const started = cur.startedAt ?? now
-  p[seg] = { ...cur, status: 'failed', finishedAt: now, durationMs: now - started, error }
-  return p
+  pipeline[segment] = { ...cur, status: 'failed', finishedAt: now, durationMs: now - started, error }
+  return pipeline
 }
 
 /**
  * 返回当前处于 running 的阶段名
  * [CONSTRAINT] 按 SEGMENTS 顺序返回首个命中；无 running 阶段时返回 null
  */
-export function getCurrent(p: Pipeline): SegmentName | null {
-  for (const s of SEGMENTS) { if (p[s] && p[s].status === 'running') return s
+export function getCurrent(pipeline: Pipeline): SegmentName | null {
+  for (const s of SEGMENTS) { if (pipeline[s] && pipeline[s].status === 'running') return s
   }
   return null
 }
@@ -105,16 +105,16 @@ export function getCurrent(p: Pipeline): SegmentName | null {
  * 判断流水线是否全部阶段 ok
  * [CONSTRAINT] 任一阶段缺失（未初始化）也视为未完成；与 createPipeline 配合使用
  */
-export function isComplete(p: Pipeline): boolean {
-  return SEGMENTS.every(s => p[s] && p[s].status === 'ok')
+export function isComplete(pipeline: Pipeline): boolean {
+  return SEGMENTS.every(s => pipeline[s] && pipeline[s].status === 'ok')
 }
 
 /**
  * 返回首个 failed 的阶段名
  * [CONSTRAINT] 按 SEGMENTS 顺序返回；多阶段失败时只报最先者（符合"从前往后修"的直觉）
  */
-export function hasFailed(p: Pipeline): SegmentName | null {
-  for (const s of SEGMENTS) { if (p[s] && p[s].status === 'failed') return s
+export function hasFailed(pipeline: Pipeline): SegmentName | null {
+  for (const s of SEGMENTS) { if (pipeline[s] && pipeline[s].status === 'failed') return s
   }
   return null
 }
@@ -124,10 +124,10 @@ export function hasFailed(p: Pipeline): SegmentName | null {
  * [CONSTRAINT] 只依据已用次数与 cfg 上限比较，不检查当前 status；语义是"配额未耗尽"
  * [CHANGE-IMPACT] 调用方需保证已在失败分支再调用，否则会返回"可重试"误导状态机
  */
-export function canRetry(p: Pipeline, seg: SegmentName, cfg: PipelineConfig): boolean {
-  const rule = cfg.retries[seg]
+export function canRetry(pipeline: Pipeline, segment: SegmentName, cfg: PipelineConfig): boolean {
+  const rule = cfg.retries[segment]
   if (!rule) return false
-  const cur = p[seg]
+  const cur = pipeline[segment]
   const used = (cur && cur.retries) || 0
   return used < rule.count
 }
@@ -137,10 +137,10 @@ export function canRetry(p: Pipeline, seg: SegmentName, cfg: PipelineConfig): bo
  * [CONSTRAINT] backoff 用尽时取最后一项（不无限放大）；未配置 backoff 返回 0（不等待）
  * [CHANGE-IMPACT] 由调用方配合 bumpRetry 使用，顺序颠倒会导致取到错误档位
  */
-export function nextRetryDelay(p: Pipeline, seg: SegmentName, cfg: PipelineConfig): number {
-  const rule = cfg.retries[seg]
+export function nextRetryDelay(pipeline: Pipeline, segment: SegmentName, cfg: PipelineConfig): number {
+  const rule = cfg.retries[segment]
   if (!rule || !rule.backoff.length) return 0
-  const used = (p[seg] && p[seg].retries) || 0
+  const used = (pipeline[segment] && pipeline[segment].retries) || 0
   return rule.backoff[Math.min(used, rule.backoff.length - 1)] || 0
 }
 
@@ -148,8 +148,8 @@ export function nextRetryDelay(p: Pipeline, seg: SegmentName, cfg: PipelineConfi
  * 递增某阶段的已重试次数
  * [CONSTRAINT] 应在真正触发下一次重试前调用；与 canRetry / nextRetryDelay 的 used 计数共享同一字段
  */
-export function bumpRetry(p: Pipeline, seg: SegmentName): Pipeline {
-  const cur = p[seg] || { status: 'pending' as SegmentStatus }
-  p[seg] = { ...cur, retries: (cur.retries || 0) + 1 }
-  return p
+export function bumpRetry(pipeline: Pipeline, segment: SegmentName): Pipeline {
+  const cur = pipeline[segment] || { status: 'pending' as SegmentStatus }
+  pipeline[segment] = { ...cur, retries: (cur.retries || 0) + 1 }
+  return pipeline
 }

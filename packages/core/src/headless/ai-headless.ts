@@ -267,13 +267,13 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     return s
   }
 
-  async function shutdown(s: HeadlessSession): Promise<void> {
+  async function shutdown(session: HeadlessSession): Promise<void> {
     try {
-      const ctx = s.context as { close?: () => Promise<void> } | undefined
+      const ctx = session.context as { close?: () => Promise<void> } | undefined
       await ctx?.close?.()
     } catch { /* swallow: 上下文已崩溃 / 已关闭，close 失败不影响后续字段清理 */ }
-    s.context = undefined
-    s.page = undefined
+    session.context = undefined
+    session.page = undefined
   }
 
   /**

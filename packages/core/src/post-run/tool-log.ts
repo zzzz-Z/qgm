@@ -15,10 +15,10 @@ export interface ToolCall {
  * [CHANGE-IMPACT] 被 readToolLogWithRetry 消费；返回结构被 run.ts 用于 tools 字段
  * @param p 日志文件绝对路径
  */
-export function readToolLog(p: string): ToolCall[] {
-  if (!fs.existsSync(p)) return []
+export function readToolLog(logPath: string): ToolCall[] {
+  if (!fs.existsSync(logPath)) return []
   try {
-    return fs.readFileSync(p, 'utf8').split('\n').filter(Boolean).map((l) => {
+    return fs.readFileSync(logPath, 'utf8').split('\n').filter(Boolean).map((l) => {
       try { return JSON.parse(l) } catch { return null }
     }).filter((x): x is ToolCall => x !== null)
   } catch { return [] }
@@ -31,11 +31,11 @@ export function readToolLog(p: string): ToolCall[] {
  * @param p 日志文件绝对路径
  * @param maxMs 最长等待毫秒数（默认 1000）
  */
-export async function readToolLogWithRetry(p: string, maxMs = 1000): Promise<ToolCall[]> {
+export async function readToolLogWithRetry(logPath: string, maxMs = 1000): Promise<ToolCall[]> {
   const start = Date.now()
   let last: ToolCall[] = []
   while (Date.now() - start < maxMs) {
-    last = readToolLog(p)
+    last = readToolLog(logPath)
     if (last.length > 0) return last
     await new Promise(resolve => setTimeout(resolve, 50))
   }

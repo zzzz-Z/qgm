@@ -35,9 +35,9 @@ interface EventStreamCallbacks {
  * [CHANGE-IMPACT] MODELS 白名单来自 useDeepseekUrl；新增模型需同步；来源校验失败仅 warn 不抛错
  * @param cb 事件回调集（含 isMockMode 与各事件处理函数）
  */
-export function useEventStream(cb: EventStreamCallbacks) {
+export function useEventStream(callbacks: EventStreamCallbacks) {
   function isFromActiveAiSite(e: MessageEvent): boolean {
-    if (cb.isMockMode && cb.isMockMode()) return true
+    if (callbacks.isMockMode && callbacks.isMockMode()) return true
     const AI_ORIGINS = MODELS
       .map((m) => { try { return new URL(m.url).origin } catch { return '' } })
       .filter(Boolean)
@@ -62,26 +62,26 @@ export function useEventStream(cb: EventStreamCallbacks) {
     const type = String(d.type || '')
     if (type === 'ai-runner:reply') {
       if (!isFromActiveAiSite(e)) return
-      cb.onReply(d, e)
+      callbacks.onReply(d, e)
       return
     }
     if (type === 'ai-runner:script') {
       if (!isFromActiveAiSite(e)) return
-      cb.onScriptV12(d, e)
+      callbacks.onScriptV12(d, e)
       return
     }
     if (type === 'ai-runner:token-estimate') {
       const tokens = Number(d.tokens) || 0
-      if (tokens > 0) cb.onToken(tokens)
+      if (tokens > 0) callbacks.onToken(tokens)
       return
     }
     if (type === 'ai-runner:ai-stream') {
       if (!isFromActiveAiSite(e)) return
-      if (cb.onAiStream) cb.onAiStream(String(d.text || ''), String(d.sessionId || ''))
+      if (callbacks.onAiStream) callbacks.onAiStream(String(d.text || ''), String(d.sessionId || ''))
       return
     }
     if (type === 'ai-runner:summary') {
-      cb.onSummary(String(d.text || ''), String(d.sessionId || ''), Boolean(d.degraded))
+      callbacks.onSummary(String(d.text || ''), String(d.sessionId || ''), Boolean(d.degraded))
     }
   }
 

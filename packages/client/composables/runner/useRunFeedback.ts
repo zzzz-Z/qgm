@@ -33,10 +33,10 @@ export function shouldIncludeChanges(
  * @param r 最近一次运行结果；null 表示无结果
  * @param isLoopActive 当前是否处于循环运行中
  */
-export function isReadonlyResult(r: RunResponse | null, isLoopActive: boolean): boolean {
-  if (!r || !r.ok) return false
-  if (r.runId === '') return false
-  if ((r.changes || []).length > 0) return false
+export function isReadonlyResult(result: RunResponse | null, isLoopActive: boolean): boolean {
+  if (!result || !result.ok) return false
+  if (result.runId === '') return false
+  if ((result.changes || []).length > 0) return false
   if (isLoopActive) return false
   return true
 }

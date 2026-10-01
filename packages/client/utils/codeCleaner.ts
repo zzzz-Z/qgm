@@ -89,8 +89,8 @@ function stripCommentsSafe(src: string): string {
  * 删去纯空白行（含仅含空格 / Tab 的行）
  * [CONSTRAINT] trim 后长度 0 即视为空行；一次性 filter 全部去除，不合并连续空行为单行
  */
-function stripBlankLinesSafe(s: string): string {
-  return s
+function stripBlankLinesSafe(text: string): string {
+  return text
     .split('\n')
     .filter(line => line.trim().length > 0)
     .join('\n')

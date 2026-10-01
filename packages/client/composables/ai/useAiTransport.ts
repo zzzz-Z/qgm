@@ -188,9 +188,9 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     return ws
   }
   /** 发送 */
-  function send(t: string, payload: Record<string, unknown>): boolean {
+  function send(type: string, payload: Record<string, unknown>): boolean {
     const w = ensure()
-    const s = JSON.stringify(Object.assign({ t }, payload))
+    const s = JSON.stringify(Object.assign({ type }, payload))
     if (w.readyState === 1) { try { w.send(s) } catch { return false } return true }
     queue.push(s)
     return true

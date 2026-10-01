@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // AIRUNNER-BATCH24-3-WEB-SERVER: web 侧测试（原 test/scriptInboxLogic.node-test.ts）
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/scriptInboxLogic.node-test.ts 迁至 test/scriptInboxLogic.node-test.ts
-// @desc Characterization Test for inbox-logic (normalizeForHash + parseMeta)
+// @desc Characterization Test for inbox-parse (normalizeForHash + parseMeta)
 // @why 锁定抽取后行为：空行/注释剔除、去空白、@desc/@why 首值截断语义
 
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { normalizeForHash, parseMeta } from '../../../packages/client/composables/runner/inbox-logic'
+import { normalizeForHash, parseMeta } from '../../../packages/client/composables/runner/inbox-parse'
 
 test('normalizeForHash 剔除空行与 // 注释行、压缩空白', () => {
   const src = ['// header', '', 'const a = 1', '  const b = 2  ', '// trailing'].join('\n')

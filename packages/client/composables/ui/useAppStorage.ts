@@ -69,10 +69,10 @@ function safeGet(key: string): string | null {
  * 写入 localStorage 并吞掉所有异常
  * [WHY] 配额超限（QuotaExceededError）与隐私模式写入会抛错，UI 不应因持久化失败而崩溃
  */
-function safeSet(key: string, value: string): void {
+function safeSet(key: string, raw: string): void {
   try {
     if (typeof localStorage === 'undefined') return
-    localStorage.setItem(key, value)
+    localStorage.setItem(key, raw)
   } catch { /* ignore */ }
 }
 
@@ -85,8 +85,42 @@ export function loadHistory(): SessionEntry[] {
 }
 
 /** 序列化写入会话历史；写失败静默（下次 save 会整体覆盖） */
-export function saveHistory(h: SessionEntry[]): void {
-  safeSet(SESSION_HISTORY_KEY, JSON.stringify(h))
+export function saveHistory(entries: SessionEntry[]): void {
+  safeSet(SESSION_HISTORY_KEY, JSON.stringify(entries))
+}
+
+// [site-isolate-v1] 按站点分桶存储：会话历史 / 激活会话 id 各站点独立
+// [WHY] 需求：每个 AI 站点有自己的会话上下文，切换站点时加载对应历史；工作区（文件目录）仍共享
+// [CONSTRAINT] 读优先站点专属键，无则回退全局键（老数据首次迁移源）；写只落站点键，不污染全局
+// [CHANGE-IMPACT] App.vue 的 sessionHistory / activeSessionId 联动会切到按站点键；全局键保留作迁移源
+const HISTORY_BY_SITE_PREFIX = '__ai_session_history__'
+const ACTIVE_BY_SITE_PREFIX = '__ai_active_session_id__'
+
+/** 读取指定站点的会话历史；无站点专属键时回退全局键（首次迁移） */
+export function loadHistoryBySite(modelId: string): SessionEntry[] {
+  try {
+    const scoped = safeGet(HISTORY_BY_SITE_PREFIX + modelId)
+    if (scoped) return JSON.parse(scoped) as SessionEntry[]
+    const legacy = safeGet(SESSION_HISTORY_KEY)
+    return legacy ? JSON.parse(legacy) as SessionEntry[] : []
+  } catch { return [] }
+}
+
+/** 写入指定站点的会话历史；仅落站点键，不动全局键（避免跨站点互相覆盖） */
+export function saveHistoryBySite(modelId: string, entries: SessionEntry[]): void {
+  safeSet(HISTORY_BY_SITE_PREFIX + modelId, JSON.stringify(entries))
+}
+
+/** 读取指定站点的激活会话 id；无站点专属键时回退全局键（首次迁移） */
+export function loadActiveSessionIdBySite(modelId: string): string {
+  const scoped = safeGet(ACTIVE_BY_SITE_PREFIX + modelId)
+  if (scoped) return scoped
+  return safeGet(ACTIVE_SESSION_KEY) || ''
+}
+
+/** 写入指定站点的激活会话 id；仅落站点键 */
+export function saveActiveSessionIdBySite(modelId: string, id: string): void {
+  safeSet(ACTIVE_BY_SITE_PREFIX + modelId, id)
 }
 
 /** 读取当前活动会话 id；无值时返回空串（调用方据此判"未选择"） */

@@ -176,10 +176,10 @@ export function diffMeta(
  * [CONSTRAINT] 空串返回 0；不含末尾换行的单行文本返回 1；不处理 CRLF 差异
  * [WHY] 手写而非 split('换行').length，避免大文件场景产生中间数组
  */
-function countLines(s: string): number {
-  if (!s) return 0
+function countLines(text: string): number {
+  if (!text) return 0
   let n = 1
-  for (let i = 0; i < s.length; i++) { if (s.charCodeAt(i) === 10) n++
+  for (let i = 0; i < text.length; i++) { if (text.charCodeAt(i) === 10) n++
   }
   return n
 }

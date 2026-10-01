@@ -47,12 +47,12 @@ export function isHeadless(): boolean {
  * [WHY] transport 动态 import 是异步的，此函数 fire-and-forget 不阻塞调用方
  * [CONSTRAINT] fn 在 transport 上不存在时静默忽略；新增协议字段时旧 transport 缺方法不应抛错
  */
-function headlessSend(fn: string, ...args: unknown[]) {
+function headlessSend(methodName: string, ...args: unknown[]) {
   void loadTransport().then((mod) => {
     try {
-      const t = mod.useAiTransport()
-      const f = (t.transport as unknown as Record<string, (...a: unknown[]) => unknown>)[fn]
-      if (typeof f === 'function') void f.apply(t.transport, args)
+      const transport = mod.useAiTransport()
+      const method = (transport.transport as unknown as Record<string, (...a: unknown[]) => unknown>)[methodName]
+      if (typeof method === 'function') void method.apply(transport.transport, args)
     } catch { /* swallow: transport 未就绪 / 方法缺失，headless 发送本就 fire-and-forget */ }
   })
 }

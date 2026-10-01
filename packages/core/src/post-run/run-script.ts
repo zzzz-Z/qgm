@@ -2,7 +2,7 @@
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { getRoot } from '../config.js'
-import { injectAiJsdoc, scanNativeApisWithFallback, scanScriptHead } from './ai-guard.js'; // [ai-guard-v1]
+import { injectAiJsdoc, scanNativeApisWithFallback, scanScriptHead } from './ai-guard.js' // [ai-guard-v1]
 import { runProcess } from '../process/proc.js'
 import { buildWrapperCode } from './run-script-wrapper.js'
 

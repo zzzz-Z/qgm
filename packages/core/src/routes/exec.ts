@@ -43,8 +43,8 @@ execHono.post('/exec', async (c) => {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       /** 写入 */
-      const write = (obj: unknown) => {
-        try { controller.enqueue(enc.encode(`${JSON.stringify(obj)}\n`)) } catch { /* ignore */ }
+      const write = (frame: unknown) => {
+        try { controller.enqueue(enc.encode(`${JSON.stringify(frame)}\n`)) } catch { /* ignore */ }
       }
       if (gitCheck.ok) write({ stream: 'meta', rollbackRef: gitCheck.rollbackRef })
       try {

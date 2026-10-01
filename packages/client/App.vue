@@ -39,7 +39,7 @@ import TooltipHost from './components/feedback/TooltipHost.vue'
 import WorkspaceGuide from './components/panels/WorkspaceGuide.vue'
 // [worklog-v1] 工作日志弹窗：header 按钮触发，git diff → Markdown
 // [app-storage-extracted-v1]
-import { activeSessionId, loadHistory, saveHistory, theme } from './composables/ui/useAppStorage'
+import { activeSessionId, loadActiveSessionIdBySite, loadHistoryBySite, saveActiveSessionIdBySite, saveHistoryBySite, theme } from './composables/ui/useAppStorage'
 import type { SessionEntry } from './composables/ui/useAppStorage'
 
 /** 自动接管模式开关 */
@@ -60,7 +60,14 @@ const { run: runScript } = useRunner()
 const scriptInbox = useScriptInbox()
 const { stopWaiting: stopAiWaiting } = useAiWaiting()
 // [app-storage-extracted-v1] SessionEntry/loadHistory/saveHistory 已抽至 useAppStorage
-const sessionHistory = ref<SessionEntry[]>(loadHistory())
+// [site-isolate-v1] 会话历史按站点分桶；切站点时由下方 watch(modelId) 重新加载
+const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
+// [site-isolate-v1-initial-sync] 首帧把 activeSessionId 从站点专属键同步过来
+// [WHY] 若跳过此步，下方 watch(activeSessionId, { immediate: true }) 会用全局键（多为空）
+//       回写站点键，导致刷新后站点专属 active session 被清空。
+// [CONSTRAINT] 必须在 watch(activeSessionId, { immediate: true }) 声明之前执行；本行紧随 sessionHistory init，满足。
+// [CHANGE-IMPACT] 会触发 activeSessionId 的响应式更新；下游 watch 立即同步到 loop/window 表。
+activeSessionId.value = loadActiveSessionIdBySite(modelId.value)
 // [ask-count] 当前会话收到的 AI 回复次数（每 reply +1）
 // [ask-count-persist] 提问次数持久化到 localStorage，刷新不重置
 
@@ -92,6 +99,15 @@ const headerUrl = computed(() => {
   return s ? s.url : deepseekUrl.value
 })
 /**
+ * [site-isolate-v1] 按当前站点写入会话历史
+ * [WHY] 需求：每站点独立会话上下文；统一收口避免多处调用各自记站点维度
+ * [CHANGE-IMPACT] 所有旧写入点已改为本函数；改签名会影响全部调用处
+ */
+function saveHistoryScoped(): void {
+  saveHistoryBySite(modelId.value, sessionHistory.value)
+}
+
+/**
  * 把一次会话加入历史记录（去重 + 上限 50 条）
  * [WHY] 同 id 覆盖 —— 会话被反复打开/改名时只保留最新一条，避免历史膨胀
  * [CONSTRAINT] 采用"最新在前"顺序（unshift 语义），超 50 条截断尾部；落盘到 localStorage 键 __ai_session_history
@@ -103,7 +119,7 @@ const headerUrl = computed(() => {
 function addSessionToHistory(id: string, url: string, title: string) {
   const entry: SessionEntry = { id, url, title, createdAt: Date.now() }
   sessionHistory.value = [entry, ...sessionHistory.value.filter(s => s.id !== id)].slice(0, 50)
-  saveHistory(sessionHistory.value)
+  saveHistoryScoped()
 }
 
 /**
@@ -139,7 +155,7 @@ function saveUrl() {
     const sid = activeSessionId.value
     if (sid) {
       sessionHistory.value = sessionHistory.value.map(x => x.id === sid ? { ...x, url: v } : x)
-      saveHistory(sessionHistory.value)
+      saveHistoryScoped()
     }
   } catch { /* ignore */ }
   urlEditing.value = false
@@ -156,24 +172,24 @@ function onUrlBlur() {
 /**
  * 处理 AI 窗口通过 postMessage 发来的消息（单一入口，按 data.type 分发）
  * [WHY] 油猴侧协议字段扩展频繁，集中分发可避免到处 addEventListener 造成重复注册
- * [CONSTRAINT] d.type 未识别时静默忽略，不抛错；上游 handleXxx 各自处理 data 缺失
+ * [CONSTRAINT] payload.type 未识别时静默忽略，不抛错；上游 handleXxx 各自处理 data 缺失
  * [CHANGE-IMPACT] 新增消息类型须同时更新油猴侧发送方与下方 if 链
  */
 function onSessionIdMessage(e: MessageEvent) {
-  const d = e.data
-  if (!d) return
-  const t = String(d.type || '')
-  if (t === 'ai-runner:reply') return handleAiReply(d, e)
-  if (t === 'ai-runner:script') return handleLegacyScript(d, e)
-  if (t === 'ai-runner:token-estimate') return handleTokenEstimate(d)
-  if (t === 'ai-runner:summary') return handleSummaryMsg(d)
-  if (t === 'ai-runner:new-session-created') return handleNewSessionCreated(d)
-  if (t === 'ai-runner:url-updated') return handleUrlUpdated(d)
-  if (t === 'ai-runner:session-id' && d.id) handleSessionIdUpdate(d)
+  const payload = e.data
+  if (!payload) return
+  const t = String(payload.type || '')
+  if (t === 'ai-runner:reply') return handleAiReply(payload, e)
+  if (t === 'ai-runner:script') return handleLegacyScript(payload, e)
+  if (t === 'ai-runner:token-estimate') return handleTokenEstimate(payload)
+  if (t === 'ai-runner:summary') return handleSummaryMsg(payload)
+  if (t === 'ai-runner:new-session-created') return handleNewSessionCreated(payload)
+  if (t === 'ai-runner:url-updated') return handleUrlUpdated(payload)
+  if (t === 'ai-runner:session-id' && payload.id) handleSessionIdUpdate(payload)
 }
 
-/** 处理统一回复通道 ai-runner:reply（d 来自 MessageEvent.data） */
-function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
+/** 处理统一回复通道 ai-runner:reply（payload 来自 MessageEvent.data） */
+function handleAiReply(payload: MessageEvent['data'], e: MessageEvent) {
   if (askCount.value >= 10 && isLoopActive.value) {
     resetAskCount()
     void startHandoff()
@@ -184,17 +200,17 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
   stopAiWaiting()
   // 多 AI 窗口 session 隔离：循环模式下若油猴传了 sessionId，必须与当前循环绑定的 loopSessionId 一致，否则丢弃
   // [multi-loop-step4b-app] 多循环路由
-  const sid = String(d.sessionId || '')
+  const sid = String(payload.sessionId || '')
   const inst = sid ? getLoopBySessionId(sid) : undefined
   const routedToLoop = Boolean(inst && isInstActive(inst))
-  const kind = String(d.kind || '')
+  const kind = String(payload.kind || '')
 
   // [ask-any-kind-v1] 弹窗优先于其他分支：任意 kind 只要正文含 @ask 就触发
   // [WHY] AI 回复 @ask 时可能被归类为 plain/done/multi；原逻辑只在 plain 触发且 done 分支更早 return，导致弹窗不弹
   // [CONSTRAINT] parseAsk 仅在 @ask 起始行返回非 null，不会误伤正常文本；命中后 return 不走后续分支
   // [CHANGE-IMPACT] 从"仅 plain"扩为"任何 kind 只要 text 含 @ask"；依赖 copyAndFill / askUser 已 import
-  if (typeof d.text === 'string' && d.text) {
-    const _ask = parseAsk(d.text)
+  if (typeof payload.text === 'string' && payload.text) {
+    const _ask = parseAsk(payload.text)
     if (_ask) {
       stopAiWaiting()
       void askUser(_ask).then((answer) => {
@@ -220,7 +236,7 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
     }
     // [done-summary-manual-v1] 手动/循环两种模式下都要把总结写入 doneSummary 通道
     // [CONSTRAINT] 首行 DONE 剥离后剩余内容即总结；缺失时降级为占位文案
-    const doneText = String(d.text || '')
+    const doneText = String(payload.text || '')
     const summary = doneText.replace(/^\s*DONE\s*/, '').trim()
     // [done-summary-sanitize-v2] 过滤脚本源码残留：仅按首行判定，避免误伤含代码片段的正常总结
     // [WHY] 首版含全文围栏检查，把「AI 总结里引用脚本片段」也判为残留 → 正常总结被降级为占位
@@ -242,14 +258,14 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
   }
 
   if (kind === 'script') {
-    const code = String(d.code || '')
-    const lang = (d.lang === 'bash' ? 'bash' : d.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
-    const site = String(d.site || e.origin || '')
+    const code = String(payload.code || '')
+    const lang = (payload.lang === 'bash' ? 'bash' : payload.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
+    const site = String(payload.site || e.origin || '')
     const item = scriptInbox.push({
       code,
       lang,
       site,
-      hash: d.hash ? String(d.hash) : undefined,
+      hash: payload.hash ? String(payload.hash) : undefined,
     })
     if (item) {
       const lineCount = code.split('\n').length
@@ -278,9 +294,9 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
     return
   }
 
-  const text = d.text !== undefined ? String(d.text) : ''
+  const text = payload.text !== undefined ? String(payload.text) : ''
   if (kind === 'plain' || kind === 'multi' || (kind === 'done' && text.trim() && text.trim() !== 'DONE')) {
-    emitBus((`ai:${kind}`) as EventKind, `AI 回复 · ${kind}`, { payload: { kind, text, count: Number(d.count) || 0 } })
+    emitBus((`ai:${kind}`) as EventKind, `AI 回复 · ${kind}`, { payload: { kind, text, count: Number(payload.count) || 0 } })
   } else if (kind === 'done') {
     emitBus('ai:done', 'AI 回复 DONE', { payload: { kind: 'done', text: 'DONE' } })
   }
@@ -288,25 +304,25 @@ function handleAiReply(d: MessageEvent['data'], e: MessageEvent) {
   if (routedToLoop) {
     void onNonScriptReply({
       kind: kind as 'done' | 'plain' | 'multi',
-      count: Number(d.count) || 0,
+      count: Number(payload.count) || 0,
       // 油猴可能未传 text；传了则用于二次校验 isStrictDone
-      text: d.text !== undefined ? String(d.text) : undefined,
+      text: payload.text !== undefined ? String(payload.text) : undefined,
     }, sid)
   }
 }
 
 /** 处理旧版油猴 ai-runner:script 单脚本消息 */
-function handleLegacyScript(d: MessageEvent['data'], e: MessageEvent) {
+function handleLegacyScript(payload: MessageEvent['data'], e: MessageEvent) {
   if (!isFromActiveAiSite(e)) return
   // 收到 AI 回复（v1.2 通道），清除「发送给 AI」按钮的 loading 状态
   stopAiWaiting()
-  const code = String(d.code || '')
-  const lang = (d.lang === 'bash' ? 'bash' : d.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
-  const site = String(d.site || e.origin || '')
-  const item = scriptInbox.push({ code, lang, site, hash: d.hash ? String(d.hash) : undefined })
+  const code = String(payload.code || '')
+  const lang = (payload.lang === 'bash' ? 'bash' : payload.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
+  const site = String(payload.site || e.origin || '')
+  const item = scriptInbox.push({ code, lang, site, hash: payload.hash ? String(payload.hash) : undefined })
   if (item) {
     // [multi-loop-step4b-app-fallback] 兜底通道同样按 sid 路由
-    const sid = String(d.sessionId || '')
+    const sid = String(payload.sessionId || '')
     const inst = sid ? getLoopBySessionId(sid) : undefined
     const routedToLoop = Boolean(inst && isInstActive(inst))
     if (routedToLoop) {
@@ -321,16 +337,16 @@ function handleLegacyScript(d: MessageEvent['data'], e: MessageEvent) {
 }
 
 /** 处理 ai-runner:token-estimate 增量估算 */
-function handleTokenEstimate(d: MessageEvent['data']) {
+function handleTokenEstimate(payload: MessageEvent['data']) {
   if (activeSessionId.value) {
     const i = sessionHistory.value.findIndex(x => x.id === activeSessionId.value)
-    if (i >= 0 && sessionHistory.value[i].tokens !== d.tokens) {
-      sessionHistory.value[i] = { ...sessionHistory.value[i], tokens: Number(d.tokens) || 0 }
+    if (i >= 0 && sessionHistory.value[i].tokens !== payload.tokens) {
+      sessionHistory.value[i] = { ...sessionHistory.value[i], tokens: Number(payload.tokens) || 0 }
       sessionHistory.value = [...sessionHistory.value]
-      saveHistory(sessionHistory.value)
+      saveHistoryScoped()
     }
   }
-  const tokens = Number(d.tokens) || 0
+  const tokens = Number(payload.tokens) || 0
   if (tokens > 0) {
     // 喂给循环状态机做 30k 增量熔断（v6 §6.9 第 4 条）
     setTokenEstimate(tokens)
@@ -338,24 +354,24 @@ function handleTokenEstimate(d: MessageEvent['data']) {
 }
 
 /** 处理 ai-runner:summary 摘要回包 */
-function handleSummaryMsg(d: MessageEvent['data']) {
-  const text = String(d.text || '')
-  const sid = String(d.sessionId || '')
-  const degraded = Boolean(d.degraded)
+function handleSummaryMsg(payload: MessageEvent['data']) {
+  const text = String(payload.text || '')
+  const sid = String(payload.sessionId || '')
+  const degraded = Boolean(payload.degraded)
   void onSummary(text, sid, degraded)
 }
 
 /** 处理 ai-runner:new-session-created 新会话建立 */
-function handleNewSessionCreated(d: MessageEvent['data']) {
-  const url = String(d.url || '')
-  const id = String(d.id || '')
+function handleNewSessionCreated(payload: MessageEvent['data']) {
+  const url = String(payload.url || '')
+  const id = String(payload.id || '')
   const oldId = activeSessionId.value
   if (oldId) {
     const i = sessionHistory.value.findIndex(x => x.id === oldId)
     if (i >= 0 && !sessionHistory.value[i].handedOff) {
       sessionHistory.value[i] = { ...sessionHistory.value[i], handedOff: true }
       sessionHistory.value = [...sessionHistory.value]
-      saveHistory(sessionHistory.value)
+      saveHistoryScoped()
     }
   }
   if (url && id) {
@@ -371,25 +387,25 @@ function handleNewSessionCreated(d: MessageEvent['data']) {
 }
 
 /** 处理 ai-runner:url-updated URL 回写 */
-function handleUrlUpdated(d: MessageEvent['data']) {
+function handleUrlUpdated(payload: MessageEvent['data']) {
   // [url-updated] 油猴发送后回传完整 URL，写入工作台
-  const u = String(d.url || '')
+  const u = String(payload.url || '')
   if (u && u !== deepseekUrl.value) setDeepseekUrl(u)
 }
 
 /** 处理 ai-runner:session-id 会话 ID 回写 */
-function handleSessionIdUpdate(d: MessageEvent['data']) {
+function handleSessionIdUpdate(payload: MessageEvent['data']) {
   if (!activeSessionId.value) return
   const idx = sessionHistory.value.findIndex(x => x.id === activeSessionId.value)
   if (idx < 0) return
   const m = MODELS.find(x => x.id === modelId.value)
   const url = m && m.sessionTemplate
-    ? m.sessionTemplate.replace('{id}', encodeURIComponent(String(d.id)))
+    ? m.sessionTemplate.replace('{id}', encodeURIComponent(String(payload.id)))
     : sessionHistory.value[idx].url
   if (url === sessionHistory.value[idx].url) return
   sessionHistory.value[idx] = { ...sessionHistory.value[idx], url }
   sessionHistory.value = [...sessionHistory.value]
-  saveHistory(sessionHistory.value)
+  saveHistoryScoped()
   setDeepseekUrl(url)
 }
 function isFromActiveAiSite(e: MessageEvent): boolean {
@@ -506,6 +522,17 @@ function onShiftQuestion(e: KeyboardEvent) {
   }
   lastVisit.value = Date.now()
 }
+// [site-isolate-v1] 切站点 → 保存旧站点 activeSessionId，加载新站点历史与激活会话
+// [WHY] 需求：每站点独立会话上下文；activeSessionId 是 useStorage 单例，切换时需手动轮换
+// [CONSTRAINT] 只在 modelId 真变化时执行；非 immediate，避免 setup 首帧覆盖 onMounted 恢复逻辑
+// [CHANGE-IMPACT] 切换触发下游 watch(activeSessionId)，连带 setActiveWinSid 等副作用
+watch(modelId, (newId, oldId) => {
+  if (!newId || newId === oldId) return
+  saveActiveSessionIdBySite(String(oldId ?? ''), activeSessionId.value)
+  sessionHistory.value = loadHistoryBySite(newId)
+  activeSessionId.value = loadActiveSessionIdBySite(newId)
+})
+
 watch(activeSessionId, (v) => {
   // [use-storage-v1] 落盘由 useStorage 托管；此处仅保留 loop/window 表同步副作用
   // 同步到 loop 实例表与窗口表（多循环并发的前提）
@@ -513,6 +540,8 @@ watch(activeSessionId, (v) => {
   setActiveLoopSessionId(sid)
   createLoopInstanceFor(sid)
   setActiveWinSid(sid)
+  // [site-isolate-v1] 活动会话值同步到当前站点专属键，供切站点时回读
+  saveActiveSessionIdBySite(modelId.value, v || '')
 }, { immediate: true })
 // [use-storage-v1] sandboxMode / bashPolicy 落盘均由 useStorage 托管，不再手动 watch
 // [use-storage-v1] theme 仅保留 DOM data-theme 副作用；落盘由 useStorage 托管

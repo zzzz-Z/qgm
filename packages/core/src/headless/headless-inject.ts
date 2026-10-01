@@ -116,16 +116,16 @@ export function detectReplyInPage() {
     } catch { /* swallow: document.body 未就绪 / Observer 不支持，dedup 退化为纯计数 */ }
   }
 
-  function hash32(s) {
+  function hash32(input) {
     let h = 0x811C9DC5
-    for (let i = 0; i < s.length; i++) {
-      h = Math.imul(h ^ s.charCodeAt(i), 0x1000193) >>> 0
+    for (let i = 0; i < input.length; i++) {
+      h = Math.imul(h ^ input.charCodeAt(i), 0x1000193) >>> 0
     }
     return (h >>> 0).toString(16).padStart(8, '0')
   }
 
-  function langFromText(s) {
-    const t = String(s || '').trim().toLowerCase()
+  function langFromText(text) {
+    const t = String(text || '').trim().toLowerCase()
     if (!t || t.length > 24) return null
     if (/^(?:bash|sh|shell|zsh)\b/.test(t)) return 'bash'
     if (/^(?:js|javascript|cjs|commonjs|node|nodejs)\b/.test(t)) return 'js'
@@ -177,6 +177,13 @@ export function detectReplyInPage() {
 
   /** 检测文本是否含 js 代码块（SYSTEM.md §1 接收端容错） */
   function hasJsFence(text: string): boolean {
+    // [hasjsfence-dom-v1] DOM 优先检测 <pre><code>：getMainText() 返回 DOM textContent（不含 markdown 反引号），
+    //   原字面量正则 ```js 在 textContent 上永远 false → plain 兜底分支 line 380 从不成立 → 前端静默收不到回复
+    // [CONSTRAINT] 只看最后一条 assistant 消息；本文件经 page.evaluate 序列化执行，禁止引用外部闭包变量
+    // [CHANGE-IMPACT] 影响 line 380 的 plain 推送决策：修复后含任意代码块的回复会推 plain（原意为过滤纯问候语）
+    const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
+    const root = blocks.length > 0 ? blocks[blocks.length - 1] : document
+    if (root.querySelectorAll('pre code').length > 0) return true
     return /```js\b/.test(String(text || ''))
   }
 
@@ -205,7 +212,17 @@ export function detectReplyInPage() {
       if (!text) continue
       if (!text.includes('\n') && text.length < 120) continue
       // [code-text-clean-v1] 语言判定三级回退：className → DOM 邻近探测 → 内容特征
-      const lang = guessLangFromClass(codeEl) || guessLangFromDom(pre) || guessLangFromContent(text) || null
+      let lang = guessLangFromClass(codeEl) || guessLangFromDom(pre) || guessLangFromContent(text) || null
+      // [script-head-contract-fallback-v1] SYSTEM.md §1.4 脚本头契约：shebang 或 @desc 注释是脚本强特征
+      // [WHY] AI 有时用非白名单语言标签（如 ```javascript / ```node / 无标签），三级判定得 null → script 被漏识别 →
+      //   前端只收到 plain 走渲染不执行。命中契约特征时兜底认定 js，让 §1.4 脚本能被无差别识别
+      // [CONSTRAINT] 只认 §1.4 明确允许的两种契约（shebang / @desc）；误伤面：AI 复述 SYSTEM.md 示例会被当成脚本候选，
+      //   由 lastMarked 优先级与 dedup hash 共同约束
+      // [CHANGE-IMPACT] 影响 detectReplyInPage 的 kind 分流：修复后符合契约的脚本块稳定走 script 分支
+      const _marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
+        || /^\s*\/\/\s*@desc\s*:/m.test(text)
+        || /^\s*#\s*@desc\s*:/m.test(text)
+      if (!lang && _marked) lang = 'js'
       if (lang !== 'js' && lang !== 'bash') continue
       let _h
       const _cached = dedup._preCache.get(pre)

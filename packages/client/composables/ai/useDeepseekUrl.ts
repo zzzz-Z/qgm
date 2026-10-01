@@ -99,15 +99,15 @@ function setSessionId(next: string): void {
  * [CONSTRAINT] 解析失败时原样返回，避免展示空白
  * @param u 完整 URL
  */
-function display(u: string): string {
+function display(url: string): string {
   try {
-    const parsed = new URL(u)
+    const parsed = new URL(url)
     if (parsed.pathname === '/' || parsed.pathname === '') return parsed.host
     const parts = parsed.pathname.split('/').filter(Boolean)
     const tail = parts[parts.length - 1] || ''
     return tail ? `${parsed.host}/…/${tail}` : parsed.host
   } catch {
-    return u
+    return url
   }
 }
 

@@ -9,7 +9,9 @@ const NL = String.fromCharCode(10)
 
 test('parseScriptMeta: 空脚本 → 全字段空串', () => {
   const m = parseScriptMeta('')
-  assert.deepEqual(m, { desc: '', why: '', mode: '', ctx: '' })
+  // [meta-schema-unify-v1] 实现已返回 8 字段（与 client/utils/scriptMeta.ts 对齐）；deepEqual 严格比较键集，
+  // 旧断言只列 4 字段 → 长期红。修复方向是测试向实现看齐（接口契约在 script-meta.ts:5-17 显式声明 8 字段）
+  assert.deepEqual(m, { desc: '', why: '', plan: '', state: '', done: '', mode: '', ctx: '', changes: '' })
 })
 
 test('parseScriptMeta: js 用 // 注释解析 @desc/@why', () => {
@@ -44,9 +46,11 @@ test('parseScriptMeta: 值截断到 200 字符', () => {
   assert.equal(parseScriptMeta(s).desc.length, 200)
 })
 
-test('parseScriptMeta: 无冒号 → 字段空串', () => {
+test('parseScriptMeta: 冒号可选 → 无冒号同样解析（与 client 实现、SYSTEM.md §1.4 示例对齐）', () => {
+  // [meta-colon-optional-v1] core 正则 (?::[^\S\n]*)? 与 client 的 :? 都是「冒号可选」；
+  // SYSTEM.md §1.4 示例写作 `// @desc <做什么>`（无冒号），旧断言把无冒号判为空串 → 与实现和规范双向漂移
   const s = '// @desc 无冒号'
-  assert.equal(parseScriptMeta(s).desc, '')
+  assert.equal(parseScriptMeta(s).desc, '无冒号')
 })
 
 test('parseClaimed: 无 @changes → null', () => {

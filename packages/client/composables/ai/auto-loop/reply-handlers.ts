@@ -67,19 +67,19 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
   } = deps
 
   /** 脚本到达（inbox 已去重）。仅在循环活动时由 App.vue 调用。 */
-  async function onScriptArrival(item: InboxItem, sid?: string): Promise<void> {
+  async function onScriptArrival(inboxItem: InboxItem, sid?: string): Promise<void> {
     if (loopPaused.value) return
     const inst = resolveInst(sid)
     if (!inst || !isInstActive(inst) || inst.state.value !== 'waiting') return
     disarmTimer(inst)
     if (inst.stopRequest.value !== 'none') { await handleStopAfterRound(inst); return }
-    if (item.hash === inst.lastHash.value) {
+    if (inboxItem.hash === inst.lastHash.value) {
       toast('连续两轮脚本相同，已忽略', 'warn', 3000)
       return
     }
-    inst.lastHash.value = item.hash
+    inst.lastHash.value = inboxItem.hash
     inst.state.value = 'parsing'
-    await executeItem(inst, item)
+    await executeItem(inst, inboxItem)
   }
 
   /** PLAN.md 待办是否未清空（通过 /__ai/tasks 的 planPending） */
@@ -173,17 +173,17 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
   }
 
   /** 单轮执行：BeforeScript hook → cjs/bash 分流 → afterRound */
-  async function executeItem(inst: LoopInstance, item: InboxItem): Promise<void> {
+  async function executeItem(inst: LoopInstance, inboxItem: InboxItem): Promise<void> {
     inst.state.value = 'executing'
     stage.value = 'implement' // AIRUNNER-BATCH47-STAGE-WRITE
     persist(inst)
     const hookRes = await runHook('BeforeScript', {
       loopId: inst.id.value,
       round: inst.round.value,
-      lang: item.lang,
-      desc: item.desc,
-      why: item.why,
-      script: item.code,
+      lang: inboxItem.lang,
+      desc: inboxItem.desc,
+      why: inboxItem.why,
+      script: inboxItem.code,
     })
     if (hookRes.action === 'reject') {
       await finish(inst, 'hook-reject', hookRes.reason || 'BeforeScript hook rejected')
@@ -192,8 +192,8 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     const startedAt = Date.now()
     const runner = useRunner()
 
-    if (item.lang !== 'bash') {
-      runner.script.value = item.code
+    if (inboxItem.lang !== 'bash') {
+      runner.script.value = inboxItem.code
       await runner.run()
       const r = runner.result.value
       if (inst.stopRequest.value === 'kill' || inst.stopRequest.value === 'rollback') {
@@ -205,10 +205,10 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
         return
       }
       const changeCount = runner.changes.value.length
-      inst.lastExec.value = { lang: item.lang, exit: r.code, changes: changeCount, durationMs: Date.now() - startedAt }
+      inst.lastExec.value = { lang: inboxItem.lang, exit: r.code, changes: changeCount, durationMs: Date.now() - startedAt }
       await afterRound(inst, {
-        lang: item.lang,
-        desc: item.desc,
+        lang: inboxItem.lang,
+        desc: inboxItem.desc,
         exit: r.code,
         ok: r.ok,
         stdout: r.stdout || '',
@@ -220,7 +220,7 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     }
 
     // bash：走 /exec（NDJSON 流）
-    const exec = await runBash(item.code)
+    const exec = await runBash(inboxItem.code)
     if (inst.stopRequest.value === 'kill' || inst.stopRequest.value === 'rollback') {
       await handleStopAfterRound(inst)
       return
@@ -236,7 +236,7 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     inst.lastExec.value = { lang: 'bash', exit: exec.code, changes: 0, durationMs: Date.now() - startedAt }
     await afterRound(inst, {
       lang: 'bash',
-      desc: item.desc,
+      desc: inboxItem.desc,
       exit: exec.code,
       ok: exec.code === 0,
       stdout: exec.stdout,

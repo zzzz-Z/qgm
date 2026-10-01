@@ -24,9 +24,9 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
  * @param data 任意可 JSON 序列化的值
  * @param code HTTP 状态码，默认 200
  */
-export function sendJSON(res: ServerResponse, data: unknown, code = 200) {
+export function sendJSON(res: ServerResponse, body: unknown, code = 200) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(data))
+  res.end(JSON.stringify(body))
 }
 
 /**

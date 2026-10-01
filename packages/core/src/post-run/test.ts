@@ -11,8 +11,8 @@ import { buildTestArgs } from './test-targets.js'
  * @param timeoutMs 超时毫秒（默认 60s）
  */
 async function runCmd(cmd: string, args: string[], timeoutMs = 60_000): Promise<{ code: number, stdout: string, stderr: string }> {
-  const r = await runProcess(cmd, { args, cwd: getRoot(), timeoutMs })
-  return { code: r.code, stdout: r.stdout, stderr: r.stderr }
+  const proc = await runProcess(cmd, { args, cwd: getRoot(), timeoutMs })
+  return { code: proc.code, stdout: proc.stdout, stderr: proc.stderr }
 }
 /**
  * 对指定测试文件运行单测

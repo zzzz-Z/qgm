@@ -13,7 +13,8 @@ it('SM: ASK_ROTATE_THRESHOLD 是数字', () => {
 })
 
 it('SM: askCount 由 loadAskCount 初始化', () => {
-  assert.ok(SM.includes('const askCount = ref(loadAskCount())'))
+  // [use-storage-v1] 实现从手写 load/save 迁到 vueuse useLocalStorage（自动持久化）
+  assert.ok(SM.includes('const askCount = useLocalStorage<number>'))
 })
 
 it('SM: 持久化 key = __ai_ask_count', () => {
@@ -21,14 +22,15 @@ it('SM: 持久化 key = __ai_ask_count', () => {
 })
 
 it('SM: trackMessage 内 user 自增并落盘', () => {
-  assert.ok(SM.includes('saveAskCount(askCount.value)'))
+  // [use-storage-v1] 赋值即持久化；断言自增语义
+  assert.ok(SM.includes('askCount.value += 1'))
 })
 
 it('SM: resetSession 清零并落盘', () => {
   const i = SM.indexOf('function resetSession')
   const body = SM.slice(i, i + 500)
+  // [use-storage-v1] 清零即自动落盘；不再有显式 save 调用
   assert.ok(body.includes('askCount.value = 0'))
-  assert.ok(body.includes('saveAskCount(0)'))
 })
 
 it('SM: 导出 askCount', () => {

@@ -20,6 +20,12 @@ const localStorageMock = {
   get length() { return store.size },
 };
 (globalThis as unknown as { localStorage: unknown }).localStorage = localStorageMock
+// [__ai_codecleaner_win_bridge__] vueuse useStorage 读 window.localStorage（不是 globalThis）；
+// 缺此桥 → useStorage 走内存兜底 → 测试读底层 store 永远 null，多断言恒红
+;(globalThis as unknown as { window: unknown }).window = { localStorage: localStorageMock }
+// [__ai_codecleaner_doc_stub__] vueuse isClient = (typeof window && typeof document);
+// 仅桥 window 不够 → 仍走内存兜底，写入永不落 mock。补最小 document stub
+;(globalThis as unknown as { document: unknown }).document = { createElement: () => ({ style: {} }), addEventListener: () => {}, removeEventListener: () => {} }
 
 // 模块级单例在首次 import 时初始化（此时 store 为空），因此初始值均为 true（fallback）
 // AIRUNNER-BATCH17-4-FIX-TLA: 去掉顶层 await；改用 before 钩子动态加载（模块单例仅初始化一次）

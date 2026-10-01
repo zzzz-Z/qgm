@@ -34,6 +34,8 @@ Object.defineProperty(globalThis, 'window', {
   writable: true,
   value: {
     get location() { return globalThis.location },
+    // [__ai_transport_win_bridge__] vueuse useStorage 读 window.localStorage；不桥接则走内存兜底
+    get localStorage() { return globalThis.localStorage },
     addEventListener: (t: string, fn: EventListener): void => {
       if (!listeners.has(t)) listeners.set(t, new Set())
       listeners.get(t)!.add(fn)
@@ -84,6 +86,9 @@ class WSStub {
     }
   }
 }
+// [__ai_transport_doc_stub__] vueuse isClient 需 document；缺失则走内存兜底，storage 断言恒红
+;(globalThis as unknown as { document: unknown }).document = { createElement: () => ({ style: {} }), addEventListener: () => {}, removeEventListener: () => {} }
+
 ;(globalThis as unknown as { WebSocket: unknown }).WebSocket = WSStub
 
 let mod: typeof import('../../../packages/client/composables/ai/useAiTransport')
@@ -224,7 +229,9 @@ test('getTransportKind: 默认 tampermonkey', () => {
 })
 
 test('getTransportKind: localStorage=headless → headless', () => {
-  lsStore.set('__ai_transport', 'headless')
+  // [use-storage-v1] 实现走 vueuse useStorage → 落盘为 JSON.stringify('headless') = '"headless"'；
+  // 直接写裸字符串反序列化失败 → 落到默认 'tampermonkey'，用例恒红
+  lsStore.set('__ai_transport', JSON.stringify('headless'))
   assert.equal(mod.getTransportKind(), 'headless')
 })
 
@@ -234,16 +241,16 @@ test('getTransportKind: URL 参数 transport=headless 优先', () => {
 })
 
 test('getTransportKind: URL 参数 transport=tampermonkey 优先', () => {
-  lsStore.set('__ai_transport', 'headless')
+  lsStore.set('__ai_transport', JSON.stringify('headless'))
   currentHref = 'http://localhost/?transport=tampermonkey'
   assert.equal(mod.getTransportKind(), 'tampermonkey')
 })
 
 test('setTransportKind: 写 localStorage', () => {
   mod.setTransportKind('headless')
-  assert.equal(lsStore.get('__ai_transport'), 'headless')
+  assert.equal(lsStore.get('__ai_transport'), JSON.stringify('headless'))
   mod.setTransportKind('tampermonkey')
-  assert.equal(lsStore.get('__ai_transport'), 'tampermonkey')
+  assert.equal(lsStore.get('__ai_transport'), JSON.stringify('tampermonkey'))
 })
 
 test('getTransport: 返回同一实例（单例）', () => {

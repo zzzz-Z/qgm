@@ -31,8 +31,8 @@ export let BACKUP_DIR = path.join(ROOT, '.ai-runner/backup')
  * [CHANGE-IMPACT] 影响所有依赖派生目录的模块（snapshot / timeline / run 等）；应在启动早期调用一次
  * @param r 项目根目录；会被规范化为绝对路径
  */
-export function setRoot(r: string): void {
-  ROOT = path.resolve(r)
+export function setRoot(rootPath: string): void {
+  ROOT = path.resolve(rootPath)
   // 写 env，供 strip-types 无法 import 的模块读
   process.env.AI_RUNNER_ROOT = ROOT
   // [has-workspace-v1] setRoot 即视为"已选择工作区"；与 clearWorkspace 成对

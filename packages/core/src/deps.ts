@@ -11,6 +11,10 @@ export { gitCommitAfter, gitSnapshot } from './git.js'
 // 冒烟测试
 export { runSmoke, type SmokeResult } from './headless/smoke.js'
 
+// [hclc-fix] run.ts 直 import ai-guard.js 使该文件唯一 import 达 9（>8 阻断）；
+// scanScriptHead 上提至 barrel，令所有 route 层调用方统一从 deps 入口引入
+export { scanScriptHead } from './post-run/ai-guard.js'
+
 // 运行后处理
 export {
   applyOverlay,
@@ -39,7 +43,7 @@ export {
   type ComplianceFlags,
   computeClaimMismatch,
   computeCompliance,
-} from './post-run/run-helpers.js'
+} from './post-run/run-compliance.js'
 
 // 进程执行
 export {

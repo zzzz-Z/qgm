@@ -23,8 +23,8 @@ hljs.registerLanguage('typescript', typescript)
  * [CHANGE-IMPACT] 与 DiffViewer.vue 内联版本功能重叠；若统一需同步两处
  * @param s 待转义文本
  */
-export function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, ch => ({
+export function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, ch => ({
     '&': '&amp;',
     '<': '&lt;',
     '>': '&gt;',

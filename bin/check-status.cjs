@@ -21,7 +21,7 @@ const read = r => fs.readFileSync(abs(r), 'utf8')
 
 const STAGES = [
   ['0.1', 'packages/core/src/interceptor.cjs', 'overlay 拦截层'],
-  ['0.2', 'packages/core/src/utils/index-index.ts', '文件索引 / 跨轮 diff'],
+  ['0.2', 'packages/core/src/utils/file-index.ts', '文件索引 / 跨轮 diff'],
   ['0.3', 'packages/core/src/headless/smoke.ts', 'smoke 模块'],
   ['1.2', 'apps/vite-plugin/src/index.ts', '主插件'],
   ['1.3', 'bin/recover.cjs', 'recover picker'],

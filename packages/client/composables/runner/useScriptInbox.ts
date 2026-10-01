@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { fnv1a8 } from '../../utils/hash.js'
 import { useRunner } from './useRunner'
 import { toast } from '../ui/useToast'
-import { normalizeForHash, parseMeta } from './inbox-logic' // AIRUNNER-BATCH5-0C-INBOX-LOGIC
+import { normalizeForHash, parseMeta } from './inbox-parse' // AIRUNNER-BATCH5-0C-INBOX-PARSE
 
 /** 收件箱条目 */
 export interface InboxItem {
@@ -140,17 +140,17 @@ export function setLastAutoFilled(code: string) {
  * - 编辑器内容 === 上次自动填入的 → 直接覆盖，返回 'overwritten'
  * - 编辑器有用户手写内容 → 不覆盖，存 inbox + toast 带「取用」按钮，返回 'queued'
  */
-export function applyToEditor(item: InboxItem): 'overwritten' | 'queued' | 'noop' {
+export function applyToEditor(inboxItem: InboxItem): 'overwritten' | 'queued' | 'noop' {
   const runner = useRunner()
   const current = runner.script.value
   if (current === lastAutoFilled || current === '') {
     // 安全覆盖
-    runner.script.value = item.code
-    lastAutoFilled = item.code
+    runner.script.value = inboxItem.code
+    lastAutoFilled = inboxItem.code
     return 'overwritten'
   }
   // 用户有手写内容，保护
-  toast(`📥 脚本 · ${item.lang}${item.desc ? ` · ${item.desc}` : ''}`, 'info', 3500) // [toast-script-arrival-v2]
+  toast(`📥 脚本 · ${inboxItem.lang}${inboxItem.desc ? ` · ${inboxItem.desc}` : ''}`, 'info', 3500) // [toast-script-arrival-v2]
   return 'queued'
 }
 

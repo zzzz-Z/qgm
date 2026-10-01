@@ -98,9 +98,18 @@ const __AI__ = {
   },
   readFile(p) { return this.readText(p) }, // [OPT] readFile delegates readText
   writeFile(p, c) { return _writeText(p, c) },
-  deleteFile(p) {
-    try { fs.rmSync(p, { recursive: true, force: true }); _changelog('delete', p); return true }
-    catch { return false }
+  deleteFile(p, opts) { // [delete-safe-v1]
+    // 为什么加目录守卫：日志显示 delete 累计 742 次（超 patch 340 次），误传目录会整棵删除
+    // 保留返回布尔值语义，避免破坏现有 "if (__AI__.deleteFile(x))" 用法
+    opts = opts || {}
+    try {
+      const st = fs.statSync(p)
+      if (st.isDirectory() && !opts.recursiveDir) {
+        process.stderr.write('[deleteFile] refused: directory (pass { recursiveDir: true } to delete)\n')
+        return false
+      }
+      fs.rmSync(p, { recursive: true, force: true }); _changelog('delete', p); return true
+    } catch { return false }
   },
   exists(p) { return fs.existsSync(p) },
   listDir(p) {
@@ -397,6 +406,11 @@ const __AI__ = {
     const PUSH = ['p', 'u', 's', 'h'].join('')
     const RESET = ['r', 'e', 's', 'e', 't'].join('')
     const CHMOD = ['c', 'h', 'm', 'o', 'd'].join('')
+    const CLEAN = ['c', 'l', 'e', 'a', 'n'].join('')
+    const CHECKOUT = ['c', 'h', 'e', 'c', 'k', 'o', 'u', 't'].join('')
+    const RESTORE = ['r', 'e', 's', 't', 'o', 'r', 'e'].join('')
+    const STASH = ['s', 't', 'a', 's', 'h'].join('')
+    const CLEAR = ['c', 'l', 'e', 'a', 'r'].join('')
     const patterns = [
       ['sudo', new RegExp(`(^|\\s)${SUDO}(\\s|$)`, 'i')],
       ['curl-pipe-sh', new RegExp(`(^|\\s)${CURL}\\s[^|]*\\|[^|]*(sh|bash)(\\s|$)`, 'i')],
@@ -407,6 +421,11 @@ const __AI__ = {
       ['git-force-push', new RegExp(`(^|\\s)${GIT}\\s+${PUSH}\\s[^|]*(-f|--force)(\\s|$)`, 'i')],
       ['git-reset-hard', new RegExp(`(^|\\s)${GIT}\\s+${RESET}\\s+--hard(\\s|$)`, 'i')],
       ['chmod-777', new RegExp(`(^|\\s)${CHMOD}\\s[^|]*777(\\s|$)`, 'i')],
+      // [shell-blacklist-v2] 补 4 条易致工作区丢失的 git 命令：clean/checkout/restore/stash-clear
+      ['git-clean-fd', new RegExp(`(^|\\s)${GIT}\\s+${CLEAN}\\s[^|]*(-f|-d|-x|--force)`, 'i')],
+      ['git-checkout-dot', new RegExp(`(^|\\s)${GIT}\\s+${CHECKOUT}\\s+(--\\s+)?\\.`, 'i')],
+      ['git-restore-dot', new RegExp(`(^|\\s)${GIT}\\s+${RESTORE}\\s[^|]*\\.`, 'i')], // [shell-blacklist-v2-fix1]
+      ['git-stash-clear', new RegExp(`(^|\\s)${GIT}\\s+${STASH}\\s+${CLEAR}\\b`, 'i')],
     ]
     for (const pair of patterns) { if (pair[1].test(flat)) return pair[0]
     }
@@ -479,6 +498,7 @@ const __AI__ = {
       const fl = raw.split(String.fromCharCode(10))
       for (let i = 0; i < fl.length; i++) {
         if (out.length >= maxHits) break
+        re.lastIndex = 0 // [grep-g-fix]
         if (re.test(fl[i])) {
           out.push({ file: path.relative(process.cwd(), f).replace(/\\/g, '/'), line: i + 1, text: fl[i].trim().slice(0, 200) })
         }

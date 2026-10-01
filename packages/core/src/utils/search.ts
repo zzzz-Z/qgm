@@ -76,16 +76,16 @@ export function getSearchFiles(): SearchFile[] {
  * [CHANGE-IMPACT] 读取失败返回 null；调用方需区分"内容为空字符串"与"读取失败"
  * @param f 由 getSearchFiles 产出的元信息（含 abs 与 mtimeMs）
  */
-export function readSearchContentCached(f: SearchFile): string | null {
-  const hit = searchContentCache.get(f.abs)
-  if (hit && hit.mtimeMs === f.mtimeMs) return hit.content
+export function readSearchContentCached(file: SearchFile): string | null {
+  const hit = searchContentCache.get(file.abs)
+  if (hit && hit.mtimeMs === file.mtimeMs) return hit.content
   let content: string
-  try { content = fs.readFileSync(f.abs, 'utf8') } catch { return null }
+  try { content = fs.readFileSync(file.abs, 'utf8') } catch { return null }
   if (searchContentCache.size >= SEARCH_CONTENT_CACHE_MAX) {
     const oldest = searchContentCache.keys().next().value
     if (oldest !== undefined) searchContentCache.delete(oldest)
   }
-  searchContentCache.set(f.abs, { mtimeMs: f.mtimeMs, content })
+  searchContentCache.set(file.abs, { mtimeMs: file.mtimeMs, content })
   return content
 }
 

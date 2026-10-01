@@ -46,7 +46,7 @@ export function createAfterRound(deps: AfterRoundDeps) {
   let hardTrackedLoopId = ''
   let hardStartedAtMs = 0
 
-  async function afterRound(inst: LoopInstance, o: RoundOutcome): Promise<void> {
+  async function afterRound(inst: LoopInstance, outcome: RoundOutcome): Promise<void> {
     // [loop-hard-limit-v1] 硬上限：总时长 / 总轮次，先到即停
     if (inst.id.value !== hardTrackedLoopId) {
       hardTrackedLoopId = inst.id.value
@@ -75,13 +75,13 @@ export function createAfterRound(deps: AfterRoundDeps) {
     const asHook = await runHook('AfterScript', {
       loopId: inst.id.value,
       round: inst.round.value,
-      lang: o.lang,
-      desc: o.desc,
-      exit: o.exit,
-      ok: o.ok,
-      stdout: o.stdout.slice(-2000),
-      stderr: o.stderr.slice(-2000),
-      changeCount: o.changeCount,
+      lang: outcome.lang,
+      desc: outcome.desc,
+      exit: outcome.exit,
+      ok: outcome.ok,
+      stdout: outcome.stdout.slice(-2000),
+      stderr: outcome.stderr.slice(-2000),
+      changeCount: outcome.changeCount,
     })
     if (asHook.action === 'reject') {
       await finish(inst, 'hook-reject-after-script', asHook.reason || 'AfterScript hook rejected')
@@ -98,10 +98,10 @@ export function createAfterRound(deps: AfterRoundDeps) {
     const arHook = await runHook('AfterResult', {
       loopId: inst.id.value,
       round: inst.round.value,
-      lang: o.lang,
-      exit: o.exit,
-      ok: o.ok,
-      changeCount: o.changeCount,
+      lang: outcome.lang,
+      exit: outcome.exit,
+      ok: outcome.ok,
+      changeCount: outcome.changeCount,
       tokenDelta,
     })
     if (arHook.action === 'reject') {

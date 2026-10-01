@@ -31,35 +31,35 @@ export function useFileTree() {
     }
   }
 
-  async function loadChildren(p: string) {
-    if (childrenCache.has(p) || loadingChildren.value.has(p)) return
-    loadingChildren.value.add(p)
+  async function loadChildren(path: string) {
+    if (childrenCache.has(path) || loadingChildren.value.has(path)) return
+    loadingChildren.value.add(path)
     try {
-      const res = await fetch(`/__ai/files/children?path=${encodeURIComponent(p)}`)
+      const res = await fetch(`/__ai/files/children?path=${encodeURIComponent(path)}`)
       const data = await res.json()
-      childrenCache.set(p, data.children || [])
+      childrenCache.set(path, data.children || [])
     } catch {
-      childrenCache.set(p, [])
+      childrenCache.set(path, [])
     } finally {
-      loadingChildren.value.delete(p)
+      loadingChildren.value.delete(path)
       loadingChildren.value = new Set(loadingChildren.value)
     }
   }
 
-  function getChildren(p: string): FileNode[] {
-    return childrenCache.get(p) || []
+  function getChildren(path: string): FileNode[] {
+    return childrenCache.get(path) || []
   }
 
-  function isChildrenLoading(p: string): boolean {
-    return loadingChildren.value.has(p)
+  function isChildrenLoading(path: string): boolean {
+    return loadingChildren.value.has(path)
   }
 
   /** 复制路径 */
-  async function copyPath(p: string) {
+  async function copyPath(path: string) {
     try {
-      await navigator.clipboard.writeText(p)
-      copiedPath.value = p
-      setTimeout(() => { if (copiedPath.value === p) copiedPath.value = '' }, 1200)
+      await navigator.clipboard.writeText(path)
+      copiedPath.value = path
+      setTimeout(() => { if (copiedPath.value === path) copiedPath.value = '' }, 1200)
     } catch { /* ignore */ }
   }
 

@@ -6,10 +6,10 @@
  * [WHY] 不引入更小单位（GB 及以上极少出现）；不做千分位分隔（UI 空间有限）
  * @param n 字节数；负数按 B 处理（< 1024 分支）
  */
-export function fmtSize(n: number): string {
-  if (n < 1024) return `${n}B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`
-  return `${(n / 1024 / 1024).toFixed(2)}MB`
+export function fmtSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)}MB`
 }
 
 /**
