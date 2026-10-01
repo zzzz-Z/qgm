@@ -103,11 +103,6 @@ const runningCommand = ref('')
 const sideTab = ref<'tree' | 'changes'>('tree')
 /** 窄屏抽屉开合 */
 const sideDrawerOpen = ref(false)
-// 供 App.vue header 按钮触达 SidePane 的 selectTab
-// [WHY] 用户要求工作日志入口从弹窗改为侧栏 tab；父组件需通过 ref 调子组件方法，无需新增事件总线
-// [CONSTRAINT] SidePane 未挂载（如无工作区）时 sidePaneRef.value 为 null，需静默兜底
-// [CHANGE-IMPACT] 依赖 SidePane 的 defineExpose({ selectTab })
-const sidePaneRef = ref<{ selectTab: (t: 'tree' | 'changes' | 'worklog') => void } | null>(null)
 /** Diff 预览文件 */
 const previewFile = ref<string | null>(null)
 /** 差异预览：变更前内容 */
@@ -357,11 +352,6 @@ if (typeof window !== 'undefined') {
   onBeforeUnmount(() => window.removeEventListener('resize', _lockedScroll))
 }
 
-/** 打开侧栏并切到指定 tab；侧栏已收起时自动展开 */
-function openSideTab(tab: 'tree' | 'changes' | 'worklog'): void {
-  sideDrawerOpen.value = true
-  sidePaneRef.value?.selectTab(tab)
-}
 /**
  * 切换 Auto Takeover
  */
@@ -570,9 +560,6 @@ function onHtmlDrop(e: DragEvent) {
   fileSuccess.value = true
   scheduleFileSuccessReset()
 }
-
-// 对外暴露给 App.vue 的 header 按钮使用
-defineExpose({ openSideTab })
 </script>
 
 <template>
@@ -650,7 +637,6 @@ defineExpose({ openSideTab })
     <!-- 右侧：变更列表 & Diff -->
     <!-- SIDE_VIF_CHANGES -->
     <SidePane
-      ref="sidePaneRef"
       v-model:side-drawer-open="sideDrawerOpen"
       :side-width="sideWidth"
       :changes="changes"
