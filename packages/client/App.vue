@@ -7,7 +7,6 @@ import { copyAndFill, getActiveWinSid, getWindowBySid, listWindows, onNewSession
 import { useScriptInbox } from './composables/runner/useScriptInbox'
 import {
   createLoopInstanceFor,
-  currentLoopContext,
   getLoopBySessionId,
   isInstActive,
   isLoopActive,
@@ -18,7 +17,7 @@ import {
   setActiveLoopSessionId,
   setActiveSessionIdGetter,
   setTokenEstimate,
-  startHandoff,
+  startHandoff
 } from './composables/ai/useAutoLoop'
 import { useAutoTakeover } from './composables/ai/useAutoTakeover'
 import { useSessionManager } from './composables/ai/useSessionManager'
@@ -35,7 +34,6 @@ import { getTransport, transportKind } from './composables/ai/useAiTransport' //
 import type { EventKind } from './composables/ui/useEventStream'
 import ToastHost from './components/feedback/ToastHost.vue'
 import TooltipHost from './components/feedback/TooltipHost.vue'
-// [worklog-v1] 工作日志弹窗：header 按钮触发，git diff → Markdown
 // [app-storage-extracted-v1]
 import { activeSessionId, loadActiveSessionIdBySite, loadHistoryBySite, saveActiveSessionIdBySite, saveHistoryBySite, theme } from './composables/ui/useAppStorage'
 import type { SessionEntry } from './composables/ui/useAppStorage'
@@ -57,11 +55,6 @@ const LS_LAST_VISIT = '__ai_last_visit'
 // [workspace-mode-v1] 工作区绑定状态：无工作区时渲染引导页
 // [CONSTRAINT] 默认 true 避免首帧闪烁；onMounted 探测后按服务端返回值覆盖
 const hasWorkspace = ref(true)
-// [worklog-v1] 工作日志弹窗可见性
-// [side-worklog-tab-v1] 工作日志弹窗改为侧栏 tab；改由 ScriptPanel 暴露的 openSideTab 触达
-// [CONSTRAINT] ScriptPanel 未挂载时 scriptPanelRef.value 为 null，点击按钮需静默兜底
-// [CHANGE-IMPACT] 依赖 ScriptPanel defineExpose({ openSideTab })，SidePane 暴露 selectTab
-const scriptPanelRef = ref<{ openSideTab: (t: 'tree' | 'changes' | 'worklog') => void } | null>(null)
 /** 键盘帮助面板开关 */
 const keyboardHelpOpen = ref(false)
 /** 信息 */
@@ -83,7 +76,7 @@ const { url: siteUrl, setUrl: setSiteUrl, modelId } = useAiSite()
 const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
 
 const { toast } = useToast()
-const { run: runScript, gitCommit } = useRunner()
+const { run: runScript, gitCommit, running } = useRunner()
 /** 脚本收件箱：来自 AI 的脚本队列 */
 const scriptInbox = useScriptInbox()
 const { stopWaiting: stopAiWaiting } = useAiWaiting()
@@ -324,6 +317,8 @@ function onUrlBlur() {
 function onSessionIdMessage(e: MessageEvent) {
   const payload = e.data
   if (!payload) return
+  console.log(payload)
+
   const t = String(payload.type || '')
   if (t === 'ai-runner:reply') return handleAiReply(payload, e)
   if (t === 'ai-runner:script') return handleLegacyScript(payload, e)
@@ -415,25 +410,28 @@ function handleAiReply(payload: MessageEvent['data'], e: MessageEvent) {
     if (item) {
       const lineCount = code.split('\n').length
       toast(`📥 脚本 · ${lang} · ${lineCount} 行${item.desc ? ` · ${item.desc}` : ''}`, 'info', 3500)
-      const planM = code.match(/^\s*(?:\/\/|#)[ \t]*@plan[ \t]*:[ \t]*(\S.*)$/m)
-      const plan = planM ? planM[1].trim().slice(0, 200) : ''
       // 若用户刚发过提问，复用那条等待卡的 key —— 原地替换为执行卡
       const runKey = takePendingAskKey() || (`run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`)
-      try {
-        emitBus('run:start', `等待执行：${item.desc || '脚本'}`, {
-          payload: { desc: item.desc, why: item.why, plan, lang, lineCount, hash: item.hash, phase: 'pending', runKey, ...currentLoopContext() },
-          updateKey: runKey
-        })
-      } catch (e) { log.error('[run:start pending] failed:', e) }
-      // 决策链路：脚本到达事件入 TraceLog，循环中盖 loopId/loopRound
+      // [no-pending-card-v1] 不再 emit「等待执行」卡片：脚本内容不该提前暴露到终端面板
+      // WHY: 上一版在脚本到达时立即 emit pending 卡，用户反馈"脚本不该显示到页面上"；真正执行时由 useRunner 的 run:start 显示「执行中」即可
+      // CHANGE-IMPACT: 删除 emitBus('run:start', phase: 'pending')；takePendingAskKey 仍需调用（防止 ask 等待卡残留）
       if (routedToLoop) {
         // 循环模式：状态机接管（不经编辑器覆盖策略）
         void onScriptArrival(item, sid)
       } else {
         // [no-delay-v2] 手动模式：不回填编辑器，scheduleAutoRun 已无延迟无 meta，立即执行
-        autoTakeover.scheduleAutoRun(() => {
-          void runScript({ script: code, runKey, autoFeedback: true })
-        })
+        // [running-guard-v1] 若上一轮 running 还在执行，scheduleAutoRun 立即调用 → run() 直接 return，「等待执行」卡永远卡住
+        // [CONSTRAINT] 轮询等待 running 释放再执行，而非直接吞掉；最多重试 20 次（20s）
+        const retryRun = (attempt: number) => {
+          if (!running.value) {
+            void runScript({ script: code, runKey, autoFeedback: true })
+          } else if (attempt < 20) {
+            setTimeout(retryRun, 1000, attempt + 1)
+          } else {
+            toast('等待执行超时（20s），请手动点击运行', 'warn', 4000)
+          }
+        }
+        autoTakeover.scheduleAutoRun(() => retryRun(0))
       }
     }
     return
@@ -774,9 +772,6 @@ function onLoginGui() {
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 0 1 2 2v7" /><line x1="6" y1="9" x2="6" y2="21" /></svg>
       </button>
-      <button v-tooltip="'打开工作日志侧栏'" aria-label="工作日志" class="worklog-toggle" @click="scriptPanelRef?.openSideTab('worklog')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="16" y2="17" /></svg>
-      </button>
     </div>
   </header>
 
@@ -785,7 +780,7 @@ function onLoginGui() {
   <div v-else class="layout-row">
     <div class="layout-main">
       <main class="main">
-        <ScriptPanel ref="scriptPanelRef" />
+        <ScriptPanel />
       </main>
     </div>
   </div>
