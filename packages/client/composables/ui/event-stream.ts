@@ -5,7 +5,7 @@ import { ref } from 'vue'
 export type EventKind
   = | 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary'
     | 'ai:ask' | 'ai:feedback'
-    | 'ai:token' | 'ai:decision' | 'ai:need-files' | 'ai:stream'
+    | 'ai:decision' | 'ai:need-files' | 'ai:stream'
     | 'run:start' | 'run:end' | 'run:error' | 'run:stage'
     | 'loop:round' | 'loop:static' | 'loop:finish'
     | 'rules:changed'

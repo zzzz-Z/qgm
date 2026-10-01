@@ -1,5 +1,5 @@
 // [state-extract-v1] useAutoLoop 的模块级状态集中地；由 useAutoLoop.ts 导入 + re-export
-// 单例：全局一份，供循环状态机 + 反向依赖模块（handoff/keyboard/token-rotate）共享
+// 单例：全局一份，供循环状态机 + 反向依赖模块（handoff/keyboard）共享
 
 import { computed, ref } from 'vue'
 import { LOOP_ROUND_TIMEOUT_MS } from '../loopLogic.js'

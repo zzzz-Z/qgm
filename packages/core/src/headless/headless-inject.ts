@@ -170,6 +170,13 @@ export function detectReplyInPage() {
     if (/\brequire\s*\(/.test(head)) return 'js'
     if (/\bmodule\.exports\b/.test(head)) return 'js'
     if (/\bprocess\.(?:exit|argv|env)\b/.test(head)) return 'js'
+    // [js-content-broaden-v1] 补常见 Node/fs/语法特征（与 tampermonkey-session-id.user.js 保持同构）
+    // WHY: 千问等站点直接输出 `fs.readdirSync(...)` / `const x = ...` 无 require → 旧特征全 null → 代码块被跳过降级为 plain 文本
+    // CONSTRAINT: 只加高置信特征；避免误伤纯 JSON/配置代码块
+    if (/\bfs\.(?:readFileSync|writeFileSync|readdirSync|existsSync|statSync|mkdirSync|unlinkSync)\b/.test(head)) return 'js'
+    if (/\bconsole\.log\s*\(/.test(head)) return 'js'
+    if (/\bJSON\.(?:parse|stringify)\s*\(/.test(head)) return 'js'
+    if (/^(?:const|let)\s+\w+\s*=/.test(head)) return 'js'
     if (/^\s*(?:echo|cd\s|ls\s|mkdir|git\s|pnpm\s|npm\s|yarn\s|rm\s)/m.test(head)) return 'bash'
     if (/\bif\s+\[\s/.test(head) || /\bfi\b/.test(head) || /\$\(/.test(head)) return 'bash'
     return null
@@ -381,23 +388,4 @@ export function resetReplyDedupInPage() {
   const sig = (h >>> 0).toString(16).padStart(8, '0')
   window.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: sig, _pendingScriptHash: null, _plainSentInCycle: false, _stableCount: 0, _seenGrowth: false }
   return true
-}
-
-/** 收集页面主文本（尾部 8k 字符），用于 token 估算。 */
-export function collectTextInPage() {
-  const el = document.querySelector('main') || document.body
-  const t = (el && el.textContent) || ''
-  return t.slice(-8000)
-}
-
-/** 粗估 token：CJK ~1.5 chars/token，其余 ~4 chars/token。 */
-export function estimateTokensInPage(text) {
-  if (!text) return 0
-  let cjk = 0; let other = 0
-  for (const ch of String(text)) {
-    const c = ch.codePointAt(0) || 0
-    if ((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3040 && c <= 0x30FF) || (c >= 0xAC00 && c <= 0xD7AF)) cjk++
-    else other++
-  }
-  return Math.ceil(cjk / 1.5 + other / 4)
 }

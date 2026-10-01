@@ -2,9 +2,7 @@
 import { ref } from 'vue'
 import type { Ref } from 'vue'
 import { useToast } from '../../composables/ui/useToast'
-import { copyAndFill, sendNewSession } from '../../composables/ai/useAiWindow'
-import { buildNewSessionPrompt } from '../../composables/ai/session-prompt'
-import { useSessionManager } from '../../composables/ai/useSessionManager'
+import { copyAndFill } from '../../composables/ai/useAiWindow'
 import { readNdjson } from '../../utils/stream'
 import { bashPolicy } from '../../composables/ui/useAppStorage'
 import { log } from '../../utils/log'
@@ -45,7 +43,6 @@ export interface ExecFlowDeps {
 export function createExecFlow(deps: ExecFlowDeps) {
   const { running, result, changes, liveStdout, liveStderr, copied, runningCommand, pushCmdHistory, buildAiPrompt, confirmDialog, startAiWaiting, softPause } = deps
   const { toast } = useToast()
-  const { maybeRotateSession } = useSessionManager()
   const execPolicyOverride = ref<string | null>(null)
   const lastAutoAskedRunId = ref('')
 
@@ -124,7 +121,7 @@ export function createExecFlow(deps: ExecFlowDeps) {
     }
   }
 
-  /** 把本次执行结果作为 prompt 回传 AI（去重、暂停、阈值轮转） */
+  /** 把本次执行结果作为 prompt 回传 AI（去重、暂停） */
   async function copyOutput(force = false): Promise<void> {
     if (!result.value) return
     try {
@@ -140,12 +137,6 @@ export function createExecFlow(deps: ExecFlowDeps) {
         return
       }
       emit('ai:feedback', `📤 回传 AI：${changes.value.length} 文件 · exit ${result.value?.code ?? -1}`, { payload: { prompt: text.slice(0, 8000), changes: changes.value.map(c => ({ path: c.path, type: c.type })), exit: result.value?.code ?? -1, ok: result.value?.ok ?? false } })
-      try {
-        await maybeRotateSession(async (summary) => {
-          const full = await buildNewSessionPrompt(summary)
-          return sendNewSession({ summary: full })
-        })
-      } catch { /* 轮转失败不阻断 */ }
       copied.value = true
       startAiWaiting()
       setTimeout(() => { copied.value = false }, 2000)

@@ -277,10 +277,10 @@ async function generateCommitMsg(): Promise<void> {
     11. 如果输出语言为中文，type 和 scope 仍用英文，subject/body 可用中文。
 
     【示例】
-    feat(auth): add refresh token rotation
+    feat(auth): add session refresh
 
-    - rotate refresh tokens on every use
-    - invalidate the previous token to prevent replay attacks
+    - rotate sessions on every use
+    - invalidate the previous session to prevent replay attacks
 
     Closes #123
 

@@ -65,6 +65,10 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
    * @param detail 可读补充说明；缺省时回落为 reason
    */
   async function finish(inst: LoopInstance, reason: string, detail?: string): Promise<void> {
+    // [breaker-sendstop-first-v1] 停止信号必须最先发出：抢在本地计时器与状态机变更之前
+    // [WHY] 若 sendStop 滞后，服务器端 post-run 可能已注入下一轮脚本，本地早退守卫无从拦截
+    // [CONSTRAINT] try/catch 包裹：链路未就绪时不应阻塞收尾流程
+    try { transport.sendStop('') } catch { /* 链路未就绪忽略 */ }
     disarmTimer(inst)
     inst.pendingRound.value = null
     const wasRollback = inst.stopRequest.value === 'rollback'
@@ -72,7 +76,6 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
     inst.stopReason.value = detail || reason
 
     inst.state.value = interrupted ? 'interrupted' : 'stopped'
-    transport.sendStop('')
     unbindKeyboard()
     persist(inst)
 
@@ -88,14 +91,15 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
         })
         const d = await r.json()
         if (d.ok && d.commit) {
+          // [ai-archive-v1] 方案 C：自动存档落 ai-archive 分支，主分支不动；提示撤回方式为丢弃工作区改动
           const hint = inst.startCommit.value
-            ? `撤回：git reset --hard ${inst.startCommit.value}`
+            ? `丢弃改动：git reset --hard ${inst.startCommit.value}`
             : ''
-          toast(`循环已提交 ${d.commit}（${inst.round.value} 轮）${hint ? ` · ${hint}` : ''}`, 'success', 8000)
+          toast(`已存档到 ai-archive:${d.commit}（${inst.round.value} 轮）${hint ? ` · ${hint}` : ''}`, 'success', 8000)
         } else if (d.ok && d.empty) {
           toast('循环结束，无文件改动', 'info', 4000)
         } else {
-          toast(`循环结束，自动提交失败：${d.reason || ''}`, 'warn', 6000)
+          toast(`循环结束，存档失败：${d.reason || ''}`, 'warn', 6000)
         }
       } catch {
         toast('循环结束（非 git 仓库，未提交）', 'info', 4000)

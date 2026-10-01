@@ -1,4 +1,4 @@
-// post-run barrel — 收敛下游 imports（HCLC 第7章）
+// post-run barrel — 收敛下游 imports（HCLC §4）
 
 export { injectAiJsdoc, scanNativeApis } from './ai-guard.js' // [ai-guard-v1]
 export type { ScanResult } from './ai-guard.js'

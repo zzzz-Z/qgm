@@ -1,4 +1,7 @@
-import * as ds from './useAiSite'
+// [transport-import-fix-v1] sendX 已从 useAiSite 迁至 useAiWindowSend；
+// [CONSTRAINT] useAiWindowSend 反向 import 本模块（ESM 循环安全：callDs 运行时访问 ds[name]，不在顶层解构）；
+// [CHANGE-IMPACT] 修复前 callDs('sendStop') 静默返回 false，暂停信号无法送达油猴；
+import * as ds from './useAiWindowSend'
 import { loopPaused } from './useAiWaiting.js'
 import { useStorage } from '@vueuse/core'
 
@@ -18,7 +21,6 @@ export interface AiTransport {
   /** [headless-login-gui-v1] 引导式登录：请服务端起有头窗口让用户手动登录 */
   sendLoginGui?: (sid: string, url?: string) => boolean
   onReply: (cb: (r: unknown, sid: string) => void) => () => void
-  onTokenEstimate: (cb: (n: number, sid: string) => void) => () => void
   onSummary: (cb: (text: string, sid: string, degraded: boolean) => void) => () => void
   /** [headless-state-err-v1] 订阅服务端 headless:state，UI 侧据此显示 error（如未登录） */
   onState?: (cb: (state: string, detail: string, sid: string) => void) => () => void
@@ -47,8 +49,8 @@ export const transportKind = useStorage<AiTransportKind>(TRANSPORT_KEY, 'tamperm
 let singleton: AiTransport | null = null
 
 /**
- * 反射调用 useAiSite 导出的发送函数（sendFill / sendStop / …）
- * [WHY] 避免静态 import 引发循环依赖：useAiSite 与 transport 相互引用，动态取值可延迟到调用时
+ * 反射调用 useAiWindowSend 导出的发送函数（sendFill / sendStop / …）
+ * [WHY] ESM 循环安全：useAiWindowSend 反向 import 本模块，callDs 仅在调用时读取 ds[name]，不在顶层解构
  * [CONSTRAINT] 未知 name 或非函数时返回 false；返回 Promise 则 fire-and-forget 并吞掉 rejection
  * [CHANGE-IMPACT] 被 sendFill/sendStop/sendRotate/sendNewSession 依赖，签名变化会破坏油猴通道
  */
@@ -70,7 +72,6 @@ function callDs(name: string, ...args: unknown[]): boolean {
  */
 export function createTampermonkeyTransport(): AiTransport {
   const replyCbs = new Set<(r: unknown, sid: string) => void>()
-  const tokenCbs = new Set<(n: number, sid: string) => void>()
   const summaryCbs = new Set<(t: string, sid: string, d: boolean) => void>()
   const newSidCbs = new Set<(url: string, id: string) => void>()
 
@@ -84,7 +85,6 @@ export function createTampermonkeyTransport(): AiTransport {
     const sid = String((d as { sid?: string }).sid || (d as { sessionId?: string }).sessionId || '')
     if (t === 'ai-runner:reply') { for (const cb of replyCbs) cb((d as { reply?: unknown }).reply, sid) }
     else if (t === 'ai-runner:script') { for (const cb of replyCbs) cb({ kind: 'script', item: (d as { item?: unknown }).item }, sid) }
-    else if (t === 'ai-runner:token-estimate') { const n = Number((d as { tokens?: number }).tokens || 0); for (const cb of tokenCbs) cb(n, sid) }
     else if (t === 'ai-runner:summary') { for (const cb of summaryCbs) cb(String((d as { text?: string }).text || ''), sid, Boolean((d as { degraded?: boolean }).degraded)) }
     else if (t === 'ai-runner:new-session-created') { for (const cb of newSidCbs) cb(String((d as { url?: string }).url || ''), String((d as { id?: string }).id || '')) }
   }
@@ -112,12 +112,11 @@ export function createTampermonkeyTransport(): AiTransport {
       muted = false
     },
     onReply(cb) { replyCbs.add(cb); return () => { replyCbs.delete(cb) } },
-    onTokenEstimate(cb) { tokenCbs.add(cb); return () => { tokenCbs.delete(cb) } },
     onSummary(cb) { summaryCbs.add(cb); return () => { summaryCbs.delete(cb) } },
     onNewSessionCreated(cb) { newSidCbs.add(cb); return () => { newSidCbs.delete(cb) } },
     dispose() {
       if (typeof window !== 'undefined') window.removeEventListener('message', onMessage)
-      replyCbs.clear(); tokenCbs.clear(); summaryCbs.clear(); newSidCbs.clear()
+      replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear()
     },
   }
 }
@@ -129,7 +128,6 @@ export function createTampermonkeyTransport(): AiTransport {
  */
 export function createHeadlessTransport(wsUrl?: string): AiTransport {
   const replyCbs = new Set<(r: unknown, sid: string) => void>()
-  const tokenCbs = new Set<(n: number, sid: string) => void>()
   const summaryCbs = new Set<(t: string, sid: string, d: boolean) => void>()
   const newSidCbs = new Set<(url: string, id: string) => void>()
   // [headless-state-err-v1] 服务端 state 订阅（error 用于 UI 反馈）
@@ -165,7 +163,6 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
       const sid = String(msg.sid || '')
       if (msg.t === 'headless:reply') { for (const cb of replyCbs) cb(msg.reply, sid) }
       else if (msg.t === 'headless:script') { for (const cb of replyCbs) cb({ kind: 'script', item: msg.item }, sid) }
-      else if (msg.t === 'headless:token-estimate') { for (const cb of tokenCbs) cb(Number(msg.tokens || 0), sid) }
       else if (msg.t === 'headless:summary') { for (const cb of summaryCbs) cb(String(msg.text || ''), sid, Boolean(msg.degraded)) }
       else if (msg.t === 'headless:new-session-created') { for (const cb of newSidCbs) cb(String(msg.url || ''), String(msg.id || '')) }
       else if (msg.t === 'headless:state') {
@@ -190,7 +187,9 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   /** 发送 */
   function send(type: string, payload: Record<string, unknown>): boolean {
     const w = ensure()
-    const s = JSON.stringify(Object.assign({ type }, payload))
+    // [ws-frame-key-v1] 协议键名是 t（见 protocol.ts TransportMessage / attach-ws handleMessage），
+    // 误用 type 键会被服务端判 unknown type 静默丢弃，UI 侧表现为「点了没反应」
+    const s = JSON.stringify(Object.assign({ t: type }, payload))
     if (w.readyState === 1) { try { w.send(s) } catch { return false } return true }
     queue.push(s)
     return true
@@ -218,12 +217,11 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     sendNewSession(sid, p) { return send('headless:new-session', { sid, summary: p.summary }) },
     sendLoginGui(sid, url) { return send('headless:login-gui', { sid, url }) },
     onReply(cb) { replyCbs.add(cb); return () => { replyCbs.delete(cb) } },
-    onTokenEstimate(cb) { tokenCbs.add(cb); return () => { tokenCbs.delete(cb) } },
     onSummary(cb) { summaryCbs.add(cb); return () => { summaryCbs.delete(cb) } },
     onNewSessionCreated(cb) { newSidCbs.add(cb); return () => { newSidCbs.delete(cb) } },
     onState(cb) { stateCbs.add(cb); return () => { stateCbs.delete(cb) } },
-    dispose() { try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; replyCbs.clear(); tokenCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear() },
-    mute() { replyCbs.clear(); tokenCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear() },
+    dispose() { try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear() },
+    mute() { replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear() },
     unMute() { /* headless 无副作用恢复 */ },
   }
 }

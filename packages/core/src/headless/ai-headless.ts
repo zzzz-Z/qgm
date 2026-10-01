@@ -1,11 +1,11 @@
-/* eslint-disable no-console -- 服务端日志 */
 // 无头浏览器会话池。依赖 playwright（optional dep）。
 // DOM 逻辑（fillPrompt / stopGenerating / newSession / rotate）分 2D.2-2D.5 实现。
 import fs from 'node:fs'
 import path from 'node:path'
 import { ROOT } from '../config.js'
 import type { TransportState } from '../server/protocol.js'
-import { clickNewSessionInPage, collectTextInPage, detectReplyInPage, estimateTokensInPage, fillPromptInPage, resetReplyDedupInPage, stopGeneratingInPage } from './headless-inject.js'
+import { resolveBrowserEngine } from './browser-engine.js'
+import { clickNewSessionInPage, detectReplyInPage, fillPromptInPage, resetReplyDedupInPage, stopGeneratingInPage } from './headless-inject.js'
 
 type Page = import('playwright').Page
 
@@ -61,7 +61,6 @@ export interface HeadlessPool {
   startReplyPoll: (sid: string, cb: (reply: HeadlessReply) => void) => () => void
   /** 重置轮询 dedup（新一轮对话开始时调用）。 */
   resetReplyDedup: (sid: string) => Promise<void>
-  startTokenPoll: (sid: string, cb: (tokens: number) => void) => () => void
 }
 
 /** DeepSeek 默认会话地址（可被环境变量覆盖） */
@@ -141,46 +140,6 @@ function rateLimitedRatio(): number {
   return sum / rateWindow.length
 }
 
-type PlaywrightModule = typeof import('playwright')
-
-let pwCache: PlaywrightModule | null | undefined
-// 优先 CloakBrowser，fallback playwright
-// cloak 优先（仅 linux-x64 有 binary），否则 playwright
-/**
- * 惰性加载浏览器引擎（cloakbrowser 优先，playwright 兜底）
- * [WHY] cloakbrowser 在 linux-x64 反检测能力更好，其他平台直接回落 playwright
- * [CONSTRAINT] 结果缓存到 pwCache（含 null 表示永久失败，避免重复 import）
- * [CHANGE-IMPACT] 返回 null 会让 launch 进入 error 态；上游应据此提示"请装 playwright"
- */
-async function loadPlaywright(): Promise<PlaywrightModule | null> {
-  if (pwCache !== undefined) return pwCache
-  // 1. 试 cloakbrowser（binary 存在才用；mac/win 会抛错）
-  if (process.platform === 'linux' && process.arch === 'x64') {
-    try {
-      const cloak = (await import('cloakbrowser')) as Record<string, unknown>
-      /** cloak 的 binaryInfo 检查本地是否有匹配平台的二进制；未安装走 playwright 兜底 */
-      const info = (cloak.binaryInfo as () => { installed: boolean })()
-      if (info.installed) {
-        pwCache = (await import('playwright'))
-        console.log('[ai-headless] engine: cloakbrowser (linux-x64)')
-        return pwCache
-      }
-      console.log('[ai-headless] cloak binary 未装，降级 playwright')
-    } catch (e) { console.log('[ai-headless] cloak 不可用:', (e as Error).message.slice(0, 80)) }
-  } else {
-    console.log(`[ai-headless] platform=${process.platform}-${process.arch}，cloak 不支持，用 playwright`)
-  }
-  // 2. playwright fallback
-  try {
-    pwCache = (await import('playwright'))
-    console.log('[ai-headless] engine: playwright')
-  } catch {
-    pwCache = null
-    console.error('[ai-headless] playwright 未装')
-  }
-  return pwCache
-}
-
 /**
  * 创建无头浏览器会话池（含并发限流 + 排队 + 抖动）
  * [WHY] 浏览器进程重且独占 profile，池化可避免并发 launch 互抢 user-data-dir
@@ -197,6 +156,10 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   }
   // 全局串行锁
   let openMutex: Promise<void> = Promise.resolve()
+  // [login-gui-guard-v1] openLoginGui 阻塞等用户关窗期间不登记 sessions，
+  // 同 sid 重复调用会对同一 userDataDir 二次 launch —— Chromium 单 profile 独占必崩。
+  // 记录 in-flight Promise，重复调用直接返回提示（首个调用保持阻塞语义不变）
+  const loginGuiInflight = new Map<string, Promise<{ ok: boolean, detail?: string }>>()
   const baseUserDataDir = opts.userDataDir || DEFAULT_USER_DATA_DIR
   // 每个 sid 独立 profile；default 保留原路径兼容旧登录态
   function userDataDirFor(sid: string): string {
@@ -232,7 +195,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
 
   async function launch(sid: string, url: string): Promise<HeadlessSession> {
     const userDataDir = userDataDirFor(sid)
-    const pw = await loadPlaywright()
+    const pw = await resolveBrowserEngine()
     if (!pw) {
       const s: HeadlessSession = { sid, state: 'error', detail: 'playwright 未安装', createdAt: Date.now(), url }
       sessions.set(sid, s)
@@ -285,11 +248,20 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
    * [CHANGE-IMPACT] 依赖 DEFAULT_USER_DATA_DIR 与 userDataDirFor；同 sid 的 headless 会话与本函数互斥。
    */
   async function openLoginGui(sid: string, url?: string): Promise<{ ok: boolean, detail?: string }> {
+    // [login-gui-guard-v1] 已有登录窗口在等待用户操作时直接复用，禁止对同一 profile 二次 launch
+    const inflight = loginGuiInflight.get(sid)
+    if (inflight) return { ok: true, detail: '登录窗口已打开，请在已有窗口中完成登录后关闭' }
+    const task = doOpenLoginGui(sid, url)
+    loginGuiInflight.set(sid, task)
+    try { return await task } finally { loginGuiInflight.delete(sid) }
+  }
+
+  async function doOpenLoginGui(sid: string, url?: string): Promise<{ ok: boolean, detail?: string }> {
     // 释放 profile 独占锁
     const existing = sessions.get(sid)
     if (existing) { await shutdown(existing); sessions.delete(sid); releaseSlot() }
 
-    const pw = await loadPlaywright()
+    const pw = await resolveBrowserEngine()
     if (!pw) return { ok: false, detail: 'playwright 未安装' }
 
     const userDataDir = userDataDirFor(sid)
@@ -416,28 +388,6 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       tick()
       return () => {
         stopped = true
-      }
-    },
-    startTokenPoll(sid, cb) {
-      const page = _getPage(sid)
-      if (!page) {
-        return () => {}
-      }
-      let stopped = false
-      let lastText = ''
-      const timer = setInterval(async () => {
-        if (stopped) return
-        try {
-          const text = await page.evaluate(collectTextInPage)
-          if (stopped || !text || text === lastText) return
-          lastText = text
-          const n = await page.evaluate(estimateTokensInPage, text)
-          if (!stopped && typeof n === 'number') cb(n)
-        } catch { /* 页面导航/关闭时忽略 */ }
-      }, 5000)
-      return () => {
-        stopped = true
-        clearInterval(timer)
       }
     },
     async resetReplyDedup(sid) {

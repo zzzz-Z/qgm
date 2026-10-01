@@ -26,7 +26,6 @@ interface MockInst {
   goal: { value: string }
   round: { value: number }
   startCommit: { value: string }
-  startTokens: { value: number }
   stopReason: { value: string }
   state: { value: string }
 }
@@ -37,7 +36,6 @@ function makeInst(overrides: Partial<MockInst> = {}): LoopInstance {
     goal: { value: 'goal-x' },
     round: { value: 3 },
     startCommit: { value: 'abc123' },
-    startTokens: { value: 1000 },
     stopReason: { value: '' },
     state: { value: 'running' },
   }
@@ -63,8 +61,6 @@ test('persist: state≠idle 时写入 JSON 快照', () => {
   assert.equal(snap.loopGoal, 'goal-x')
   assert.equal(snap.loopRound, 3)
   assert.equal(snap.loopStartCommit, 'abc123')
-  // [persist-schema-v1] 实现 PersistSnapshot 只写 6 字段（id/goal/round/startCommit/reason/state）；
-  // loopStartTokens 已在重构时移除 → 刷新恢复后 token 熔断基准归零（已知取舍），不再断言该字段
   assert.equal(snap.state, 'running')
 })
 
@@ -83,7 +79,6 @@ test('restore: 活动态降级为 stopped 并写提示语', () => {
     loopGoal: 'G',
     loopRound: 5,
     loopStartCommit: 'c',
-    loopStartTokens: 1,
     stopReason: '',
     state: 'running',
   }))
@@ -108,7 +103,6 @@ test('restore: 非活动态（stopped）不触碰实例', () => {
     loopGoal: 'G',
     loopRound: 9,
     loopStartCommit: 'c',
-    loopStartTokens: 1,
     stopReason: '',
     state: 'stopped',
   }))
@@ -133,7 +127,6 @@ test('restore→persist: 降级后立即回写为 stopped 快照', () => {
     loopGoal: 'G',
     loopRound: 2,
     loopStartCommit: 'c',
-    loopStartTokens: 1,
     stopReason: '',
     state: 'running',
   }))

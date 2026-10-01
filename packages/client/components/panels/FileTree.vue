@@ -101,7 +101,7 @@ const rootNode = computed(() => {
 const isMarkdown = computed(() => /\.(?:md|markdown)$/i.test(fileDialog.value?.path || ''))
 
 // [ft-hljs] 弹窗内容渲染：.md 走 renderMarkdown，其余走 hljs 高亮（与 DiffViewer 同款）
-// [WHY] markdown 的 heading/list/表格/链接需要标签级样式；hljs 只做源码 token 着色
+// [WHY] markdown 的 heading/list/表格/链接需要标签级样式；hljs 只做源码词法着色
 // [CONSTRAINT] html:false 由 useMarkdown 内部保证，不透传原始 HTML
 const fileDialogHtml = computed(() => {
   const c = fileDialog.value?.content || ''

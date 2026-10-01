@@ -10,18 +10,7 @@ interface ModelOption {
 /** 可选的 DeepSeek 模型清单 */
 export const MODELS: ModelOption[] = [
   { id: 'deepseek', label: 'DeepSeek', url: 'https://chat.deepseek.com/', sessionTemplate: 'https://chat.deepseek.com/a/chat/s/{id}' },
-  { id: 'chatgpt', label: 'ChatGPT', url: 'https://chatgpt.com/', sessionTemplate: 'https://chatgpt.com/c/{id}' },
-  { id: 'claude', label: 'Claude', url: 'https://claude.ai/new', sessionTemplate: 'https://claude.ai/chat/{id}' },
-  { id: 'kimi', label: 'Kimi', url: 'https://kimi.moonshot.cn/', sessionTemplate: 'https://kimi.moonshot.cn/chat/{id}' },
-  { id: 'doubao', label: '豆包', url: 'https://www.doubao.com/chat/' },
-  { id: 'tongyi', label: '通义千问', url: 'https://www.tongyi.com/' },
-  { id: 'gemini', label: 'Gemini', url: 'https://gemini.google.com/app', sessionTemplate: 'https://gemini.google.com/app/{id}' },
-  { id: 'zhipu', label: '智谱清言', url: 'https://chatglm.cn/main/alltoolsdetail' },
-  // [site-agnostic-v1] 千问网页版（qianwen.com）—— 独立于 tongyi.com 老域名
-  // WHY: 千问新版前端 UmiJS + React，与 tongyi.com 老版本不同；两者需并列供用户选择
-  // CONSTRAINT: origin 会被 useEventStream 白名单收录；sid 沿用 win_ 前缀
-  // CHANGE-IMPACT: AiWindowList 列表长度与来源白名单同步变化
-  { id: 'qianwen', label: '千问', url: 'https://www.qianwen.com/', sessionTemplate: 'https://www.qianwen.com/chat/{id}' },
+  { id: 'qianwen', label: '通义千问', url: 'https://www.qianwen.com/', sessionTemplate: 'https://www.qianwen.com/chat/{id}' },
 ]
 
 /** 标识 */

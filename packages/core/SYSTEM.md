@@ -70,17 +70,7 @@
 
 ---
 
-## §2 首轮探测与环境握手 (Environment Handshake)
-
-仅在探测结果文件不存在时触发：
-
-1. 检查 `typeof __AI__`：若为 `'undefined'`，立即以 `{ error: 'API_MISSING', exitCode: 2 }` 上报，**禁止回退到原生 Node API**。
-2. 若为 `'object'`，执行 `Object.keys(__AI__)` 并记录类型。
-3. 将 `{ keys, types, probedAt }` 写入 `.ai-runner/probe-result.json`，作为后续调用的唯一白名单凭据。
-
----
-
-## §3 读写协议 (Read/Write Protocols)
+## §2 读写协议 (Read/Write Protocols)
 
 - **R1 读为先 (Read-First)**：改动前必读。>200 行文件仅 `dump ±20` 行。未读即写直接判定 `precheck fail`。
 - **R2 锚点强校验 (Anchor-Verify)**：`patchFile` 前必须验证 anchor 文本精确存在。不存在则 `__AI__.exit(2)`；**严禁使用未经验证命中数的宽松正则**。
@@ -88,14 +78,14 @@
 
 ---
 
-## §4 运行时沙箱 (Sandbox & API)
+## §3 运行时沙箱 (Sandbox & API)
 
-### §4.1 原生 API 禁用黑名单
+### §3.1 原生 API 禁用黑名单
 
 **绝对禁止**导入或调用：`fs` / `path` / `child_process` / `os` / `process.exit`。
 所有副作用必须通过 `__AI__` 命名空间。
 
-### §4.2 `__AI__` API 速查
+### §3.2 `__AI__` API 速查
 
 - **读写**：`readFile` `readText` `tryReadFile` `readFiles` `readJSON` `writeFile` `writeText` `atomicWrite` `patchFile` `replaceInFile` `deleteFile` `exists` `listDir` `walk`
 - **搜索**：`grep` `dump` `dumpCtx` `readIfChanged` `fileSig` `getChangedFiles`
@@ -109,14 +99,14 @@
 
 > ⚠️ **`syntaxCheck(code, filename)` 陷阱**：第 1 参必须是**源码字符串**（非路径）；不支持 `.vue` SFC（请改用 `typeCheck`）；仅校验 JS/CJS 语法，不校验 TS 类型。
 
-### §4.3 降级协议 (Fallback)
+### §3.3 降级协议 (Fallback)
 
-仅当 §2 确认 `__AI__.xxx` 不存在时允许降级：
+仅当 `__AI__.xxx` 确认不存在时允许降级：
 必须在调用行上方 **≤3 行内**添加 `// ⚠️ fallback: __AI__.xxx not found`，随后才可使用原生实现。无此注释的原生调用一律拦截。
 
 ---
 
-### §5 架构红线（HCLC）
+## §4 架构红线（HCLC）
 
 - **依赖数量**：单文件 `import` > 8 即触发阻断级违规（由 `hclc-guard.node-test.ts` 强制校验）。
 - **文件体积**：普通模块 ≤ 400 行，组件 ≤ 500 行；超限必须拆分为 composable 或 utils，禁止申请豁免。
@@ -124,7 +114,7 @@
 
 ---
 
-## §6 调试与排查 (Debugging)
+## §5 调试与排查 (Debugging)
 
 - **优先无头浏览器**：使用 `__AI__.browser.*` (cssom/screenshot) 替代 DevTools 人肉排查。
 - **大文件定位**：先 `grep` 拿行号，再 `dump ±20`，禁止全量读取。
@@ -133,7 +123,7 @@
 
 ---
 
-## §7 注释规范 (Comments)
+## §6 注释规范 (Comments)
 
 - **默认不写**：代码即文档。若需注释才能读懂，优先重构命名或拆分函数。
 - **仅解释“为什么”**：只记录非显而易见的业务约束、设计权衡、外部依赖副作用或已知技术债；严禁复述代码行为。
@@ -143,7 +133,7 @@
 
 ---
 
-## §8 命名与可维护性 (Naming & Maintainability)
+## §7 命名与可维护性 (Naming & Maintainability)
 
 - **文件命名**：一律 `kebab-case`（如 `data-processor.js`），禁止空格、大写或下划线。
 - **标识符命名**：变量/函数 `camelCase`，常量 `UPPER_SNAKE_CASE`。名称必须自描述；禁止单字母变量（循环索引 `i/j/k` 除外）。
@@ -152,17 +142,22 @@
 - **单一职责**：函数只做一件事，长度 ≤ 30 行；超过则拆分并赋予语义化名称。
 - **禁止硬编码**：路径、端口、密钥等外部依赖必须提取为常量或通过环境变量注入。
 
-## §9 错误恢复与重试预算 (Error Recovery & Retry Budget)
+## §8 错误恢复与重试预算 (Error Recovery & Retry Budget)
 
 - **重试预算 (Retry Budget)**：针对同一个 `@todo` 或同一个报错，**最多允许重试 3 次**。
 - **强制策略转换 (Pivot)**：若第 2 次重试仍因相同原因失败（如正则依然不匹配、类型依然报错），**禁止继续微调原脚本**。必须：
   1. 放弃当前的 `patchFile` 策略，改用 `readFile` 全量读取 + `writeFile` 整体覆写。
   2. 或使用 `@ask` 向用户求助，提供错误日志和两种备选方案。
 - **禁止死循环**：严禁在 `while` 循环中无延迟、无退出条件地重试文件读写或 Shell 命令。
+- **熔断冻结 (Circuit Breaker)**：同一 `@todo` 连续失败 **2 次**（含 `metaError` 类全部错误：契约违规 / 锚点失配 / 输出截断 / 语法错误）即触发熔断。熔断后必须：
+  1. 该 `@todo` 就地冻结，**禁止任何形式的自动重放**（包括换锚点、换策略、缩量重发）。
+  2. 立即以 `@ask` 上报失败指纹（错误码 + 尝试次数 + 已试方案），等待人工决策。
+  3. 冻结状态在后续所有 `SCRIPT` 轮首行以 `// @frozen <todo> <reason>` 标注，直至人工解除。
+- **循环级暂停优先**：检测到 `loopPaused === true` 时，任何轮末推进（`round += 1` / `enterWaiting` / 重注入脚本）一律早退，不得仅依赖下游守卫拦截。
 
 ---
 
-## §10 跨文件级联与事务性 (Cross-file Cascade & Transactionality)
+## §9 跨文件级联与事务性 (Cross-file Cascade & Transactionality)
 
 - **接口/类型变更级联**：若修改了 `core` 层的导出类型、函数签名或组件 `props`，**必须**在同一轮或紧随的下一轮中，使用 `grep` 查找所有调用方/使用方，并同步更新。
 - **移动/重命名事务**：若重命名文件或移动目录，必须：
@@ -174,7 +169,7 @@
 
 ---
 
-## §11 输出长度预算与截断规避 (Output Length Budget)
+## §10 输出长度预算与截断规避 (Output Length Budget)
 
 模型单轮回复受 `max_tokens` 上限约束，超出即被上游静默截断——表现为脚本尾部缺失，服务端报 `Invalid or unexpected token` / `Unexpected end of input`。
 
@@ -182,4 +177,4 @@
 - **禁止内嵌大字符串**：SVG / HTML / 长 CSS / 大段模板文本一律走独立 `writeFile` 轮，不与其他逻辑挤在同一脚本。
 - **避免敏感字面量**：脚本内不要出现成对闭合的 `<script>` / `</template>` / `</style>` 等标签字符串；如需写入，用字符串拼接（如 `'<scr' + 'ipt>'`）绕开上游扫描。
 - **分步提交**：文件级改动优先「先建新文件 → 再接线 → 最后清理旧实现」三段式，每段独立成轮。
-- **截断自检**：若收到 `Invalid or unexpected token` / `Unexpected end of input` 且错误位置在脚本尾段，判定为输出被截断，**不得原地重试**；必须缩小本轮改动范围后重发（见 §9 重试预算）。
+- **截断自检**：若收到 `Invalid or unexpected token` / `Unexpected end of input` 且错误位置在脚本尾段，判定为输出被截断，**不得原地重试**；必须缩小本轮改动范围后重发（见 §8 重试预算）。

@@ -75,14 +75,6 @@ test('S→C headless:state 六态全往返', () => {
     assert.equal(r.state, s)
   }
 })
-
-test('S→C headless:token-estimate 往返', () => {
-  const msg = { t: 'headless:token-estimate', sid: 'default', tokens: 1234 }
-  const r = JSON.parse(JSON.stringify(msg))
-  assert.equal(r.tokens, 1234)
-  assert.equal(typeof r.tokens, 'number')
-})
-
 test('S→C headless:new-session-created 往返', () => {
   const msg = { t: 'headless:new-session-created', sid: 'default', url: 'https://chat.deepseek.com/c/abc', id: 'abc' }
   const r = JSON.parse(JSON.stringify(msg))
@@ -128,6 +120,8 @@ test('[P5-3] 提供 unMute 且能复位 flag', () => {
 })
 
 test('[P5-3] startLoop 前调 unMute 防永久静音', () => {
-  const ualSrc = fs.readFileSync(path.join(process.cwd(), 'packages/client/composables/ai/useAutoLoop.ts'), 'utf8')
+  // [start-family-v1] startLoop 已从 useAutoLoop.ts 抽至 auto-loop/start-family.ts；
+  // unMute 调用本身仍存在（迁移未丢语义），改读迁移后文件
+  const ualSrc = fs.readFileSync(path.join(process.cwd(), 'packages/client/composables/ai/auto-loop/start-family.ts'), 'utf8')
   assert.ok(/transport\.unMute\?\.\(\)/.test(ualSrc), 'startLoop 缺 unMute 调用')
 })

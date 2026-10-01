@@ -13,7 +13,6 @@ import {
   appendSmokeReport,
   appendTestReport,
   appendTscReport,
-  trimPromptIfOverBudget,
 } from './prompt-builder'
 // 命令历史簇
 import { createCmdHistory } from './cmd-history'
@@ -138,7 +137,6 @@ const { script, lastRunCode, running, result, changes, rolling, busyAll, liveStd
 // 已删除 countdown（延迟机制移除）
 const { enabled: autoTakeoverEnabled, enable: enableAutoTakeover, disable: disableAutoTakeover, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
 // ── 领域 composable ──
-// 已删 maybeRotateSession：文件内无消费点
 const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
 const { events: busEvents } = useEventBus()
 const { stripComments, stripBlankLines } = useCodeCleaner()
@@ -436,7 +434,7 @@ async function buildAiPrompt(): Promise<string> {
   appendRawOutputs(p, r)
 
   const text = p.join('\n')
-  return trimPromptIfOverBudget(text, toast)
+  return text
 }
 // append* 系列已抽到 prompt-builder.ts
 

@@ -1,5 +1,5 @@
 // @env node
-// src/deps.ts —— Route 层依赖聚合入口（HCLC 第7章：单文件 import 数 ≤ 5）
+// src/deps.ts —— Route 层依赖聚合入口（HCLC §4：单文件 import 数 ≤ 5）
 
 // 环境元数据
 

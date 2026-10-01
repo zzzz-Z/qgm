@@ -1,7 +1,7 @@
 // [prompt-builder-v1] 从 ScriptPanel.vue 抽出：AI prompt 拼装的 append* 系列
 // 纯函数 + 结构类型；调用方传入数据，模块本身不做状态访问
 
-import { buildErrorContext, enforceBudget } from '../../utils/contextBuilder'
+import { buildErrorContext } from '../../utils/contextBuilder'
 import { shouldIncludeChanges } from '../../composables/runner/useRunFeedback'
 import { trimOutput } from './output-utils'
 
@@ -219,31 +219,4 @@ export function appendRawOutputs(p: string[], r: PromptResult | null): void {
   if (!r) return
   if (r.stderr) p.push('# 错误输出 (stderr)', '```', trimOutput(r.stderr, r.ok, 3000, 12000, r.scriptCtx), '```', '')
   if (r.stdout) p.push('# Stdout', '```', trimOutput(r.stdout, r.ok, 3000, 12000, r.scriptCtx), '```', '')
-}
-
-export function trimPromptIfOverBudget(
-  text: string,
-  toast: ToastFn,
-): string {
-  const budget = enforceBudget(text)
-  if (budget.ok) return text
-  const marker = '# 相关文件源码'
-  const idx = text.indexOf(marker)
-  if (idx < 0) {
-    toast(`prompt 超预算：${budget.size} / ${budget.budget} 字节`, 'warn', 4000)
-    return text
-  }
-  const head = text.slice(0, idx)
-  const tail = text.slice(idx)
-  const tailLines = tail.split('\n')
-  const keep = tailLines.slice(0, 200).join('\n')
-  const keepRest = tailLines.slice(200)
-  const trimmed = `${head + keep}\n// …（prompt 超预算，已省略 ${keepRest.length} 行源码）\n`
-  const after = enforceBudget(trimmed)
-  if (after.ok) {
-    toast(`prompt 超预算，已裁剪源码块到 ${after.size} 字节`, 'warn', 4000)
-  } else {
-    toast(`prompt 仍超预算（${after.size} 字节），请减少附加文件`, 'error', 5000)
-  }
-  return trimmed
 }

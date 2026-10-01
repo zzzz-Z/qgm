@@ -52,7 +52,10 @@ async function dispatchHono(
   const origin = inferOrigin(req)
   const fetchReq = await nodeToFetchRequest(req, origin)
   const resp = await honoApp.fetch(fetchReq)
-  if (resp.status === 404) return false
+  // [hono-404-bridge-v2] Hono 无路由时默认回 text/plain 404；业务路由 404 均为 c.json。
+  // 仅纯文本 404 视为「未命中」回退静态/页面；JSON 404 是合法业务响应，直接透传，
+  // 否则「基准记录不存在」等错误体会被兜底 res.end('Not Found') 吞掉
+  if (resp.status === 404 && !(resp.headers.get('content-type') || '').includes('application/json')) return false
   await fetchResponseToNode(res, resp)
   return true
 }

@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH26-2-FIX-REQUIRE
 // AIRUNNER-BATCH26-CJS-TO-VITEST: 从 src/hclc-guard.test.cjs 迁至 test/server/hclc-guard.test.ts
 // HCLC 结构守卫 — 将 src/ 的 import 阈值固化为可回归断言
-// 参考 SYSTEM.md 第7章：单文件 import 数 > 8 为阻断级
+// 参考 SYSTEM.md §4（架构红线）：单文件 import 数 > 8 为阻断级
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // @desc @ask 弹窗 UI：问题正文（Markdown）+ 快捷选项 + 自由文本输入
 // @why 承接交互提问通道；选项点击即提交，无选项时仅暴露文本输入
-// @change-impact 依赖 useAsk 单例（状态源）与 renderMarkdown（正文渲染）；样式 tokens 复用全局变量
+// @change-impact 依赖 useAsk 单例（状态源）与 renderMarkdown（正文渲染）；样式变量复用全局
 
 import { computed, nextTick, ref, watch } from 'vue'
 import { useAsk } from '../../composables/ui/useAsk'
@@ -103,8 +103,8 @@ function onKey(e: KeyboardEvent): void {
   justify-content: center;
 }
 .ask-card {
-  min-width: 360px;
-  max-width: 560px;
+  min-width: 40vw;
+  max-width: 80vw;
   max-height: 80vh;
   display: flex;
   flex-direction: column;

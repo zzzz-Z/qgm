@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 'vue'
-import { useEventListener, useStorage } from '@vueuse/core'
+import { promiseTimeout, useEventListener, useStorage } from '@vueuse/core'
 import ScriptPanel from './components/script/ScriptPanel.vue'
 import { currentSiteUrl, MODELS, useAiSite } from './composables/ai/useAiSite'
 import { copyAndFill, getActiveWinSid, getWindowBySid, listWindows, onNewSessionCreated, openAiSession, openSite, setActiveWinSid } from './composables/ai/useAiWindow'
@@ -15,9 +15,7 @@ import {
   onScriptArrival,
   onSummary,
   setActiveLoopSessionId,
-  setActiveSessionIdGetter,
-  setTokenEstimate,
-  startHandoff
+  setActiveSessionIdGetter
 } from './composables/ai/useAutoLoop'
 import { useAutoTakeover } from './composables/ai/useAutoTakeover'
 import { useSessionManager } from './composables/ai/useSessionManager'
@@ -47,9 +45,6 @@ const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.lo
 /** localStorage 键：上次访问时间 */
 const LS_LAST_VISIT = '__ai_last_visit'
 
-// [ask-count] 当前会话收到的 AI 回复次数（每 reply +1）
-// [ask-count-persist] 提问次数持久化到 localStorage，刷新不重置
-
 // [use-storage-v1] activeSessionId / sandboxMode / theme 均为 useAppStorage 的 useStorage 单例（跨标签页同步）
 // [use-storage-v1] transportKind 已迁移到 useAiTransport 的 useStorage 单例
 // [workspace-mode-v1] 工作区绑定状态：无工作区时渲染引导页
@@ -68,8 +63,7 @@ const urlInputRef = ref<HTMLInputElement | null>(null)
 
 /** 自动接管模式开关 */
 const autoTakeover = useAutoTakeover()
-// [ask-count-merge] 与 useSessionManager 共享同一 askCount 数据源
-const { askCount, resetAskCount, resetSession } = useSessionManager()
+const { resetSession } = useSessionManager()
 const { url: siteUrl, setUrl: setSiteUrl, modelId } = useAiSite()
 // [app-storage-extracted-v1] SessionEntry/loadHistory/saveHistory 已抽至 useAppStorage
 // [site-isolate-v1] 会话历史按站点分桶；切站点时由下方 watch(modelId) 重新加载
@@ -121,103 +115,96 @@ watch(theme, (v) => {
 
 // auto resend after 3 min no reply
 
+/** [workspace-mode-v1] 探测工作区状态：无工作区时渲染引导页；网络失败默认放行 */
+async function probeWorkspace(): Promise<void> {
+  try {
+    const response = await fetch('/__ai/workspace', { headers: { accept: 'application/json' } })
+    if (!response.ok) return
+    const data = await response.json() as { hasWorkspace?: boolean }
+    hasWorkspace.value = data.hasWorkspace !== false
+  } catch { /* ignore: 探测失败保持默认放行 */ }
+}
+
+/** [auto-new-session-on-switch-v1] 切项目后：清本地状态 → 等布局稳 → openAiSession */
+async function reopenAfterSwitchProject(): Promise<void> {
+  try { resetSession() } catch { /* 未就绪时忽略 */ }
+  // [new-session-reset-v1] 同步清事件流，避免新项目窗口渲染旧事件卡
+  try { clearEvents() } catch { /* 未就绪时忽略 */ }
+  await promiseTimeout(600)
+  try {
+    // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
+    const { win } = await openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，按输出契约执行首轮任务，并输出本轮第一个符合契约的 SCRIPT。', forceRules: true })
+    if (win) {
+      try { getTransport() } catch { /* 油猴模式下无需 */ }
+    } else {
+      toast('新会话窗口打开失败（可能被浏览器拦截弹窗）', 'warn', 4000)
+    }
+  } catch { /* ignore */ }
+}
+
+/** 从 sessionStorage 读取切项目标志；命中则 fire-and-forget 触发 reopen */
+function maybeScheduleReopen(): void {
+  let flag: string | null
+  let timestamp = 0
+  try {
+    flag = sessionStorage.getItem('__ai_switch_project')
+    timestamp = Number(sessionStorage.getItem('__ai_switch_project_at')) || 0
+    sessionStorage.removeItem('__ai_switch_project')
+    sessionStorage.removeItem('__ai_switch_project_at')
+  } catch { return /* sessionStorage 不可用时静默 */ }
+  if (flag !== '1' || Date.now() - timestamp >= 15000) return
+  void reopenAfterSwitchProject()
+}
+
+/** [headless-reply] 无头模式：订阅 transport.onReply，转成 MessageEvent 喂给 onSessionIdMessage */
+function subscribeHeadlessReply(): void {
+  if (transportKind.value !== 'headless') return
+  try {
+    const transport = getTransport()
+    transport.onReply((raw: unknown, sid: string) => {
+      // [p1-2-client-v2] transport 回调签名声明 unknown（逆变）；此处一次性收窄为 AiReply|null
+      const reply = raw as AiReply | null
+      const item = reply && reply.item ? reply.item : null
+      const fake = { data: { type: 'ai-runner:reply', kind: reply && reply.kind ? reply.kind : 'plain', code: item ? item.code : undefined, lang: item ? item.lang : undefined, hash: item ? item.hash : undefined, text: reply && reply.text !== undefined ? reply.text : undefined, count: reply && reply.count !== undefined ? reply.count : undefined, sessionId: sid, site: 'headless' }, origin: 'ws://headless', source: null } as unknown as MessageEvent
+      try { onSessionIdMessage(fake) } catch (error) { log.error('[headless-reply] 处理失败:', error) }
+    })
+    // [headless-state-err-v1] error 状态必须显式提示，否则用户只看到「发送无回应」
+    transport.onState?.((state: string, detail: string, sid: string) => {
+      if (state !== 'error') return
+      const message = detail || '无头链路异常'
+      try { toast(`无头链路错误：${message}`, 'error', 6000) } catch { /* swallow: toast 未就绪 */ }
+      log.error('[headless-state] sid=', sid, 'detail=', detail)
+    })
+    log.warn('[ai-runner] 无头 reply 订阅已注册')
+  } catch (error) { log.error('[headless-reply] 订阅失败:', error) }
+}
+
+/** 刷新后向已开 AI 窗口请求重发最近消息（reply/summary/session-id），并恢复 headerUrl */
+async function replayRecentMessages(): Promise<void> {
+  await nextTick() // 等待 onSessionIdMessage 注册完成
+  await promiseTimeout(800)
+  for (const w of listWindows()) {
+    const target = getWindowBySid(w.sid)
+    if (!target || target.closed) continue
+    try {
+      target.postMessage({ type: 'ai-runner:request-replay' }, '*')
+      target.postMessage({ type: 'ai-runner:request-rescan' }, '*')
+    } catch { /* ignore */ }
+  }
+  if (!activeSessionId.value) return
+  const entry = sessionHistory.value.find(x => x.id === activeSessionId.value)
+  if (entry && entry.url && siteUrl.value !== entry.url) setSiteUrl(entry.url)
+}
+
 onMounted(async () => {
   // [sites-store-wire-v1] 首次启动迁移旧分散键到统一 store
   try { migrateIfNeeded() } catch { /* 未就绪不阻断 */ }
-  // [workspace-mode-v1] 探测工作区状态：无工作区时渲染引导页
-  // [CONSTRAINT] 网络失败默认 true 避免误锁用户；探测成功才覆盖
-  try {
-    const r = await fetch('/__ai/workspace', { headers: { accept: 'application/json' } })
-    if (r.ok) {
-      const j = await r.json() as { hasWorkspace?: boolean }
-      hasWorkspace.value = j.hasWorkspace !== false
-    }
-  } catch { /* ignore: 探测失败保持默认放行 */ }
-  // [auto-new-session-on-switch-v1] 切项目后：自动开新会话并连接
-  try {
-    const flag = sessionStorage.getItem('__ai_switch_project')
-    const at = Number(sessionStorage.getItem('__ai_switch_project_at')) || 0
-    sessionStorage.removeItem('__ai_switch_project')
-    sessionStorage.removeItem('__ai_switch_project_at')
-    if (flag === '1' && Date.now() - at < 15000) {
-      // 1) 清空本地会话状态（消息 / token / askCount / sessionId）
-      try { resetSession() } catch { /* 未就绪时忽略 */ }
-      // [new-session-reset-v1] 同步清事件流与 skill 缓存，避免新项目窗口渲染旧事件卡
-      try { clearEvents() } catch { /* 未就绪时忽略 */ }
-      // 2) 打开新的 AI 会话窗口
-      setTimeout(() => {
-        // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
-        void openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '开始聊天', forceRules: true }).then(({ win }) => {
-          if (win) {
-            // 3) 确保 headless 通道被激活（getTransport 懒创建，触发连接）
-            try { getTransport() } catch { /* 油猴模式下无需 */ }
-          } else {
-            toast('新会话窗口打开失败（可能被浏览器拦截弹窗）', 'warn', 4000)
-          }
-        }).catch(() => { /* 忽略 */ })
-      }, 600)
-    }
-  } catch { /* sessionStorage 不可用时静默 */ }
-  // 无头模式：订阅 transport.onReply，转成 MessageEvent 格式喂给同一处理器
-  try {
-    if (transportKind.value === 'headless') {
-      const t = getTransport()
-      t.onReply((raw: unknown, sid: string) => {
-        // [p1-2-client-v2] transport 回调签名声明 unknown（逆变）；此处一次性收窄为 AiReply|null
-        const reply = raw as AiReply | null
-        const item = reply && reply.item ? reply.item : null
-        const fake = {
-          data: {
-            type: 'ai-runner:reply',
-            kind: reply && reply.kind ? reply.kind : 'plain',
-            code: item ? item.code : undefined,
-            lang: item ? item.lang : undefined,
-            hash: item ? item.hash : undefined,
-            text: reply && reply.text !== undefined ? reply.text : undefined,
-            count: reply && reply.count !== undefined ? reply.count : undefined,
-            sessionId: sid,
-            site: 'headless',
-          },
-          origin: 'ws://headless',
-          source: null,
-        } as unknown as MessageEvent
-        try { onSessionIdMessage(fake) } catch (e) { log.error('[headless-reply] 处理失败:', e) }
-      })
-      // [headless-state-err-v1] error 状态必须显式提示，否则用户只看到"发送无回应"
-      t.onState?.((state: string, detail: string, sid: string) => {
-        if (state === 'error') {
-          const msg = detail || '无头链路异常'
-          try { toast(`无头链路错误：${msg}`, 'error', 6000) } catch { /* swallow: toast 未就绪 */ }
-          log.error('[headless-state] sid=', sid, 'detail=', detail)
-        }
-      })
-      log.warn('[ai-runner] 无头 reply 订阅已注册')
-    }
-  } catch (e) { log.error('[headless-reply] 订阅失败:', e) }
+  await probeWorkspace()
+  maybeScheduleReopen()
+  subscribeHeadlessReply()
   // 注入 activeSessionId 读取器：循环启动时取当前活动会话 id 绑定到 loopSessionId
   setActiveSessionIdGetter(() => activeSessionId.value)
-
-  // 刷新后向已开 AI 窗口请求重发最近消息（reply/summary/session-id）
-  // 兜底场景：页面刷新导致消息监听重建，期间 AI 回复错过；由油猴缓存重放
-  nextTick(() => {
-    setTimeout(() => {
-      const wins = listWindows()
-      for (const w of wins) {
-        const target = getWindowBySid(w.sid)
-        if (target && !target.closed) {
-          try {
-            target.postMessage({ type: 'ai-runner:request-replay' }, '*')
-            target.postMessage({ type: 'ai-runner:request-rescan' }, '*')
-          } catch { /* ignore */ }
-        }
-      }
-    }, 800)
-  })
-  if (!activeSessionId.value) return
-  const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
-  if (s && s.url && siteUrl.value !== s.url) {
-    setSiteUrl(s.url)
-  }
+  await replayRecentMessages()
 })
 
 // [site-isolate-v1-initial-sync] 首帧把 activeSessionId 从站点专属键同步过来
@@ -317,12 +304,14 @@ function onUrlBlur() {
 function onSessionIdMessage(e: MessageEvent) {
   const payload = e.data
   if (!payload) return
-  console.log(payload)
 
   const t = String(payload.type || '')
-  if (t === 'ai-runner:reply') return handleAiReply(payload, e)
-  if (t === 'ai-runner:script') return handleLegacyScript(payload, e)
-  if (t === 'ai-runner:token-estimate') return handleTokenEstimate(payload)
+
+  if (t === 'ai-runner:reply') { void handleAiReply(payload, e); return }
+  if (t === 'ai-runner:script') {
+    handleLegacyScript(payload, e).catch(error => log.error('[legacy-script] failed:', error))
+    return
+  }
   if (t === 'ai-runner:summary') return handleSummaryMsg(payload)
   if (t === 'ai-runner:new-session-created') return handleNewSessionCreated(payload)
   if (t === 'ai-runner:url-updated') return handleUrlUpdated(payload)
@@ -330,11 +319,6 @@ function onSessionIdMessage(e: MessageEvent) {
 }
 /** 处理统一回复通道 ai-runner:reply（payload 来自 MessageEvent.data） */
 function handleAiReply(payload: MessageEvent['data'], e: MessageEvent) {
-  if (askCount.value >= 10 && isLoopActive.value) {
-    resetAskCount()
-    void startHandoff()
-    return
-  }
   if (!isFromActiveAiSite(e)) return
   // 收到 AI 回复，清除「发送给 AI」按钮的 loading 状态
   stopAiWaiting()
@@ -422,16 +406,21 @@ function handleAiReply(payload: MessageEvent['data'], e: MessageEvent) {
         // [no-delay-v2] 手动模式：不回填编辑器，scheduleAutoRun 已无延迟无 meta，立即执行
         // [running-guard-v1] 若上一轮 running 还在执行，scheduleAutoRun 立即调用 → run() 直接 return，「等待执行」卡永远卡住
         // [CONSTRAINT] 轮询等待 running 释放再执行，而非直接吞掉；最多重试 20 次（20s）
-        const retryRun = (attempt: number) => {
+        const retryRun = async (attempt: number): Promise<void> => {
           if (!running.value) {
             void runScript({ script: code, runKey, autoFeedback: true })
-          } else if (attempt < 20) {
-            setTimeout(retryRun, 1000, attempt + 1)
-          } else {
-            toast('等待执行超时（20s），请手动点击运行', 'warn', 4000)
+            return
           }
+          if (attempt >= 20) {
+            toast('等待执行超时（20s），请手动点击运行', 'warn', 4000)
+            return
+          }
+          await promiseTimeout(1000)
+          await retryRun(attempt + 1)
         }
-        autoTakeover.scheduleAutoRun(() => retryRun(0))
+        autoTakeover.scheduleAutoRun(() => {
+          retryRun(0).catch(error => log.error('[retry-run] failed:', error))
+        })
       }
     }
     return
@@ -454,7 +443,7 @@ function handleAiReply(payload: MessageEvent['data'], e: MessageEvent) {
   }
 }
 /** 处理旧版油猴 ai-runner:script 单脚本消息 */
-function handleLegacyScript(payload: MessageEvent['data'], e: MessageEvent) {
+async function handleLegacyScript(payload: MessageEvent['data'], e: MessageEvent): Promise<void> {
   if (!isFromActiveAiSite(e)) return
   // 收到 AI 回复（v1.2 通道），清除「发送给 AI」按钮的 loading 状态
   stopAiWaiting()
@@ -473,24 +462,9 @@ function handleLegacyScript(payload: MessageEvent['data'], e: MessageEvent) {
       // v1.2 兜底通道：延迟执行
       const runKey = `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
       const delayMs = 3000 + Math.random() * 4000
-      setTimeout(() => { void runScript({ script: code, runKey, autoFeedback: true }) }, delayMs)
+      await promiseTimeout(delayMs)
+      void runScript({ script: code, runKey, autoFeedback: true })
     }
-  }
-}
-/** 处理 ai-runner:token-estimate 增量估算 */
-function handleTokenEstimate(payload: MessageEvent['data']) {
-  if (activeSessionId.value) {
-    const i = sessionHistory.value.findIndex(x => x.id === activeSessionId.value)
-    if (i >= 0 && sessionHistory.value[i].tokens !== payload.tokens) {
-      sessionHistory.value[i] = { ...sessionHistory.value[i], tokens: Number(payload.tokens) || 0 }
-      sessionHistory.value = [...sessionHistory.value]
-      saveHistoryScoped()
-    }
-  }
-  const tokens = Number(payload.tokens) || 0
-  if (tokens > 0) {
-    // 喂给循环状态机做 30k 增量熔断
-    setTokenEstimate(tokens)
   }
 }
 /** 处理 ai-runner:summary 摘要回包 */
@@ -520,8 +494,6 @@ function handleNewSessionCreated(payload: MessageEvent['data']) {
     // 新会话建立 → 立即回写完整 URL 到工作台
     setSiteUrl(url)
   }
-  // [reset-askcount-new-session] 新会话建立 → URL 旁提问计数清零
-  resetAskCount()
   void onNewSessionCreated(url, id)
 }
 /** 处理 ai-runner:url-updated URL 回写 */
@@ -595,7 +567,7 @@ async function onOpenAiWin() {
   // [CHANGE-IMPACT] 只清事件流，不动 sessionId / messages；影响面小于 onNewSession
   try { clearEvents() } catch { /* 未就绪时忽略 */ }
   // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 规则注入一次完成
-  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '开始聊天', forceRules: true })
+  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，按输出契约执行首轮任务，并输出本轮第一个符合契约的 SCRIPT。', forceRules: true })
   if (!win) {
     toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
     return
@@ -618,11 +590,10 @@ async function onNewSession() {
   // [CHANGE-IMPACT] 与 useAiWindow.copyAndFill 的 track-original-prompt / rules-dedup-key-v2 配套
   try { clearEvents() } catch { /* 未就绪时忽略 */ }
   try { resetSession() } catch { /* 未就绪时忽略 */ }
-  askCount.value = 0
   loopPaused.value = true
   autoTakeover.disable()
   // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
-  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '开始聊天', forceRules: true })
+  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，按输出契约执行首轮任务，并输出本轮第一个符合契约的 SCRIPT。', forceRules: true })
   if (!win) {
     toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', 4000)
     return
@@ -722,7 +693,6 @@ function onLoginGui() {
           class="ds-value-static"
           @click="openUrlEdit"
         >{{ headerUrl || '（点击输入 URL）' }}</span>
-        <span v-tooltip="'当前会话提问次数'" class="ask-count">{{ askCount }} 次</span>
         <button
           v-tooltip="'打开 / 激活 AI 窗口（点此建立工作台与 AI 站的连接）'"
           aria-label="打开 AI 窗口"

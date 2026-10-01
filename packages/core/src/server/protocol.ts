@@ -77,7 +77,6 @@ export type ServerMessage
     | { t: 'headless:reply', sid: string, reply: AiReplyDto }
     | { t: 'headless:script', sid: string, item: InboxItemDto }
     | { t: 'headless:state', sid: string, state: TransportState, detail?: string }
-    | { t: 'headless:token-estimate', sid: string, tokens: number }
     | { t: 'headless:new-session-created', sid: string, url: string, id: string }
     | { t: 'headless:summary', sid: string, text: string, degraded: boolean }
     | { t: 'headless:list', sessions: unknown[] }

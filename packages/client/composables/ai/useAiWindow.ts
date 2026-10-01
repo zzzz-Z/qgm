@@ -123,11 +123,11 @@ async function _prependFirstPromptRules(prompt: string): Promise<string> {
  * 复制 prompt 到剪贴板并发送到 AI 窗口
  * [WHY] 剪贴板是油猴侧输入框粘贴的兜底路径；即便 postMessage 失败用户仍能手动粘贴
  * [CONSTRAINT] 返回 'sent' 表示已注入运行中的窗口；'opened' 表示新开了窗口；'failed' 表示全失败
- * [CHANGE-IMPACT] 内部会改动 _rulesInjectedSids / askCount / sessionId 状态，多次调用同一 prompt 会去重
+ * [CHANGE-IMPACT] 内部会改动 _rulesInjectedSids / sessionId 状态，多次调用同一 prompt 会去重
  * @param prompt 待发送的原始问题；空串直接返回 failed
  * @param opts.forceRules true 时绕过 sid 去重，开新窗时强制注入规则
  */
-export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean, images?: string[] }): Promise<FillResult> {
+export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean, skipRules?: boolean, images?: string[] }): Promise<FillResult> {
   if (!prompt) return 'failed'
   let finalPrompt = prompt
   // [image-channel-v2] 图片独立通道 payload；无图片时展开为空对象，不污染 postMessage 载荷
@@ -141,15 +141,18 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     //       组合键下同一窗口同一会话只注入一次；切窗口 / 换会话 id 视为新会话重新注入
     // [CHANGE-IMPACT] _rulesInjectedSids 内容格式变化；语义仍为「已注入规则头的会话标识」
     const sid = `${getActiveWinSid()}:${sessionId.value}`
-    if (sid && (opts?.forceRules || !_rulesInjectedSids.has(sid))) {
+    // [chat-first-no-rules-v1] skipRules=true 用于纯聊天首问（"开始聊天"）：不注入 SYSTEM.md，
+    // [WHY] 携带三态契约会让 AI 按 SCRIPT 输出，无 @desc/@why 被 post-run 判 400；
+    //       会话级纯聊天不需要规则头，规则仅在真正启动循环/接管任务时注入。
+    // [CONSTRAINT] skipRules 不写入 _rulesInjectedSids：后续 startLoop 首次调用仍会正常注入。
+    if (sid && !opts?.skipRules && (opts?.forceRules || !_rulesInjectedSids.has(sid))) {
       _rulesInjectedSids.add(sid)
       finalPrompt = await _prependFirstPromptRules(prompt)
     }
   } catch { /* ignore */ }
-  // [track-original-prompt] 只记录原始 prompt：UI 展示 / token 估算不应包含自动携带的规则头
+  // [track-original-prompt] 只记录原始 prompt：UI 展示不应包含自动携带的规则头
   // [WHY] 用户报告「打开新会话 发了两次 SYSTEM.md」实为 finalPrompt 上屏；
   //       语义上「用户消息」是原始输入，「规则头」是系统提示，不该混入用户消息卡
-  // [CHANGE-IMPACT] messages 数组存的是原始 prompt；token 估算随之偏小（更贴近用户视角）
   useSessionManager().trackMessage('user', prompt)
   await _clipboard.copy(finalPrompt)
   if (isHeadless()) {
@@ -221,6 +224,8 @@ export async function openAiSession(opts?: {
   sid?: string
   initialPrompt?: string
   forceRules?: boolean
+  /** [chat-first-no-rules-v1] true 时不注入 SYSTEM.md/AGENTS.md，用于纯聊天首问 */
+  skipRules?: boolean
 }): Promise<{ win: Window | null, fill: FillResult | null }> {
   const p = opts?.initialPrompt
   // [window-ready-wait-v1] 记录调用前该 sid 是否已有窗口引用；无则视为本次新开窗口
@@ -236,13 +241,13 @@ export async function openAiSession(opts?: {
   // [CHANGE-IMPACT] headless 用户从"完全无规则"→"首问带 SYSTEM.md+AGENTS.md"
   if (isHeadless()) {
     if (!p) return { win: null, fill: null }
-    const fill = await copyAndFill(p, { forceRules: opts?.forceRules })
+    const fill = await copyAndFill(p, { forceRules: opts?.forceRules, skipRules: opts?.skipRules })
     return { win: null, fill }
   }
   if (!win) return { win: null, fill: null }
   if (!p) return { win, fill: null }
   if (!preWin) await promiseTimeout(1500)
-  const fill = await copyAndFill(p, { forceRules: opts?.forceRules })
+  const fill = await copyAndFill(p, { forceRules: opts?.forceRules, skipRules: opts?.skipRules })
   return { win, fill }
 }
 

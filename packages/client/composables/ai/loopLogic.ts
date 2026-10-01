@@ -17,8 +17,6 @@ export const LOOP_MAX_ROUNDS = Number.POSITIVE_INFINITY
 export const LOOP_HARD_MAX_MS = 30 * 60 * 1000
 /** [loop-hard-limit-v1] 循环最大轮次硬上限 */
 export const LOOP_HARD_MAX_ROUNDS = 50
-/** [fix-rotate-threshold] 循环内 token 达此值触发会话轮转（独立于熔断） */
-export const LOOP_ROTATE_THRESHOLD = 40_000
 /** 单轮等待 AI 回复超时 —— cjs 默认 90s */
 export const LOOP_ROUND_TIMEOUT_MS = 90_000
 /** bash 任务单轮超时：bash 通常更复杂，给 180s */

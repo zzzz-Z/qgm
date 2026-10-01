@@ -65,27 +65,10 @@ beforeEach(() => {
   ssStore.clear()
   const r = mod.useSessionManager()
   r.resetSession()
-  r.resetAskCount()
   r.messages.value = []
 })
 
 // ============ 常量 ============
-
-test('WARN_THRESHOLD = 40000', () => {
-  assert.equal(mod.WARN_THRESHOLD, 40000)
-})
-
-test('HARD_LIMIT = 50000', () => {
-  assert.equal(mod.HARD_LIMIT, 50000)
-})
-
-test('ASK_ROTATE_THRESHOLD = 200', () => {
-  assert.equal(mod.ASK_ROTATE_THRESHOLD, 200)
-})
-
-test('WARN_THRESHOLD < HARD_LIMIT', () => {
-  assert.ok(mod.WARN_THRESHOLD < mod.HARD_LIMIT)
-})
 
 // ============ API 面 ============
 
@@ -95,18 +78,7 @@ test('useSessionManager: 返回完整 API 面', () => {
     'sessionId',
     'sessionUrl',
     'messages',
-    'inputTokens',
-    'outputTokens',
-    'totalTokens',
-    'usagePercent',
-    'isApproachingLimit',
-    'isOverLimit',
-    'WARN_THRESHOLD',
-    'HARD_LIMIT',
     'trackMessage',
-    'maybeRotateSession',
-    'askCount',
-    'resetAskCount',
     'copyAndHandoff',
     'resetSession',
     'restoreFromStorage',
@@ -122,7 +94,6 @@ test('useSessionManager: 多次调用返回同一组 ref（模块单例）', () 
   const b = mod.useSessionManager()
   assert.equal(a.sessionId, b.sessionId)
   assert.equal(a.messages, b.messages)
-  assert.equal(a.askCount, b.askCount)
 })
 
 // ============ 初始状态 ============
@@ -151,107 +122,24 @@ test('trackMessage: 空内容不记录', () => {
   assert.equal(r.messages.value.length, 0)
 })
 
-test('trackMessage: user 角色记录并递增 askCount', () => {
+test('trackMessage: user 角色记录', () => {
   const r = mod.useSessionManager()
-  const before = r.askCount.value
   r.trackMessage('user', 'hello')
   assert.equal(r.messages.value.length, 1)
   assert.equal(r.messages.value[0].role, 'user')
   assert.equal(r.messages.value[0].content, 'hello')
-  assert.equal(r.askCount.value, before + 1)
 })
 
-test('trackMessage: assistant 角色记录但不递增 askCount', () => {
+test('trackMessage: assistant 角色记录', () => {
   const r = mod.useSessionManager()
-  const before = r.askCount.value
   r.trackMessage('assistant', 'reply')
   assert.equal(r.messages.value.length, 1)
-  assert.equal(r.askCount.value, before)
 })
 
-test('trackMessage: system 角色记录但不递增 askCount', () => {
+test('trackMessage: system 角色记录', () => {
   const r = mod.useSessionManager()
-  const before = r.askCount.value
   r.trackMessage('system', 'sys')
-  assert.equal(r.askCount.value, before)
-})
-
-// ============ computed 派生 ============
-
-test('inputTokens: 非 assistant 消息合计', () => {
-  const r = mod.useSessionManager()
-  r.trackMessage('user', 'hello world')
-  r.trackMessage('system', 'sys prompt')
-  assert.ok(r.inputTokens.value > 0)
-})
-
-test('outputTokens: 仅 assistant 消息合计', () => {
-  const r = mod.useSessionManager()
-  r.trackMessage('user', 'hi')
-  assert.equal(r.outputTokens.value, 0)
-  r.trackMessage('assistant', 'reply')
-  assert.ok(r.outputTokens.value > 0)
-})
-
-test('totalTokens: inputTokens + outputTokens', () => {
-  const r = mod.useSessionManager()
-  r.trackMessage('user', 'hi there')
-  r.trackMessage('assistant', 'hi back')
-  assert.equal(r.totalTokens.value, r.inputTokens.value + r.outputTokens.value)
-})
-
-test('usagePercent: 空会话为 0', () => {
-  const r = mod.useSessionManager()
-  assert.equal(r.usagePercent.value, 0)
-})
-
-test('usagePercent: 上限 100（Math.min 保护）', () => {
-  const r = mod.useSessionManager()
-  // 塞超长文本
-  r.trackMessage('user', 'x'.repeat(200000))
-  assert.ok(r.usagePercent.value <= 100)
-})
-
-test('isApproachingLimit: 空会话为 false', () => {
-  const r = mod.useSessionManager()
-  assert.equal(r.isApproachingLimit.value, false)
-})
-
-test('isOverLimit: 空会话为 false', () => {
-  const r = mod.useSessionManager()
-  assert.equal(r.isOverLimit.value, false)
-})
-
-// ============ maybeRotateSession ============
-
-test('maybeRotateSession: askCount 低于阈值 → fired=false', async () => {
-  const r = mod.useSessionManager()
-  r.resetAskCount()
-  const res = await r.maybeRotateSession(() => true)
-  assert.equal(res.fired, false)
-  assert.equal(res.sent, false)
-  assert.equal(res.overCount, 0)
-})
-
-test('maybeRotateSession: askCount = 阈值 → fired=true 且重置计数', async () => {
-  const r = mod.useSessionManager()
-  r.resetAskCount()
-  for (let i = 0; i < mod.ASK_ROTATE_THRESHOLD; i++) r.trackMessage('user', `m${i}`)
-  assert.equal(r.askCount.value, mod.ASK_ROTATE_THRESHOLD)
-  const res = await r.maybeRotateSession(() => true)
-  assert.equal(res.fired, true)
-  assert.equal(res.sent, true)
-  assert.equal(res.overCount, mod.ASK_ROTATE_THRESHOLD)
-  assert.equal(r.askCount.value, 0)
-})
-
-test('maybeRotateSession: sendFn 返回 false → sent=false', async () => {
-  const r = mod.useSessionManager()
-  r.resetAskCount()
-  for (let i = 0; i < mod.ASK_ROTATE_THRESHOLD; i++) r.trackMessage('user', 'm')
-  const res = await r.maybeRotateSession(() => false)
-  assert.equal(res.fired, true)
-  assert.equal(res.sent, false)
+  assert.equal(r.messages.value.length, 1)
 })
 
 // ============ updateSessionUrl ============
@@ -264,14 +152,13 @@ test('updateSessionUrl: 更新 sessionUrl', () => {
 
 // ============ resetSession ============
 
-test('resetSession: 清空 messages 与 askCount', () => {
+test('resetSession: 清空 messages', () => {
   const r = mod.useSessionManager()
   r.trackMessage('user', 'hi')
   r.trackMessage('assistant', 'there')
   const oldId = r.sessionId.value
   r.resetSession()
   assert.equal(r.messages.value.length, 0)
-  assert.equal(r.askCount.value, 0)
   // sessionId 应重新生成（mock 下相同）
   assert.equal(r.sessionId.value, oldId)
 })

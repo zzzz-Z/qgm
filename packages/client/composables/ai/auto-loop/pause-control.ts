@@ -3,6 +3,7 @@ import { getTransport } from '../useAiTransport.js'
 import type { ComputedRef, Ref } from 'vue'
 import type { LoopInstance } from './types.js'
 import { toast } from '../../ui/useToast'
+import { log } from '../../../utils/log'
 import { getActiveWin } from '../useAiWindow'
 import { useRuntime } from '../useRuntime.js'
 import { useRunner } from '../../runner/useRunner'
@@ -111,16 +112,20 @@ export function createPauseControl(deps: PauseControlDeps) {
     const runtime = useRuntime()
     runtime.pause()
     const t = getTransport()
-    try { t.sendStop('') } catch { /* 链路未就绪时忽略 */ }
+    let stopSent = false
+    try { stopSent = t.sendStop('') } catch { /* 链路未就绪时忽略 */ }
+    if (!stopSent) log.warn('[pause] sendStop 未送达（transport 返回 false）')
     try { t.mute?.() } catch { /* 链路未就绪时忽略 */ }
+    // [pause-fix-v3] runner.stop 无条件执行：手动跑脚本（running 且无 loop 实例）时也需 abort /run fetch
+    try { useRunner().stop() } catch { /* 无正在运行的执行时忽略 */ }
     const inst = activeLoop.value
     if (inst) {
       disarmTimer(inst)
       // 不设置 stopRequest：暂停期间 AI 若回包，mute+loopPaused 会拦下；恢复后继续正常处理
       inst.stopRequest.value = 'none'
-      try { useRunner().stop() } catch { /* 无正在运行的执行时忽略 */ }
     }
-    toast('已暂停 · 点「发送」可结束循环回到待发状态', 'warn', 3000)
+    // [pause-fix-v3] sendStop 失败不再静默：toast 区分信号是否送达
+    toast(stopSent ? '已暂停 · 点「发送」可结束循环回到待发状态' : '已暂停，但停止信号未送达 AI 窗口', 'warn', 3000)
   }
 
   /**

@@ -13,7 +13,6 @@ interface EventStreamMessage {
   lang?: string
   site?: string
   hash?: string
-  tokens?: number
   sessionId?: string
   degraded?: boolean
   [k: string]: unknown
@@ -22,7 +21,6 @@ interface EventStreamMessage {
 interface EventStreamCallbacks {
   onReply: (d: EventStreamMessage, e: MessageEvent) => void
   onScriptV12: (d: EventStreamMessage, e: MessageEvent) => void
-  onToken: (tokens: number) => void
   onSummary: (text: string, sessionId: string, degraded: boolean) => void
   onAiStream?: (text: string, sessionId: string) => void
   isMockMode?: () => boolean
@@ -68,11 +66,6 @@ export function useEventStream(callbacks: EventStreamCallbacks) {
     if (type === 'ai-runner:script') {
       if (!isFromActiveAiSite(e)) return
       callbacks.onScriptV12(d, e)
-      return
-    }
-    if (type === 'ai-runner:token-estimate') {
-      const tokens = Number(d.tokens) || 0
-      if (tokens > 0) callbacks.onToken(tokens)
       return
     }
     if (type === 'ai-runner:ai-stream') {

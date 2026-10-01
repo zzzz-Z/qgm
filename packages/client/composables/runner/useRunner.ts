@@ -69,7 +69,7 @@ const baselineRunId = useSessionStorage<string>(STORAGE_KEY_BASELINE, '')
 /** 是否已请求执行后自动回传（一次性，消费后由 clearAutoFeedback 重置） */
 const autoFeedbackRequested = ref(false)
 /** 是否启用 git 提交（每轮打点）；持久化到 sessionStorage */
-const gitCommit = useSessionStorage<boolean>(GIT_KEY, false)
+const gitCommit = useSessionStorage<boolean>(GIT_KEY, true)
 
 // 脚本持久化：仅 script 一项需要手工 watch（见上方注释）；其余键由 useSessionStorage 内部管理
 watch(script, (v) => {

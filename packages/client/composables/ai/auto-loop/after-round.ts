@@ -40,6 +40,7 @@ export function createAfterRound(deps: AfterRoundDeps) {
     persist,
     stage,
     enterWaiting,
+    loopPaused,
   } = deps
 
   // [loop-hard-limit-v1] 起跑时间：按 loopId 追踪，新循环重置
@@ -47,6 +48,9 @@ export function createAfterRound(deps: AfterRoundDeps) {
   let hardStartedAtMs = 0
 
   async function afterRound(inst: LoopInstance, outcome: RoundOutcome): Promise<void> {
+    // [breaker-paused-v1] 暂停态早退：阻断「点停止后仍推进 round / persist」的重试风暴路径
+    // [CONSTRAINT] 此检查必须在 hard-limit 之前：paused 是显式用户意图，优先级高于轮次预算
+    if (loopPaused.value) return
     // [loop-hard-limit-v1] 硬上限：总时长 / 总轮次，先到即停
     if (inst.id.value !== hardTrackedLoopId) {
       hardTrackedLoopId = inst.id.value
@@ -91,10 +95,6 @@ export function createAfterRound(deps: AfterRoundDeps) {
     stage.value = 'verify'
     persist(inst)
 
-    // [breaker-removed-v1] token 熔断已移除（PLAN #17 单例回退）；tokenDelta 保留为 0，
-    // 因 AfterResult 钩子契约仍带此字段，删除会破坏下游 hook 的入参结构
-    const tokenDelta = 0
-
     const arHook = await runHook('AfterResult', {
       loopId: inst.id.value,
       round: inst.round.value,
@@ -102,7 +102,6 @@ export function createAfterRound(deps: AfterRoundDeps) {
       exit: outcome.exit,
       ok: outcome.ok,
       changeCount: outcome.changeCount,
-      tokenDelta,
     })
     if (arHook.action === 'reject') {
       await finish(inst, 'hook-reject-after-result', arHook.reason || 'AfterResult hook rejected')

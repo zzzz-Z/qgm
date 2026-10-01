@@ -18,11 +18,20 @@ const localStorageMock = {
   clear: () => { store.clear() },
   key: (i: number) => Array.from(store.keys())[i] ?? null,
   get length() { return store.size },
-};
-(globalThis as unknown as { localStorage: unknown }).localStorage = localStorageMock
+}
+;(globalThis as unknown as { localStorage: unknown }).localStorage = localStorageMock
+// [storage-stub] vueuse useStorage 的 `storage instanceof Storage` 探测在 node 环境引用全局
+// Storage，缺失时模块导入即崩（[use-storage-v1] 后所有 useStorage 消费方均受影响）
+class StorageStub { }
+;(globalThis as unknown as { Storage: unknown }).Storage = StorageStub
 // [__ai_codecleaner_win_bridge__] vueuse useStorage 读 window.localStorage（不是 globalThis）；
 // 缺此桥 → useStorage 走内存兜底 → 测试读底层 store 永远 null，多断言恒红
-;(globalThis as unknown as { window: unknown }).window = { localStorage: localStorageMock }
+;(globalThis as unknown as { window: unknown }).window = {
+  localStorage: localStorageMock,
+  // [storage-listen-stub] useStorage listenToStorageChanges 会挂自定义事件监听，缺法则导入期抛错
+  addEventListener: (): void => {},
+  removeEventListener: (): void => {},
+}
 // [__ai_codecleaner_doc_stub__] vueuse isClient = (typeof window && typeof document);
 // 仅桥 window 不够 → 仍走内存兜底，写入永不落 mock。补最小 document stub
 ;(globalThis as unknown as { document: unknown }).document = { createElement: () => ({ style: {} }), addEventListener: () => {}, removeEventListener: () => {} }
@@ -57,29 +66,36 @@ test('useCodeCleaner: 首次 import 时 store 空 → 默认 true（fallback）'
   assert.equal(r.stripBlankLines.value, true)
 })
 
-test('toggleStripComments: 写 localStorage 为 \'1\' 并更新 ref', () => {
+test('toggleStripComments: 写 localStorage 为 \'1\' 并更新 ref', async () => {
   store.clear()
   const r = useCodeCleaner()
+  // [use-storage-v1] useStorage 仅在值变化时落盘（模块单例 ref 可能已是 true），
+  // 先置反值再置目标值，保证最后一次变化一定触发写入
+  r.toggleStripComments(false)
+  await new Promise(resolve => setTimeout(resolve, 0))
   r.toggleStripComments(true)
   assert.equal(r.stripComments.value, true)
+  await new Promise(resolve => setTimeout(resolve, 0))
   assert.equal(store.get(KEY_COMMENTS), '1')
 })
 
-test('toggleStripComments: 关时写 \'0\'', () => {
+test('toggleStripComments: 关时写 \'0\'', async () => {
   store.clear()
   const r = useCodeCleaner()
   r.toggleStripComments(false)
   assert.equal(r.stripComments.value, false)
+  await new Promise(resolve => setTimeout(resolve, 0))
   assert.equal(store.get(KEY_COMMENTS), '0')
 })
 
-test('toggleStripBlankLines: 独立于 stripComments', () => {
+test('toggleStripBlankLines: 独立于 stripComments', async () => {
   store.clear()
   const r = useCodeCleaner()
   r.toggleStripComments(true)
   r.toggleStripBlankLines(false)
   assert.equal(r.stripComments.value, true)
   assert.equal(r.stripBlankLines.value, false)
+  await new Promise(resolve => setTimeout(resolve, 0))
   assert.equal(store.get(KEY_BLANKS), '0')
 })
 

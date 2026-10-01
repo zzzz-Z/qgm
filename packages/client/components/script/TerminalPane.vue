@@ -294,7 +294,7 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
           </div>
         </div>
       </div>
-      <!-- 等待 AI 回复指示条：收到首 token / reply 后由 stopAiWaiting 关闭；置于消息流底部 -->
+      <!-- 等待 AI 回复指示条：收到首个回复后由 stopAiWaiting 关闭；置于消息流底部 -->
       <div v-if="props.aiWaiting" class="wait-banner" role="status" aria-live="polite">
         <span class="wait-spinner" aria-hidden="true" />
         <span class="wait-text">{{ waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中' }}</span>
@@ -442,6 +442,40 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 }
 .script-card:hover {
   background: rgb(127 127 127 / 3%);
+}
+/* [bubble-v1] 显示区气泡：AI 总结/文本与用户提问/回答用圆角气泡区分来源 */
+.done-summary,
+.text-card {
+  margin: 8px 0;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--bg-elevated, rgb(127 127 127 / 5%));
+  border: 1px solid rgb(127 127 127 / 12%);
+}
+.text-card.ask-card {
+  margin: 8px 0 8px auto;
+  max-width: 78%;
+  border-radius: 14px 14px 4px 14px;
+}
+.text-card.answer-card {
+  border-radius: 14px 14px 14px 4px;
+}
+/* [bubble-v1] 显示区气泡：AI 总结/文本与用户提问/回答用圆角气泡区分来源 */
+.done-summary,
+.text-card {
+  margin: 8px 0;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--bg-elevated, rgb(127 127 127 / 5%));
+  border: 1px solid rgb(127 127 127 / 12%);
+}
+.text-card.ask-card {
+  margin: 8px 0 8px auto;
+  max-width: 78%;
+  border-radius: 14px 14px 4px 14px;
+}
+.text-card.answer-card {
+  border-radius: 14px 14px 14px 4px;
 }
 /* [round-divider-v1] 轮次分隔条：左右渐隐线 + 中央圆角标签，弱视觉强化"分组" */
 /* [rd-css-v1] .round-divider* 样式已迁至 RoundDivider.vue */

@@ -8,6 +8,16 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 async function loadPw() {
+  // [browser-engine-align] 与 packages/core 的 resolveBrowserEngine 保持策略一致：
+  // linux-x64 上 cloak binary 已装则走 cloak 启动的 playwright 实例；否则回落 playwright。
+  if (process.platform === 'linux' && process.arch === 'x64') {
+    try {
+      const cloak = await import('cloakbrowser')
+      if (cloak.binaryInfo && cloak.binaryInfo().installed) {
+        return await import('playwright')
+      }
+    } catch { /* fallthrough: cloak 不可用，走 playwright */ }
+  }
   try { return await import('playwright') } catch { return null }
 }
 

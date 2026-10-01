@@ -84,7 +84,7 @@ export default defineConfig({
           for (const [name, re] of CHUNK_GROUPS) {
             if (re.test(tail)) return name
           }
-          // [WHY] 不兜底合并：gpt-tokenizer（~2MB）由 tokenEstimator 动态 import，
+          // [WHY] 不兜底合并：gpt-tokenizer（~2MB）由预估模块动态 import，
           //       强行并入静态 vendor 会让惰性加载失效、2MB 重回首屏；返回 undefined 交给 rolldown 默认拆包
           return undefined
         },

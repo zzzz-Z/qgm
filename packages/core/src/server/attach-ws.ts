@@ -117,7 +117,7 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         await pool.resetReplyDedup(sid)
         send({ t: 'headless:state', sid, state: 'generating' })
         // 启动回复轮询
-        // reply + token 两个 poll 的 stop 合并，避免泄漏
+        // reply + estimate 两个 poll 的 stop 合并，避免泄漏
         const stopReply = pool.startReplyPoll(sid, (reply) => {
           try {
             if (reply.kind === 'script' && reply.code) {
@@ -127,10 +127,7 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
             }
           } catch { /* swallow: 页面导航/关闭期间 evaluate 抛错，等下一轮 tick */ }
         })
-        const stopToken = pool.startTokenPoll(sid, (tokens) => {
-          try { send({ t: 'headless:token-estimate', sid, tokens }) } catch { /* swallow: 同上，轮询期间页面可能短暂不可用 */ }
-        })
-        replyPollers.set(sid, () => { stopReply(); stopToken() })
+        replyPollers.set(sid, stopReply)
         break
       }
       case 'headless:stop': {

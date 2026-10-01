@@ -6,7 +6,7 @@ interface ToastItem {
   id: number
   /**
    * 稳定 key：相同 key 的 toast 不新增，原地更新内容并续期计时器
-   *  用于流式输出期间频繁触发的提示（如 token-estimate），防 MutationObserver 风暴
+   *  用于流式输出期间频繁触发的提示（如流式高频更新），防 MutationObserver 风暴
    */
   key?: string
   msg: string
@@ -71,7 +71,7 @@ function evict() {
 
 /**
  * 弹出（或按 key 原地刷新）一条提示
- * [WHY] 传 key 时复用同一 toast 并续期，避免流式 token-estimate 类高频提示刷屏
+ * [WHY] 传 key 时复用同一 toast 并续期，避免流式高频提示刷屏
  * [CONSTRAINT] key 复用仅更新前 3 字段（msg/type/icon），id 与占位顺序不变
  * [CHANGE-IMPACT] 修改自动关闭逻辑须同步改动 armTimer 内联路径与 dismissToast 手动路径
  * @param duration 毫秒；传 0 或负数将被 setTimeout 立即调度

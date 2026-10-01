@@ -1,9 +1,9 @@
 /* eslint-disable ts/no-unused-vars, unused-imports/no-unused-vars -- 兼容 fs API 签名 / catch 兼容 */
 // ==UserScript==
-// @name         AI Runner · 会话 ID + token 估算 + 回复回传 + fill 接收
+// @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.4.4
-// @description  回传会话 ID/token/AI 回复到工作台；接收 fill/stop（修复千问 Slate 输入框）；DONE 携带完整注释块；回复签名按 assistant 容器识别（修复千问回传）
+// @version      1.4.5
+// @description  回传会话 ID/用量/AI 回复到工作台；接收 fill/stop（修复千问 Slate 输入框）；DONE 携带完整注释块；回复签名按 assistant 容器识别（修复千问回传）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -36,9 +36,6 @@
     // CHANGE-IMPACT: 影响 extractId() 返回；未命中返回 ''，不影响其他站点
     { re: /(?:www\.)?qianwen\.com\/(?:chat|c|q)\/([\w-]+)/, n: 1 }
   ]
-
-  const RATIO_CJK = 0.6
-  const RATIO_LATIN = 0.25
 
   // [replay-buf] 缓存最近 N 条外发消息，供刷新后重放
   const _msgBuf = []
@@ -83,7 +80,6 @@
 
   let lastId = ''
   let lastSid = ''
-  let lastTokens = -1
 
   function extractSidFromHash() {
     const m = location.hash.match(/(?:^#|&)sid=([\w.-]+)/)
@@ -98,17 +94,6 @@
     }
     return ''
   }
-
-  const TEXT_SELECTORS = [
-    '[class*="message"]',
-    '[class*="chat-message"]',
-    '[class*="markdown"]',
-    '[data-message-author-role]',
-    '.ds-markdown',
-    '.markdown',
-    '.chat-answers-card-wrap',
-    '.chat-question-card-wrap',
-  ]
 
   // [assistant-root-v1] 定位「最后一条 AI 回复」的容器，站点无关
   // WHY: 原实现硬编码 DeepSeek 的 .ds-assistant-message-main-content；
@@ -129,61 +114,16 @@
     return null
   }
 
-  function collectText() {
-    const seen = new Set()
-    const parts = []
-    for (let i = 0; i < TEXT_SELECTORS.length; i++) {
-      const nodes = document.querySelectorAll(TEXT_SELECTORS[i])
-      for (let j = 0; j < nodes.length; j++) {
-        const el = nodes[j]
-        if (seen.has(el)) continue
-        seen.add(el)
-        let parent = el.parentElement
-        let skip = false
-        while (parent) {
-          if (seen.has(parent)) { skip = true; break }
-          parent = parent.parentElement
-        }
-        if (skip) continue
-        const t = el.textContent || ''
-        if (t) parts.push(t)
-      }
-    }
-    return parts.join('\n')
-  }
-
-  function estimateTokens(text) {
-    if (!text) return 0
-    let cjk = 0
-    let latin = 0
-    for (let i = 0; i < text.length; i++) {
-      const code = text.charCodeAt(i)
-      if ((code >= 0x4E00 && code <= 0x9FFF)
-        || (code >= 0x3000 && code <= 0x303F)
-        || (code >= 0xFF00 && code <= 0xFFEF)) {
-        cjk++
-      } else {
-        latin++
-      }
-    }
-    return Math.round(cjk * RATIO_CJK + latin * RATIO_LATIN)
-  }
-
   function send() {
     const id = extractId()
     const sid = extractSidFromHash()
-    const tokens = estimateTokens(collectText())
     let changed = false
     if (id && id !== lastId) { lastId = id; changed = true }
     if (sid !== lastSid) { lastSid = sid; changed = true }
-    if (tokens !== lastTokens && tokens > 0) { lastTokens = tokens; changed = true }
     if (!changed) return
     try {
       if (window.opener && !window.opener.closed) {
         post({ type: 'ai-runner:session-id', id, sessionId: extractSidFromHash() })
-        if (tokens > 0) {
-          post({ type: 'ai-runner:token-estimate', tokens, sessionId: extractSidFromHash() })
-        }
       }
     } catch {}
   }
@@ -269,10 +209,29 @@
     if (/\brequire\s*\(/.test(head)) return 'js'
     if (/\bmodule\.exports\b/.test(head)) return 'js'
     if (/\bprocess\.(?:exit|argv|env)\b/.test(head)) return 'js'
+    // [js-content-broaden-v1] 补常见 Node/fs/语法特征
+    // WHY: 千问输出的脚本常直接 `fs.readdirSync(...)` / `const x = ...`，无 require/module.exports → 三级判定全 null → 整块被跳过降级为 plain 文本（用户反馈"脚本当成文本传了过来"）
+    // CONSTRAINT: 只加高置信特征（fs. 调用 / const|let 赋值 / console.log / => 箭头 / JSON.parse）；避免误伤普通 Markdown 代码块（如纯 JSON 配置）
+    // CHANGE-IMPACT: 特征命中即判 js；与 headless-inject.ts 的同名函数必须同步
+    if (/\bfs\.(?:readFileSync|writeFileSync|readdirSync|existsSync|statSync|mkdirSync|unlinkSync)\b/.test(head)) return 'js'
+    if (/\bconsole\.log\s*\(/.test(head)) return 'js'
+    if (/\bJSON\.(?:parse|stringify)\s*\(/.test(head)) return 'js'
+    if (/^(?:const|let)\s+\w+\s*=/.test(head)) return 'js'
     if (/^(?:echo|cd\s|ls\s|mkdir|git\s|pnpm\s|npm\s|yarn\s|rm\s)/m.test(head)) return 'bash'
     if (/\bif\s+\[\s/.test(head) || /\bfi\b/.test(head) || /\$\(/.test(head)) return 'bash'
     return null
   }
+  // [strip-line-numbers-v1] 剔除语法高亮行号 span（react-syntax-highlighter 等）
+  // WHY: 千问代码块每行前有 <span class="linenumber ...">N</span>，textContent 把行号粘进代码 →
+  //   "#! /usr/bin/env node" 变成 "1#! /usr/bin/env node" → shebang/^const 正则全失配 → 脚本降级成 plain
+  // CONSTRAINT: 克隆节点再删，不动真实 DOM；选择器覆盖 .linenumber 与 react-syntax-highlighter-line-number
+  // CHANGE-IMPACT: extractLatestScript 的 text 不再含行号；hash 与执行内容均为纯净代码
+  function codeTextOf(codeEl) {
+    const clone = codeEl.cloneNode(true)
+    clone.querySelectorAll('.linenumber, .react-syntax-highlighter-line-number, [class*="line-number"]').forEach(n => n.remove())
+    return (clone.textContent || '').replace(/^\n+|\n+$/g, '')
+  }
+
   function extractLatestScript() {
     const pres = document.querySelectorAll('pre')
     let last = null
@@ -282,7 +241,7 @@
       // [WHY] pre.textContent 会把头部按钮文字并入首行，污染后 #! 锚点失配、语言判定失败导致整块跳过
       // [CONSTRAINT] 无 code 子元素时回退 pre 本身；去首尾空行逻辑保持原样
       const codeEl = pre.querySelector('code') || pre
-      const text = (codeEl.textContent || '').replace(/^\n+|\n+$/g, '')
+      const text = codeTextOf(codeEl)
       if (!text) continue
       if (!text.includes('\n') && text.length < 120) continue
       // [code-text-clean-v1] 语言判定三级回退：className → DOM 邻近探测 → 内容特征
@@ -305,6 +264,41 @@
       if (marked) lastMarked = item
     }
     return lastMarked || last
+  }
+
+  // [md-fence-fallback-v1] DOM <pre> 提取失败时，从 Markdown 文本提取 ``` 围栏代码块
+  // WHY: 千问等站点代码块不用标准 <pre><code> 结构，extractLatestScript 找不到 → 降级成 plain 文本
+  // CONSTRAINT: 只从「最后一条 AI 回复」的 Markdown 里提取；语言标签白名单 js/bash/cjs/shell/sh/node
+  // CHANGE-IMPACT: 与 extractLatestScript 互补，先 DOM 后 Markdown，不重复发送（hash 去重）
+  function extractScriptFromMarkdown() {
+    try {
+      const root = latestAssistantRoot() || document
+      const md = extractReplyMd(root)
+      // 匹配 ```lang\n...``` 或 ```\n...```（无语言标签）
+      const fenceRe = /```(\w*)\n([\s\S]*?)```/g
+      let m
+      let last = null
+      while ((m = fenceRe.exec(md)) !== null) {
+        const rawLang = (m[1] || '').toLowerCase()
+        const code = m[2].replace(/^\n+|\n+$/g, '')
+        if (!code || (!code.includes('\n') && code.length < 120)) continue
+        let lang = rawLang === 'javascript' || rawLang === 'node'
+          ? 'js'
+          : rawLang === 'sh' || rawLang === 'shell'
+            ? 'bash'
+            : rawLang === 'cjs'
+              ? 'cjs'
+              : rawLang === 'js'
+                ? 'js'
+                : rawLang === 'bash'
+                  ? 'bash'
+                  : null
+        if (!lang) lang = guessLangFromContent(code)
+        if (lang !== 'cjs' && lang !== 'js' && lang !== 'bash') continue
+        last = { lang, code, hash: hash32(code) }
+      }
+      return last
+    } catch { return null }
   }
 
   // [fix-undef] 从页面取最新一条回复的纯文本（排除 pre 代码块，用于 handoff 总结判定）
@@ -349,8 +343,9 @@
       const code = el.querySelector('code')
       const cls = code ? String(code.className || '') : ''
       const m = cls.match(/language-([a-z0-9]+)/i)
-      const src = (code || el).textContent || ''
-      return `\`\`\`${m ? m[1] : ''}\n${src.replace(/\n+$/g, '')}\n\`\`\`\n\n`
+      // [strip-line-numbers-v1] 用 codeTextOf 剔除行号，与 extractLatestScript 保持一致
+      const src = codeTextOf(code || el)
+      return `\`\`\`${m ? m[1] : ''}\n${src}\n\`\`\`\n\n`
     }
     if (tag === 'code') return `\`${el.textContent || ''}\``
     if (tag === 'blockquote') return `${inner().split('\n').map(l => `> ${l}`).join('\n')}\n\n`
@@ -403,8 +398,24 @@
 
   // [debounce-flatten-v1] 单级 350ms 节流：原 replyObserver 与 classifyAndPost 共用 replyDebounce，
   //   每次 DOM 变化都重设 2000ms；AI 流式期间 DOM 持续抖动 → 核心逻辑永远被推迟到"最后一次变化后再 2s"才执行。
-  // [CONSTRAINT] 350ms 是合并 token 级抖动的下限；lastBodySig / seenHashes / seenDoneMarkers 已保证同内容不重复 post。
+  // [CONSTRAINT] 350ms 是合并流式抖动的下限；lastBodySig / seenHashes / seenDoneMarkers 已保证同内容不重复 post。
   // [CHANGE-IMPACT] 弹窗感知延迟 ~2s → ~0.35s；classifyAndPost 改为同步执行，节流由 observerDebounce 单点承担。
+  // [generating-gate-v1] 生成中不发送 script/plain
+  // WHY: 千问等站点流式输出（打字机），350ms 防抖间隙内脚本只出了一半；partial 的 hash 每次都变 → seenHashes 失效，连发多条残缺脚本
+  // CONSTRAINT: 以「停止生成」按钮可见且可用为"仍在生成"信号；生成结束后按钮消失 → DOM 变化再触发 classifyAndPost，此时取到完整内容
+  // CHANGE-IMPACT: script/plain 延迟到生成结束；DONE 整行匹配不受影响（流式中不会误出 DONE 首行）
+  function findStopGeneratingBtn() {
+    const all = Array.from(document.querySelectorAll('button'))
+    return all.find((b) => {
+      const lbl = `${b.getAttribute('aria-label') || ''} ${b.textContent || ''} ${b.getAttribute('title') || ''}`
+      return /停止生成|停止回答|停止输出|stop\s*generat|stop\s*stream|stop\s*response|stop\s*answer/i.test(lbl)
+    }) || null
+  }
+  function isGenerating() {
+    const btn = findStopGeneratingBtn()
+    return Boolean(btn && !btn.disabled)
+  }
+
   let observerDebounce = null
   function classifyAndPost() {
     try {
@@ -425,7 +436,11 @@
         return
       }
 
-      const s = extractLatestScript()
+      // [generating-gate-v1] 流式输出未完，script/plain 一律等生成结束后再发
+      if (isGenerating()) return
+
+      // [md-fence-fallback-v1] DOM 提取失败时兜底 Markdown 围栏提取
+      const s = extractLatestScript() || extractScriptFromMarkdown()
       if (s && !seenHashes.has(s.hash)) {
         seenHashes.add(s.hash)
         post({
@@ -477,17 +492,19 @@
   resumeReplyObserver()
 
   // ===== fill / rotate / new-session / stop =====
+  // [stop-v3] 按钮未命中时以 Esc 键盘事件兜底（站点改文案/图标按钮漏配时仍有概率阻断）
+  // [WHY] 纯文案匹配脆弱：DeepSeek/千问按钮改版即静默失效，AI 继续流式生成
+  // [CHANGE-IMPACT] 返回值语义不变（true=按钮命中）；stop 分支据此打日志
   function clickStopGenerating() {
     try {
-      const all = Array.from(document.querySelectorAll('button'))
-      const btn = all.find((b) => {
-        const lbl = `${b.getAttribute('aria-label') || ''} ${b.textContent || ''} ${b.getAttribute('title') || ''}`
-        return /停止生成|停止回答|停止输出|stop\s*generat|stop\s*stream|stop\s*response|stop\s*answer/i.test(lbl)
-      })
+      const btn = findStopGeneratingBtn()
       if (btn && !btn.disabled) {
         btn.click()
         return true
       }
+    } catch {}
+    try {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }))
     } catch {}
     return false
   }
@@ -836,7 +853,8 @@
       // [WHY] replyObserver 常驻 body；清空 seenHashes/lastBodySig 会让旧回复被重判为新回复 post
       // [CONSTRAINT] 保留 seenHashes / seenDoneMarkers / lastBodySig；下次 fill/rotate 由 resumeReplyObserver 恢复
       // [CHANGE-IMPACT] 与 resumeReplyObserver 成对；改此处必须同步改 resume 触发点
-      clickStopGenerating()
+      const stopHit = clickStopGenerating()
+      console.log('[ai-runner] stop received, stop-btn hit =', stopHit)
       _msgBuf.length = 0
       _pending.length = 0
       if (observerDebounce) { clearTimeout(observerDebounce); observerDebounce = null }

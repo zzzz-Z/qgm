@@ -16,8 +16,6 @@ import { onNewSessionCreated, onSummary, startHandoff, SUMMARY_INSTRUCTION } fro
 import { bindKeyboard, unbindKeyboard } from './auto-loop/keyboard.js'
 import { runHook } from './auto-loop/hooks.js'
 
-import { autoRotateSession, setTokenEstimate } from './auto-loop/token-rotate.js'
-
 // AIRUNNER-BATCH5-0A-TYPES-SPLIT
 import type { LoopInstance, LoopState } from './auto-loop/types.js'
 import { persist, restore } from './auto-loop/persist.js'
@@ -253,10 +251,6 @@ export function isInstActive(inst: LoopInstance | null): boolean {
 
 // [stop-and-finish-v1] handleStopAfterRound / finish 已抽到 auto-loop/stop-and-finish.ts
 
-// ============================================================================
-// token 估算（App.vue 桥接）
-// ============================================================================
-
 /** 当前循环上下文（ScriptPanel 记 run trace 时盖 loopId/loopRound 用） */
 export function currentLoopContext(): { loopId?: string, loopRound?: number } {
   const inst = activeLoop.value
@@ -341,12 +335,10 @@ export function useAutoLoop() {
     loopPaused: computed(() => loopPaused.value),
     onScriptArrival,
     onNonScriptReply,
-    setTokenEstimate,
     currentLoopContext,
     startHandoff,
     onSummary,
     onNewSessionCreated,
-    autoRotateSession,
     resumeLoop,
     resumeFromPause,
     exitPauseToIdle,
@@ -397,7 +389,6 @@ function submitDecision(id: string, customText?: string): void {
   }
 }
 export { onNewSessionCreated, onSummary, startHandoff, SUMMARY_INSTRUCTION }
-export { autoRotateSession, setTokenEstimate }
 
 // 类型 re-export
 export type { HookEvent, HookResult } from './auto-loop/hooks.js'

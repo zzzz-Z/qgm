@@ -128,7 +128,7 @@ const diagnosis = computed<Diagnosis | null>(() => {
     if (code === 2) {
       headline = '安全熔断（exit 2）'
       cause = '触发契约校验或安全黑名单'
-      action = '读 RULES 第三章与第七章；确认命令/路径合规'
+      action = '读 SYSTEM.md §1（输出契约）与 §3（运行时沙箱）；确认命令/路径合规'
     } else {
       headline = `脚本退出异常（exit ${String(code)}）`
       cause = '运行时异常或断言失败'

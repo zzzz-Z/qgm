@@ -17,7 +17,9 @@ export default defineConfig({
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
-    command: 'pnpm web:dev',
+    // [fix-webserver-cmd] 根 package.json 实际脚本为 dev:web；原 web:dev 从不存在，
+    // 仅因 reuseExistingServer 复用已运行实例而长期未暴露
+    command: 'pnpm dev:web',
     cwd: '..',
     url: 'http://localhost:5174/__ai/',
     reuseExistingServer: true,

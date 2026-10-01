@@ -12,10 +12,10 @@ describe('scanNativeApis (原生 API 扫描)', () => {
   it('fs.readFileSync 命中', () => {
     expect(scanNativeApis('fs.readFileSync(\'x\')').hit).toBe(true)
   })
-  it('行注释 token 被忽略', () => {
+  it('行注释片段被忽略', () => {
     expect(scanNativeApis('// fs.readFileSync\nconst x=1').hit).toBe(false)
   })
-  it('块注释 token 被忽略', () => {
+  it('块注释片段被忽略', () => {
     expect(scanNativeApis('/* path.join */\nconst x=1').hit).toBe(false)
   })
   it('process.exit 命中', () => {

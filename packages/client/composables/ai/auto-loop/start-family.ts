@@ -116,7 +116,7 @@ export function createStartFamily(deps: StartFamilyDeps) {
     if (typeof transport.waitAck === 'function') {
       void transport.waitAck('headless:fill', '', 3000).catch(() => { /* waitAck 自身异常不阻断 */ })
     }
-    // [P3-1b] preparing 态：sendFill 后到 AI 首 token 前显示 preparing
+    // [P3-1b] preparing 态：sendFill 后到 AI 首次回复前显示 preparing
     inst.state.value = 'preparing'
     persist(inst)
     setTimeout(() => {

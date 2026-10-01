@@ -1,5 +1,4 @@
 import { cleanCode } from './codeCleaner'
-import { fallbackEstimate } from './tokenEstimator'
 
 interface ContextFile {
   path: string
@@ -11,9 +10,6 @@ export interface CleanOptions {
   stripComments: boolean
   stripBlankLines: boolean
 }
-
-/** 单次构建上下文的 token 预算上限；[CHANGE-IMPACT] 调大需同步评估模型上下文窗口，否则发送会被服务端截断 */
-const PROMPT_BUDGET = 32000
 
 /**
  * 把单个文件渲染成 <file> 块（含行号）
@@ -53,7 +49,7 @@ export function buildFullContext(files: ContextFile[], opts: CleanOptions): stri
 }
 /**
  * 拼装错误上下文（仅渲染已知错误位置，供 lint/type 修复场景使用）
- * [WHY] 与 buildFullContext 互补：错误场景下按 locs 精准渲染，减少无关 token
+ * [WHY] 与 buildFullContext 互补：错误场景下按 locs 精准渲染，减少无关上下文
  * [CONSTRAINT] errorLocations 键须为已规范化的 POSIX 路径；调用方混用 ./ 前缀时此函数会再试一次归一
  */
 export function buildErrorContext(
@@ -70,15 +66,6 @@ export function buildErrorContext(
     out.push('')
   }
   return out.join('\n')
-}
-/**
- * 粗估文本 token 数并判断是否在预算内
- * [WHY] fallbackEstimate 是启发式，非精确 tokenizer；仅用于构建前预警，不阻断发送
- * [CONSTRAINT] ok=true 不代表服务端一定接受，仅表示启发式估算未超 PROMPT_BUDGET
- */
-export function enforceBudget(text: string): { ok: boolean, size: number, budget: number } {
-  const size = fallbackEstimate(text)
-  return { ok: size <= PROMPT_BUDGET, size, budget: PROMPT_BUDGET }
 }
 
 // AIRUNNER-BATCH16-3-SPLIT-ERR-LOCS: 实现已外移至 context-error-locations.ts

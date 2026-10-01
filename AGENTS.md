@@ -11,22 +11,21 @@
 
 ## 契约速查（完整定义见 SYSTEM.md）
 
-| 主题       | 摘要                                                           | 出处           |
-| :--------- | :------------------------------------------------------------- | :------------- |
-| 输出围栏   | 首尾字符 / 零溢出；违反即整轮丢弃                              | SYSTEM.md §1   |
-| 脚本头     | Shebang `#! /usr/bin/env node` + `@desc` + `@why`              | SYSTEM.md §1   |
-| 收尾轮     | 首行严格 `DONE` + 后续 Markdown 总结；不写脚本、不调 log       | SYSTEM.md §1   |
-| 首轮探测   | `typeof __AI__` 判定；失败带 `exitCode: 2` 上报                | SYSTEM.md §2   |
-| 读写协议   | R1 读为先 / R2 锚点验证 / R3 幂等有据                          | SYSTEM.md §3   |
-| 运行时沙箱 | 禁原生 `fs` / `path` / `child_process` / `os`，全部走 `__AI__` | SYSTEM.md §4   |
-| 降级协议   | 仅当探测确认缺失 + `// ⚠️ fallback: ...` 注释                  | SYSTEM.md §4.3 |
-| 架构红线   | 单文件 import ≤ 8；普通 ≤ 400 行、组件 ≤ 500 行                | SYSTEM.md §5   |
-| 调试排查   | `__AI__.browser.*` 优先；grep → dump ±20                       | SYSTEM.md §6   |
-| 注释规范   | 三问（WHY / CONSTRAINT / CHANGE-IMPACT）取其二                 | SYSTEM.md §7   |
-| 命名规范   | 文件 kebab-case；禁止 `var`；函数 ≤ 30 行                      | SYSTEM.md §8   |
-| 重试预算   | 同一报错最多重试 3 次；第 2 次仍失败必须换策略                 | SYSTEM.md §9   |
-| 跨文件级联 | 改导出类型/签名/props 必须 grep 全部调用方同步                 | SYSTEM.md §10  |
-| 输出预算   | 单轮脚本 ≤ 300 行 / 12 KB；超限拆轮                            | SYSTEM.md §11  |
+| 主题       | 摘要                                                              | 出处           |
+| :--------- | :---------------------------------------------------------------- | :------------- |
+| 输出围栏   | 首尾字符 / 零溢出；违反即整轮丢弃                                 | SYSTEM.md §1   |
+| 脚本头     | Shebang `#! /usr/bin/env node` + `@desc` + `@why`                 | SYSTEM.md §1   |
+| 收尾轮     | 首行严格 `DONE` + 后续 Markdown 总结；不写脚本、不调 log          | SYSTEM.md §1   |
+| 读写协议   | R1 读为先 / R2 锚点验证 / R3 幂等有据                             | SYSTEM.md §2   |
+| 运行时沙箱 | 禁原生 `fs` / `path` / `child_process` / `os`，全部走 `__AI__`    | SYSTEM.md §3   |
+| 降级协议   | 仅当 `__AI__.xxx` 确认缺失 + `// ⚠️ fallback: ...` 注释           | SYSTEM.md §3.3 |
+| 架构红线   | 单文件 import ≤ 8；普通 ≤ 400 行、组件 ≤ 500 行                   | SYSTEM.md §4   |
+| 调试排查   | `__AI__.browser.*` 优先；grep → dump ±20                          | SYSTEM.md §5   |
+| 注释规范   | 三问（WHY / CONSTRAINT / CHANGE-IMPACT）取其二                    | SYSTEM.md §6   |
+| 命名规范   | 文件 kebab-case；禁止 `var`；函数 ≤ 30 行                         | SYSTEM.md §7   |
+| 重试预算   | 同一报错最多重试 3 次；第 2 次仍失败必须换策略；连续 2 次熔断冻结 | SYSTEM.md §8   |
+| 跨文件级联 | 改导出类型/签名/props 必须 grep 全部调用方同步                    | SYSTEM.md §9   |
+| 输出预算   | 单轮脚本 ≤ 300 行 / 12 KB；超限拆轮                               | SYSTEM.md §10  |
 
 ---
 

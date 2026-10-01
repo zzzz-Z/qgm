@@ -19,6 +19,10 @@ Object.defineProperty(globalThis, 'localStorage', {
 })
 
 const ssStore = new Map<string, string>()
+// [storage-stub] vueuse useStorage 的 `storage instanceof Storage` 探测在 node 环境引用全局
+// Storage，缺失时模块导入即崩（[use-storage-v1] 后所有 useStorage 消费方均受影响）
+class StorageStub { }
+Object.defineProperty(globalThis, 'Storage', { configurable: true, writable: true, value: StorageStub })
 Object.defineProperty(globalThis, 'sessionStorage', {
   configurable: true,
   writable: true,
@@ -146,9 +150,9 @@ test('初始：smokeEnabled 默认 true', () => {
   assert.equal(r.smokeEnabled.value, true)
 })
 
-test('初始：gitCommit 默认 false', () => {
+test('初始：gitCommit 默认 true', () => {
   const r = mod.useRunner()
-  assert.equal(r.gitCommit.value, false)
+  assert.equal(r.gitCommit.value, true)
 })
 
 test('初始：baselineRunId 为空串', () => {
@@ -194,20 +198,25 @@ test('watch: smokeEnabled 变化后写入 sessionStorage', async () => {
 
 test('watch: gitCommit 变化后写入 sessionStorage', async () => {
   const r = mod.useRunner()
-  r.gitCommit.value = true
+  // [use-storage-v1] useSessionStorage 仅在值变化时落盘；ref 是模块单例且 beforeEach 只清 store，
+  // 必须取「与当前值相反」的目标值才能保证触发写入
+  const next = !r.gitCommit.value
+  r.gitCommit.value = next
   await nextTick()
   const raw = ssStore.get('__ai_runner_git_commit')
   assert.ok(raw)
-  assert.equal(JSON.parse(raw!), true)
+  assert.equal(JSON.parse(raw!), next)
 })
 
 test('watch: baselineRunId 变化后写入 sessionStorage', async () => {
   const r = mod.useRunner()
-  r.baselineRunId.value = 'run-abc'
+  // [use-storage-v1] 同上：基于当前 ref 值显式取异值（勿用时钟类随机值，跨测试顺序下不可靠），
+  // 确保触发落盘
+  const next = r.baselineRunId.value === 'run-xyz' ? 'run-abc' : 'run-xyz'
+  r.baselineRunId.value = next
   await nextTick()
-  const raw = ssStore.get('__ai_runner_baseline')
-  assert.ok(raw)
-  assert.equal(JSON.parse(raw!), 'run-abc')
+  // [use-storage-v1] string 序列化器落盘为裸字符串（write: v => v），非 JSON 引号形式
+  assert.equal(ssStore.get('__ai_runner_baseline'), next)
 })
 
 test('watch: 修改 script 后 persistWarning 复位为空串', async () => {

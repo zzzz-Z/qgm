@@ -10,7 +10,6 @@ export interface SessionEntry {
   url: string
   title: string
   createdAt: number
-  tokens?: number
   handedOff?: boolean
 }
 

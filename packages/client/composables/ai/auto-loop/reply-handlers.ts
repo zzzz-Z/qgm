@@ -95,6 +95,9 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
 
   /** 非脚本回复：done / plain / multi */
   async function onNonScriptReply(reply: AiReply, sid?: string): Promise<void> {
+    // [breaker-paused-v1] 暂停态早退：阻断暂停后仍走 done/multi 分支推进状态的路径
+    // [WHY] 与 afterRound 的早退配对，保证「暂停 = 冻结」语义在回复链路上完整
+    if (loopPaused.value) return
     const inst = resolveInst(sid)
     if (!inst || !isInstActive(inst) || inst.state.value !== 'waiting') return
     disarmTimer(inst)

@@ -144,15 +144,16 @@ test('headless:fill 空 prompt 回 state=error', async () => {
   } finally { try { ws.close() } catch { /* ignore */ } }
 })
 
-test('headless:fill 无 session 回 state=error', async () => {
+test('headless:fill 无 session 自动先 open（首帧 filling）', async () => {
   const ws = await openWs()
   try {
     const got = nextMessage(ws, m => m.t === 'headless:state' && m.sid === '__nope__', 3000)
     ws.send(JSON.stringify({ t: 'headless:fill', sid: '__nope__', prompt: 'hi' }))
     const msg = await got
     expect(msg.t).toBe('headless:state')
-    expect(String(msg.state)).toBe('error')
-    expect(String(msg.detail || '')).toMatch(/session|未打开/)
+    // [headless-auto-open] 服务端对未打开 session 的 fill 自动补 open（配合前端 open+fill 同帧），
+    // 首帧必为 filling；后续 open 结果不在此断言（真实启动浏览器，非本用例关注点）
+    expect(String(msg.state)).toBe('filling')
   } finally { try { ws.close() } catch { /* ignore */ } }
 })
 

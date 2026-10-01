@@ -321,13 +321,24 @@ const __AI__ = {
         if (fsx.existsSync(c)) return c
         return path.join(__dirname, '..', 'bin', 'headless-cli.cjs')
       })()
-      const r = execFileSync(process.execPath, [bin, cmd].concat(args), {
-        cwd: process.cwd(),
-        encoding: 'utf8',
-        timeout: 60_000,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-      try { return JSON.parse(r) } catch { return { ok: false, error: `parse fail: ${r.slice(0, 100)}` } }
+      // [browser-run-guard-v1] CLI 出错时仍会先写 JSON 到 stdout 再 exit(1)；
+      // 原实现未捕获 execFileSync 抛错，非零退出会冒泡成脚本级 Error 中断。
+      // 改为捕获后回读 e.stdout 尝试解析；无 stdout 则回退到 stderr 片段。
+      let raw = ''
+      try {
+        raw = execFileSync(process.execPath, [bin, cmd].concat(args), {
+          cwd: process.cwd(),
+          encoding: 'utf8',
+          timeout: 60_000,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      } catch (e) {
+        raw = String((e && e.stdout) || '')
+        if (!raw) {
+          return { ok: false, error: `headless-cli exit ${(e && e.status) || '?'}: ${String((e && e.stderr) || e).slice(0, 300)}` }
+        }
+      }
+      try { return JSON.parse(raw) } catch { return { ok: false, error: `parse fail: ${raw.slice(0, 200)}` } }
     },
     cssom(url, selector) { return this._run('cssom', [url, selector]) },
     screenshot(url, selector, outPath, mask) {
@@ -356,7 +367,7 @@ const __AI__ = {
   syntaxCheck(code, filename) {
     // [syntax-check-guard-v1] 入参友好化：路径误传 / SFC 传入时给出明确错误
     // [WHY] 传路径字符串 → vm.Script 把 /Users/... 的 / 当正则开头，抛 "Invalid regular expression flags" 无法自解释；
-    //        传 .vue SFC 源码 → 因 <script> 标签报 "Unexpected token '<'"
+    //        传 .vue SFC 源码 → 因 <script> 标签报 Unexpected token 错
     // [CONSTRAINT] 只在入参为单行短文本且指向真实存在的文件时才短路，避免误伤正常代码
     // [CHANGE-IMPACT] 返回结构不变（{ ok, error }）；SYSTEM.md 的 __AI__ API 速查需补充用法说明
     const s = String(code)
@@ -388,7 +399,7 @@ const __AI__ = {
     }
     return __AI__.exec(parts[0], parts.slice(1), opts || {})
   },
-  // [ai-shell-exit-v2] 黑名单：rm 组合旗标按 token 精判；其余按整串正则匹配
+  // [ai-shell-exit-v2] 黑名单：rm 组合旗标按片段精判；其余按整串正则匹配
   _shellBlacklist(parts, flat) {
     const RM = ['r', 'm'].join('')
     if (parts[0] === RM) {
@@ -531,7 +542,7 @@ const __AI__ = {
     if (!tpl) return []
     return names.filter((n) => { return new RegExp(`\\b${__AI__.esc(n)}\\b`).test(tpl) })
   },
-  // [L6] 读缓存：文件内容未变则跳过重读，省 token
+  // [L6] 读缓存：文件内容未变则跳过重读，省开销
   _readCachePath() { return '(memory)' },
   readCacheMap() { return _rcMem },
   _writeCacheMap(m) { for (const k in m) _rcMem[k] = m[k] },

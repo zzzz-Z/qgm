@@ -3,7 +3,6 @@ import { expect, test } from '@playwright/test'
 // 若被 node --test 拾取（NODE_TEST_CONTEXT 由 node 子进程自动设置），立即退出
 // 与 client/e2e/headless-ws.spec.ts 保持同一策略
 if (process.env.NODE_TEST_CONTEXT) {
-  // @ts-expect-error playwright 环境下 process 存在；node:test 环境下才进入此分支
   process.exit(0)
 }
 
@@ -28,9 +27,15 @@ test('/__ai/diff-from-baseline 未知 baselineRunId 返回 404', async ({ reques
 
 test('/__ai/diff-from-baseline 有效 runId 返回结构完整', async ({ request }) => {
   // 1) 先跑一个只读脚本拿 runId
-  const runRes = await request.post('/__ai/run', {
-    data: { script: '#!/usr/bin/env node\nlog.info("baseline-seed")\nprocess.exit(0)' },
-  })
+  // [CONSTRAINT] /run 有脚本头契约前置校验（ai-guard scanScriptHead），缺 @desc/@why 会 400
+  const script = [
+    '#!/usr/bin/env node',
+    '// @desc baseline-seed 冒烟种子',
+    '// @why e2e diff-from-baseline 需要一个真实 runId 作为基准',
+    'log.info("baseline-seed")',
+    'process.exit(0)',
+  ].join('\n')
+  const runRes = await request.post('/__ai/run', { data: { script } })
   expect(runRes.status()).toBe(200)
 
   // NDJSON 流里取 summary 帧的 runId

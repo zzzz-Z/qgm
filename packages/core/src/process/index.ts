@@ -1,4 +1,4 @@
-// process barrel — 收敛下游 imports（HCLC 第7章）
+// process barrel — 收敛下游 imports（HCLC §4）
 
 export { BASH_TIMEOUT_MS, buildEnvWhitelist, checkBashBlacklist } from './bash-guard.js'
 // [bash-whitelist-wire-v1]

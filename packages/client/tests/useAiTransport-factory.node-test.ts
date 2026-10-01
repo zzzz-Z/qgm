@@ -1,9 +1,13 @@
 // AIRUNNER-BATCH41-1-AI-TRANSPORT: useAiTransport.ts Characterization Test
-import { beforeAll, beforeEach, test } from 'vitest'
+import { beforeAll, beforeEach, test, vi } from 'vitest'
 import assert from 'node:assert/strict'
 
 // ===== 全局 mock（必须在 import 之前）=====
 const lsStore = new Map<string, string>()
+// [storage-stub] vueuse useStorage（useAiSite 模块顶层）在 node 环境引用全局 Storage，
+// 缺失时整条导入链（useAiTransport → useAiWindowSend → useAiSite）在 import 即崩
+class StorageStub { }
+Object.defineProperty(globalThis, 'Storage', { configurable: true, writable: true, value: StorageStub })
 Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
   writable: true,
@@ -132,13 +136,6 @@ test('createTampermonkeyTransport: onReply 注册/注销', () => {
   assert.equal(calls, 0)
 })
 
-test('createTampermonkeyTransport: onTokenEstimate 注册/注销', () => {
-  const t = mod.createTampermonkeyTransport()
-  const off = t.onTokenEstimate(() => {})
-  assert.equal(typeof off, 'function')
-  off()
-})
-
 test('createTampermonkeyTransport: onSummary 注册/注销', () => {
   const t = mod.createTampermonkeyTransport()
   const off = t.onSummary(() => {})
@@ -182,6 +179,19 @@ test('createHeadlessTransport: sendFill 返回 boolean', () => {
   const t = mod.createHeadlessTransport()
   const r = t.sendFill('sid-1', { prompt: 'hi' })
   assert.equal(typeof r, 'boolean')
+})
+
+// [ws-frame-key-v1] 锁定出站帧协议键名必须是 t：误用 type 会被服务端判 unknown type 静默丢弃
+// [CONSTRAINT] 未连接时帧先进 queue，open（microtask）后才 flush 到 stub.sent，需等一个 macrotask
+test('createHeadlessTransport: 出站帧协议键名为 t', async () => {
+  const t = mod.createHeadlessTransport()
+  t.sendLoginGui!('sid-1')
+  await new Promise(r => setTimeout(r, 0))
+  const stub = WSStub.last!
+  const frames = stub.sent.map(s => JSON.parse(s) as { t?: string, type?: string })
+  const login = frames.find(f => f.t === 'headless:login-gui')
+  assert.ok(login, '应存在 t=headless:login-gui 帧')
+  assert.equal(frames.filter(f => f.type !== undefined).length, 0, '出站帧不得携带 type 键')
 })
 
 test('createHeadlessTransport: mute 后回调集合被清空', () => {
@@ -228,11 +238,13 @@ test('getTransportKind: 默认 tampermonkey', () => {
   assert.equal(mod.getTransportKind(), 'tampermonkey')
 })
 
-test('getTransportKind: localStorage=headless → headless', () => {
-  // [use-storage-v1] 实现走 vueuse useStorage → 落盘为 JSON.stringify('headless') = '"headless"'；
-  // 直接写裸字符串反序列化失败 → 落到默认 'tampermonkey'，用例恒红
-  lsStore.set('__ai_transport', JSON.stringify('headless'))
-  assert.equal(mod.getTransportKind(), 'headless')
+test('getTransportKind: localStorage=headless → headless', async () => {
+  // [use-storage-v1] transportKind 是模块级 useStorage ref，仅初始化时读一次 localStorage；
+  // 导入后的裸写不会回灌 ref，故必须先 seed 再 resetModules 重新导入，验证真实初始化路径
+  lsStore.set('__ai_transport', 'headless')
+  vi.resetModules()
+  const fresh = await import('../../../packages/client/composables/ai/useAiTransport')
+  assert.equal(fresh.getTransportKind(), 'headless')
 })
 
 test('getTransportKind: URL 参数 transport=headless 优先', () => {
@@ -246,11 +258,15 @@ test('getTransportKind: URL 参数 transport=tampermonkey 优先', () => {
   assert.equal(mod.getTransportKind(), 'tampermonkey')
 })
 
-test('setTransportKind: 写 localStorage', () => {
+test('setTransportKind: 写 localStorage', async () => {
+  // [use-storage-v1] 写入走 useStorage watcher（flush: pre，Vue 调度器异步落盘）；
+  // string 序列化器落盘为裸字符串（read: v => v），非 JSON 引号形式
   mod.setTransportKind('headless')
-  assert.equal(lsStore.get('__ai_transport'), JSON.stringify('headless'))
+  await new Promise(r => setTimeout(r, 0))
+  assert.equal(lsStore.get('__ai_transport'), 'headless')
   mod.setTransportKind('tampermonkey')
-  assert.equal(lsStore.get('__ai_transport'), JSON.stringify('tampermonkey'))
+  await new Promise(r => setTimeout(r, 0))
+  assert.equal(lsStore.get('__ai_transport'), 'tampermonkey')
 })
 
 test('getTransport: 返回同一实例（单例）', () => {

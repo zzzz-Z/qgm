@@ -114,7 +114,7 @@ export interface WhitelistResult {
 }
 
 /**
- * 提取一条 shell 命令的首个 token（命令名），忽略前导空白与 VAR=val 前缀。
+ * 提取一条 shell 命令的首个片段（命令名），忽略前导空白与 VAR=val 前缀。
  * 简单按空白与 ; && || | 切分；不做 shell 解析（避免引入复杂度）。
  */
 function firstCmd(line: string): string {

@@ -1,4 +1,4 @@
-// utils barrel — 收敛下游 imports（HCLC 第7章）
+// utils barrel — 收敛下游 imports（HCLC §4）
 
 export { fingerprintErrors } from './error-fingerprint.js'
 export type { Fingerprint } from './error-fingerprint.js'

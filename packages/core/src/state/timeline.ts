@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-/** 单轮快照：轮次、状态、耗时、token 消耗 */
+/** 单轮快照：轮次、状态、耗时、用量统计 */
 export interface RoundSnapshot {
   round: number
   runId: string

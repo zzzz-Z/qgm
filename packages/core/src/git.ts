@@ -151,8 +151,9 @@ export async function gitArchiveBranch(
 
 /** 最后一次 commit 短 hash */
 /**
- * 运行后提交：按本次 changes 提交。
- * message 含改动列表 + exit + duration，方便 git log 追溯。
+ * 运行后把本次 changes 存档到 ai-archive 分支。
+ * [ai-archive-v1] 方案 C：不再 commit 到当前分支；message 含改动列表 + exit + duration，
+ * 在 ai-archive 上即可追溯每轮 AI 改动（主分支仅在用户显式 git commit 时前进）。
  */
 export async function gitCommitAfter(
   runId: string,
@@ -252,7 +253,8 @@ export async function gitPreExecCheck(): Promise<GitPreExecResult> {
 }
 
 /**
- * 循环结束时一次性提交全部改动（循环级 commit）。
+ * 循环结束时把工作区全部改动存档到 ai-archive 分支（循环级存档）。
+ * [ai-archive-v1] 方案 C：不再 commit 到当前分支；主分支只在用户显式 git commit 时前进。
  * 工作区无改动 → { ok: true, empty: true }；非 git 仓库 → { ok: false, reason }。
  */
 export async function gitCommitAll(message: string): Promise<{ ok: boolean, commit?: string, empty?: boolean, reason?: string }> {
@@ -260,13 +262,20 @@ export async function gitCommitAll(message: string): Promise<{ ok: boolean, comm
   const status = await run('git', ['status', '--porcelain'])
   if (status.code !== 0) return { ok: false, reason: `git status 失败: ${status.stderr}` }
   if (!status.stdout.trim()) return { ok: true, empty: true }
-  const add = await run('git', ['add', '-A'])
-  if (add.code !== 0) return { ok: false, reason: `git add 失败: ${add.stderr}` }
+
+  // [ai-archive-v1] 方案 C：循环结束的自动提交也落 ai-archive，主分支保持用户可审阅状态
+  const paths = status.stdout
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean)
+    .map(l => l.replace(/^.{3}/, '').trim())
+    .filter(Boolean)
+  if (paths.length === 0) return { ok: true, empty: true }
   const safeMsg = String(message).slice(0, 200)
-  const commit = await run('git', ['commit', '-m', safeMsg, '--no-verify'])
-  if (commit.code !== 0) return { ok: false, reason: `git commit 失败: ${commit.stderr}` }
-  const rev = await run('git', ['rev-parse', 'HEAD'])
-  return { ok: true, commit: rev.stdout.trim().slice(0, 12) }
+  const archived = await gitArchiveBranch(paths, safeMsg)
+  if (!archived.ok) return { ok: false, reason: `存档到 ${ARCHIVE_BRANCH} 失败: ${archived.reason}` }
+  if (!archived.changed) return { ok: true, empty: true }
+  return { ok: true, commit: archived.commit }
 }
 
 /**
