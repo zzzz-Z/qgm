@@ -88,8 +88,7 @@
 .hdr .timeline-toggle,
 .hdr .open-ai-toggle,
 .hdr .new-session-toggle,
-.hdr .git-commit-toggle,
-.hdr .worklog-toggle {
+.hdr .git-commit-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -111,8 +110,7 @@
 .hdr .timeline-toggle:hover,
 .hdr .open-ai-toggle:hover,
 .hdr .new-session-toggle:hover,
-.hdr .git-commit-toggle:hover,
-.hdr .worklog-toggle:hover {
+.hdr .git-commit-toggle:hover {
   color: var(--text);
   background: var(--surface-2);
   border-color: var(--border-2);
@@ -125,8 +123,7 @@
 .hdr .timeline-toggle svg,
 .hdr .open-ai-toggle svg,
 .hdr .new-session-toggle svg,
-.hdr .git-commit-toggle svg,
-.hdr .worklog-toggle svg {
+.hdr .git-commit-toggle svg {
   width: 14px;
   height: 14px;
   stroke-width: 2;
