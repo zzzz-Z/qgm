@@ -30,7 +30,7 @@ let cachedAvailable: boolean | null = null
  * @param args 参数数组；由 runProcess 负责转义
  * @param timeoutMs 超时毫秒（默认 30s）
  */
-async function run(cmd: string, args: string[], timeoutMs = 30_000): Promise<{ code: number, stdout: string, stderr: string }> {
+async function run(cmd: string, args: string[], timeoutMs = 30_000, extraEnv?: Record<string, string>): Promise<{ code: number, stdout: string, stderr: string }> {
   // [git-env-guard-v1] 统一注入 git 环境变量，避免逐个命令手动加 --no-pager / --no-color
   // [WHY] 用户在截图质疑"为何只有 rawDiff 加 --no-pager"；逐个命令加既易漏又冗长；
   //       在唯一入口 run() 设 env 可一次性覆盖全部 19 处调用
@@ -45,6 +45,7 @@ async function run(cmd: string, args: string[], timeoutMs = 30_000): Promise<{ c
     PAGER: 'cat',
     GIT_TERMINAL_PROMPT: '0',
     GIT_OPTIONAL_LOCKS: '0',
+    ...(extraEnv || {}),
   }
   // [git-full-output-v1] 提升输出上限至 50MB，避免超大 diff 被默认 5MB 截断
   // [WHY] 用户要求"获取所有输出"：runProcess 默认 5MB，遇大变更（多文件+长 diff）会 SIGKILL 并截断
@@ -90,6 +91,62 @@ export async function gitSnapshot(_runId: string): Promise<GitSnapshotResult> {
   }
   const hash = stash.stdout.trim()
   return { ok: true, commit: hash ? hash.slice(0, 12) : undefined, changed: lines.length }
+}
+
+/** ai-archive 分支名：AI 过程存档统一落此分支，主分支只在用户显式 commit 时前进 */
+export const ARCHIVE_BRANCH = 'ai-archive'
+/** archive 专用临时索引；GIT_INDEX_FILE 隔离，不触碰工作区 / 真实索引 / HEAD */
+const ARCHIVE_INDEX_PATH = path.join(ROOT, '.ai-runner', 'tmp', 'git-archive-index')
+
+/**
+ * 把指定路径的变更存档到 ai-archive 分支（不动 HEAD / 工作区 / 真实索引）。
+ * [WHY] 方案 C：AI 自动存档一律走备份分支，主分支保持干净，仅用户显式 commit 才前进。
+ * [CONSTRAINT] 全程 GIT_INDEX_FILE 隔离；父提交优先取 ai-archive 已有 tip，首次则从 HEAD 起步。
+ * [CHANGE-IMPACT] 由 gitCommitAfter / gitCommitAll 消费；仅写 refs/heads/ai-archive 与临时索引。
+ */
+export async function gitArchiveBranch(
+  paths: string[],
+  message: string,
+): Promise<{ ok: boolean, commit?: string, changed?: number, reason?: string }> {
+  if (!(await gitAvailable())) return { ok: false, reason: '非 git 仓库' }
+  if (paths.length === 0) return { ok: true, changed: 0 }
+
+  fs.mkdirSync(path.dirname(ARCHIVE_INDEX_PATH), { recursive: true })
+  try { fs.unlinkSync(ARCHIVE_INDEX_PATH) } catch { /* ignore */ }
+  const env = { GIT_INDEX_FILE: ARCHIVE_INDEX_PATH }
+
+  const branchRef = await run('git', ['rev-parse', '--verify', `refs/heads/${ARCHIVE_BRANCH}`])
+  let parent: string
+  if (branchRef.code === 0 && branchRef.stdout.trim()) {
+    parent = branchRef.stdout.trim()
+  } else {
+    const head = await run('git', ['rev-parse', 'HEAD'])
+    if (head.code !== 0) return { ok: false, reason: '无法读取 HEAD（空仓库？）' }
+    parent = head.stdout.trim()
+  }
+
+  const rt = await run('git', ['read-tree', parent], 30_000, env)
+  if (rt.code !== 0) return { ok: false, reason: `read-tree 失败: ${rt.stderr}` }
+
+  const add = await run('git', ['add', '-A', '--', ...paths], 30_000, env)
+  if (add.code !== 0) return { ok: false, reason: `git add 失败: ${add.stderr}` }
+
+  const wt = await run('git', ['write-tree'], 30_000, env)
+  if (wt.code !== 0) return { ok: false, reason: `write-tree 失败: ${wt.stderr}` }
+  const tree = wt.stdout.trim()
+
+  const ptree = await run('git', ['rev-parse', `${parent}^{tree}`])
+  if (ptree.code === 0 && ptree.stdout.trim() === tree) return { ok: true, changed: 0 }
+
+  const safeMsg = String(message).slice(0, 4000)
+  const ct = await run('git', ['commit-tree', tree, '-p', parent, '-m', safeMsg], 30_000, env)
+  if (ct.code !== 0) return { ok: false, reason: `commit-tree 失败: ${ct.stderr}` }
+  const commit = ct.stdout.trim()
+
+  const ur = await run('git', ['update-ref', `refs/heads/${ARCHIVE_BRANCH}`, commit])
+  if (ur.code !== 0) return { ok: false, reason: `update-ref 失败: ${ur.stderr}` }
+
+  return { ok: true, changed: 1, commit: commit.slice(0, 12) }
 }
 
 /** 最后一次 commit 短 hash */
