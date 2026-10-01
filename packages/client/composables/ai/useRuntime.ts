@@ -1,17 +1,14 @@
-// [runtime-jsdoc-v1]
+// [runtime-no-pinia-v1] 从 pinia store 迁出为 composable singleton，API 语义与原 defineStore 等价
 // [runtime-store-v1] 循环状态单一真相源
 // 从 useAutoLoop / useAiWaiting 集中过来；状态变更的副作用由本文件的 watch 承担。
 // 调用方只读 state、只调 action，不自己维护循环状态。
 import { computed, watch } from 'vue'
-import { defineStore } from 'pinia'
 import { useStorage } from '@vueuse/core'
-// [runtime-transport-wire-v1] mute/unMute 生效所依赖的真实 transport
-import { getTransport } from '../composables/ai/useAiTransport'
-// [runtime-kind-v3] 循环状态定义从 types.ts 复用，避免两套枚举
-import type { LoopState } from '../composables/ai/auto-loop/types'
+import { getTransport } from './useAiTransport.js'
+import type { LoopState } from './auto-loop/types.js'
 
 /** 运行时类型（类型别名） */
-export type RuntimeKind = LoopState // [runtime-kind-v3] LoopState 已含 paused
+export type RuntimeKind = LoopState
 /** 运行时阶段（类型别名） */
 export type RuntimeStage = '' | 'plan' | 'implement' | 'verify'
 
@@ -38,21 +35,16 @@ const INITIAL: RuntimeState = {
   userNote: '',
 }
 
-/** 运行时 Pinia store：循环状态的单一真相源；状态变更副作用由本文件 watch 承担 */
-export const useRuntime = defineStore('runtime-store', () => { // [runtime-fix2]
+function createRuntime() {
   /** 持久化到 sessionStorage 的运行时状态（跨标签页不共享，刷新后保留） */
   const state = useStorage<RuntimeState>(STORAGE_KEY, { ...INITIAL }, sessionStorage)
 
-  /** 是否处于暂停态（kind = paused） */
   const isPaused = computed(() => state.value.kind === 'paused')
-  /** 是否处于活动态（运行中或等待 AI 回复） */
   const isActive = computed(() => state.value.kind === 'running' || state.value.kind === 'waiting')
-  /** 是否处于空闲态（无循环在跑） */
   const isIdle = computed(() => state.value.kind === 'idle')
-  /** 是否已停止（循环结束或被用户中断） */
   const isStopped = computed(() => state.value.kind === 'stopped')
 
-  /** 副作用：kind 切到 paused 时静音 transport；从 paused 恢复时解除静音 */
+  // [runtime-transport-wire-v1] kind 切到 paused / 从 paused 恢复时静音或解静音真实 transport
   watch(() => state.value.kind, (k, prev) => {
     if (k === 'paused') {
       try { getTransport().mute?.() } catch { /* 未就绪时忽略 */ }
@@ -71,26 +63,18 @@ export const useRuntime = defineStore('runtime-store', () => { // [runtime-fix2]
   }
 
   /** 进入等待态：等待 AI 回复或脚本回包 */
-  function enterWaiting(): void {
-    state.value.kind = 'waiting'
-  }
+  function enterWaiting(): void { state.value.kind = 'waiting' }
 
   /** 暂停：置为 paused（watch 触发 transport 静音） */
-  function pause(): void {
-    state.value.kind = 'paused'
-  }
+  function pause(): void { state.value.kind = 'paused' }
 
   /** 从暂停恢复：回到 waiting（watch 触发 transport 解除静音） */
-  function resume(): void {
-    state.value.kind = 'waiting'
-  }
+  function resume(): void { state.value.kind = 'waiting' }
 
   /** 停止循环：置为 stopped，保留当前轮次与目标供查看 */
-  function stop(): void {
-    state.value.kind = 'stopped'
-  }
+  function stop(): void { state.value.kind = 'stopped' }
 
-  /** 重置为 idle：清空循环上下文（id / 轮次 / 目标 / token / 花费 / 阶段） */
+  /** 重置为 idle：清空循环上下文（id / 轮次 / 目标 / 阶段） */
   function reset(): void {
     state.value.kind = 'idle'
     state.value.loopId = ''
@@ -110,19 +94,13 @@ export const useRuntime = defineStore('runtime-store', () => { // [runtime-fix2]
   }
 
   /** 设置流水线阶段：plan / implement / verify 或空 */
-  function setStage(stage: RuntimeStage): void {
-    state.value.stage = stage
-  }
+  function setStage(stage: RuntimeStage): void { state.value.stage = stage }
 
   /** 设置循环标识（每次 start 后由外部回填） */
-  function setLoopId(id: string): void {
-    state.value.loopId = String(id || '')
-  }
+  function setLoopId(id: string): void { state.value.loopId = String(id || '') }
 
   /** 设置用户备注：随下一轮反馈带给 AI */
-  function setUserNote(note: string): void {
-    state.value.userNote = String(note || '')
-  }
+  function setUserNote(note: string): void { state.value.userNote = String(note || '') }
 
   return {
     state,
@@ -142,4 +120,12 @@ export const useRuntime = defineStore('runtime-store', () => { // [runtime-fix2]
     setLoopId,
     setUserNote,
   }
-})
+}
+
+let runtimeSingleton: ReturnType<typeof createRuntime> | null = null
+
+/** 运行时状态 composable（singleton）；首次调用初始化，与 pinia defineStore 返回等价 API */
+export function useRuntime() {
+  if (!runtimeSingleton) runtimeSingleton = createRuntime()
+  return runtimeSingleton
+}

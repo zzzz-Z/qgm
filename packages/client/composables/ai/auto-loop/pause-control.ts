@@ -4,7 +4,7 @@ import type { ComputedRef, Ref } from 'vue'
 import type { LoopInstance } from './types.js'
 import { toast } from '../../ui/useToast'
 import { getActiveWin } from '../useAiWindow'
-import { useRuntime } from '../../../stores/runtime'
+import { useRuntime } from '../useRuntime.js'
 import { useRunner } from '../../runner/useRunner'
 
 type RoundGuards = ReturnType<typeof import('./round-guards.js').createRoundGuards>
@@ -101,7 +101,7 @@ export function createPauseControl(deps: PauseControlDeps) {
   // [P3-6] sendFill 后统一 ACK 追踪（3s 未回则落 trace；不阻断循环）
 
   // ============================================================================
-  // 用户中断（v6 §6.6）
+  // 用户中断
   // ============================================================================
 
   /** Esc 暂停：中断当前执行 + 静音，但循环状态保留为 paused，可恢复 */

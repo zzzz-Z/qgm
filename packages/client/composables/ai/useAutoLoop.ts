@@ -1,6 +1,6 @@
 import { computed, watch } from 'vue'
 import { useAiWaiting } from './useAiWaiting.js'
-import { useRuntime } from '../../stores/runtime'
+import { useRuntime } from './useRuntime.js'
 import { pushTerminalNotice, useRunner } from '../runner/useRunner'
 import { getTransport } from './useAiTransport.js'
 import { toast } from '../ui/useToast'
@@ -51,7 +51,7 @@ const transport = getTransport()
 const { loopPaused } = useAiWaiting()
 
 // ============================================================================
-// useAutoLoop —— 自动化循环状态机（v6 §6）
+// useAutoLoop —— 自动化循环状态机
 // 单例：所有状态模块级，ScriptPanel 与 App.vue 共享同一份
 //
 // 状态机：
@@ -142,12 +142,12 @@ const { afterRound } = createAfterRound({
 })
 
 // ============================================================================
-// 持久化（v6 §11.4）：刷新后不自动续跑（activeWin 引用已失效）→ 恢复为 stopped
+// 持久化：刷新后不自动续跑（activeWin 引用已失效）→ 恢复为 stopped
 // ============================================================================
 restore(singletonView)
 
 // ============================================================================
-// tab title 进度（v6 §12.3）
+// tab title 进度
 // ============================================================================
 watch([
   () => activeLoop.value?.state.value,
@@ -235,7 +235,7 @@ const { resumeFromPause, clearSoftPause, exitPauseToIdle, resumeLoop, requestPau
   bindKeyboard,
 })
 
-// ── [§5 分区] 模块工具函数 ──
+// ── [分区] 模块工具函数 ──
 /**
  * 解析为 Inst
  * @param _sid - sid
@@ -311,7 +311,7 @@ export function useAutoLoop() {
   // 用途：UI 侧可通过 runtime.state.kind 读循环状态，为后续彻底迁到 store 做准备
   // 注意：暂不改 module ref 的写入路径，避免一次性大改引发回归
   const runtime = useRuntime()
-  watch(loopState, (v) => { runtime.state.kind = v }, { immediate: true })
+  watch(loopState, (v) => { runtime.state.value.kind = v }, { immediate: true })
 
   return {
     loopState: computed({
@@ -408,7 +408,7 @@ export { bindKeyboard, unbindKeyboard } from './auto-loop/keyboard.js'
 // [waiting-v1] re-export 供 handoff.ts 复用
 export { disarmTimer, enterWaiting }
 
-// ── [§5 分区] 顶层 re-export 集中区 ──
+// ── [分区] 顶层 re-export 集中区 ──
 // [state-extract-v1] activeLoop re-export 保持外部契约（实现归 auto-loop/state.ts）
 export { activeLoop }
 
