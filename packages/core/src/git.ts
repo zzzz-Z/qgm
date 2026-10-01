@@ -162,7 +162,7 @@ export async function gitHead(): Promise<string | null> {
 }
 
 /**
- * 跑 bash 前的 git 保护检查（v6 §8.7）。
+ * 跑 bash 前的 git 保护检查。
  *
  * - 工作区干净 → `{ ok: true, rollbackRef }`，调用方可直接执行 bash；
  *   出问题时可 `git reset --hard <rollbackRef>` 撤回（HEAD 本身就是回滚点，无需空 commit）。
@@ -197,7 +197,7 @@ export async function gitPreExecCheck(): Promise<GitPreExecResult> {
 }
 
 /**
- * 循环结束时一次性提交全部改动（v6 §6.10 循环级 commit）。
+ * 循环结束时一次性提交全部改动（循环级 commit）。
  * 工作区无改动 → { ok: true, empty: true }；非 git 仓库 → { ok: false, reason }。
  */
 export async function gitCommitAll(message: string): Promise<{ ok: boolean, commit?: string, empty?: boolean, reason?: string }> {
@@ -215,7 +215,7 @@ export async function gitCommitAll(message: string): Promise<{ ok: boolean, comm
 }
 
 /**
- * 急停回滚（v6 §6.6 Ctrl+Esc）：直接 git reset --hard <ref>。
+ * 急停回滚（Ctrl+Esc）：直接 git reset --hard <ref>。
  * 这是用户显式触发的紧急通道，绕过 /exec 黑名单（黑名单禁止的是 AI 自动执行）。
  */
 export async function gitResetHard(ref: string): Promise<{ ok: boolean, reason?: string }> {

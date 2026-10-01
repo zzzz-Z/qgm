@@ -287,10 +287,10 @@
       if (!text.includes('\n') && text.length < 120) continue
       // [code-text-clean-v1] 语言判定三级回退：className → DOM 邻近探测 → 内容特征
       let lang = guessLangFromClass(codeEl) || guessLangFromDom(pre) || guessLangFromContent(text) || null
-      // [script-head-contract-fallback-v1] SYSTEM.md §1.4 脚本头契约：与 headless-inject.ts 该段保持严格同构
+      // [script-head-contract-fallback-v1] 脚本头契约：与 headless-inject.ts 该段保持严格同构
       // [WHY] 同款漏识别：AI 用非白名单语言标签（javascript/node/无标签）时三级判定得 null → 代码块被跳过 →
       //   前端只收到 plain 走 Markdown 渲染不执行（表现为「渲染了但没跑」）
-      // [CONSTRAINT] 只认 §1.4 允许的两种契约（shebang / @desc）；本段与 headless-inject.ts 必须同改，避免双通道分叉
+      // [CONSTRAINT] 只认脚本头契约允许的两种形式（shebang / @desc）；本段与 headless-inject.ts 必须同改，避免双通道分叉
       // [CHANGE-IMPACT] 影响 classifyAndPost 的 kind 分流（line 429 kind:'script'）
       const _marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
         || /^\s*\/\/\s*@desc\s*:/m.test(text)
@@ -321,7 +321,7 @@
   // [done-comments] 从代码块中提取「DONE 起始的连续注释块」
   // 返回：{ raw: string[], tagged: { [tag]: string }, text: string, firstLine: string }
 
-  // [done-md-reconstruct-v1] DOM → Markdown 反推：SYSTEM.md §8 允许 AI 输出纯 Markdown 总结，
+  // [done-md-reconstruct-v1] DOM → Markdown 反推：允许 AI 输出纯 Markdown 总结，
   // 但 textContent 会把 <h3>/<p>/<ul> 粘成一行；需按标签结构重建 Markdown 源码
   // [CONSTRAINT] 只覆盖 DeepSeek 常用标签；未知标签递归取子节点文本（兜底）
   // [CHANGE-IMPACT] 输出直接喂给前端 renderMarkdown；改这里必须同步 headless-inject 的 elToMd
@@ -376,7 +376,7 @@
     // [done-md-reconstruct-v1] 用 DOM→Markdown 反推替代 textContent（保留换行与结构）
     const summary = extractReplyMd(_root)
 
-    // [done-plain-v1] SYSTEM.md §8 新协议：首行严格 DONE + 后续 Markdown 总结
+    // [done-plain-v1] 新协议：首行严格 DONE + 后续 Markdown 总结
     // [CONSTRAINT] 只匹配首个非空行恰好为 DONE；避免"我做了 DONE"类误判
     if (summary) {
       const firstLine = summary.split(/\r?\n/).find(l => l.trim().length > 0) || ''

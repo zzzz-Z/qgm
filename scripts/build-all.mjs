@@ -31,6 +31,12 @@ for (const f of ['interceptor.cjs', 'helpers.cjs', 'logger.cjs']) {
   if (fs.existsSync(src)) { fs.copyFileSync(src, dst); console.log(`[build-all] copied ${f}`) }
   else { console.log(`[build-all] skip (missing) ${f}`) }
 }
+// [preset-rules-move-v1] /__ai/preset/system 从 SSR 产物同级的 dist/SYSTEM.md 读取；缺则 404
+// CHANGE-IMPACT: 删此段 → 发布态首问丢规则（只余工作区 AGENTS.md）
+const sysSrc = path.join(ROOT, 'packages', 'core', 'SYSTEM.md')
+const sysDst = path.join(distRoot, 'SYSTEM.md')
+if (fs.existsSync(sysSrc)) { fs.copyFileSync(sysSrc, sysDst); console.log('[build-all] copied SYSTEM.md') }
+else { console.log('[build-all] skip (missing) SYSTEM.md') }
 console.log('[build-all] done')
 
 // [AIRUNNER-BUILD-WATCH-V1] --watch 常驻：src/ 变更 → 自动重建 server + 拷贝 runtime

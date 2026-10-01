@@ -28,7 +28,7 @@ export function normalizeForHash(code: string): string {
 
 /**
  * 从脚本首部提取 @desc / @why 元注释（多行匹配，各取首个非空）
- * [WHY] 脚本头契约（SYSTEM.md §1.4）要求首部带这两条；解析失败时降级为空串不阻断
+ * [WHY] 脚本头契约要求首部带这两条；解析失败时降级为空串不阻断
  * [CONSTRAINT] js/cjs 用 // 前缀、bash 用 # 前缀；desc / why 值截断至 200 字符
  * [CHANGE-IMPACT] 返回结构被 useRunner / run.ts 的 scriptDesc / scriptWhy 消费
  * @param lang 目标语言，决定注释前缀

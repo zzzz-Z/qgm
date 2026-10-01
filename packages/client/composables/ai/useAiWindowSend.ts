@@ -109,7 +109,7 @@ export function sendStop(): boolean {
 
 /**
  * 向指定槽位发 rotate 指令（切换会话/话题）
- * [CONSTRAINT] origin 无法解析时返回 false，不用 '*'（违反 v6 §3.4 安全约束）
+ * [CONSTRAINT] origin 无法解析时返回 false，不用 '*'（违反安全约束）
  */
 export function sendRotateTo(sid: string, payload: RotatePayload): boolean {
   const win = getWindowBySid(sid)

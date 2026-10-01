@@ -9,7 +9,7 @@
 | 场景           | 先看                                                                                                  |
 | :------------- | :---------------------------------------------------------------------------------------------------- |
 | 第一次接手项目 | [`AGENTS.md`](../AGENTS.md) → [`README.md`](../README.md) → [`PROJECT-NOTES.md`](../PROJECT-NOTES.md) |
-| 让 AI 干活     | [`SYSTEM.md`](../packages/core/src/rules/SYSTEM.md)（常驻规则）                                       |
+| 让 AI 干活     | [`SYSTEM.md`](../packages/core/SYSTEM.md)（常驻规则）                                                 |
 | 打包后怎么用   | [`docs/USAGE.md`](USAGE.md)                                                                           |
 | 现在进度如何   | [`docs/plan/CURRENT-STATUS.md`](plan/CURRENT-STATUS.md)                                               |
 

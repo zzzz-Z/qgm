@@ -20,22 +20,15 @@ for (const f of files) {
   }
 }
 
-// [preset-rules-v1] 同步 rules/ 下所有 .md 到 dist/rules/
-// WHY: /__ai/preset/system 依赖 dist/rules/SYSTEM.md 存在；不复制则发布态 404
-const RULES_SRC = path.join(SRC, 'rules')
-const RULES_DST = path.join(DIST, 'rules')
-if (fs.existsSync(RULES_SRC)) {
-  fs.mkdirSync(RULES_DST, { recursive: true })
-  for (const ent of fs.readdirSync(RULES_SRC, { withFileTypes: true })) {
-    if (!ent.isFile()) continue
-    if (!ent.name.endsWith('.md')) continue
-    const s = path.join(RULES_SRC, ent.name)
-    const d = path.join(RULES_DST, ent.name)
-    fs.copyFileSync(s, d)
-    console.log(`copied rules/${ent.name}`)
-  }
+// [preset-rules-move-v1] SYSTEM.md 从 src/rules/ 上移到包根；同步单文件到 dist/SYSTEM.md
+// WHY: /__ai/preset/system 依赖 dist/SYSTEM.md 存在；不复制则发布态 404
+const SYS_SRC = path.join(PKG_ROOT, 'SYSTEM.md')
+const SYS_DST = path.join(DIST, 'SYSTEM.md')
+if (fs.existsSync(SYS_SRC)) {
+  fs.copyFileSync(SYS_SRC, SYS_DST)
+  console.log('copied SYSTEM.md')
 } else {
-  console.log('skip (no rules dir)')
+  console.log('skip (missing) SYSTEM.md')
 }
 
 console.log(`core copy-runtime done: ${n}/${files.length}`)

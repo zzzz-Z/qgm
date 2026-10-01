@@ -21,7 +21,7 @@ test('reply-handlers: 分支已就位', () => {
   assert.ok(src.includes('askUser(ask)'))
 })
 
-test('reply-handlers: 单文件 import ≤ 8（HCLC §6）', () => {
+test('reply-handlers: 单文件 import ≤ 8（架构红线）', () => {
   const imports = (src.match(/^import\s/gm) || []).length
   assert.ok(imports <= 8, `import 数 ${imports} 超出上限 8`)
 })

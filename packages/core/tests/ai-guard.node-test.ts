@@ -1,8 +1,8 @@
-// [ai-guard-fallback-v2] ai-guard 单测：§4.3 严格扫描、§4.4 降级豁免、§4.2 幂等注入
+// [ai-guard-fallback-v2] ai-guard 单测：原生 API 严格扫描、降级协议豁免、__AI__ API 速查幂等注入
 import { describe, expect, it } from 'vitest'
 import { injectAiJsdoc, scanNativeApis, scanNativeApisWithFallback } from '../../../packages/core/src/post-run/ai-guard.js'
 
-describe('scanNativeApis (§4.3)', () => {
+describe('scanNativeApis (原生 API 扫描)', () => {
   it('合规 __AI__ 脚本通过', () => {
     expect(scanNativeApis('const t = __AI__.readText(\'a.txt\')').hit).toBe(false)
   })
@@ -23,7 +23,7 @@ describe('scanNativeApis (§4.3)', () => {
   })
 })
 
-describe('scanNativeApisWithFallback (§4.4)', () => {
+describe('scanNativeApisWithFallback (降级协议)', () => {
   it('无标记仍命中', () => {
     expect(scanNativeApisWithFallback('const fs = require(\'fs\')').hit).toBe(true)
   })
@@ -37,7 +37,7 @@ describe('scanNativeApisWithFallback (§4.4)', () => {
   })
 })
 
-describe('injectAiJsdoc (§4.2)', () => {
+describe('injectAiJsdoc (__AI__ API 速查)', () => {
   it('prepend JSDoc 且保留原文', () => {
     const out = injectAiJsdoc('const x = 1\n')
     expect(out).toContain('__AI__ 运行时沙箱')

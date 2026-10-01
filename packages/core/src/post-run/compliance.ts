@@ -27,7 +27,7 @@ export function hashRules(): string {
     // [WHY] 原实现只读 .ai-runner/skills（目录不存在）→ 恒返回 sha256('')=e3b0c442，分组失效
     // [CHANGE-IMPACT] compliance.jsonl 的 rulesHash 会从 e3b0c442 变为 SYSTEM.md 内容哈希
     const sources: string[] = []
-    const sysPath = path.join(getRoot(), 'packages/core/src/rules/SYSTEM.md')
+    const sysPath = path.join(getRoot(), 'packages/core/SYSTEM.md')
     if (fs.existsSync(sysPath)) sources.push(sysPath)
     const userDir = path.join(getRoot(), '.ai-runner/skills')
     if (fs.existsSync(userDir)) {

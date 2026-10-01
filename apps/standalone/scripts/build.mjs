@@ -28,17 +28,16 @@ for (const f of ['interceptor.cjs', 'helpers.cjs', 'logger.cjs']) {
   else { console.log(`  skip (missing) ${f}`) }
 }
 
-// [preset-rules-fix] /__ai/preset/system 从 dist/rules/SYSTEM.md 读取；缺则 404
-//   WHY: preset.ts 用 import.meta.url 回溯 rules/SYSTEM.md，发布产物需显式复制
+// [preset-rules-move-v1] /__ai/preset/system 从 dist/SYSTEM.md 读取；缺则 404
+//   WHY: preset.ts 用 import.meta.url 回溯 SYSTEM.md，发布产物需显式复制
 //   CHANGE-IMPACT: 删此段 → 发布态规则加载静默失败（只余 AGENTS.md）
-const rulesSrc = path.join(ROOT, 'packages', 'core', 'src', 'rules', 'SYSTEM.md')
-const rulesDstDir = path.join(DIST_ROOT, 'rules')
+const rulesSrc = path.join(ROOT, 'packages', 'core', 'SYSTEM.md')
+const rulesDst = path.join(DIST_ROOT, 'SYSTEM.md')
 if (fs.existsSync(rulesSrc)) {
-  fs.mkdirSync(rulesDstDir, { recursive: true })
-  fs.copyFileSync(rulesSrc, path.join(rulesDstDir, 'SYSTEM.md'))
-  console.log('  copied rules/SYSTEM.md')
+  fs.copyFileSync(rulesSrc, rulesDst)
+  console.log('  copied SYSTEM.md')
 } else {
-  console.log('  skip (missing) rules/SYSTEM.md')
+  console.log('  skip (missing) SYSTEM.md')
 }
 console.log('[standalone:build] step 3/3: sync client dist')
 // [sync-dedup-v1] 复用 scripts/sync-client-dist.mjs，避免与 build-all.mjs / build:web 三处各写一份拷贝逻辑

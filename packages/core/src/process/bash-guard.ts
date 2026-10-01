@@ -1,11 +1,11 @@
 /**
- * bash 命令静态安全门禁 + 环境变量白名单（v6 §8.4 / §8.8）。
+ * bash 命令静态安全门禁 + 环境变量白名单。
  *
- * 设计原则：黑名单不完备是已知残余风险，唯一兜底是 git 保护（§8.3）。
- * 命中黑名单即拒绝执行，不重试、不弹窗（v6 §6.9 第 5 条）。
+ * 设计原则：黑名单不完备是已知残余风险，唯一兜底是 git 保护。
+ * 命中黑名单即拒绝执行，不重试、不弹窗。
  */
 
-/** 命中即拒的破坏性命令模式（10 条，来自 v6 §8.4）。大小写不敏感。 */
+/** 命中即拒的破坏性命令模式（10 条）。大小写不敏感。 */
 
 /** bash 命令黑名单：命中直接拒绝执行 */
 export const BASH_BLACKLIST: ReadonlyArray<{ pattern: RegExp, label: string }> = [
@@ -160,5 +160,5 @@ export function checkBashWhitelist(script: string): WhitelistResult {
   }
   return { verdict: 'allow', cmd: firstCmd(lines[0] || '') }
 }
-/** bash 默认超时 120s（v6 §8.2） */
+/** bash 默认超时 120s */
 export const BASH_TIMEOUT_MS = 120_000

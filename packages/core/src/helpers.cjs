@@ -159,7 +159,7 @@ const __AI__ = {
   },
   getProjectRoot() { return process.cwd() },
   log() { console.log.apply(console, [_c.dim('[AI]')].concat([].slice.call(arguments))) },
-  // [ai-shell-exit-v2] §1.3 统一退出：可选先打印错误，再带 code 退出
+  // [ai-shell-exit-v2] 统一退出：可选先打印错误，再带 code 退出
   exit(code, msg) {
     if (msg) __AI__.err(msg)
     process.exit(typeof code === 'number' ? code : 0)
@@ -358,7 +358,7 @@ const __AI__ = {
     // [WHY] 传路径字符串 → vm.Script 把 /Users/... 的 / 当正则开头，抛 "Invalid regular expression flags" 无法自解释；
     //        传 .vue SFC 源码 → 因 <script> 标签报 "Unexpected token '<'"
     // [CONSTRAINT] 只在入参为单行短文本且指向真实存在的文件时才短路，避免误伤正常代码
-    // [CHANGE-IMPACT] 返回结构不变（{ ok, error }）；SYSTEM.md §4.2 需补充用法说明
+    // [CHANGE-IMPACT] 返回结构不变（{ ok, error }）；SYSTEM.md 的 __AI__ API 速查需补充用法说明
     const s = String(code)
     if (!s.includes('\n') && s.length < 500) {
       try { if (fs.existsSync(s)) return { ok: false, error: 'syntaxCheck 接收源码内容而非文件路径；请用 __AI__.readText(p) 读取后传入' } } catch { /* ignore */ }
@@ -375,7 +375,7 @@ const __AI__ = {
       return { ok: false, error: e.message }
     }
   },
-  // [ai-shell-exit-v2] §4.1 安全封装：所有 shell 调用唯一入口，内置黑名单运行时拦截
+  // [ai-shell-exit-v2] 安全封装：所有 shell 调用唯一入口，内置黑名单运行时拦截
   // 命中 → 返回 { ok: false, error: "SECURITY_BLOCKED", code: 2, hit: <name> }
   shell(cmd, opts) {
     const parts = Array.isArray(cmd) ? cmd.map(String) : String(cmd).trim().split(/\s+/)
@@ -559,7 +559,7 @@ const __AI__ = {
     for (const k in _rcMem) delete _rcMem[k]
     return true
   },
-  // [skill-load-v1] SYSTEM.md §11.4：沙箱侧唯一职责 —— 接收网页层已拼装裁剪的 content，幂等追加到文件
+  // [skill-load-v1] 沙箱侧唯一职责 —— 接收网页层已拼装裁剪的 content，幂等追加到文件
   // [CONSTRAINT] 只做：非空校验 + 完全一致去重 + 追加落盘；不解析格式、不校验来源、不二次裁剪
   // [CHANGE-IMPACT] 落盘路径 .ai-runner/loaded-skill.md 会被后续脚本通过 __AI__.readText 消费
   loadSkill(content) {

@@ -26,7 +26,7 @@ const STAGES = [
   ['1.2', 'apps/vite-plugin/src/index.ts', '主插件'],
   ['1.3', 'bin/recover.cjs', 'recover picker'],
   // [stages-path-fix-v1] 仓库根的 SYSTEM.md 只是指针且实际不存在，SSOT 是 core 里的那份
-  ['2.1', 'packages/core/src/rules/SYSTEM.md', '系统提示词（SSOT）'],
+  ['2.1', 'packages/core/SYSTEM.md', '系统提示词（SSOT）'],
   ['3.2', 'bin/run-all.cjs', 'run-all'],
   ['4', 'bin/log-signal.cjs', '信号记录'],
 ]

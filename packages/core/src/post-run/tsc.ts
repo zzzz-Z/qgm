@@ -111,5 +111,5 @@ export async function runTsc(
   return { ok: code === 0, stdout: head + out, stderr: errs }
 }
 
-// ── [§5 分区] 顶层 re-export 集中区 ──
+// ── [分区] 顶层 re-export 集中区 ──
 export { pickTscTargets, TSC_EXTS, TSC_SKIP_DIRS } from './tsc-targets.js'

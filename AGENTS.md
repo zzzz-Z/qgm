@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> 项目入口索引。**唯一规则来源（SSOT）为 [`SYSTEM.md`](./packages/core/src/rules/SYSTEM.md)**；冲突时以 SYSTEM.md 为准。
+> 项目入口索引。**唯一规则来源（SSOT）为 [`SYSTEM.md`](./packages/core/SYSTEM.md)**；冲突时以 SYSTEM.md 为准。
 > 本文件缺失仅警告，不中断。
 
 ## 首轮加载顺序
@@ -13,17 +13,20 @@
 
 | 主题       | 摘要                                                           | 出处           |
 | :--------- | :------------------------------------------------------------- | :------------- |
-| 输出围栏   | 单块纯化 / 首尾字符 / 零溢出                                   | SYSTEM.md §1   |
-| 脚本头     | Shebang `#! /usr/bin/env node` + `@desc` + `@why`              | SYSTEM.md §1.4 |
+| 输出围栏   | 首尾字符 / 零溢出；违反即整轮丢弃                              | SYSTEM.md §1   |
+| 脚本头     | Shebang `#! /usr/bin/env node` + `@desc` + `@why`              | SYSTEM.md §1   |
+| 收尾轮     | 首行严格 `DONE` + 后续 Markdown 总结；不写脚本、不调 log       | SYSTEM.md §1   |
 | 首轮探测   | `typeof __AI__` 判定；失败带 `exitCode: 2` 上报                | SYSTEM.md §2   |
 | 读写协议   | R1 读为先 / R2 锚点验证 / R3 幂等有据                          | SYSTEM.md §3   |
 | 运行时沙箱 | 禁原生 `fs` / `path` / `child_process` / `os`，全部走 `__AI__` | SYSTEM.md §4   |
-| 降级协议   | 仅当探测确认缺失 + `// ⚠️ fallback: ...` 注释                  | SYSTEM.md §4.4 |
-| 文件分区   | TS/Vue 固定顺序，节间空行                                      | SYSTEM.md §5   |
-| 架构约束   | 单文件 import ≤ 8；普通 ≤ 400 行、组件 ≤ 500 行                | SYSTEM.md §6   |
-| 调试排查   | `__AI__.browser.*` 优先；grep → dump ±20                       | SYSTEM.md §7   |
-| 收尾轮     | 首行严格 `DONE` + 后续 Markdown 总结；不写脚本、不调 log       | SYSTEM.md §8   |
-| 注释规范   | 三问（WHY / CONSTRAINT / CHANGE-IMPACT）取其二                 | SYSTEM.md §9   |
+| 降级协议   | 仅当探测确认缺失 + `// ⚠️ fallback: ...` 注释                  | SYSTEM.md §4.3 |
+| 架构红线   | 单文件 import ≤ 8；普通 ≤ 400 行、组件 ≤ 500 行                | SYSTEM.md §5   |
+| 调试排查   | `__AI__.browser.*` 优先；grep → dump ±20                       | SYSTEM.md §6   |
+| 注释规范   | 三问（WHY / CONSTRAINT / CHANGE-IMPACT）取其二                 | SYSTEM.md §7   |
+| 命名规范   | 文件 kebab-case；禁止 `var`；函数 ≤ 30 行                      | SYSTEM.md §8   |
+| 重试预算   | 同一报错最多重试 3 次；第 2 次仍失败必须换策略                 | SYSTEM.md §9   |
+| 跨文件级联 | 改导出类型/签名/props 必须 grep 全部调用方同步                 | SYSTEM.md §10  |
+| 输出预算   | 单轮脚本 ≤ 300 行 / 12 KB；超限拆轮                            | SYSTEM.md §11  |
 
 ---
 
@@ -38,7 +41,6 @@ bin/                  CLI 工具集（air-ask / air-check / air-log / air-recove
 scripts/              build / dev / 分析 / 校验等辅助脚本
 test/server|web/      后端 / 前端 node-test 单测
 docs/                 USAGE.md / DOCS-INDEX.md
-SYSTEM.md             指针 → packages/core/src/rules/SYSTEM.md（SSOT）
 ```
 
 三条架构铁律（由 `test/server/workspace-guard.node-test.ts` 覆盖）：
@@ -76,5 +78,5 @@ pnpm test:unit    # vitest（test/web + test/server）
 
 ## 详见
 
-完整规则、`__AI__` API 映射表、架构约束、UI/Vue/CSS 速查、踩坑库索引（E/T/P/A）见 [`SYSTEM.md`](./packages/core/src/rules/SYSTEM.md)。
+完整规则（输出契约 / 运行时沙箱 / 架构红线 / 注释与命名 / 重试预算 / 跨文件级联 / 输出预算）见 [`SYSTEM.md`](./packages/core/SYSTEM.md)。
 打包使用 / 环境变量 / 部署见 [`docs/USAGE.md`](./docs/USAGE.md)。

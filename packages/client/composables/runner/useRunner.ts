@@ -123,8 +123,8 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   liveStderr.value = ''
   doneSummary.value = '' // [done-summary-channel-v1] 新一轮清空上轮总结
 
-  // [desc-colon-opt-v1] SYSTEM.md §1.4 规定 `// @desc <做什么>`（无冒号）；兼容历史 `@desc:` 写法
-  // [WHY] 原正则强制冒号，AI 按 §1.4 输出无冒号时匹配失败 → 卡片永远显示 fallback
+  // [desc-colon-opt-v1] 脚本头契约规定 `// @desc <做什么>`（无冒号）；兼容历史 `@desc:` 写法
+  // [WHY] 原正则强制冒号，AI 按脚本头契约输出无冒号时匹配失败 → 卡片永远显示 fallback
   // [CONSTRAINT] 冒号可选：`@desc xxx` 与 `@desc: xxx` 均可；[ \t]* 允许冒号两侧空白
   const metaM = code.match(/^[^\S\n]*(?:\/\/|#)[^\S\n]*@desc[^\S\n]*(?::[^\S\n]*)?(\S[^\n]*)$/m)
   const desc = metaM ? metaM[1].trim().slice(0, 200) : '执行脚本'

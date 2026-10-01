@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // [script-card-split-v1] 从 TerminalPane 拆出的脚本卡片子组件
-// [WHY] TerminalPane 行数超 §6 上限；卡片是最大块，可自持展开状态，优先独立
+// [WHY] TerminalPane 行数超架构红线上限；卡片是最大块，可自持展开状态，优先独立
 // [CHANGE-IMPACT] TerminalPane 的 script 分支改为 <ScriptCard :card="card" />；样式随迁
 import { ref } from 'vue'
 

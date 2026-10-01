@@ -46,9 +46,9 @@ test('parseScriptMeta: 值截断到 200 字符', () => {
   assert.equal(parseScriptMeta(s).desc.length, 200)
 })
 
-test('parseScriptMeta: 冒号可选 → 无冒号同样解析（与 client 实现、SYSTEM.md §1.4 示例对齐）', () => {
+test('parseScriptMeta: 冒号可选 → 无冒号同样解析（与 client 实现、脚本头契约示例对齐）', () => {
   // [meta-colon-optional-v1] core 正则 (?::[^\S\n]*)? 与 client 的 :? 都是「冒号可选」；
-  // SYSTEM.md §1.4 示例写作 `// @desc <做什么>`（无冒号），旧断言把无冒号判为空串 → 与实现和规范双向漂移
+  // 脚本头契约示例写作 `// @desc <做什么>`（无冒号），旧断言把无冒号判为空串 → 与实现和规范双向漂移
   const s = '// @desc 无冒号'
   assert.equal(parseScriptMeta(s).desc, '无冒号')
 })

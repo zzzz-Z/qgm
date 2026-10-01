@@ -25,7 +25,7 @@ export interface ScriptMeta {
 
 /**
  * 从脚本头部提取全部 @xxx 元注释（desc / why / plan / state / done / mode / ctx / changes）
- * [WHY] 元注释是脚本契约（SYSTEM.md §1.4）的载体，服务端据此决定输出裁剪、变更声明等行为
+ * [WHY] 元注释是脚本契约的载体，服务端据此决定输出裁剪、变更声明等行为
  * [CONSTRAINT] js/cjs 与 bash 均识别（// 或 # 前缀）；每个字段只取首次出现；值截断至 200 字符
  * [CHANGE-IMPACT] 新增字段须同步 ScriptMeta 接口；ctx='full' 会关闭 stdout 裁剪
  * @param script 脚本原文

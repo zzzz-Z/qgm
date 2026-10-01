@@ -175,7 +175,7 @@ export function detectReplyInPage() {
     return null
   }
 
-  /** 检测文本是否含 js 代码块（SYSTEM.md §1 接收端容错） */
+  /** 检测文本是否含 js 代码块（接收端容错） */
   function hasJsFence(text: string): boolean {
     // [hasjsfence-dom-v1] DOM 优先检测 <pre><code>：getMainText() 返回 DOM textContent（不含 markdown 反引号），
     //   原字面量正则 ```js 在 textContent 上永远 false → plain 兜底分支 line 380 从不成立 → 前端静默收不到回复
@@ -213,10 +213,10 @@ export function detectReplyInPage() {
       if (!text.includes('\n') && text.length < 120) continue
       // [code-text-clean-v1] 语言判定三级回退：className → DOM 邻近探测 → 内容特征
       let lang = guessLangFromClass(codeEl) || guessLangFromDom(pre) || guessLangFromContent(text) || null
-      // [script-head-contract-fallback-v1] SYSTEM.md §1.4 脚本头契约：shebang 或 @desc 注释是脚本强特征
+      // [script-head-contract-fallback-v1] 脚本头契约：shebang 或 @desc 注释是脚本强特征
       // [WHY] AI 有时用非白名单语言标签（如 ```javascript / ```node / 无标签），三级判定得 null → script 被漏识别 →
-      //   前端只收到 plain 走渲染不执行。命中契约特征时兜底认定 js，让 §1.4 脚本能被无差别识别
-      // [CONSTRAINT] 只认 §1.4 明确允许的两种契约（shebang / @desc）；误伤面：AI 复述 SYSTEM.md 示例会被当成脚本候选，
+      //   前端只收到 plain 走渲染不执行。命中契约特征时兜底认定 js，让符合脚本头契约的脚本能被无差别识别
+      // [CONSTRAINT] 只认脚本头契约允许的两种形式（shebang / @desc）；误伤面：AI 复述 SYSTEM.md 示例会被当成脚本候选，
       //   由 lastMarked 优先级与 dedup hash 共同约束
       // [CHANGE-IMPACT] 影响 detectReplyInPage 的 kind 分流：修复后符合契约的脚本块稳定走 script 分支
       const _marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
@@ -249,7 +249,7 @@ export function detectReplyInPage() {
   }
 
   /**
-   * DOM → Markdown 反推：SYSTEM.md §8 允许 AI 输出纯 Markdown 总结，但 DOM 抓取会丢换行
+   * DOM → Markdown 反推：允许 AI 输出纯 Markdown 总结，但 DOM 抓取会丢换行
    * [WHY] textContent 会把 <h3>/<p>/<ul> 全部粘成一整行；需按标签结构重建 Markdown 源码
    * [CONSTRAINT] 只覆盖 DeepSeek 渲染使用的常见标签；未知标签递归取子节点文本（兜底）
    * [CHANGE-IMPACT] 输出直接喂给前端 renderMarkdown，标签→语法映射必须与其对齐
@@ -303,7 +303,7 @@ export function detectReplyInPage() {
 
   /**
    * 查找新已完成
-   * [done-plain-v1] SYSTEM.md §8 新协议：首行严格 DONE + 后续 Markdown 总结（无需 js 围栏）
+   * [done-plain-v1] 新协议：首行严格 DONE + 后续 Markdown 总结（无需 js 围栏）
    * [CONSTRAINT] 只取最后一条 assistant 消息；首非空行 trim 后必须恰为 DONE
    * [CHANGE-IMPACT] marker 用首 200 字符 + 全长拼接；text 为 DOM→Markdown 反推结果（含换行）
    */
@@ -346,7 +346,7 @@ export function detectReplyInPage() {
   if (doneMarker) {
     dedup.seenDoneMarkers.push(doneMarker.marker)
     dedup.lastBodySig = bodySignature()
-    // [done-plain-v1] 不再要求 js 围栏：SYSTEM.md §8 已允许纯 Markdown 总结
+    // [done-plain-v1] 不再要求 js 围栏：已允许纯 Markdown 总结
     return { kind: 'done', text: doneMarker.text }
   }
 

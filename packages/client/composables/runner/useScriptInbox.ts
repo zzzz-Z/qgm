@@ -136,7 +136,7 @@ export function setLastAutoFilled(code: string) {
 }
 
 /**
- * 覆盖策略（v6 §13.1）：
+ * 覆盖策略：
  * - 编辑器内容 === 上次自动填入的 → 直接覆盖，返回 'overwritten'
  * - 编辑器有用户手写内容 → 不覆盖，存 inbox + toast 带「取用」按钮，返回 'queued'
  */

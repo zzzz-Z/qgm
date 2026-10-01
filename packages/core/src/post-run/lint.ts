@@ -69,5 +69,5 @@ export async function runEslint(files: string[], timeoutMs = 60_000): Promise<{ 
   return { code: r.code, stdout: r.stdout, stderr: r.stderr }
 }
 
-// ── [§5 分区] 顶层 re-export 集中区 ──
+// ── [分区] 顶层 re-export 集中区 ──
 export { LINT_EXTS, pickLintTargets } from './lint-targets.js'

@@ -10,7 +10,7 @@ import {
   LOOP_ROTATE_THRESHOLD,
 } from '../composables/ai/loopLogic.js'
 
-// isStrictDone（v6 §6.9 第 1 条）：必须整段 trim 后恰为 DONE
+// isStrictDone：必须整段 trim 后恰为 DONE
 it('DONE 严格匹配：合法形态', () => {
   assert.equal(isStrictDone('DONE'), true)
   assert.equal(isStrictDone('  DONE  '), true)

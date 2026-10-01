@@ -1,19 +1,3 @@
-<template>
-  <Teleport to="body">
-    <Transition name="tt-fade">
-      <div
-        v-if="state.visible"
-        ref="floatingRef"
-        class="tt-host"
-        :style="floatingStyles"
-        role="tooltip"
-      >
-        {{ state.text }}
-      </div>
-    </Transition>
-  </Teleport>
-</template>
-
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/vue'
@@ -78,6 +62,22 @@ watch(
   () => update(),
 )
 </script>
+
+<template>
+  <Teleport to="body">
+    <Transition name="tt-fade">
+      <div
+        v-if="state.visible"
+        ref="floatingRef"
+        class="tt-host"
+        :style="floatingStyles"
+        role="tooltip"
+      >
+        {{ state.text }}
+      </div>
+    </Transition>
+  </Teleport>
+</template>
 
 <style scoped>
 .tt-host {

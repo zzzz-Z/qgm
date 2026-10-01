@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // [round-divider-split-v1] 从 TerminalPane 拆出的轮次分隔条子组件
-// [WHY] TerminalPane 行数超 §6 上限；本组件无状态、props 单一，优先独立
+// [WHY] TerminalPane 行数超架构红线上限；本组件无状态、props 单一，优先独立
 // [CHANGE-IMPACT] TerminalPane 的 round-divider 分支改为 <RoundDivider />；样式随之迁移
 defineProps<{
   roundLabel: string

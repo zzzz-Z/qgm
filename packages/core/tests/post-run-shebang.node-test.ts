@@ -12,7 +12,7 @@ test('node shebang → isNodeScript=true', () => {
 })
 
 // [g2-narrow-v1] shebang.ts 已收窄为恒定返回 isNodeScript=true；非 node shebang 的拦截
-// 发生在 routes/run.ts 前置的 scanScriptHead（§1.4 ILLEGAL_SHEBANG）。
+// 发生在 routes/run.ts 前置的 scanScriptHead（脚本头契约 ILLEGAL_SHEBANG）。
 test('bash shebang → shebang.ts 恒 true（拦截在 routes/run.ts）', () => {
   const r = splitShebang('#!/usr/bin/env bash\necho hi')
   assert.equal(r.isNodeScript, true)

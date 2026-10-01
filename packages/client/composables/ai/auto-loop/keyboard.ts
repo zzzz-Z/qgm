@@ -3,7 +3,7 @@ import { activeLoop, isLoopActive, requestPause, stopAndRollback } from '../useA
 
 let keyboardBound = false
 // ============================================================================
-// 键盘：Esc 暂停 / Ctrl+Esc 回滚（v6 §6.6）
+// 键盘：Esc 暂停 / Ctrl+Esc 回滚
 // 键盘绑定是全局的（每页一份），onKeydown 从 activeLoop 取当前实例
 // ============================================================================
 /**

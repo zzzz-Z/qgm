@@ -1,5 +1,5 @@
 // @desc ask-parser 单测：@ask 识别、选项提取、边界
-// @why 新增交互通道（SYSTEM.md §1.5），锁定契约防止后续回归
+// @why 新增交互通道，锁定契约防止后续回归
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { parseAsk } from '../utils/ask-parser'

@@ -39,7 +39,7 @@ export function parseScriptMeta(code: string): ScriptMeta {
   }
 }
 
-/** [meta-schema-unify-v1] 语言判据与 core/post-run/shebang.ts + §1.4 对齐：基于首行 shebang，不用注释前缀 */
+/** [meta-schema-unify-v1] 语言判据与 core/post-run/shebang.ts + 脚本头契约对齐：基于首行 shebang，不用注释前缀 */
 export function detectLang(code: string): 'js' | 'bash' {
   let first = String(code).split(/\r?\n/, 1)[0] || ''
   if (first.charCodeAt(0) === 0xFEFF) first = first.slice(1)

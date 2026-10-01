@@ -79,7 +79,7 @@ function logTool(op, p, size) {
   try { fs.writeSync(TOOL_FD, line) } catch {}
 }
 
-// 读黑名单（v6 §8.6）—— 脚本可读源码，但不能读到项目密钥/凭证
+// 读黑名单 —— 脚本可读源码，但不能读到项目密钥/凭证
 // 命中即抛 EACCES；existsSync 静默返回 false（不暴露存在性）
 const READ_BLACKLIST = [
   /(^|[/\\])\.env(\.[\w-]+)?$/i, // .env / .env.local / .env.production
@@ -246,7 +246,7 @@ fs.readFileSync = function (p, opts) {
     }
     return entry.data
   }
-  // 读黑名单（v6 §8.6）：脚本读取敏感凭证 → 抛 EACCES，防 console.log 泄漏
+  // 读黑名单：脚本读取敏感凭证 → 抛 EACCES，防 console.log 泄漏
   if (isReadBlacklisted(p)) throw eacces(p)
   return orig.readFileSync(p, opts)
 }

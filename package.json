@@ -19,6 +19,8 @@
     "build:server": "vite build --config apps/standalone/vite.config.ts",
     "build:watch": "node scripts/build-all.mjs --watch",
     "build:tsc": "tsc -p tsconfig.json && node scripts/copy-runtime.cjs",
+    "git:archive": "node scripts/git-archive.mjs",
+    "git:archive:watch": "node scripts/git-archive.mjs --watch",
     "start": "node apps/standalone/bin/air-server.cjs",
     "session:start": "node scripts/session-start.cjs",
     "lint": "eslint .",

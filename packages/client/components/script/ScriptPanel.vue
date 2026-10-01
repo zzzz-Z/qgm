@@ -67,45 +67,6 @@ const SIDE_WIDTH_DIFF = 560
 let runStartAt = 0
 /** 滚动锁时间戳（防高频 scrollTo） */
 let _scrollLock = 0
-// 命令历史簇
-const { pushCmdHistory, cmdHistoryPrev, cmdHistoryNext } = createCmdHistory({ script })
-// 附件簇（attachedFiles 由本组件持有，供 addTreePaths 等共享）
-const { removeAttach, clearAll, onEditorPaste, onDesktopDrop } = createAttachManager({ attachedFiles, script, fileSuccess })
-// 树拖入 / 目录展开 / 脚本拼装（attachedFiles 由本组件持有）
-const { onTreeDrop, buildPromptWithAttachments } = createTreeAttach({ attachedFiles })
-// 预览/撤回（previewFile/Before/After 由本组件持有）
-const { getChangeType, onPreviewFile, onRollback, onRollbackAll } = createPreviewManager({
-  changes,
-  result,
-  previewFile,
-  previewBefore,
-  previewAfter,
-  rollback,
-  rollbackAll,
-})
-// 侧栏拖拽（paneRef/sideWidth/sideWidthBase/resizingSide 由本组件持有）
-const { onSideDown, dispose: disposeSideResize } = createSideResize({
-  paneRef,
-  sideWidth,
-  sideWidthBase,
-  resizingSide,
-  persistWidth: (w) => { try { localStorage.setItem(SIDE_WIDTH_KEY, String(w)) } catch { /* ignore */ } },
-})
-// exec 全流程（refs 由本组件持有）
-const { copyOutput } = createExecFlow({
-  running,
-  result,
-  changes,
-  liveStdout,
-  liveStderr,
-  copied,
-  runningCommand,
-  pushCmdHistory,
-  buildAiPrompt,
-  confirmDialog,
-  startAiWaiting,
-  softPause,
-})
 
 /** 编辑器 */
 const editorRef = ref<{ insertText: (t: string) => void } | null>(null)
@@ -211,6 +172,49 @@ const { pause: pauseElapsed, resume: resumeElapsed } = useIntervalFn(() => {
 const { start: scheduleFileSuccessReset } = useTimeoutFn(() => {
   fileSuccess.value = false
 }, 1500, { immediate: false })
+
+// [factory-after-refs] 领域工厂在上方 refs / composables 之后初始化
+// WHY: 工厂入参（script/attachedFiles/paneRef/previewFile/softPause…）是上方声明的 const 绑定，
+//   提前引用会命中 TDZ，组件初始化即抛 ReferenceError
+// 命令历史簇
+const { pushCmdHistory, cmdHistoryPrev, cmdHistoryNext } = createCmdHistory({ script })
+// 附件簇（attachedFiles 由本组件持有，供 addTreePaths 等共享）
+const { removeAttach, clearAll, onEditorPaste, onDesktopDrop } = createAttachManager({ attachedFiles, script, fileSuccess })
+// 树拖入 / 目录展开 / 脚本拼装（attachedFiles 由本组件持有）
+const { onTreeDrop, buildPromptWithAttachments } = createTreeAttach({ attachedFiles })
+// 预览/撤回（previewFile/Before/After 由本组件持有）
+const { getChangeType, onPreviewFile, onRollback, onRollbackAll } = createPreviewManager({
+  changes,
+  result,
+  previewFile,
+  previewBefore,
+  previewAfter,
+  rollback,
+  rollbackAll,
+})
+// 侧栏拖拽（paneRef/sideWidth/sideWidthBase/resizingSide 由本组件持有）
+const { onSideDown, dispose: disposeSideResize } = createSideResize({
+  paneRef,
+  sideWidth,
+  sideWidthBase,
+  resizingSide,
+  persistWidth: (w) => { try { localStorage.setItem(SIDE_WIDTH_KEY, String(w)) } catch { /* ignore */ } },
+})
+// exec 全流程（refs 由本组件持有）
+const { copyOutput } = createExecFlow({
+  running,
+  result,
+  changes,
+  liveStdout,
+  liveStderr,
+  copied,
+  runningCommand,
+  pushCmdHistory,
+  buildAiPrompt,
+  confirmDialog,
+  startAiWaiting,
+  softPause,
+})
 
 // 分栏比例（终端占比）
 

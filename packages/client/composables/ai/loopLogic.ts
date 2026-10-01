@@ -1,5 +1,5 @@
 // ============================================================================
-// loopLogic —— 自动化循环的纯决策逻辑（v6 §6）
+// loopLogic —— 自动化循环的纯决策逻辑
 // 不依赖 vue / DOM / sessionStorage，可在 node:test 下直接单测。
 // useAutoLoop 是「有状态的编排者」，本模块是「无状态的判定规则」。
 // 修改熔断参数/判定规则只需改这里，行为被 loopLogic.node-test.ts 锁定。
@@ -19,17 +19,17 @@ export const LOOP_HARD_MAX_MS = 30 * 60 * 1000
 export const LOOP_HARD_MAX_ROUNDS = 50
 /** [fix-rotate-threshold] 循环内 token 达此值触发会话轮转（独立于熔断） */
 export const LOOP_ROTATE_THRESHOLD = 40_000
-/** 单轮等待 AI 回复超时（v6 §6.9 第 7 条）—— cjs 默认 90s */
+/** 单轮等待 AI 回复超时 —— cjs 默认 90s */
 export const LOOP_ROUND_TIMEOUT_MS = 90_000
 /** bash 任务单轮超时：bash 通常更复杂，给 180s */
 export const LOOP_ROUND_TIMEOUT_BASH_MS = 180_000
 
-// DONE 严格识别（v6 §6.9 第 1 条）
+// DONE 严格识别
 // 必须整段 trim 后恰为 DONE；防止「this task is done」「DONE！」误判终止。
 // 关键：DONE 必须独占一行，前后不允许出现其他可打印字符；
 // 仅允许前后空白/换行（^\s* 与 \s*$）。多行文本中夹带 DONE 不算终止信号。
 /**
- * 判断首行是否为严格的 DONE 标记（v6 §6.9 第 1 条）
+ * 判断首行是否为严格的 DONE 标记
  * [WHY] 允许多行：首行 DONE，第二行起可跟总结（[done-with-summary] 归档用）
  * [CONSTRAINT] 首行 trim 后必须恰为 DONE；'DONE!' / 'Task done' / '已完成' 均不识别
  */

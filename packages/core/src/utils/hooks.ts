@@ -76,5 +76,5 @@ export async function runHook(event: HookEvent, payload: unknown): Promise<HookR
   return { event, action: 'ok', hooksRun: run }
 }
 
-// ── [§5 分区] 顶层 re-export 集中区 ──
+// ── [分区] 顶层 re-export 集中区 ──
 export type { HookDef, HookEvent, HookResult } from './hooks-config.js'

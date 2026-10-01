@@ -130,7 +130,7 @@ function display(url: string): string {
 
 /**
  * 组合式函数 Deepseek Url
- * [CHANGE-IMPACT] 窗口/发送职责已抽至 useAiWindow（§6 行数上限）；本函数仅保留 URL/模型状态
+ * [CHANGE-IMPACT] 窗口/发送职责已抽至 useAiWindow（架构红线的行数上限）；本函数仅保留 URL/模型状态
  */
 export function useAiSite() {
   return {

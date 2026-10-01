@@ -1,4 +1,4 @@
-// [ai-guard-v1] SYSTEM.md §4.2/§4.3 硬执行器：pre-execution 原生 API 扫描 + __AI__ JSDoc 幂等注入
+// [ai-guard-v1] 硬执行器：pre-execution 原生 API 扫描 + __AI__ JSDoc 幂等注入
 
 /** 扫描结果：是否命中禁用的 node 原生 API，以及命中的具体模式 */
 export interface ScanResult {
@@ -11,7 +11,7 @@ export interface HeadResult {
   reason?: string
 }
 
-/** 原生 API 黑名单（SYSTEM.md §4.1）：fs / path / child_process / os / process.exit */
+/** 原生 API 黑名单：fs / path / child_process / os / process.exit */
 const FORBIDDEN: { name: string, re: RegExp }[] = [
   { name: 'require(fs)', re: /\brequire\s*\(\s*['"](?:node:)?fs['"]\s*\)/ },
   { name: 'import from fs', re: /\bimport\s+(?:[^\s;][^;\n]*)?\bfrom\s+['"](?:node:)?fs['"]/ },
@@ -28,16 +28,16 @@ const FORBIDDEN: { name: string, re: RegExp }[] = [
   { name: 'process.exit', re: /\bprocess\s*\.\s*exit\s*\(/ },
 ]
 
-/** §4.4 降级标记匹配：`// __AI__.xxx not found` 形式的显式豁免注释 */
+/** 降级协议标记匹配：`// __AI__.xxx not found` 形式的显式豁免注释 */
 const FALLBACK_RE = /\/\/\s*(?:[\u26A0!]\s*)?__AI__\.\w+\s+not found/i
 
 /** 注入标识：命中后 injectAiJsdoc 幂等 */
 const INJECT_MARK = '[__AI__-injected-v1]'
 
-/** 注入到脚本顶部的 __AI__ API 速查 JSDoc（SYSTEM.md §4.2） */
+/** 注入到脚本顶部的 __AI__ API 速查 JSDoc */
 const AI_JSDOC = [
   '/**',
-  ' * [__AI__ 运行时沙箱 · SYSTEM.md §4]',
+  ' * [__AI__ 运行时沙箱]',
   ' * 禁用：node 原生 fs / path / child_process / os / process.exit',
   ' * 可用：__AI__.readText(p) / writeText(p, s) / exists(p) / readJSON(p)',
   ' *       __AI__.atomicWrite(p, s) / patchFile(p, { find, replace })',
@@ -51,9 +51,9 @@ function stripComments(code: string): string {
   return code.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ')
 }
 
-/** 扫描脚本源码，返回是否命中禁用 API 及命中清单（SYSTEM.md §4.3） */
-// [script-head-contract-v1] SYSTEM.md §1.4 脚本头契约：shebang 唯一合法 + @desc/@why 必需
-/** 校验脚本头（SYSTEM.md §1.4）：shebang 只允许 node；@desc 与 @why 必需 */
+/** 扫描脚本源码，返回是否命中禁用 API 及命中清单 */
+// [script-head-contract-v1] 脚本头契约：shebang 唯一合法 + @desc/@why 必需
+/** 校验脚本头：shebang 只允许 node；@desc 与 @why 必需 */
 export function scanScriptHead(code: string): HeadResult {
   let first = String(code).split(/\r?\n/, 1)[0] || ''
   if (first.charCodeAt(0) === 0xFEFF) first = first.slice(1)
@@ -74,7 +74,7 @@ export function scanScriptHead(code: string): HeadResult {
   return { ok: true }
 }
 /**
- * 扫描脚本源码中的禁用的原生 API 调用（SYSTEM.md §4.3）
+ * 扫描脚本源码中的禁用的原生 API 调用
  * [WHY] 沙箱运行时注入的是 __AI__ 命名空间，禁止直接 require fs / path / child_process；此扫描为编译前拦截
  * [CONSTRAINT] 先 stripComments 再匹配，避免注释内示例触发误报；命中规则在 FORBIDDEN 表
  * [CHANGE-IMPACT] 被 run-script 用于前置拦截；FORBIDDEN 表新增规则会波及既有脚本的兼容性
@@ -89,9 +89,9 @@ export function scanNativeApis(code: string): ScanResult {
   return { hit: matches.length > 0, matches }
 }
 
-// [ai-guard-fallback-v2] SYSTEM.md §4.4 降级协议：显式标记才允许豁免原生 API
+// [ai-guard-fallback-v2] 降级协议：显式标记才允许豁免原生 API
 // 命中原生 API 的行，向上回溯 3 行内若出现 `// __AI__.xxx not found`，该行豁免
-/** 从给定行向上回溯 lookback 行，判断是否出现 §4.4 降级标记 */
+/** 从给定行向上回溯 lookback 行，判断是否出现降级协议标记 */
 function hasFallbackNear(lines: string[], idx: number, lookback = 3): boolean {
   const from = Math.max(0, idx - lookback)
   for (let i = from; i <= idx; i++) {
@@ -100,12 +100,12 @@ function hasFallbackNear(lines: string[], idx: number, lookback = 3): boolean {
   return false
 }
 
-/** 带 §4.4 降级豁免的扫描：命中位置附近的显式降级标记可豁免该行 */
+/** 带降级协议豁免的扫描：命中位置附近的显式降级标记可豁免该行 */
 export function scanNativeApisWithFallback(code: string): ScanResult {
   // [guard-v2] 先用 stripComments 处理整段再逐行——
   //   WHY: 旧实现只剥行尾 //，导致 injectAiJsdoc 注入的头部 JSDoc 内关键字被命中，
   //        每一条脚本都会被误报 NATIVE_API_FORBIDDEN，静态扫描形同虚设。
-  //   [CONSTRAINT] fallback 检查必须用原始行（注释原文），否则 §4.4 标记会随注释一起被剥掉。
+  //   [CONSTRAINT] fallback 检查必须用原始行（注释原文），否则降级协议标记会随注释一起被剥掉。
   //   [CHANGE-IMPACT] 影响所有经 run-script 前置校验的脚本；不再误伤含 JSDoc 的合规脚本。
   const stripped = stripComments(code)
   const strippedLines = stripped.split(/\r?\n/)
@@ -123,7 +123,7 @@ export function scanNativeApisWithFallback(code: string): ScanResult {
   return { hit: matches.length > 0, matches }
 }
 
-/** 将 __AI__ 速查 JSDoc 幂等注入脚本头部；保留 shebang 行在其后（SYSTEM.md §4.2） */
+/** 将 __AI__ 速查 JSDoc 幂等注入脚本头部；保留 shebang 行在其后 */
 export function injectAiJsdoc(code: string): string {
   if (code.includes(INJECT_MARK)) return code
   const block = `${AI_JSDOC}\n// ${INJECT_MARK}\n`

@@ -1,5 +1,5 @@
 // [worklog-markdown-v1] 从 git.ts 抽出：工作日志 Markdown 组装（纯函数）
-// [WHY] §6 git.ts 超 400 行限；本函数只做字符串拼装，无 IO 依赖，适合独立模块
+// [WHY] git.ts 超架构红线的 400 行限；本函数只做字符串拼装，无 IO 依赖，适合独立模块
 
 /** 单个文件在工作日志中的变更记录 */
 export interface WorklogFileEntry {
