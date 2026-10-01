@@ -170,12 +170,6 @@ export async function gitCommitAfter(
     return { ok: true }
   }
 
-  // 只暂存本次运行实际改动的文件，避免把用户无关的 WIP 卷进来
-  const add = await run('git', ['add', '-A', '--', ...changes.map(c => c.path)])
-  if (add.code !== 0) {
-    return { ok: false, reason: `git add 失败: ${add.stderr}` }
-  }
-
   const summary = changes
     .slice(0, 30)
     .map(c => `- [${c.type}] ${c.path}`)
@@ -198,15 +192,19 @@ export async function gitCommitAfter(
   const body = summary + truncated
   const foot = `exit: ${exit}, duration: ${durationMs}ms`
 
-  const commitArgs = ['commit', '-m', head, '-m', body, '-m', foot]
-  if (!verify) commitArgs.push('--no-verify')
-  const commit = await run('git', commitArgs)
-  if (commit.code !== 0) {
-    return { ok: false, reason: `git commit 失败: ${commit.stderr}` }
+  // [ai-archive-v1] 方案 C：AI 自动存档一律落 ai-archive 分支，不动当前分支 / 工作区 / 真实索引
+  // [CHANGE-IMPACT] 主分支不再因 auto-run 前进；worklog/diff 端点读工作区 diff 不受影响
+  // [CONSTRAINT] verify 参数保留兼容（archive 走 commit-tree，不触发 hooks，无需 --no-verify）
+  void verify
+  const message = [head, '', body, '', foot].join('\n')
+  const archived = await gitArchiveBranch(changes.map(c => c.path), message)
+  if (!archived.ok) {
+    return { ok: false, reason: `存档到 ${ARCHIVE_BRANCH} 失败: ${archived.reason}` }
   }
-
-  const rev = await run('git', ['rev-parse', 'HEAD'])
-  return { ok: true, commit: rev.stdout.trim().slice(0, 12) }
+  if (!archived.changed) {
+    return { ok: true }
+  }
+  return { ok: true, commit: archived.commit }
 }
 
 /**
