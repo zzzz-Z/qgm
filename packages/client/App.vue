@@ -44,14 +44,11 @@ import { migrateIfNeeded, setActiveModelId } from './composables/ui/useSitesStor
 // [workspace-guide-lazy-v1] 引导页仅 !hasWorkspace 时渲染（v-if 闸门），异步拆包不进首屏 chunk
 const WorkspaceGuide = defineAsyncComponent(() => import('./components/panels/WorkspaceGuide.vue'))
 // [app-storage-extracted-v1] SESSION_HISTORY_KEY 已抽至 useAppStorage
-/** mock 通道（v6 §13.2 ?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
+/** mock 通道（?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
 const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
 /** localStorage 键：上次访问时间 */
 const LS_LAST_VISIT = '__ai_last_visit'
 
-// [app-storage-extracted-v1] SessionEntry/loadHistory/saveHistory 已抽至 useAppStorage
-// [site-isolate-v1] 会话历史按站点分桶；切站点时由下方 watch(modelId) 重新加载
-const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
 // [ask-count] 当前会话收到的 AI 回复次数（每 reply +1）
 // [ask-count-persist] 提问次数持久化到 localStorage，刷新不重置
 
@@ -81,8 +78,12 @@ const autoTakeover = useAutoTakeover()
 // [ask-count-merge] 与 useSessionManager 共享同一 askCount 数据源
 const { askCount, resetAskCount, resetSession } = useSessionManager()
 const { url: siteUrl, setUrl: setSiteUrl, modelId } = useAiSite()
+// [app-storage-extracted-v1] SessionEntry/loadHistory/saveHistory 已抽至 useAppStorage
+// [site-isolate-v1] 会话历史按站点分桶；切站点时由下方 watch(modelId) 重新加载
+const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
+
 const { toast } = useToast()
-const { run: runScript } = useRunner()
+const { run: runScript, gitCommit } = useRunner()
 /** 脚本收件箱：来自 AI 的脚本队列 */
 const scriptInbox = useScriptInbox()
 const { stopWaiting: stopAiWaiting } = useAiWaiting()
@@ -424,7 +425,7 @@ function handleAiReply(payload: MessageEvent['data'], e: MessageEvent) {
           updateKey: runKey
         })
       } catch (e) { log.error('[run:start pending] failed:', e) }
-      // 决策链路：脚本到达事件入 TraceLog（v6 §3.2），循环中盖 loopId/loopRound
+      // 决策链路：脚本到达事件入 TraceLog，循环中盖 loopId/loopRound
       if (routedToLoop) {
         // 循环模式：状态机接管（不经编辑器覆盖策略）
         void onScriptArrival(item, sid)
@@ -490,7 +491,7 @@ function handleTokenEstimate(payload: MessageEvent['data']) {
   }
   const tokens = Number(payload.tokens) || 0
   if (tokens > 0) {
-    // 喂给循环状态机做 30k 增量熔断（v6 §6.9 第 4 条）
+    // 喂给循环状态机做 30k 增量熔断
     setTokenEstimate(tokens)
   }
 }
@@ -765,6 +766,14 @@ function onLoginGui() {
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
       </button>
+      <!-- [git-commit-toggle-v1] 运行后自动 git 存档开关；原 settings-card 移除后此开关无 UI 绑定，补回到 header -->
+      <button
+        v-tooltip="gitCommit ? 'Git 存档：开（每次运行后自动提交到当前分支）' : 'Git 存档：关'"
+        aria-label="Git 存档开关" class="git-commit-toggle" :class="{ active: gitCommit }"
+        @click="gitCommit = !gitCommit"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 0 1 2 2v7" /><line x1="6" y1="9" x2="6" y2="21" /></svg>
+      </button>
       <button v-tooltip="'打开工作日志侧栏'" aria-label="工作日志" class="worklog-toggle" @click="scriptPanelRef?.openSideTab('worklog')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="16" y2="17" /></svg>
       </button>
@@ -784,107 +793,5 @@ function onLoginGui() {
   <TooltipHost />
 </template>
 
-<style scoped lang="scss" src="./App.scss">
-/* [dsh-tokens-global-v1] 把 dsw-* token 提到全局作用域 */
-:root,
-html,
-body {
-  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
-  --dsw-static-neutral-bluish-50: rgb(249, 250, 251);
-  --dsw-static-neutral-bluish-75: rgb(241, 243, 245);
-  --dsw-static-neutral-bluish-100: rgb(235, 238, 242);
-  --dsw-static-neutral-bluish-200: rgb(225, 229, 238);
-  --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
-  --dsw-static-neutral-bluish-400: rgb(173, 178, 184);
-  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
-  --dsw-static-neutral-bluish-700: rgb(97, 102, 107);
-  --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
-  --dsw-static-neutral-bluish-950: rgb(21, 21, 23);
-  --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
-  --dsw-static-deepseek-50: rgb(237, 243, 254);
-  --dsw-static-deepseek-400: rgb(122, 170, 255);
-  --dsw-static-deepseek-500: rgb(65, 118, 230);
-  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-00);
-  --dsw-alias-border-l1: rgba(0, 0, 0, 0.04);
-  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
-  --dsw-alias-border-l3: rgba(0, 0, 0, 0.12);
-  --dsw-alias-border-l4: rgba(0, 0, 0, 0.16);
-  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-1000);
-  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-700);
-  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-600);
-  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-400);
-  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-500);
-  --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
-  --dsw-alias-interactive-bg-hover-solid: var(--dsw-static-neutral-bluish-75);
-  --dsw-specific-bubble: var(--dsw-static-deepseek-50);
-  --dsw-specific-input-major: var(--dsw-static-neutral-bluish-00);
-  --dsw-elevation-soft: 0 1px 2px rgba(15, 17, 21, 0.06), 0 4px 12px rgba(15, 17, 21, 0.06);
-}
-.dark,
-[data-theme='dark'] {
-  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-950);
-  --dsw-alias-border-l1: rgba(255, 255, 255, 0.06);
-  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
-  --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
-  --dsw-alias-border-l4: rgba(255, 255, 255, 0.2);
-  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-50);
-  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-300);
-  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-400);
-  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-600);
-  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-400);
-  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.08);
-  --dsw-alias-interactive-bg-hover-solid: rgb(53, 54, 56);
-  --dsw-specific-bubble: var(--dsw-static-neutral-bluish-850);
-  --dsw-specific-input-major: var(--dsw-static-neutral-bluish-850);
-  --dsw-elevation-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-
-/* [absent-summary-v1] 缺席摘要横幅 */
-.absence-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 14px;
-  background: rgb(59 130 246 / 12%);
-  border-bottom: 1px solid rgb(59 130 246 / 22%);
-  color: rgb(220 226 236 / 95%);
-  font-size: 12px;
-}
-.absence-ico {
-  font-size: 14px;
-}
-.absence-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.absence-text b {
-  color: #bfdbfe;
-}
-.absence-btn {
-  padding: 2px 10px;
-  border-radius: 8px;
-  background: rgb(59 130 246 / 22%);
-  color: #bfdbfe;
-  border: none;
-  cursor: pointer;
-  font-size: 12px;
-}
-.absence-btn:hover {
-  background: rgb(59 130 246 / 32%);
-}
-
-/* [supervisor-mode-v1] 角色提示 */
-.role-hint {
-  margin-left: 8px;
-  padding: 1px 8px;
-  border-radius: 8px;
-  font-size: 11px;
-  background: rgb(59 130 246 / 14%);
-  color: #bfdbfe;
-  cursor: help;
-}
-</style>
+<style scoped lang="scss" src="./App.scss"></style>
 <!-- tooltip-audit -->
