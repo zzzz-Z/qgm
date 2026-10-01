@@ -68,10 +68,6 @@ function selectTab(tab: (typeof sideTab)['value']): void {
   if (collapsed.value)
     collapsed.value = false
 }
-
-// 供父组件（App.vue）从 header 按钮直接切到指定 tab；
-// [CHANGE-IMPACT] 依赖 Vue 3 的 defineExpose；父组件通过 ref 调用，无需额外事件通道
-defineExpose({ selectTab })
 </script>
 
 <template>
