@@ -694,8 +694,8 @@ function onHtmlDrop(e: DragEvent) {
 <style scoped lang="scss">
 .pane.is-resizing-side,
 .pane.is-resizing-side * {
-  user-select: none !important;
-  cursor: col-resize !important;
+  user-select: none;
+  cursor: col-resize;
 }
 
 .pane.is-resizing-side .pane-side {
@@ -707,7 +707,6 @@ function onHtmlDrop(e: DragEvent) {
     transform: scale(0.9);
     opacity: 0;
   }
-
   to {
     transform: scale(1);
     opacity: 1;
@@ -718,10 +717,10 @@ function onHtmlDrop(e: DragEvent) {
   .pane {
     display: flex;
     flex-direction: row;
-    gap: 0 !important;
+    gap: 0;
     height: 100%;
     overflow: hidden;
-    padding: 0 !important;
+    padding: 0;
   }
 }
 
@@ -740,7 +739,6 @@ function onHtmlDrop(e: DragEvent) {
   from {
     opacity: 0;
   }
-
   to {
     opacity: 1;
   }
@@ -778,55 +776,51 @@ function onHtmlDrop(e: DragEvent) {
 }
 
 .pane-main {
-  background: var(--bg) !important;
-  color: var(--text) !important;
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 0 !important;
-  padding: 0 !important;
-  min-width: 0 !important;
-  overflow: hidden !important;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
-/* waiting-pulse → 已迁至全局 style.css ([global-keyframes-v1]) */
-
-/* cursor-blink → 已迁至全局 style.css ([global-keyframes-v1]) */
+/* waiting-pulse / cursor-blink / dot-pulse 已迁至全局 style.css ([global-keyframes-v1]) */
 
 .overlay {
-  position: absolute !important;
-  inset: 0 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  z-index: 50 !important;
-  pointer-events: none !important;
-  background: rgb(13 17 23 / 70%) !important;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  pointer-events: none;
+  background: rgb(13 17 23 / 70%);
 }
 
 .overlay-card {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  gap: 8px !important;
-  padding: 24px 32px !important;
-  border-radius: var(--radius-12) !important;
-  background: var(--surface-2) !important;
-  border: 2px dashed var(--primary) !important;
-  color: var(--text) !important;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 32px;
+  border-radius: var(--radius-12);
+  background: var(--surface-2);
+  border: 2px dashed var(--primary);
+  color: var(--text);
 }
 
 .overlay.success .overlay-card {
-  border-style: solid !important;
-  border-color: var(--success) !important;
+  border-style: solid;
+  border-color: var(--success);
 }
 
 .overlay-icon {
-  font-size: 32px !important;
+  font-size: 32px;
 }
 .overlay-text {
-  font-size: 13px !important;
-  color: var(--text-2) !important;
+  font-size: 13px;
+  color: var(--text-2);
 }
-
-/* dot-pulse → 已迁至全局 style.css ([global-keyframes-v1]) */
 </style>

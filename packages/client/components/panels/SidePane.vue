@@ -166,7 +166,7 @@ defineExpose({ selectTab })
   overflow: hidden;
 }
 .pane-side.is-collapsed > :not(.side-tabs) {
-  display: none !important;
+  display: none;
 }
 .pane-side.is-collapsed .side-tabs {
   flex-direction: column;

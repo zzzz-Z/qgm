@@ -299,143 +299,143 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 </script>
 
 <style scoped>
+/* TerminalPane styles — 合并历史 7 层覆盖为单层
+ * [WHY] 早期迭代逐层叠加 !important（同选择器 5+ 处定义），视觉溯源困难；本合并层按最终生效值统一
+ * [CONSTRAINT] 选择器与原定义一致，仅保留最终生效属性；不再用 !important
+ * [CHANGE-IMPACT] 后续视觉调整改本层；不要重新引入覆盖层 */
+
 .status.err {
   color: var(--danger);
 }
 
+/* ── 容器 ─────────────────────────────────────────── */
 .terminal {
   padding: 0 50px;
-  flex: 1 1 0 !important;
-  min-height: 0 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  overflow: hidden !important;
-  background: var(--bg) !important;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
 }
 
-/* [chat-list-structure] 仅保留结构属性（撑满高度 + 滚动）；视觉属性由 [codex-final-v1] 覆盖层统一定义 */
+.flow-timeline {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 0;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+  background: transparent;
+  flex: 1 1 0;
+  font-size: 12px;
+}
+
+/* ── 消息流 ─────────────────────────────────────────── */
 .chat-list {
   flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 20px 24px 32px;
+  gap: 16px;
+  text-align: left;
+  background: transparent;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui,
+    sans-serif;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-2);
 }
 
+.chat-list::-webkit-scrollbar {
+  width: 6px;
+}
+.chat-list::-webkit-scrollbar-thumb {
+  background: rgb(127 127 127 / 22%);
+  border-radius: 999px;
+}
+.chat-list::-webkit-scrollbar-thumb:hover {
+  background: rgb(127 127 127 / 38%);
+}
+.chat-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── 空态 ─────────────────────────────────────────── */
 .tree-empty {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 14px !important;
-  padding: 40px 24px !important;
-  color: var(--text-3) !important;
-  text-align: center !important;
-  flex: 1 1 0 !important;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 96px 32px;
+  margin: auto;
+  text-align: center;
+  color: var(--text-3);
+  flex: 1 1 0;
 }
-
 .empty-title {
-  font-size: 14px !important;
-  font-weight: 500 !important;
-  color: var(--text-2) !important;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-2);
+  letter-spacing: 0;
 }
-
 .empty-sub {
-  font-size: 12px !important;
-  color: var(--text-3) !important;
+  font-size: 13px;
+  color: var(--text-3);
+  opacity: 1;
 }
 
-.chat-list .tree-empty {
-  flex: 1 1 0 !important;
-  min-height: 0 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  text-align: center !important;
-  margin: auto !important;
-  padding: 40px 24px !important;
-  gap: 16px !important;
-}
-
-.chat-list .tree-empty .empty-title {
-  font-size: 15px !important;
-  font-weight: 500 !important;
-  color: var(--text-2) !important;
-}
-
-.chat-list .tree-empty .empty-sub {
-  font-size: 12px !important;
-  color: var(--text-3) !important;
-}
-
-.flow-timeline .chat-list {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: flex-start !important;
-  justify-content: flex-start !important;
-  text-align: left !important;
-  flex: 1 1 0 !important;
-  min-height: 0 !important;
-  width: 100% !important;
-  max-width: none !important;
-  margin: 0 !important;
-  padding: 10px 14px !important;
-  gap: 8px !important;
-  overflow-y: auto !important;
-  background: transparent !important;
-}
-
-.flow-timeline .chat-list .tree-empty {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  text-align: center !important;
-  margin: auto !important;
-  width: 100% !important;
-  padding: 40px 24px !important;
-}
-
-.chat-list .tree-empty {
-  padding: 64px 24px !important;
-  gap: 24px !important;
-}
-
-.chat-list .tree-empty .empty-title {
-  font-size: 16px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.2px;
-}
-
-.chat-list .tree-empty .empty-sub {
-  font-size: 12.5px !important;
-  opacity: 0.9;
-}
-
-/* [no-border-v1] 移除卡片左侧竖条：用户要求删除状态色条 */
-.script-card {
+/* ── 卡片基础（script / text / done 共用去框） ──── */
+.script-card,
+.text-card,
+.done-summary {
   margin: 0;
   padding: 8px 0;
   border: 0;
   border-radius: 0;
   background: transparent;
 }
-.script-card-head {
+
+.script-card,
+.text-card,
+.done-summary {
+  margin: 0;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.script-card-head,
+.text-card-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: var(--text-3, #8b949e);
+  gap: 6px;
+  margin-bottom: 2px;
+  font-size: 10.5px;
+  line-height: 1.2;
+  color: var(--text-3);
+  letter-spacing: 0.2px;
 }
-/* [head-click-toggle-v1] 头部整行可点击展开（去掉原「输出」按钮后替代交互入口） */
 .script-card-head.is-clickable {
   cursor: pointer;
   user-select: none;
 }
-.script-card-badge {
+.script-card-badge,
+.text-card-badge {
+  flex: 0 0 auto;
   padding: 1px 7px;
   border-radius: 4px;
   background: rgb(110 118 129 / 25%);
@@ -443,22 +443,23 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   font: 600 10px/1.5 var(--mono, monospace);
   letter-spacing: 0.4px;
 }
-/* [card-title-v1] 固定标题「脚本」+ phase 着色 */
-.script-card-title {
-  color: var(--text-3, #8b949e);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-}
-.script-card-phase {
+.text-card-kind {
   color: var(--text-3, #8b949e);
   font-size: 11.5px;
-  font-weight: 500;
 }
-/* [card-phase-color-v1] 按 phase 着色 */
+.script-card-phase {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0.3px;
+  color: var(--text-3, #8b949e);
+}
 .script-card.phase-running .script-card-phase {
   color: var(--primary, #58a6ff);
-  animation: card-pulse 1.6s ease-in-out infinite;
 }
 .script-card.phase-pending .script-card-phase {
   color: var(--warning, #d29922);
@@ -469,61 +470,49 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 .script-card.phase-error .script-card-phase {
   color: var(--danger, #f85149);
 }
-@keyframes card-pulse {
+.script-card.phase-running .script-card-phase::before,
+.script-card.phase-pending .script-card-phase::before,
+.script-card.phase-done .script-card-phase::before,
+.script-card.phase-error .script-card-phase::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
+}
+.script-card.phase-running .script-card-phase::before {
+  animation: vp-pulse 1.4s ease-in-out infinite;
+}
+@keyframes vp-pulse {
   0%,
   100% {
     opacity: 1;
+    transform: scale(1);
   }
   50% {
-    opacity: 0.55;
+    opacity: 0.5;
+    transform: scale(0.85);
   }
 }
-.script-card-body {
-  padding: 0;
-  font:
-    13.5px/1.75 -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    'PingFang SC',
-    sans-serif;
-  color: var(--text, #e6edf3);
-  word-break: break-word;
-}
-.script-card-body :deep(p) {
-  margin: 0 0 8px;
-}
-.script-card-body :deep(p:last-child) {
-  margin-bottom: 0;
-}
-
-/* [card-ui-polish-v1] 时间戳 + tail 区（[head-click-toggle-v1] 交互已上移至卡片头整行） */
 .script-card-time {
+  flex: 0 0 auto;
   margin-left: auto;
+  font: 10.5px/1.1 var(--mono, monospace);
   color: var(--text-3, #8b949e);
-  font: 11px/1 var(--mono, monospace);
-  opacity: 0.75;
+  opacity: 0.65;
 }
-.script-card-tail {
-  padding: 8px 14px 12px;
-  border-top: 1px dashed var(--border, #30363d);
-  background: var(--surface-2, #0d1117);
-  max-height: 260px;
-  overflow-y: auto;
-}
-.tail-pre {
-  margin: 0;
-  padding: 4px 0;
-  font: 11.5px/1.55 var(--mono, monospace);
+.script-card-desc {
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text-2, #c9d1d9);
-  white-space: pre-wrap;
-  word-break: break-all;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.tail-pre.err {
-  color: var(--danger, #ef4444);
-}
-
-/* [why-fold-v1] why 从卡片主体迁移至展开区：徽章 + 正文同行，
- * 视觉上用左边框色条与 tail-pre 输出区分；颜色取 text-3 弱化避免抢输出焦点 */
 .why-block {
   display: flex;
   align-items: flex-start;
@@ -549,73 +538,73 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   min-width: 0;
   word-break: break-word;
 }
-
-/* [no-border-v1] 与 script-card 一致：去掉左侧竖条 */
-.text-card {
-  margin: 0;
-  padding: 8px 0;
-  border: 0;
-  border-radius: 0;
+.script-card-tail {
+  margin-top: 8px;
+  padding: 8px 0 0;
   background: transparent;
+  border-top: 1px dashed var(--border, #30363d);
+  border-radius: 0;
 }
-.text-card-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 12px;
+.script-card-tail .tail-pre {
+  margin: 0;
+  padding: 4px 0;
+  font: 11.5px/1.55 var(--mono, monospace);
+  color: var(--text-2, #c9d1d9);
+  white-space: pre-wrap;
+  word-break: break-all;
+  animation: tail-typing var(--tw-duration, 0.8s) steps(40, end) both;
+}
+.script-card-tail .tail-pre.err {
+  color: var(--danger, #ef4444);
+}
+@keyframes tail-typing {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+.why-label {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--surface-3, #161b22);
+  font: 600 10px/1.4 var(--mono, monospace);
+  letter-spacing: 0.5px;
   color: var(--text-3, #8b949e);
 }
-.text-card-badge {
-  padding: 1px 7px;
-  border-radius: 4px;
-  background: rgb(110 118 129 / 25%);
-  color: var(--text-2, #c9d1d9);
-  font: 600 10px/1.5 var(--mono, monospace);
-  letter-spacing: 0.4px;
+.why-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
 }
-.text-card-kind {
-  color: var(--text-3, #8b949e);
-  font-size: 11.5px;
-}
-.script-card-body :deep(strong) {
-  color: var(--text, #e6edf3);
-  font-weight: 600;
-}
-.script-card-body :deep(blockquote) {
-  margin: 6px 0;
-  padding: 4px 12px;
-  border-left: 3px solid var(--border, #30363d);
-  color: var(--text-2, #c9d1d9);
-}
-.script-card-body :deep(.md-pre) {
-  margin: 8px 0;
-  padding: 10px 12px;
-  background: var(--surface-2, #0d1117);
-  border: 1px solid var(--border, #30363d);
-  border-radius: 6px;
-  overflow-x: auto;
-  white-space: pre;
-}
-.script-card-body :deep(.md-pre code) {
-  font: 12px/1.55 var(--mono, monospace);
-  color: var(--text-2, #c9d1d9);
-}
-.script-card-body :deep(.md-inline) {
-  padding: 1px 5px;
-  background: rgb(110 118 129 / 25%);
-  border-radius: 4px;
-  font: 12px var(--mono, monospace);
-  color: var(--text-2, #c9d1d9);
-}
-
-/* [no-border-v1] 与 script-card 一致：去掉左侧竖条 */
-.done-summary {
-  margin: 0;
-  padding: 8px 0;
-  border: 0;
-  border-radius: 0;
+.script-card-tail {
+  margin-top: 8px;
+  padding: 8px 0 0;
   background: transparent;
+  border-top: 1px dashed var(--border, #30363d);
+  border-radius: 0;
+}
+.script-card-tail .tail-pre {
+  margin: 0;
+  padding: 4px 0;
+  font: 11.5px/1.55 var(--mono, monospace);
+  color: var(--text-2, #c9d1d9);
+  white-space: pre-wrap;
+  word-break: break-all;
+  animation: tail-typing var(--tw-duration, 0.8s) steps(40, end) both;
+}
+.script-card-tail .tail-pre.err {
+  color: var(--danger, #ef4444);
+}
+@keyframes tail-typing {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
 }
 .done-summary-head {
   display: flex;
@@ -634,7 +623,7 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   border-bottom: 0;
 }
 .done-summary-head::before {
-  content: '✓';
+  content: '\2713';
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -648,12 +637,12 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 .done-summary-body {
   margin: 0;
   font:
-    13.5px/1.75 -apple-system,
+    13px/1.75 -apple-system,
     BlinkMacSystemFont,
     'Segoe UI',
     'PingFang SC',
     sans-serif;
-  color: var(--text, #e6edf3);
+  color: var(--text-2);
   word-break: break-word;
 }
 .done-summary-body :deep(p) {
@@ -662,7 +651,6 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 .done-summary-body :deep(p:last-child) {
   margin-bottom: 0;
 }
-/* [align-left-v1] H1/H2/H3 分档：DeepSeek 原生 H2 约 18px；标题与左边缘对齐 */
 .done-summary-body :deep(h1) {
   margin: 22px 0 12px;
   font-size: 20px;
@@ -689,10 +677,9 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 .done-summary-body :deep(h3:first-child) {
   margin-top: 0;
 }
-.done-summary-body :deep(h1:first-child),
-.done-summary-body :deep(h2:first-child),
-.done-summary-body :deep(h3:first-child) {
-  margin-top: 0;
+.done-summary-body :deep(strong) {
+  font-weight: 600;
+  color: var(--text, #e6edf3);
 }
 .done-summary-body :deep(table) {
   width: 100%;
@@ -752,235 +739,33 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   font: 12px/1.6 var(--mono, monospace);
   color: var(--text-2, #c9d1d9);
 }
-/* ============================================================
- * [codex-final-v1] Codex / Claude Code 风视觉覆盖层
- * [WHY] 历史 7 处 .flow-timeline 定义层叠为垂直多步布局，与目标"单行紧凑状态条"不符；
- *       本覆盖层置于样式段末尾，依赖 CSS 层叠顺序统一为最终视觉，不改动上方任何定义
- * [CONSTRAINT] 全部使用 !important 保证覆盖先前 7 处定义；仅调视觉参数，不删历史代码
- * [CHANGE-IMPACT] 若后续做样式段整体重构，本层内容应并入主定义后删除
- * ============================================================ */
-
-/* ① 主容器：纵向撑满（含 chat-list）；误压扁修正 [flow-timeline-fix-v1] */
-/* [WHY] 上轮误判 .flow-timeline 为顶部状态条并压成 36px/overflow:hidden，导致消息列表被裁；
- *       实际它是 .terminal 下的唯一主容器，内部结构为 .chat-list；需纵向撑满、overflow:hidden 交由子级滚动
- * [CONSTRAINT] 无状态条 DOM 节点，原 flow-step / script-header 子选择器均为孤儿，不影响本次修正
- * [CHANGE-IMPACT] 恢复后 .chat-list 才有高度撑满与滚动上下文 */
-.flow-timeline {
-  display: flex !important;
-  flex-direction: column !important;
-  flex-wrap: nowrap !important;
-  align-items: stretch !important;
-  justify-content: flex-start !important;
-  gap: 0 !important;
-  padding: 0 !important;
-  border-bottom: 0 !important;
-  min-height: 0 !important;
-  max-height: none !important;
-  overflow: hidden !important;
-  background: transparent !important;
-  flex: 1 1 0 !important;
-  font-size: 12px !important;
+.done-summary-body :deep(.md-inline) {
+  padding: 1px 5px;
+  background: rgb(110 118 129 / 25%);
+  border-radius: 4px;
+  font: 12px var(--mono, monospace);
+  color: var(--text-2, #c9d1d9);
 }
-
-/* ② 消息流：系统字体 + 居中宽度 + 舒适留白（与输入框字体一致） */
-.chat-list,
-.flow-timeline .chat-list {
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui,
-    sans-serif !important;
-  font-size: 14px !important;
-  line-height: 1.7 !important;
-  color: var(--text) !important;
-  max-width: 820px !important;
-  margin: 0 auto !important;
-  padding: 20px 24px 32px !important;
-  gap: 16px !important;
-  text-align: left !important;
-  align-items: stretch !important;
-}
-
-/* ③ 实时输出：与卡片同款"去框+左侧色条"，不再独立成卡 */
-
-/* ④ 空态：简洁居中（Codex 首启屏风） */
-.chat-list .tree-empty {
-  padding: 80px 24px !important;
-  gap: 12px !important;
-  align-items: center !important;
-  justify-content: center !important;
-  text-align: center !important;
-}
-
-.chat-list .tree-empty .empty-title {
-  font-size: 15px !important;
-  font-weight: 500 !important;
-  color: var(--text-2) !important;
-  letter-spacing: 0 !important;
-}
-
-.chat-list .tree-empty .empty-sub {
-  font-size: 13px !important;
-  color: var(--text-3) !important;
-  opacity: 1 !important;
-}
-
-/* ⑤ 卡片内标题与正文与系统字体对齐 */
-.script-card-body,
-.done-summary-body {
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui,
-    sans-serif !important;
-  font-size: 14px !important;
-  line-height: 1.7 !important;
-}
-
-/* ⑥ 卡片头部标签弱化，仅保留时间与 phase 文字，与 Codex 消息头一致 */
-.script-card-head,
-.text-card-head {
-  margin-bottom: 6px !important;
-  font-size: 12px !important;
-  color: var(--text-3) !important;
-}
-
-/* ============================================================
- * [visual-polish-v2] 视觉精修层
- * [WHY] 孤儿清理完成后，进一步优化消息流的呼吸感、卡片反馈、空态排版
- * [CONSTRAINT] 仍用 !important 覆盖；仅调视觉参数，不改结构
- * [CHANGE-IMPACT] 与 [codex-final-v1] 同层叠加，改动集中在末尾便于统一回滚
- * ============================================================ */
-
-/* ① 消息流：更大呼吸 + 上边距留白 */
-.chat-list,
-.flow-timeline .chat-list {
-  gap: 16px !important;
-  padding: 20px 20px 32px !important;
-}
-
-/* ② 卡片 hover：完全无视觉变化
- * [hover-static-v1] 用户明确要求 hover 时不出现任何色条变化或发光/阴影；
- * 历史规则曾用 border-left-width 加粗（位移）或 border-left-color 加亮（发光感），
- * 均已移除；卡片在 hover 时保持静止，不做任何视觉反馈
- * [CONSTRAINT] 不再声明 transition（无 hover 反馈即无过渡需求）
- * [CHANGE-IMPACT] 若后续产品要求 hover 反馈，建议用 box-shadow（不占布局）而非改几何属性
- */
-
-/* ③ 卡片头部：时间戳与 phase 间距与对齐微调 */
-.script-card-head,
-.text-card-head {
-  margin-bottom: 10px !important;
-  gap: 10px !important;
-  letter-spacing: 0.2px !important;
-}
-
-/* ④ 时间戳：更淡更小，仅作元信息 */
-.script-card-time {
-  font-size: 10.5px !important;
-  opacity: 0.65 !important;
-}
-
-/* ⑤ phase 标签：圆点 + 文字间距，视觉上更醒 */
-.script-card-phase {
-  letter-spacing: 0.3px !important;
-  font-weight: 600 !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-}
-.script-card.phase-running .script-card-phase::before,
-.script-card.phase-pending .script-card-phase::before,
-.script-card.phase-done .script-card-phase::before,
-.script-card.phase-error .script-card-phase::before {
-  content: '';
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  vertical-align: middle;
-}
-.script-card.phase-running .script-card-phase::before {
-  animation: vp-pulse 1.4s ease-in-out infinite;
-}
-@keyframes vp-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.5;
-    transform: scale(0.85);
-  }
-}
-
-/* ⑥ 滚动条：更细更淡，视觉噪音最小化 */
-.chat-list::-webkit-scrollbar {
-  width: 6px;
-}
-.chat-list::-webkit-scrollbar-thumb {
-  background: rgba(127, 127, 127, 0.22);
-  border-radius: 999px;
-}
-.chat-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(127, 127, 127, 0.38);
-}
-.chat-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-/* ⑦ 空态：Codex 首启屏风 */
-.chat-list .tree-empty {
-  gap: 8px !important;
-  padding: 96px 32px !important;
-}
-.chat-list .tree-empty .empty-title {
-  font-size: 16px !important;
-  font-weight: 500 !important;
-  color: var(--text-2) !important;
-}
-.chat-list .tree-empty .empty-sub {
-  font-size: 13px !important;
-  color: var(--text-3) !important;
-}
-
-/* ⑧ [head-click-toggle-v1] 输出按钮已删除；展开交互由卡片头整行承担（见 .script-card-head.is-clickable） */
-
-/* ⑨ script-card-tail：与卡片同底，弱化边界 */
-.script-card-tail {
-  margin-top: 8px !important;
-  padding: 8px 0 0 !important;
-  background: transparent !important;
-  border-top: 1px dashed var(--border) !important;
-  border-radius: 0 !important;
-}
-
-/* ============================================================
- * [ai-wait-banner-v1] 等待 AI 回复指示条（底部居中胶囊型）
- * [WHY] 用户需求：点击发送到收到 AI 回复之间应可视化等待态；顶部固定条会抢占消息首行视线，改为底部居中胶囊
- * [CONSTRAINT] 置于 .flow-timeline 末尾、.chat-list 之下；v-if 由 props.aiWaiting 控制，随 stopAiWaiting 自动隐藏；
- *              父层 [flow-timeline-fix-v1] 有 align-items:stretch，需 align-self:center 抵消才能居中
- * [CHANGE-IMPACT] 与 ScriptPanel 的 <TerminalPane :ai-waiting> 成对；改颜色/布局需同步覆盖层可视优先级
- * ============================================================ */
 .wait-banner {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 8px !important;
-  align-self: center !important;
-  margin: 0 auto 14px !important;
-  padding: 7px 16px !important;
-  background: rgba(88, 166, 255, 0.08) !important;
-  border: 1px solid rgba(88, 166, 255, 0.24) !important;
-  border-radius: 999px !important;
-  color: var(--primary, #58a6ff) !important;
-  font-size: 12px !important;
-  font-weight: 500 !important;
-  letter-spacing: 0.2px !important;
-  flex-shrink: 0 !important;
-  box-shadow: 0 4px 14px rgba(88, 166, 255, 0.1) !important;
-  backdrop-filter: blur(6px) !important;
-  animation: wait-fadein 0.2s ease-out !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  align-self: center;
+  margin: 0 auto 14px;
+  padding: 7px 16px;
+  background: rgb(88 166 255 / 8%);
+  border: 1px solid rgb(88 166 255 / 24%);
+  border-radius: 999px;
+  color: var(--primary, #58a6ff);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+  box-shadow: 0 4px 14px rgb(88 166 255 / 10%);
+  backdrop-filter: blur(6px);
+  animation: wait-fadein 0.2s ease-out;
 }
-
 @keyframes wait-fadein {
   from {
     opacity: 0;
@@ -991,48 +776,66 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
     transform: translateY(0) scale(1);
   }
 }
-
-/* [spinner-polish-v1] 旋转圈：三色描边分层，旋转方向感更明确 */
 .wait-spinner {
-  display: inline-block !important;
-  width: 12px !important;
-  height: 12px !important;
-  border: 2px solid rgba(88, 166, 255, 0.18) !important;
-  border-top-color: var(--primary, #58a6ff) !important;
-  border-right-color: rgba(88, 166, 255, 0.55) !important;
-  border-radius: 50% !important;
-  animation: wait-spin 0.9s linear infinite !important;
-  flex-shrink: 0 !important;
-  box-sizing: border-box !important;
+  display: inline-block;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgb(88 166 255 / 18%);
+  border-top-color: var(--primary, #58a6ff);
+  border-right-color: rgb(88 166 255 / 55%);
+  border-radius: 50%;
+  animation: wait-spin 0.9s linear infinite;
+  flex-shrink: 0;
 }
-
 @keyframes wait-spin {
   to {
     transform: rotate(360deg);
   }
 }
-
-/* 省略号：3 点逐次显现（steps 动画） */
+@keyframes wait-fadein {
+  from {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.wait-spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgb(88 166 255 / 18%);
+  border-top-color: var(--primary, #58a6ff);
+  border-right-color: rgb(88 166 255 / 55%);
+  border-radius: 50%;
+  animation: wait-spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes wait-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .wait-dots::after {
   content: '';
   animation: wait-dots 1.4s steps(4, end) infinite;
 }
-
-/* 时长徽标：弱化处理，仅作时间感知补充 */
 .wait-elapsed {
-  margin-left: 4px !important;
-  padding: 1px 7px !important;
+  margin-left: 4px;
+  padding: 1px 7px;
   font:
     600 10.5px/1.4 ui-monospace,
-    monospace !important;
-  color: var(--primary, #58a6ff) !important;
-  background: rgba(88, 166, 255, 0.1) !important;
-  border-radius: 999px !important;
-  letter-spacing: 0.3px !important;
-  /* [css-fix-v1] 上一轮的 tabular-nums: 1 是无效 CSS；正确写法为 font-variant-numeric */
+    monospace;
+  color: var(--primary, #58a6ff);
+  background: rgb(88 166 255 / 10%);
+  border-radius: 999px;
+  letter-spacing: 0.3px;
   font-variant-numeric: tabular-nums;
 }
-
 @keyframes wait-dots {
   0%,
   20% {
@@ -1048,80 +851,5 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   100% {
     content: '...';
   }
-}
-/* ============================================================
- * [tail-typewriter-v1] 输出打字机动画
- * [WHY] 用户需求：tail 输出用打字机显示，与 wait-banner 的 spinner 视觉呼应
- * [CONSTRAINT] clip-path 逐格揭示（steps(40)）；时长由模板 --tw-duration 按 tail 长度计算（0.4-2.5s）
- * [CHANGE-IMPACT] 只加动画不改布局；tail 内容变化触发 Vue 重渲染，动画随之重放
- * ============================================================ */
-.script-card-tail .tail-pre {
-  animation: tail-typing var(--tw-duration, 0.8s) steps(40, end) both !important;
-}
-@keyframes tail-typing {
-  from {
-    clip-path: inset(0 100% 0 0);
-  }
-  to {
-    clip-path: inset(0 0 0 0);
-  }
-}
-
-/* ============================================================
- * [text-tone-v1] 文字降级：正文字号 -1px、主色阶下移一档
- * [WHY] 用户要求「文字变小、颜色稍微暗一点」；纯视觉微调，不动结构与交互
- * [CONSTRAINT] 置于样式段末尾，覆盖 [codex-final-v1]/[visual-polish-v2]；选择器与原定义一致，靠层叠顺序生效；全部 !important
- * [CHANGE-IMPACT] 若后续重排样式段，本层须保留在末尾或并入主定义后删除
- * ============================================================ */
-.chat-list,
-.flow-timeline .chat-list {
-  font-size: 13px !important;
-  color: var(--text-2) !important;
-}
-
-.script-card-body,
-.done-summary-body {
-  font-size: 13px !important;
-  color: var(--text-2) !important;
-}
-
-.script-card-head,
-.text-card-head {
-  font-size: 11px !important;
-}
-
-/* [head-compact-v1] 头部行紧凑：字号再降 0.5px、行高收紧、底部间距压到 2px、gap 6px
- * [WHY] 用户要求 head 行更紧凑、字号更小，减少消息流的视觉噪音
- * [CONSTRAINT] 置于样式段末尾，靠层叠覆盖 [visual-polish-v2] 的 margin-bottom:10px 与 gap:10px
- * [CHANGE-IMPACT] 仅收紧时间戳/phase/底色间距；正文 body 与 tail 区不受影响
- */
-.script-card-head,
-.text-card-head {
-  margin-bottom: 2px !important;
-  gap: 6px !important;
-  font-size: 10.5px !important;
-  line-height: 1.2 !important;
-}
-
-/* [head-compact-v1] 时间戳与 phase 同步收紧行高（避免其独立行盒把 head 撑高） */
-.script-card-time,
-.script-card-phase {
-  line-height: 1.1 !important;
-}
-
-/* [head-inline-v1] 状态 / 信息 / 时间同一行：desc 撑满中间、单行省略
- * [WHY] 用户要求把状态、信息（desc）、时间合并到一行，卡片头部即完整语义
- * [CONSTRAINT] desc 用 flex:1 + ellipsis 保持单行不换行；时间戳仍由 margin-left:auto 贴右
- * [CHANGE-IMPACT] body 已不再渲染；renderMarkdown 仍被 ai:done / ai:plain / ai:ask 分支消费
- */
-.script-card-desc {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--text-2, #c9d1d9);
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 </style>

@@ -126,7 +126,7 @@ interface AttachedFile {
 .attach-tag .attach-ico,
 .attach-tag .attach-name,
 .attach-tag .attach-size {
-  padding: 2px 8px !important;
-  font-size: 11px !important;
+  padding: 2px 8px;
+  font-size: 11px;
 }
 </style>

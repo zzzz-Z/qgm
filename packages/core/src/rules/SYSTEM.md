@@ -76,7 +76,7 @@
 
 1. 检查 `typeof __AI__`：若为 `'undefined'`，立即以 `{ error: 'API_MISSING', exitCode: 2 }` 上报，**禁止回退到原生 Node API**。
 2. 若为 `'object'`，执行 `Object.keys(__AI__)` 并记录类型。
-3. 将 `{ keys, types, probedAt }` 写入固定探测文件，作为后续调用的唯一白名单凭据。
+3. 将 `{ keys, types, probedAt }` 写入 `.ai-runner/probe-result.json`，作为后续调用的唯一白名单凭据。
 
 ---
 

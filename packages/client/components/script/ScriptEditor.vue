@@ -492,149 +492,165 @@ defineExpose({ insertText })
 
 <style scoped lang="scss">
 :deep(.cm-file-tag) {
-  background: var(--primary-bg, rgba(88, 166, 255, 0.12));
+  background: var(--primary-bg, rgb(88 166 255 / 12%));
   color: var(--primary, #58a6ff);
   border-radius: 4px;
   padding: 1px 4px;
   margin: 0 1px;
 }
-
-/* [chat-action-bar-v1] 底部操作条：无背景、右下角对齐，图标按钮紧贴输入框右下 */
-.editor-actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px 10px;
-  flex-shrink: 0;
-}
-
-/* [chat-input-v3] 智能体聊天输入框风：大圆角 + 淡背景 + 高度自适应 */
 .editor.card {
-  flex: 0 0 auto !important;
-  min-height: 140px !important;
-  max-height: 360px !important;
-  display: flex !important;
-  flex-direction: column !important;
-  overflow: hidden !important;
-  background: var(--surface-2, rgba(127, 127, 127, 0.06)) !important;
-  border: 1px solid var(--border, rgba(127, 127, 127, 0.15)) !important;
-  border-radius: 20px !important;
-  box-shadow: 0 1px 2px rgba(15, 17, 21, 0.04) !important;
+  flex: 0 0 auto;
+  min-height: 140px;
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-2, rgb(127 127 127 / 6%));
+  border: 1px solid var(--border, rgb(127 127 127 / 15%));
+  border-radius: 20px;
+  box-shadow: 0 1px 2px rgb(15 17 21 / 4%);
   transition:
     border-color 0.15s ease,
-    box-shadow 0.15s ease !important;
+    box-shadow 0.15s ease;
+  max-width: min(820px, calc(100% - 100px));
+  width: 100%;
+  margin: 8px auto 16px;
+  box-sizing: border-box;
 }
-
 .editor.card.is-running {
-  border-color: rgba(88, 166, 255, 0.4) !important;
+  border-color: rgb(88 166 255 / 40%);
 }
-
 .editor.card:focus-within {
-  border-color: rgba(88, 166, 255, 0.55) !important;
-  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.1) !important;
+  border-color: var(--border);
+  box-shadow:
+    0 1px 2px rgb(15 17 21 / 6%),
+    0 0 0 3px rgb(88 166 255 / 12%);
 }
-
-/* 隐藏行号 / gutter / 折叠等代码编辑器特征，对齐聊天输入框观感 */
+html[data-theme='dark'] .editor.card {
+  background: rgb(127 127 127 / 8%);
+  border-color: rgb(127 127 127 / 22%);
+}
 .editor :deep(.cm-gutters),
 .editor :deep(.cm-lineNumbers),
 .editor :deep(.cm-foldGutter) {
-  display: none !important;
+  display: none;
 }
-
 .editor :deep(.cm-editor) {
-  color: var(--text, inherit) !important;
-  font-size: 14px !important;
-  background: transparent !important;
+  color: var(--text, inherit);
+  font-size: 14px;
+  background: transparent;
 }
-
 .editor :deep(.cm-editor.cm-focused) {
-  outline: none !important;
+  outline: none;
 }
-
 .editor :deep(.cm-scroller) {
-  font-family: inherit !important;
-  line-height: 1.6 !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
+  font-family: inherit;
+  line-height: 1.6;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
-
-.editor :deep(.cm-content) {
-  min-height: 48px !important;
-  // [pad-align-v4] 同改 20px 消除残留（chat-list 实际水平 padding 为 20px）
-  padding: 14px 20px !important;
-  color: var(--text, inherit) !important;
-  font-size: 14px !important;
-  line-height: 1.65 !important;
-  background: transparent !important;
-  caret-color: var(--primary, #58a6ff) !important;
-  // [chat-input-v6] basicSetup 默认给 .cm-content 上 monospace，聊天输入框改系统 UI 字体
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui,
-    sans-serif !important;
-}
-
-/* [chat-input-v6] 滚动条更细更淡，减少视觉噪音 */
 .editor :deep(.cm-scroller)::-webkit-scrollbar {
   width: 5px;
   height: 5px;
 }
 .editor :deep(.cm-scroller)::-webkit-scrollbar-thumb {
-  background: rgba(127, 127, 127, 0.22);
+  background: rgb(127 127 127 / 20%);
   border-radius: 999px;
 }
 .editor :deep(.cm-scroller)::-webkit-scrollbar-thumb:hover {
-  background: rgba(127, 127, 127, 0.38);
+  background: rgb(127 127 127 / 38%);
 }
 .editor :deep(.cm-scroller)::-webkit-scrollbar-track {
   background: transparent;
 }
-
-// [chat-input-v3] placeholder 柔和色，弱化提示但不抢视觉
+.editor :deep(.cm-content) {
+  min-height: 48px;
+  padding: 14px 20px;
+  color: var(--text, inherit);
+  font-size: 14px;
+  line-height: 1.65;
+  background: transparent;
+  caret-color: var(--primary, #58a6ff);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui,
+    sans-serif;
+}
 .editor :deep(.cm-placeholder) {
-  color: var(--text-3, rgba(127, 127, 127, 0.55)) !important;
-  font-style: normal !important;
-  pointer-events: none !important;
+  color: var(--text-3, rgb(127 127 127 / 50%));
+  font-style: normal;
+  pointer-events: none;
+  opacity: 0.85;
 }
-
-// [chat-input-v7] activeLineGutter 已随 gutter display:none 失效，仅保留 activeLine
-.editor :deep(.cm-activeLine) {
-  background: transparent !important;
+.editor :deep(.cm-cursor),
+.editor :deep(.cm-dropCursor) {
+  border-left-width: 2px;
+  border-left-color: var(--primary, #58a6ff);
+  border-radius: 1px;
 }
-
 .editor :deep(.cm-selectionBackground),
 .editor :deep(.cm-content ::selection) {
-  background: rgba(88, 166, 255, 0.22) !important;
+  background: rgb(88 166 255 / 18%);
 }
-
-/* [drag-drop-ux-v1] 悬停反馈：外发光 + 内部虚线框 + 脉冲 + 图标文案 */
+.editor :deep(.cm-activeLine) {
+  background: transparent;
+}
+.editor :deep(.attach-bar) {
+  padding: 12px 20px 4px;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  gap: 8px;
+}
+.editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 20px 12px;
+}
+.editor-actions :deep(.ghost-btn),
+.editor-actions :deep(.primary-btn) {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.editor-actions :deep(.ghost-btn > span),
+.editor-actions :deep(.primary-btn > span) {
+  display: none;
+}
+.editor-actions :deep(.ghost-btn:hover:not(:disabled)) {
+  background: rgb(127 127 127 / 12%);
+  border-color: transparent;
+}
 .editor.is-dragging {
-  border-color: rgb(88 166 255 / 70%) !important;
+  border-color: rgb(88 166 255 / 70%);
   box-shadow:
     0 0 0 3px rgb(88 166 255 / 16%),
-    0 0 24px rgb(88 166 255 / 18%) !important;
-  background: rgb(88 166 255 / 4%) !important;
+    0 0 24px rgb(88 166 255 / 18%);
+  background: rgb(88 166 255 / 4%);
 }
-
 .editor.is-dragging::after {
-  content: '📎  松开鼠标以附加文件' !important;
-  position: absolute !important;
-  inset: 6px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  background: rgb(88 166 255 / 8%) !important;
-  border: 2px dashed rgb(88 166 255 / 65%) !important;
-  border-radius: 8px !important;
-  color: var(--primary-hover, #58a6ff) !important;
-  font-size: 13px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.3px !important;
-  pointer-events: none !important;
-  z-index: 10 !important;
-  animation: ai-drop-pulse 1.2s ease-in-out infinite !important;
+  content: '📎  松开鼠标以附加文件';
+  position: absolute;
+  inset: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(88 166 255 / 8%);
+  border: 2px dashed rgb(88 166 255 / 65%);
+  border-radius: 8px;
+  color: var(--primary-hover, #58a6ff);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  pointer-events: none;
+  z-index: 10;
+  animation: ai-drop-pulse 1.2s ease-in-out infinite;
 }
-
 @keyframes ai-drop-pulse {
   0%,
   100% {
@@ -644,205 +660,75 @@ defineExpose({ insertText })
     opacity: 1;
   }
 }
-
 :deep(.cm-host) {
-  flex: 1 1 0 !important;
-  min-height: 0 !important;
-  height: 100% !important;
-  overflow: hidden !important;
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
-
+.editor-body {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
 .file-picker {
-  /* [file-picker-fix-v2] 改 absolute → fixed：.editor-body 有 overflow:hidden，
-   * 当光标贴近编辑器底部时向下弹出会被裁切，出现"只显示一半"的症状；
-   * fixed + 视口坐标（coordsAtPos 返回的即视口坐标）可完全规避该裁切
-   * z-index 提到 9999，避免被其他浮层（Tooltip/Toast）遮挡 */
-  position: fixed !important;
-  z-index: 9999 !important;
-  min-width: 280px !important;
-  max-width: 480px !important;
-  max-height: 240px !important;
-  background: var(--surface-2) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius-8) !important;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 40%) !important;
-  display: flex !important;
-  flex-direction: column !important;
-  overflow: hidden !important;
+  position: fixed;
+  z-index: 9999;
+  min-width: 280px;
+  max-width: 480px;
+  max-height: 240px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-
 .fp-input {
-  padding: 8px 12px !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--border) !important;
-  background: transparent !important;
-  color: var(--text) !important;
-  font: 12px/1.4 var(--mono, monospace) !important;
-  outline: 0 !important;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: 12px/1.4 var(--mono, monospace);
+  outline: 0;
 }
-
 .fp-list {
-  /* [file-picker-fix-v1] flex column 子项必须显式声明 flex-grow 与 min-height:0，
-   * 否则在父级 max-height + overflow:hidden 下会被压扁至内容塌陷，列表项渲染成灰色条 */
-  flex: 1 1 auto !important;
-  min-height: 0 !important;
-  overflow-y: auto !important;
-  padding: 4px !important;
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 1px !important;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
-
 .fp-item {
-  /* [file-picker-fix-v1] 阻止 flex column 收缩项高度；最小行高兜底避免被压缩成灰色条 */
-  flex-shrink: 0 !important;
-  min-height: 22px !important;
-  line-height: 1.2 !important;
-  padding: 5px 10px !important;
-  border-radius: var(--radius-4) !important;
-  font-size: 12px !important;
-  font-family: var(--mono, monospace) !important;
-  color: var(--text-2) !important;
-  cursor: pointer !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
+  flex-shrink: 0;
+  min-height: 22px;
+  line-height: 1.2;
+  padding: 5px 10px;
+  border-radius: var(--radius-4);
+  font-size: 12px;
+  font-family: var(--mono, monospace);
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-
 .fp-item:hover,
 .fp-item.active {
-  background: var(--primary-bg) !important;
-  color: var(--primary) !important;
+  background: var(--primary-bg);
+  color: var(--primary);
 }
-
 .fp-empty {
-  padding: 12px !important;
-  text-align: center !important;
-  color: var(--text-3) !important;
-  font-size: 12px !important;
-}
-
-.editor-body {
-  flex: 1 1 0 !important;
-  min-height: 0 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  overflow: hidden !important;
-  position: relative !important;
-}
-
-/* ============================================================
- * [editor-polish-v1] 输入框精修 v2
- * [WHY] v1 已完成聊天框结构改造；本层针对光标、附件条衔接、底部按钮区、焦点过渡做视觉精修
- * [CONSTRAINT] 全部 !important 覆盖 v1；不改结构；纯视觉参数
- * [CHANGE-IMPACT] 与 [chat-input-v3] / [chat-action-bar-v1] 同层叠加，改动集中便于回滚
- * ============================================================ */
-
-/* ① 光标：柔和 2px 竖条 + 呼吸动画，比默认 1px 更醒目 */
-.editor :deep(.cm-cursor),
-.editor :deep(.cm-dropCursor) {
-  border-left-width: 2px !important;
-  border-left-color: var(--primary, #58a6ff) !important;
-  border-radius: 1px !important;
-}
-
-/* ② 输入区内边距：左右与信息区 chat-list 的实际水平 padding 对齐 */
-/* [pad-align-v4] chat-list 后续规则已把水平 padding 由 24px 覆盖为 20px，
- * 输入框此前仍按 24px 计算，文字比消息文字内缩 4px；改 20px 归位。 */
-.editor :deep(.cm-content) {
-  // [pad-align-v4] 左右 20px 对齐 chat-list；上下 14px 保持紧凑
-  padding: 14px 20px !important;
-}
-
-/* ③ 选区：更透明、更柔和，不遮挡字 */
-.editor :deep(.cm-selectionBackground),
-.editor :deep(.cm-content ::selection) {
-  background: rgba(88, 166, 255, 0.18) !important;
-}
-
-/* ④ 附件条：无边框无底色，仅在内容与输入区之间留 8px 视觉缝 */
-.editor :deep(.attach-bar) {
-  // [pad-align-v4] 左右 20px 对齐 chat-list（原 24px 已过时）
-  padding: 12px 20px 4px !important;
-  margin: 0 !important;
-  background: transparent !important;
-  border: 0 !important;
-  gap: 8px !important;
-}
-
-/* ⑤ 底部按钮区：贴右下角，hover 更明显 */
-.editor-actions {
-  // [pad-align-v4] 左右 20px 对齐 chat-list（原 24px 已过时）
-  padding: 6px 20px 12px !important;
-  gap: 4px !important;
-  justify-content: flex-end !important;
-  align-items: center !important;
-}
-.editor-actions :deep(.ghost-btn),
-.editor-actions :deep(.primary-btn) {
-  width: 32px !important;
-  height: 32px !important;
-  padding: 0 !important;
-  border-radius: 8px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-}
-.editor-actions :deep(.ghost-btn > span),
-.editor-actions :deep(.primary-btn > span) {
-  display: none !important;
-}
-.editor-actions :deep(.ghost-btn:hover:not(:disabled)) {
-  background: rgba(127, 127, 127, 0.12) !important;
-  border-color: transparent !important;
-}
-
-/* ⑥ 焦点态：光晕更柔和，无需边框加亮 */
-.editor.card:focus-within {
-  border-color: var(--border) !important;
-  box-shadow:
-    0 1px 2px rgba(15, 17, 21, 0.06),
-    0 0 0 3px rgba(88, 166, 255, 0.12) !important;
-}
-
-/* ⑦ 暗色模式：背景对比稍强，卡片浮起更明显 */
-html[data-theme='dark'] .editor.card {
-  background: rgba(127, 127, 127, 0.08) !important;
-  border-color: rgba(127, 127, 127, 0.22) !important;
-}
-
-/* ⑧ 滚动条更细，指尖划过不刺眼 */
-.editor :deep(.cm-scroller)::-webkit-scrollbar {
-  width: 5px !important;
-}
-.editor :deep(.cm-scroller)::-webkit-scrollbar-thumb {
-  background: rgba(127, 127, 127, 0.2) !important;
-  border-radius: 999px !important;
-}
-
-/* ⑨ placeholder 呼吸：淡化处理，不与正文抢视觉 */
-.editor :deep(.cm-placeholder) {
-  color: var(--text-3, rgba(127, 127, 127, 0.5)) !important;
-  opacity: 0.85 !important;
-}
-
-/* ============================================================
- * [pad-align-v2] 输入卡片与展示区宽度对齐
- * [WHY] 展示区 .chat-list 有 max-width:820px 居中；输入卡片 .editor.card 却全宽拉伸 →
- *       两侧左右边界不一致，视觉割裂。本层让输入卡片对齐 820px 并居中。
- * [CONSTRAINT] .editor.card 是 pane-main（flex column）的直接子项；靠 max-width + margin auto 居中；
- *              width:100% 保证窄屏下缩到父容器宽度，不溢出。
- * [CHANGE-IMPACT] 与 [chat-input-v3] 的 flex 布局叠加；若后续改 pane-main 的 align-items 需同步复核。
- * ============================================================ */
-
-.editor.card {
-  /* [pad-align-v5] chat-list 由 .terminal 的 50px 水平内边距包裹；卡片直接挂 .pane-main。
-     宽屏（pane-main ≥ 920px）两侧都是 820px 居中 → 边缘一致；
-     窄屏（pane-main < 920px）chat-list 因 .terminal padding 内缩 50px，而卡片贴 pane 边 → 左右错位。
-     min(820px, 100% - 100px) 宽屏保持 820 居中、窄屏自动同步内缩 50px，两端边缘严格对齐。 */
-  max-width: min(820px, calc(100% - 100px)) !important;
-  width: 100% !important;
-  margin: 8px auto 16px !important;
-  box-sizing: border-box !important;
+  padding: 12px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12px;
 }
 </style>
