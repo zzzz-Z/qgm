@@ -16,7 +16,8 @@ export default defineConfig({
     target: 'node20',
     minify: false,
     sourcemap: false,
-    rollupOptions: {
+    // [rolldown-opt-v1] Vite 8 + rolldown 下 rollupOptions 是 deprecated 别名，与 client 侧统一
+    rolldownOptions: {
       external: ['vite', /^node:/],
       output: { entryFileNames: 'index.js', format: 'esm' },
     },

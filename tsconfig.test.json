@@ -16,13 +16,15 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
+  // [test-tsc-scope-v1] 测试文件实际位于 packages/*/tests/；原 include 指向已不存在的 test/，
+  //   tsc 报 TS18003「No inputs were found」→ 该检查长期形同虚设，测试里的类型错误无人拦截
+  // [CHANGE-IMPACT] 覆盖面从「无输入」变为 core + client 全部 node-test；首次可能暴露存量错误
   "include": [
-    "test/**/*.ts"
+    "packages/*/tests/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    // AIRUNNER-BATCH28-DOCS-SYNC-TSTSC: client/test 已删除（batch23）
-    "test/**/*.test.cjs"
+    "**/*.test.cjs"
   ]
 }

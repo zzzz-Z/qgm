@@ -2,8 +2,6 @@
 import { computed } from 'vue'
 import type { Change, ChangeType } from '../../types'
 
-defineOptions({ name: 'FileList' })
-
 /** 组件接收的 props 定义 */
 const props = defineProps<{
   changes: Change[]
@@ -11,7 +9,6 @@ const props = defineProps<{
   busyAll: boolean
   activeFile?: string
 }>()
-
 /** 派发 */
 const emit = defineEmits<{
   rollback: [file: string]
@@ -19,6 +16,8 @@ const emit = defineEmits<{
   save: []
   preview: [file: string] // ← 改为元组属性语法
 }>()
+
+defineOptions({ name: 'FileList' })
 
 /** 摘要 */
 const summary = computed(() => {
@@ -40,7 +39,6 @@ function metaOf(t: ChangeType) {
     deleted: { label: 'D', title: '删除', cls: 'deleted' },
   }[t]
 }
-
 /**
  * 把文件路径拆成目录前缀与文件名
  * [WHY] 列表展示时目录用浅色、文件名用主色，需要单独字段

@@ -4,9 +4,9 @@ import FileTree from './FileTree.vue'
 import FileList from './FileList.vue'
 import { useFoldState } from '../../composables/ui/useFoldState'
 
-defineOptions({ name: 'SidePane' })
-
-const model = defineModel<boolean>('sideDrawerOpen', { required: true })
+/** 标签页类型：从 _tabAllowed 派生，保证与运行时白名单一致 */
+// [WHY] TS 类型别名编译期惰性求值，`typeof _tabAllowed` 引用后置 const 无 TDZ 风险
+type SideTab = typeof _tabAllowed[number]
 
 const props = defineProps<{
   changes: { path: string, type: 'added' | 'modified' | 'deleted' }[]
@@ -16,7 +16,6 @@ const props = defineProps<{
   result: { tools?: unknown[] } | null
   sideWidth: number
 }>()
-
 const emit = defineEmits<{
   rollback: [file: string]
   rollbackAll: []
@@ -24,11 +23,18 @@ const emit = defineEmits<{
   preview: [file: string]
 }>()
 
-/** 标签页类型：从 _tabAllowed 派生，保证与运行时白名单一致 */
-// [WHY] TS 类型别名编译期惰性求值，`typeof _tabAllowed` 引用后置 const 无 TDZ 风险
-type SideTab = typeof _tabAllowed[number]
+const model = defineModel<boolean>('sideDrawerOpen', { required: true })
+
+defineOptions({ name: 'SidePane' })
 
 const _tabAllowed = ['tree', 'changes', 'worklog'] as const
+const WorklogPane = defineAsyncComponent(() => import('./WorklogPane.vue'))
+
+// [worklog-lazy-v1] WorklogPane（含 markdown-it 渲染链）仅首次切到 worklog tab 才加载
+// [WHY] worklogLoaded 闸门 v-if 保证 defineAsyncComponent 的 loader 到首切才触发；
+//       加载后 v-if 恒真、由 v-show 保活，保留结果/展开状态（不能只用 v-if，否则切走即丢状态）
+// [CHANGE-IMPACT] 首切 tab 多一次 chunk 请求；WorklogPane 自身 watch 改 immediate 以适配"挂载即激活"
+const worklogLoaded = shallowRef(false)
 
 // 折叠 + tab 选择持久化（PLAN 5.4）
 const fold = useFoldState('default', 'side-pane')
@@ -47,23 +53,15 @@ const sideTab = computed<SideTab>({
   // 语义清晰无需进一步抽象，保留双重强转但注明理由
   set: (v: SideTab) => fold.setOpen('tab', v as unknown as boolean),
 })
-
-// [worklog-lazy-v1] WorklogPane（含 markdown-it 渲染链）仅首次切到 worklog tab 才加载
-// [WHY] worklogLoaded 闸门 v-if 保证 defineAsyncComponent 的 loader 到首切才触发；
-//       加载后 v-if 恒真、由 v-show 保活，保留结果/展开状态（不能只用 v-if，否则切走即丢状态）
-// [CHANGE-IMPACT] 首切 tab 多一次 chunk 请求；WorklogPane 自身 watch 改 immediate 以适配"挂载即激活"
-const worklogLoaded = shallowRef(false)
-watch(sideTab, (tab) => {
-  if (tab === 'worklog') worklogLoaded.value = true
-}, { immediate: true })
-const WorklogPane = defineAsyncComponent(() => import('./WorklogPane.vue'))
-
 const displayWidth = computed(() => props.sideWidth || 320)
-
 const collapsed = computed({
   get: () => !fold.isOpen('expanded', true),
   set: (v: boolean) => fold.setOpen('expanded', !v),
 })
+
+watch(sideTab, (tab) => {
+  if (tab === 'worklog') worklogLoaded.value = true
+}, { immediate: true })
 
 function selectTab(tab: (typeof sideTab)['value']): void {
   sideTab.value = tab

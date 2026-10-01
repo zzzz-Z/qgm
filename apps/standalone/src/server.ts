@@ -32,6 +32,69 @@ if (persistedRoot) setRoot(persistedRoot)
 /** router（相关状态/数据） */
 const router = createRouter({ root: ROOT })
 
+/** [static-meta-v1] 已解析的资源元信息：原文件与预压缩变体的 stat */
+interface StaticMeta {
+  /** 原文件 stat */
+  stat: fs.Stats
+  /** .br 变体 stat（不存在为 null） */
+  brStat: fs.Stats | null
+  /** .gz 变体 stat（不存在为 null） */
+  gzStat: fs.Stats | null
+}
+
+// [static-meta-v1] 只缓存 /assets/*：文件名带内容哈希，名字变了就是新资源，旧条目不会再被命中
+// [CONSTRAINT] 上限防长驻进程多次重建后 Map 无界增长
+const staticMetaCache = new Map<string, StaticMeta>()
+const STATIC_META_MAX = 512
+
+/**
+ * 取普通文件的 stat
+ * [WHY] 单次 statSync 替代 existsSync + statSync 两次系统调用；目录/不存在统一归为 null
+ * @param p - 绝对路径
+ * @returns stat，非普通文件或不存在为 null
+ */
+function statFile(p: string): fs.Stats | null {
+  try {
+    const st = fs.statSync(p)
+    return st.isFile() ? st : null
+  } catch { return null }
+}
+
+/**
+ * 解析资源元信息（/assets/* 命中缓存时零 syscall）
+ * [CONSTRAINT] 非哈希路径（index.html / favicon.ico）不缓存，否则重建后 ETag 会短暂失真
+ * @param rel - 请求相对路径，用作缓存键
+ * @param abs - 绝对路径
+ * @param cacheable - 是否可长期缓存
+ * @returns 元信息，文件不存在为 null
+ */
+function loadMeta(rel: string, abs: string, cacheable: boolean): StaticMeta | null {
+  if (cacheable) {
+    const hit = staticMetaCache.get(rel)
+    if (hit) return hit
+  }
+  const stat = statFile(abs)
+  if (!stat) return null
+  const meta: StaticMeta = { stat, brStat: statFile(`${abs}.br`), gzStat: statFile(`${abs}.gz`) }
+  if (cacheable) {
+    if (staticMetaCache.size >= STATIC_META_MAX) staticMetaCache.clear()
+    staticMetaCache.set(rel, meta)
+  }
+  return meta
+}
+
+/** 静态资源 MIME 表 */
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+}
+
 /**
  * 执行 serve Static
  * @param req - req
@@ -48,22 +111,27 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boole
   else if (p === '/favicon.ico') rel = p
   else return false
   const abs = path.resolve(CLIENT_DIST, `.${rel}`)
-  if (!abs.startsWith(CLIENT_DIST)) return false
-  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return false
+  // [path-guard-v1] 必须带 path.sep：只比前缀时，同前缀的兄弟目录（…/client-evil/x）会绕过检查
+  if (!abs.startsWith(CLIENT_DIST + path.sep)) return false
+  // [static-meta-v1] /assets/* 名字带内容哈希 → 元信息可长期缓存；其余每次实探
+  const meta = loadMeta(rel, abs, rel.startsWith('/assets/'))
+  if (!meta) return false
   // [precompress-negotiate-v1] 优先回源 vite-plugin-compression2 生成的 .br/.gz（br 优先，压缩率更高）
   // [WHY] 预压缩零运行时 CPU；Content-Type 仍按原文件扩展名判定
   // [CHANGE-IMPACT] 无预压缩产物或客户端不支持时自动回退原始文件，行为与旧实现一致
   const acceptEncoding = String(req.headers['accept-encoding'] || '')
   let served = abs
   let encoding: string | null = null
-  if (/\bbr\b/.test(acceptEncoding) && fs.existsSync(`${abs}.br`)) {
+  let st = meta.stat
+  if (/\bbr\b/.test(acceptEncoding) && meta.brStat) {
     served = `${abs}.br`
     encoding = 'br'
-  } else if (/\bgzip\b/.test(acceptEncoding) && fs.existsSync(`${abs}.gz`)) {
+    st = meta.brStat
+  } else if (/\bgzip\b/.test(acceptEncoding) && meta.gzStat) {
     served = `${abs}.gz`
     encoding = 'gzip'
+    st = meta.gzStat
   }
-  const st = fs.statSync(served)
   // [cache-headers-v1] ETag 走弱校验（size+mtimeMs），命中 If-None-Match 直接 304
   const etag = `W/"${st.size.toString(16)}-${Math.round(st.mtimeMs).toString(16)}"`
   // [cache-headers-v1] /assets/* 文件名带内容 hash → 一年 immutable；index.html 必须 no-cache 保证版本即时可见
@@ -83,10 +151,8 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boole
     res.end()
     return true
   }
-  const ext = path.extname(abs).toLowerCase()
-  const t: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.mjs': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' }
   res.writeHead(200, {
-    'Content-Type': t[ext] || 'application/octet-stream',
+    'Content-Type': MIME[path.extname(abs).toLowerCase()] || 'application/octet-stream',
     'Content-Length': String(st.size),
     ...baseHeaders,
   })

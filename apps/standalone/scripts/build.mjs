@@ -6,6 +6,7 @@ import { build } from 'vite'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { syncClientDist } from '../../../scripts/sync-client-dist.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const PKG_ROOT = path.dirname(HERE) // apps/standalone
@@ -40,24 +41,7 @@ if (fs.existsSync(rulesSrc)) {
   console.log('  skip (missing) rules/SYSTEM.md')
 }
 console.log('[standalone:build] step 3/3: sync client dist')
-const srcClient = path.join(ROOT, 'packages', 'client', 'dist')
-const dstClient = path.join(DIST_ROOT, 'client')
-if (fs.existsSync(srcClient)) {
-  if (fs.existsSync(dstClient)) fs.rmSync(dstClient, { recursive: true, force: true })
-  copyDir(srcClient, dstClient)
-  console.log('  synced packages/client/dist -> apps/standalone/dist/client')
-} else {
-  console.log('  skip (no client dist, run packages/client build first)')
-}
-
-function copyDir(s, d) {
-  fs.mkdirSync(d, { recursive: true })
-  for (const e of fs.readdirSync(s, { withFileTypes: true })) {
-    const sp = path.join(s, e.name)
-    const dp = path.join(d, e.name)
-    if (e.isDirectory()) copyDir(sp, dp)
-    else fs.copyFileSync(sp, dp)
-  }
-}
+// [sync-dedup-v1] 复用 scripts/sync-client-dist.mjs，避免与 build-all.mjs / build:web 三处各写一份拷贝逻辑
+syncClientDist(path.join(ROOT, 'packages', 'client', 'dist'), path.join(DIST_ROOT, 'client'))
 
 console.log('[standalone:build] done')

@@ -7,9 +7,10 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useAsk } from '../../composables/ui/useAsk'
 import { renderMarkdown } from '../../composables/useMarkdown'
 
-const { askState, resolveAsk } = useAsk()
 const draft = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
+
+const { askState, resolveAsk } = useAsk()
 
 const questionHtml = computed(() => renderMarkdown(askState.value?.question || ''))
 const hasOptions = computed(() => (askState.value?.options.length || 0) > 0)
@@ -26,17 +27,14 @@ watch(() => askState.value, async (v) => {
 
 /** 快捷选项点击 → 以按钮文本作答并关闭 */
 function chooseOption(label: string): void { resolveAsk(label) }
-
 /** 提交自由文本；[CONSTRAINT] 空白文本视为无效，不提交 */
 function confirm(): void {
   const t = draft.value.trim()
   if (!t) return
   resolveAsk(t)
 }
-
 /** 取消/遮罩点击/Esc → resolve(null) */
 function cancel(): void { resolveAsk(null) }
-
 function onKey(e: KeyboardEvent): void {
   if (e.key === 'Escape') cancel()
 }

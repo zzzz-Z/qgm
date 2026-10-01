@@ -3,12 +3,6 @@
 import { computed, ref, watch } from 'vue'
 import { useClipboard } from '@vueuse/core'
 
-/** 上一轮运行结果；null 表示尚未运行，各子字段可能缺失由下方诊断逻辑兜底 */
-const props = withDefaults(defineProps<Props>(), { result: null })
-
-/** 向父组件派发"跳转到错误文件"事件（父组件负责选中/滚动） */
-const emit = defineEmits<{ (e: 'jump', file: string): void }>()
-
 interface Props {
   result?: {
     ok?: boolean
@@ -20,16 +14,13 @@ interface Props {
     tsc?: { ok?: boolean, stdout?: string, stderr?: string, ran?: boolean } | null
   } | null
 }
-
 type Severity = 'error' | 'warning' | 'info'
-
 interface Item {
   severity: Severity
   source: string
   message: string
   files?: string[]
 }
-
 // [tier1c-3] 错误第一印象：一句话诊断 + 归因 + 行动建议 + 复现命令
 interface Diagnosis {
   headline: string
@@ -38,22 +29,25 @@ interface Diagnosis {
   command: string
 }
 
-// [copy-via-vueuse] 组件级单例 useClipboard：内部会注册 copy 事件监听，
-// 通过 setup scope 在组件卸载时自动清理；因此必须定义在 setup 顶层而非函数内
-const _clipboard = useClipboard()
+/** 向父组件派发"跳转到错误文件"事件（父组件负责选中/滚动） */
+const emit = defineEmits<{ (e: 'jump', file: string): void }>()
 
+/** 上一轮运行结果；null 表示尚未运行，各子字段可能缺失由下方诊断逻辑兜底 */
+const props = withDefaults(defineProps<Props>(), { result: null })
 /** 严重度排序权重；[CHANGE-IMPACT] items 排序依赖此映射，改权重会改变 UI 首条展示项 */
 const severityOrder: Record<Severity, number> = { error: 0, warning: 1, info: 2 }
-
 /** 严重度 → 展示图标；[CONSTRAINT] 三种 Severity 必须全覆盖，否则模板渲染 undefined */
 const SEV_ICON: Record<Severity, string> = { error: '✗', warning: '⚠', info: '⋯' }
 
 /** 列表展开态；有 error 时会被下方 watch 强制置 true */
 const expanded = ref(false)
-
 // 一键复制命令到剪贴板；不支持时退化到提示
 /** 复制按钮的临时提示文案（"已复制: xxx" 或降级显示的原始命令）；2s 后自动清空 */
 const copiedTip = ref('')
+
+// [copy-via-vueuse] 组件级单例 useClipboard：内部会注册 copy 事件监听，
+// 通过 setup scope 在组件卸载时自动清理；因此必须定义在 setup 顶层而非函数内
+const _clipboard = useClipboard()
 
 /** 汇总所有异常源（tsc / eslint / test / exit / errorFiles）并按严重度排序 */
 const items = computed<Item[]>(() => {
@@ -99,10 +93,8 @@ const items = computed<Item[]>(() => {
   }
   return out.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])
 })
-
 /** 是否至少有一条 error 级条目；决定头部图标用红叉还是黄叹号 */
 const hasError = computed(() => items.value.some(i => i.severity === 'error'))
-
 /** [tier1c-3] 一句话诊断：取最严重条目生成 归因 / 行动 / 复现命令 四段式；无异常时返回 null */
 const diagnosis = computed<Diagnosis | null>(() => {
   const list = items.value
@@ -171,14 +163,12 @@ function firstLines(text: string | undefined, n: number): string {
   const ls = text.split('\n').filter(Boolean)
   return ls.slice(0, n).join('\n')
 }
-
 /**
  * 请求父组件跳转到指定文件
  * [CONSTRAINT] 纯事件转发，不校验路径存在性；父组件负责失败提示
  * @param f 目标文件相对路径
  */
 function jumpTo(f: string): void { emit('jump', f) }
-
 /**
  * 统计 tsc 输出中 `error TS####` 的出现次数
  * [CONSTRAINT] 依赖 tsc 固定错误格式；改 format 会导致漏计（此处不兜底）
@@ -189,7 +179,6 @@ function countTsErrors(text: string | undefined): number {
   if (!text) return 0
   return (text.match(/error TS\d+/g) || []).length
 }
-
 /**
  * 复制命令到剪贴板并给出 2s 临时反馈
  * [copy-via-vueuse] 走 vueuse useClipboard：内部自动选 navigator.clipboard 或 execCommand 回退，
@@ -207,7 +196,6 @@ async function copyCommand(cmd: string): Promise<void> {
   }
   setTimeout(() => { copiedTip.value = '' }, 2000)
 }
-
 /**
  * 跳转到首个 errorFiles 条目
  * [CONSTRAINT] errorFiles 为空时静默 no-op（模板已用 v-if 兜底按钮可见性）

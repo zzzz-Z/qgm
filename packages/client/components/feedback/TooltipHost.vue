@@ -1,25 +1,7 @@
-<template>
-  <Teleport to="body">
-    <Transition name="tt-fade">
-      <div
-        v-if="state.visible"
-        ref="floatingRef"
-        class="tt-host"
-        :style="floatingStyles"
-        role="tooltip"
-      >
-        {{ state.text }}
-      </div>
-    </Transition>
-  </Teleport>
-</template>
-
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/vue'
 import { useTooltip } from '../../composables/ui/useTooltip'
-
-defineOptions({ name: 'TooltipHost' })
 
 interface VirtualElement {
   getBoundingClientRect: () => {
@@ -35,7 +17,7 @@ interface VirtualElement {
   contextElement?: Element
 }
 
-const { state } = useTooltip()
+defineOptions({ name: 'TooltipHost' })
 
 /**
  * 虚拟参考元素：位置跟随鼠标光标（0×0 矩形）。
@@ -58,10 +40,10 @@ const referenceRef = ref<VirtualElement>({
     }
   },
 })
-
 /** 引用 */
 const floatingRef = ref<HTMLElement | null>(null)
 
+const { state } = useTooltip()
 const { floatingStyles, update } = useFloating(referenceRef, floatingRef, {
   // 光标右下方弹出，贴近原 translate(12px, 14px) 的视觉效果
   placement: 'bottom-start',
@@ -78,6 +60,22 @@ watch(
   () => update(),
 )
 </script>
+
+<template>
+  <Teleport to="body">
+    <Transition name="tt-fade">
+      <div
+        v-if="state.visible"
+        ref="floatingRef"
+        class="tt-host"
+        :style="floatingStyles"
+        role="tooltip"
+      >
+        {{ state.text }}
+      </div>
+    </Transition>
+  </Teleport>
+</template>
 
 <style scoped>
 .tt-host {

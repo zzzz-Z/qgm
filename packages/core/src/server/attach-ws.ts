@@ -121,9 +121,9 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         const stopReply = pool.startReplyPoll(sid, (reply) => {
           try {
             if (reply.kind === 'script' && reply.code) {
-              send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now(), reasoning: String((reply as { reasoning?: string }).reasoning || '') } } })
+              send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now() } } })
             } else {
-              send({ t: 'headless:reply', sid, reply: { kind: reply.kind, text: reply.text, reasoning: String((reply as { reasoning?: string }).reasoning || '') } })
+              send({ t: 'headless:reply', sid, reply: { kind: reply.kind, text: reply.text } })
             }
           } catch { /* swallow: 页面导航/关闭期间 evaluate 抛错，等下一轮 tick */ }
         })

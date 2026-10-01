@@ -2,8 +2,8 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + token 估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.4.3
-// @description  回传会话 ID/token/AI 回复到工作台；接收 fill/stop（修复千问 Slate 输入框）；DONE 携带完整注释块
+// @version      1.4.4
+// @description  回传会话 ID/token/AI 回复到工作台；接收 fill/stop（修复千问 Slate 输入框）；DONE 携带完整注释块；回复签名按 assistant 容器识别（修复千问回传）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -110,36 +110,23 @@
     '.chat-question-card-wrap',
   ]
 
-  // [reasoning-channel-v1] DeepSeek 思考块候选选择器（多站点适配，命中即用，缺失静默）
-  // 契约：仅采集文本，长度截断到 8000 字符；不改动原有回复/脚本提取逻辑
-  const REASONING_SELECTORS = [
-    '.ds-think-content',
-    '[class*="think-content"]',
-    '[class*="reasoning-content"]',
-    '[class*="thinking-content"]',
-    '[class*="deep-think"]',
-    '[data-testid*="reasoning"]',
-    '[class*="chain-of-thought"]',
-    'details[class*="think"] > div',
+  // [assistant-root-v1] 定位「最后一条 AI 回复」的容器，站点无关
+  // WHY: 原实现硬编码 DeepSeek 的 .ds-assistant-message-main-content；
+  //   千问（.chat-answers-card-wrap）等站点取不到 → 文本退回整页 document，
+  //   而整页末 300 字符是输入框/页脚，AI 流式期间不变化 → 回复签名恒定 → 永不回传
+  // CONSTRAINT: 按特异性从上到下取最后一个命中元素；全不命中返回 null 由调用方兜底为 document
+  // CHANGE-IMPACT: findNewDone / extractLatestReplyText / bodySignature 三处共用
+  const ASSISTANT_ROOT_SELECTORS = [
+    '.ds-assistant-message-main-content', // DeepSeek
+    '[data-message-author-role="assistant"]', // ChatGPT
+    '.chat-answers-card-wrap', // 千问 / 通义
   ]
-
-  /**
-   * 提取最近一条 assistant 消息内的思考文本；无命中返回空串。
-   * 优先最后一条 assistant 容器；容器找不到时降级为整页最后一个命中元素。
-   */
-  function extractLatestReasoning() {
-    try {
-      const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
-      const root = blocks.length > 0 ? blocks[blocks.length - 1] : document
-      for (let i = 0; i < REASONING_SELECTORS.length; i++) {
-        const els = root.querySelectorAll(REASONING_SELECTORS[i])
-        if (els.length === 0) continue
-        const el = els[els.length - 1]
-        const t = (el.textContent || '').trim()
-        if (t) return t.slice(-8000)
-      }
-      return ''
-    } catch { return '' }
+  function latestAssistantRoot() {
+    for (let i = 0; i < ASSISTANT_ROOT_SELECTORS.length; i++) {
+      const els = document.querySelectorAll(ASSISTANT_ROOT_SELECTORS[i])
+      if (els.length > 0) return els[els.length - 1]
+    }
+    return null
   }
 
   function collectText() {
@@ -326,8 +313,7 @@
     // [WHY] 原实现只取全局最后一个叶子节点 → 多段回复被截成末段，@ask 前缀丢失
     // [CONSTRAINT] 复用 extractReplyMd（DOM→Markdown 反推）；容器缺失时回退 document
     try {
-      const _blocks = document.querySelectorAll('.ds-assistant-message-main-content')
-      const _root = _blocks.length > 0 ? _blocks[_blocks.length - 1] : document
+      const _root = latestAssistantRoot() || document
       return extractReplyMd(_root)
     } catch { return '' }
   }
@@ -386,8 +372,7 @@
   }
 
   function findNewDone() {
-    const _blocks = document.querySelectorAll('.ds-assistant-message-main-content')
-    const _root = _blocks.length > 0 ? _blocks[_blocks.length - 1] : document
+    const _root = latestAssistantRoot() || document
     // [done-md-reconstruct-v1] 用 DOM→Markdown 反推替代 textContent（保留换行与结构）
     const summary = extractReplyMd(_root)
 
@@ -407,7 +392,12 @@
   }
 
   function bodySignature() {
-    const t = (document.body.textContent || '').replace(/\s+/g, ' ')
+    // [assistant-root-v1] 优先用「最后一条 AI 回复」容器的文本做签名
+    // WHY: 整页末 300 字符在千问这类站点是输入框/页脚，AI 流式期间恒定 → 无法触发回传
+    // CONSTRAINT: 容器存在且文本非空才用其签名；否则退回整页末 300 字符（旧行为，保证其他站点不回归）
+    const root = latestAssistantRoot()
+    const rootText = root ? (root.textContent || '').replace(/\s+/g, ' ').trim() : ''
+    const t = rootText || (document.body.textContent || '').replace(/\s+/g, ' ')
     return hash32(t.slice(-300))
   }
 
@@ -429,7 +419,6 @@
           kind: 'done',
           site: location.origin,
           sessionId: extractSidFromHash(),
-          reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
           text: doneMarker.text,
         })
         lastBodySig = bodySignature()
@@ -447,7 +436,6 @@
           hash: s.hash,
           site: location.origin,
           sessionId: extractSidFromHash(),
-          reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
         })
         lastBodySig = bodySignature()
         return
@@ -461,7 +449,6 @@
           kind: 'plain',
           site: location.origin,
           sessionId: extractSidFromHash(),
-          reasoning: extractLatestReasoning(), // [reasoning-channel-v1]
           // [ask-text-v1] 补 text：前端 parseAsk 依赖此字段识别交互提问
           // [CONSTRAINT] extractLatestReplyText 返回最后 assistant 容器文本；缺失时前端退化为纯提示
           text: (() => { try { return extractLatestReplyText() || '' } catch { return '' } })(),

@@ -86,9 +86,15 @@ async function smokeCheck() {
 ;(async () => {
   head(`run-all  ${new Date().toISOString()}`)
 
-  step('lint (eslint --fix)', () => runPnpm('lint'))
-  step('tsc (vue-tsc -b --force)', () => runPnpm('tsc'))
-  step('test:unit (node --test)', () => runPnpm('test:unit'))
+  // [run-all-scope-v1] 标签必须与 package.json 中实际脚本一致：
+  // 原先标签写 `eslint --fix` / `vue-tsc -b --force` / `node --test`，实际跑的是 lint / tsc / vitest
+  step('lint (eslint .)', () => runPnpm('lint'))
+  // [typecheck-single-entry] 类型检查收敛为单入口
+  // WHY: 各处自拼 tsc/vue-tsc 组合时容易漏 -p 或走错 tsconfig（如 vue-tsc 配 core 配置），
+  //   导致前端类型错误不被拦截；统一走 package.json 的 typecheck
+  // CHANGE-IMPACT: 覆盖面由「core + apps + client」扩为「+ test/」，首次可能暴露存量 test 类型错误
+  step('typecheck (tsc + tsc:apps + tsc:client + test:tsc)', () => runPnpm('typecheck'))
+  step('test:unit (vitest run)', () => runPnpm('test:unit'))
 
   const up = await serverUp()
   if (!up) {

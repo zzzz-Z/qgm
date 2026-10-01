@@ -6,18 +6,18 @@
 //                与主流程（useSessionManager 随机 sid）并存，两者互不覆盖
 import { computed } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
-import { MODELS, url } from '../../composables/ai/useAiSite'
+// [sites-persist-v1] 点击站点需持久化 modelId（刷新不丢 + 上方 URL 同步）
+import { MODELS, url, useAiSite } from '../../composables/ai/useAiSite'
 import { openSite } from '../../composables/ai/useAiWindow'
 import { getActiveWinSid, getWindowBySid, listWindows, removeWindowBySid, setActiveWinSid, windowsTick } from '../../composables/ai/useAiWindowTable'
 import { useToast } from '../../composables/ui/useToast'
 
 const { toast } = useToast()
-
+// [sites-persist-v1] 读取当前站点 modelId（持久化态）用于高亮与刷新恢复
+// [sites-highlight-v1] 读取持久化 modelId，刷新后仍能高亮当前站点
+const { modelId, setModel } = useAiSite()
 // [防御性刷新] 用户手动关闭窗口时 1.5s 后同步状态
 useIntervalFn(() => { windowsTick.value++ }, 1500, { immediate: true })
-
-/** 固定 sid：每站点一个稳定 id，不随会话切换变化 */
-function sidOf(modelId: string): string { return `win_${modelId}` }
 
 /** 站点列表（MODELS 全量）→ 附加运行时状态（opened / active） */
 const items = computed(() => {
@@ -33,17 +33,29 @@ const items = computed(() => {
       url: m.url,
       sid,
       opened: Boolean(win),
-      active: sid === active && Boolean(win),
+      // [sites-highlight-v1] 刷新后窗口表为空，改以持久化 modelId 为主判据；内存窗口激活作为兜底
+      // [WHY] 原判据 sid === active && Boolean(win) 依赖内存窗口表，刷新即丢高亮
+      // [CHANGE-IMPACT] 用户点击 / setModel 后立即高亮，与上方 URL 保持一致
+      active: m.id === modelId.value || (sid === active && Boolean(win)),
     }
   })
 })
+/** 已激活数（用于头部角标） */
+const openedCount = computed(() => items.value.filter(it => it.opened).length)
 
+/** 固定 sid：每站点一个稳定 id，不随会话切换变化 */
+function sidOf(modelId: string): string { return `win_${modelId}` }
 /**
  * 点击某站点：
  * - 已开窗口 → 激活切换
  * - 未开窗口 → openSite(url, sid) 打开；成功则激活
  */
 async function onClick(item: { id: string, label: string, url: string, sid: string, opened: boolean }): Promise<void> {
+  // [sites-persist-v1] 无论窗口是否已打开，都先把持久化 modelId 切到该站点：
+  // [WHY] 只有 setModel 会写 localStorage（__ai_model_id）并同步 url；仅 setActiveWinSid 属内存态，刷新即丢
+  // [CONSTRAINT] setModel 命中 MODELS 才生效；未命中返回 false，不阻断后续开窗流程
+  // [CHANGE-IMPACT] App.vue 的 watch(modelId) 会随之重载会话历史 / 清 sessionId
+  setModel(item.id)
   if (item.opened) {
     setActiveWinSid(item.sid)
     windowsTick.value++
@@ -58,16 +70,12 @@ async function onClick(item: { id: string, label: string, url: string, sid: stri
   windowsTick.value++
   void url
 }
-
 /** 关闭某站点窗口：仅从表中移除引用，不强制 win.close */
 function dismiss(sid: string, label: string): void {
   removeWindowBySid(sid)
   windowsTick.value++
   toast(`已移除 ${label} 的窗口引用`, 'info', 2500)
 }
-
-/** 已激活数（用于头部角标） */
-const openedCount = computed(() => items.value.filter(it => it.opened).length)
 </script>
 
 <template>

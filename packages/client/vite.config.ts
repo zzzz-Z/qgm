@@ -67,8 +67,9 @@ export default defineConfig({
     vue(),
     // [precompress-v1] 产物旁生成 .gz/.br；serveStatic 按 Accept-Encoding 直接回源
     // [WHY] 省运行时压缩 CPU；2MB main 经 br 后约 250KB
-    // [CONSTRAINT] threshold 1KB 跳过小文件；保留原文件（不 deleteOriginalAssets）
-    compression({ algorithms: ['gzip', 'brotliCompress'], threshold: 1024 }),
+    // [CONSTRAINT] threshold 512：rolldown-runtime（~0.7KB）在首屏 modulepreload 链上，
+    //              原 1024 阈值会漏掉它；压缩后更大时插件自身会跳过
+    compression({ algorithms: ['gzip', 'brotliCompress'], threshold: 512 }),
   ],
   // [chunk-split-v1] 拆分 2MB main：第三方库按域归组，便于 HTTP/2 并行与长缓存
   // [WHY] rolldown 1.2.x 的 manualChunks 只接受函数（对象形式报 "Expected Function"）

@@ -2,15 +2,15 @@
 import { computed, ref } from 'vue'
 import { renderMarkdown } from '../../composables/useMarkdown.js'
 
-/** 组件接收的 props 定义 */
-const props = defineProps<{ item: Item }>()
-
 interface Item {
   kind?: string
   role?: string
   ts?: number
   payload?: Record<string, unknown>
 }
+
+/** 组件接收的 props 定义 */
+const props = defineProps<{ item: Item }>()
 
 /** 是否展开 */
 const expanded = ref(false)
@@ -20,12 +20,10 @@ const role = computed(() => {
   const r = props.item && props.item.role
   return (typeof r === 'string' && r) ? r : 'sys'
 })
-
 /** 是否为 */
 const isUser = computed(() => role.value === 'user')
 /** 是否为AI */
 const isAi = computed(() => role.value === 'ai')
-
 /** 条目上的徽标文本 */
 const badge = computed(() => {
   const k = String((props.item && props.item.kind) || '')
@@ -36,7 +34,6 @@ const badge = computed(() => {
   if (role.value === 'step') return 'STEP'
   return 'SYS'
 })
-
 /** 条目标题 */
 const title = computed(() => {
   const p = (props.item && props.item.payload) || {}
@@ -52,7 +49,6 @@ const title = computed(() => {
   }
   return '(空)'
 })
-
 /** 文本 */
 const bodyText = computed(() => {
   const p = (props.item && props.item.payload) || {}
@@ -65,12 +61,10 @@ const bodyText = computed(() => {
   }
   return ''
 })
-
 /** 是否含 */
 const hasBody = computed(() => bodyText.value.trim().length > 0)
 /** 已渲染的正文 HTML */
 const bodyHtml = computed(() => renderMarkdown(bodyText.value))
-
 /** 标签 */
 const tsLabel = computed(() => {
   const t = props.item && props.item.ts

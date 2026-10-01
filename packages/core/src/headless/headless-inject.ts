@@ -248,37 +248,6 @@ export function detectReplyInPage() {
     return t.slice(-8000)
   }
 
-  // [reasoning-channel-v1] DeepSeek 思考块候选选择器；多站点命中即用，缺失静默返回空串
-  // 契约：与 scripts/tampermonkey-session-id.user.js 的 REASONING_SELECTORS 保持一致
-  const REASONING_SELECTORS = [
-    '.ds-think-content',
-    '[class*="think-content"]',
-    '[class*="reasoning-content"]',
-    '[class*="thinking-content"]',
-    '[class*="deep-think"]',
-    '[data-testid*="reasoning"]',
-    '[class*="chain-of-thought"]',
-    'details[class*="think"] > div',
-  ]
-
-  /**
-   * 提取最近一条 assistant 消息内的思考文本；无命中返回空串。
-   * 与油猴版语义一致：优先最后一条 assistant 容器，长度截断到 8000 字符。
-   */
-  function extractLatestReasoning() {
-    try {
-      const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
-      const root = blocks.length > 0 ? blocks[blocks.length - 1] : document
-      for (let i = 0; i < REASONING_SELECTORS.length; i++) {
-        const els = root.querySelectorAll(REASONING_SELECTORS[i])
-        if (els.length === 0) continue
-        const el = els[els.length - 1]
-        const t = (el.textContent || '').trim()
-        if (t) return t.slice(-8000)
-      }
-      return ''
-    } catch { return '' }
-  }
   /**
    * DOM → Markdown 反推：SYSTEM.md §8 允许 AI 输出纯 Markdown 总结，但 DOM 抓取会丢换行
    * [WHY] textContent 会把 <h3>/<p>/<ul> 全部粘成一整行；需按标签结构重建 Markdown 源码
@@ -367,7 +336,7 @@ export function detectReplyInPage() {
       dedup._pendingScriptHash = null
       dedup.seenHashes.push(script.hash)
       dedup.lastBodySig = bodySignature()
-      return { kind: 'script', code: script.code, lang: script.lang, hash: script.hash, reasoning: extractLatestReasoning() }
+      return { kind: 'script', code: script.code, lang: script.lang, hash: script.hash }
     }
     dedup._pendingScriptHash = script.hash
     return null
@@ -378,7 +347,7 @@ export function detectReplyInPage() {
     dedup.seenDoneMarkers.push(doneMarker.marker)
     dedup.lastBodySig = bodySignature()
     // [done-plain-v1] 不再要求 js 围栏：SYSTEM.md §8 已允许纯 Markdown 总结
-    return { kind: 'done', text: doneMarker.text, reasoning: extractLatestReasoning() }
+    return { kind: 'done', text: doneMarker.text }
   }
 
   // 文本稳定检测：连续 3 次 body 不变 → 生成结束，推 plain + text
@@ -396,7 +365,7 @@ export function detectReplyInPage() {
   const plainText = getMainText()
   if (!hasJsFence(plainText) && !isAskPrefix(plainText)) return null
   dedup._plainSentInCycle = true
-  return { kind: 'plain', text: plainText, reasoning: extractLatestReasoning() }
+  return { kind: 'plain', text: plainText }
 
   return null
 }

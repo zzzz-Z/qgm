@@ -102,6 +102,9 @@ importers:
       eslint-plugin-vue:
         specifier: ^10.11.0
         version: 10.11.0(@stylistic/eslint-plugin@5.10.0(eslint@9.39.5(jiti@2.7.0)))(@typescript-eslint/parser@8.70.1(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0))(vue-eslint-parser@10.4.1(eslint@9.39.5(jiti@2.7.0)))
+      eslint-vue-setup-rules:
+        specifier: ^1.2.0
+        version: 1.2.0
       pixelmatch:
         specifier: ^7.2.0
         version: 7.2.0
@@ -1822,6 +1825,9 @@ packages:
   eslint-visitor-keys@5.0.1:
     resolution: {integrity: sha512-tD40eHxA35h0PEIZNeIjkHoDR4YjjJp34biM0mDvplBe//mB+IHCqHDGV7pxF+7MklTvighcCPPZC7ynWyjdTA==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
+
+  eslint-vue-setup-rules@1.2.0:
+    resolution: {integrity: sha512-Py7tb2r6ajlwBZMUzB6leI9tum2l0pNQm6xCY6B4AoZe3ivJ7BdESGtTmRL/tGOrdPxYsbmAjj+PXwgmXqiuwA==}
 
   eslint@9.39.5:
     resolution: {integrity: sha512-DgZS62aPLXKlnxILS/AYCoRvHaZeXceIzlXPkkGGzJWSow1aEk0lbTlxUSlyjC8jcaKxAdOnTDz+o1JFSBsyjw==}
@@ -4731,6 +4737,8 @@ snapshots:
   eslint-visitor-keys@4.2.1: {}
 
   eslint-visitor-keys@5.0.1: {}
+
+  eslint-vue-setup-rules@1.2.0: {}
 
   eslint@9.39.5(jiti@2.7.0):
     dependencies:

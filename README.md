@@ -198,7 +198,6 @@ ScriptPanel 编辑器里若脚本 **无 shebang**，点「运行」会走 `ask-f
 | `compliance-report.cjs` | —                       | 合规报告                                      |
 | `gen-notes.cjs`         | —                       | 生成笔记                                      |
 | `headless-cli.cjs`      | —                       | Playwright headless CLI（cssom / screenshot） |
-| `headless-smoke.cjs`    | —                       | headless 冒烟                                 |
 
 ---
 
@@ -342,13 +341,9 @@ pnpm recover       # air-recover 快照恢复 picker
 
 # 分析与运维
 pnpm check-regression   # 回归基线对比
-pnpm check:plan         # PLAN 一致性检查
 pnpm verify:contracts   # 契约验证
 pnpm analyze:confidence # 置信度分析
 pnpm analyze:trust      # 信任演化分析
-pnpm monitor:resources  # 资源监控
-pnpm retention:dry      # 保留策略 dry-run
-pnpm retention:apply    # 保留策略执行
 ```
 
 环境要求：Node.js ≥ 20.19.0，Vite ≥ 5（peerDependency）。

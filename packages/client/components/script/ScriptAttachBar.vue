@@ -1,25 +1,5 @@
-<template>
-  <div v-if="files.length" class="attach-bar">
-    <div v-for="f in files" :key="f.id" class="attach-tag" :class="`kind-${f.kind}`">
-      <img v-if="f.kind === 'image'" :src="f.content" :alt="f.name" class="attach-img">
-      <span v-else-if="f.kind === 'folder'" class="attach-ico">📁</span>
-      <span v-else class="attach-ico">📄</span>
-      <span class="attach-name" :title="f.name">{{ f.name }}</span>
-      <span class="attach-size">{{ f.kind === 'folder' ? `${f.size} 文件` : fmtSize(f.size) }}</span>
-      <button v-tooltip="'移除'" aria-label="移除" class="attach-del" @click="emit('remove', f.id)">
-        ×
-      </button>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { fmtSize } from '../../utils/format'
-
-defineProps<{ files: AttachedFile[] }>()
-
-/** 派发 */
-const emit = defineEmits<{ remove: [id: string] }>()
+import { fileBadge, fileToneStyle, fmtSize } from '../../utils/format'
 
 interface AttachedFile {
   id: string
@@ -28,7 +8,31 @@ interface AttachedFile {
   kind: 'image' | 'text' | 'folder'
   content: string
 }
+
+defineProps<{ files: AttachedFile[] }>()
+/** 派发 */
+const emit = defineEmits<{ remove: [id: string] }>()
+
+/** 悬停全文：Trae 风芯片不再内联展示体积，改挂到 title 上避免信息丢失 */
+function tagTitle(f: AttachedFile): string {
+  const size = f.kind === 'folder' ? `${f.size} 个文件` : fmtSize(f.size)
+  return `${f.name} · ${size}`
+}
 </script>
+
+<template>
+  <div v-if="files.length" class="attach-bar">
+    <div v-for="f in files" :key="f.id" class="attach-tag" :class="`kind-${f.kind}`" :title="tagTitle(f)">
+      <img v-if="f.kind === 'image'" :src="f.content" :alt="f.name" class="attach-img">
+      <span v-else-if="f.kind === 'folder'" class="attach-ico">📁</span>
+      <span v-else class="attach-badge" :style="fileToneStyle(f.name)">{{ fileBadge(f.name) }}</span>
+      <span class="attach-name">{{ f.name }}</span>
+      <button v-tooltip="'移除'" aria-label="移除" class="attach-del" @click="emit('remove', f.id)">
+        ×
+      </button>
+    </div>
+  </div>
+</template>
 
 <style scoped lang="scss">
 // 附件条与输入框卡片同体：透明背景 + 无底部分界线
@@ -36,50 +40,58 @@ interface AttachedFile {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 4px 16px 0;
+  padding: 6px 16px 2px;
   background: transparent;
   max-height: 120px;
   overflow-y: auto;
 }
 
-// 附件标签圆角 10px 与卡片同族；半透明底更融入输入框
+// Trae 风芯片：类型角标 + 文件名，无 emoji、无体积、无重投影
 .attach-tag {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
-  border-radius: 10px;
-  background: rgba(127, 127, 127, 0.08);
-  border: 1px solid transparent;
-  font-size: 11.5px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgb(127 127 127 / 8%);
+  border: 1px solid rgb(127 127 127 / 16%);
+  font-size: 11px;
   color: var(--text, inherit);
-  max-width: 260px;
-  justify-content: center;
+  max-width: 240px;
   transition:
     background 0.15s ease,
     border-color 0.15s ease;
 }
 
 .attach-tag:hover {
-  background: rgba(127, 127, 127, 0.14);
-  border-color: rgba(127, 127, 127, 0.2);
+  background: rgb(127 127 127 / 14%);
+  border-color: rgb(127 127 127 / 26%);
 }
 
 .attach-tag.kind-image {
   border-color: rgb(88 166 255 / 30%);
 }
 
+// 类型角标：等宽小字，承载 TS/VUE/MD 等短标签；配色由 fileToneStyle 按类型内联注入
+.attach-badge {
+  flex: 0 0 auto;
+  padding: 0 3px;
+  border-radius: 3px;
+  font: 600 8.5px/1.5 var(--mono, monospace);
+  letter-spacing: 0.3px;
+}
+
 .attach-img {
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
   object-fit: cover;
-  border-radius: var(--radius-4);
+  border-radius: 3px;
   flex-shrink: 0;
   background: rgb(0 0 0 / 20%);
 }
 
 .attach-ico {
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1;
 }
 
@@ -92,16 +104,10 @@ interface AttachedFile {
   font-weight: 500;
 }
 
-.attach-size {
-  flex: 0 0 auto;
-  color: var(--text-3, var(--text-3));
-  font: 10px/1 var(--mono, monospace);
-}
-
 .attach-del {
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -109,9 +115,9 @@ interface AttachedFile {
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: var(--text-3, rgba(127, 127, 127, 0.7));
+  color: var(--text-3, rgb(127 127 127 / 70%));
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1;
   transition:
     background 0.15s ease,
@@ -120,13 +126,6 @@ interface AttachedFile {
 
 .attach-del:hover {
   color: var(--danger, #f85149);
-  background: rgba(248, 81, 73, 0.14);
-}
-
-.attach-tag .attach-ico,
-.attach-tag .attach-name,
-.attach-tag .attach-size {
-  padding: 2px 8px;
-  font-size: 11px;
+  background: rgb(248 81 73 / 14%);
 }
 </style>

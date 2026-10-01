@@ -2,6 +2,7 @@
 /* eslint-disable no-console -- CLI 输出 */
 'use strict'
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 
@@ -30,27 +31,30 @@ function run(cmd, args, timeoutMs = 180_000) {
   }
 }
 
-// 绕过 pnpm policy 拦截，直调二进制
-function runTsc() {
-  const isWin = process.platform === 'win32'
-  const vueTsc = path.join(ROOT, 'node_modules/.bin', isWin ? 'vue-tsc.cmd' : 'vue-tsc')
-  const tsc = path.join(ROOT, 'node_modules/.bin', isWin ? 'tsc.cmd' : 'tsc')
-  const bin = fs.existsSync(vueTsc) ? vueTsc : tsc
-  if (!fs.existsSync(bin)) return { code: 1, out: '未找到 tsc / vue-tsc' }
-  return run(bin, ['-p', 'tsconfig.json', '--noEmit'])
+// [typecheck-single-entry] 走 package.json 的 typecheck 单入口
+// WHY: 原先跑 `vue-tsc -p tsconfig.json`（core 配置），实际只覆盖 packages/core/src，
+//   前端 + 测试的类型错误能悄悄绕过这道回归闸门
+// CHANGE-IMPACT: 口径由「core only」变为「core + apps + client + test」，baseline 必须重建
+function runTypecheck() {
+  return run('pnpm', ['typecheck'], 600_000)
 }
+
+// [vitest-json-reporter] 用 vitest 的 json reporter 落盘后解析，不解析人类可读输出
+// WHY: 原实现扫 client/test 与 src 两个已不存在的目录，扫描恒为空 → 测试闸门形同虚设；
+//   测试实际由 vitest 收集 packages/*/tests/
+// CONSTRAINT: 报告写 os.tmpdir()，避免污染仓库工作区
 function runTests() {
-  const files = []
-  const d1 = path.join(ROOT, 'client/test')
-  if (fs.existsSync(d1)) { for (const f of fs.readdirSync(d1)) { if (f.endsWith('.node-test.ts')) files.push(path.join('client/test', f))
+  const isWin = process.platform === 'win32'
+  const bin = path.join(ROOT, 'node_modules/.bin', isWin ? 'vitest.cmd' : 'vitest')
+  if (!fs.existsSync(bin)) return { code: 1, out: '未找到 vitest' }
+  const outFile = path.join(os.tmpdir(), `air-runner-vitest-${process.pid}.json`)
+  try {
+    const r = run(bin, ['run', '--config', 'vitest.config.ts', '--reporter=json', `--outputFile=${outFile}`], 600_000)
+    const json = fs.existsSync(outFile) ? fs.readFileSync(outFile, 'utf8') : ''
+    return { code: r.code, out: json || r.out }
+  } finally {
+    try { fs.unlinkSync(outFile) } catch { /* ignore */ }
   }
-  }
-  const d2 = path.join(ROOT, 'src')
-  if (fs.existsSync(d2)) { for (const f of fs.readdirSync(d2)) { if (f.endsWith('.test.cjs')) files.push(path.join('src', f))
-  }
-  }
-  if (!files.length) return { code: 1, out: '未找到测试文件' }
-  return run(process.execPath, ['--test', '--experimental-strip-types', ...files], 180_000)
 }
 
 function runLint() {
@@ -73,22 +77,21 @@ function countTscErrors(text) {
   return m ? m.length : 0
 }
 
+// 解析 vitest json reporter 的 numFailedTests；解析失败返回 -1（由调用方阻断，不静默放行）
 function countTestFails(text) {
-  // node --test 输出 " # fail N"
-  const m = text.match(/^# fail (\d+)$/m)
-  if (m) return Number(m[1])
-  // 备用：TAP "not ok" 计数
-  const n = (text.match(/^not ok \d+/gm) || []).length
-  return n
+  try {
+    const r = JSON.parse(text)
+    return typeof r.numFailedTests === 'number' ? r.numFailedTests : -1
+  } catch { return -1 }
 }
 
 const cmd = process.argv[2] || 'check'
 
 if (cmd === 'init') {
   head('init baseline')
-  console.log('  跑 pnpm tsc...')
-  const t = runTsc()
-  console.log('  跑 pnpm test:unit...')
+  console.log('  跑 pnpm typecheck...')
+  const t = runTypecheck()
+  console.log('  跑 vitest (json reporter)...')
   const u = runTests()
   console.log('  跑 eslint...')
   const l = runLint()
@@ -117,12 +120,17 @@ if (cmd === 'check') {
   console.log('  baseline sha:', base.sha, '@', new Date(base.ts).toISOString())
   console.log('  baseline tsc.errors:', base.tsc.errors, ' test.fails:', base.test.fails)
   console.log('')
-  console.log('  跑 pnpm tsc...')
-  const t = runTsc()
+  console.log('  跑 pnpm typecheck...')
+  const t = runTypecheck()
   const curTscErrors = countTscErrors(t.out)
-  console.log('  跑 pnpm test:unit...')
+  console.log('  跑 vitest (json reporter)...')
   const u = runTests()
   const curTestFails = countTestFails(u.out)
+  // 报告缺失/不可解析时 curTestFails 为 -1；不静默放行，直接阻断
+  if (curTestFails < 0) {
+    err('✗ 无法解析 vitest json 报告，阻断')
+    process.exit(1)
+  }
   console.log('  跑 eslint...')
   const l = runLint()
   const curLintErrors = countLintErrors(l.out)

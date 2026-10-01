@@ -2,9 +2,10 @@
 import { ref } from 'vue'
 import { useToast } from '../../composables/ui/useToast'
 
-const { toast } = useToast()
 const pathInput = ref('')
 const busy = ref(false)
+
+const { toast } = useToast()
 
 async function pick() {
   if (busy.value) return
@@ -22,7 +23,6 @@ async function pick() {
     toast(`选择失败：${e instanceof Error ? e.message : String(e)}`, 'error', 4000)
   } finally { busy.value = false }
 }
-
 async function selectByPath() {
   const p = pathInput.value.trim()
   if (!p) { toast('请输入工作区绝对路径', 'warn', 3000); return }

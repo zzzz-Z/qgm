@@ -29,6 +29,15 @@ interface WorklogResult {
 
 const props = defineProps<{ active: boolean }>()
 
+let pendingTimer: ReturnType<typeof setTimeout> | null = null
+/**
+ * 订阅 transport onReply：pendingCommitRequest 为 true 时消费下一条作为 commit message
+ * [WHY] 用户要求生成按钮改为'发 git diff 给 AI → 拿回复'；用一次性门控避免拦截其它无关回复
+ * [CONSTRAINT] 仅 kind 为 plain/multi/done 且 text 非空时消费；消费后立即关闭门控避免重复触发
+ * [CHANGE-IMPACT] 写 aiCommitMsg/commitMsg/aiGenerating；成功后会触发一次 load() 拉取最新状态
+ */
+let unsubscribeReply: (() => void) | null = null
+
 const loading = ref(false)
 const result = ref<WorklogResult | null>(null)
 const error = ref('')
@@ -41,7 +50,42 @@ const aiError = ref('')
 // 请求门控：置 true 时接受下一条 onReply 作为本次回复；收到即置 false
 // [CONSTRAINT] 用门控而非 sid 过滤，因为 sid 在无头通道与油猴通道下语义可能不一致
 const pendingCommitRequest = ref(false)
-let pendingTimer: ReturnType<typeof setTimeout> | null = null
+
+const fileMap = computed<Record<string, WorklogFileEntry>>(() => {
+  const m: Record<string, WorklogFileEntry> = {}
+  for (const f of result.value?.files || []) m[f.path] = f
+  return m
+})
+const changeCount = computed(() => result.value?.files.length || 0)
+
+// [worklog-lazy-v1] immediate：组件在 tab 激活时才异步挂载，挂载即 active=true，非 immediate watch 不会触发
+watch(() => props.active, (v) => { if (v && !result.value && !loading.value) void load() }, { immediate: true })
+
+onMounted(() => {
+  try {
+    const t = getTransport()
+    unsubscribeReply = t.onReply((raw: unknown) => {
+      if (!pendingCommitRequest.value) return
+      const reply = raw as { kind?: string, text?: string } | null
+      if (!reply) return
+      const kind = String(reply.kind || 'plain')
+      if (kind !== 'plain' && kind !== 'multi' && kind !== 'done') return
+      const text = String(reply.text || '').trim()
+      if (!text) return
+      const line = extractCommitLine(text)
+      if (!line) return
+      aiCommitMsg.value = line
+      commitMsg.value = line
+      aiGenerating.value = false
+      pendingCommitRequest.value = false
+      if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null }
+    })
+  } catch { /* transport 未就绪时静默；用户可手动编辑 */ }
+})
+onUnmounted(() => {
+  if (unsubscribeReply) { try { unsubscribeReply() } catch { /* ignore */ } unsubscribeReply = null }
+  if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null }
+})
 
 // [diff-highlight] 只对代码围栏内的 diff 文本做前缀着色，用 span 包裹，不引入新 HTML 源
 // [CONSTRAINT] markdown-it 已做 escape，因此 span 内只包含转义后的 & < >，无 XSS 风险
@@ -61,19 +105,9 @@ function diffHighlight(html: string): string {
     return `<pre class="md-pre"><code>${out.join('\n')}</code></pre>`
   })
 }
-
 function renderDiff(md: string): string {
   return diffHighlight(renderMarkdown(md))
 }
-
-const fileMap = computed<Record<string, WorklogFileEntry>>(() => {
-  const m: Record<string, WorklogFileEntry> = {}
-  for (const f of result.value?.files || []) m[f.path] = f
-  return m
-})
-
-const changeCount = computed(() => result.value?.files.length || 0)
-
 /** 状态字母与颜色分类：M=modified A=added D=deleted R=renamed C=copied */
 function statusLetter(s: string): string {
   if (s === 'added') return 'A'
@@ -98,7 +132,6 @@ function toggleFile(p: string): void {
   else n.add(p)
   expanded.value = n
 }
-
 /**
  * 把 /git/diff 返回的原始 diff 文本按文件切分
  * [WHY] 后端 /git/diff 直出 unified diff 原文，前端按 ^diff --git 切块后与 worklog 的 files 列表对齐
@@ -117,7 +150,6 @@ function splitDiffByPath(rawDiff: string): Record<string, string> {
   }
   return out
 }
-
 /** 渲染某文件的原始 diff 为高亮 HTML；单独包一层 pre 供展开区展示 */
 function fileDiffHtml(p: string): string {
   const f = fileMap.value[p]
@@ -127,7 +159,6 @@ function fileDiffHtml(p: string): string {
   const md = `${FENCE}diff\n${f.diff}\n${FENCE}`
   return renderDiff(md)
 }
-
 async function load(): Promise<void> {
   // 并行请求 worklog 与原始 diff；后者填充 files[].diff
   // [WHY] worklog 的 markdown 链路在某些环境看不到详细段；/git/diff 直出 unified diff 规避该问题
@@ -172,7 +203,6 @@ async function load(): Promise<void> {
     loading.value = false
   }
 }
-
 /** 提交：把 commitMsg 复制到剪贴板（后端不做实际 git commit，避免越权） */
 async function doCommit(): Promise<void> {
   if (!result.value || !commitMsg.value.trim()) return
@@ -180,7 +210,6 @@ async function doCommit(): Promise<void> {
     await navigator.clipboard.writeText(commitMsg.value)
   } catch { /* ignore: 剪贴板不可用时静默 */ }
 }
-
 /**
  * 基于 git diff 内容生成 Conventional Commits 风格 message
  * [WHY] v1 一律 chore: update N files 无语义；v2 按文件类型分组 + diff 关键词推断 type/scope
@@ -289,7 +318,6 @@ async function generateCommitMsg(): Promise<void> {
     generateLocalCommitMsg()
   }
 }
-
 /**
  * 从 AI 回复文本中提取单行 commit message
  * [WHY] AI 可能返回多余的解释 / 代码块 / 反引号；只取第一条非空、非围栏、非标题行
@@ -313,40 +341,6 @@ function extractCommitLine(text: string): string {
   }
   return raw.split('\n')[0].trim()
 }
-
-/**
- * 订阅 transport onReply：pendingCommitRequest 为 true 时消费下一条作为 commit message
- * [WHY] 用户要求生成按钮改为'发 git diff 给 AI → 拿回复'；用一次性门控避免拦截其它无关回复
- * [CONSTRAINT] 仅 kind 为 plain/multi/done 且 text 非空时消费；消费后立即关闭门控避免重复触发
- * [CHANGE-IMPACT] 写 aiCommitMsg/commitMsg/aiGenerating；成功后会触发一次 load() 拉取最新状态
- */
-let unsubscribeReply: (() => void) | null = null
-onMounted(() => {
-  try {
-    const t = getTransport()
-    unsubscribeReply = t.onReply((raw: unknown) => {
-      if (!pendingCommitRequest.value) return
-      const reply = raw as { kind?: string, text?: string } | null
-      if (!reply) return
-      const kind = String(reply.kind || 'plain')
-      if (kind !== 'plain' && kind !== 'multi' && kind !== 'done') return
-      const text = String(reply.text || '').trim()
-      if (!text) return
-      const line = extractCommitLine(text)
-      if (!line) return
-      aiCommitMsg.value = line
-      commitMsg.value = line
-      aiGenerating.value = false
-      pendingCommitRequest.value = false
-      if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null }
-    })
-  } catch { /* transport 未就绪时静默；用户可手动编辑 */ }
-})
-onUnmounted(() => {
-  if (unsubscribeReply) { try { unsubscribeReply() } catch { /* ignore */ } unsubscribeReply = null }
-  if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null }
-})
-
 /**
  * 本地启发式 fallback（发送失败时使用），保留原 v2 逻辑
  * [WHY] 网络/窗口不可用时至少给用户草稿；不覆盖已成功获取的 AI 结果
@@ -402,7 +396,6 @@ function generateLocalCommitMsg(): void {
 
   commitMsg.value = scope ? `${type}(${scope}): ${summary}` : `${type}: ${summary}`
 }
-
 /** 复制完整工作日志 Markdown，供窄区按钮消费 */
 async function copyFullLog(): Promise<void> {
   if (!result.value || !result.value.markdown) return
@@ -410,9 +403,6 @@ async function copyFullLog(): Promise<void> {
     await navigator.clipboard.writeText(result.value.markdown)
   } catch { /* ignore: 剪贴板不可用时静默 */ }
 }
-
-// [worklog-lazy-v1] immediate：组件在 tab 激活时才异步挂载，挂载即 active=true，非 immediate watch 不会触发
-watch(() => props.active, (v) => { if (v && !result.value && !loading.value) void load() }, { immediate: true })
 </script>
 
 <template>

@@ -1,53 +1,24 @@
-<template>
-  <section class="editor card" :class="{ 'is-running': isRunning, 'is-dragging': isDragging }">
-    <slot name="attach-bar" />
-    <div
-      class="editor-body"
-      @paste.capture="(e) => emit('paste', e)"
-      @dragenter="onDragEnter"
-      @dragover.prevent="onDragOver"
-      @dragleave="onDragLeave"
-      @drop="onDrop"
-    >
-      <!-- @FILE_PICKER_V1 -->
-      <!-- Teleport 到 body：.editor-body 有 overflow:hidden + 祖先含 transform，
-           会让 absolute/fixed 定位被裁或错位；Teleport 后完全脱离组件树，只受视口坐标约束
-           [CONSTRAINT] 因脱离 scoped 祖先链，内部选择器必须去掉 :deep 前缀改用同元素 data-v 匹配
-           [CHANGE-IMPACT] pickerRef / pickerInputRef 仍指向原元素，无需改脚本逻辑 -->
-      <Teleport to="body">
-        <div v-if="pickerOpen" ref="pickerRef" class="file-picker" :style="pickerStyle">
-          <input
-            ref="pickerInputRef" v-model="pickerQuery" class="fp-input" placeholder="搜索文件，Enter 选择，Esc 取消"
-            @keydown.down.prevent="pickerMove(1)" @keydown.up.prevent="pickerMove(-1)"
-            @keydown.enter.prevent="pickerConfirm" @keydown.esc.prevent="pickerClose"
-          >
-          <div class="fp-list">
-            <div
-              v-for="(f, i) in pickerFiltered" :key="f" class="fp-item" :class="{ active: i === pickerIndex }"
-              @mousedown.prevent="pickerPick(f)"
-            >
-              {{ f }}
-            </div>
-            <div v-if="!pickerFiltered.length" class="fp-empty">
-              无匹配文件
-            </div>
-          </div>
-        </div>
-      </Teleport>
-      <div ref="cmHost" class="cm-host" tabindex="0" />
-    </div>
-    <!-- 底部操作条：纯图标按钮，右下角对齐（Codex / CC 风） -->
-    <div class="editor-actions">
-      <slot name="action-bar" />
-    </div>
-  </section>
-</template>
-
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { FileNode } from '../../types'
 import type { Decoration, DecorationSet, EditorView, ViewUpdate } from '@codemirror/view'
-import type { Extension } from '@codemirror/state'
+import { fileBadge, fileToneStyle } from '../../utils/format'
+
+// CM 动态 import 聚合类型：从各包具名导出反推，杜绝 any
+interface CMModule {
+  EditorView: typeof import('@codemirror/view').EditorView
+  keymap: typeof import('@codemirror/view').keymap
+  placeholder: typeof import('@codemirror/view').placeholder
+  Decoration: typeof import('@codemirror/view').Decoration
+  WidgetType: typeof import('@codemirror/view').WidgetType
+  ViewPlugin: typeof import('@codemirror/view').ViewPlugin
+  EditorState: typeof import('@codemirror/state').EditorState
+  Prec: typeof import('@codemirror/state').Prec
+  Compartment: typeof import('@codemirror/state').Compartment
+  RangeSetBuilder: typeof import('@codemirror/state').RangeSetBuilder
+  basicSetup: typeof import('codemirror').basicSetup
+  cmJavascript: typeof import('@codemirror/lang-javascript').javascript
+}
 
 /** 组件接收的 props 定义 */
 const props = defineProps<{
@@ -58,7 +29,6 @@ const props = defineProps<{
   onHistoryPrev?: () => void
   onHistoryNext?: () => void
 }>()
-
 /** 派发 */
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -66,29 +36,10 @@ const emit = defineEmits<{
   'drop': [e: DragEvent]
 }>()
 
-// CM 动态 import 聚合类型：从各包具名导出反推，杜绝 any
-interface CMModule {
-  EditorView: typeof import('@codemirror/view').EditorView
-  keymap: typeof import('@codemirror/view').keymap
-  placeholder: typeof import('@codemirror/view').placeholder
-  Decoration: typeof import('@codemirror/view').Decoration
-  ViewPlugin: typeof import('@codemirror/view').ViewPlugin
-  EditorState: typeof import('@codemirror/state').EditorState
-  Prec: typeof import('@codemirror/state').Prec
-  Compartment: typeof import('@codemirror/state').Compartment
-  RangeSetBuilder: typeof import('@codemirror/state').RangeSetBuilder
-  basicSetup: typeof import('codemirror').basicSetup
-  cmJavascript: typeof import('@codemirror/lang-javascript').javascript
-}
-
 let CM: CMModule | null = null
-
 let cmView: import('@codemirror/view').EditorView | null = null
-
 let editableComp: import('@codemirror/state').Compartment | null = null
-
-let fileTagPlugin: Extension | null = null
-
+let fileTagPlugin: import('@codemirror/view').ViewPlugin<{ decorations: DecorationSet }> | null = null
 /** dragenter 与 dragleave 的配对深度计数 */
 let dragDepth = 0
 
@@ -97,10 +48,8 @@ let dragDepth = 0
 // CONSTRAINT: 子元素进出会连发 dragenter/dragleave，用 dragDepth 计数抵消，归零才复位
 /** 是否处于「文件悬停输入框」态 */
 const isDragging = ref(false)
-
 /** CodeMirror 编辑器容器 DOM */
 const cmHost = ref<HTMLDivElement | null>(null)
-
 /* @FILE_PICKER_V1 */
 /** 打开 */
 const pickerOpen = ref(false)
@@ -125,7 +74,6 @@ const pickerFiles = ref<string[]>([])
 
 /** 文件选择器的内联样式 */
 const pickerStyle = computed(() => ({ left: `${pickerX.value}px`, top: `${pickerY.value}px` }))
-
 /** 文件选择器过滤后的结果 */
 const pickerFiltered = computed(() => {
   const q = pickerQuery.value.toLowerCase()
@@ -138,7 +86,6 @@ watch(() => props.isLoopActive, (v) => {
   if (!cmView || !CM || !editableComp) return
   cmView.dispatch({ effects: editableComp.reconfigure(CM.EditorView.editable.of(!v)) })
 })
-
 // 外部 script 变化同步到编辑器
 watch(() => props.modelValue, (v) => {
   if (!cmView) return
@@ -148,7 +95,6 @@ watch(() => props.modelValue, (v) => {
 })
 
 onMounted(() => { void createEditor() })
-
 onBeforeUnmount(() => {
   try { cmView?.destroy() } catch { /* ignore */ }
   cmView = null
@@ -161,20 +107,17 @@ function hasFiles(e: DragEvent): boolean {
   const types = Array.from(dt.types || [])
   return types.includes('Files')
 }
-
 /** dragenter：仅文件类型才激活遮罩；多次嵌套进出自增 */
 function onDragEnter(e: DragEvent) {
   if (!hasFiles(e)) return
   dragDepth++
   isDragging.value = true
 }
-
 /** dragover：只改光标为 copy，不切状态（enter/leave 已负责状态） */
 function onDragOver(e: DragEvent) {
   if (!hasFiles(e)) return
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
 }
-
 /** dragleave：计数递减，归零后关闭遮罩（避免子元素间穿梭时闪烁） */
 function onDragLeave() {
   dragDepth--
@@ -183,7 +126,6 @@ function onDragLeave() {
     isDragging.value = false
   }
 }
-
 /** drop：先复位，再 stopPropagation 防冒泡到 ScriptPanel.mainRef 的双触发（旧行为会同时插文本） */
 function onDrop(e: DragEvent) {
   e.preventDefault()
@@ -192,7 +134,6 @@ function onDrop(e: DragEvent) {
   isDragging.value = false
   emit('drop', e)
 }
-
 /**
  * 确保 CM
  */
@@ -209,6 +150,7 @@ async function ensureCM(): Promise<CMModule> {
     keymap: v.keymap,
     placeholder: v.placeholder,
     Decoration: v.Decoration,
+    WidgetType: v.WidgetType,
     ViewPlugin: v.ViewPlugin,
     EditorState: s.EditorState,
     Prec: s.Prec,
@@ -219,7 +161,6 @@ async function ensureCM(): Promise<CMModule> {
   }
   return CM
 }
-
 /**
  * 执行 picker Load Files
  */
@@ -239,7 +180,6 @@ async function pickerLoadFiles() {
     pickerFiles.value = flat
   } catch { pickerFiles.value = [] }
 }
-
 /**
  * 执行 picker Open At
  * @param atPos - at Pos
@@ -279,7 +219,6 @@ function pickerOpenAt(atPos: number) {
   void pickerLoadFiles()
   nextTick(() => pickerInputRef.value?.focus())
 }
-
 /**
  * 执行 picker Close
  */
@@ -288,7 +227,6 @@ function pickerClose() {
   pickerQuery.value = ''
   pickerIndex.value = 0
 }
-
 /**
  * 在 @ 文件选择器中循环移动选中项
  * [CONSTRAINT] 用模运算实现环回（末项继续下移回到首项）；空列表直接返回
@@ -300,7 +238,6 @@ function pickerMove(d: number) {
   if (!n) return
   pickerIndex.value = (pickerIndex.value + d + n) % n
 }
-
 /**
  * 确认当前选中的文件并插入路径（Enter 触发）
  * [CONSTRAINT] 列表为空时静默 no-op；具体插入逻辑在 pickerPick 中
@@ -309,7 +246,6 @@ function pickerConfirm() {
   const f = pickerFiltered.value[pickerIndex.value]
   if (f) pickerPick(f)
 }
-
 /**
  * 执行 picker Pick
  * @param filePath - file Path
@@ -325,7 +261,6 @@ function pickerPick(filePath: string) {
   pickerIndex.value = 0
   cmView.focus()
 }
-
 /**
  * 编辑器内容/光标变更回调（驱动 @ 文件选择器）
  * [WHY] 只在 docChanged 时处理：单纯光标移动不触发选择器逻辑，减少无谓计算
@@ -349,7 +284,6 @@ function onEditorUpdate(u: ViewUpdate) {
     else pickerClose()
   }
 }
-
 /**
  * 创建 Editor
  */
@@ -357,6 +291,38 @@ async function createEditor() {
   if (!cmHost.value || cmView) return
   const m = await ensureCM()
   if (!editableComp) editableComp = new m.Compartment()
+  // Trae 风 @引用芯片：把 @路径 整段替换为「类型角标 + 文件名」控件
+  // [WHY] 与附件芯片视觉统一；隐藏冗长路径，避免挤占输入区
+  // [CONSTRAINT] 仅替换「显示」，文档内仍是 @路径 原文，发送/解析逻辑零影响
+  // [CHANGE-IMPACT] 需配合下方 atomicRanges，否则光标可落入不可见区间
+  class FileChipWidget extends m.WidgetType {
+    constructor(
+      readonly badge: string,
+      readonly label: string,
+      readonly full: string,
+    ) { super() }
+
+    override eq(other: FileChipWidget) {
+      return other.badge === this.badge && other.label === this.label && other.full === this.full
+    }
+
+    toDOM() {
+      const el = document.createElement('span')
+      el.className = 'cm-file-chip'
+      el.title = `@${this.full}`
+      const badge = document.createElement('span')
+      badge.className = 'cm-file-chip-badge'
+      badge.textContent = this.badge
+      const tone = fileToneStyle(this.label)
+      badge.style.color = tone.color
+      badge.style.background = tone.background
+      const name = document.createElement('span')
+      name.className = 'cm-file-chip-name'
+      name.textContent = this.label
+      el.append(badge, name)
+      return el
+    }
+  }
   if (!fileTagPlugin) {
     fileTagPlugin = m.ViewPlugin.fromClass(class {
       decorations: DecorationSet
@@ -372,7 +338,9 @@ async function createEditor() {
           const to = match.index + match[0].length
           const after = text[to]
           if (after === undefined || after === ' ' || after === '\n' || after === '\t') {
-            builder.add(from, to, m.Decoration.mark({ class: 'cm-file-tag' }))
+            const path = match[0].slice(1)
+            const label = path.split('/').pop() || path
+            builder.add(from, to, m.Decoration.replace({ widget: new FileChipWidget(fileBadge(label), label, path) }))
           }
         }
         return builder.finish()
@@ -395,13 +363,13 @@ async function createEditor() {
       m.EditorView.theme({
         '&': {
           height: '100%',
-          fontSize: '12px',
+          fontSize: '13px',
           backgroundColor: 'var(--surface)',
           color: 'var(--text)',
         },
         '.cm-scroller': {
           fontFamily: 'var(--mono, monospace)',
-          lineHeight: '20px',
+          lineHeight: '19px',
           overflowX: 'hidden',
           overflowY: 'auto',
         },
@@ -468,11 +436,15 @@ async function createEditor() {
         }
       }),
       fileTagPlugin,
+      // @引用芯片是 replace 装饰，需声明为原子区间，光标/选区整体跳过不可见原文
+      m.EditorView.atomicRanges.of((view: EditorView) => {
+        const inst = fileTagPlugin ? view.plugin(fileTagPlugin) : null
+        return inst?.decorations ?? m.Decoration.none
+      }),
     ],
   })
   cmView = new m.EditorView({ state, parent: cmHost.value })
 }
-
 /**
  * 在光标处插入文本并把光标移到插入内容末尾
  * [WHY] 供父组件通过 defineExpose 调用（拖拽插入 / 附件插入）；走 CM dispatch 保证 undo 历史完整
@@ -490,31 +462,94 @@ function insertText(text: string): void {
 defineExpose({ insertText })
 </script>
 
+<template>
+  <section class="editor card" :class="{ 'is-running': isRunning, 'is-dragging': isDragging }">
+    <slot name="attach-bar" />
+    <div
+      class="editor-body"
+      @paste.capture="(e) => emit('paste', e)"
+      @dragenter="onDragEnter"
+      @dragover.prevent="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
+    >
+      <!-- @FILE_PICKER_V1 -->
+      <!-- Teleport 到 body：.editor-body 有 overflow:hidden + 祖先含 transform，
+           会让 absolute/fixed 定位被裁或错位；Teleport 后完全脱离组件树，只受视口坐标约束
+           [CONSTRAINT] 因脱离 scoped 祖先链，内部选择器必须去掉 :deep 前缀改用同元素 data-v 匹配
+           [CHANGE-IMPACT] pickerRef / pickerInputRef 仍指向原元素，无需改脚本逻辑 -->
+      <Teleport to="body">
+        <div v-if="pickerOpen" ref="pickerRef" class="file-picker" :style="pickerStyle">
+          <input
+            ref="pickerInputRef" v-model="pickerQuery" class="fp-input" placeholder="搜索文件，Enter 选择，Esc 取消"
+            @keydown.down.prevent="pickerMove(1)" @keydown.up.prevent="pickerMove(-1)"
+            @keydown.enter.prevent="pickerConfirm" @keydown.esc.prevent="pickerClose"
+          >
+          <div class="fp-list">
+            <div
+              v-for="(f, i) in pickerFiltered" :key="f" class="fp-item" :class="{ active: i === pickerIndex }"
+              @mousedown.prevent="pickerPick(f)"
+            >
+              {{ f }}
+            </div>
+            <div v-if="!pickerFiltered.length" class="fp-empty">
+              无匹配文件
+            </div>
+          </div>
+        </div>
+      </Teleport>
+      <div ref="cmHost" class="cm-host" tabindex="0" />
+    </div>
+    <!-- 底部操作条：纯图标按钮，右下角对齐（Codex / CC 风） -->
+    <div class="editor-actions">
+      <slot name="action-bar" />
+    </div>
+  </section>
+</template>
+
 <style scoped lang="scss">
-:deep(.cm-file-tag) {
-  background: var(--primary-bg, rgb(88 166 255 / 12%));
-  color: var(--primary, #58a6ff);
-  border-radius: 4px;
-  padding: 1px 4px;
+:deep(.cm-file-chip) {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px 0 3px;
   margin: 0 1px;
+  border-radius: 5px;
+  background: rgb(127 127 127 / 10%);
+  border: 1px solid rgb(127 127 127 / 18%);
+  color: var(--text, #e6edf3);
+  font-size: 11px;
+  line-height: 1.25;
+  vertical-align: baseline;
+  cursor: default;
+}
+:deep(.cm-file-chip-badge) {
+  padding: 0 3px;
+  border-radius: 3px;
+  /* 配色由 fileToneStyle 按文件类型内联注入，此处只兜底未知类型 */
+  font: 600 8.5px/1.4 var(--mono, monospace);
+  letter-spacing: 0.3px;
+}
+:deep(.cm-file-chip-name) {
+  font-weight: 500;
 }
 .editor.card {
   flex: 0 0 auto;
-  min-height: 140px;
-  max-height: 360px;
+  min-height: 104px;
+  max-height: 300px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--surface-2, rgb(127 127 127 / 6%));
   border: 1px solid var(--border, rgb(127 127 127 / 15%));
-  border-radius: 20px;
+  border-radius: 14px;
   box-shadow: 0 1px 2px rgb(15 17 21 / 4%);
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease;
   max-width: min(820px, calc(100% - 100px));
   width: 100%;
-  margin: 8px auto 16px;
+  margin: 6px auto 10px;
   box-sizing: border-box;
 }
 .editor.card.is-running {
@@ -537,7 +572,7 @@ html[data-theme='dark'] .editor.card {
 }
 .editor :deep(.cm-editor) {
   color: var(--text, inherit);
-  font-size: 14px;
+  font-size: 13px;
   background: transparent;
 }
 .editor :deep(.cm-editor.cm-focused) {
@@ -545,7 +580,7 @@ html[data-theme='dark'] .editor.card {
 }
 .editor :deep(.cm-scroller) {
   font-family: inherit;
-  line-height: 1.6;
+  line-height: 1.45;
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -564,11 +599,11 @@ html[data-theme='dark'] .editor.card {
   background: transparent;
 }
 .editor :deep(.cm-content) {
-  min-height: 48px;
-  padding: 14px 20px;
+  min-height: 40px;
+  padding: 10px 16px;
   color: var(--text, inherit);
-  font-size: 14px;
-  line-height: 1.65;
+  font-size: 13px;
+  line-height: 1.5;
   background: transparent;
   caret-color: var(--primary, #58a6ff);
   font-family:
@@ -605,20 +640,20 @@ html[data-theme='dark'] .editor.card {
   background: transparent;
 }
 .editor :deep(.attach-bar) {
-  padding: 12px 20px 4px;
+  padding: 8px 16px 2px;
   margin: 0;
   background: transparent;
   border: 0;
-  gap: 8px;
+  gap: 6px;
 }
 .editor-actions {
   @apply flex justify-end items-center gap-1;
-  padding: 6px 20px 12px;
+  padding: 4px 16px 8px;
 }
 .editor-actions :deep(.ghost-btn),
 .editor-actions :deep(.primary-btn) {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border-radius: 8px;
   display: inline-flex;

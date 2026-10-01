@@ -1,3 +1,27 @@
+<script setup lang="ts">
+interface Template { id: string, label: string, title: string, code: string }
+
+// 去 props 变量绑定：模板直接用解构名，赋值给 props 会触发 unused-imports warning
+defineProps<{
+  running: boolean
+  isLoopActive: boolean
+  autoTakeoverEnabled: boolean
+  // 循环暂停标志：按钮在「暂停 / 恢复」间切换
+  loopPaused: boolean
+  script: string
+  attachedFilesCount: number
+  // 等待 AI 回复中：主按钮显示 spinner，视觉反馈与顶部 banner 呼应
+  aiWaiting: boolean
+}>()
+/** 派发 */
+const emit = defineEmits<{
+  applyTemplate: [code: string]
+  clearAll: []
+  pauseAll: []
+  toggleAutoTakeover: []
+}>()
+</script>
+
 <template>
   <div class="tpl-bar">
     <div class="tpl-spacer" />
@@ -55,31 +79,6 @@
     </button>
   </div>
 </template>
-
-<script setup lang="ts">
-// 去 props 变量绑定：模板直接用解构名，赋值给 props 会触发 unused-imports warning
-defineProps<{
-  running: boolean
-  isLoopActive: boolean
-  autoTakeoverEnabled: boolean
-  // 循环暂停标志：按钮在「暂停 / 恢复」间切换
-  loopPaused: boolean
-  script: string
-  attachedFilesCount: number
-  // 等待 AI 回复中：主按钮显示 spinner，视觉反馈与顶部 banner 呼应
-  aiWaiting: boolean
-}>()
-
-/** 派发 */
-const emit = defineEmits<{
-  applyTemplate: [code: string]
-  clearAll: []
-  pauseAll: []
-  toggleAutoTakeover: []
-}>()
-
-interface Template { id: string, label: string, title: string, code: string }
-</script>
 
 <style scoped>
 .tpl-bar {

@@ -2,6 +2,8 @@
 // 解决 tsc --noEmit -p tsconfig.client.json 时对 *.vue 无类型导致的 TS2307
 /// <reference types="vite/client" />
 
+declare module 'eslint-vue-setup-rules'
+
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
 

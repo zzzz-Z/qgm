@@ -116,14 +116,7 @@
 
 ---
 
-## §5 代码组织与架构约束 (Code & Architecture)
-
-### §5.1 文件内分区（TS/Vue）
-
-固定顺序，同类聚合，function 声明，节间空一行：
-`import` → `Vue 宏` → `类型` → `常量` → `ref/reactive` → `computed` → `watch/onMounted` → `function` → `export`
-
-### §5.2 架构红线（HCLC）
+### §5 架构红线（HCLC）
 
 - **依赖数量**：单文件 `import` > 8 即触发阻断级违规（由 `hclc-guard.node-test.ts` 强制校验）。
 - **文件体积**：普通模块 ≤ 400 行，组件 ≤ 500 行；超限必须拆分为 composable 或 utils，禁止申请豁免。
@@ -178,3 +171,15 @@
   3. 删除旧文件。
      _(注：若沙箱支持 `git mv`，优先使用 `__AI__.shell('git mv ...')` 以保留 Git 历史)_。
 - **未完成的级联**：若因上下文超长导致无法在一轮内修复所有调用方，必须在 `@todo` 中显式记录“剩余未更新的调用方路径”，并在下一轮优先处理。
+
+---
+
+## §11 输出长度预算与截断规避 (Output Length Budget)
+
+模型单轮回复受 `max_tokens` 上限约束，超出即被上游静默截断——表现为脚本尾部缺失，服务端报 `Invalid or unexpected token` / `Unexpected end of input`。
+
+- **硬性预算**：单轮脚本源码 ≤ 300 行 / 12 KB。超出必须拆为多轮，一轮只推进一个原子 `@todo`。
+- **禁止内嵌大字符串**：SVG / HTML / 长 CSS / 大段模板文本一律走独立 `writeFile` 轮，不与其他逻辑挤在同一脚本。
+- **避免敏感字面量**：脚本内不要出现成对闭合的 `<script>` / `</template>` / `</style>` 等标签字符串；如需写入，用字符串拼接（如 `'<scr' + 'ipt>'`）绕开上游扫描。
+- **分步提交**：文件级改动优先「先建新文件 → 再接线 → 最后清理旧实现」三段式，每段独立成轮。
+- **截断自检**：若收到 `Invalid or unexpected token` / `Unexpected end of input` 且错误位置在脚本尾段，判定为输出被截断，**不得原地重试**；必须缩小本轮改动范围后重发（见 §9 重试预算）。

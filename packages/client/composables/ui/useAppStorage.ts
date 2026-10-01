@@ -1,6 +1,8 @@
 // [app-storage-v1] PLAN 4.7 阈值整改：从 App.vue 抽出的 localStorage 纯函数
 // 所有访问都在 try/catch 内，SSR/无 localStorage 环境安全降级
 import { useStorage } from '@vueuse/core'
+// [unified-store-v1] 会话历史主写统一 store
+import { loadSite, saveSite } from './useSitesStore'
 
 /** 会话（接口） */
 export interface SessionEntry {
@@ -96,9 +98,14 @@ export function saveHistory(entries: SessionEntry[]): void {
 const HISTORY_BY_SITE_PREFIX = '__ai_session_history__'
 const ACTIVE_BY_SITE_PREFIX = '__ai_active_session_id__'
 
-/** 读取指定站点的会话历史；无站点专属键时回退全局键（首次迁移） */
+/** 读取指定站点的会话历史：优先统一 store，旧键作为迁移兜底 */
+// [unified-load-v1] 统一源：__ai_sites_unified.sites[id].history
 export function loadHistoryBySite(modelId: string): SessionEntry[] {
   try {
+    const unified = loadSite(modelId)
+    if (unified && Array.isArray(unified.history) && unified.history.length > 0) {
+      return unified.history as unknown as SessionEntry[]
+    }
     const scoped = safeGet(HISTORY_BY_SITE_PREFIX + modelId)
     if (scoped) return JSON.parse(scoped) as SessionEntry[]
     const legacy = safeGet(SESSION_HISTORY_KEY)
@@ -106,20 +113,38 @@ export function loadHistoryBySite(modelId: string): SessionEntry[] {
   } catch { return [] }
 }
 
-/** 写入指定站点的会话历史；仅落站点键，不动全局键（避免跨站点互相覆盖） */
+/** 写入指定站点的会话历史：主写统一 store，双写旧键作回滚备份 */
+// [unified-save-v1] 双写理由：新源给后续 loadSite 用；旧键保留供回退与老版本读
 export function saveHistoryBySite(modelId: string, entries: SessionEntry[]): void {
+  const existing = loadSite(modelId)
+  saveSite(modelId, {
+    history: entries,
+    activeId: (existing && existing.activeId) || '',
+    url: (existing && existing.url) || '',
+    updatedAt: Date.now(),
+  })
   safeSet(HISTORY_BY_SITE_PREFIX + modelId, JSON.stringify(entries))
 }
 
-/** 读取指定站点的激活会话 id；无站点专属键时回退全局键（首次迁移） */
+/** 读取指定站点的激活会话 id：优先统一 store，旧键作为迁移兜底 */
+// [unified-active-v1]
 export function loadActiveSessionIdBySite(modelId: string): string {
+  const unified = loadSite(modelId)
+  if (unified && unified.activeId) return unified.activeId
   const scoped = safeGet(ACTIVE_BY_SITE_PREFIX + modelId)
   if (scoped) return scoped
   return safeGet(ACTIVE_SESSION_KEY) || ''
 }
 
-/** 写入指定站点的激活会话 id；仅落站点键 */
+/** 写入指定站点的激活会话 id：主写统一 store，双写旧键回滚备份 */
 export function saveActiveSessionIdBySite(modelId: string, id: string): void {
+  const existing = loadSite(modelId)
+  saveSite(modelId, {
+    history: (existing && existing.history) || [],
+    activeId: id,
+    url: (existing && existing.url) || '',
+    updatedAt: Date.now(),
+  })
   safeSet(ACTIVE_BY_SITE_PREFIX + modelId, id)
 }
 

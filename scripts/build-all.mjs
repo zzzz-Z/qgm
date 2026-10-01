@@ -36,7 +36,12 @@ console.log('[build-all] done')
 // [AIRUNNER-BUILD-WATCH-V1] --watch 常驻：src/ 变更 → 自动重建 server + 拷贝 runtime
 if (process.argv.includes('--watch')) {
   const { watch } = await import('node:fs')
-  const srcDir = path.join(ROOT, 'packages', 'core', 'src')
+  // [watch-scope-v1] 服务端产物由 core 与 standalone 两侧源码共同驱动，
+  // 只监听 core 会导致改 apps/standalone/src/server.ts 后不重建
+  const watchDirs = [
+    path.join(ROOT, 'packages', 'core', 'src'),
+    path.join(ROOT, 'apps', 'standalone', 'src'),
+  ]
   let rebuilding = false
   let pending = false
   const rebuild = async () => {
@@ -58,9 +63,10 @@ if (process.argv.includes('--watch')) {
     }
   }
   let timer = null
-  watch(srcDir, { recursive: true }, (_evt, _name) => {
+  const onChange = () => {
     if (timer) clearTimeout(timer)
     timer = setTimeout(rebuild, 300)
-  })
-  console.log('[build-all:watch] 监听 packages/core/src 中，Ctrl+C 退出')
+  }
+  for (const d of watchDirs) watch(d, { recursive: true }, onChange)
+  console.log(`[build-all:watch] 监听 ${watchDirs.map(d => path.relative(ROOT, d)).join('、')} 中，Ctrl+C 退出`)
 }

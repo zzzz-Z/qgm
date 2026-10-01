@@ -1,86 +1,3 @@
-<template>
-  <section class="terminal">
-    <!-- [flow-timeline] 全流程时间线 -->
-    <div class="flow-timeline">
-      <div ref="chatListRef" class="chat-list" @scroll="onChatScroll">
-        <!-- 每轮脚本 desc：Markdown 渲染；来源 busEvents（已持久化到 localStorage） -->
-        <template v-for="card in timelineItems" :key="card.key">
-          <div v-if="card.type === 'script'" class="script-card" :class="card.phaseClass">
-            <div
-              class="script-card-head"
-              :class="{ 'is-clickable': !!(card.stdoutTail || card.stderrTail || card.why) }"
-              :aria-expanded="(card.stdoutTail || card.stderrTail || card.why) ? isCardExpanded(card) : undefined"
-              @click="(card.stdoutTail || card.stderrTail || card.why) ? toggleCard(card.key) : null"
-            >
-              <span class="script-card-phase">{{ card.phaseLabel }}</span>
-              <span class="script-card-desc">{{ card.desc }}</span>
-              <span class="script-card-time">{{ card.timeLabel }}</span>
-            </div>
-            <div
-              v-if="isCardExpanded(card) && (card.stdoutTail || card.stderrTail || card.why)"
-              class="script-card-tail"
-            >
-              <!-- why 从卡片主体迁移至此：仅展开时可见，与输出同屏 -->
-              <div v-if="card.why" class="why-block">
-                <span class="why-label">WHY</span>
-                <span class="why-text">{{ card.why }}</span>
-              </div>
-              <pre
-                v-if="card.stdoutTail"
-                class="tail-pre"
-              >{{ card.stdoutTail }}</pre>
-              <pre
-                v-if="card.stderrTail"
-                class="tail-pre err"
-              >{{ card.stderrTail }}</pre>
-            </div>
-          </div>
-          <!-- 总结卡片（来自事件流，刷新后保留） -->
-          <section v-else-if="card.type === 'done'" class="done-summary">
-            <div class="done-summary-head">
-              任务完成 · 总结
-            </div>
-            <div class="done-summary-body" v-html="card.html" />
-          </section>
-          <!-- 非 cjs 文本卡片：与总结同排版 -->
-          <section v-else-if="card.type === 'text'" class="text-card">
-            <header class="text-card-head">
-              <span class="text-card-badge">AI</span>
-              <span class="script-card-time">{{ card.timeLabel }}</span>
-            </header>
-            <div class="done-summary-body" v-html="card.html" />
-          </section>
-          <!-- 用户提问/回答卡：badge 用「你」区分 AI；回答额外走 answer-card 视觉 -->
-          <section v-else class="text-card" :class="card.role === 'user-answer' ? 'answer-card' : 'ask-card'">
-            <header class="text-card-head">
-              <span class="text-card-badge" :class="card.role === 'user-answer' ? 'answer-badge' : 'ask-badge'">你</span>
-              <span class="script-card-time">{{ card.timeLabel }}</span>
-            </header>
-            <div class="done-summary-body" v-html="card.html" />
-          </section>
-        </template>
-
-        <!-- 空态：无卡片 / 无输出 / 无总结 -->
-        <div v-if="!running && !twStdout && !twStderr && timelineItems.length === 0" class="tree-empty">
-          <div class="empty-title">
-            还没有执行记录
-          </div>
-          <div class="empty-sub">
-            点击「运行」开始自动化循环
-          </div>
-        </div>
-      </div>
-      <!-- 等待 AI 回复指示条：收到首 token / reply 后由 stopAiWaiting 关闭；置于消息流底部 -->
-      <div v-if="props.aiWaiting" class="wait-banner" role="status" aria-live="polite">
-        <span class="wait-spinner" aria-hidden="true" />
-        <span class="wait-text">{{ waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中' }}</span>
-        <span class="wait-dots" aria-hidden="true" />
-        <span v-if="waitElapsed > 0" class="wait-elapsed" aria-hidden="true">{{ waitElapsed }}s</span>
-      </div>
-    </div>
-  </section>
-</template>
-
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
@@ -89,23 +6,10 @@ import { useIntervalFn } from '@vueuse/core'
 import { renderMarkdown } from '../../composables/useMarkdown.js'
 // 事件流单例（localStorage 持久化），用于渲染每轮脚本 desc
 import { useEventBus } from '../../composables/ui/useEventStream'
-
-/** 组件接收的 props 定义 */
-const props = defineProps<{
-
-  running: boolean
-  twStdout: string
-  twStderr: string
-  twLines: string[]
-  twErrLines: string[]
-  doneSummary?: string // lineClass: (line: string) => string
-  // 等待 AI 回复中；由 ScriptPanel 透传 useAiWaiting().waiting
-  aiWaiting?: boolean
-}>()
-
-/** 派发 */
-// 去掉变量赋值：模板未消费此 emit，赋值触发 unused-imports warning
-defineEmits<{ (e: 'applyTemplate', code: string): void }>()
+// [rd-import-v1] 引入抽出的轮次分隔条组件
+import RoundDivider from './RoundDivider.vue'
+// [sc-wire-v1] 脚本卡片抽为子组件
+import ScriptCard from './ScriptCard.vue'
 
 interface ScriptItem {
   type: 'script'
@@ -121,14 +25,12 @@ interface ScriptItem {
   // why 从卡片主体迁移至展开区，避免每张卡都占两行；空串表示无 why
   why: string
 }
-
 interface TextItem {
   type: 'text'
   key: string
   timeLabel: string
   html: string
 }
-
 interface DoneItem {
   type: 'done'
   key: string
@@ -138,21 +40,25 @@ interface DoneItem {
 // 用户提问/回答卡：ScriptPanel.runSmart 与 App.vue ask 回答分支 emit('ai:ask')
 // role='user-answer' 时展示为「回答」+ answer-badge，区分于「提问」
 interface AskItem { type: 'ask', key: string, timeLabel: string, html: string, role?: 'user-answer' }
+// [round-divider-v1] 轮次分隔条：loopRound 变化时插入，视觉上呈现 TRAE 式「轮次分组」
+// [CONSTRAINT] 依赖 payload.loopRound（由 App.vue ...currentLoopContext() 注入）；手动模式无 loopRound → 不插条
+interface DividerItem { type: 'round-divider', key: string, roundLabel: string, timeLabel: string }
 
-const { events: busEvents } = useEventBus()
+/** 组件接收的 props 定义 */
+const props = defineProps<{
 
-// 等待时长本地计时：aiWaiting 为 true 时启动，false 时停止并归零
-// [WHY] 用本地 interval 而非改 useAiWaiting 契约（避免污染其他消费方）；仅用于展示层
-// [CONSTRAINT] useIntervalFn 组件卸载自动清理；watch 双向同步启停
-// [CHANGE-IMPACT] 与 wait-banner 模板成对；去掉 watch 会让秒数永远为 0
-const waitElapsed = ref(0)
-const { pause: pauseWaitTimer, resume: resumeWaitTimer } = useIntervalFn(() => {
-  waitElapsed.value += 1
-}, 1000, { immediate: false })
-watch(() => props.aiWaiting, (v) => {
-  if (v) { waitElapsed.value = 0; resumeWaitTimer() }
-  else { pauseWaitTimer(); waitElapsed.value = 0 }
-}, { immediate: true })
+  running: boolean
+  twStdout: string
+  twStderr: string
+  twLines: string[]
+  twErrLines: string[]
+  doneSummary?: string // lineClass: (line: string) => string
+  // 等待 AI 回复中；由 ScriptPanel 透传 useAiWaiting().waiting
+  aiWaiting?: boolean
+}>()
+/** 派发 */
+// 去掉变量赋值：模板未消费此 emit，赋值触发 unused-imports warning
+defineEmits<{ (e: 'applyTemplate', code: string): void }>()
 
 /** 阶段中文标签表；未命中回退为原值 */
 const PHASE_LABEL: Record<string, string> = {
@@ -162,6 +68,21 @@ const PHASE_LABEL: Record<string, string> = {
   error: '失败',
 }
 
+// 等待时长本地计时：aiWaiting 为 true 时启动，false 时停止并归零
+// [WHY] 用本地 interval 而非改 useAiWaiting 契约（避免污染其他消费方）；仅用于展示层
+// [CONSTRAINT] useIntervalFn 组件卸载自动清理；watch 双向同步启停
+// [CHANGE-IMPACT] 与 wait-banner 模板成对；去掉 watch 会让秒数永远为 0
+const waitElapsed = ref(0)
+// [sc-deadcode-v1] expandedCards/toggleCard/isCardExpanded 已下沉到 ScriptCard.vue
+
+/** 列表 */
+const chatListRef = ref<HTMLElement | null>(null)
+
+const { events: busEvents } = useEventBus()
+const { pause: pauseWaitTimer, resume: resumeWaitTimer } = useIntervalFn(() => {
+  waitElapsed.value += 1
+}, 1000, { immediate: false })
+
 /**
  * 每轮脚本卡片：从 busEvents 提取 run:start 事件（desc/why/lang/phase）
  * [WHY] 事件流 updateKey 原地更新，同一脚本多次 phase 变化只留一条；desc 用 renderMarkdown 呈现
@@ -169,7 +90,9 @@ const PHASE_LABEL: Record<string, string> = {
  * [CHANGE-IMPACT] 依赖 App.vue / useRunner 的 emit 契约（run:start + payload.desc/why/lang/phase）
  */
 const timelineItems = computed(() => {
-  const out: Array<ScriptItem | TextItem | DoneItem | AskItem> = []
+  const out: Array<ScriptItem | TextItem | DoneItem | AskItem | DividerItem> = []
+  // [round-divider-v1] 追踪上一张脚本卡的轮次；跨轮时插入分隔条（初始 0 表示尚未出现任何轮次）
+  let lastRound = 0
   for (const ev of busEvents.value) {
     // 用户提问卡：ScriptPanel.runSmart 成功 copyAndFill 后 emit('ai:ask')
     // [CONSTRAINT] 只收 payload.text 非空事件，避免空卡；与 ai:done 同结构仅 badge 不同
@@ -192,6 +115,7 @@ const timelineItems = computed(() => {
     }
     // 总结卡片：来自 ai:done 事件（方案 A，持久化）
     // [CONSTRAINT] text 为空表示纯占位（AI 只回复 DONE 无总结），跳过不渲染
+
     if (ev.kind === 'ai:done') {
       const tp = (ev.payload || {}) as Record<string, unknown>
       const text = String(tp.text || '').trim()
@@ -242,42 +166,35 @@ const timelineItems = computed(() => {
     const d = new Date(ev.ts || Date.now())
     const pad = (n: number) => String(n).padStart(2, '0')
     const timeLabel = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    // [round-divider-v1] loopRound 变化时插一条轮次分隔（不改变原有卡片结构，纯视觉分组）
+    const loopRoundNum = Number(p.loopRound || 0)
+    if (loopRoundNum > 0 && loopRoundNum !== lastRound) {
+      lastRound = loopRoundNum
+      out.push({ type: 'round-divider', key: `rd-${loopRoundNum}-${ev.id}`, roundLabel: `R${loopRoundNum}`, timeLabel })
+    }
     out.push({ type: 'script', key, langLabel, phaseLabel: PHASE_LABEL[phase] || phase, phaseClass: `phase-${phase}`, desc, timeLabel, stdoutTail, stderrTail, why })
   }
 
   return out
 })
-
 // 折叠展开的卡片 key 集合；用 Set 替换触发响应
-const expandedCards = ref<Set<string>>(new Set())
+// [script-progress-v1] 任务进度：done+error 计完成；TRAE 面板 "X/Y tasks completed" 同语义
+// [WHY] 用事件流里的 run:start 卡片计数复用同语义，无需引入额外状态
+// [CONSTRAINT] 只统计当前 timelineItems 中的脚本卡；随清屏 / 刷新同步更新
+// [CHANGE-IMPACT] 与模板 .progress-header 成对；去掉会让顶部进度消失
+const scriptProgress = computed(() => {
+  const items = timelineItems.value.filter(c => c.type === 'script') as Array<{ phaseClass: string }>
+  let done = 0
+  for (const c of items) {
+    if (c.phaseClass === 'phase-done' || c.phaseClass === 'phase-error') done += 1
+  }
+  return { done, total: items.length }
+})
 
-// 已删 latestScriptKey 自动展开：用户需求"输出默认全部收起"，所有卡初始收起，需手动点开
-/**
- * 切换卡片输出的折叠状态
- * [CONSTRAINT] 必须替换引用（Set 非响应式内部变更），否则模板不重渲染
- * @param key 卡片 updateKey
- */
-function toggleCard(key: string): void {
-  const next = new Set(expandedCards.value)
-  if (next.has(key)) next.delete(key)
-  else next.add(key)
-  expandedCards.value = next
-}
-
-/**
- * 判定卡片是否展开输出区
- * [WHY] 执行中/等待中的卡片应默认展开以展示打字机输出；用户手动 toggle 覆盖默认行为
- * [CONSTRAINT] 手动 toggle 与自动展开叠加：用户展开过的卡片即使在 done 态也保持展开
- * @param card scriptCards 单项；只用 key 与 phaseClass
- */
-function isCardExpanded(card: { key: string }): boolean {
-  // 仅凭用户手动展开记录；不再按 phase 自动展开
-  return expandedCards.value.has(card.key)
-}
-
-/** 列表 */
-const chatListRef = ref<HTMLElement | null>(null)
-
+watch(() => props.aiWaiting, (v) => {
+  if (v) { waitElapsed.value = 0; resumeWaitTimer() }
+  else { pauseWaitTimer(); waitElapsed.value = 0 }
+}, { immediate: true })
 // 总结写入后自动滚到底部，确保用户第一眼看到
 // [CONSTRAINT] 需 nextTick 等 DOM 更新完成后再滚；仅当有新内容时触发（props.doneSummary 从空→非空 或 变内容）
 // [CHANGE-IMPACT] 若父组件清空 doneSummary（新一轮开始）不滚动；避免滚动位置抖动
@@ -290,6 +207,7 @@ watch(
     if (el) el.scrollTop = el.scrollHeight
   },
 )
+
 // 页面刷新时自动滚到最后一条：
 // [WHY] 上面的 watch 非 immediate，刷新时 busEvents 若同步恢复则不触发；需挂载后主动滚一次
 // [CONSTRAINT] rAF 二次滚动兜底字体/异步渲染造成的高度变化；一次性，不持续 watch
@@ -311,7 +229,84 @@ onMounted(async () => {
 function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 </script>
 
+<template>
+  <section class="terminal">
+    <!-- [flow-timeline] 全流程时间线 -->
+    <div class="flow-timeline">
+      <!-- [script-progress-v1] 顶部进度条：X/Y tasks completed；无脚本卡时不渲染 -->
+      <div v-if="scriptProgress.total > 0" class="progress-header">
+        <span class="progress-dot" :class="{ 'is-active': scriptProgress.done < scriptProgress.total }" />
+        <span class="progress-text">
+          {{ scriptProgress.done }}/{{ scriptProgress.total }} tasks completed
+        </span>
+        <span class="progress-bar">
+          <span
+            class="progress-bar-fill"
+            :style="{ width: `${scriptProgress.total ? (scriptProgress.done / scriptProgress.total * 100) : 0}%` }"
+          />
+        </span>
+      </div>
+      <div ref="chatListRef" class="chat-list" @scroll="onChatScroll">
+        <!-- 每轮脚本 desc：Markdown 渲染；来源 busEvents（已持久化到 localStorage） -->
+        <template v-for="card in timelineItems" :key="card.key">
+          <!-- [rd-tpl-v1] 已抽为子组件 -->
+          <RoundDivider
+            v-if="card.type === 'round-divider'"
+            :round-label="card.roundLabel"
+            :time-label="card.timeLabel"
+          />
+          <ScriptCard
+            v-else-if="card.type === 'script'"
+            :key="card.key"
+            :card="card"
+          />
+          <section v-else-if="card.type === 'done'" class="done-summary">
+            <div class="done-summary-head">
+              任务完成 · 总结
+            </div>
+            <div class="done-summary-body" v-html="card.html" />
+          </section>
+          <!-- 非 cjs 文本卡片：与总结同排版 -->
+          <section v-else-if="card.type === 'text'" class="text-card">
+            <header class="text-card-head">
+              <span class="text-card-badge">AI</span>
+              <span class="script-card-time">{{ card.timeLabel }}</span>
+            </header>
+            <div class="done-summary-body" v-html="card.html" />
+          </section>
+          <!-- 用户提问/回答卡：badge 用「你」区分 AI；回答额外走 answer-card 视觉 -->
+          <section v-else-if="card.type === 'ask'" class="text-card" :class="card.role === 'user-answer' ? 'answer-card' : 'ask-card'">
+            <header class="text-card-head">
+              <span class="text-card-badge" :class="card.role === 'user-answer' ? 'answer-badge' : 'ask-badge'">你</span>
+              <span class="script-card-time">{{ card.timeLabel }}</span>
+            </header>
+            <div class="done-summary-body" v-html="card.html" />
+          </section>
+        </template>
+
+        <!-- 空态：无卡片 / 无输出 / 无总结 -->
+        <div v-if="!running && !twStdout && !twStderr && timelineItems.length === 0" class="tree-empty">
+          <div class="empty-title">
+            还没有执行记录
+          </div>
+          <div class="empty-sub">
+            点击「运行」开始自动化循环
+          </div>
+        </div>
+      </div>
+      <!-- 等待 AI 回复指示条：收到首 token / reply 后由 stopAiWaiting 关闭；置于消息流底部 -->
+      <div v-if="props.aiWaiting" class="wait-banner" role="status" aria-live="polite">
+        <span class="wait-spinner" aria-hidden="true" />
+        <span class="wait-text">{{ waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中' }}</span>
+        <span class="wait-dots" aria-hidden="true" />
+        <span v-if="waitElapsed > 0" class="wait-elapsed" aria-hidden="true">{{ waitElapsed }}s</span>
+      </div>
+    </div>
+  </section>
+</template>
+
 <style scoped>
+/* [font-weight-light-v1] 全文字重降一档：600→500、500→400，对齐 TRAE 视觉轻量化 */
 /* TerminalPane styles — 合并历史 7 层覆盖为单层
  * [WHY] 早期迭代逐层叠加 !important（同选择器 5+ 处定义），视觉溯源困难；本合并层按最终生效值统一
  * [CONSTRAINT] 选择器与原定义一致，仅保留最终生效属性；不再用 !important
@@ -334,6 +329,7 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   @apply flex flex-col flex-nowrap items-stretch justify-start gap-0 overflow-hidden;
   padding: 0;
   min-height: 0;
+  padding-bottom: 50px;
   max-height: none;
   background: transparent;
   flex: 1 1 0;
@@ -341,6 +337,48 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 }
 
 /* ── 消息流 ─────────────────────────────────────────── */
+/* [script-progress-v1] 顶部进度条 */
+.progress-header {
+  @apply flex items-center;
+  gap: 8px;
+  padding: 8px 24px;
+  max-width: 820px;
+  margin: 0 auto;
+  width: 100%;
+  font-size: 11px;
+  color: var(--text-3, #8b949e);
+  border-bottom: 1px solid rgb(127 127 127 / 8%);
+  flex-shrink: 0;
+}
+.progress-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(127 127 127 / 40%);
+  flex-shrink: 0;
+}
+.progress-dot.is-active {
+  background: var(--primary, #58a6ff);
+  animation: vp-pulse 1.4s ease-in-out infinite;
+}
+.progress-text {
+  font: 400 11px/1.4 var(--mono, monospace);
+  letter-spacing: 0.2px;
+}
+.progress-bar {
+  flex: 1 1 auto;
+  height: 3px;
+  border-radius: 2px;
+  background: rgb(127 127 127 / 12%);
+  overflow: hidden;
+  max-width: 240px;
+}
+.progress-bar-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #58a6ff, #3fb950);
+  transition: width 0.3s ease;
+}
 .chat-list {
   flex: 1 1 0;
   min-height: 0;
@@ -381,7 +419,7 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 }
 .empty-title {
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 400;
   color: var(--text-2);
   letter-spacing: 0;
 }
@@ -405,6 +443,8 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 .script-card:hover {
   background: rgb(127 127 127 / 3%);
 }
+/* [round-divider-v1] 轮次分隔条：左右渐隐线 + 中央圆角标签，弱视觉强化"分组" */
+/* [rd-css-v1] .round-divider* 样式已迁至 RoundDivider.vue */
 .script-card-head,
 .text-card-head {
   @apply flex items-center gap-1.5 mb-0.5 text-[10.5px] leading-[1.2];
@@ -447,48 +487,45 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   border-radius: 4px;
   background: rgb(110 118 129 / 25%);
   color: var(--text-2, #c9d1d9);
-  font: 600 10px/1.5 var(--mono, monospace);
+  font: 400 10px/1.5 var(--mono, monospace);
   letter-spacing: 0.4px;
 }
 .text-card-kind {
   color: var(--text-3, #8b949e);
   font-size: 11.5px;
 }
+/* [phase-icon-restore-v1] 恢复 .script-card-phase 与 .phase-icon；语言徽章样式不恢复 */
 .script-card-phase {
   flex: 0 0 auto;
-  @apply inline-flex items-center gap-[4px];
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: 0.2px;
+  display: inline-flex;
+  align-items: center;
   color: var(--text-3, #8b949e);
 }
-.script-card.phase-running .script-card-phase {
+.script-card-phase.phase-running {
   color: var(--primary, #58a6ff);
 }
-.script-card.phase-pending .script-card-phase {
+.script-card-phase.phase-pending {
   color: var(--warning, #d29922);
 }
-.script-card.phase-done .script-card-phase {
+.script-card-phase.phase-done {
   color: var(--success, #3fb950);
 }
-.script-card.phase-error .script-card-phase {
+.script-card-phase.phase-error {
   color: var(--danger, #f85149);
 }
-.script-card.phase-running .script-card-phase::before,
-.script-card.phase-pending .script-card-phase::before,
-.script-card.phase-done .script-card-phase::before,
-.script-card.phase-error .script-card-phase::before {
-  content: '';
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  vertical-align: middle;
+.phase-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  display: block;
 }
-.script-card.phase-running .script-card-phase::before {
-  animation: vp-pulse 1.4s ease-in-out infinite;
+.phase-icon-spin {
+  animation: phase-spin 1.6s linear infinite;
+}
+@keyframes phase-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 @keyframes vp-pulse {
   0%,
@@ -504,7 +541,7 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 .script-card-time {
   flex: 0 0 auto;
   margin-left: auto;
-  font: 500 11px/1.1 var(--mono, monospace);
+  font: 400 11px/1.1 var(--mono, monospace);
   color: var(--text-3, #8b949e);
   opacity: 0.62;
   font-variant-numeric: tabular-nums;
@@ -513,8 +550,8 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   flex: 1 1 auto;
   min-width: 0;
   color: var(--text-2, #c9d1d9);
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 300;
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
@@ -534,7 +571,7 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   padding: 1px 6px;
   border-radius: 3px;
   background: var(--surface-3, #161b22);
-  font: 600 10px/1.4 var(--mono, monospace);
+  font: 400 10px/1.4 var(--mono, monospace);
   letter-spacing: 0.5px;
   color: var(--text-3, #8b949e);
 }
@@ -568,7 +605,7 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 .done-summary-head {
   @apply flex items-center gap-2;
   font:
-    600 14px/1.5 -apple-system,
+    400 14px/1.5 -apple-system,
     BlinkMacSystemFont,
     'Segoe UI',
     'PingFang SC',
@@ -611,21 +648,21 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
 .done-summary-body :deep(h1) {
   margin: 22px 0 12px;
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--text, #e6edf3);
   line-height: 1.35;
 }
 .done-summary-body :deep(h2) {
   margin: 20px 0 10px;
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--text, #e6edf3);
   line-height: 1.4;
 }
 .done-summary-body :deep(h3) {
   margin: 18px 0 8px;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--text, #e6edf3);
   line-height: 1.4;
 }
@@ -635,7 +672,7 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   margin-top: 0;
 }
 .done-summary-body :deep(strong) {
-  font-weight: 600;
+  font-weight: 400;
   color: var(--text, #e6edf3);
 }
 .done-summary-body :deep(table) {
@@ -656,7 +693,7 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   vertical-align: top;
 }
 .done-summary-body :deep(th) {
-  font-weight: 600;
+  font-weight: 400;
   color: var(--text-2, #c9d1d9);
   background: transparent;
   border-bottom: 1px solid var(--border, #30363d);
@@ -703,6 +740,7 @@ function onChatScroll(): void { /* 由父组件按需注入滚动处理 */ }
   font: 12px var(--mono, monospace);
   color: var(--text-2, #c9d1d9);
 }
+/* ── 等待 AI 回复指示条 ─────────────────────────── */
 .wait-banner {
   display: inline-flex;
   align-items: center;

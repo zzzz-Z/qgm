@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import DiffViewer from './DiffViewer.vue'
 
-defineOptions({ name: 'DiffOverlay' })
-
 /** 组件接收的 props 定义 */
 const props = defineProps<{
   fileName: string
@@ -10,9 +8,10 @@ const props = defineProps<{
   after: string
   changeType: 'added' | 'modified' | 'deleted'
 }>()
-
 /** 派发 */
 const emit = defineEmits<{ close: [] }>()
+
+defineOptions({ name: 'DiffOverlay' })
 </script>
 
 <template>

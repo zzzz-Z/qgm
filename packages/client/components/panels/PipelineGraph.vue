@@ -2,15 +2,7 @@
 // PLAN 5.2 链路图（五段聚合）
 import { computed } from 'vue'
 
-/** 组件接收的 props 定义 */
-const props = withDefaults(defineProps<Props>(), {
-  pipeline: () => ({}),
-  round: 0,
-  elapsedMs: 0,
-})
-
 type SegStatus = 'pending' | 'running' | 'ok' | 'failed' | 'skipped' | 'manual'
-
 interface Props {
   /** 内部 11 段状态 */
   pipeline?: Record<string, { status?: string } | undefined>
@@ -18,6 +10,12 @@ interface Props {
   elapsedMs?: number
 }
 
+/** 组件接收的 props 定义 */
+const props = withDefaults(defineProps<Props>(), {
+  pipeline: () => ({}),
+  round: 0,
+  elapsedMs: 0,
+})
 // 五段聚合：内部 11 段 → 用户视角 5 段
 /** 流水线阶段名称列表 */
 const STAGES: Array<{ key: string, label: string, segs: string[] }> = [
@@ -27,7 +25,6 @@ const STAGES: Array<{ key: string, label: string, segs: string[] }> = [
   { key: 'exe', label: '执行', segs: ['EXECUTE', 'COLLECT'] },
   { key: 'back', label: '回传', segs: ['RESULT_RELAY', 'RESULT_INJECT'] },
 ]
-
 /** 图标 */
 const ICON: Record<SegStatus, string> = {
   pending: '·',
@@ -43,13 +40,10 @@ const stages = computed(() => STAGES.map((st) => {
   const ss = st.segs.map(k => norm(props.pipeline?.[k]?.status))
   return { ...st, status: agg(ss) }
 }))
-
 /** 当前阶段索引 */
 const currentIdx = computed(() => stages.value.findIndex(s => s.status === 'running'))
-
 /** 是否含 */
 const hasAny = computed(() => stages.value.some(s => s.status !== 'pending'))
-
 /** 格式化已用时长 */
 const fmtElapsed = computed(() => {
   const ms = props.elapsedMs
@@ -73,7 +67,6 @@ function agg(states: Array<SegStatus>): SegStatus {
   if (states.some(s => s === 'ok')) return 'running'
   return 'pending'
 }
-
 /**
  * 把服务端下发的原始状态字符串规范化到 SegStatus 枚举
  * [CONSTRAINT] 只接受 ok / running / failed 三个字面量；其余（含 undefined）一律回落 pending

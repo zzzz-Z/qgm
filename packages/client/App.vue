@@ -39,35 +39,19 @@ import TooltipHost from './components/feedback/TooltipHost.vue'
 // [app-storage-extracted-v1]
 import { activeSessionId, loadActiveSessionIdBySite, loadHistoryBySite, saveActiveSessionIdBySite, saveHistoryBySite, theme } from './composables/ui/useAppStorage'
 import type { SessionEntry } from './composables/ui/useAppStorage'
+// [useSitesStore-import-v1] 统一 store 启动时迁移 + 切站点写 activeModelId
+import { migrateIfNeeded, setActiveModelId } from './composables/ui/useSitesStore'
 // [workspace-guide-lazy-v1] 引导页仅 !hasWorkspace 时渲染（v-if 闸门），异步拆包不进首屏 chunk
 const WorkspaceGuide = defineAsyncComponent(() => import('./components/panels/WorkspaceGuide.vue'))
-
-/** 自动接管模式开关 */
-const autoTakeover = useAutoTakeover()
-// [ask-count-merge] 与 useSessionManager 共享同一 askCount 数据源
-const { askCount, resetAskCount, resetSession } = useSessionManager()
 // [app-storage-extracted-v1] SESSION_HISTORY_KEY 已抽至 useAppStorage
 /** mock 通道（v6 §13.2 ?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
 const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
-
 /** localStorage 键：上次访问时间 */
 const LS_LAST_VISIT = '__ai_last_visit'
 
-const { url: siteUrl, setUrl: setSiteUrl, modelId } = useAiSite()
-const { toast } = useToast()
-const { run: runScript } = useRunner()
-/** 脚本收件箱：来自 AI 的脚本队列 */
-const scriptInbox = useScriptInbox()
-const { stopWaiting: stopAiWaiting } = useAiWaiting()
 // [app-storage-extracted-v1] SessionEntry/loadHistory/saveHistory 已抽至 useAppStorage
 // [site-isolate-v1] 会话历史按站点分桶；切站点时由下方 watch(modelId) 重新加载
 const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
-// [site-isolate-v1-initial-sync] 首帧把 activeSessionId 从站点专属键同步过来
-// [WHY] 若跳过此步，下方 watch(activeSessionId, { immediate: true }) 会用全局键（多为空）
-//       回写站点键，导致刷新后站点专属 active session 被清空。
-// [CONSTRAINT] 必须在 watch(activeSessionId, { immediate: true }) 声明之前执行；本行紧随 sessionHistory init，满足。
-// [CHANGE-IMPACT] 会触发 activeSessionId 的响应式更新；下游 watch 立即同步到 loop/window 表。
-activeSessionId.value = loadActiveSessionIdBySite(modelId.value)
 // [ask-count] 当前会话收到的 AI 回复次数（每 reply +1）
 // [ask-count-persist] 提问次数持久化到 localStorage，刷新不重置
 
@@ -81,7 +65,6 @@ const hasWorkspace = ref(true)
 // [CONSTRAINT] ScriptPanel 未挂载时 scriptPanelRef.value 为 null，点击按钮需静默兜底
 // [CHANGE-IMPACT] 依赖 ScriptPanel defineExpose({ openSideTab })，SidePane 暴露 selectTab
 const scriptPanelRef = ref<{ openSideTab: (t: 'tree' | 'changes' | 'worklog') => void } | null>(null)
-
 /** 键盘帮助面板开关 */
 const keyboardHelpOpen = ref(false)
 /** 信息 */
@@ -93,11 +76,176 @@ const urlDraft = ref('')
 /** URL 输入框引用 */
 const urlInputRef = ref<HTMLInputElement | null>(null)
 
+/** 自动接管模式开关 */
+const autoTakeover = useAutoTakeover()
+// [ask-count-merge] 与 useSessionManager 共享同一 askCount 数据源
+const { askCount, resetAskCount, resetSession } = useSessionManager()
+const { url: siteUrl, setUrl: setSiteUrl, modelId } = useAiSite()
+const { toast } = useToast()
+const { run: runScript } = useRunner()
+/** 脚本收件箱：来自 AI 的脚本队列 */
+const scriptInbox = useScriptInbox()
+const { stopWaiting: stopAiWaiting } = useAiWaiting()
+// [use-event-listener-v1] 用 vueuse useEventListener 而非原生 addEventListener：
+// 组件 unmount 时自动 removeEventListener；HMR / 热重载下重复注册会引发 message 重复处理
+useEventListener(window, 'message', onSessionIdMessage)
+useEventListener(window, 'keydown', onShiftQuestion)
+
 /** 顶部 AI 会话地址显示 */
 const headerUrl = computed(() => {
   const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
   return s ? s.url : siteUrl.value
 })
+
+// [site-isolate-v1] 切站点 → 保存旧站点 activeSessionId，加载新站点历史与激活会话
+// [WHY] 需求：每站点独立会话上下文；activeSessionId 是 useStorage 单例，切换时需手动轮换
+// [CONSTRAINT] 只在 modelId 真变化时执行；非 immediate，避免 setup 首帧覆盖 onMounted 恢复逻辑
+// [CHANGE-IMPACT] 切换触发下游 watch(activeSessionId)，连带 setActiveWinSid 等副作用
+watch(modelId, (newId, oldId) => {
+  if (!newId || newId === oldId) return
+  // [sites-store-wire-v1] 切站点：写统一 store 的 activeModelId
+  try { setActiveModelId(newId) } catch { /* 未就绪不阻断 */ }
+  saveActiveSessionIdBySite(String(oldId ?? ''), activeSessionId.value)
+  sessionHistory.value = loadHistoryBySite(newId)
+  activeSessionId.value = loadActiveSessionIdBySite(newId)
+})
+watch(activeSessionId, (v) => {
+  // [use-storage-v1] 落盘由 useStorage 托管；此处仅保留 loop/window 表同步副作用
+  // 同步到 loop 实例表与窗口表（多循环并发的前提）
+  const sid = v || 'default'
+  setActiveLoopSessionId(sid)
+  createLoopInstanceFor(sid)
+  setActiveWinSid(sid)
+  // [site-isolate-v1] 活动会话值同步到当前站点专属键，供切站点时回读
+  saveActiveSessionIdBySite(modelId.value, v || '')
+}, { immediate: true })
+// [use-storage-v1] sandboxMode / bashPolicy 落盘均由 useStorage 托管，不再手动 watch
+// [use-storage-v1] theme 仅保留 DOM data-theme 副作用；落盘由 useStorage 托管
+watch(theme, (v) => {
+  document.documentElement.setAttribute('data-theme', v)
+}, { immediate: true })
+
+// auto resend after 3 min no reply
+
+onMounted(async () => {
+  // [sites-store-wire-v1] 首次启动迁移旧分散键到统一 store
+  try { migrateIfNeeded() } catch { /* 未就绪不阻断 */ }
+  // [workspace-mode-v1] 探测工作区状态：无工作区时渲染引导页
+  // [CONSTRAINT] 网络失败默认 true 避免误锁用户；探测成功才覆盖
+  try {
+    const r = await fetch('/__ai/workspace', { headers: { accept: 'application/json' } })
+    if (r.ok) {
+      const j = await r.json() as { hasWorkspace?: boolean }
+      hasWorkspace.value = j.hasWorkspace !== false
+    }
+  } catch { /* ignore: 探测失败保持默认放行 */ }
+  // [auto-new-session-on-switch-v1] 切项目后：自动开新会话并连接
+  try {
+    const flag = sessionStorage.getItem('__ai_switch_project')
+    const at = Number(sessionStorage.getItem('__ai_switch_project_at')) || 0
+    sessionStorage.removeItem('__ai_switch_project')
+    sessionStorage.removeItem('__ai_switch_project_at')
+    if (flag === '1' && Date.now() - at < 15000) {
+      // 1) 清空本地会话状态（消息 / token / askCount / sessionId）
+      try { resetSession() } catch { /* 未就绪时忽略 */ }
+      // [new-session-reset-v1] 同步清事件流与 skill 缓存，避免新项目窗口渲染旧事件卡
+      try { clearEvents() } catch { /* 未就绪时忽略 */ }
+      // 2) 打开新的 AI 会话窗口
+      setTimeout(() => {
+        // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
+        void openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '开始聊天', forceRules: true }).then(({ win }) => {
+          if (win) {
+            // 3) 确保 headless 通道被激活（getTransport 懒创建，触发连接）
+            try { getTransport() } catch { /* 油猴模式下无需 */ }
+          } else {
+            toast('新会话窗口打开失败（可能被浏览器拦截弹窗）', 'warn', 4000)
+          }
+        }).catch(() => { /* 忽略 */ })
+      }, 600)
+    }
+  } catch { /* sessionStorage 不可用时静默 */ }
+  // 无头模式：订阅 transport.onReply，转成 MessageEvent 格式喂给同一处理器
+  try {
+    if (transportKind.value === 'headless') {
+      const t = getTransport()
+      t.onReply((raw: unknown, sid: string) => {
+        // [p1-2-client-v2] transport 回调签名声明 unknown（逆变）；此处一次性收窄为 AiReply|null
+        const reply = raw as AiReply | null
+        const item = reply && reply.item ? reply.item : null
+        const fake = {
+          data: {
+            type: 'ai-runner:reply',
+            kind: reply && reply.kind ? reply.kind : 'plain',
+            code: item ? item.code : undefined,
+            lang: item ? item.lang : undefined,
+            hash: item ? item.hash : undefined,
+            text: reply && reply.text !== undefined ? reply.text : undefined,
+            count: reply && reply.count !== undefined ? reply.count : undefined,
+            sessionId: sid,
+            site: 'headless',
+          },
+          origin: 'ws://headless',
+          source: null,
+        } as unknown as MessageEvent
+        try { onSessionIdMessage(fake) } catch (e) { log.error('[headless-reply] 处理失败:', e) }
+      })
+      // [headless-state-err-v1] error 状态必须显式提示，否则用户只看到"发送无回应"
+      t.onState?.((state: string, detail: string, sid: string) => {
+        if (state === 'error') {
+          const msg = detail || '无头链路异常'
+          try { toast(`无头链路错误：${msg}`, 'error', 6000) } catch { /* swallow: toast 未就绪 */ }
+          log.error('[headless-state] sid=', sid, 'detail=', detail)
+        }
+      })
+      log.warn('[ai-runner] 无头 reply 订阅已注册')
+    }
+  } catch (e) { log.error('[headless-reply] 订阅失败:', e) }
+  // 注入 activeSessionId 读取器：循环启动时取当前活动会话 id 绑定到 loopSessionId
+  setActiveSessionIdGetter(() => activeSessionId.value)
+
+  // 刷新后向已开 AI 窗口请求重发最近消息（reply/summary/session-id）
+  // 兜底场景：页面刷新导致消息监听重建，期间 AI 回复错过；由油猴缓存重放
+  nextTick(() => {
+    setTimeout(() => {
+      const wins = listWindows()
+      for (const w of wins) {
+        const target = getWindowBySid(w.sid)
+        if (target && !target.closed) {
+          try {
+            target.postMessage({ type: 'ai-runner:request-replay' }, '*')
+            target.postMessage({ type: 'ai-runner:request-rescan' }, '*')
+          } catch { /* ignore */ }
+        }
+      }
+    }, 800)
+  })
+  if (!activeSessionId.value) return
+  const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
+  if (s && s.url && siteUrl.value !== s.url) {
+    setSiteUrl(s.url)
+  }
+})
+
+// [site-isolate-v1-initial-sync] 首帧把 activeSessionId 从站点专属键同步过来
+// [WHY] 若跳过此步，下方 watch(activeSessionId, { immediate: true }) 会用全局键（多为空）
+//       回写站点键，导致刷新后站点专属 active session 被清空。
+// [CONSTRAINT] 必须在 watch(activeSessionId, { immediate: true }) 声明之前执行；本行紧随 sessionHistory init，满足。
+// [CHANGE-IMPACT] 会触发 activeSessionId 的响应式更新；下游 watch 立即同步到 loop/window 表。
+activeSessionId.value = loadActiveSessionIdBySite(modelId.value)
+// [use-storage-v1] LS_LAST_VISIT 迁移到 useStorage<number>；写入即持久化，语义等价
+// [CONSTRAINT] 单例初始化时自动读旧值（缺失走默认 0）；读→算→写三步在模块初始化时同步完成
+{
+  const lastVisit = useStorage<number>(LS_LAST_VISIT, 0)
+  const last = Number(lastVisit.value) || 0
+  if (last) {
+    const hours = (Date.now() - last) / 3_600_000
+    if (hours >= 4) {
+      absenceInfo.value = { daysAgo: Math.floor(hours / 24) }
+    }
+  }
+  lastVisit.value = Date.now()
+}
+
 /**
  * [site-isolate-v1] 按当前站点写入会话历史
  * [WHY] 需求：每站点独立会话上下文；统一收口避免多处调用各自记站点维度
@@ -106,7 +254,6 @@ const headerUrl = computed(() => {
 function saveHistoryScoped(): void {
   saveHistoryBySite(modelId.value, sessionHistory.value)
 }
-
 /**
  * 把一次会话加入历史记录（去重 + 上限 50 条）
  * [WHY] 同 id 覆盖 —— 会话被反复打开/改名时只保留最新一条，避免历史膨胀
@@ -121,7 +268,6 @@ function addSessionToHistory(id: string, url: string, title: string) {
   sessionHistory.value = [entry, ...sessionHistory.value.filter(s => s.id !== id)].slice(0, 50)
   saveHistoryScoped()
 }
-
 /**
  * 打开 Url Edit
  */
@@ -168,7 +314,6 @@ function saveUrl() {
 function onUrlBlur() {
   if (urlEditing.value) saveUrl()
 }
-
 /**
  * 处理 AI 窗口通过 postMessage 发来的消息（单一入口，按 data.type 分发）
  * [WHY] 油猴侧协议字段扩展频繁，集中分发可避免到处 addEventListener 造成重复注册
@@ -187,7 +332,6 @@ function onSessionIdMessage(e: MessageEvent) {
   if (t === 'ai-runner:url-updated') return handleUrlUpdated(payload)
   if (t === 'ai-runner:session-id' && payload.id) handleSessionIdUpdate(payload)
 }
-
 /** 处理统一回复通道 ai-runner:reply（payload 来自 MessageEvent.data） */
 function handleAiReply(payload: MessageEvent['data'], e: MessageEvent) {
   if (askCount.value >= 10 && isLoopActive.value) {
@@ -310,7 +454,6 @@ function handleAiReply(payload: MessageEvent['data'], e: MessageEvent) {
     }, sid)
   }
 }
-
 /** 处理旧版油猴 ai-runner:script 单脚本消息 */
 function handleLegacyScript(payload: MessageEvent['data'], e: MessageEvent) {
   if (!isFromActiveAiSite(e)) return
@@ -335,7 +478,6 @@ function handleLegacyScript(payload: MessageEvent['data'], e: MessageEvent) {
     }
   }
 }
-
 /** 处理 ai-runner:token-estimate 增量估算 */
 function handleTokenEstimate(payload: MessageEvent['data']) {
   if (activeSessionId.value) {
@@ -352,7 +494,6 @@ function handleTokenEstimate(payload: MessageEvent['data']) {
     setTokenEstimate(tokens)
   }
 }
-
 /** 处理 ai-runner:summary 摘要回包 */
 function handleSummaryMsg(payload: MessageEvent['data']) {
   const text = String(payload.text || '')
@@ -360,7 +501,6 @@ function handleSummaryMsg(payload: MessageEvent['data']) {
   const degraded = Boolean(payload.degraded)
   void onSummary(text, sid, degraded)
 }
-
 /** 处理 ai-runner:new-session-created 新会话建立 */
 function handleNewSessionCreated(payload: MessageEvent['data']) {
   const url = String(payload.url || '')
@@ -385,14 +525,12 @@ function handleNewSessionCreated(payload: MessageEvent['data']) {
   resetAskCount()
   void onNewSessionCreated(url, id)
 }
-
 /** 处理 ai-runner:url-updated URL 回写 */
 function handleUrlUpdated(payload: MessageEvent['data']) {
   // [url-updated] 油猴发送后回传完整 URL，写入工作台
   const u = String(payload.url || '')
   if (u && u !== siteUrl.value) setSiteUrl(u)
 }
-
 /** 处理 ai-runner:session-id 会话 ID 回写 */
 function handleSessionIdUpdate(payload: MessageEvent['data']) {
   if (!activeSessionId.value) return
@@ -497,7 +635,6 @@ async function onNewSession() {
     toast('发送失败，请检查 AI 窗口是否就绪', 'warn', 4000)
   }
 }
-
 /**
  * 全局键盘快捷键：Shift+? 开关快捷键帮助、Escape 关闭
  * [WHY] 在输入框/可编辑元素内不劫持按键，避免用户输入问号时弹出帮助
@@ -514,151 +651,6 @@ function onShiftQuestion(e: KeyboardEvent) {
     keyboardHelpOpen.value = false
   }
 }
-
-// [use-storage-v1] LS_LAST_VISIT 迁移到 useStorage<number>；写入即持久化，语义等价
-// [CONSTRAINT] 单例初始化时自动读旧值（缺失走默认 0）；读→算→写三步在模块初始化时同步完成
-{
-  const lastVisit = useStorage<number>(LS_LAST_VISIT, 0)
-  const last = Number(lastVisit.value) || 0
-  if (last) {
-    const hours = (Date.now() - last) / 3_600_000
-    if (hours >= 4) {
-      absenceInfo.value = { daysAgo: Math.floor(hours / 24) }
-    }
-  }
-  lastVisit.value = Date.now()
-}
-// [site-isolate-v1] 切站点 → 保存旧站点 activeSessionId，加载新站点历史与激活会话
-// [WHY] 需求：每站点独立会话上下文；activeSessionId 是 useStorage 单例，切换时需手动轮换
-// [CONSTRAINT] 只在 modelId 真变化时执行；非 immediate，避免 setup 首帧覆盖 onMounted 恢复逻辑
-// [CHANGE-IMPACT] 切换触发下游 watch(activeSessionId)，连带 setActiveWinSid 等副作用
-watch(modelId, (newId, oldId) => {
-  if (!newId || newId === oldId) return
-  saveActiveSessionIdBySite(String(oldId ?? ''), activeSessionId.value)
-  sessionHistory.value = loadHistoryBySite(newId)
-  activeSessionId.value = loadActiveSessionIdBySite(newId)
-})
-
-watch(activeSessionId, (v) => {
-  // [use-storage-v1] 落盘由 useStorage 托管；此处仅保留 loop/window 表同步副作用
-  // 同步到 loop 实例表与窗口表（多循环并发的前提）
-  const sid = v || 'default'
-  setActiveLoopSessionId(sid)
-  createLoopInstanceFor(sid)
-  setActiveWinSid(sid)
-  // [site-isolate-v1] 活动会话值同步到当前站点专属键，供切站点时回读
-  saveActiveSessionIdBySite(modelId.value, v || '')
-}, { immediate: true })
-// [use-storage-v1] sandboxMode / bashPolicy 落盘均由 useStorage 托管，不再手动 watch
-// [use-storage-v1] theme 仅保留 DOM data-theme 副作用；落盘由 useStorage 托管
-watch(theme, (v) => {
-  document.documentElement.setAttribute('data-theme', v)
-}, { immediate: true })
-
-// [use-event-listener-v1] 用 vueuse useEventListener 而非原生 addEventListener：
-// 组件 unmount 时自动 removeEventListener；HMR / 热重载下重复注册会引发 message 重复处理
-useEventListener(window, 'message', onSessionIdMessage)
-useEventListener(window, 'keydown', onShiftQuestion)
-
-// auto resend after 3 min no reply
-
-onMounted(async () => {
-  // [workspace-mode-v1] 探测工作区状态：无工作区时渲染引导页
-  // [CONSTRAINT] 网络失败默认 true 避免误锁用户；探测成功才覆盖
-  try {
-    const r = await fetch('/__ai/workspace', { headers: { accept: 'application/json' } })
-    if (r.ok) {
-      const j = await r.json() as { hasWorkspace?: boolean }
-      hasWorkspace.value = j.hasWorkspace !== false
-    }
-  } catch { /* ignore: 探测失败保持默认放行 */ }
-  // [auto-new-session-on-switch-v1] 切项目后：自动开新会话并连接
-  try {
-    const flag = sessionStorage.getItem('__ai_switch_project')
-    const at = Number(sessionStorage.getItem('__ai_switch_project_at')) || 0
-    sessionStorage.removeItem('__ai_switch_project')
-    sessionStorage.removeItem('__ai_switch_project_at')
-    if (flag === '1' && Date.now() - at < 15000) {
-      // 1) 清空本地会话状态（消息 / token / askCount / sessionId）
-      try { resetSession() } catch { /* 未就绪时忽略 */ }
-      // [new-session-reset-v1] 同步清事件流与 skill 缓存，避免新项目窗口渲染旧事件卡
-      try { clearEvents() } catch { /* 未就绪时忽略 */ }
-      // 2) 打开新的 AI 会话窗口
-      setTimeout(() => {
-        // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
-        void openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '开始聊天', forceRules: true }).then(({ win }) => {
-          if (win) {
-            // 3) 确保 headless 通道被激活（getTransport 懒创建，触发连接）
-            try { getTransport() } catch { /* 油猴模式下无需 */ }
-          } else {
-            toast('新会话窗口打开失败（可能被浏览器拦截弹窗）', 'warn', 4000)
-          }
-        }).catch(() => { /* 忽略 */ })
-      }, 600)
-    }
-  } catch { /* sessionStorage 不可用时静默 */ }
-  // 无头模式：订阅 transport.onReply，转成 MessageEvent 格式喂给同一处理器
-  try {
-    if (transportKind.value === 'headless') {
-      const t = getTransport()
-      t.onReply((raw: unknown, sid: string) => {
-        // [p1-2-client-v2] transport 回调签名声明 unknown（逆变）；此处一次性收窄为 AiReply|null
-        const reply = raw as AiReply | null
-        const item = reply && reply.item ? reply.item : null
-        const fake = {
-          data: {
-            type: 'ai-runner:reply',
-            kind: reply && reply.kind ? reply.kind : 'plain',
-            code: item ? item.code : undefined,
-            lang: item ? item.lang : undefined,
-            hash: item ? item.hash : undefined,
-            text: reply && reply.text !== undefined ? reply.text : undefined,
-            count: reply && reply.count !== undefined ? reply.count : undefined,
-            sessionId: sid,
-            site: 'headless',
-          },
-          origin: 'ws://headless',
-          source: null,
-        } as unknown as MessageEvent
-        try { onSessionIdMessage(fake) } catch (e) { log.error('[headless-reply] 处理失败:', e) }
-      })
-      // [headless-state-err-v1] error 状态必须显式提示，否则用户只看到"发送无回应"
-      t.onState?.((state: string, detail: string, sid: string) => {
-        if (state === 'error') {
-          const msg = detail || '无头链路异常'
-          try { toast(`无头链路错误：${msg}`, 'error', 6000) } catch { /* swallow: toast 未就绪 */ }
-          log.error('[headless-state] sid=', sid, 'detail=', detail)
-        }
-      })
-      log.warn('[ai-runner] 无头 reply 订阅已注册')
-    }
-  } catch (e) { log.error('[headless-reply] 订阅失败:', e) }
-  // 注入 activeSessionId 读取器：循环启动时取当前活动会话 id 绑定到 loopSessionId
-  setActiveSessionIdGetter(() => activeSessionId.value)
-
-  // 刷新后向已开 AI 窗口请求重发最近消息（reply/summary/session-id）
-  // 兜底场景：页面刷新导致消息监听重建，期间 AI 回复错过；由油猴缓存重放
-  nextTick(() => {
-    setTimeout(() => {
-      const wins = listWindows()
-      for (const w of wins) {
-        const target = getWindowBySid(w.sid)
-        if (target && !target.closed) {
-          try {
-            target.postMessage({ type: 'ai-runner:request-replay' }, '*')
-            target.postMessage({ type: 'ai-runner:request-rescan' }, '*')
-          } catch { /* ignore */ }
-        }
-      }
-    }, 800)
-  })
-  if (!activeSessionId.value) return
-  const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
-  if (s && s.url && siteUrl.value !== s.url) {
-    setSiteUrl(s.url)
-  }
-})
-
 /**
  * 切换 transport 偏好并刷新页面
  * [WHY] transport 决定 useAiSite 的 _isHeadless 判定与传输层加载，reload 是最简可靠的生效方式
@@ -670,7 +662,6 @@ function onTransportChange(e: Event) {
   transportKind.value = v === 'headless' ? 'headless' : 'tampermonkey'
   window.location.reload()
 }
-
 /**
  * [headless-login-gui-v1] 触发引导式登录
  * [WHY] 用户手动在有头窗口登录一次 → profile 落盘 → 后续 headless 复用同一 userDataDir 即已登录

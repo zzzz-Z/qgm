@@ -2,12 +2,12 @@
 import { computed } from 'vue'
 import type { LintResult } from '../../types'
 
-defineOptions({ name: 'LintBlock' })
-
 /** 组件接收的 props 定义 */
 const props = defineProps<{
   lint: LintResult
 }>()
+
+defineOptions({ name: 'LintBlock' })
 
 /** 是否含 */
 const hasDetails = computed(() => !!(props.lint.stdout || props.lint.stderr))
