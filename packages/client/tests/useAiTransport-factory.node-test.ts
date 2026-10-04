@@ -82,6 +82,14 @@ class WSStub {
   }
 
   send(s: string): void { this.sent.push(s) }
+  /** 测试辅助：向 message 监听者派发一帧（transport 用 addEventListener 注册） */
+  dispatchMessage(data: string): void {
+    for (const l of this.listeners.get('message') ?? []) {
+      // 测试桩合成事件非生产路径，双重断言仅用于桩类型桥接（EventListener 联合 → 消息回调）
+      try { (l as unknown as (e: { data: string }) => void)({ data }) } catch { /* ignore */ }
+    }
+  }
+
   close(): void {
     this.readyState = 3
     this.onclose?.()
@@ -192,6 +200,46 @@ test('createHeadlessTransport: 出站帧协议键名为 t', async () => {
   const login = frames.find(f => f.t === 'headless:login-gui')
   assert.ok(login, '应存在 t=headless:login-gui 帧')
   assert.equal(frames.filter(f => f.type !== undefined).length, 0, '出站帧不得携带 type 键')
+})
+
+test('createHeadlessTransport: 实时帧 replayed 为 false、replay:true 帧透传 true', async () => {
+  // [replay-flag-v1] 回归：重连回放帧必须可被消费方识别并拒绝重入 auto-loop（旧脚本重跑/旧 @ask 重弹的根因）
+  const t = mod.createHeadlessTransport()
+  t.sendFill('s', { prompt: 'p' }) // 触发建连
+  await new Promise(r => setTimeout(r, 0))
+  const got: Array<boolean> = []
+  t.onReply((_r, _sid, replayed) => { got.push(Boolean(replayed)) })
+  const stub = WSStub.last!
+  stub.dispatchMessage(JSON.stringify({ t: 'headless:reply', sid: 's', reply: { kind: 'plain', text: 'live' } }))
+  stub.dispatchMessage(JSON.stringify({ t: 'headless:reply', sid: 's', replay: true, reply: { kind: 'plain', text: 'old' } }))
+  assert.deepEqual(got, [false, true])
+})
+
+test('createHeadlessTransport: close 后自动重连并重新请求 replay', async () => {
+  // [ws-reconnect-v1] 回归：后端重启导致半开/关闭后，必须自动重建连接，否则 send() 写死 socket 静默丢帧
+  const t = mod.createHeadlessTransport()
+  t.sendFill('s', { prompt: 'p' })
+  await new Promise(r => setTimeout(r, 0))
+  const stub1 = WSStub.last!
+  stub1.close()
+  await new Promise(r => setTimeout(r, 600)) // 基础退避 500ms + microtask
+  const stub2 = WSStub.last!
+  assert.notEqual(stub2, stub1, 'close 后应创建新连接')
+  await new Promise(r => setTimeout(r, 0))
+  const frames = stub2.sent.map(s => JSON.parse(s) as { t?: string })
+  assert.ok(frames.some(f => f.t === 'headless:request-replay'), '重连后应重新请求 replay')
+  t.dispose()
+})
+
+test('createHeadlessTransport: dispose 后不再重连', async () => {
+  const t = mod.createHeadlessTransport()
+  t.sendFill('s', { prompt: 'p' })
+  await new Promise(r => setTimeout(r, 0))
+  const stub1 = WSStub.last!
+  t.dispose()
+  stub1.close()
+  await new Promise(r => setTimeout(r, 600))
+  assert.equal(WSStub.last, stub1, 'dispose 后不得新建连接')
 })
 
 test('createHeadlessTransport: mute 后回调集合被清空', () => {

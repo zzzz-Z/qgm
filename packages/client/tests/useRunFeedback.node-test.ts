@@ -63,10 +63,11 @@ test('shouldIncludeChanges: 边界 afterLines+201 → true', () => {
   assert.equal(shouldIncludeChanges([c], locs), true)
 })
 
-test('shouldIncludeChanges: afterLines 未定义视为 0（200 阈值）', () => {
+test('shouldIncludeChanges: afterLines 未定义 → 保守含 changes（true）', () => {
+  // [afterlines-guard-v1] total=0 会让任何 n<=200 误判"文件内"而错误排除 changes；缺失即保守返回 true
   const locs = new Map([['a.ts', new Set([200])]])
   const c = ch('a.ts')
-  assert.equal(shouldIncludeChanges([c], locs), false)
+  assert.equal(shouldIncludeChanges([c], locs), true)
 })
 
 test('shouldIncludeChanges: locs 为空集 → 视为无错误 → true', () => {

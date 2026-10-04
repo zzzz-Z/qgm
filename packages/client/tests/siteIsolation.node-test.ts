@@ -106,15 +106,15 @@ test('loadHistoryBySite：不同站点相互隔离，不串历史', async () => 
   assert.equal(claude.length, 0)
 })
 
-test('loadHistoryBySite：无站点专属键时回退全局键（首次迁移）', async () => {
+test('loadHistoryBySite：无站点专属键时不再回退全局键（站点隔离）', async () => {
   await ready
-  // 模拟老版本遗留的全局键
+  // [site-isolate-fix-v1] 老版本遗留的全局键不再被新站点继承，避免跨站点历史串味。
+  // [CONSTRAINT] 用未在其它用例写过的站点 id：统一 store 是内存单例，跨用例残留会污染断言
   localStorage.setItem('__ai_session_history', JSON.stringify([
     { id: 'legacy-1', url: 'u', title: 't', createdAt: 1 },
   ]))
-  const got = mod.loadHistoryBySite('deepseek')
-  assert.equal(got.length, 1)
-  assert.equal(got[0].id, 'legacy-1')
+  const got = mod.loadHistoryBySite('isolated-fresh-site')
+  assert.equal(got.length, 0)
 })
 
 test('saveHistoryBySite：只落站点键，不污染全局键', async () => {
@@ -144,10 +144,12 @@ test('loadActiveSessionIdBySite：不同站点各存各的，互不覆盖', asyn
   assert.equal(mod.loadActiveSessionIdBySite('claude'), '')
 })
 
-test('loadActiveSessionIdBySite：无站点专属键时回退全局键（首次迁移）', async () => {
+test('loadActiveSessionIdBySite：无站点专属键时不再回退全局键（站点隔离）', async () => {
   await ready
+  // [site-isolate-fix-v1] 全局键不参与回退：新站点激活会话一律为空。
+  // [CONSTRAINT] 用未在其它用例写过的站点 id：统一 store 是内存单例，跨用例残留会污染断言
   localStorage.setItem('__ai_active_session_id', 'legacy-active')
-  assert.equal(mod.loadActiveSessionIdBySite('deepseek'), 'legacy-active')
+  assert.equal(mod.loadActiveSessionIdBySite('isolated-fresh-site-2'), '')
 })
 
 // ============ 键名约定 ============

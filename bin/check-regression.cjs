@@ -116,7 +116,15 @@ if (cmd === 'check') {
     err('无 baseline，先跑: node bin/check-regression.cjs init')
     process.exit(2)
   }
-  const base = JSON.parse(fs.readFileSync(BASELINE, 'utf8'))
+  // [baseline-json-guard-v1] JSON 损坏时给出明确错误而非未捕获异常
+  let base
+  try {
+    base = JSON.parse(fs.readFileSync(BASELINE, 'utf8'))
+  } catch (e) {
+    err(`baseline 解析失败（${BASELINE}）: ${String(e)}`)
+    err('删除该文件后跑 init 重建')
+    process.exit(2)
+  }
   console.log('  baseline sha:', base.sha, '@', new Date(base.ts).toISOString())
   console.log('  baseline tsc.errors:', base.tsc.errors, ' test.fails:', base.test.fails)
   console.log('')

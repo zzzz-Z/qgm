@@ -25,7 +25,9 @@ export type StopRequest = 'none' | 'pause' | 'kill' | 'rollback'
 
 /** AI（接口） */
 export interface AiReply {
-  kind: 'script' | 'done' | 'plain' | 'multi'
+  // [stopped-detect-v1] stopped = AI 页面「当前问题已停止」，生成被中止（无 DONE/无完整脚本）
+  // [limit-detect-v1] limit = AI 会话达到长度上限（应触发轮转新会话）
+  kind: 'script' | 'done' | 'plain' | 'multi' | 'stopped' | 'limit'
   /** kind=script 时有效 */
   item?: InboxItem
   /** kind=multi 时：新代码块数量 */

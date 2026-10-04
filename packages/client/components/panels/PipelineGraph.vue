@@ -1,6 +1,5 @@
 <script setup lang="ts">
 // PLAN 5.2 链路图（五段聚合）
-import { computed } from 'vue'
 
 type SegStatus = 'pending' | 'running' | 'ok' | 'failed' | 'skipped' | 'manual'
 interface Props {
@@ -75,7 +74,10 @@ function agg(states: Array<SegStatus>): SegStatus {
  */
 function norm(raw?: string): SegStatus {
   const s = String(raw || 'pending')
-  if (s === 'ok' || s === 'running' || s === 'failed') return s
+  // [skipped-pass-v1] 支持 skipped：服务端对「由客户端完成、run.ts 无法观测」的段标 skipped，
+  // 原白名单只收 ok/running/failed，会把 skipped 回退为 pending 导致 5 段聚合显示错位
+  // [manual-pass-v1] 补 manual：ICON 表已声明该状态，但白名单缺失会把它降级为 pending
+  if (s === 'ok' || s === 'running' || s === 'failed' || s === 'skipped' || s === 'manual') return s
   return 'pending'
 }
 </script>

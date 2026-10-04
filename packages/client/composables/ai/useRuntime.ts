@@ -1,9 +1,9 @@
+import { computed, watch } from 'vue'
+import { useStorage } from '@vueuse/core'
 // [runtime-no-pinia-v1] 从 pinia store 迁出为 composable singleton，API 语义与原 defineStore 等价
 // [runtime-store-v1] 循环状态单一真相源
 // 从 useAutoLoop / useAiWaiting 集中过来；状态变更的副作用由本文件的 watch 承担。
 // 调用方只读 state、只调 action，不自己维护循环状态。
-import { computed, watch } from 'vue'
-import { useStorage } from '@vueuse/core'
 import { getTransport } from './useAiTransport.js'
 import type { LoopState } from './auto-loop/types.js'
 
@@ -37,7 +37,10 @@ const INITIAL: RuntimeState = {
 
 function createRuntime() {
   /** 持久化到 sessionStorage 的运行时状态（跨标签页不共享，刷新后保留） */
-  const state = useStorage<RuntimeState>(STORAGE_KEY, { ...INITIAL }, sessionStorage)
+  // [ssr-storage-guard-v1] 直接传 sessionStorage 在 Node/SSR 下会 ReferenceError（报告 §2.14）。
+  // 传 undefined 让 vueuse 用默认 storage（浏览器 window.sessionStorage / SSR 下内存兜底）；
+  // mergeDefaults:true 让旧快照缺字段时用 INITIAL 补齐，避免 schema 演进后 undefined。
+  const state = useStorage<RuntimeState>(STORAGE_KEY, { ...INITIAL }, undefined, { mergeDefaults: true })
 
   const isPaused = computed(() => state.value.kind === 'paused')
   const isActive = computed(() => state.value.kind === 'running' || state.value.kind === 'waiting')
@@ -45,14 +48,16 @@ function createRuntime() {
   const isStopped = computed(() => state.value.kind === 'stopped')
 
   // [runtime-transport-wire-v1] kind 切到 paused / 从 paused 恢复时静音或解静音真实 transport
+  // [mute-flag-symmetry-v1] 任何「离开 paused」的转移都须 unMute：
+  // 原实现只处理 paused→waiting/running，paused→stopped→running 路径会残留静音（隐藏死锁）
+  // [CONSTRAINT] immediate:true 让 sessionStorage 恢复的 paused 初值也同步 mute 真实 transport
   watch(() => state.value.kind, (k, prev) => {
     if (k === 'paused') {
       try { getTransport().mute?.() } catch { /* 未就绪时忽略 */ }
-    }
-    if (prev === 'paused' && (k === 'waiting' || k === 'running')) {
+    } else if (prev === 'paused') {
       try { getTransport().unMute?.() } catch { /* 未就绪时忽略 */ }
     }
-  })
+  }, { immediate: true })
 
   /** 启动循环：置为 running、写入目标、轮次归零、清空循环 id */
   function start(goal: string): void {

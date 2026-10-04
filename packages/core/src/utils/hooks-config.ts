@@ -37,11 +37,23 @@ export function parseHooksConfig(raw: string): Record<string, HookDef[]> {
   }
 }
 
-/** 从磁盘读取并解析 hooks 配置。 */
+// [hooks-config-cache-v1] mtime 缓存：同一 mtime 的配置文件复用解析结果。
+// [WHY] runHook 每轮循环触发多次（BeforeFill/BeforeScript/AfterScript/AfterResult/LoopStop），
+//        每次读盘 + JSON.parse 造成持续 IO；hooks.json 变更频率极低。
+// [CONSTRAINT] 以 path → { mtimeMs, parsed } 缓存；mtime 变化即失效。
+// [CHANGE-IMPACT] 未改变解析语义；异常路径仍回落空对象。
+interface HooksCacheEntry { mtimeMs: number, parsed: Record<string, HookDef[]> }
+const _hooksCache = new Map<string, HooksCacheEntry>()
+
+/** 从磁盘读取并解析 hooks 配置（带 mtime 缓存） */
 export function loadHooksConfig(configPath: string): Record<string, HookDef[]> {
   try {
-    if (!fs.existsSync(configPath)) return {}
-    return parseHooksConfig(fs.readFileSync(configPath, 'utf8'))
+    const st = fs.statSync(configPath)
+    const cached = _hooksCache.get(configPath)
+    if (cached && cached.mtimeMs === st.mtimeMs) return cached.parsed
+    const parsed = parseHooksConfig(fs.readFileSync(configPath, 'utf8'))
+    _hooksCache.set(configPath, { mtimeMs: st.mtimeMs, parsed })
+    return parsed
   } catch {
     return {}
   }

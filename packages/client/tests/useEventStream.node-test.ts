@@ -130,10 +130,13 @@ test('emit: 无 updateKey 时即使 kind/summary 相同也新增', () => {
   assert.equal(events.value.length, 2)
 })
 
-test('emit: 每次调用后写入 localStorage', () => {
+test('emit: 节流 250ms 内合并写盘，flush 后落 localStorage', async () => {
   mod.emit('run:start', 'a')
+  // [event-save-throttle-v1] 写盘已改为 250ms 节流：窗口内不落盘
+  assert.equal(store.has(STORAGE_KEY), false, 'should not write synchronously within throttle window')
+  mod.flushEventSave()
   const raw = store.get(STORAGE_KEY)
-  assert.ok(raw, 'localStorage should have data')
+  assert.ok(raw, 'localStorage should have data after flush')
   const arr = JSON.parse(raw!)
   assert.equal(arr.length, 1)
   assert.equal(arr[0].summary, 'a')
@@ -153,8 +156,9 @@ test('clearEvents: 清空 events', () => {
   assert.equal(events.value.length, 0)
 })
 
-test('clearEvents: 移除 localStorage 键', () => {
+test('clearEvents: 移除 localStorage 键且不复活', () => {
   mod.emit('run:start', 'a')
+  mod.flushEventSave()
   assert.ok(store.has(STORAGE_KEY))
   mod.clearEvents()
   assert.equal(store.has(STORAGE_KEY), false)

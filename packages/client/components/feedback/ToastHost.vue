@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { useToast } from '../../composables/ui/useToast'
-import AskDialog from './AskDialog.vue'
+// [ask-card-v1] 原 AskDialog.vue（@ask 弹窗）已删除：提问改为对话流内的可点选卡片，
+//   见 TerminalPane 的 .question-card 与 composables/ui/useAsk.ts
 
 defineOptions({ name: 'ToastHost' })
 
@@ -65,7 +65,6 @@ function onToastClick(t: { id: number }) {
       </div>
     </Transition>
   </Teleport>
-  <AskDialog />
 </template>
 
 <style scoped>

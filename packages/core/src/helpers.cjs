@@ -216,7 +216,13 @@ const __AI__ = {
   patchFile(file, anchor, replacement, opts) {
     opts = opts || {}
     const src = fs.readFileSync(file, 'utf8')
-    if (opts.marker && src.includes(opts.marker)) return { ok: true, skipped: true, reason: 'marker present' }
+    // [patch-skip-changelog-v1] marker 短路是**幂等设计**（非缺陷，见 lessons AGENDA-2 复核结论），
+    //   但它静默返回 → 「这次 patch 究竟跑了还是被跳过」在 changelog 里查不到，审计断链。
+    //   补一行记录，代价为零；不改落盘语义（AGENDA-2 已证 patchFile 落盘正常）。
+    if (opts.marker && src.includes(opts.marker)) {
+      _changelog('patch-skip', file)
+      return { ok: true, skipped: true, reason: 'marker present' }
+    }
     const count = src.split(anchor).length - 1
     if (count === 0) throw new Error(`patchFile: anchor not found in ${file}`)
     if (opts.unique && count > 1) throw new Error(`patchFile: anchor not unique (${count})`)
@@ -276,13 +282,20 @@ const __AI__ = {
       const t = st.todo[0]
       st.currentTodoId = (typeof t === 'string') ? t : (t && t.id) || null
     }
-    if (!st.rulesVersion) {
-      try {
-        const r = fs.readFileSync(path.join(cwd, 'SYSTEM.md'), 'utf8')
-        const m = r.match(/^version:[ \t]*(\S.*)$/m)
-        st.rulesVersion = m ? m[1].trim() : 'unknown'
-      } catch { st.rulesVersion = 'unknown' }
-    }
+    // [rules-version-align-v1] 与 post-run/compliance.ts hashRules 对齐：
+    //   WHY 原实现读 <cwd>/SYSTEM.md 且找 version 行——SSOT 在 packages/core/SYSTEM.md，
+    //       且文件无 version 行 → rulesVersion 恒 unknown → DSPy 无法按规则版本分组。
+    //   改为 sha256(packages/core/SYSTEM.md) 前 8 位，每次覆盖更新（覆盖会话中途改规则的场景）。
+    try {
+      const rulesCrypto = require('node:crypto')
+      const rulesSysPath = path.join(cwd, 'packages/core/SYSTEM.md')
+      if (fs.existsSync(rulesSysPath)) {
+        const rulesRaw = fs.readFileSync(rulesSysPath, 'utf8')
+        st.rulesVersion = rulesCrypto.createHash('sha256').update(rulesRaw).digest('hex').slice(0, 8)
+      } else {
+        st.rulesVersion = 'unknown'
+      }
+    } catch { st.rulesVersion = 'unknown' }
   },
   esc(s) {
     const meta = '.*+?^${}()|[]\\'
@@ -388,6 +401,7 @@ const __AI__ = {
   },
   // [ai-shell-exit-v2] 安全封装：所有 shell 调用唯一入口，内置黑名单运行时拦截
   // 命中 → 返回 { ok: false, error: "SECURITY_BLOCKED", code: 2, hit: <name> }
+  // [exec-timeout-v1] opts.timeout 透传给 __AI__.exec（默认 60000ms；传 0 / null 显式不限时）
   shell(cmd, opts) {
     const parts = Array.isArray(cmd) ? cmd.map(String) : String(cmd).trim().split(/\s+/)
     if (parts.length === 0 || !parts[0]) return { ok: false, error: 'empty cmd', code: 1 }
@@ -445,15 +459,35 @@ const __AI__ = {
   exec(cmd, args, opts) {
     const { execFileSync } = require('node:child_process')
     opts = opts || {}
+    // [exec-timeout-v1] 原实现 execFileSync 无 timeout（对比同文件 browser 分支 :345 有 60s）：
+    //   命令一旦挂死，整轮脚本静默卡到 /run 的 60s 硬超时才被整体杀掉，
+    //   且 AI 只看到「超时」而看不到「是哪条命令」——只能盲猜重试。
+    //   opts.timeout 可覆盖；显式传 0 或 null 表示不限时（少数确实长时间运行的工具）。
+    const effectiveTimeout = (opts.timeout === 0 || opts.timeout === null)
+      ? undefined
+      : (Number(opts.timeout) > 0 ? Number(opts.timeout) : 60_000)
     try {
       const out = execFileSync(cmd, args || [], {
         cwd: opts.cwd || process.cwd(),
         encoding: 'utf8',
         shell: opts.shell || false,
         stdio: opts.stdio || ['ignore', 'pipe', 'pipe'],
+        timeout: effectiveTimeout,
       })
       return { ok: true, stdout: String(out || '') }
     } catch (e) {
+      // [exec-timeout-v1] 超时必须与「命令真的失败」可区分：否则 AI 会把「还没跑完」
+      //   当成「跑错了」，改错方向。超时统一 code=124（与 GNU timeout 一致）。
+      const timedOut = Boolean(e && (e.code === 'ETIMEDOUT' || /timed?\s*out/i.test(String(e.message || ''))))
+      if (timedOut) {
+        return {
+          ok: false,
+          stdout: String(e.stdout || ''),
+          stderr: `[exec timeout] \`${cmd}\` 超过 ${effectiveTimeout}ms 未返回，已强制终止`,
+          code: 124,
+          timedOut: true,
+        }
+      }
       return { ok: false, stdout: String(e.stdout || ''), stderr: String(e.stderr || ''), code: e.status }
     }
   },

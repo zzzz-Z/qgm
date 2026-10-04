@@ -1,8 +1,10 @@
 import { promiseTimeout, useClipboard } from '@vueuse/core'
 import { currentSiteUrl, url } from './useAiSite'
+import { loadRulesBlock } from './load-rules.js'
+// [restore-import-v1] log 早前按 auto-import 名单清理时误删（app 侧兜底可跑，但 tsc --noEmit / vitest 无该插件）
+import { log } from '../../utils/log'
 import { useSessionManager } from './useSessionManager'
 import { onNewSessionCreated as onNewSessionCreatedImpl } from './auto-loop/handoff.js'
-import { log } from '../../utils/log'
 import {
   getActiveWin,
   getActiveWinSid,
@@ -39,7 +41,10 @@ const _clipboard = useClipboard()
 
 // [rules-always-v1] 每会话首次发送必带规则：以 sessionId 为键去重；
 // 切换工作区触发 reload 后 useSessionManager 会重新 generateId → 新键 → 规则自动重新注入
+// [rules-set-cap-v1] 报告 P2：只增不减；改用 LRU 风格数组 + Set 去重，上限 100
 const _rulesInjectedSids = new Set<string>()
+const _rulesInjectedOrder: string[] = []
+const RULES_INJECTED_MAX = 100
 
 /**
  * 打开 AI 站点窗口并按 sid 保存引用；headless 模式改走 WS
@@ -85,35 +90,15 @@ function withSidHash(url: string, sid: string): string {
 
 /**
  * [first-prompt-rules] 会话首问前置规则：读 SYSTEM.md 与 AGENTS.md 全文包成 <file> 块拼在问题前
- * 读取失败或文件缺失时降级返回原 prompt，不阻断发送
+ * [load-rules-wired-v1] 实现已抽到 load-rules.ts（含 Promise 缓存），本函数仅做幂等守卫与拼装
  */
 async function _prependFirstPromptRules(prompt: string): Promise<string> {
   // [rules-idempotent-v1] 幂等守卫：prompt 已含 SYSTEM.md 块 → 直接返回
-  // [WHY] 多条开窗路径（onNewSession / onOpenAiWin / 切项目）可能并发触发；
-  //       同一 prompt 被拼两次会向 AI 重复投喂规则头，此处兜底
-  // [CHANGE-IMPACT] 幂等语义；即使调用方误传已拼装 prompt 也不会二次注入
   if (prompt.includes('<file path="SYSTEM.md">')) return prompt
   try {
-    const parts: string[] = []
-    try {
-      const presetRes = await fetch('/__ai/preset/system')
-      const preset = await presetRes.json()
-      if (preset && preset.ok && preset.content) {
-        parts.push(`<file path="SYSTEM.md">` + `\n${preset.content}\n` + `</file>`)
-      }
-    } catch { /* 预置源不可用则跳过，不阻断 */ }
-    const res = await fetch('/__ai/files/read', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: ['AGENTS.md'] }),
-    })
-    const data = await res.json()
-    for (const f of data.files || []) {
-      if (f.error || !f.content) continue
-      parts.push(`<file path="${f.path}">` + `\n${f.content}\n` + `</file>`)
-    }
-    if (!parts.length) return prompt
-    return `# 会话首问规则（自动携带）\n\n${parts.join('\n\n')}\n\n# 问题\n\n${prompt}`
+    const block = await loadRulesBlock()
+    if (!block) return prompt
+    return `# 会话首问规则（自动携带）\n\n${block}\n\n# 问题\n\n${prompt}`
   } catch {
     return prompt
   }
@@ -146,8 +131,16 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     //       会话级纯聊天不需要规则头，规则仅在真正启动循环/接管任务时注入。
     // [CONSTRAINT] skipRules 不写入 _rulesInjectedSids：后续 startLoop 首次调用仍会正常注入。
     if (sid && !opts?.skipRules && (opts?.forceRules || !_rulesInjectedSids.has(sid))) {
-      _rulesInjectedSids.add(sid)
+      // [rules-add-order-v1] add 必须在 prepend 成功之后：原实现在 await 前登记，
+      // 若 prepend 后续抛错（复制到剪贴板前），sid 会被永久标记为「已注入」，规则静默丢失
       finalPrompt = await _prependFirstPromptRules(prompt)
+      // [rules-set-cap-v1] 记录注入 + LRU 淘汰
+      _rulesInjectedSids.add(sid)
+      _rulesInjectedOrder.push(sid)
+      while (_rulesInjectedOrder.length > RULES_INJECTED_MAX) {
+        const old = _rulesInjectedOrder.shift()
+        if (old) _rulesInjectedSids.delete(old)
+      }
     }
   } catch { /* ignore */ }
   // [track-original-prompt] 只记录原始 prompt：UI 展示不应包含自动携带的规则头
@@ -159,8 +152,9 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     const t = await loadTransport()
     const tr = t.useAiTransport().transport
     tr.sendOpen?.(getActiveWinSid(), { url: url.value })
-    tr.sendFill(getActiveWinSid(), { prompt: finalPrompt, ...imagePayload })
-    return 'sent'
+    // [manual-fill-bypass-paused-v1] 必须尊重真实返回值：旧实现无条件 return 'sent'，
+    // WS 发送失败时用户消息照样上屏+亮「思考中」，实际帧从未发出，表现为永久无响应
+    return tr.sendFill(getActiveWinSid(), { prompt: finalPrompt, ...imagePayload }) ? 'sent' : 'failed'
   }
 
   const sid = getActiveWinSid()

@@ -2,142 +2,55 @@
 // DOM 逻辑（fillPrompt / stopGenerating / newSession / rotate）分 2D.2-2D.5 实现。
 import fs from 'node:fs'
 import path from 'node:path'
-import { ROOT } from '../config.js'
-import type { TransportState } from '../server/protocol.js'
 import { resolveBrowserEngine } from './browser-engine.js'
-import { clickNewSessionInPage, detectReplyInPage, fillPromptInPage, resetReplyDedupInPage, stopGeneratingInPage } from './headless-inject.js'
+import { clickNewSessionInPage, detectLoginStateInPage, detectReplyInPage, fillPromptInPage, resetReplyDedupInPage, stopGeneratingInPage, verifyFillSentInPage } from './headless-inject.js'
+
+// [headless-types-reexport-v1] 类型声明已抽到 headless-types.ts；此处 re-export 保持对外 API 兼容
+import type { HeadlessOptions, HeadlessPool, HeadlessReply, HeadlessSession } from './headless-types.js'
+
+// [headless-scheduler-reexport-v1] 调度辅助已抽到 headless-scheduler.ts；
+// parseDeepSeekCompletionError 通过 re-export 保持对外 API 兼容（测试仍可从本模块导入）。
+import { jitterDelay, parseDeepSeekCompletionError, rateLimitedRatio, recordRequest, withBackoff } from './headless-scheduler.js'
+
+// [headless-constants-reexport-v1] 默认常量与 defaultUserDataDir 已抽到 headless-constants.ts
+import {
+  DEFAULT_JITTER_MAX_MS,
+  DEFAULT_JITTER_MIN_MS,
+  DEFAULT_POOL_LIMIT,
+  DEFAULT_QUEUE_TIMEOUT_MS,
+  DEFAULT_URL,
+  defaultUserDataDir,
+  LAUNCH_TIMEOUT_MS,
+  LOGIN_STABLE_MS,
+} from './headless-constants.js'
+import { createSlotQueue } from './headless-slot-queue.js'
 
 type Page = import('playwright').Page
+export { parseDeepSeekCompletionError } from './headless-scheduler.js'
 
-/** 无头浏览器会话：持有浏览器实例、上下文、页面及生命周期钩子 */
-export interface HeadlessSession {
-  sid: string
-  state: TransportState
-  detail?: string
-  createdAt: number
-  url: string
-  context?: unknown
-  page?: unknown
-}
+export type { HeadlessOptions, HeadlessPool, HeadlessReply, HeadlessSession } from './headless-types.js'
 
-/** 无头浏览器启动配置：目标地址、超时、池大小、请求抖动等 */
-export interface HeadlessOptions {
-  engine?: 'playwright' | 'cloak'
-  userDataDir?: string
-  defaultUrl?: string
-  headless?: boolean
-  poolLimit?: number
-  queueTimeoutMs?: number
-  proxy?: { server: string, username?: string, password?: string }
-  humanize?: boolean
-  geoip?: boolean
-  jitterMin?: number
-  jitterMax?: number
-}
+// [fill-verify-v2] 发送验证的只读宽限轮询（AGENDA-10）。
+// [WHY] 旧实现在 click 后单次等 600ms 再采样 verifyFillSentInPage：新建会话首帧 .ds-message 计数为 0，
+// 必然判「未发送」→ withBackoff 重试整个 fill（重新填充 + 重新点击）= 重复发送，
+// 且 handleFill 因 ok=false 提前 return，对方回复无人接收（静默丢弃）。
+// [CONSTRAINT] 只读采样、绝不重复点击；频控命中立刻返回交给上层走长退避；单次 evaluate 抛错（页面导航）不中断轮询。
+const FILL_VERIFY_GRACE_MS = 2400
+const FILL_VERIFY_POLL_MS = 300
 
-/** 无头会话的单次回复：AI 文本、时间戳、是否已结束 */
-export interface HeadlessReply {
-  kind: 'script' | 'done' | 'plain'
-  code?: string
-  lang?: string
-  hash?: string
-  text?: string
-}
+/** verifyFillSentInPage 的页面侧返回结构 */
+interface FillVerifyResult { sent?: boolean, rateLimited?: boolean, reason?: string }
 
-/** 无头会话池：管理并发会话与排队，防止资源竞争 */
-export interface HeadlessPool {
-  open: (sid: string, url?: string) => Promise<HeadlessSession>
-  close: (sid: string) => Promise<void>
-  get: (sid: string) => HeadlessSession | null
-  list: () => HeadlessSession[]
-  getPage: (sid: string) => unknown | null
-  fillPrompt: (sid: string, prompt: string) => Promise<boolean>
-  stopGenerating: (sid: string) => Promise<boolean>
-  newSession: (sid: string) => Promise<{ url: string, id: string } | null>
-  /** [headless-login-gui-v1] 引导式登录：有头窗口打开站点，用户登录后关窗，登录态落盘 */
-  openLoginGui: (sid: string, url?: string) => Promise<{ ok: boolean, detail?: string }>
-  rotate: (sid: string, instruction: string) => Promise<boolean>
-  /** 启动回复轮询（每 800ms 扫页面）。返回停止函数。 */
-  startReplyPoll: (sid: string, cb: (reply: HeadlessReply) => void) => () => void
-  /** 重置轮询 dedup（新一轮对话开始时调用）。 */
-  resetReplyDedup: (sid: string) => Promise<void>
-}
-
-/** DeepSeek 默认会话地址（可被环境变量覆盖） */
-const DEFAULT_URL = 'https://chat.deepseek.com/'
-/** 浏览器用户数据目录（持久化登录态与 Cookie） */
-const DEFAULT_USER_DATA_DIR = path.join(ROOT, '.ai-runner', 'headless-profile')
-/** 浏览器启动超时（毫秒），超时抛错 */
-const LAUNCH_TIMEOUT_MS = 30_000
-
-/** 无头会话池的并发上限 */
-const DEFAULT_POOL_LIMIT = 5
-/** 池满时排队等待上限（毫秒），超时抛错 */
-const DEFAULT_QUEUE_TIMEOUT_MS = 60_000
-/** 请求间隔抖动下限（毫秒），用于规避限流 */
-const DEFAULT_JITTER_MIN_MS = 3500
-/** 请求间隔抖动上限（毫秒），与下限配合 */
-const DEFAULT_JITTER_MAX_MS = 6000
-
-/**
- * 在 [minMs, maxMs) 区间内随机延迟后 resolve
- * [WHY] 固定间隔易被服务端识别为脚本；随机抖动模拟真人操作节奏
- * [CONSTRAINT] maxMs <= minMs 时按 minMs 恒定延迟；使用 Math.random 非加密随机
- * [CHANGE-IMPACT] 影响 sendFill / rotate 的每次发送间隔；调小会增加被限流风险
- * @param minMs 延迟下限（毫秒）
- * @param maxMs 延迟上限（毫秒，不含）
- */
-function jitterDelay(minMs: number, maxMs: number): Promise<void> {
-  const span = Math.max(0, maxMs - minMs)
-  const ms = minMs + Math.random() * span
-  return new Promise(r => setTimeout(r, ms))
-}
-
-/**
- * 指数退避重试封装（仅对 429 / rate-limit 生效）
- * [WHY] 服务端限流是暂时性故障，重试比直接失败更符合用户预期
- * [CONSTRAINT] 非 429 错误立即抛出（不做无意义重试）；退避序列 1s / 2s / 4s / 8s / 16s
- * [CHANGE-IMPACT] 被 fillPrompt 调用；maxRetry 调大虽提升成功率但拖长单次操作耗时
- * @param fn 待重试的异步操作
- * @param maxRetry 最大重试次数（默认 5）
- */
-async function withBackoff<T>(fn: () => Promise<T>, maxRetry = 5): Promise<T> {
-  for (let i = 0; i <= maxRetry; i++) {
-    try {
-      return await fn()
-    } catch (e) {
-      const msg = String(e)
-      if (!/429|rate.?limit/i.test(msg) || i === maxRetry) throw e
-      const wait = 2 ** i * 1000
-      await new Promise(r => setTimeout(r, wait))
-    }
+async function verifyFillWithGrace(page: Page): Promise<FillVerifyResult | null> {
+  const deadline = Date.now() + FILL_VERIFY_GRACE_MS
+  let last: FillVerifyResult | null = null
+  for (;;) {
+    last = await page.evaluate(verifyFillSentInPage).catch(() => null) as FillVerifyResult | null
+    if (last && last.sent === true) return last
+    if (last && last.rateLimited) return last
+    if (Date.now() >= deadline) return last
+    await new Promise(r => setTimeout(r, FILL_VERIFY_POLL_MS))
   }
-  throw new Error('backoff 超限')
-}
-
-// 429 比例监控（滑动窗口，>10% 降频）
-/** 速率窗口 */
-const rateWindow: number[] = []
-/**
- * 记录一次请求结果到滑动窗口（100 次容量）
- * [WHY] 用近期 429 比例动态调整抖动下限，服务端限流时自动降频
- * [CONSTRAINT] 窗口 FIFO 淘汰；只记录布尔（是否 429），不记录其他错误类型
- * @param is429 本次请求是否被限流（429 / rate-limit）
- */
-function recordRequest(is429: boolean): void {
-  rateWindow.push(is429 ? 1 : 0)
-  if (rateWindow.length > 100) rateWindow.shift()
-}
-/**
- * 计算滑动窗口内 429 占比
- * [CONSTRAINT] 窗口为空时返回 0（视为无限流）；用于 fillPrompt 决定是否放大抖动倍率
- */
-function rateLimitedRatio(): number {
-  if (rateWindow.length === 0) {
-    return 0
-  }
-  const sum = rateWindow.reduce((a, b) => a + b, 0)
-  return sum / rateWindow.length
 }
 
 /**
@@ -149,6 +62,7 @@ function rateLimitedRatio(): number {
  */
 export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   const sessions = new Map<string, HeadlessSession>()
+  const completionErrors = new Map<string, string>()
 
   // [OPT] _getPage helper
   function _getPage(sid: string): Page | undefined {
@@ -160,7 +74,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   // 同 sid 重复调用会对同一 userDataDir 二次 launch —— Chromium 单 profile 独占必崩。
   // 记录 in-flight Promise，重复调用直接返回提示（首个调用保持阻塞语义不变）
   const loginGuiInflight = new Map<string, Promise<{ ok: boolean, detail?: string }>>()
-  const baseUserDataDir = opts.userDataDir || DEFAULT_USER_DATA_DIR
+  const baseUserDataDir = opts.userDataDir || defaultUserDataDir()
   // 每个 sid 独立 profile；default 保留原路径兼容旧登录态
   function userDataDirFor(sid: string): string {
     return sid === 'default' ? baseUserDataDir : path.join(baseUserDataDir, sid)
@@ -171,25 +85,43 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   const queueTimeoutMs = opts.queueTimeoutMs || DEFAULT_QUEUE_TIMEOUT_MS
   const jitterMin = opts.jitterMin || DEFAULT_JITTER_MIN_MS
   const jitterMax = opts.jitterMax || DEFAULT_JITTER_MAX_MS
-  const waiting: Array<{ resolve: () => void, timer: ReturnType<typeof setTimeout> }> = []
+  // [headless-slot-queue-wired-v1] 槽位队列已抽到 headless-slot-queue.ts
+  const slotQueue = createSlotQueue(poolLimit, queueTimeoutMs)
   function acquireSlot(): Promise<void> {
-    if (sessions.size < poolLimit) {
-      return Promise.resolve()
-    }
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        const i = waiting.findIndex(w => w.resolve === resolve)
-        if (i >= 0) waiting.splice(i, 1)
-        resolve()
-      }, queueTimeoutMs)
-      waiting.push({ resolve, timer })
+    if (!slotQueue.isFull(sessions.size)) return Promise.resolve()
+    return slotQueue.acquire()
+  }
+  function releaseSlot(): void { slotQueue.release() }
+
+  function captureCompletionErrors(sid: string, page: Page): void {
+    page.on('response', (response) => {
+      let responseUrl: URL
+      try { responseUrl = new URL(response.url()) } catch { return }
+      if (responseUrl.hostname !== 'chat.deepseek.com' || responseUrl.pathname !== '/api/v0/chat/completion') return
+      void response.text().then((raw) => {
+        const error = parseDeepSeekCompletionError(raw)
+        console.info(`[headless-sse] sid=${sid} bytes=${raw.length} error=${Boolean(error)}`)
+        if (error) completionErrors.set(sid, error)
+      }).catch((error: unknown) => { console.warn(`[headless-sse] sid=${sid} body-read-failed=${String(error).slice(0, 120)}`) })
     })
   }
-  function releaseSlot(): void {
-    const next = waiting.shift()
-    if (next) {
-      clearTimeout(next.timer)
-      next.resolve()
+
+  /**
+   * [login-token-guard-v1] 轮询登录态，直到「确认已登录」(tokenState=yes) 或「无法判定」(unknown) 才放行
+   * [WHY] 输入框出现 ≠ 已登录：未登录时 DeepSeek 先渲染聊天骨架（path=/，输入框短暂存在），
+   *       token 校验失败后才跳 /sign_in。实测 open 曾返回假 idle、login-gui 曾误报登录成功并自动关窗
+   * [CONSTRAINT] 仅以 tokenState==='no'（userToken 显式为空）为负证据；unknown 放行，不误伤非 DeepSeek 部署；
+   *              evaluate 在页面跳转瞬间会抛错，按 unknown 放行并由后续 fill 失败兜底
+   * @returns true=已登录或无法判定（放行）；false=明确未登录
+   */
+  async function waitForLoginToken(page: Page, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      const raw = await page.evaluate(detectLoginStateInPage).catch(() => null)
+      const st = raw as { tokenState?: 'yes' | 'no' | 'unknown' } | null | undefined
+      if (!st || st.tokenState !== 'no') return true
+      if (Date.now() >= deadline) return false
+      await page.waitForTimeout(500)
     }
   }
 
@@ -216,12 +148,22 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     if (opts.geoip) launchOpts.geoip = true
     const context = await pw.chromium.launchPersistentContext(userDataDir, launchOpts as Parameters<typeof pw.chromium.launchPersistentContext>[1])
     const page = context.pages()[0] || await context.newPage()
+    captureCompletionErrors(sid, page)
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: LAUNCH_TIMEOUT_MS })
     // 等输入框渲染，避免 fill 时找不到
     try {
       await page.waitForSelector('textarea:not([readonly]):not([disabled]), [contenteditable="true"]', { timeout: 15000, state: 'visible' })
     } catch {
       const s: HeadlessSession = { sid, state: 'error', detail: '页面加载后未找到输入框（可能未登录）', createdAt: Date.now(), url, context, page }
+      sessions.set(sid, s)
+      return s
+    }
+    // [login-token-guard-v1] 输入框可见只是必要条件，还要确认真实登录态；未登录时最多再等 10s
+    // 让客户端完成 token 校验（失败会跳 /sign_in），仍为未登录则直接报错——
+    // 避免前端拿到假 idle 去 fill 后收到「未找到输入框」的二次困惑
+    const loginOk = await waitForLoginToken(page, 10_000)
+    if (!loginOk) {
+      const s: HeadlessSession = { sid, state: 'error', detail: '未登录：页面已渲染但登录态校验未通过（userToken 为空），请先在登录窗口完成登录', createdAt: Date.now(), url, context, page }
       sessions.set(sid, s)
       return s
     }
@@ -256,6 +198,46 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     try { return await task } finally { loginGuiInflight.delete(sid) }
   }
 
+  /**
+   * [login-gui-autoclose-v1] 轮询登录窗口，检测到已登录即自动关闭
+   * [WHY] 手动关窗步骤极易遗漏：窗口持 Chromium 单实例锁，headless 会静默拿到空环境，
+   *       表层误报「可能未登录」；自动关窗把「登录→可用」收敛为无感闭环
+   * [CONSTRAINT] 检测复用 launch() 的输入框选择器，且排除 /sign_in 路径；
+   *              页面跳转瞬间 evaluate 可能抛错，静默等下轮；用户手动关窗则本探测自然作废
+   * @returns stop 函数，返回是否已发生过自动关闭
+   */
+  function startLoginAutoclose(page: Page, closeCtx: () => Promise<void>): () => boolean {
+    let done = false
+    let candidatePath = ''
+    let candidateSince = 0
+    const timer = setInterval(() => {
+      if (done) return
+      page.evaluate(detectLoginStateInPage)
+        .then((raw) => {
+          // headless-inject 为 @ts-nocheck 文件，evaluate 返回值推断为 unknown，按返回结构收窄
+          const st = raw as { path: string, hasInput: boolean, tokenState?: 'yes' | 'no' | 'unknown' } | null | undefined
+          // [login-token-guard-v1] 必须拿到「确认已登录」的正面证据：仅凭 path 非 /sign_in + 有输入框，
+          // 会把未登录时先渲染的聊天骨架（path=/）误判成登录成功 —— 实测 17s 即误报并自动关窗
+          if (!st || !st.hasInput || st.tokenState !== 'yes' || /sign_in|login/i.test(st.path)) {
+            candidatePath = ''
+            candidateSince = 0
+            return
+          }
+          if (candidatePath !== st.path) {
+            candidatePath = st.path
+            candidateSince = Date.now()
+            return
+          }
+          if (done || Date.now() - candidateSince < LOGIN_STABLE_MS) return
+          done = true
+          clearInterval(timer)
+          closeCtx().catch(() => { /* swallow: 进程退出竞态，close 事件兜底 */ })
+        })
+        .catch(() => { /* swallow: 页面跳转瞬间 evaluate 抛错，等下轮 */ })
+    }, 2000)
+    return () => { const was = done; done = true; clearInterval(timer); return was }
+  }
+
   async function doOpenLoginGui(sid: string, url?: string): Promise<{ ok: boolean, detail?: string }> {
     // 释放 profile 独占锁
     const existing = sessions.get(sid)
@@ -276,10 +258,24 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       } as Parameters<typeof pw.chromium.launchPersistentContext>[1])
       const page = ctx.pages()[0] || await ctx.newPage()
       await page.goto(url || defaultUrl, { waitUntil: 'domcontentloaded', timeout: LAUNCH_TIMEOUT_MS })
-      // 等用户关窗：close 是唯一退出信号
+      // [login-gui-autoclose-v1] 置顶防「弹了没看见」；服务端轮询登录态，登录即自动关窗释放 profile
+      page.bringToFront().catch(() => { /* swallow: 窗口可能已被用户关闭 */ })
       const ctxLocal = ctx
-      await new Promise<void>((resolve) => { ctxLocal.on('close', () => resolve()) })
-      return { ok: true, detail: '登录窗口已关闭，登录态已落盘' }
+      const stopAutoclose = startLoginAutoclose(page, () => ctxLocal.close())
+      let autoClosed: boolean
+      try {
+        // 阻塞直到窗口关闭（自动或手动），不设超时——误中断会丢登录进度
+        await new Promise<void>((resolve) => { ctxLocal.on('close', () => resolve()) })
+      } finally {
+        autoClosed = stopAutoclose()
+      }
+      const verification = await launch(sid, url || defaultUrl)
+      const loginVerified = verification.state === 'idle'
+      await shutdown(verification)
+      sessions.delete(sid)
+      completionErrors.delete(sid)
+      if (!loginVerified) return { ok: false, detail: '登录窗口已关闭，但无头校验仍进入登录页；登录态未通过验证，请重新完成登录' }
+      return { ok: true, detail: autoClosed ? '已检测到登录成功，窗口已自动关闭，登录态已落盘' : '登录窗口已关闭，登录态已落盘' }
     } catch (e) {
       try { if (ctx) await ctx.close() } catch { /* swallow: ctx 已关闭，close 失败忽略 */ }
       return { ok: false, detail: String((e as Error).message || e).slice(0, 200) }
@@ -288,6 +284,12 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
 
   return {
     async open(sid, url) {
+      // [login-gui-guard-v1] 登录窗口阻塞期间持有 profile 单实例锁，
+      // 此时 headless launch 会拿到全新空环境（静默降级）→ 表层误报「可能未登录」
+      if (loginGuiInflight.has(sid)) {
+        const s: HeadlessSession = { sid, state: 'error', detail: '登录窗口尚未关闭，请先完成登录并关闭有头窗口', createdAt: Date.now(), url: url || defaultUrl }
+        return s
+      }
       // 全局串行，防并发 launch 抢 profile
       const prev = openMutex
       let rel: () => void = () => {}
@@ -309,6 +311,8 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       if (!s) return
       await shutdown(s)
       sessions.delete(sid)
+      // [completion-error-leak-v1] 会话销毁时须同步清理该 sid 的错误缓存，否则 Map 随 sid 单调增长
+      completionErrors.delete(sid)
       releaseSlot()
     },
     get(sid) { return sessions.get(sid) || null },
@@ -319,6 +323,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       if (!page) {
         return false
       }
+      completionErrors.delete(sid)
       const ratio = rateLimitedRatio()
       const scale = ratio > 0.1 ? 2 : 1
       await jitterDelay(jitterMin * scale, jitterMax * scale)
@@ -326,6 +331,19 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
         const ok = await withBackoff(async () => {
           const r = await page.evaluate(fillPromptInPage, { prompt })
           if (r !== true) throw new Error('fill 返回 false')
+          // [fill-verify-v2] 发送验证：click/Enter 后若页面未产生用户气泡，说明上一条仍在生成中，
+          // click 被静默忽略（DeepSeek 会阻止新消息但无错误提示）；或消息已发出但尚未渲染。
+          // [WHY] attach-ws 里 fill 成功就推 generating 态；若实际未发送，后续 poll 永远收不到回复，前端卡死。
+          // 旧实现只做一次 600ms 采样，在「新建会话首帧」恒判失败（AGENDA-10）——已改为只读宽限轮询。
+          // [CONSTRAINT] 只读 DOM，不重复点击（重复点击 = 双重发送）；失败抛错让 withBackoff 重试
+          // [rate-retry-v1] verify 为结构返回：sent=false 时区分「上一条仍在生成」与「频控拒收」。
+          // 频控拒收抛 cooldown 标记错误 → withBackoff 走 COOLDOWN_WAITS 长退避（15s→120s），
+          // 冷却后在闭包内原样重发同一 prompt，上层调用方零感知
+          const v = await verifyFillWithGrace(page)
+          if (!v || v.sent !== true) {
+            if (v && v.rateLimited) throw new Error(`rate-limit cooldown: ${v.reason || '消息发送过于频繁，请稍后重试'}`)
+            throw new Error('fill 验证失败：消息未出现在对话中（可能上一条仍在生成）')
+          }
           return r
         })
         recordRequest(false)
@@ -356,7 +374,10 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
         if (ok !== true) {
           return null
         }
-        await new Promise(r => setTimeout(r, 1500))
+        // [headless-newsession-v1] 等输入框渲染完成再返回，否则 attach-ws 立即 fill 会找不到输入框
+        // [WHY] DeepSeek 新建会话是 SPA 路由跳转，URL 变化不代表 DOM 就绪；1500ms 固定延迟不够
+        // [CONSTRAINT] 复用 launch() 的输入框选择器；10s 超时后仍找不到则返回 null（让 fill 报错）
+        await page.waitForSelector('textarea:not([readonly]):not([disabled]), [contenteditable="true"]', { timeout: 10000, state: 'visible' })
         const url = page.url()
         const idMatch = url.match(/\/chat\/([\w-]+)/) || url.match(/\/c\/([\w-]+)/)
         return { url, id: idMatch ? idMatch[1] : '' }
@@ -377,7 +398,10 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
         if (stopped || running) { if (!stopped) setTimeout(tick, 800); return }
         running = true
         try {
-          const reply = await page.evaluate(detectReplyInPage)
+          const streamError = completionErrors.get(sid)
+          const reply = streamError
+            ? (completionErrors.delete(sid), { kind: 'error', text: streamError })
+            : await page.evaluate(detectReplyInPage)
           if (!stopped && reply && typeof reply === 'object' && (reply as { kind?: string }).kind) {
             cb(reply as HeadlessReply)
           }

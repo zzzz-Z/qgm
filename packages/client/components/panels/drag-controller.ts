@@ -41,8 +41,19 @@ export function createDragController(deps: DragControllerDeps) {
     const label = isDir
       ? (count > 0 ? `${node.name}/ · ${count} 个文件` : `${node.name}/ · 加载中…`)
       : node.name
-    el.innerHTML = `${iconSvg(svgName, 'ghost-svg')}<span class="ghost-label">${label}</span>`
+    // [ghost-xss-fix-v1] label 含未转义的 node.name；磁盘上存在形如 <img onerror> 的文件名时，
+    // 拖拽即在工作台 origin 执行脚本（报告 §2.15）。改为 SVG（白名单）+ textContent 两段写入。
+    el.innerHTML = iconSvg(svgName, 'ghost-svg')
+    const labelEl = document.createElement('span')
+    labelEl.className = 'ghost-label'
+    labelEl.textContent = label
+    el.appendChild(labelEl)
     document.body.appendChild(el)
+    // [ghost-update-v1] 首帧 drag.paths 通常是空（collectFilePathsAsync 未返回），
+    // 报告 §2.16：ghost 永远显示"加载中…"。挂 update 回调供 resolve 后刷新文案。
+    ;(el as HTMLElement & { __updateLabel?: (s: string) => void }).__updateLabel = (s: string) => {
+      labelEl.textContent = s
+    }
     return el
   }
 
@@ -89,6 +100,12 @@ export function createDragController(deps: DragControllerDeps) {
     if (node.type === 'directory') {
       collectFilePathsAsync(node).then((paths) => {
         if (drag && drag.node.path === node.path) drag.paths = paths
+        // [ghost-update-v1] paths 到达后刷新 ghost 文案（首帧通常为 0）
+        const g = ghost as (HTMLElement & { __updateLabel?: (s: string) => void }) | null
+        if (g && typeof g.__updateLabel === 'function') {
+          const n = paths.length
+          g.__updateLabel(n > 0 ? `${node.name}/ · ${n} 个文件` : node.name)
+        }
       })
     } else {
       drag.paths = [node.path]

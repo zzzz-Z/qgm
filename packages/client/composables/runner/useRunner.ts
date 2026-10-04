@@ -1,8 +1,12 @@
 import { ref, watch } from 'vue'
 import { useSessionStorage } from '@vueuse/core'
-import { readNdjson } from '../../utils/stream'
 import { emit } from '../ui/useEventStream'
 import type { Change, DecisionPayload, RunResponse } from '../../types'
+import { uid } from '../../utils/id'
+// [restore-import-v1] readNdjson 早前被按 auto-import 名单清理时误删：app 侧兜底可跑，
+// 但 tsc --noEmit 报 Cannot find name 'readNdjson'（run 的 NDJSON 流解析依赖它）
+import { readNdjson } from '../../utils/stream'
+// [restore-import-v1] log 早前按 auto-import 名单清理时误删（app 侧兜底可跑，但 tsc --noEmit / vitest 无该插件）
 import { log } from '../../utils/log'
 
 /** sessionStorage 键：脚本内容 */
@@ -19,12 +23,11 @@ const STORAGE_KEY_BASELINE = '__ai_runner_baseline'
 const GIT_KEY = '__ai_runner_git_commit'
 /** 运行中止控制器；非响应式模块单例，与 stop() 成对管理 */
 let abortController: AbortController | null = null
+let activeRunToken = 0
 
-// ============================================================================
 // 模块级单例状态 —— 与 useSessionManager 惯例一致
 // 每次 useRunner() 返回同一份引用，避免 useAutoLoop 与 ScriptPanel 拿到两份不同的状态
 // 持久化统一走 vueuse useSessionStorage：自动 JSON 序列化 + 跨标签页同步
-// ============================================================================
 /** 持久化失败提示（仅脚本内容超配额时置位）；由下方 script 的 watch 写入 / 清空 */
 const persistWarning = ref('')
 /** 脚本内容；[CONSTRAINT] 保留 ref + watch 而非 useSessionStorage：需捕获 QuotaExceeded 设 persistWarning（vueuse 无 onSuccess 回调无法自动清空） */
@@ -99,7 +102,25 @@ function stop() {
     abortController.abort()
     abortController = null
   }
+  activeRunToken += 1
   running.value = false
+}
+
+/**
+ * 从脚本源码猜一个可读的一行摘要（脚本头无 @desc 时的兜底）
+ * [WHY] 统一回落到「执行脚本」会让时间线上多张卡片完全同形，用户无从判断这是哪一步；
+ *   取首个有效代码行至少能表意（例如 `fs.rmSync(tmp, { recursive: true })`）
+ * [CONSTRAINT] 跳过空行与注释行（`//` `/*` `*` `#` —— `#` 同时覆盖 shebang）；
+ *   一个有效行都找不到时仍回落 '执行脚本'：TerminalPane 依赖该字面量判定并跳过无信息空卡
+ * @param code 脚本源码全文
+ */
+function guessDesc(code: string): string {
+  for (const raw of code.split('\n')) {
+    const line = raw.trim()
+    if (!line || line.startsWith('//') || line.startsWith('/*') || line.startsWith('*') || line.startsWith('#')) continue
+    return line.slice(0, 60)
+  }
+  return '执行脚本'
 }
 
 /**
@@ -112,9 +133,13 @@ function stop() {
  * @param opts.autoFeedback 置位后本轮结束自动回传结果（一次性）
  */
 async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boolean }) {
-  if (opts?.autoFeedback) autoFeedbackRequested.value = true
   const code = (opts?.script ?? script.value).trim()
   if (!code || running.value) return
+  // [auto-feedback-after-guard-v1] 原在守卫之前置位，被跳过的 run 把一次性标志留给下一轮
+  // （报告 §2.19）；改为守卫通过后再置位。
+  if (opts?.autoFeedback) autoFeedbackRequested.value = true
+  const myToken = ++activeRunToken
+  const isStale = () => myToken !== activeRunToken
   lastRunCode.value = code
   running.value = true
   result.value = null
@@ -127,33 +152,22 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   // [WHY] 原正则强制冒号，AI 按脚本头契约输出无冒号时匹配失败 → 卡片永远显示 fallback
   // [CONSTRAINT] 冒号可选：`@desc xxx` 与 `@desc: xxx` 均可；[ \t]* 允许冒号两侧空白
   const metaM = code.match(/^[^\S\n]*(?:\/\/|#)[^\S\n]*@desc[^\S\n]*(?::[^\S\n]*)?(\S[^\n]*)$/m)
-  const desc = metaM ? metaM[1].trim().slice(0, 200) : '执行脚本'
+  const desc = metaM ? metaM[1].trim().slice(0, 200) : guessDesc(code)
   // [script-card-payload-v1] 提取 @why 与语言，供 TerminalPane 脚本卡片渲染（Markdown 化）
   const whyM = code.match(/^[^\S\n]*(?:\/\/|#)[^\S\n]*@why[^\S\n]*(?::[^\S\n]*)?(\S[^\n]*)$/m)
   const why = whyM ? whyM[1].trim().slice(0, 200) : ''
   const lang = /^#!\s*\/usr\/bin\/env\s+(?:bash|sh)\b/m.test(code) ? 'bash' : 'cjs'
   // [run-uk-unique] 每次运行唯一 key，避免同 key 覆盖历史事件导致位置错乱
-  const UK = opts?.runKey || (`run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`)
-  let lastStage = ''
-  const titleOf = () => {
-    const combined = (`${liveStdout.value}\n${liveStderr.value}`).trim()
-    const lines = combined.split('\n').filter(Boolean)
-    const tail = (lines[lines.length - 1] || '').trim()
-    const parts = [desc]
-    if (lastStage) parts.push(lastStage)
-    if (tail) parts.push(tail.slice(0, 100))
-    return parts.join(' · ')
-  }
+  const UK = opts?.runKey || uid('run')
   const emitStep = (phase: string, over: Record<string, unknown> = {}) => {
-    if (typeof over.currentStage === 'string') lastStage = over.currentStage
-    emit('run:start', titleOf(), {
+    // [timeline-denoise-v1] summary 只放 desc：原先拼接了原始 stdout 尾行（titleOf），
+    //   但 summary 从未被任何组件渲染，却会随每次 250ms 节流更新写进 localStorage ——
+    //   既是纯噪音，也让长输出白付一次 JSON 序列化。展示所需信息全部走 payload。
+    emit('run:start', desc, {
       payload: { desc, why, lang, phase, stdoutTail: liveStdout.value.slice(-400), stderrTail: liveStderr.value.slice(-400), ...over },
       updateKey: UK,
     })
   }
-  // [lifecycle] 记录本次执行的所有 stage（用于展开区时间线）
-  const stageHistory: Array<{ name: string, status: string, ts: number, ms?: number, ok?: boolean, files?: number, tscOk?: boolean, testOk?: boolean }> = []
-  const runStartedAt = Date.now()
   let finalPhase: 'running' | 'done' | 'error' = 'running' // [loading-fix]
   const wrappedEmitStep = (phase: string, over: Record<string, unknown> = {}) => {
     if (phase === 'done' || phase === 'error') finalPhase = phase
@@ -201,6 +215,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
     let _summaryDecision: DecisionPayload | null = null
     let _summaryNeedFiles: string[] | null = null
     await readNdjson<Record<string, unknown>>(res.body, (frame) => {
+      if (isStale()) return
       if (frame.type === 'summary') {
         if (frame.decision && typeof frame.decision === 'object') {
           _summaryDecision = frame.decision as DecisionPayload
@@ -214,33 +229,19 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         if (frame.stream === 'stdout') liveStdout.value += String(frame.data || '')
         else if (frame.stream === 'stderr') liveStderr.value += String(frame.data || '')
         flushChunk()
-      } else if (frame.type === 'stage') {
-        const name = String(frame.name || 'stage')
-        const status = String(frame.status || '')
-        const ok = typeof frame.ok === 'boolean' ? frame.ok : undefined
-        const ms = typeof frame.ms === 'number' ? frame.ms : undefined
-        const files = typeof frame.files === 'number' ? frame.files : undefined
-        const tscOk = typeof frame.tscOk === 'boolean' ? frame.tscOk : undefined
-        const testOk = typeof frame.testOk === 'boolean' ? frame.testOk : undefined
-        // 同 name 的 start → done 更新（不重复添加）
-        const idx = stageHistory.findIndex(x => x.name === name)
-        const rec = { name, status, ts: Date.now(), ms, ok, files, tscOk, testOk }
-        if (idx >= 0) stageHistory[idx] = { ...stageHistory[idx], ...rec }
-        else stageHistory.push(rec)
-        const mark = status === 'done' ? (ok === false ? ' ✗' : ' ✓') : ' …'
-        wrappedEmitStep('running', {
-          currentStage: name + mark,
-          stageName: name,
-          stageStatus: status,
-          stageHistory,
-          startedAt: runStartedAt,
-          elapsedMs: Date.now() - runStartedAt,
-        })
-        frames.push(frame)
       }
     }, abortController.signal)
-    const summary: Record<string, unknown> | null = frames.length > 0 ? frames[frames.length - 1] : null
+    // [frames-tail-fix-v1] 原取 frames 尾帧作为 summary；但 stage 帧也会 push，
+    // 若 summary 帧之后还有 stage 帧（服务端顺序不保证），会错把 stage 当 summary，
+    // 导致 runId/changes/ok 全部缺失。改为按 type === 'summary' 精确匹配。
+    const summary: Record<string, unknown> | null = (() => {
+      for (let i = frames.length - 1; i >= 0; i--) {
+        if (frames[i].type === 'summary') return frames[i]
+      }
+      return null
+    })()
     if (summary) {
+      if (isStale()) return
       const s = summary
       const data: RunResponse = {
         runId: String(s.runId || ''),
@@ -266,6 +267,8 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         tools: s.tools as RunResponse['tools'],
         smoke: (s.smoke as RunResponse['smoke']) ?? null,
         claimMismatch: (s.claimMismatch as RunResponse['claimMismatch']) ?? null,
+        // [pipeline-in-summary-v1] 捕获 summary 帧下发的 pipeline，供 PipelineStrip 即时渲染
+        pipeline: (s.pipeline as RunResponse['pipeline']) ?? undefined,
       }
       const prevBaseline = baselineRunId.value
       result.value = data
@@ -278,7 +281,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       }, [])
       if (data.ok && data.runId) baselineRunId.value = data.runId
       if (result.value) result.value.baselineRunId = prevBaseline
-      wrappedEmitStep(data.ok ? 'done' : 'error', { exit: data.code, changeCount: changes.value.length, stageHistory, startedAt: runStartedAt, elapsedMs: Date.now() - runStartedAt })
+      wrappedEmitStep(data.ok ? 'done' : 'error', { exit: data.code, changeCount: changes.value.length })
     } else {
       result.value = {
         runId: '',
@@ -293,6 +296,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       wrappedEmitStep('error', { reason: '未收到 summary 帧' })
     }
   } catch (e) {
+    if (isStale()) return
     const aborted = (e as { name?: string })?.name === 'AbortError'
     result.value = {
       runId: '',
@@ -305,12 +309,14 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
     }
     wrappedEmitStep('error', { reason: aborted ? '已取消' : String(e).slice(0, 80) })
   } finally {
-    // 兜底：任何提前 return（HTTP 错误 / 无 body）都会走到这，确保 emit 结束态
-    if (finalPhase === 'running') {
-      const ok = result.value?.ok === true
-      wrappedEmitStep(ok ? 'done' : 'error', { exit: result.value?.code, changeCount: changes.value.length, fallback: true })
+    if (!isStale()) {
+      // 兜底：任何提前 return（HTTP 错误 / 无 body）都会走到这，确保 emit 结束态
+      if (finalPhase === 'running') {
+        const ok = result.value?.ok === true
+        wrappedEmitStep(ok ? 'done' : 'error', { exit: result.value?.code, changeCount: changes.value.length, fallback: true })
+      }
+      running.value = false
     }
-    running.value = false
   }
 }
 
@@ -329,7 +335,8 @@ async function rollback(file: string) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ runId: result.value.runId, file }),
     })
-    const data = await res.json()
+    // [rollback-catch-v1] res.json() 无 catch 会在网络异常时 unhandled rejection（报告 §2.20）
+    const data = await res.json().catch(() => ({ ok: false }))
     if (data.ok) changes.value = changes.value.filter(c => c.path !== file)
     return data
   } finally {
@@ -349,7 +356,7 @@ async function rollbackAll() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ runId: result.value.runId }),
     })
-    const data = await res.json()
+    const data = await res.json().catch(() => ({ ok: false }))
     if (data.ok) changes.value = []
     return data
   } finally {
@@ -368,7 +375,7 @@ async function save() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ runId: result.value.runId }),
-    })
+    }).catch(() => null)
     changes.value = []
   } finally {
     busyAll.value = false
@@ -394,6 +401,7 @@ export function useRunner() {
     liveStdout,
     liveStderr,
     doneSummary,
+    pipelineFromServer: () => result.value?.pipeline,
     autoFeedbackRequested,
     clearAutoFeedback: () => { autoFeedbackRequested.value = false },
     run,

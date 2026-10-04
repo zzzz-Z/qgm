@@ -1,42 +1,32 @@
 // 会话提示词拼装：新会话 / 循环首轮统一携带 SYSTEM.md + AGENTS.md
 // [WHY] 所有下发提示词都由预设 SYSTEM.md + 工作区 AGENTS.md 拼装，与首问加载同源，
 //       避免规则漂移；切工作区 / 超 200 轮轮转时 AI 上下文始终完整。
-// [CONSTRAINT] 两处 fetch 任一失败 → 只返回业务内容（summary / goal），不注入其它兜底；
-//             fetch 指向同源 HTTP 服务，失败极罕见。
+// [CONSTRAINT] 三处 fetch（SYSTEM/AGENTS、技能、lessons）任一失败 → 只返回业务内容
+//             （summary / goal），不注入其它兜底；三者失败时都降级为空串。
+// [load-lessons-v1] lessons 注入：把既往踩坑记录带进决策回路（此前只被统计读，见 load-lessons.ts）
 
-/** 读 SYSTEM.md（预设源）与 AGENTS.md（工作区）包成 <file> 块；任一失败返回空串 */
-async function loadRulesBlock(): Promise<string> {
-  const parts: string[] = []
-  try {
-    const r = await fetch('/__ai/preset/system')
-    const j = await r.json()
-    if (j && j.ok && j.content) parts.push(`<file path="SYSTEM.md">` + `\n${j.content}\n</file>`)
-  } catch { /* preset 不可用 */ }
-  try {
-    const r = await fetch('/__ai/files/read', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: ['AGENTS.md'] }),
-    })
-    const j = await r.json()
-    const files = (j && j.files) || []
-    for (const f of files) {
-      if (!f || f.error || !f.content) continue
-      parts.push(`<file path="${f.path}">` + `\n${f.content}\n</file>`)
-    }
-  } catch { /* 工作区读取失败 */ }
-  return parts.join('\n\n')
-}
+// [load-rules-wired-v1] 读取逻辑已抽到 load-rules.ts（含 Promise 缓存）
+import { loadRulesBlock } from './load-rules.js'
+import { buildLessonsBlock } from './load-lessons.js'
+import { buildSkillsBlock } from './skill-registry.js'
 
 /**
- * 新会话首问：SYSTEM.md + AGENTS.md + 上一轮总结
+ * 新会话首问：SYSTEM.md + AGENTS.md + 技能 + lessons + 上一轮总结
  * [CHANGE-IMPACT] 被 handoff.ts / exec-flow.ts 调用；返回值经 sendNewSession 原样带到油猴侧
- * @param summary 上一轮会话总结
+ * [lessons-inject-v2] 与 buildLoopInitialPrompt 对齐：交接后的新会话仍在做同一件事，
+ *   既往踩坑记录同样相关（唯一调用方是 auto-loop/handoff.ts，见该处 onSummary）
+ * [query-source-v1] 技能检索用 query 而非 summary：summary 描述「已做」，用它推「将做」会
+ *   把上一轮跑过的命令名当成需求（实测 goal 为空的 fallback 模板唯一可匹配词是 `test`，
+ *   于是注入 tdd + systematic-debugging 共 6903 B，与目标无关）。query 缺省时退回 summary。
+ * @param summary 上一轮会话总结（仅作正文，不作检索依据）
+ * @param query 技能检索来源，通常是 goal；为空则不检索
  */
-export async function buildNewSessionPrompt(summary: string): Promise<string> {
-  const rules = await loadRulesBlock()
+export async function buildNewSessionPrompt(summary: string, query?: string): Promise<string> {
+  const retrieval = String(query ?? summary ?? '').trim()
+  const [rules, skills, lessons] = await Promise.all([loadRulesBlock(), buildSkillsBlock(retrieval), buildLessonsBlock()])
+  const head = [rules, skills, lessons].filter(Boolean).join('\n\n')
 
-  return rules ? `${rules}\n\n# 上一轮会话总结\n\n${summary}` : summary
+  return head ? `${head}\n\n# 上一轮会话总结\n\n${summary}` : summary
 }
 
 /**
@@ -45,8 +35,9 @@ export async function buildNewSessionPrompt(summary: string): Promise<string> {
  * @param goal 用户填写的循环目标
  */
 export async function buildLoopInitialPrompt(goal: string): Promise<string> {
-  const rules = await loadRulesBlock()
+  const [rules, skills, lessons] = await Promise.all([loadRulesBlock(), buildSkillsBlock(goal), buildLessonsBlock()])
+  const head = [rules, skills, lessons].filter(Boolean).join('\n\n')
 
   const g = String(goal).trim()
-  return rules ? `${rules}\n\n# 目标\n\n${g}` : g
+  return head ? `${head}\n\n# 目标\n\n${g}` : g
 }

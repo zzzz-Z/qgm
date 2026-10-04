@@ -32,7 +32,15 @@ export async function readNdjson<T>(
         onFrame(frame)
       }
     }
+    // [stream-flush-v1] 报告 §3 P2：末次 decode 未 flush，多字节残留会丢末帧
+    buf += dec.decode()
+    const tail = buf.trim()
+    if (tail) {
+      try { onFrame(JSON.parse(tail) as T) } catch { /* 尾帧解析失败忽略 */ }
+    }
   } finally {
+    // [stream-cancel-v1] 报告 §3 P2：原只 releaseLock，底层流仍在传输；主动 cancel 释放
+    try { await reader.cancel() } catch { /* 流已关闭 */ }
     try { reader.releaseLock() } catch { /* swallow: 流已关闭 / 已释放，releaseLock 幂等性不保证 */ }
   }
 }

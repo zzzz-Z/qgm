@@ -12,6 +12,17 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [] }>()
 
 defineOptions({ name: 'DiffOverlay' })
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+
+// [diff-overlay-esc-v1] 报告 §2.22：aria-label 承诺 Esc 关窗，但原实现无任何 keydown 处理
+function onKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    emit('close')
+  }
+}
 </script>
 
 <template>

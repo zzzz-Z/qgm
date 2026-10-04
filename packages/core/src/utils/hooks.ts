@@ -1,12 +1,17 @@
 // AIRUNNER-BATCH11-1-HOOKS-CONFIG: 类型与配置加载已外移至 hooks-config.ts；此文件保留 runHook 执行编排
 import path from 'node:path'
-import { ROOT } from '../config.js'
+import { getRoot } from '../config.js'
 import { runProcess } from '../process/proc.js'
 import type { HookEvent, HookResult } from './hooks-config.js'
 import { loadHooksConfig } from './hooks-config.js'
 
-/** 钩子配置文件路径 */
-const CONFIG_PATH = path.join(ROOT, '.ai-runner/hooks.json')
+/**
+ * hooks 配置文件路径；[lazy-path-v1] 改为函数式：原 const 在模块导入时快照 ROOT，
+ * standalone 下 setRoot 切换工作区后仍指向启动 cwd（隐藏 bug）
+ */
+function configPath(): string {
+  return path.join(getRoot(), '.ai-runner/hooks.json')
+}
 /** 单个钩子执行的超时上限（毫秒） */
 const HOOK_TIMEOUT_MS = 5000
 
@@ -15,7 +20,7 @@ const HOOK_TIMEOUT_MS = 5000
 /**
  * 读取 Config
  */
-function readConfig(): ReturnType<typeof loadHooksConfig> { return loadHooksConfig(CONFIG_PATH) }
+function readConfig(): ReturnType<typeof loadHooksConfig> { return loadHooksConfig(configPath()) }
 
 /**
  * 按 hooks 配置依次执行指定事件下的外部命令
@@ -38,7 +43,9 @@ export async function runHook(event: HookEvent, payload: unknown): Promise<HookR
     if (!cmd) continue
     run++
     const r = await runProcess(cmd, {
-      cwd: ROOT,
+      // [root-track-v1] cwd 用 getRoot() 动态读取：原 ROOT 是模块级快照，
+      // setRoot 切换工作区后 hook 仍在旧目录执行（隐藏 bug，与 git.ts 同类）
+      cwd: getRoot(),
       shell: true,
       timeoutMs: HOOK_TIMEOUT_MS,
       timeoutLabel: `hook ${event} 超时`,

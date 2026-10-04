@@ -7,6 +7,8 @@
  * @param bytes 字节数；负数按 B 处理（< 1024 分支）
  */
 export function fmtSize(bytes: number): string {
+  // [fmt-size-nan-guard-v1] 报告 P2：NaN/undefined 会输出 "NaNMB" 或 "undefinedB"
+  if (!Number.isFinite(bytes) || bytes < 0) return '—'
   if (bytes < 1024) return `${bytes}B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
   return `${(bytes / 1024 / 1024).toFixed(2)}MB`
@@ -67,7 +69,9 @@ export function readAsText(file: File): Promise<string> {
   return new Promise((res, rej) => {
     const r = new FileReader()
     r.onload = () => res(String(r.result || ''))
-    r.onerror = rej
+    // [reader-reject-error-v1] 报告 P2：原 reject 原始 ProgressEvent 而非 Error，
+    // 调用方的 catch 拿到的不是 Error，判断类型会误判。包成 Error 更可控。
+    r.onerror = () => rej(new Error(`FileReader 读取失败：${file && file.name ? file.name : '(unknown)'}`))
     r.readAsText(file)
   })
 }

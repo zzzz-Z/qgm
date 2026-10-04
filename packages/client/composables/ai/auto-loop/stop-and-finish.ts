@@ -1,7 +1,10 @@
 // [stop-and-finish-v1] 从 useAutoLoop.ts 抽出（PLAN P0-2 瘦身）；handleStopAfterRound + finish
+import { TOAST_LONG, TOAST_LONGEST, TOAST_MEDIUM } from '../../../utils/toast-durations'
 import type { Ref } from 'vue'
 import type { LoopInstance } from './types.js'
 import type { AiTransport } from '../useAiTransport.js'
+import { disarmTimer } from './timers.js'
+import { setLoopState } from './transitions.js'
 
 type ToastFn = typeof import('../../ui/useToast.js').toast
 type RunHookFn = typeof import('./hooks.js').runHook
@@ -9,13 +12,13 @@ type RunHookFn = typeof import('./hooks.js').runHook
 /** 抽离出的依赖面：全部由 useAutoLoop.ts 注入，本模块无模块级状态 */
 interface StopAndFinishDeps {
   loopPaused: Ref<boolean>
-  disarmTimer: (inst: LoopInstance) => void
   persist: (inst: LoopInstance) => void
-  enterWaiting: (inst: LoopInstance) => void
   transport: AiTransport
   toast: ToastFn
   runHook: RunHookFn
   unbindKeyboard: () => void
+  /** [handoff-timer-cleanup-v1] 终止循环时须一并 disarm 30s handoff 定时器，否则窗口期内急停会被后续 handoffFail 二次覆盖状态 */
+  handoffDisarm: (inst: LoopInstance) => void
 }
 
 /**
@@ -26,8 +29,7 @@ interface StopAndFinishDeps {
  * @param deps 停止族依赖面（loopPaused / transport / toast 等外部引用）
  */
 export function createStopAndFinish(deps: StopAndFinishDeps) {
-  // [unused-cleanup-v2] 已删 enterWaiting：本文件仅解构点，接口字段保留供上游契约
-  const { loopPaused, disarmTimer, persist, transport, toast, runHook, unbindKeyboard } = deps
+  const { loopPaused, persist, transport, toast, runHook, unbindKeyboard, handoffDisarm } = deps
   /**
    * 每轮结束后按 stopRequest 决定是否回滚
    * [WHY] 用户在本轮开始时点了"回滚急停"时，本轮变更需 git reset 到起始 commit 后再 finish
@@ -52,9 +54,7 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
     await finish(inst, 'interrupted', '用户急停/暂停')
   }
 
-  // ============================================================================
   // 终止 + 循环级 commit
-  // ============================================================================
   /**
    * 终止循环的统一出口：改状态 + 停 transport + 循环级 commit + 触发 LoopStop hook
    * [WHY] 所有终止路径（用户急停 / 窗口丢失 / hook reject 等）共用一个收尾，避免状态机分支散落
@@ -65,17 +65,23 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
    * @param detail 可读补充说明；缺省时回落为 reason
    */
   async function finish(inst: LoopInstance, reason: string, detail?: string): Promise<void> {
+    // [finish-race-guard-v1] 捕获进入时的 loopId：await commit 期间用户可能启动新循环
+    // （initLoop 会复位 loopPaused=false + 写入新 id），若此处不校验，await 后置 loopPaused=true
+    // 会把新循环立刻误置为暂停态（500ms preparing 定时器被 enterWaiting 守卫拦下 → 永久卡住）
+    const finishingLoopId = inst.id.value
     // [breaker-sendstop-first-v1] 停止信号必须最先发出：抢在本地计时器与状态机变更之前
     // [WHY] 若 sendStop 滞后，服务器端 post-run 可能已注入下一轮脚本，本地早退守卫无从拦截
     // [CONSTRAINT] try/catch 包裹：链路未就绪时不应阻塞收尾流程
     try { transport.sendStop('') } catch { /* 链路未就绪忽略 */ }
     disarmTimer(inst)
+    handoffDisarm(inst)
     inst.pendingRound.value = null
     const wasRollback = inst.stopRequest.value === 'rollback'
     const interrupted = reason === 'interrupted'
     inst.stopReason.value = detail || reason
 
-    inst.state.value = interrupted ? 'interrupted' : 'stopped'
+    // [transitions-v1] INTERRUPT / STOP 事件：任意活动态 → interrupted | stopped
+    setLoopState(inst, interrupted ? 'INTERRUPT' : 'STOP')
     unbindKeyboard()
     persist(inst)
 
@@ -95,17 +101,21 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
           const hint = inst.startCommit.value
             ? `丢弃改动：git reset --hard ${inst.startCommit.value}`
             : ''
-          toast(`已存档到 ai-archive:${d.commit}（${inst.round.value} 轮）${hint ? ` · ${hint}` : ''}`, 'success', 8000)
+          toast(`已存档到 ai-archive:${d.commit}（${inst.round.value} 轮）${hint ? ` · ${hint}` : ''}`, 'success', TOAST_LONGEST)
         } else if (d.ok && d.empty) {
-          toast('循环结束，无文件改动', 'info', 4000)
+          toast('循环结束，无文件改动', 'info', TOAST_MEDIUM)
         } else {
-          toast(`循环结束，存档失败：${d.reason || ''}`, 'warn', 6000)
+          toast(`循环结束，存档失败：${d.reason || ''}`, 'warn', TOAST_LONG)
         }
       } catch {
-        toast('循环结束（非 git 仓库，未提交）', 'info', 4000)
+        toast('循环结束（非 git 仓库，未提交）', 'info', TOAST_MEDIUM)
       }
     }
 
+    // [finish-race-guard-v1] 若 await 期间已启动新循环，跳过收尾（loopPaused / stopRequest / LoopStop hook）
+    // [WHY] 新循环 initLoop 已复位 loopPaused=false 并写入新 loopId；此处覆盖会让新循环立即被误判为暂停
+    // [CONSTRAINT] 该 return 不影响本循环已完成的 state / persist / commit；只保护"后续新循环不被污染"
+    if (inst.id.value !== finishingLoopId) return
     // [auto-idle-after-finish-v1] 整轮结束自动回初始态：按钮切「发送」
     loopPaused.value = true
     inst.stopRequest.value = 'none'

@@ -22,7 +22,17 @@
     "git:archive": "node scripts/git-archive.mjs",
     "git:archive:watch": "node scripts/git-archive.mjs --watch",
     "start": "node apps/standalone/bin/air-server.cjs",
+    "docker:deploy": "node scripts/docker-deploy.mjs",
+    "docker:up": "node scripts/docker-deploy.mjs --no-build",
+    "docker:rebuild": "node scripts/docker-deploy.mjs --build",
+    "docker:down": "node scripts/docker-deploy.mjs --down",
+    "docker:logs": "node scripts/docker-deploy.mjs --logs",
+    "docker:prune": "node scripts/docker-deploy.mjs --prune",
     "session:start": "node scripts/session-start.cjs",
+    "handoff:gen": "node scripts/handoff-gen.cjs",
+    "lessons:add": "node bin/lessons-add.cjs",
+    "lessons:status": "node scripts/lessons-status.cjs",
+    "docs:verify": "node scripts/verify-docs-index.cjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "tsc": "tsc -p tsconfig.json --noEmit",
@@ -41,7 +51,8 @@
     "tsc:apps": "tsc -p tsconfig.apps.json",
     "verify:contracts": "node scripts/verify-contracts.cjs",
     "analyze:confidence": "node scripts/analyze-confidence.cjs",
-    "analyze:trust": "node scripts/analyze-trust-evolution.cjs"
+    "analyze:trust": "node scripts/analyze-trust-evolution.cjs",
+    "stop": "pkill -f 'apps/standalone/dist/_server/index.js' || true"
   },
   "peerDependencies": {
     "vite": ">=5"
@@ -89,6 +100,7 @@
     "@unocss/eslint-plugin": "^66.10.5",
     "@vitejs/plugin-vue": "^6.0.9",
     "@vitest/coverage-v8": "5.0.1",
+    "@vueuse/core": "^15.0.0",
     "eslint": "^9.39.4",
     "eslint-plugin-format": "^2.0.1",
     "eslint-plugin-vue": "^10.11.0",
@@ -98,6 +110,7 @@
     "sass-embedded": "^1.104.1",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.70.0",
+    "unplugin-auto-import": "^21.1.0",
     "vite": "^8.2.2",
     "vite-plugin-compression2": "^2.5.3",
     "vue-eslint-parser": "^10.4.1",

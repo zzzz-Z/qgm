@@ -17,7 +17,10 @@ export function shouldIncludeChanges(
   const c = changes[0]
   const locs = errorLocs.get(c.path) || errorLocs.get(`./${c.path}`)
   if (locs && locs.size > 0) {
-    const total = c.afterLines ?? 0
+    // [afterlines-guard-v1] 报告 §3 P2：afterLines 缺失时 total=0 会让任何 n<=200 误判"文件内"，
+    // 导致已有的 changes 被错误排除。改为缺失即保守返回 true（含 changes）。
+    const total = c.afterLines
+    if (typeof total !== 'number') return true
     for (const n of locs) {
       if (n <= total + 200) return false
     }

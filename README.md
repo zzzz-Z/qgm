@@ -129,15 +129,15 @@ export DEEPSEEK_API_KEY=sk-xxxx
 3. **定向 tsc**：临时 tsconfig 只检查变更文件；有 `vue-tsc` 优先，否则回退 `tsc`
 4. **vitest**：本次新增 / 修改的 `*.node-test.ts` 自动跑
 5. **Playwright 冒烟**（勾选 smoke 时）：headless chromium 访问 `/` 与 `/__ai/`，收集 pageerror / console.error / HTTP ≥ 400
-6. **Git 保护**（勾选 gitCommit 时）：运行前 `git add -A && commit` 存档，成功后按本次 changes 再提一次
+6. **Git 保护**（勾选 gitCommit 时）：运行前把工作区固化成 `refs/ai-runner/pre/<runId>` 快照 ref（含未跟踪文件，**不动** HEAD / 索引 / 工作区）；成功后按本次 changes 存档到 `ai-archive` 分支，主分支只在用户显式 commit 时前进
 
 失败时从 stdout/stderr 栈里提取项目内真实文件路径（`errorFiles`），供前端补全上下文。
 
 ### 3.3 Diff 与回滚
 
 - 右侧变更面板列出 A/M/D 计数与文件，点文件看 **LCS diff**
-- 每个文件可单独 ↺ 回滚（`POST /rollback`）
-- 「撤回全部」一键回到运行前（`POST /rollback-all`）
+- 每个文件可单独 ↺ 回滚（`POST /rollback`）：内容来源遵循 **git 优先** —— 有运行前 ref 时逐文件 `git restore`（只改工作区、不动索引），无 git / 快照失败才回落 `.before` 内容副本
+- 「撤回全部」一键回到运行前（`POST /rollback-all`），结束后回收该次运行的快照 ref
 - 「保存」确认改动并清除当次快照（`POST /save`）
 - 跨轮对比：以某次历史运行为基准看当前工作区差异（`POST /diff-from-baseline`）
 - 快照保留最近 **20** 次，超出自动 GC；运行日志保留 **30** 天
@@ -303,7 +303,7 @@ AGENTS.md                       # 项目入口索引
 - LCS diff 在超大文件（N×M > 4M 格）退化为全删全增展示
 - Git 保护默认关闭，需界面手动勾选
 - `@` 提及只匹配文件路径，不做符号检索
-- G2 收窄后仅支持 node 脚本，bash 支持已下线
+- G2 收窄后 `/run` 仅接受 node 脚本（`#! /usr/bin/env node`）；bash 不进入 `/run`，仅能经自动循环的 `/exec` 通道执行（受 120s 超时与 `bashPolicy` 约束）。采集侧语言白名单同为 js/bash，语言不可判定的代码块不再被当作脚本
 - `enforceBudget` 按字符数（200KB）判断，非 token 数；中文场景实际 token 远超预算口径
 
 ---

@@ -49,7 +49,7 @@ export function aiRunner(options: AiRunnerOptions = {}): Plugin {
     configureServer(server: ViteDevServer) {
       // [U4] 忽略插件自身 src/ 变更，防 Vite 重启 dev server 打断循环
       // 副作用：改插件代码后需手动重启 dev server 让新逻辑生效
-      try { server.watcher.unwatch(__pkgDir) } catch { }
+      try { server.watcher.unwatch(__pkgDir) } catch { /* swallow: watcher 未就绪时 unwatch 抛错，不阻断 dev server 启动 */ }
       server.middlewares.use(PREFIX, (req, res) => {
         if (!req.url || req.url === '') req.url = '/'
         router.handle(req, res).catch((e: unknown) => {

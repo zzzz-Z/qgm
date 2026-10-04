@@ -28,6 +28,10 @@ export interface ProcessResult {
   stderr: string
   /** 是否因超时/取消而被杀掉 */
   killed: boolean
+  // [run-timeout-visible-v1] 把「超时」与「取消 / 输出超限 / 自身非零退出」区分开。
+  //   过去只有 killed，调用方（AI）看到 code=-1 只能猜，于是把「超时后其实已部分成功」
+  //   当成彻底失败 → 无脑重试 → 白烧轮次（2026-10-04 skill 安装实测）。
+  timedOut: boolean
   /** [resource-limit-v1] 输出是否因超限被截断 */
   truncated?: boolean
 }
@@ -88,7 +92,7 @@ export function runProcess(cmd: string, options: RunProcessOptions = {}): Promis
         }
       }, options.timeoutMs)
     }
-    const onAbort = () => { killed = true; clearTimeout(escalate); kill('SIGKILL') }
+    const onAbort = () => { killed = true; clearTimeout(timer); clearTimeout(escalate); kill('SIGKILL') }
     options.signal?.addEventListener('abort', onAbort, { once: true })
 
     child.stdout?.on('data', (d: Buffer) => {
@@ -104,7 +108,7 @@ export function runProcess(cmd: string, options: RunProcessOptions = {}): Promis
     child.on('error', (e) => {
       clearTimeout(timer); clearTimeout(escalate)
       options.signal?.removeEventListener('abort', onAbort)
-      resolve({ code: -1, stdout, stderr: stderr ? `${stderr}\n${String(e)}` : String(e), killed, truncated })
+      resolve({ code: -1, stdout, stderr: stderr ? `${stderr}\n${String(e)}` : String(e), killed, timedOut, truncated })
     })
     child.on('close', (code) => {
       clearTimeout(timer); clearTimeout(escalate)
@@ -112,7 +116,7 @@ export function runProcess(cmd: string, options: RunProcessOptions = {}): Promis
       const finalStderr = timedOut && options.timeoutMs
         ? `${stderr}\n[${options.timeoutLabel || '超时'} ${Math.round(options.timeoutMs / 1000)}s 强制终止]`
         : stderr
-      resolve({ code: code ?? -1, stdout, stderr: finalStderr, killed, truncated })
+      resolve({ code: code ?? -1, stdout, stderr: finalStderr, killed, timedOut, truncated })
     })
   })
 }

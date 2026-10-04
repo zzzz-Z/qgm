@@ -2,10 +2,8 @@
 import { activeLoop, isLoopActive, requestPause, stopAndRollback } from '../useAutoLoop.js'
 
 let keyboardBound = false
-// ============================================================================
 // 键盘：Esc 暂停 / Ctrl+Esc 回滚
 // 键盘绑定是全局的（每页一份），onKeydown 从 activeLoop 取当前实例
-// ============================================================================
 /**
  * 循环进行中的全局键盘处理：Escape 暂停 / Ctrl+Escape 回滚
  * [WHY] 急停入口需在循环运行时可立即响应；Ctrl 修饰区分"暂停"与"回滚"两档

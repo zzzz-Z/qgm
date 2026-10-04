@@ -1,12 +1,6 @@
 // [exec-flow-v1] 从 ScriptPanel.vue 抽出：bash/cjs 命令执行 + 结果回传 AI
-import { ref } from 'vue'
+import { TOAST_MEDIUM } from '../../utils/toast-durations'
 import type { Ref } from 'vue'
-import { useToast } from '../../composables/ui/useToast'
-import { copyAndFill } from '../../composables/ai/useAiWindow'
-import { readNdjson } from '../../utils/stream'
-import { bashPolicy } from '../../composables/ui/useAppStorage'
-import { log } from '../../utils/log'
-import { emit } from '../../composables/ui/useEventStream'
 import type { ChangeType } from '../../types'
 
 /** 执行结果（ScriptPanel 用到的子集） */
@@ -45,10 +39,16 @@ export function createExecFlow(deps: ExecFlowDeps) {
   const { toast } = useToast()
   const execPolicyOverride = ref<string | null>(null)
   const lastAutoAskedRunId = ref('')
+  // [copyout-timer-v1] copied 提示的 timer 句柄；连续回传时先清旧的
+  let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
   /** 用户批准黑名单命令后以 always 策略重跑（递归调用 execCmd） */
   async function execCmdInternal(cmd: string, policy: string, cmdText: string): Promise<void> {
     execPolicyOverride.value = policy
+    // [recursion-guard-v1] 外层 execCmd 在进入 try 后置 running=true，此刻尚未走 finally；
+    // 直接递归会被 execCmd 开头的 `if (!raw || running.value) return` 拦回，什么都不执行（报告 §2.4）。
+    // 递归前临时复位 running，让内层通过守卫；内层自己的 finally 会再次落 false，外层 finally 幂等。
+    running.value = false
     try {
       await execCmd(cmdText)
     } finally {
@@ -131,15 +131,18 @@ export function createExecFlow(deps: ExecFlowDeps) {
       const text = await buildAiPrompt()
       if (!text) return
       const r = await copyAndFill(text)
-      if (r) softPause()
+      // [send-fail-no-pause-v1] 原顺序 `if (r) softPause()` 在 'failed' 判定之前，
+      // 'failed' 是真值 → 发送失败仍先暂停循环（报告 §2.10）。改为仅成功时暂停。
+      if (r !== 'failed') softPause()
       if (r === 'failed') {
-        toast('发送失败，已复制到剪贴板', 'warn', 4000)
+        toast('发送失败，已复制到剪贴板', 'warn', TOAST_MEDIUM)
         return
       }
       emit('ai:feedback', `📤 回传 AI：${changes.value.length} 文件 · exit ${result.value?.code ?? -1}`, { payload: { prompt: text.slice(0, 8000), changes: changes.value.map(c => ({ path: c.path, type: c.type })), exit: result.value?.code ?? -1, ok: result.value?.ok ?? false } })
       copied.value = true
       startAiWaiting()
-      setTimeout(() => { copied.value = false }, 2000)
+      if (copiedTimer) clearTimeout(copiedTimer)
+      copiedTimer = setTimeout(() => { copied.value = false; copiedTimer = null }, 2000)
     } catch (e) { log.error(e) }
   }
 

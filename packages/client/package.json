@@ -42,6 +42,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/markdown-it": "^14.2.0"
+    "@types/markdown-it": "^14.2.0",
+    "unplugin-auto-import": "^21.1.0"
   }
 }

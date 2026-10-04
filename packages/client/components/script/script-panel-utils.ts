@@ -26,9 +26,3 @@ export function isInEditor(x: number, y: number): boolean {
     return Boolean((el as HTMLElement).closest('.editor'))
   } catch { return false }
 }
-
-/** 判断脚本是否为 bash（shebang 检测） */
-export function isBashScript(scriptText: string): boolean {
-  const first = (scriptText.split('\n', 1)[0] || '').trim()
-  return /^#!\s*\/usr\/bin\/(?:env\s+)?bash\b/.test(first)
-}

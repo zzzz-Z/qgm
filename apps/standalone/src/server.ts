@@ -212,5 +212,5 @@ server.listen(PORT, HOST, () => {
   console.log(`  AI Runner server:  ${base}${PREFIX}/`)
   console.log(`  WebSocket:         ${base}${WS_PATH}`)
 })
-process.on('SIGINT', () => { try { server.close() } catch {} process.exit(0) })
-process.on('SIGTERM', () => { try { server.close() } catch {} process.exit(0) })
+process.on('SIGINT', () => { try { server.close() } catch { /* swallow: close 失败仍应继续退出，避免退出流程被阻塞 */ } process.exit(0) })
+process.on('SIGTERM', () => { try { server.close() } catch { /* swallow: close 失败仍应继续退出，避免退出流程被阻塞 */ } process.exit(0) })

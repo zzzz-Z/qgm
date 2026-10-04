@@ -1,6 +1,5 @@
 import { effectScope, ref } from 'vue'
 import { useSessionStorage, useTimeoutFn } from '@vueuse/core'
-
 /** 跨组件共享的「等待 AI 回复」（单一数据源） */
 
 // 3 分钟无回复则复位 waiting，避免永久卡死

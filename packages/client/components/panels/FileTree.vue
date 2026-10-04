@@ -1,15 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { useClipboard } from '@vueuse/core'
+// [filetree-aria-v1] 报告 §5.3：树节点补 role/tabindex/aria-label/keydown，键盘可操作
 // PLAN 5.4 目录展开态持久化
-import { useFoldState } from '../../composables/ui/useFoldState'
-import { highlightToHtml } from '../../composables/useHljs'
 // .md 文件走 markdown 渲染；其余走 hljs 源码高亮
-import { renderMarkdown } from '../../composables/useMarkdown'
-import { useFileTree } from '../../composables/data/useFileTree'
 // 拖拽逻辑已抽到 drag-controller.ts
 import { createDragController } from './drag-controller'
+import { getFileIcon, iconSvg } from './file-tree-icons'
 import type { FileNode } from '../../types'
+import { TOAST_MEDIUM } from '../../utils/toast-durations'
 
 defineOptions({ name: 'FileTree' })
 
@@ -36,23 +33,8 @@ interface FileReadResponse { files?: FileReadItem[] }
 // 通过 setup scope 在组件卸载时自动清理；因此必须定义在 setup 顶层而非函数内
 const _clipboard = useClipboard()
 
-/** 文件树图标映射（按扩展名） */
-const ICONS: Record<string, string> = {
-  vue: '<path fill="#42b883" d="M2 2h4l6 10 6-10h4L12 22 2 2z"/><path fill="#35495e" d="M4.5 2h3L12 10l4.5-8h3L12 18 4.5 2z"/>',
-  ts: '<path fill="#3178c6" d="M2 2h20v20H2V2zm10 14h-2v-4H8v-2h6v2h-2v4zm4-6h-2v6h-2v-6h-2V8h6v2z"/>',
-  js: '<path fill="#f7df1e" d="M2 2h20v20H2V2zm14.5 15c0-1.5-1-2.2-2.5-2.8l-.8-.4c-.7-.3-1-.6-1-1.1 0-.5.4-.9 1.1-.9.7 0 1.2.4 1.3 1h1.8c-.1-1.4-1.2-2.3-3-2.3-1.7 0-2.9 1-2.9 2.5 0 1.4 1 2.1 2.4 2.7l.9.4c.7.3 1 .7 1 1.2 0 .6-.5 1-1.3 1-.9 0-1.4-.5-1.5-1.2h-1.9c.1 1.6 1.3 2.6 3.3 2.6 1.8 0 3.1-1 3.1-2.7zM9 17H7v-7H5V8h4v2H9v7z"/>',
-  style: '<path fill="#563d7c" d="M12 2L2 6l2 12 8 4 8-4 2-12-10-4zm0 2.3l7.5 3-1.5 9L12 19l-6-2.7-1.5-9L12 4.3z"/>',
-  json: '<path fill="#cbcb41" d="M4 4h16v16H4V4zm3 10c0-1.5 1-2.5 2.5-2.5S12 12.5 12 14s-1 2.5-2.5 2.5S7 15.5 7 14zm5 0c0-1.5 1-2.5 2.5-2.5s2.5 1 2.5 2.5-1 2.5-2.5 2.5-2.5-1-2.5-2.5z"/>',
-  md: '<path fill="#519aba" d="M4 4h16v16H4V4zm3 12V8l3 4 3-4v8h-2v-5l-1 1.5L9 11v5H7zm8 0h-2v-4h2v4z"/>',
-  html: '<path fill="#e34c26" d="M4 2l1.8 18L12 22l6.2-2L20 2H4zm12.5 15.5L12 19l-4.5-1.5L6.8 5h10.4l-.7 12.5z"/>',
-  image: '<path fill="#a074c4" d="M4 4h16v16H4V4zm3 12l3-4 2 2.5 3-4 3 5.5H7z"/>',
-  config: '<path fill="#858585" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 3a2 2 0 110 4 2 2 0 010-4zm0 10a5 5 0 01-4-2h8a5 5 0 01-4 2z"/>',
-  pkg: '<path fill="#cb3837" d="M4 4h16v16H4V4zm3 3v10h10V7H7zm2 2h6v6H9V9z"/>',
-  file: '<path fill="#9ca3af" d="M6 2h8l6 6v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2zm7 1v5h5"/>',
-  folder: '<path fill="#dcb67a" d="M2 6a2 2 0 012-2h5l2 2h7a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>',
-  folderOpen: '<path fill="#dcb67a" d="M2 6a2 2 0 012-2h5l2 2h7a2 2 0 012 2v1H8l-2 3H2V6zm0 7h6l2-3h10v7a2 2 0 01-2 2H4a2 2 0 01-2-2v-7z"/>',
-  chevronRight: '<path fill="currentColor" d="M9 6l6 6-6 6V6z"/>',
-}
+// [choose-workspace-feedback-v1] 工作区选择失败需向用户提示：静默会让用户误以为按钮无响应
+const { toast } = useToast()
 
 const { tree, loading, copiedPath, load, loadChildren, getChildren, isChildrenLoading, copyPath } = useFileTree()
 
@@ -76,6 +58,9 @@ const fileDialog = ref<{ path: string, content: string } | null>(null)
 const fileLoading = ref(false)
 /** 文件内容读取失败原因（HTTP status 或 Error.message） */
 const fileError = ref('')
+// [file-dialog-race-v1] 请求序号：双击 A 后快速双击 B，或关闭弹窗后旧响应返回，
+// 原实现无条件写 fileDialog 会「用 A 的内容显示在 B 路径下」或「关闭后复活」（报告 §2.7）
+let fileDialogSeq = 0
 
 /** 根节点 */
 const rootPath = computed(() => {
@@ -119,6 +104,9 @@ const fileDialogHtml = computed(() => {
 if (props.root) {
   onMounted(async () => {
     await load()
+    // [expanded-rehydrate-v1] 刷新后 expanded 已从持久化恢复，但 loadChildren 从未被调过，
+    // 子节点空 → 展开态但内容空白（报告 §2.5）。此处为每个已展开目录补拉子节点。
+    for (const p of expanded) { void loadChildren(p) }
     // 优先用 /__ai/workspace 返回的 root 目录名；其次 package.json name
     try {
       const ws = await fetch('/__ai/workspace', { headers: { accept: 'application/json' } })
@@ -183,12 +171,13 @@ function level(): number { return props.depth || 0 }
 /**
  * 执行 persist Expanded
  */
-function _persistExpanded(): void {
-  const map: Record<string, boolean> = {}
-  for (const p of expanded) map[p] = true
-  // [CONSTRAINT] 全量替换：fold 中未出现在 expanded 的 key 会被清除，
-  // 即"折叠"是默认态，只持久化"展开"项（与 useFoldState 的 isOpen fallback 语义一致）
-  fold.all.value = map
+function _persistExpanded(changedPath: string, isOpen: boolean): void {
+  // [filetree-persist-merge-v1] 增量写：只改本次 toggle 涉及的 key，保留其他递归实例的展开态。
+  // 原全量覆写会让子实例的 toggle 抹掉根实例已展开的目录（报告 §2.6）。
+  const next: Record<string, boolean> = { ...fold.all.value }
+  if (isOpen) next[changedPath] = true
+  else delete next[changedPath]
+  fold.all.value = next
 }
 
 /**
@@ -198,13 +187,14 @@ function _persistExpanded(): void {
  * @param p 目录相对路径（与 isOpen / loadChildren 使用同一键）
  */
 function toggle(p: string) {
-  if (expanded.has(p)) {
+  const wasOpen = expanded.has(p)
+  if (wasOpen) {
     expanded.delete(p)
   } else {
     expanded.add(p)
     loadChildren(p)
   }
-  _persistExpanded()
+  _persistExpanded(p, !wasOpen)
 }
 
 /**
@@ -212,38 +202,6 @@ function toggle(p: string) {
  * [CONSTRAINT] 只读 expanded Set，不触发加载；首次渲染时未持久化的目录默认折叠
  */
 function isOpen(p: string): boolean { return expanded.has(p) }
-
-/**
- * 按文件名后缀映射图标 key
- * [CONSTRAINT] 匹配顺序敏感：先具体后缀（.vue/.tsx）再通配；package.json 优先于 .json 分支
- * [CHANGE-IMPACT] 返回 key 必须存在于 ICONS，否则 iconSvg 会回落到 file
- */
-function getFileIcon(name: string): string {
-  const n = name.toLowerCase()
-  if (n.endsWith('.vue')) return 'vue'
-  if (n.endsWith('.ts') || n.endsWith('.tsx')) return 'ts'
-  if (n.endsWith('.js') || n.endsWith('.jsx') || n.endsWith('.mjs') || n.endsWith('.cjs')) return 'js'
-  if (/.(?:css|scss|sass|less)$/.test(n)) return 'style'
-  if (n.endsWith('.json')) return 'json'
-  if (n.endsWith('.md')) return 'md'
-  if (/.html?$/.test(n)) return 'html'
-  if (/.(?:png|jpg|jpeg|gif|svg|webp|ico)$/.test(n)) return 'image'
-  if (/.(?:yaml|yml)$/.test(n)) return 'config'
-  if (n === 'package.json' || n === 'pnpm-lock.yaml') return 'pkg'
-  if (n.startsWith('.') || n === 'tsconfig.json' || n === 'vite.config.ts' || n === 'eslint.config.ts') return 'config'
-  return 'file'
-}
-
-/**
- * 生成图标 svg 字符串
- * [WHY] 走字符串拼接而非 v-for 组件，避免为 12 个图标各建一个 Vue 组件
- * [CONSTRAINT] name 未命中 ICONS 时回落 file；cls 会附加到 svg 的 class 属性
- * @param cls 附加 CSS 类（如 'spin' / 'placeholder'），空串表示不附加
- */
-function iconSvg(name: string, cls = ''): string {
-  const d = ICONS[name] || ICONS.file
-  return `<svg class="ft-icon ${cls}" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">${d}</svg>`
-}
 
 // 收集目录下所有文件路径。因懒加载，目录的 children 可能未拉取，
 // 所以遇目录时向后端请求完整子树（depth=32）。
@@ -280,6 +238,7 @@ async function collectFilePathsAsync(node: FileNode): Promise<string[]> {
  */
 async function onFileDblClick(node: { type?: string, path: string }) {
   if (!node || node.type === 'directory') return
+  const seq = ++fileDialogSeq
   fileDialog.value = { path: node.path, content: '' }
   fileLoading.value = true
   fileError.value = ''
@@ -289,22 +248,28 @@ async function onFileDblClick(node: { type?: string, path: string }) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ paths: [node.path] }),
     })
-    if (!r.ok) { fileError.value = `HTTP ${r.status}`; return }
+    if (!r.ok) { if (seq === fileDialogSeq) fileError.value = `HTTP ${r.status}`; return }
     const j = await r.json() as Record<string, unknown>
     const arr = (Array.isArray((j as FileReadResponse).files) ? (j as FileReadResponse).files : (Array.isArray(j) ? j : [])) as FileReadItem[]
     const hit = arr.find((x: FileReadItem) => x && x.path === node.path) || arr[0] || {}
+    // [file-dialog-race-v1] 只有最新请求才能写 fileDialog
+    if (seq !== fileDialogSeq) return
     fileDialog.value = { path: node.path, content: String((hit as FileReadItem).content || '') }
   } catch (e) {
-    fileError.value = e instanceof Error ? e.message : String(e)
+    if (seq === fileDialogSeq) fileError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    fileLoading.value = false
+    if (seq === fileDialogSeq) fileLoading.value = false
   }
 }
 
 /**
  * 关闭 File Dialog
  */
-function closeFileDialog() { fileDialog.value = null }
+function closeFileDialog() {
+  // [file-dialog-race-v1] 关闭即让在飞请求失效，防旧响应复活弹窗
+  fileDialogSeq += 1
+  fileDialog.value = null
+}
 
 /**
  * 复制弹窗中展示的文件内容到剪贴板
@@ -348,12 +313,17 @@ async function chooseWorkspace(): Promise<void> {
         window.location.reload()
         return
       }
-      // 兼容旧服务端：200 + { canceled: true }
-      if (j && j.canceled) { /* silent */ }
+      if (j && j.canceled) return
     }
-    // 501（不支持平台）/ 5xx：静默失败
-  } catch {
-    // 网络错误：静默
+    // [choose-workspace-feedback-v1] 501 / 5xx 必须提示：
+    // 用户点击后无 reload 也无提示会误判按钮失效；取消（204/200+canceled）仍保持静默
+    if (r.status === 501) {
+      toast('当前平台不支持系统选择器，请手动输入路径', 'warn', TOAST_MEDIUM)
+      return
+    }
+    toast(`选择失败：HTTP ${r.status}`, 'error', TOAST_MEDIUM)
+  } catch (e) {
+    toast(`选择失败：${e instanceof Error ? e.message : String(e)}`, 'error', TOAST_MEDIUM)
   }
 }
 </script>
@@ -393,7 +363,7 @@ async function chooseWorkspace(): Promise<void> {
       </button>
     </div>
 
-    <ul v-else class="list">
+    <ul v-else class="list" role="tree" aria-label="工作区文件树">
       <li v-for="node in list()" :key="node.path" class="item">
         <template v-if="node.type === 'directory'">
           <div
@@ -401,6 +371,12 @@ async function chooseWorkspace(): Promise<void> {
             class="row dir"
             :class="{ 'is-draggable': props.draggable, 'is-open': isOpen(node.path) }"
             :style="{ '--depth': level() }"
+            role="treeitem"
+            :aria-label="node.path"
+            :aria-expanded="isOpen(node.path)"
+            tabindex="0"
+            @keydown.enter.prevent="toggle(node.path)"
+            @keydown.space.prevent="toggle(node.path)"
             @pointerdown="onPointerDown($event, node)"
           >
             <!-- 层级引导线 -->
@@ -432,6 +408,10 @@ async function chooseWorkspace(): Promise<void> {
           class="row file"
           :class="{ 'is-draggable': props.draggable }"
           :style="{ '--depth': level() }"
+          role="treeitem"
+          :aria-label="node.path"
+          tabindex="0"
+          @keydown.enter.prevent="onFileDblClick(node)"
           @dblclick="onFileDblClick(node)"
           @pointerdown="onPointerDown($event, node)"
         >
@@ -472,12 +452,15 @@ async function chooseWorkspace(): Promise<void> {
   </Teleport>
 </template>
 
-<style scoped lang="scss" src="./FileTree.scss" />
+<style scoped lang="scss" src="./file-tree.scss"></style>
 
+<!-- [ghost-non-scoped-v1] ghost 挂载到 document.body，其样式必须非 scoped 才能命中。
+     此处原为内联块，10-03 那轮样式抽离时被误合并进 file-tree.scss（且带上 <style> 标签 → sass 报
+     "expected selector" 构建失败）。抽离只应搬 scoped 树样式，非 scoped 块必须留在 SFC 内。 -->
 <style lang="scss">
 /* ghost 挂载到 document.body，必须非 scoped 才能命中 */
-// WHY: FileTree.scss 现由 scoped 引入，选择器会被加 [data-v-xxx]；ghost 无此属性 → 完全失效 → 拖动时鼠标旁看不到文件
-// CONSTRAINT: 与 FileTree.scss 内同名规则并存（scoped 那份不生效），后续清理时先确认本块已生效再删旧版
+// WHY: 树样式由 scoped 引入（file-tree.scss），选择器会被加 [data-v-xxx]；ghost 无此属性 → 完全失效 → 拖动时鼠标旁看不到文件
+// CONSTRAINT: 本块必须保持非 scoped；scoped 引用里的同名规则一律不生效，以本块为准
 html.ai-runner-dragging,
 html.ai-runner-dragging * {
   cursor: grabbing;

@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { fileBadge, fileToneStyle, fmtSize } from '../../utils/format'
-
 interface AttachedFile {
   id: string
   name: string
@@ -9,9 +7,21 @@ interface AttachedFile {
   content: string
 }
 
-defineProps<{ files: AttachedFile[] }>()
+const props = defineProps<{ files: AttachedFile[] }>()
 /** 派发 */
 const emit = defineEmits<{ remove: [id: string] }>()
+
+// [attachbar-rows-v1] 预生成行数据：tagTitle / fileBadge / fileToneStyle 每行仅算一次，
+// 附件多时避免模板内重复调用（每次重渲染都执行）。
+const rows = computed(() => props.files.map(f => ({
+  id: f.id,
+  name: f.name,
+  kind: f.kind,
+  content: f.content,
+  title: tagTitle(f),
+  badge: fileBadge(f.name),
+  toneStyle: fileToneStyle(f.name),
+})))
 
 /** 悬停全文：Trae 风芯片不再内联展示体积，改挂到 title 上避免信息丢失 */
 function tagTitle(f: AttachedFile): string {
@@ -22,10 +32,10 @@ function tagTitle(f: AttachedFile): string {
 
 <template>
   <div v-if="files.length" class="attach-bar">
-    <div v-for="f in files" :key="f.id" class="attach-tag" :class="`kind-${f.kind}`" :title="tagTitle(f)">
+    <div v-for="f in rows" :key="f.id" class="attach-tag" :class="`kind-${f.kind}`" :title="f.title">
       <img v-if="f.kind === 'image'" :src="f.content" :alt="f.name" class="attach-img">
       <span v-else-if="f.kind === 'folder'" class="attach-ico">📁</span>
-      <span v-else class="attach-badge" :style="fileToneStyle(f.name)">{{ fileBadge(f.name) }}</span>
+      <span v-else class="attach-badge" :style="f.toneStyle">{{ f.badge }}</span>
       <span class="attach-name">{{ f.name }}</span>
       <button v-tooltip="'移除'" aria-label="移除" class="attach-del" @click="emit('remove', f.id)">
         ×

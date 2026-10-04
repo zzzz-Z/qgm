@@ -20,7 +20,7 @@ function readAll() {
   for (const line of raw.split('\n')) {
     const l = line.trim()
     if (!l) continue
-    try { out.push(JSON.parse(l)) } catch {}
+    try { out.push(JSON.parse(l)) } catch { /* swallow: 损坏行跳过，不影响其余统计 */ }
   }
   return out
 }

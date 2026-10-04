@@ -22,7 +22,7 @@ let cachedBrowser: Browser | null = null
 /**
  * 获取 Browser
  */
-export async function getBrowser(): Promise<Browser> {
+async function getBrowser(): Promise<Browser> {
   if (cachedBrowser && cachedBrowser.isConnected()) return cachedBrowser
   const pw = await resolveBrowserEngine()
   if (!pw) throw new Error('未安装 playwright（可选依赖），跳过 smoke 巡检')

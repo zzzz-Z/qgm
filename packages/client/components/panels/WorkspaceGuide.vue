@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useToast } from '../../composables/ui/useToast'
+import { TOAST_DEFAULT, TOAST_MEDIUM } from '../../utils/toast-durations'
 
 const pathInput = ref('')
 const busy = ref(false)
@@ -16,25 +15,25 @@ async function pick() {
     if (r.ok) {
       const j = await r.json().catch(() => ({})) as { ok?: boolean, unsupported?: boolean }
       if (j && j.ok) { window.location.reload(); return }
-      if (j && j.unsupported) { toast('当前平台不支持系统选择器，请手动输入路径', 'warn', 4000); return }
+      if (j && j.unsupported) { toast('当前平台不支持系统选择器，请手动输入路径', 'warn', TOAST_MEDIUM); return }
     }
-    toast(`选择失败：HTTP ${r.status}`, 'error', 4000)
+    toast(`选择失败：HTTP ${r.status}`, 'error', TOAST_MEDIUM)
   } catch (e) {
-    toast(`选择失败：${e instanceof Error ? e.message : String(e)}`, 'error', 4000)
+    toast(`选择失败：${e instanceof Error ? e.message : String(e)}`, 'error', TOAST_MEDIUM)
   } finally { busy.value = false }
 }
 async function selectByPath() {
   const p = pathInput.value.trim()
-  if (!p) { toast('请输入工作区绝对路径', 'warn', 3000); return }
+  if (!p) { toast('请输入工作区绝对路径', 'warn', TOAST_DEFAULT); return }
   if (busy.value) return
   busy.value = true
   try {
     const r = await fetch('/__ai/workspace/select', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: p }) })
     const j = await r.json().catch(() => ({})) as { ok?: boolean, error?: string }
     if (r.ok && j && j.ok) { window.location.reload(); return }
-    toast(j?.error || `选择失败：HTTP ${r.status}`, 'error', 4000)
+    toast(j?.error || `选择失败：HTTP ${r.status}`, 'error', TOAST_MEDIUM)
   } catch (e) {
-    toast(`选择失败：${e instanceof Error ? e.message : String(e)}`, 'error', 4000)
+    toast(`选择失败：${e instanceof Error ? e.message : String(e)}`, 'error', TOAST_MEDIUM)
   } finally { busy.value = false }
 }
 </script>

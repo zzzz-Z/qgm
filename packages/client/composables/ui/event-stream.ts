@@ -1,10 +1,14 @@
-// AIRUNNER-BATCH19-2-SPLIT-EVENT-STREAM: 从 useEventStream.ts 抽出的纯模块级状态与函数（无 useAiSite 依赖）
 import { ref } from 'vue'
+// AIRUNNER-BATCH19-2-SPLIT-EVENT-STREAM: 从 useEventStream.ts 抽出的纯模块级状态与函数（无 useAiSite 依赖）
 
-/** 事件类型枚举（ai: = AI 回包；run: = 运行阶段；loop: = 循环状态；rules: = 规则变化） */
+/**
+ * 事件类型枚举（ai: = AI 回包；run: = 运行阶段；loop: = 循环状态；rules: = 规则变化）
+ * [ask-vs-question] `ai:ask` = 用户发出的提问/回答（badge「你」）；
+ *   `ai:question` = AI 的 @ask 提问卡（可点选，见 useAsk）
+ */
 export type EventKind
   = | 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary'
-    | 'ai:ask' | 'ai:feedback'
+    | 'ai:ask' | 'ai:question' | 'ai:feedback'
     | 'ai:decision' | 'ai:need-files' | 'ai:stream'
     | 'run:start' | 'run:end' | 'run:error' | 'run:stage'
     | 'loop:round' | 'loop:static' | 'loop:finish'
@@ -28,6 +32,11 @@ export interface StreamEvent {
 const MAX_EVENTS = 500
 /** localStorage 键；[CONSTRAINT] 与 loadEvents / saveEvents / clearEvents 三处严格配对，改名会丢历史事件 */
 const STORAGE_KEY = '__ai_event_log'
+
+// [event-save-throttle-v1] 报告 §5.1.1：每帧 emit 全量 JSON.stringify + 写盘是热点。
+// 改为 250ms 节流合并：高频 emit 期间只在窗口末尾写一次盘；页面卸载前强制 flush。
+// [CONSTRAINT] 声明须在 emit / clearEvents / flushEventSave 之前（三者运行时读写该句柄）
+let _saveTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 事件队列（模块级单例）；[CONSTRAINT] 更新走引用替换（`events.value = [...]`）而非就地 push，确保 shallowRef 语义下的依赖追踪 */
 const events = ref<StreamEvent[]>(loadEvents())
@@ -75,9 +84,19 @@ export function emit(kind: EventKind, summary: string, opts?: { round?: number, 
  * [CHANGE-IMPACT] 调用方多为用户手动清屏，不涉及业务数据回滚
  */
 export function clearEvents(): void {
+  // [event-save-throttle-v1] 取消挂起的节流写盘：否则清空后 250ms 内 flush 会把 [] 写回，键复活
+  if (_saveTimer !== null) { clearTimeout(_saveTimer); _saveTimer = null }
   events.value = []
   seq = 0
   try { if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
+}
+
+/**
+ * 立即落盘（跳过节流窗口）
+ * [WHY] 测试与 beforeunload 需要确定性写入；高频路径不应直接调用
+ */
+export function flushEventSave(): void {
+  flushSave()
 }
 
 /**
@@ -86,6 +105,10 @@ export function clearEvents(): void {
  * [CHANGE-IMPACT] 增删返回值需同步检查 useEventStream 包装层的解构
  */
 export function useEventBus() { return { events, emit, clearEvents } }
+
+// [event-save-throttle-v1] 报告 §5.1.1：每帧 emit 全量 JSON.stringify + 写盘是热点。
+// 改为 250ms 节流合并：高频 emit 期间只在窗口末尾写一次盘；页面卸载前强制 flush。
+// （句柄 _saveTimer 声明在模块顶部，早于 emit / clearEvents / flushEventSave 的运行时使用）
 
 /**
  * 从 localStorage 反序列化历史事件（最多保留 MAX_EVENTS 条）
@@ -103,17 +126,28 @@ function loadEvents(): StreamEvent[] {
   } catch { return [] }
 }
 
-/**
- * 序列化事件列表到 localStorage（写入前裁剪至 MAX_EVENTS）
- * [CONSTRAINT] 配额超限时静默忽略，事件队列的运行时状态不受影响
- * [WHY] 持久化是为刷新页面后恢复时间线，非业务关键路径，失败不回滚
- * @param list 全量事件列表；内部 slice(-MAX_EVENTS) 后写入
- */
-function saveEvents(list: StreamEvent[]): void {
+function flushSave(): void {
+  if (_saveTimer !== null) { clearTimeout(_saveTimer); _saveTimer = null }
   try {
     if (typeof localStorage === 'undefined') return
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(-MAX_EVENTS)))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(events.value.slice(-MAX_EVENTS)))
   } catch { /* ignore */ }
+}
+
+/**
+ * 节流写盘：窗口内多次调用只写一次；最大延迟 250ms
+ */
+function saveEvents(_list: StreamEvent[]): void {
+  if (_saveTimer !== null) return
+  _saveTimer = setTimeout(() => {
+    _saveTimer = null
+    flushSave()
+  }, 250)
+}
+
+// [event-flush-on-unload-v1] 页面卸载前强制 flush，避免最后一次节流窗口丢失
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', flushSave)
 }
 /**
  * 记录本次提问的事件 updateKey（供后续 AI 回包原地替换卡片）

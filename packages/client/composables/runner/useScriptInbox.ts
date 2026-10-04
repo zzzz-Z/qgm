@@ -1,9 +1,10 @@
+import { TOAST_MEDIUM_SHORT } from '../../utils/toast-durations'
 import { ref } from 'vue'
 // AIRUNNER-BATCH20-2-FIX-HASH-SUFFIX: 补 .js 后缀
-import { fnv1a8 } from '../../utils/hash.js'
 import { useRunner } from './useRunner'
 import { toast } from '../ui/useToast'
 import { normalizeForHash, parseMeta } from './inbox-parse' // AIRUNNER-BATCH5-0C-INBOX-PARSE
+import { fnv1a8 } from '../../utils/hash' // [restore-import-v1] 早前清理误删（app 侧 auto-import 兜底，vitest 无该插件）
 
 /** 收件箱条目 */
 export interface InboxItem {
@@ -75,7 +76,19 @@ export function push(opts: PushOptions): InboxItem | null {
   }
   const meta = parseMeta(code, opts.lang)
   const item: InboxItem = {
-    id: `inb_${crypto.randomUUID().slice(0, 8)}`,
+    // [uuid-fallback-v1] 同 useSessionManager：非安全上下文无 randomUUID
+    id: `inb_${(() => {
+      const c = (typeof crypto !== 'undefined' ? crypto : undefined) as Crypto | undefined
+      if (c && typeof c.randomUUID === 'function') return c.randomUUID().slice(0, 8)
+      if (c && typeof c.getRandomValues === 'function') {
+        const buf = new Uint8Array(4)
+        c.getRandomValues(buf)
+        let out = ''
+        for (const b of buf) out += b.toString(16).padStart(2, '0')
+        return out
+      }
+      return Date.now().toString(36).slice(-8)
+    })()}`,
     code,
     lang: opts.lang,
     site: opts.site,
@@ -84,7 +97,9 @@ export function push(opts: PushOptions): InboxItem | null {
     why: meta.why,
     ts: Date.now(),
   }
-  inbox.value = [...inbox.value, item]
+  // [inbox-cap-v1] 报告 P2：长会话内存持续增长；上限 200 条，超出淘汰最旧
+  const next = [...inbox.value, item]
+  inbox.value = next.length > 200 ? next.slice(-200) : next
   return item
 }
 
@@ -150,7 +165,7 @@ export function applyToEditor(inboxItem: InboxItem): 'overwritten' | 'queued' | 
     return 'overwritten'
   }
   // 用户有手写内容，保护
-  toast(`📥 脚本 · ${inboxItem.lang}${inboxItem.desc ? ` · ${inboxItem.desc}` : ''}`, 'info', 3500) // [toast-script-arrival-v2]
+  toast(`📥 脚本 · ${inboxItem.lang}${inboxItem.desc ? ` · ${inboxItem.desc}` : ''}`, 'info', TOAST_MEDIUM_SHORT) // [toast-script-arrival-v2]
   return 'queued'
 }
 

@@ -141,3 +141,26 @@ test('snapshot: saveSnapshot + readManifest roundtrip', async () => {
   assert.equal(m.changes[0].type, 'modified')
   assert.ok(typeof m.createdAt === 'number')
 })
+
+// [git-first-rollback-v1] 内容来源二选一：有 gitRef 不落 .before，无 gitRef 才落内容副本
+test('snapshot: 无 gitRef 时落 .before，manifest 无 gitRef（runner 兜底路径不变）', async () => {
+  useTmp()
+  const { saveSnapshot, readManifest, runDir } = await import('../../../packages/core/src/state/snapshot.js')
+  const before = new Map([['src/bak.ts', 'old bak']])
+  const changes = [{ path: 'src/bak.ts', type: 'modified' as const, afterLines: 1 }]
+  saveSnapshot('run-bak-1', before, changes as never)
+  assert.equal(fs.existsSync(path.join(runDir('run-bak-1'), 'src/bak.ts.before')), true)
+  assert.equal(readManifest('run-bak-1')?.gitRef, undefined)
+})
+
+test('snapshot: 带 gitRef 时不落 .before，仅写含 gitRef 的 manifest', async () => {
+  useTmp()
+  const { saveSnapshot, readManifest, runDir } = await import('../../../packages/core/src/state/snapshot.js')
+  const before = new Map([['src/g.ts', 'old g']])
+  const changes = [{ path: 'src/g.ts', type: 'modified' as const, afterLines: 2 }]
+  saveSnapshot('run-gitref-1', before, changes as never, { gitRef: 'refs/ai-runner/pre/run-gitref-1' })
+  const dir = runDir('run-gitref-1')
+  assert.equal(fs.existsSync(path.join(dir, 'src/g.ts.before')), false, 'gitRef 存在时不应落内容副本')
+  assert.equal(fs.existsSync(path.join(dir, '_manifest.json')), true, '回滚索引必须照写')
+  assert.equal(readManifest('run-gitref-1')?.gitRef, 'refs/ai-runner/pre/run-gitref-1')
+})

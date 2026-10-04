@@ -25,7 +25,9 @@ export interface PlanTask {
  * @param planPath - plan Path
  */
 export function parsePlanTodo(planPath?: string): PlanTask[] {
-  const base = process.env.AIR_ROOT || process.cwd()
+  // [root-env-align-v1] 与 config.setRoot 对齐：setRoot 写 AI_RUNNER_ROOT，原实现只读 AIR_ROOT
+  // 导致 standalone 切换工作区后 PLAN.md 仍从启动 cwd 读取（隐藏 bug）
+  const base = process.env.AI_RUNNER_ROOT || process.env.AIR_ROOT || process.cwd()
   const p = planPath || path.join(base, 'PLAN.md')
   let src = ''
   try { src = fs.readFileSync(p, 'utf8') } catch { return [] }

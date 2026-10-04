@@ -78,7 +78,7 @@ async function smokeCheck() {
       }
     }
   } finally {
-    try { await browser.close() } catch {}
+    try { await browser.close() } catch { /* swallow: close 失败不覆盖主流程结果 */ }
   }
   if (fail) throw new Error(`${fail} 个页面冒烟失败`)
 }

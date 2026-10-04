@@ -7,6 +7,9 @@ export { clearRulesHashCache, hashRules } from './compliance.js'
 export { parseDecisionMarkers } from './decision.js'
 export type { DecisionMarkers, DecisionOption, DecisionPayload } from './decision.js'
 export { extractErrorFiles } from './error-files.js'
+// [lesson-autocapture-v1] DONE 总结 → lessons.md 自动沉淀
+export { appendLessons, extractLessons } from './lesson-extract.js'
+export type { ExtractedLesson } from './lesson-extract.js'
 export { hasEslint, pickLintTargets, runEslint } from './lint.js'
 export { applyOverlay, readOverlayChanges } from './overlay.js'
 // [run-compliance] /run 合规校验辅助

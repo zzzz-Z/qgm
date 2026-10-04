@@ -31,13 +31,16 @@ export function createSideResize(deps: SideResizeDeps) {
     sideWidth.value = Math.max(MIN_SIDE_WIDTH, Math.min(rect.width * MAX_SIDE_WIDTH_RATIO, w))
   }
 
-  /** 松开鼠标：结束拖拽、记录基准宽度、持久化、移除监听 */
+  /** 松开/取消鼠标：结束拖拽、记录基准宽度、持久化、移除监听 */
+  // [side-cancel-v1] 同时处理 pointerup 与 pointercancel：触摸/笔/窗口失焦会触发 cancel，
+  // 原实现只挂 pointerup → resizingSide 永 true、window 监听残留、整页 cursor 粘死（报告 §2.9）
   function onSideUp(): void {
     resizingSide.value = false
     sideWidthBase.value = sideWidth.value
     persistWidth(sideWidth.value)
     window.removeEventListener('pointermove', onSideMove)
     window.removeEventListener('pointerup', onSideUp)
+    window.removeEventListener('pointercancel', onSideUp)
   }
 
   /** 按下手柄：标记拖拽中、注册全局监听 */
@@ -45,6 +48,7 @@ export function createSideResize(deps: SideResizeDeps) {
     resizingSide.value = true
     window.addEventListener('pointermove', onSideMove)
     window.addEventListener('pointerup', onSideUp)
+    window.addEventListener('pointercancel', onSideUp)
     e.preventDefault()
   }
 
@@ -52,6 +56,7 @@ export function createSideResize(deps: SideResizeDeps) {
   function dispose(): void {
     window.removeEventListener('pointermove', onSideMove)
     window.removeEventListener('pointerup', onSideUp)
+    window.removeEventListener('pointercancel', onSideUp)
   }
 
   return { onSideDown, onSideMove, onSideUp, dispose }

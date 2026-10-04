@@ -1,28 +1,30 @@
 <script setup lang="ts">
+import { TOAST_MEDIUM, TOAST_SHORT_MEDIUM } from '../../utils/toast-durations'
+// [defensive-refresh-v1] 跨域窗口无 close 事件可监听，只能轮询兜底；
+// 但仅在前台标签页轮询，后台标签页无需刷新列表可显著降低 CPU。
+// [CONSTRAINT] visibilitychange 时立即补一次 windowsTick，保证切回前台马上同步。
+const _pollEnabled = ref(typeof document !== 'undefined' ? document.visibilityState === 'visible' : true)
+
 // @desc 左侧常驻 AI 站点面板：固定展示 MODELS 全列表，每站点单窗口单激活
 // @why  用户需求"显示固定网站 + 每网站只允许一个激活会话"；
 //       用固定 sid `win_${model.id}` 与 openSite 的 windowName 复用机制配合，保证同站点单窗口
 // @change-impact 依赖 MODELS 常量与 useAiWindowTable 的响应式信号；
 //                与主流程（useSessionManager 随机 sid）并存，两者互不覆盖
-import { computed } from 'vue'
-import { useIntervalFn } from '@vueuse/core'
 // [sites-persist-v1] 点击站点需持久化 modelId（刷新不丢 + 上方 URL 同步）
-import { MODELS, url, useAiSite } from '../../composables/ai/useAiSite'
-import { openSite } from '../../composables/ai/useAiWindow'
-import { getActiveWinSid, getWindowBySid, listWindows, removeWindowBySid, setActiveWinSid, windowsTick } from '../../composables/ai/useAiWindowTable'
-import { useToast } from '../../composables/ui/useToast'
 
 const { toast } = useToast()
 // [sites-persist-v1] 读取当前站点 modelId（持久化态）用于高亮与刷新恢复
 // [sites-highlight-v1] 读取持久化 modelId，刷新后仍能高亮当前站点
 const { modelId, setModel } = useAiSite()
-// [防御性刷新] 用户手动关闭窗口时 1.5s 后同步状态
-useIntervalFn(() => { windowsTick.value++ }, 1500, { immediate: true })
+useIntervalFn(() => { if (_pollEnabled.value) windowsTick.value++ }, 1500, { immediate: true })
 
 /** 站点列表（MODELS 全量）→ 附加运行时状态（opened / active） */
+// [aiwin-list-no-self-write-v1] 报告 §3 P2：原实现 computed 内调 listWindows() 会触发 bumpWindows()
+// 写 windowsTick（computed 自己的依赖）→ 每次求值都令自身失效，构成隐藏的响应式环。
+// 改为：丢弃返回值、仅用作清理死窗口的副作用；其内部 bump 会通过 tick 触发下一轮 recompute 收敛。
 const items = computed(() => {
   void windowsTick.value
-  void listWindows()
+  listWindows()
   const active = getActiveWinSid()
   return MODELS.map((m) => {
     const sid = sidOf(m.id)
@@ -42,6 +44,15 @@ const items = computed(() => {
 })
 /** 已激活数（用于头部角标） */
 const openedCount = computed(() => items.value.filter(it => it.opened).length)
+
+if (typeof document !== 'undefined') {
+  const onVis = () => {
+    _pollEnabled.value = document.visibilityState === 'visible'
+    if (_pollEnabled.value) windowsTick.value++
+  }
+  onMounted(() => document.addEventListener('visibilitychange', onVis))
+  onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVis))
+}
 
 /** 固定 sid：每站点一个稳定 id，不随会话切换变化 */
 function sidOf(modelId: string): string { return `win_${modelId}` }
@@ -63,7 +74,7 @@ async function onClick(item: { id: string, label: string, url: string, sid: stri
   }
   const win = openSite(item.url, item.sid)
   if (!win) {
-    toast(`打开 ${item.label} 失败（可能被浏览器拦截弹窗）`, 'warn', 4000)
+    toast(`打开 ${item.label} 失败（可能被浏览器拦截弹窗）`, 'warn', TOAST_MEDIUM)
     return
   }
   setActiveWinSid(item.sid)
@@ -74,7 +85,7 @@ async function onClick(item: { id: string, label: string, url: string, sid: stri
 function dismiss(sid: string, label: string): void {
   removeWindowBySid(sid)
   windowsTick.value++
-  toast(`已移除 ${label} 的窗口引用`, 'info', 2500)
+  toast(`已移除 ${label} 的窗口引用`, 'info', TOAST_SHORT_MEDIUM)
 }
 </script>
 

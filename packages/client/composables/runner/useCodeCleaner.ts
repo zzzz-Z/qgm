@@ -1,5 +1,4 @@
 import { useStorage } from '@vueuse/core'
-
 /** localStorage 键：去注释开关的持久化（'1'=开 / '0'=关） */
 const KEY_COMMENTS = '__ai_clean_strip_comments'
 /** localStorage 键：去空行开关的持久化（同格式） */

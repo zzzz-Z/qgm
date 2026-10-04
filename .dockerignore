@@ -1,0 +1,22 @@
+# [build-context-v1] 上下文越小 → COPY 层 hash 越稳定、传输越快。
+# 这里多排一类文件，就少一类「碰了它就让 L5 失效」的意外。
+.git
+**/.git
+node_modules
+**/node_modules
+.ai-runner
+**/.ai-runner
+**/dist
+.vite
+.turbo
+coverage
+**/coverage
+**/playwright-report
+**/test-results
+**/*.tsbuildinfo
+*.log
+.DS_Store
+# 本地工具/笔记目录：与容器运行无关，但改动频繁，必须排除以免无谓触发重建
+.workbuddy
+.trae
+.vscode

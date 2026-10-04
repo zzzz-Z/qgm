@@ -1,6 +1,7 @@
 // [after-round-v1] 从 useAutoLoop.ts 抽出（PLAN 4.7 阈值整改）
 import type { Ref } from 'vue'
 import type { LoopInstance, RoundOutcome } from './types.js'
+import { setLoopState } from './transitions.js'
 import { LOOP_HARD_MAX_MS, LOOP_HARD_MAX_ROUNDS } from '../loopLogic.js'
 import type { AiTransport } from '../useAiTransport.js'
 
@@ -91,7 +92,8 @@ export function createAfterRound(deps: AfterRoundDeps) {
       await finish(inst, 'hook-reject-after-script', asHook.reason || 'AfterScript hook rejected')
       return
     }
-    inst.state.value = 'feedback'
+    // [transitions-v1] FEEDBACK 事件：executing → feedback
+    setLoopState(inst, 'FEEDBACK')
     stage.value = 'verify'
     persist(inst)
 

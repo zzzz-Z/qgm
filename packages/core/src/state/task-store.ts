@@ -58,12 +58,27 @@ export interface TrustSnapshot {
 
 let _sessionId: string | null = null
 
+// [task-store-cache-v1] state.json 读缓存：以 mtimeMs 为键，写入后失效。
+// [WHY] readStateRaw / readDiskJson 在同一进程内可能连读多次（读任务状态 + 写前读 disk）；
+//       state.json 每次变更 mtime 均不同，缓存不会读到陈旧数据。
+let _stateCache: { mtimeMs: number, parsed: Record<string, unknown> } | null = null
+function _readStateJsonCached(): Record<string, unknown> {
+  const file = statePath()
+  try {
+    const st = fs.statSync(file)
+    if (_stateCache && _stateCache.mtimeMs === st.mtimeMs) return _stateCache.parsed
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>
+    _stateCache = { mtimeMs: st.mtimeMs, parsed }
+    return parsed
+  } catch { return {} }
+}
+
 // 惰性求值，感知 setRoot
 
 /**
  * 执行 state Path
  */
-export function statePath(): string {
+function statePath(): string {
   return path.join(getRoot(), '.ai-runner', 'state.json')
 }
 
@@ -112,8 +127,7 @@ export function readTaskPlan(): { tiers?: TaskState['tiers'], totals?: TaskState
  */
 function readStateRaw(): TaskState {
   try {
-    const raw = fs.readFileSync(statePath(), 'utf8')
-    const obj = JSON.parse(raw) as Record<string, unknown>
+    const obj = _readStateJsonCached()
     const rawTodo = Array.isArray(obj.todo) ? obj.todo : []
     const rawDone = Array.isArray(obj.done) ? obj.done : []
     const done: TaskDoneItem[] = rawDone.map((d) => {
@@ -241,11 +255,7 @@ function getSessionId(): string {
  * 读取 Disk Json
  */
 function readDiskJson(): Record<string, unknown> {
-  try {
-    return JSON.parse(fs.readFileSync(statePath(), 'utf8')) as Record<string, unknown>
-  } catch {
-    return {}
-  }
+  return _readStateJsonCached()
 }
 
 /**
@@ -267,4 +277,5 @@ export function writeTaskState(next: TaskState): void {
     sessionId: getSessionId(),
   }
   fs.writeFileSync(statePath(), JSON.stringify(merged, null, 2))
+  _stateCache = null
 }

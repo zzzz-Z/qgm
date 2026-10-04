@@ -1,0 +1,49 @@
+services:
+  ai-runner:
+    build:
+      context: .
+    image: qgm/ai-runner:local
+    ports:
+      - '5175:5175'
+      # noVNC：浏览器打开 http://localhost:6080/vnc.html?autoconnect=1&resize=scale
+      # 即可看见并操作「登录窗口」那扇有头浏览器窗口。默认只绑本机，需局域网访问改成
+      # "6080:6080"；同时建议设 AIR_VNC_PASSWORD 免被他人接管浏览器会话。
+      - '127.0.0.1:6080:6080'
+    environment:
+      AIR_SERVER_HOST: 0.0.0.0
+      AIR_SERVER_PORT: 5175
+      HOME: /home/node
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      # [air-xvnc-v1] 拉起 Xvfb+x11vnc+noVNC，修掉有头登录窗口在容器内必崩的问题；置 0 可关闭
+      AIR_XVFB: '1'
+      AIR_XVFB_DISPLAY: ':99'
+      DISPLAY: ':99'
+      # AIR_VNC_PASSWORD: "换成你的密码"
+    volumes:
+      - ./:/workspace
+      - ai-runner-home:/home/node/.ai-runner
+      - ai-runner-profile:/app/.ai-runner
+      # [docker-socket-v1] 挂载宿主 docker daemon，使沙箱内 docker CLI 可管理宿主容器。
+      # [CONSTRAINT] 等价于把宿主 Docker root 权限交给沙箱；仅在可信个人机上启用。
+      # 若需禁用，删除下一行并重建容器即可。
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5175/__ai/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      # [healthcheck-fast-v1] Docker 在容器启动后「首次 healthcheck = interval 之后」执行，
+      # 所以 interval 直接决定 `up -d` 到 healthy 的等待时长：30s → 首次要等 30s，
+      # 10s → 通常 10~15s 即可拿到 healthy（docker-deploy.mjs 每 3s 轮询一次）。
+      # start_period 保持 90s 不变：它只是「宽限期」，期间失败不会被标记 unhealthy，
+      # 服务启动慢也不会被误判为不健康。
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+volumes:
+  ai-runner-home:
+  ai-runner-profile:

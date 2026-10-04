@@ -11,6 +11,9 @@ export interface RunResult {
   code: number
   stdout: string
   stderr: string
+  // [run-timeout-visible-v1] 透传「是否因超时被杀」。AI 只看 code 时，超时（-1/143）
+  //   与真失败无法区分 → 会把「文件已写完的超时」当失败重试；此字段让判据唯一。
+  timedOut?: boolean
 }
 
 /**
@@ -91,5 +94,5 @@ export async function runScript(
     signal,
     onChunk,
   })
-  return { code: r.code, stdout: r.stdout, stderr: r.stderr }
+  return { code: r.code, stdout: r.stdout, stderr: r.stderr, timedOut: r.timedOut }
 }

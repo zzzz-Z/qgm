@@ -23,7 +23,8 @@ export interface ScriptMeta {
  */
 export function parseScriptMeta(code: string): ScriptMeta {
   const pick = (name: string): string => {
-    const re = new RegExp(`^[ \\t]*(?://|#)[ \\t]*@${name}[ \\t]*:?[ \\t]*(.+)$`, 'm')
+    // [meta-word-boundary-v1] 加 \b：原正则会误匹配 @descriptor → desc = "riptor …"（报告 P2）
+    const re = new RegExp(`^[ \\t]*(?://|#)[ \\t]*@${name}\\b[ \\t]*:?[ \\t]*(.+)$`, 'm')
     const m = code.match(re)
     return m ? m[1].trim() : ''
   }

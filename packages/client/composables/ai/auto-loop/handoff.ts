@@ -1,16 +1,27 @@
 // handoff
+import { TOAST_LONG, TOAST_VERY_LONG } from '../../../utils/toast-durations'
 import { toast } from '../../ui/useToast.js'
 import { buildNewSessionPrompt } from '../session-prompt.js'
 import { loopPaused } from '../useAiWaiting.js'
 import { getTransport } from '../useAiTransport.js'
 import type { LoopInstance } from '../useAutoLoop.js'
 import { activeLoop, enterWaiting, isLoopActive, persist, unbindKeyboard } from '../useAutoLoop.js'
+import { setLoopState } from './transitions.js'
 
 /** 传输层实例（sendFill / sendStop 等） */
-const transport = getTransport()
+// [transport-dynamic-v1] Proxy 转发到 getTransport() 实时单例：setTransportKind 切换后旧引用不再失效
+const transport = new Proxy({} as ReturnType<typeof getTransport>, {
+  get(_target, prop) { return Reflect.get(getTransport() as object, prop) },
+})
 /** [handoff] 交接总结模板：发给 AI 生成结构化摘要，供新会话续接；严格结构由下游 parseHandoffSummary 解析 */
+// [reply-mark-v1] 首行为独占标记行 `HANDOFF`：与 SCRIPT / ASK / DONE 同构（第二行起才是载荷）。
+//   旧模板以 `# 任务` 作首行，与 Markdown 一级标题同形（DOM→Markdown 反推把任何 <h1> 还原成 `# xxx`），
+//   无法与摘要正文里的普通标题区分；`# 任务` 仍作为过渡别名被识别（见 utils/reply-mark.ts）
 export const SUMMARY_INSTRUCTION = [
   '请将本次会话总结为以下格式，供新会话继续工作：',
+  '**首行必须恰好是 `HANDOFF`**（独占一行，前后只允许空白），第二行起才是摘要正文。',
+  '',
+  'HANDOFF',
   '',
   '# 任务',
   '<当前任务目标>',
@@ -39,7 +50,8 @@ export async function startHandoff(): Promise<void> {
   const inst = activeLoop.value
   if (!inst || !isLoopActive.value) { toast('没有进行中的循环', 'warn'); return }
   if (inst.state.value === 'handoff') { toast('已在轮转中', 'warn'); return }
-  inst.state.value = 'handoff'
+  // [transitions-v1] HANDOFF 事件：waiting|feedback → handoff
+  setLoopState(inst, 'HANDOFF')
   persist(inst)
   const okSent = transport.sendRotate('', { instruction: SUMMARY_INSTRUCTION })
   if (!okSent) { handoffFail(inst, '发送 rotate 失败（窗口已关？）'); return }
@@ -59,7 +71,10 @@ export async function onSummary(text: string, sessionId: string, degraded: boole
   const t = String(text || '').trim()
   const finalSummary = t || localFallbackSummary(inst)
   void degraded // [trace-removed] 形参保留以兼容调用方签名
-  const full = await buildNewSessionPrompt(finalSummary)
+  // [query-source-v1] 检索用 goal 而非 finalSummary：后者含 lastExec 命令名，
+  // 会把上一轮跑过的 `test` 当成需求（实测注入 6903 B 无关技能）。goal 为空则不检索。
+  const retrievalQuery = String(inst.goal.value || '').trim()
+  const full = await buildNewSessionPrompt(finalSummary, retrievalQuery)
   const okSent = transport.sendNewSession('', { summary: full })
   if (!okSent) { handoffFail(inst, '发送 new-session 失败'); return }
   handoffArm(inst, '新会话创建超时（30s）')
@@ -75,10 +90,11 @@ export async function onNewSessionCreated(url: string, id: string): Promise<void
   if (!inst || inst.state.value !== 'handoff') return
   handoffDisarm(inst)
   inst.stopRequest.value = 'none'
-  inst.state.value = 'waiting'
+  // [transitions-v1] HANDOFF_OK 事件：handoff → waiting
+  setLoopState(inst, 'HANDOFF_OK')
   persist(inst)
   enterWaiting(inst)
-  toast(`✓ 已切到新会话 · ${id || url}`, 'success', 5000)
+  toast(`✓ 已切到新会话 · ${id || url}`, 'success', TOAST_VERY_LONG)
 }
 /**
  * 本地生成降级摘要（AI 未返回或摘要为空时）
@@ -112,7 +128,7 @@ function handoffArm(inst: LoopInstance, msg: string) {
  * 清除交接超时定时器；幂等
  * [CONSTRAINT] inst.handoffTimer 置 null 以标记无挂起定时器
  */
-function handoffDisarm(inst: LoopInstance) {
+export function handoffDisarm(inst: LoopInstance) {
   if (inst.handoffTimer) { clearTimeout(inst.handoffTimer); inst.handoffTimer = null }
 }
 /**
@@ -125,14 +141,16 @@ function handoffFail(inst: LoopInstance, reason: string) {
   handoffDisarm(inst)
   // [loop-paused:handoff] 暂停中直接置 stopped
   if (loopPaused.value) {
-    inst.state.value = 'stopped'
+    // [transitions-v1] HANDOFF_FAIL 事件（暂停分支）：handoff → stopped
+    setLoopState(inst, 'HANDOFF_FAIL')
     persist(inst)
     return
   }
   inst.stopReason.value = reason
-  inst.state.value = 'stopped'
+  // [transitions-v1] HANDOFF_FAIL 事件：handoff → stopped
+  setLoopState(inst, 'HANDOFF_FAIL')
   persist(inst)
   transport.sendStop('')
   unbindKeyboard()
-  toast(`✗ 轮转失败：${reason}`, 'error', 6000)
+  toast(`✗ 轮转失败：${reason}`, 'error', TOAST_LONG)
 }

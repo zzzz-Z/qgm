@@ -29,21 +29,29 @@ function emptyStore(): UnifiedStore {
   return { activeModelId: '', sites: {} }
 }
 
+// [sites-store-cache-v1] 报告 §5.1.2：每次读写都全量 parse；saveHistoryBySite 一次 2 parse。
+// 加模块级缓存：首次或 cache 失效时才重新 parse；safeWrite 同步更新缓存。
+let _cache: UnifiedStore | null = null
+
 function safeRead(): UnifiedStore {
+  if (_cache) return _cache
   try {
-    if (typeof localStorage === 'undefined') return emptyStore()
+    if (typeof localStorage === 'undefined') { _cache = emptyStore(); return _cache }
     const raw = localStorage.getItem(KEY)
-    if (!raw) return emptyStore()
+    if (!raw) { _cache = emptyStore(); return _cache }
     const obj = JSON.parse(raw)
-    if (!obj || typeof obj !== 'object') return emptyStore()
-    return {
+    if (!obj || typeof obj !== 'object') { _cache = emptyStore(); return _cache }
+    _cache = {
       activeModelId: String(obj.activeModelId || ''),
       sites: (obj.sites && typeof obj.sites === 'object') ? obj.sites : {},
     }
-  } catch { return emptyStore() }
+    return _cache
+  } catch { _cache = emptyStore(); return _cache }
 }
 
 function safeWrite(store: UnifiedStore): void {
+  // [sites-store-cache-v1] 写时同步更新缓存，保持读写一致
+  _cache = store
   try {
     if (typeof localStorage === 'undefined') return
     localStorage.setItem(KEY, JSON.stringify(store))

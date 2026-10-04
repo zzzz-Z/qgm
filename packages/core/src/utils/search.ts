@@ -3,9 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { BINARY_EXT, getRoot } from '../config.js'
 import { runProcess } from '../process/proc.js'
-// ============================================================================
 // 全局检索（glob / grep）
-// ============================================================================
 
 /** 检索中文件的最小元信息；mtimeMs 用于内容缓存失效判定（不读 stat 即失效） */
 interface SearchFile { abs: string, rel: string, mtimeMs: number }
@@ -36,7 +34,7 @@ let astGrepWarned = false
  * @param rel 与 dir 对应的相对路径（用于拼 out.rel）
  * @param out 收集容器，函数不返回
  */
-export function collectSearchFiles(dir: string, rel: string, out: SearchFile[]) {
+function collectSearchFiles(dir: string, rel: string, out: SearchFile[]) {
   let entries: fs.Dirent[]
   try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
   for (const ent of entries) {

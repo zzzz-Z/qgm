@@ -15,14 +15,14 @@ export let ROOT = process.cwd()
  */
 // eslint-disable-next-line import/no-mutable-exports -- 可变绑定：setRoot / clearWorkspace 会改写
 export let hasWorkspace = false
-// eslint-disable-next-line import/no-mutable-exports -- ESM live bindings, setRoot 内重新赋值
-export let RUNS_DIR = path.join(ROOT, '.ai-runner/runs')
+
+let RUNS_DIR = path.join(ROOT, '.ai-runner/runs')
 // eslint-disable-next-line import/no-mutable-exports -- ESM live bindings, setRoot 内重新赋值
 export let SCRIPTS_DIR = path.join(ROOT, '.ai-runner/scripts')
-// eslint-disable-next-line import/no-mutable-exports -- ESM live bindings, setRoot 内重新赋值
-export let LOGS_DIR = path.join(ROOT, '.ai-runner/logs')
-// eslint-disable-next-line import/no-mutable-exports -- ESM live bindings, setRoot 内重新赋值
-export let BACKUP_DIR = path.join(ROOT, '.ai-runner/backup')
+
+let LOGS_DIR = path.join(ROOT, '.ai-runner/logs')
+
+let BACKUP_DIR = path.join(ROOT, '.ai-runner/backup')
 
 /**
  * 设置项目根目录并同步派生目录常量
@@ -165,6 +165,12 @@ export interface Change {
 export interface Manifest {
   changes: Change[]
   createdAt: number
+  /**
+   * [git-first-rollback-v1] 运行前状态的固化 ref（`refs/ai-runner/pre/<runId>`）。
+   * 存在时 `.before` 刻意不落盘——内容已由该 ref 覆盖，回滚走 `git restore --source`；
+   * 缺失（非 git 仓库 / 快照失败）则回落 `.before` 内容副本。
+   */
+  gitRef?: string
 }
 
 /** 单次脚本运行的日志条目（时间、退出码、变更数） */
@@ -175,6 +181,8 @@ export interface RunLogEntry {
   why?: string
   script: string
   exit: number
+  // [run-timeout-visible-v1] 超时被杀（code=-1/143）与真失败可区分；判断「是否需重试」看它
+  timedOut?: boolean
   durationMs: number
   changeCount: number
   changes: Change[]

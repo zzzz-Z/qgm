@@ -48,10 +48,10 @@ test('readNdjson: 空行被跳过', async () => {
   assert.deepEqual(r, [{ a: 1 }])
 })
 
-test('readNdjson: 末行无换行符 → 不产出（buffer 未 flush）', async () => {
-  // 实现按 \n 切分，末尾未闭合行不 emit
+test('readNdjson: 末行无换行符 → flush 后仍产出（末帧不丢）', async () => {
+  // [stream-flush-v1] 末次 decode flush：未闭合的尾行也要 emit
   const r = await collect(['{"a":1}'])
-  assert.deepEqual(r, [])
+  assert.deepEqual(r, [{ a: 1 }])
 })
 
 test('readNdjson: 坏 JSON 行被跳过', async () => {

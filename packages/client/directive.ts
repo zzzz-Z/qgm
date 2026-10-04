@@ -1,5 +1,5 @@
 import type { Directive } from 'vue'
-import { hideTooltip, moveTooltip, showTooltip } from './composables/ui/useTooltip'
+import { hideTooltip, moveTooltip, showTooltip } from './composables/ui/useTooltip' // [restore-import-v1] 早前清理误删
 
 interface TooltipEl extends HTMLElement {
   __ttText?: string

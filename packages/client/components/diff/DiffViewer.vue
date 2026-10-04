@@ -1,7 +1,4 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useResizeObserver } from '@vueuse/core'
-import { highlightToHtml } from '../../composables/useHljs'
 import { diffLines as diffLinesLib } from 'diff'
 import { DEFAULT_HIGHLIGHT_HEAD, DEFAULT_HIGHLIGHT_TAIL } from './DiffViewer.constants'
 
@@ -93,20 +90,6 @@ onBeforeUnmount(() => {
 })
 
 /**
- * 将 HTML 特殊字符转义为实体
- * [WHY] 高亮失败时用本函数降级为纯文本，避免 v-html 渲染原始标签
- * [CONSTRAINT] 覆盖 & < > " ' 五种字符；不处理 \u00a0 等实体已表达字符
- */
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, ch => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    '\'': '&#39;',
-  }[ch] as string))
-}
-/**
  * 将源码文本按行做 hljs 高亮，返回高亮后的 HTML 行数组
  * [WHY] 行数超过 HIGHLIGHT_THRESHOLD 时只高亮头尾，中段用 escapeHtml 降级：hljs 对大文件代价高
  * [CONSTRAINT] 返回的每项为 HTML 片段，调用方需用 v-html 渲染；行数与原文一致（split 后）
@@ -142,6 +125,15 @@ function highlightToLines(text: string): string[] {
  * @param b 变更后文本行数组
  */
 function computeDiff(a: string[], b: string[]): DiffLine[] {
+  // [diffviewer-lcs-guard-v1] 报告 §4：文件头注释声称 N*M > 4M 走 fallback，但实现直接调 diffLinesLib。
+  // 此处补齐：超阈值时按「全删 + 全增」输出，避免 LCS DP 在巨大文件上 O(N*M) 卡死主线程。
+  const LCS_CELL_LIMIT = 4_000_000
+  if (a.length * b.length > LCS_CELL_LIMIT) {
+    const fallback: DiffLine[] = []
+    for (let i = 0; i < a.length; i++) fallback.push({ type: 'del', text: a[i], oldLine: i + 1 })
+    for (let i = 0; i < b.length; i++) fallback.push({ type: 'add', text: b[i], newLine: i + 1 })
+    return fallback
+  }
   const changes = diffLinesLib(a.join('\n'), b.join('\n'))
   const out: DiffLine[] = []
   let oldLine = 1
@@ -311,7 +303,7 @@ function onScroll(e: Event) {
   min-height: 160px;
   max-height: none;
 
-  overflow-x: hidden;
+  overflow-x: auto; /* [diff-no-wrap-v1] 配合关折行：长行横向滚动 */
   overflow-y: auto;
   font: 12px/1.6 var(--mono, monospace);
   background: var(--surface);
@@ -354,9 +346,10 @@ function onScroll(e: Event) {
   margin: 0;
   padding: 0 14px;
 
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-all;
+  /* [diff-no-wrap-v1] 关折行：虚拟滚动用固定 ROW_HEIGHT=22 计算 spacerTop/Bottom，
+     原 white-space:pre-wrap 会让长行折为多行，spacer 与真实高度不自洽，
+     表现为中段空白 / 丢行 / 滚不到底（报告 §1.3）。横向滚动由父容器提供。 */
+  white-space: pre;
   flex: 1;
   min-width: 0;
   color: var(--text, #1f2d3d);

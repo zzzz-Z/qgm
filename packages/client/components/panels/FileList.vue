@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import type { Change, ChangeType } from '../../types'
 
 /** 组件接收的 props 定义 */
@@ -25,6 +24,13 @@ const summary = computed(() => {
   for (const c of props.changes) s[c.type]++
   return s
 })
+// [filelist-rows-v1] 报告 §5.1.4：模板里每行调用 metaOf 2 次 + splitPath 2 次；
+// 改为一次预生成，重渲染时零重复计算。依赖 props.changes，自动随变更集刷新。
+const rows = computed(() => props.changes.map((c) => {
+  const meta = metaOf(c.type)
+  const sp = splitPath(c.path)
+  return { path: c.path, type: c.type, label: meta.label, title: meta.title, dir: sp.dir, name: sp.name }
+}))
 
 /**
  * 取变更类型对应的展示元信息（徽标字母 / tooltip / CSS 类）
@@ -87,15 +93,16 @@ function splitPath(p: string) {
     </header>
 
     <div class="file-list">
-      <div v-for="c in changes" :key="c.path" class="file-row" :class="[c.type, { 'is-active': c.path === activeFile }]" style="cursor:pointer" @click="emit('preview', c.path)">
-        <span v-tooltip="metaOf(c.type).title" class="letter" :class="c.type">
-          {{ metaOf(c.type).label }}
+      <div v-for="c in rows" :key="c.path" class="file-row" :class="[c.type, { 'is-active': c.path === activeFile }]" style="cursor:pointer" role="button" :aria-label="`预览 ${c.path}`" tabindex="0" @click="emit('preview', c.path)" @keydown.enter.prevent="emit('preview', c.path)">
+        <span v-tooltip="c.title" class="letter" :class="c.type">
+          {{ c.label }}
         </span>
         <span class="path">
-          <span class="dir">{{ splitPath(c.path).dir }}</span><span class="name">{{ splitPath(c.path).name }}</span>
+          <span class="dir">{{ c.dir }}</span><span class="name">{{ c.name }}</span>
         </span>
         <button
           v-tooltip="`撤回 ${c.path}`"
+          :aria-label="`撤回 ${c.path}`"
           class="undo-btn"
           :disabled="rolling[c.path]"
           @click.stop="emit('rollback', c.path)"
@@ -178,8 +185,8 @@ function splitPath(p: string) {
   @apply flex gap-1.5;
 }
 
-.save-btn,
-.btn-primary {
+/* [filelist-btnprimary-cleanup-v1] 删除模板零引用的 .btn-primary 选择器 */
+.save-btn {
   padding: 4px 12px;
   background: transparent;
   color: var(--primary);
@@ -191,14 +198,12 @@ function splitPath(p: string) {
   transition: 0.12s;
   box-shadow: none;
 }
-.save-btn:hover:not(:disabled),
-.btn-primary:hover:not(:disabled) {
+.save-btn:hover:not(:disabled) {
   background: var(--primary-bg);
   color: var(--primary-hover);
   border-color: var(--primary-hover);
 }
-.save-btn:disabled,
-.btn-primary:disabled {
+.save-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

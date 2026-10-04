@@ -50,6 +50,8 @@ export interface BaselineDiffResponse {
 /** 运行 */
 export interface RunResponse {
   runId: string
+  /** [pipeline-in-summary-v1] 服务端 summary 帧下发的链路状态 */
+  pipeline?: Record<string, { status?: string } | undefined>
   code: number
   ok: boolean
   error?: string
@@ -59,7 +61,7 @@ export interface RunResponse {
   stderr: string
   changes: Change[]
   lint?: LintResult | null
-  test?: { ran: boolean, ok: boolean, stdout: string, stderr: string } | null
+  test?: { ran: boolean, ok: boolean, stdout: string, stderr: string, reason?: 'no-test-targets' } | null
   tsc?: { ok: boolean, stdout: string, stderr: string } | null
   /** 失败时服务端从错误输出里提取的项目内文件路径（相对路径） */
   errorFiles?: string[]

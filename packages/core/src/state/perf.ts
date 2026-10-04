@@ -26,7 +26,7 @@ export interface SlowCheck {
 }
 
 /** 性能基线默认存储对象 */
-export const DEFAULT_STORE: PerfStore = {
+const DEFAULT_STORE: PerfStore = {
   version: 1,
   maxSamples: 20,
   slowFactor: 2,

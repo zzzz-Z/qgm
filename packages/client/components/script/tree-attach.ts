@@ -1,8 +1,8 @@
 // [tree-attach-v1] 从 ScriptPanel.vue 抽出：文件树拖拽 → 附件 / 目录展开 / 脚本拼装
 import { isInEditor } from './script-panel-utils'
-import { fmtSize } from '../../utils/format'
 import type { FileNode, FilesReadResponse } from '../../types'
 import type { Ref } from 'vue'
+import { uid } from '../../utils/id'
 import type { AttachedFile } from './attach-manager'
 
 /**
@@ -50,43 +50,47 @@ export function createTreeAttach(deps: { attachedFiles: Ref<AttachedFile[]> }) {
 
   /** 添加一批路径为附件：目录走 folder、单文件走 text 直接读源码 */
   async function addTreePaths(paths: string[]): Promise<void> {
-    for (const p of paths) {
-      if (!p) continue
-      if (attachedFiles.value.some(a => a.name === p)) continue
-      const tree = await fetchTreePaths(p)
-      if (tree.length) {
-        // 文件夹：只加一个 tag，发送时展开
-        attachedFiles.value.push({
-          id: `at-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-          name: p,
-          size: tree.length,
-          kind: 'folder',
-          content: '',
-          paths: tree,
-        })
-        continue
-      }
-      // 单文件：直接读源码
-      try {
-        const res = await fetch('/__ai/files/read', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paths: [p] }),
-        })
-        const data = await res.json()
-        const f = (data.files || [])[0]
-        if (!f) continue
-        if (f.error) continue
-        const content = String(f.content || '')
-        attachedFiles.value.push({
-          id: `at-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-          name: p,
-          size: content.length,
-          kind: 'text',
-          content,
-        })
-      } catch { /* 单个文件读取失败不影响其他 */ }
+    // [tree-attach-parallel-v1] 并行处理：拖入多文件时 IO 耗时从 O(N) 降到 O(1)。
+    // [CONSTRAINT] attachedFiles.push 在并发下仍为原子操作（同帧内无 await 间隔），顺序无关。
+    const pending = paths.filter(p => p && !attachedFiles.value.some(a => a.name === p))
+    await Promise.all(pending.map(p => addOnePath(p)))
+  }
+
+  /** 处理单个路径：目录走 folder、文件走 text（并行安全） */
+  async function addOnePath(p: string): Promise<void> {
+    const tree = await fetchTreePaths(p)
+    if (tree.length) {
+      // 文件夹：只加一个 tag，发送时展开
+      attachedFiles.value.push({
+        id: uid('at'),
+        name: p,
+        size: tree.length,
+        kind: 'folder',
+        content: '',
+        paths: tree,
+      })
+      return
     }
+    // 单文件：直接读源码
+    try {
+      const res = await fetch('/__ai/files/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: [p] }),
+      })
+      const data = await res.json()
+      const f = (data.files || [])[0]
+      if (!f) return
+      if (f.error) return
+      const content = String(f.content || '')
+      attachedFiles.value.push({
+        id: uid('at'),
+        name: p,
+        size: content.length,
+        kind: 'text',
+        content,
+      })
+    } catch { /* 单个文件读取失败不影响其他 */ }
   }
 
   /** 树拖入编辑区：仅在编辑器范围响应 */
@@ -99,7 +103,6 @@ export function createTreeAttach(deps: { attachedFiles: Ref<AttachedFile[]> }) {
   /** 脚本 + 附件 → 拼装成最终脚本文本（bash 用 #、cjs 用 //） */
   async function buildPromptWithAttachments(scriptText: string, files: AttachedFile[]): Promise<string> {
     if (!files.length) return scriptText
-    // const p = isBash ? '#' : '//'
     const parts: string[] = []
     for (const f of files) {
       if (f.kind === 'folder' && f.paths && f.paths.length) {

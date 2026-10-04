@@ -36,8 +36,8 @@ export function normalizeForHash(code: string): string {
 export function parseMeta(code: string, lang: 'js' | 'cjs' | 'bash'): { desc: string, why: string } {
   const out = { desc: '', why: '' }
   const re = (lang === 'cjs' || lang === 'js')
-    ? /^[^\S\n]*\/\/[^\S\n]*@(desc|why)[^\S\n]*:[^\S\n]*(\S[^\n]*)$/gm
-    : /^[^\S\n]*#[^\S\n]*@(desc|why)[^\S\n]*:[^\S\n]*(\S[^\n]*)$/gm
+    ? /^[^\S\n]*\/\/[^\S\n]*@(desc|why)\b[^\S\n]*(?::[^\S\n]*)?(\S[^\n]*)$/gm
+    : /^[^\S\n]*#[^\S\n]*@(desc|why)\b[^\S\n]*(?::[^\S\n]*)?(\S[^\n]*)$/gm
   let m: RegExpExecArray | null
   while ((m = re.exec(code)) !== null) {
     const k = m[1] === 'desc' ? 'desc' : 'why'

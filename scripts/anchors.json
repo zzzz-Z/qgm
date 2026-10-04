@@ -1,35 +1,23 @@
 {
   "anchors": [
     {
-      "file": "client/composables/ai/useSessionManager.ts",
-      "contains": "ASK_ROTATE_THRESHOLD = 40"
+      "file": "packages/client/composables/ai/useAiReplyHandlers.ts",
+      "contains": "'ai-runner:url-updated'"
     },
     {
-      "file": "client/App.vue",
-      "contains": "ai-runner:url-updated"
+      "file": "packages/client/composables/ai/useAiReplyHandlers.ts",
+      "contains": "'ai-runner:new-session-created'"
     },
     {
-      "file": "client/App.vue",
-      "contains": "ai-runner:new-session-created"
+      "file": "packages/client/composables/ai/useAiReplyHandlers.ts",
+      "contains": "'ai-runner:session-id'"
     },
     {
-      "file": "client/App.vue",
-      "contains": "ai-runner:session-id"
-    },
-    {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "function trimOutput"
-    },
-    {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "if (ctx === 'full') return text"
-    },
-    {
-      "file": "client/types.ts",
+      "file": "packages/client/types.ts",
       "contains": "scriptCtx?: string"
     },
     {
-      "file": "client/composables/runner/useRunner.ts",
+      "file": "packages/client/composables/runner/useRunner.ts",
       "contains": "scriptCtx: (s.scriptCtx as string)"
     },
     {
@@ -57,47 +45,11 @@
       "contains": "syntaxError: true"
     },
     {
-      "file": "client/composables/ai/loopLogic.ts",
-      "contains": "export const LOOP_STALL_LIMIT = 3"
-    },
-    {
-      "file": "client/composables/ai/loopLogic.ts",
-      "contains": "export function updateStall"
-    },
-    {
-      "file": "client/composables/ai/useAutoLoop.ts",
-      "contains": "const stallRounds = ref(0)"
-    },
-    {
-      "file": "client/composables/ai/useAutoLoop.ts",
-      "contains": "finish(inst, 'no-progress'"
-    },
-    {
-      "file": "client/composables/ai/loopLogic.ts",
-      "contains": "export function fpKey"
-    },
-    {
-      "file": "client/composables/ai/loopLogic.ts",
-      "contains": "export function updateFpStall"
-    },
-    {
-      "file": "client/composables/ai/loopLogic.ts",
-      "contains": "LOOP_FP_STALL_LIMIT = 2"
-    },
-    {
-      "file": "client/composables/ai/useAutoLoop.ts",
-      "contains": "finish(inst, 'same-fingerprint'"
-    },
-    {
-      "file": "client/composables/ai/useAutoLoop.ts",
-      "contains": "const lastFpKey = ref("
-    },
-    {
-      "file": "client/composables/runner/useRunner.ts",
+      "file": "packages/client/composables/runner/useRunner.ts",
       "contains": "fingerprints: (s.fingerprints as RunResponse"
     },
     {
-      "file": "client/types.ts",
+      "file": "packages/client/types.ts",
       "contains": "fingerprints?: Array<"
     },
     {
@@ -126,7 +78,7 @@
     },
     {
       "file": "AGENTS.md",
-      "contains": "## 11. 会话首轮一键 preflight"
+      "contains": "pnpm session:start"
     },
     {
       "file": "scripts/handoff-gen.cjs",
@@ -135,14 +87,6 @@
     {
       "file": "package.json",
       "contains": "handoff:gen"
-    },
-    {
-      "file": "scripts/verify-anchors.cjs",
-      "contains": "/* eslint-disable no-console"
-    },
-    {
-      "file": ".ai-runner/evidence/health-latest.json",
-      "contains": "generatedAt"
     },
     {
       "file": "packages/core/src/logger.cjs",
@@ -165,16 +109,8 @@
       "contains": "eslint-disable regexp/no-super-linear-backtracking"
     },
     {
-      "file": "client/composables/ai/loopLogic.ts",
+      "file": "packages/client/composables/ai/loopLogic.ts",
       "contains": "Number.POSITIVE_INFINITY"
-    },
-    {
-      "file": "client/composables/ai/loopLogic.ts",
-      "contains": "无轮次上限"
-    },
-    {
-      "file": "client/composables/ai/useAutoLoop.ts",
-      "contains": "// [drop-round-limit] 上限已取消"
     },
     {
       "file": "scripts/tampermonkey-session-id.user.js",
@@ -189,96 +125,160 @@
       "contains": "ai-runner:request-rescan"
     },
     {
-      "file": "client/App.vue",
+      "file": "packages/client/composables/ui/useAppStartup.ts",
       "contains": "ai-runner:request-replay"
     },
     {
-      "file": "client/App.vue",
+      "file": "packages/client/composables/ui/useAppStartup.ts",
       "contains": "ai-runner:request-rescan"
-    },
-    {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "unified-status-bar"
     },
     {
       "file": "packages/core/src/helpers.cjs",
       "contains": "require('chalk')"
     },
     {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "usb-left"
+      "file": "packages/core/src/helpers.cjs",
+      "contains": "_changelog('patch-skip', file)"
     },
     {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "usb-right"
-    },
-    {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "usb-time"
-    },
-    {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "barMeta"
-    },
-    {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "is-countdown"
-    },
-    {
-      "file": "client/composables/ai/useAutoTakeover.ts",
+      "file": "packages/client/composables/ai/useAutoTakeover.ts",
       "contains": "pendingMeta"
     },
     {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "usb-main"
-    },
-    {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "usb-icon"
-    },
-    {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "mainStatus"
-    },
-    {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "chatListRef"
-    },
-    {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "autoScroll"
-    },
-    {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "usb-spin"
-    },
-    {
-      "file": "client/composables/ai/useDeepseekUrl.ts",
-      "contains": "askcount-unify"
-    },
-    {
-      "file": "client/composables/ai/useDeepseekUrl.ts",
-      "contains": "count?: boolean"
-    },
-    {
-      "file": "client/App.vue",
-      "contains": "count: false"
-    },
-    {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "_scrollLock"
+      "file": "packages/client/components/script/TerminalPane.vue",
+      "contains": "const chatListRef = ref<HTMLElement | null>(null)"
     },
     {
       "file": "AGENTS.md",
-      "contains": "无轮次上限"
+      "contains": "自动循环没有轮次上限"
     },
     {
-      "file": "SYSTEM.md",
-      "contains": "无轮次上限"
+      "file": "packages/client/composables/ai/loopLogic.ts",
+      "contains": "export const LOOP_HARD_MAX_ROUNDS = 50"
     },
     {
-      "file": "client/components/script/ScriptPanel.vue",
-      "contains": "copyoutput-rotate"
+      "file": "packages/client/composables/ai/loopLogic.ts",
+      "contains": "export const LOOP_HARD_MAX_MS = 30 * 60 * 1000"
+    },
+    {
+      "file": "packages/client/composables/ai/loopLogic.ts",
+      "contains": "[drop-round-limit] 轮次上限已取消"
+    },
+    {
+      "file": "packages/client/composables/ai/auto-loop/after-round.ts",
+      "contains": "finish(inst, 'hard-rounds'"
+    },
+    {
+      "file": "packages/client/composables/ai/auto-loop/after-round.ts",
+      "contains": "finish(inst, 'hard-timeout'"
+    },
+    {
+      "file": "packages/client/composables/ai/auto-loop/stop-and-finish.ts",
+      "contains": "[breaker-sendstop-first-v1]"
+    },
+    {
+      "file": "packages/client/composables/ai/auto-loop/handoff.ts",
+      "contains": "export async function startHandoff"
+    },
+    {
+      "file": "packages/client/composables/ai/auto-loop/handoff.ts",
+      "contains": "export const SUMMARY_INSTRUCTION"
+    },
+    {
+      "file": "packages/core/tests/limit-marker-guard.node-test.ts",
+      "contains": "[limit-detect-v2] 三处同构守卫"
+    },
+    {
+      "file": "packages/client/composables/ai/useSessionManager.ts",
+      "contains": "const STORAGE_KEY = 'ai_runner_session_ctx'"
+    },
+    {
+      "file": "packages/client/components/script/prompt-builder.ts",
+      "contains": "[trim-output-inlined-v1]"
+    },
+    {
+      "file": "packages/client/components/script/prompt-builder.ts",
+      "contains": "scriptCtx?: string"
+    },
+    {
+      "file": "scripts/verify-anchors.cjs",
+      "contains": "path.join(ROOT, a.file)"
+    },
+    {
+      "file": "scripts/session-start.cjs",
+      "contains": "packages/core"
+    },
+    {
+      "file": "scripts/session-start.cjs",
+      "contains": "lessons-status.cjs"
+    },
+    {
+      "file": "scripts/lessons-status.cjs",
+      "contains": "[lessons-review-v1]"
+    },
+    {
+      "file": "packages/core/src/headless/headless-inject.ts",
+      "contains": "if (lang !== 'js' && lang !== 'bash') continue"
+    },
+    {
+      "file": "scripts/tampermonkey-session-id.user.js",
+      "contains": "if (lang !== 'js' && lang !== 'bash') continue"
+    },
+    {
+      "file": "packages/core/tests/reply-mark-parity.node-test.ts",
+      "contains": "脚本语言白名单两端同构"
+    },
+    {
+      "file": "packages/core/src/skills/registry.ts",
+      "contains": "[skills-registry-v2]"
+    },
+    {
+      "file": "packages/core/src/skills/registry.ts",
+      "contains": "磁盘上「含 SKILL.md 的技能目录」集合"
+    },
+    {
+      "file": "packages/core/src/skills/frontmatter.ts",
+      "contains": "[skill-frontmatter-v1]"
+    },
+    {
+      "file": "packages/core/src/skills/installer.ts",
+      "contains": "[skills-install-v1]"
+    },
+    {
+      "file": "packages/core/src/skills/installer.ts",
+      "contains": "已装 → 本地库 → 远端下载"
+    },
+    {
+      "file": "packages/core/src/routes/skills.ts",
+      "contains": "skillsHono.post('/skills/install'"
+    },
+    {
+      "file": "packages/core/SYSTEM.md",
+      "contains": "获取顺序：本地优先，不可跳层"
+    },
+    {
+      "file": "packages/core/src/process/proc.ts",
+      "contains": "[run-timeout-visible-v1]"
+    },
+    {
+      "file": "packages/core/tests/skills-install-local-first.node-test.ts",
+      "contains": "本地优先"
+    },
+    {
+      "file": "packages/core/tests/skills-registry.node-test.ts",
+      "contains": "恒等"
+    },
+    {
+      "file": "packages/core/SYSTEM.md",
+      "contains": "状态 C：TEXT（纯文本回执）"
+    },
+    {
+      "file": "packages/core/src/headless/headless-inject.ts",
+      "contains": "marks.handoff < 0 && marks.text < 0"
+    },
+    {
+      "file": "packages/client/utils/reply-mark.ts",
+      "contains": "纯文本回执，渲染为文本卡"
     }
   ]
 }

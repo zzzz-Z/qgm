@@ -9,6 +9,7 @@ import vue from '@vitejs/plugin-vue'
 import { compression } from 'vite-plugin-compression2'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import AutoImport from 'unplugin-auto-import/vite'
 
 /** client根目录 */
 const CLIENT_ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -65,6 +66,35 @@ export default defineConfig({
   plugins: [
     UnoCSS({ configFile: path.resolve(CLIENT_ROOT, 'uno.config.ts') }),
     vue(),
+    // [auto-import-v1] 免 import 使用 vue/@vueuse/core 与本地 composables/utils
+    // [WHY] 大量组件重复 import ref/computed/useXxx；集中声明减少样板
+    // [CONSTRAINT] dts 输出路径须与 tsconfig.client include 匹配（packages/client/**/*.d.ts）
+    // [CONSTRAINT] unplugin-auto-import 的 '@vueuse/core' 预设走 local-pkg.resolveModule，
+    //   解析基准是 process.cwd()（`pnpm build` / `dev:web` 下 = 仓库根），而不是 vite root 或本文件位置。
+    //   故根 package.json 必须显式声明 devDependency '@vueuse/core'——删掉它 cwd 处解析不到包，
+    //   插件报 "[auto-import] failed to load @vueuse/core" 并中断构建。
+    //   （@vueuse/core v15 已移除 indexes.json，预设实际回落到 @vueuse/metadata/index.json）
+    AutoImport({
+      imports: ['vue', '@vueuse/core'],
+      dirs: ['composables/**', 'utils/**'],
+      // [dir-dedupe-v1] 排除与门面文件重名导出的实现文件，消除 unimport
+      //   "Duplicated imports" 告警。排除判据（脚本双重核验）：
+      //   ① 文件每个导出都能从其他扫描文件拿到（门面 re-export，同一绑定）；
+      //   ② 或其独有符号在其他文件均被显式 import（不依赖 auto-import）。
+      //   两判据都不满足的文件（state/hooks/persist/handoff/useAiWindow）不能排除，
+      //   其残余同名告警是门面架构的已知噪音（二选一结果同绑定），非错误。
+      dirsScanOptions: {
+        fileFilter: (file: string) =>
+          !file.includes('composables/ai/auto-loop/types.ts')
+          && !file.includes('composables/ai/auto-loop/timers.ts')
+          && !file.includes('composables/ai/auto-loop/keyboard.ts')
+          && !file.includes('composables/ui/event-stream.ts')
+          && !file.includes('utils/context-error-locations.ts')
+          && !file.includes('utils/codeCleaner.ts'),
+      },
+      dts: 'auto-imports.d.ts',
+      vueTemplate: true,
+    }),
     // [precompress-v1] 产物旁生成 .gz/.br；serveStatic 按 Accept-Encoding 直接回源
     // [WHY] 省运行时压缩 CPU；2MB main 经 br 后约 250KB
     // [CONSTRAINT] threshold 512：rolldown-runtime（~0.7KB）在首屏 modulepreload 链上，

@@ -2,8 +2,8 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.4.5
-// @description  回传会话 ID/用量/AI 回复到工作台；接收 fill/stop（修复千问 Slate 输入框）；DONE 携带完整注释块；回复签名按 assistant 容器识别（修复千问回传）
+// @version      1.5.0
+// @description  回传会话 ID/用量/AI 回复到工作台；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -17,6 +17,8 @@
 // @match        *://*.qianwen.cn/*
 // @run-at       document-idle
 // @grant        none
+// @updateURL    http://127.0.0.1:5178/tampermonkey-session-id.user.js
+// @downloadURL  http://127.0.0.1:5178/tampermonkey-session-id.user.js
 // ==/UserScript==
 (function () {
   'use strict'
@@ -165,6 +167,46 @@
   const seenHashes = new Set()
   const seenDoneMarkers = new Set()
   let lastBodySig = ''
+  // [stopped-detect-v1] 「已停止」标记基线：fill/rotate 开新一轮时记录当前出现次数，
+  // classifyAndPost 仅在计数增长时推送一次 kind:'stopped'（与 headless 侧 detectReplyInPage 同构）
+  let stopMarkerBaseline = 0
+  function countStopMarkers() {
+    try {
+      const t = (document.body && document.body.textContent) || ''
+      return (t.match(/当前问题已停止|已停止生成|已停止回答/g) || []).length
+    } catch { return 0 }
+  }
+  function syncStopMarkerBaseline() {
+    stopMarkerBaseline = countStopMarkers()
+  }
+  // [limit-detect-v2] 会话长度上限基线：与 headless 侧 detectReplyInPage 正则严格同构（改一处必须三处同步）。
+  // 正则须覆盖「达到对话长度上限」（动词在前，DeepSeek 实际文案）与「对话长度已达上限」（名词在前）两种语序；
+  // 末段要求「上限」后紧跟「请开启新对话」，故侧栏常驻的「开启新对话」按钮不会误计。
+  let limitMarkerBaseline = 0
+  let limitMarkerText = ''
+  let assistantRootBaseline = 0
+  function countLimitMarkers() {
+    try {
+      const t = (document.body && document.body.textContent) || ''
+      const m = t.match(/(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长)[，,：:]?\s*请?(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length/gi) || []
+      if (m.length) limitMarkerText = m[m.length - 1]
+      return m.length
+    } catch { return 0 }
+  }
+  // [limit-detect-v2] 本轮是否新增 AI 回复块：存量触顶兜底用（有触顶标记 + 无新块 = 会话早已触顶）
+  function countAssistantRoots() {
+    try {
+      for (let i = 0; i < ASSISTANT_ROOT_SELECTORS.length; i++) {
+        const els = document.querySelectorAll(ASSISTANT_ROOT_SELECTORS[i])
+        if (els.length > 0) return els.length
+      }
+    } catch { /* swallow: 选择器不支持/文档未就绪，退化为 0 不启用兜底 */ }
+    return 0
+  }
+  function syncLimitMarkerBaseline() {
+    limitMarkerBaseline = countLimitMarkers()
+    assistantRootBaseline = countAssistantRoots()
+  }
 
   function langFromText(s) {
     const t = String(s || '').trim().toLowerCase()
@@ -175,7 +217,7 @@
   }
   // [code-text-clean-v1] 从 <code class="language-xxx"> 直接判语言
   // [WHY] DeepSeek 代码块头的语言标签/复制按钮不进入 <code> 元素，取 className 比邻近 DOM 探测更可靠
-  // [CONSTRAINT] 只认 cjs/js/bash 三种（与 extractLatestScript 白名单一致），其余返回 null 交给后续探测
+  // [CONSTRAINT] 只认 js/bash 两种（与 extractLatestScript 白名单一致），其余返回 null 交给后续探测
   // [CHANGE-IMPACT] 与 guessLangFromDom / guessLangFromContent 组成三级回退，改单级不影响其他级
   function guessLangFromClass(el) {
     if (!el || !el.className) return null
@@ -252,15 +294,20 @@
       // [CONSTRAINT] 只认脚本头契约允许的两种形式（shebang / @desc）；本段与 headless-inject.ts 必须同改，避免双通道分叉
       // [CHANGE-IMPACT] 影响 classifyAndPost 的 kind 分流（line 429 kind:'script'）
       const _marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
-        || /^\s*\/\/\s*@desc\s*:/m.test(text)
-        || /^\s*#\s*@desc\s*:/m.test(text)
+        || /^\s*\/\/\s*@desc\b/m.test(text)
+        || /^\s*#\s*@desc\b/m.test(text)
       if (!lang && _marked) lang = 'js'
-      if (lang !== 'cjs' && lang !== 'js' && lang !== 'bash') continue
+      // [script-lang-whitelist-v2] 语言白名单收紧为 js / bash，并**取消**「首行声明 SCRIPT 即无条件放行」。
+      // [WHY] 旧判据在白名单之外还挂了一个 declared 豁免开关：声明 SCRIPT 时连语言判不出来的块
+      //   （```python / ```json / 无标签）也收，前端把 null 折算成 'js' 当 cjs 交给 node → 必然语法错。
+      //   脚本头契约（shebang / @desc）已由上方 _marked 兜底成 js，故删除该豁免不损失合法脚本。
+      // [CONSTRAINT] 与 packages/core/src/headless/headless-inject.ts 的 extractLatestScript 逐字同构
+      if (lang !== 'js' && lang !== 'bash') continue
       const item = { lang, code: text, hash: hash32(text) }
       last = item
       const marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
-        || /^\s*\/\/\s*@desc\s*:/m.test(text)
-        || /^\s*#\s*@desc\s*:/m.test(text)
+        || /^\s*\/\/\s*@desc\b/m.test(text)
+        || /^\s*#\s*@desc\b/m.test(text)
       if (marked) lastMarked = item
     }
     return lastMarked || last
@@ -366,20 +413,40 @@
     return elToMd(node).replace(/\n{3,}/g, '\n\n').trim()
   }
 
+  // [reply-mark-v1] 统一回复标记识别：`SCRIPT` / `ASK` / `DONE` / `HANDOFF` / `TEXT` 共用「首行标记行」判据
+  // [WHY] 原「首行严格 DONE」与本通道 / headless-inject / 前端 parseAsk 的形态不一致 →
+  //   同一条回复在不同链路被分到不同类别，甚至整轮丢失。统一为「首个非空行 = 独占标记行」。
+  // [CONSTRAINT] 内部不得出现 TS 类型注解；与 headless-inject.ts、packages/client/utils/reply-mark.ts
+  //   逐句同构，由 reply-mark-parity 守卫测试三处对拍锁死。改一处必须同步三处。
+  function scanReplyMarks(md) {
+    const out = { script: -1, ask: -1, done: -1, handoff: -1, text: -1 }
+    const lines = String(md || '').split(/\r?\n/)
+    let head = -1
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim().length > 0) { head = i; break }
+    }
+    if (head < 0) return out
+    const line = lines[head].trim()
+    if (/^SCRIPT$/.test(line)) out.script = head + 1
+    else if (/^(?:ASK|@ask)$/i.test(line)) out.ask = head + 1
+    else if (/^DONE$/.test(line)) out.done = head + 1
+    else if (/^(?:HANDOFF|#\s*任务)$/.test(line)) out.handoff = head + 1
+    else if (/^TEXT$/.test(line)) out.text = head + 1
+    return out
+  }
+
   function findNewDone() {
     const _root = latestAssistantRoot() || document
     // [done-md-reconstruct-v1] 用 DOM→Markdown 反推替代 textContent（保留换行与结构）
     const summary = extractReplyMd(_root)
 
-    // [done-plain-v1] 新协议：首行严格 DONE + 后续 Markdown 总结
-    // [CONSTRAINT] 只匹配首个非空行恰好为 DONE；避免"我做了 DONE"类误判
-    if (summary) {
-      const firstLine = summary.split(/\r?\n/).find(l => l.trim().length > 0) || ''
-      if (/^\s*DONE\s*$/.test(firstLine)) {
-        const headMarker = hash32(`done-head|${summary.slice(0, 200)}|${summary.length}`)
-        if (!seenDoneMarkers.has(headMarker)) {
-          return { marker: headMarker, text: summary }
-        }
+    // [reply-mark-v1] 判据走统一标记扫描：只认首个非空行的独占标记行
+    //   （正文写「DONE 之后…」不会命中；首行不是标记就不是 done）
+    // [CHANGE-IMPACT] 与 headless-inject 的 kind 分流同名同义，改一处必须同步三处
+    if (summary && scanReplyMarks(summary).done > 0) {
+      const headMarker = hash32(`done-head|${summary.slice(0, 200)}|${summary.length}`)
+      if (!seenDoneMarkers.has(headMarker)) {
+        return { marker: headMarker, text: summary }
       }
     }
 
@@ -436,11 +503,54 @@
         return
       }
 
+      // [stopped-detect-v1] 生成被中止感知（用户点停止/平台中断/内容截断）：
+      // 残缺回复无 DONE 无完整脚本，按旧逻辑会被降级为 plain「等待下一轮」→ 前端无感知干等超时。
+      // 标记计数较 fill/rotate 基线增长即推送 kind:'stopped'（更新基线保证只推一次），优先于 script/plain
+      const stopCount = countStopMarkers()
+      if (stopCount > stopMarkerBaseline) {
+        stopMarkerBaseline = stopCount
+        lastBodySig = bodySignature()
+        post({
+          type: 'ai-runner:reply',
+          kind: 'stopped',
+          site: location.origin,
+          sessionId: extractSidFromHash(),
+          text: 'AI 网页已停止生成',
+        })
+        return
+      }
+
+      // [limit-detect-v2] 会话长度上限感知：触顶后本会话继续提问不可能有产出，
+      // 标记计数较 fill/rotate 基线增长即推送 kind:'limit'（更新基线保证只推一次），优先于 script/plain。
+      // 存量兜底：fill 时页面已有触顶标记 → 本会话早已触顶；若此后未新增 AI 回复块（重发同样无产出）也推送。
+      // 前端收到后触发自动轮转（总结 → 新会话 → 续跑）
+      const limitCount = countLimitMarkers()
+      const limitStale = limitCount > 0 && assistantRootBaseline > 0 && countAssistantRoots() <= assistantRootBaseline
+      if (limitCount > limitMarkerBaseline || limitStale) {
+        limitMarkerBaseline = limitCount
+        lastBodySig = bodySignature()
+        post({
+          type: 'ai-runner:reply',
+          kind: 'limit',
+          site: location.origin,
+          sessionId: extractSidFromHash(),
+          text: limitMarkerText || 'AI 会话已达长度上限',
+        })
+        return
+      }
+
       // [generating-gate-v1] 流式输出未完，script/plain 一律等生成结束后再发
       if (isGenerating()) return
 
+      // [reply-mark-v1] 标记行优先：首行是 `ASK` / `DONE` / `HANDOFF` / `TEXT` 的回复不走脚本分类
+      //   （否则带示例代码块的 DONE 总结会被当脚本重新执行）；与 headless-inject.ts 同构
+      const marks = (() => {
+        try { return scanReplyMarks(extractReplyMd(latestAssistantRoot() || document)) }
+        catch { return { script: -1, ask: -1, done: -1, handoff: -1, text: -1 } }
+      })()
+      const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0
       // [md-fence-fallback-v1] DOM 提取失败时兜底 Markdown 围栏提取
-      const s = extractLatestScript() || extractScriptFromMarkdown()
+      const s = markedNonScript ? null : (extractLatestScript() || extractScriptFromMarkdown())
       if (s && !seenHashes.has(s.hash)) {
         seenHashes.add(s.hash)
         post({
@@ -459,14 +569,17 @@
       const sig = bodySignature()
       if (sig !== lastBodySig) {
         lastBodySig = sig
+        // [ask-text-v1] 补 text：前端 parseAsk 依赖此字段识别交互提问
+        // [text-mark-v1] TEXT 标记：剥掉标记行只留正文（extractLatestReplyText 含「TEXT」首行）
+        // [CONSTRAINT] extractLatestReplyText 返回最后 assistant 容器文本；缺失时前端退化为纯提示
+        const replyMd = (() => { try { return extractLatestReplyText() || '' } catch { return '' } })()
+        const replyText = marks.text > 0 ? replyMd.split(/\r?\n/).slice(marks.text).join('\n').trim() : replyMd
         post({
           type: 'ai-runner:reply',
           kind: 'plain',
           site: location.origin,
           sessionId: extractSidFromHash(),
-          // [ask-text-v1] 补 text：前端 parseAsk 依赖此字段识别交互提问
-          // [CONSTRAINT] extractLatestReplyText 返回最后 assistant 容器文本；缺失时前端退化为纯提示
-          text: (() => { try { return extractLatestReplyText() || '' } catch { return '' } })(),
+          text: replyText,
         })
       }
     } catch {}
@@ -746,6 +859,8 @@
 
     if (d.type === 'ai-runner:fill') {
       resumeReplyObserver() // [stop-v2] stop 后首次 fill 恢复回复监听
+      syncStopMarkerBaseline() // [stopped-detect-v1] 开新一轮：以当前「已停止」计数为新基线
+      syncLimitMarkerBaseline() // [limit-detect-v1] 开新一轮：以当前「上限」计数为新基线
       if (d.msgId && _seenInbound.has(d.msgId)) return
       if (d.msgId) { _seenInbound.add(d.msgId); if (_seenInbound.size > 200) _seenInbound.delete(_seenInbound.values().next().value) }
       const prompt = String(d.prompt || '')
@@ -781,6 +896,8 @@
 
     if (d.type === 'ai-runner:rotate') {
       resumeReplyObserver() // [stop-v2] stop 后首次 rotate 恢复回复监听
+      syncStopMarkerBaseline() // [stopped-detect-v1] 开新一轮：以当前「已停止」计数为新基线
+      syncLimitMarkerBaseline() // [limit-detect-v1] 开新一轮：以当前「上限」计数为新基线
       if (d.msgId && _seenInbound.has(d.msgId)) return
       if (d.msgId) { _seenInbound.add(d.msgId); if (_seenInbound.size > 200) _seenInbound.delete(_seenInbound.values().next().value) }
       const instruction = String(d.instruction || '')

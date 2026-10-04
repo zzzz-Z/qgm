@@ -247,22 +247,35 @@ export function gcSnapshots(keep: number) {
  * [WHY] 只对 modified / deleted 文件落盘：added 无历史内容、其他类型无意义
  * [CONSTRAINT] before 缺失对应项时静默跳过（首次运行 / 快照被 GC 的边界）
  * [CHANGE-IMPACT] 备份路径为 dir/{path}.before，rollback 侧按同规则回读，命名不可改
+ * [git-first-rollback-v1] `opts.gitRef` 存在时**刻意不落 .before**：运行前内容已由 git ref 覆盖
+ *   （rollback 侧走 gitRestoreFile），再落一份等于同内容存两处。`_manifest.json` 仍照写——
+ *   它是回滚索引（changes 列表 + gitRef），不是内容副本，代价可忽略。
  * @param runId 本次运行的唯一 id（与 runDir 一致）
  * @param before 运行前全量内容（snapshot() 结果）
  * @param changes 本次运行检测到的变更列表
+ * @param opts 可选参数；省略即走内容副本
+ * @param opts.gitRef 存在表示内容来源为 git 运行前 ref（跳过 .before 落盘）
  */
-export function saveSnapshot(runId: string, before: Map<string, string>, changes: Change[]) {
+export function saveSnapshot(
+  runId: string,
+  before: Map<string, string>,
+  changes: Change[],
+  opts?: { gitRef?: string },
+) {
   const dir = runDir(runId)
   fs.mkdirSync(dir, { recursive: true })
-  for (const c of changes) {
-    if (c.type === 'added') continue
-    const content = before.get(c.path)
-    if (content === undefined) continue
-    const bak = path.join(dir, `${c.path}.before`)
-    fs.mkdirSync(path.dirname(bak), { recursive: true })
-    fs.writeFileSync(bak, content)
+  const gitRef = opts?.gitRef
+  if (!gitRef) {
+    for (const c of changes) {
+      if (c.type === 'added') continue
+      const content = before.get(c.path)
+      if (content === undefined) continue
+      const bak = path.join(dir, `${c.path}.before`)
+      fs.mkdirSync(path.dirname(bak), { recursive: true })
+      fs.writeFileSync(bak, content)
+    }
   }
-  const manifest: Manifest = { changes, createdAt: Date.now() }
+  const manifest: Manifest = { changes, createdAt: Date.now(), ...(gitRef ? { gitRef } : {}) }
   fs.writeFileSync(path.join(dir, '_manifest.json'), JSON.stringify(manifest, null, 2))
 }
 

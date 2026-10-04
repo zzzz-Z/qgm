@@ -5,11 +5,31 @@ import type { Socket } from 'node:net'
 import type { Server as HttpServer, IncomingMessage } from 'node:http'
 import { PREFIX } from '../config.js'
 import { createHeadlessPool } from '../headless/ai-headless.js'
+// [lesson-autocapture-v1] DONE 总结中的踩坑记录自动落盘，见 post-run/lesson-extract.ts
+import { appendLessons, extractLessons } from '../post-run/lesson-extract.js'
 import type { ServerMessage, TransportMessage } from './protocol.js'
 // Vite 可能是 HttpServer | Http2SecureServer，取交集的最小子集
 
 // [p1-2-v1] 宽档：HttpServer 与 Http2SecureServer 的公共最小子集；用 Pick 避免显式 any
 type AnyHttpServer = Pick<import('node:events').EventEmitter, 'on' | 'off'>
+
+// [ws-heartbeat-v1] ws 库连接的存活标记（ping/pong 巡检用）；浏览器原生 WebSocket 无此面，仅服务端挂载
+type AliveWs = WebSocket & { isAlive?: boolean }
+const HEARTBEAT_MS = 30000
+
+/** [attach-ws-buffer-factory-v1] 外发消息缓冲：仅记录可重放的业务帧，上限 30 条 */
+const _SRV_BUF_MAX = 30
+function createBufferOut(buf: Map<string, unknown[]>): (sid: string, payload: unknown) => void {
+  return (sid, payload) => {
+    if (!sid) return
+    const t = (payload as { t?: string }).t || ''
+    if (t !== 'headless:reply' && t !== 'headless:script' && t !== 'headless:summary' && t !== 'headless:new-session-created') return
+    let arr = buf.get(sid)
+    if (!arr) { arr = []; buf.set(sid, arr) }
+    arr.push(payload)
+    if (arr.length > _SRV_BUF_MAX) arr.shift()
+  }
+}
 
 /** WebSocket 挂载配置：路径、心跳、升级处理 */
 export interface AttachWsOptions {
@@ -29,20 +49,13 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
   const pool = createHeadlessPool({ engine: 'playwright' })
   // 每个 sid 的 poll 停止器（fill 成功时启动）
   const replyPollers = new Map<string, () => void>()
+  // [fill-serialize-v1] 同 sid 的 fill 序列串行化，防止 await 交错导致 startReplyPoll 被覆写后孤儿化
+  const fillChains = new Map<string, Promise<void>>()
 
   // 缓存最近外发消息（per-sid），供客户端重连后请求重放
   const _serverMsgBuf = new Map<string, unknown[]>()
-  const _SRV_BUF_MAX = 30
-  function _bufferOut(sid: string, payload: unknown) {
-    if (!sid) return
-    const t = (payload as { t?: string }).t || ''
-    // 仅缓存业务消息，不缓存 state/hello 等瞬态
-    if (t !== 'headless:reply' && t !== 'headless:script' && t !== 'headless:summary' && t !== 'headless:new-session-created') return
-    let arr = _serverMsgBuf.get(sid)
-    if (!arr) { arr = []; _serverMsgBuf.set(sid, arr) }
-    arr.push(payload)
-    if (arr.length > _SRV_BUF_MAX) arr.shift()
-  }
+  // [attach-ws-buffer-factory-v1] 缓冲区操作抽到模块级工厂，减少 attachWs 内联长度
+  const _bufferOut = createBufferOut(_serverMsgBuf)
 
   const wss = new WebSocketServer({ noServer: true })
 
@@ -54,6 +67,64 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
     })
   }
   httpServer.on('upgrade', onUpgrade)
+
+  /** [attach-ws-split-v1] headless:fill 处理（含同 sid 串行链） */
+  async function handleFill(msg: TransportMessage, send: (m: ServerMessage | TransportMessage) => void): Promise<void> {
+    const sid = String(msg.sid || 'default')
+    const prompt = String(msg.prompt || '')
+    if (!prompt) { send({ t: 'headless:state', sid, state: 'error', detail: 'prompt 为空' }); return }
+    const prev = fillChains.get(sid) ?? Promise.resolve()
+    const chain = prev.catch(() => {}).then(async () => {
+      let sess = pool.get(sid)
+      if (!sess) {
+        send({ t: 'headless:state', sid, state: 'filling' })
+        sess = await pool.open(sid)
+        if (sess.state === 'error') {
+          send({ t: 'headless:state', sid, state: 'error', detail: sess.detail || 'open 失败' })
+          return
+        }
+      }
+      const oldStop = replyPollers.get(sid)
+      if (oldStop) { oldStop(); replyPollers.delete(sid) }
+      send({ t: 'headless:state', sid, state: 'filling' })
+      await pool.newSession(sid).catch(() => null)
+      const ok = await pool.fillPrompt(sid, prompt)
+      if (!ok) {
+        // [fill-verify-v2] 止血（AGENDA-10）：验证失败 ≠ 一定没发出去（页面改版 / 消息慢渲染都会误判）。
+        // 旧实现在此 return → 对方真回复了也无人接收，整轮被静默丢弃。
+        // 改为仅上报 error 供前端 toast，随后照常 resetReplyDedup + startReplyPoll。
+        // [CONSTRAINT] 代价：真未发送时 poll 空转；每次 tick 仅一次只读 evaluate，且下次 fill 会先 stop 掉它。
+        send({ t: 'headless:state', sid, state: 'error', detail: 'fill 验证失败（未找到输入框/发送按钮），仍继续等待回复' })
+      } else {
+        send({ t: 'headless:state', sid, state: 'generating' })
+      }
+      await pool.resetReplyDedup(sid)
+      const stopReply = pool.startReplyPoll(sid, (reply) => {
+        try {
+          if (reply.kind === 'script' && reply.code) {
+            send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now() } } })
+          } else {
+            send({ t: 'headless:reply', sid, reply: { kind: reply.kind, text: reply.text } })
+            // [lesson-autocapture-v1] DONE 总结若含「踩坑记录」段，自动追加到 lessons.md
+            // WHY: 之前只能人工 pnpm lessons:add，知识沉淀依赖记忆；此处零成本捕获
+            // CONSTRAINT: 仅识别明确标题，无该段落即忽略；追加失败静默，不影响主链路
+            if (reply.kind === 'done' && reply.text) {
+              try {
+                const lessons = extractLessons(reply.text)
+                const n = appendLessons(lessons)
+                if (n > 0) send({ t: 'headless:state', sid, state: 'generating', detail: `lessons +${n}` })
+              } catch { /* swallow: 提取异常不应阻断 WS 主链路 */ }
+            }
+          }
+        } catch { /* swallow: 页面导航/关闭期间 evaluate 抛错，等下一轮 tick */ }
+      })
+      replyPollers.set(sid, stopReply)
+    })
+    fillChains.set(sid, chain)
+    try { await chain } finally {
+      if (fillChains.get(sid) === chain) fillChains.delete(sid)
+    }
+  }
 
   // handleMessage（从 ws-server 抽，缩进 -2）
   async function handleMessage(ws: WebSocket, msg: TransportMessage): Promise<void> {
@@ -68,7 +139,11 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
       case 'headless:request-replay': {
         const sid0 = String(msg.sid || 'default')
         const buf = _serverMsgBuf.get(sid0) || []
-        for (const m of buf) { try { ws.send(JSON.stringify(m)) } catch { /* swallow: 重放中单条失败不阻断后续 */ } }
+        // [replay-flag-v1] 重放帧逐帧打 replay:true（不改缓存本体）；客户端据此跳过 auto-loop 副作用，
+        // 否则刷新/HMR 重连后旧脚本被重新执行、旧 @ask 重新弹窗，状态机被带离 waiting 后真实回复反被丢弃
+        for (const m of buf) {
+          try { ws.send(JSON.stringify({ ...(m as Record<string, unknown>), replay: true })) } catch { /* swallow: 重放中单条失败不阻断后续 */ }
+        }
         break
       }
       case 'headless:open': {
@@ -90,44 +165,7 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         break
       }
       case 'headless:fill': {
-        const sid = String(msg.sid || 'default')
-        const prompt = String(msg.prompt || '')
-        const finalPrompt = prompt
-        if (!prompt) { send({ t: 'headless:state', sid, state: 'error', detail: 'prompt 为空' }); break }
-        // session 未打开时自动先 open（前端 sendOpen+sendFill 同帧）
-        let sess = pool.get(sid)
-        if (!sess) {
-          send({ t: 'headless:state', sid, state: 'filling' })
-          sess = await pool.open(sid)
-          if (sess.state === 'error') {
-            send({ t: 'headless:state', sid, state: 'error', detail: sess.detail || 'open 失败' })
-            break
-          }
-        }
-        // 停掉旧 poll
-        const oldStop = replyPollers.get(sid)
-        if (oldStop) { oldStop(); replyPollers.delete(sid) }
-        send({ t: 'headless:state', sid, state: 'filling' })
-        const ok = await pool.fillPrompt(sid, finalPrompt)
-        if (!ok) {
-          send({ t: 'headless:state', sid, state: 'error', detail: 'fill 失败（未找到输入框/发送按钮）' })
-          break
-        }
-        // fill（点发送）之后才重置 dedup，防「用户消息渲染」被误判为 plain
-        await pool.resetReplyDedup(sid)
-        send({ t: 'headless:state', sid, state: 'generating' })
-        // 启动回复轮询
-        // reply + estimate 两个 poll 的 stop 合并，避免泄漏
-        const stopReply = pool.startReplyPoll(sid, (reply) => {
-          try {
-            if (reply.kind === 'script' && reply.code) {
-              send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now() } } })
-            } else {
-              send({ t: 'headless:reply', sid, reply: { kind: reply.kind, text: reply.text } })
-            }
-          } catch { /* swallow: 页面导航/关闭期间 evaluate 抛错，等下一轮 tick */ }
-        })
-        replyPollers.set(sid, stopReply)
+        await handleFill(msg, send)
         break
       }
       case 'headless:stop': {
@@ -160,7 +198,8 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         // [headless-login-gui-v1] 阻塞直到用户关窗；期间其他消息仍可并发进入 handleMessage
         send({ t: 'headless:state', sid, state: 'filling', detail: '等待用户在有头窗口登录…' })
         const r = await pool.openLoginGui(sid, url)
-        send({ t: 'headless:state', sid, state: r.ok ? 'idle' : 'error', detail: r.ok ? '登录流程结束' : (r.detail || '登录失败') })
+        // [login-gui-autoclose-v1] 成功 detail 来自池层（区分「自动关窗」与「手动关窗」），需透传给前端
+        send({ t: 'headless:state', sid, state: r.ok ? 'idle' : 'error', detail: r.detail || (r.ok ? '登录流程结束' : '登录失败') })
         break
       }
       default: {
@@ -169,7 +208,21 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
     }
   }
 
-  wss.on('connection', (ws) => {
+  // [ws-heartbeat-v1] ping/pong 巡检：后端重启或网络静默断裂后浏览器可能仍持半开连接（报 OPEN 但帧不到达），
+  // 30s 无 pong 即 terminate，强制浏览器侧收到 close → 前端指数退避重连，避免「发消息没反应」
+  const heartbeat = setInterval(() => {
+    for (const client of wss.clients) {
+      const c = client as AliveWs
+      if (c.isAlive === false) { try { c.terminate() } catch { /* swallow: 关闭竞态 */ } ; continue }
+      c.isAlive = false
+      try { c.ping() } catch { /* swallow: 已关闭连接 ping 抛错，下一轮 terminate 兜底 */ }
+    }
+  }, HEARTBEAT_MS)
+
+  wss.on('connection', (ws0) => {
+    const ws = ws0 as AliveWs
+    ws.isAlive = true
+    ws.on('pong', () => { ws.isAlive = true })
     ws.send(JSON.stringify({ t: 'hello', version: 1 }))
     ws.on('message', (data) => {
       let msg: TransportMessage
@@ -182,8 +235,17 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
     ws.on('error', () => {})
   })
 
+  // [attach-ws-dispose-v1] 完整 teardown：除 stop 新连接外，须
+  //  - 停止所有 reply poller（否则每个 sid 的 800ms tick 会持续运行）
+  //  - 强制 terminate 现有客户端（wss.close 只拒绝新连接，不会主动断已连 socket）
+  //  - 清空 _serverMsgBuf（否则重放缓冲随 sid 单调增长）
   return () => {
+    try { clearInterval(heartbeat) } catch { /* ignore */ }
     try { httpServer.off('upgrade', onUpgrade) } catch { /* ignore */ }
+    for (const stop of replyPollers.values()) { try { stop() } catch { /* ignore */ } }
+    replyPollers.clear()
+    _serverMsgBuf.clear()
+    try { for (const client of wss.clients) { try { client.terminate() } catch { /* ignore */ } } } catch { /* ignore */ }
     try { wss.close() } catch { /* ignore */ }
   }
 }

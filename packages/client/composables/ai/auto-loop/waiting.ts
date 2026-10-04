@@ -1,5 +1,7 @@
 // [waiting-v1] 从 useAutoLoop.ts 抽出（PLAN 4.7 阈值整改）
+// [timers-v1] disarmTimer 已移至 ./timers.js（消环）：enterWaiting 只需 finish，不再反向依赖
 import type { LoopInstance } from './types.js'
+import { setLoopState } from './transitions.js'
 
 interface WaitingDeps {
   loopPaused: { value: boolean }
@@ -10,27 +12,23 @@ interface WaitingDeps {
 }
 
 /**
- * 组装等待族（enterWaiting 等），闭包持有 deps
- * [WHY] 从 useAutoLoop.ts 抽出以降低单文件体积（HCLC 400 行约束）
- * [CONSTRAINT] deps 全量由 useAutoLoop 注入；本模块无模块级状态，多次创建产生独立闭包；
- * 超时时长按 lastExec.lang 区分（bash 180s vs cjs 90s）
- * [CHANGE-IMPACT] 修改 WaitingDeps 结构须同步更新 useAutoLoop 的装配处
- * @param deps 等待族依赖面（loopPaused / persist / finish / 两类超时常量）
+ * 组装等待族（enterWaiting）
+ * [WHY] 抽出以降低 useAutoLoop 体积；本模块无模块级状态，多次创建产生独立闭包
+ * [CONSTRAINT] 超时时长按 lastExec.lang 区分（bash 180s vs cjs 90s）
+ * [CHANGE-IMPACT] 修改 WaitingDeps 须同步 useAutoLoop 装配处
  */
 export function createWaiting(deps: WaitingDeps) {
   const { loopPaused, persist, finish, LOOP_ROUND_TIMEOUT_BASH_MS, LOOP_ROUND_TIMEOUT_MS } = deps
 
-  /** 进入等待 AI 回复状态 */
   function enterWaiting(inst: LoopInstance) {
-    if (loopPaused.value) return // [loop-paused]
-    inst.state.value = 'waiting'
+    if (loopPaused.value) return
+    // [transitions-v1] FILL 事件：running|preparing → waiting
+    setLoopState(inst, 'FILL')
     persist(inst)
     if (inst.roundTimer) clearTimeout(inst.roundTimer)
-    // bash 任务通常更复杂、AI 思考更久，给 180s；cjs / 首轮（无 lastExec）默认 90s
     const lastLang = inst.lastExec.value?.lang
     const timeoutMs = lastLang === 'bash' ? LOOP_ROUND_TIMEOUT_BASH_MS : LOOP_ROUND_TIMEOUT_MS
     inst.roundTimeoutMs.value = timeoutMs
-    // UI 倒计时进度反馈：每秒更新已等待秒数
     inst.waitingStartedAt.value = Date.now()
     inst.waitingElapsed.value = 0
     if (inst.waitingTicker) clearInterval(inst.waitingTicker)
@@ -43,12 +41,5 @@ export function createWaiting(deps: WaitingDeps) {
     }, timeoutMs)
   }
 
-  /** 清除本轮超时计时器 */
-  function disarmTimer(inst: LoopInstance) {
-    if (inst.roundTimer) { clearTimeout(inst.roundTimer); inst.roundTimer = null }
-    if (inst.waitingTicker) { clearInterval(inst.waitingTicker); inst.waitingTicker = null }
-    inst.waitingElapsed.value = 0
-  }
-
-  return { enterWaiting, disarmTimer }
+  return { enterWaiting }
 }

@@ -1,9 +1,9 @@
-import { log } from '../../utils/log'
 // [transport-static-import-v1] useAiTransport 已被 App.vue/WorklogPane 等多处静态引入，
 // 动态 import 只会触发 INEFFECTIVE_DYNAMIC_IMPORT；改为命名空间静态导入，
 // loadTransport() 以 Promise.resolve 保留异步签名，调用方零改动
 import * as transportMod from './useAiTransport.js'
 import { getActiveWinSid, getWindowBySid, targetOriginFor } from './useAiWindowTable'
+import { log } from '../../utils/log' // [restore-import-v1] 早前清理误删
 
 /** fill 消息载荷：向 AI 窗口投递的提问文本 */
 export interface FillPayload {
@@ -26,7 +26,7 @@ export interface RotatePayload { instruction: string }
 export interface NewSessionPayload { summary: string }
 
 /** Transport 模块（已静态化；保留 Promise 形态兼容既有 await loadTransport() 调用点） */
-const _transportMod: Promise<typeof import('./useAiTransport.js')> = Promise.resolve(transportMod)
+const _transportMod: Promise<typeof import('./useAiTransport.js')> = Promise.resolve().then(() => transportMod)
 
 /** 加载 Transport（模块级单例；静态导入后此函数等价于常量 Promise） */
 export function loadTransport() {
@@ -54,6 +54,7 @@ function headlessSend(methodName: string, ...args: unknown[]) {
   void loadTransport().then((mod) => {
     try {
       const transport = mod.useAiTransport()
+      // [dynamic-method-v1] 按名动态取 transport 方法；transport 接口未暴露索引签名，此处收窄一次
       const method = (transport.transport as unknown as Record<string, (...a: unknown[]) => unknown>)[methodName]
       if (typeof method === 'function') void method.apply(transport.transport, args)
     } catch { /* swallow: transport 未就绪 / 方法缺失，headless 发送本就 fire-and-forget */ }

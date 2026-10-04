@@ -1,6 +1,5 @@
 // [use-fold-state-v1] PLAN 5.4 折叠状态持久化（localStorage，key = sessionId:filePath）
 import type { Ref } from 'vue'
-import { useLocalStorage } from '@vueuse/core'
 
 /** 折叠状态（接口） */
 export interface FoldState {

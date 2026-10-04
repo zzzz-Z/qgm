@@ -65,6 +65,9 @@ function setUrl(next: string): boolean {
   if (!trimmed) return false
   try {
     const u = new URL(trimmed)
+    // [url-protocol-guard-v1] 报告 P2：javascript: / data: 也能通过 URL() 解析，
+    // 会被落盘为 openSite() 默认地址。只接受 http/https。
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
     url.value = u.toString()
     return true
   } catch {

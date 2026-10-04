@@ -11,10 +11,8 @@ export const windowsTick = ref(0)
 /** 通知所有消费方：窗口表已变化 */
 function bumpWindows(): void { windowsTick.value++ }
 
-// ============================================================================
 // 活动窗口引用管理 —— postMessage 的目标 window 必须精确，否则跨域无法操作 DOM
 // 新窗口覆盖旧引用（简化：只跟最新一个），与油猴侧 window.opener 一一对应
-// ============================================================================
 // [multi-loop-step3] 窗口表：按 sid 存储；activeWinSid 指向当前激活槽位
 const windowTable = new Map<string, { win: Window, url: string }>()
 const activeWinSid = ref<string>('default')

@@ -1,0 +1,87 @@
+// [load-lessons-v1] 把 `.ai-runner/lessons.md`（项目踩坑记录）注入 AI 决策回路。
+// [WHY] lessons.md 此前只被 handoff-gen.cjs / session-start.cjs 做「统计读」——
+//       生成交接报告、列出待复核条目——**从未进入 AI 的 prompt**。
+//       于是「DONE 采集 → 入库 → 复核 → 蒸馏」这条链缺了最后一环：
+//       前一条坑被记下来了，下一条同类的坑 AI 还是照踩。本模块补上这一环。
+// [CONSTRAINT] 失败 / 空文件 / 超预算一律降级为空串，绝不阻断首问与循环首轮；
+//              超预算时按条目边界截断，且优先保留较新的条目（append-only ⇒ 新条目在文件尾）。
+// [CHANGE-IMPACT] 被 session-prompt.ts 的两个 prompt 构建函数消费；调整 LESSONS_BUDGET 会改变首问长度。
+
+/** lessons 注入预算（字符）。超出后按条目边界截断，宁少勿滥。 */
+export const LESSONS_BUDGET = 6000
+
+/**
+ * 掐掉文件头部的 `>` 引用块引言。
+ * [WHY] 引言是写给「维护者」的采集/复核/蒸馏协议，对 AI 完成当前任务没有信息量，
+ *       却固定占掉约 1KB 预算。只保留 `## 标题` 起的条目正文。
+ * [CONSTRAINT] 找不到 `## ` 时返回空串 —— 不要退回整篇（那会把引言也灌进去）
+ */
+function stripPreface(md: string): string {
+  const i = md.search(/^##\s/m)
+  return i >= 0 ? md.slice(i) : ''
+}
+
+/**
+ * 按 `## 标题` 切分条目
+ * [CONSTRAINT] 与 attach-ws.ts 的入库去重、lessons-status.cjs 的统计口径一致，都用 `^## `
+ */
+function splitEntries(body: string): string[] {
+  const out: string[] = []
+  let cur: string[] = []
+  for (const line of body.split(/\r?\n/)) {
+    if (/^##\s/.test(line) && cur.length) {
+      out.push(cur.join('\n').trimEnd())
+      cur = []
+    }
+    cur.push(line)
+  }
+  const tail = cur.join('\n').trim()
+  if (tail) out.push(tail)
+  return out.filter(Boolean)
+}
+
+/**
+ * 读取并构造 lessons 注入块
+ * [CONSTRAINT] 任何异常（网络 / 解析 / 无内容）都返回 '' —— 调用方据此自然降级
+ * @returns 可直接拼进 prompt 的 `<file>` 块；无内容时为 ''
+ */
+export async function buildLessonsBlock(): Promise<string> {
+  let md = ''
+  try {
+    const r = await fetch('/__ai/files/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: ['.ai-runner/lessons.md'] }),
+    })
+    const j = await r.json()
+    const files = Array.isArray(j?.files) ? j.files : []
+    const hit = files.find((f: { path?: string }) => String(f?.path || '').endsWith('lessons.md'))
+    if (hit && !hit.error && hit.content) md = String(hit.content)
+  } catch { return '' }
+  if (!md.trim()) return ''
+
+  const entries = splitEntries(stripPreface(md))
+  if (!entries.length) return ''
+
+  // 从最新（文件尾）往前累计；至少保留 1 条，避免预算过小时注入空块
+  const picked: string[] = []
+  let used = 0
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]
+    if (picked.length && used + e.length > LESSONS_BUDGET) break
+    picked.unshift(e)
+    used += e.length + 2
+  }
+  const truncated = picked.length < entries.length
+
+  const head = [
+    '# 历史踩坑记录（.ai-runner/lessons.md）',
+    '',
+    '> 本项目**既往踩过的坑**，按标题去重、append-only。生成脚本前先扫一遍，避免重踩。',
+    '> 条目状态行由复核方标注；缺省 = 待复核 —— 可作参考，勿当铁律。',
+  ]
+  if (truncated) head.push(`> ⚠️ 条目过多，此处仅注入最近 ${picked.length}/${entries.length} 条；完整见 \`.ai-runner/lessons.md\`。`)
+  head.push('')
+
+  return `<file path=".ai-runner/lessons.md">\n${head.join('\n')}${picked.join('\n\n')}\n</file>`
+}

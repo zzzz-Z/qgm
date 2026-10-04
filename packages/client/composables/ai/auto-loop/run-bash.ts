@@ -1,6 +1,7 @@
 // [run-bash-v1] 从 useAutoLoop.ts 抽出（PLAN 4.7 阈值整改）
-import { readNdjson } from '../../../utils/stream'
 import { bashPolicy } from '../../ui/useAppStorage'
+// [restore-import-v1] readNdjson 早前按 auto-import 名单清理时误删（app 侧兜底可跑，但 tsc --noEmit / vitest 无该插件）
+import { readNdjson } from '../../../utils/stream'
 
 interface BashExecResult {
   code: number

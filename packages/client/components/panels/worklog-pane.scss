@@ -1,0 +1,393 @@
+/* [worklog-style-extract-v1] 从 WorklogPane.vue 抽出，缓解 500 行红线。 */
+
+.wl-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* ── 顶部提交区（VSCode 风格） ── */
+/* 拆为三行：输入 + 生成、分体提交按钮；列布局容纳 */
+.wl-commit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  flex-shrink: 0;
+}
+.wl-commit-row {
+  @apply flex gap-1.5;
+}
+.wl-commit-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--surface-2, #161b22);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.wl-commit-input:focus {
+  border-color: var(--primary, #2563eb);
+}
+.wl-commit-input::placeholder {
+  color: var(--text-3);
+}
+/* 生成 commit message 按钮：与输入框同高，方形 */
+.wl-commit-gen {
+  @apply inline-flex items-center justify-center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  padding: 0;
+  color: var(--text-3);
+  background: var(--surface-2, #161b22);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    color 0.12s ease,
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+.wl-commit-gen:hover:not(:disabled) {
+  color: var(--primary, #2563eb);
+  border-color: var(--primary, #2563eb);
+}
+.wl-commit-gen:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 分体按钮：主区 + 窄区共享底色；中间分隔线用半透明白 */
+.wl-commit-btn-row {
+  @apply flex w-full;
+}
+.wl-commit-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  @apply inline-flex items-center justify-center gap-1.5;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--primary, #2563eb);
+  border: 0;
+  border-radius: 6px 0 0 6px;
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+.wl-commit-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.wl-commit-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.wl-commit-more {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #fff;
+  background: var(--primary, #2563eb);
+  border: 0;
+  border-left: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 0 6px 6px 0;
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+.wl-commit-more:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.wl-commit-more:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* AI 生成结果区：生成中 / 成功 / 失败三态 */
+.wl-ai-result {
+  padding: 6px 10px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.wl-ai-loading {
+  @apply flex items-center gap-1.5;
+  color: var(--text-3);
+}
+.wl-ai-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-2, #30363d);
+  border-top-color: var(--primary, #2563eb);
+  border-radius: 50%;
+  animation: wl-ai-spin 0.8s linear infinite;
+}
+@keyframes wl-ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.wl-ai-error {
+  color: var(--danger, #f85149);
+}
+.wl-ai-ok {
+  @apply flex items-center gap-1.5;
+  padding: 5px 8px;
+  background: rgb(88 166 255 / 8%);
+  border: 1px solid rgb(88 166 255 / 22%);
+  border-radius: 6px;
+  color: var(--text);
+}
+.wl-ai-label {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  font:
+    700 10px/1.4 ui-monospace,
+    monospace;
+  letter-spacing: 0.5px;
+  color: #fff;
+  background: var(--primary, #2563eb);
+  border-radius: 3px;
+}
+.wl-ai-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  color: var(--text);
+}
+.wl-ai-apply {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  color: var(--primary, #2563eb);
+  background: transparent;
+  border: 1px solid var(--primary, #2563eb);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.wl-ai-apply:hover {
+  background: rgb(88 166 255 / 12%);
+}
+
+/* [scope-refresh-moved] 原「范围 + 刷新」区已删除；刷新按钮迁至 wl-commit-row
+ * [WHY] 用户要求删掉起点 ref 输入框并把刷新按钮放到生成按钮旁，视觉更紧凑
+ * [CHANGE-IMPACT] 刷新按钮复用 .wl-commit-gen 的方形视觉规范（30px）
+ */
+.wl-commit-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  padding: 0;
+  color: var(--text-3);
+  background: var(--surface-2, #161b22);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    color 0.12s ease,
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+.wl-commit-refresh:hover:not(:disabled) {
+  color: var(--primary, #2563eb);
+  border-color: var(--primary, #2563eb);
+}
+.wl-commit-refresh:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 滚动区 ── */
+.wl-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0 12px;
+}
+.wl-empty {
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.wl-error {
+  color: var(--danger, #f85149);
+}
+
+/* ── 分组标题「更改」 ── */
+.wl-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  cursor: default;
+}
+.wl-group-count {
+  margin-left: auto;
+  padding: 1px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--surface-2, #21262d);
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 文件列表 ── */
+.wl-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wl-item {
+  border: 0;
+}
+.wl-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.wl-item-head:hover {
+  background: rgb(127 127 127 / 10%);
+}
+.wl-chev {
+  flex: 0 0 auto;
+  @apply inline-flex items-center justify-center;
+  width: 12px;
+  height: 12px;
+  color: var(--text-3);
+  transition: transform 0.12s ease;
+}
+.wl-chev.open {
+  transform: rotate(90deg);
+}
+.wl-doc {
+  flex: 0 0 auto;
+  @apply inline-flex items-center;
+  color: var(--text-3);
+}
+.wl-doc.st-mod {
+  color: var(--warning, #d29922);
+}
+.wl-doc.st-add {
+  color: var(--success, #3fb950);
+}
+.wl-doc.st-del {
+  color: var(--danger, #f85149);
+}
+.wl-doc.st-move {
+  color: var(--primary, #2563eb);
+}
+.wl-name {
+  flex: 0 0 auto;
+  color: var(--text);
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wl-dir {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-left: 4px;
+}
+.wl-st {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  font:
+    700 11px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.3px;
+}
+.wl-st.st-mod {
+  color: var(--warning, #d29922);
+}
+.wl-st.st-add {
+  color: var(--success, #3fb950);
+}
+.wl-st.st-del {
+  color: var(--danger, #f85149);
+}
+.wl-st.st-move {
+  color: var(--primary, #2563eb);
+}
+
+/* ── 展开区 diff ── */
+.wl-diff {
+  padding: 4px 10px 10px;
+  border-top: 1px dashed var(--border);
+  background: var(--surface-2, #0d1117);
+  max-height: 420px;
+  overflow: auto;
+}
+.wl-diff :deep(.md-pre) {
+  margin: 6px 0;
+  padding: 8px 10px;
+  background: transparent;
+  border: 0;
+  font:
+    11.5px/1.55 ui-monospace,
+    'SF Mono',
+    Menlo,
+    monospace;
+  tab-size: 4;
+  white-space: pre;
+  overflow-x: auto;
+}
+.wl-diff :deep(.diff-add) {
+  display: inline-block;
+  width: 100%;
+  background: rgb(46 160 67 / 15%);
+  color: #3fb950;
+}
+.wl-diff :deep(.diff-del) {
+  display: inline-block;
+  width: 100%;
+  background: rgb(248 81 73 / 15%);
+  color: #f85149;
+}
+.wl-diff :deep(.diff-hunk) {
+  display: inline-block;
+  width: 100%;
+  background: rgb(88 166 255 / 12%);
+  color: #58a6ff;
+}
+.wl-diff :deep(.diff-file) {
+  display: inline-block;
+  width: 100%;
+  color: var(--text);
+  font-weight: 700;
+}

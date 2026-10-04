@@ -1,19 +1,6 @@
 <script setup lang="ts">
-import { lineClass } from './output-utils'
 // append* 系列已抽到 prompt-builder.ts
-import {
-  appendBaselineChanges,
-  appendChangeList,
-  appendClaimMismatch,
-  appendDryRunFailure,
-  appendFailedSourceFiles,
-  appendFeedbackSummary,
-  appendLintReport,
-  appendRawOutputs,
-  appendSmokeReport,
-  appendTestReport,
-  appendTscReport,
-} from './prompt-builder'
+
 // 命令历史簇
 import { createCmdHistory } from './cmd-history'
 // 附件簇已抽到 attach-manager.ts
@@ -28,26 +15,12 @@ import { createSideResize } from './side-resize'
 // exec 全流程已抽到 exec-flow.ts
 import { createExecFlow } from './exec-flow'
 // 组件内定时器统一走 vueuse：随组件卸载自动清理，省去手动 clear
-import { useIntervalFn, useTimeoutFn } from '@vueuse/core'
 // [script-panel-utils-v2-extracted]
-import { useTwDisplay } from '../../composables/ui/useTwDisplay'
 import TerminalPane from './TerminalPane.vue'
 import ScriptEditor from './ScriptEditor.vue'
 import ScriptToolbar from './ScriptToolbar.vue'
 import ScriptAttachBar from './ScriptAttachBar.vue'
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRunner } from '../../composables/runner/useRunner'
-import { useAutoLoop } from '../../composables/ai/useAutoLoop'
-import { useAiWaiting } from '../../composables/ai/useAiWaiting'
-import { copyAndFill } from '../../composables/ai/useAiWindow'
-import { useAutoTakeover } from '../../composables/ai/useAutoTakeover'
-import { emit as emitBus, useEventBus } from '../../composables/ui/useEventStream'
-import { useCodeCleaner } from '../../composables/runner/useCodeCleaner'
-import { LS_SIDE_WIDTH_KEY } from '../../utils/storage'
-import { isReadonlyResult } from '../../composables/runner/useRunFeedback'
-import { parseErrorLocations } from '../../utils/contextBuilder'
-import { useToast } from '../../composables/ui/useToast'
-import { setLastAutoFilled } from '../../composables/runner/useScriptInbox'
+import { useScriptPanelActions } from './script-panel-actions'
 import SidePane from '../panels/SidePane.vue'
 // 左侧常驻多窗口面板
 import AiWindowList from '../panels/AiWindowList.vue'
@@ -64,9 +37,6 @@ const SIDE_WIDTH_DEFAULT = 320
 /** 差异 */
 const SIDE_WIDTH_DIFF = 560
 let runStartAt = 0
-/** 滚动锁时间戳（防高频 scrollTo） */
-let _scrollLock = 0
-
 /** 编辑器 */
 const editorRef = ref<{ insertText: (t: string) => void } | null>(null)
 // ── 主状态 ref ──
@@ -108,8 +78,6 @@ const previewFile = ref<string | null>(null)
 const previewBefore = ref<string | null>(null)
 /** 差异预览：变更后内容 */
 const previewAfter = ref<string>('')
-/** 终端聊天列表 DOM 引用 */
-const chatListRef = ref<HTMLElement | null>(null)
 /** 树展开的 stream id 集合 */
 const treeExpanded = ref<Set<number>>(new Set())
 // ── 附件 / 命令历史 / 滚动 ref ──
@@ -117,8 +85,6 @@ const treeExpanded = ref<Set<number>>(new Set())
 /* [attachments] 附件：粘贴图片 / 拖文件 → tag 展示；发送时文本内容拼入脚本 */
 /** 附件列表 */
 const attachedFiles = ref<AttachedFile[]>([])
-/** 终端自动滚动开关 */
-const autoScroll = ref(true)
 // ── 状态栏 ref ──
 
 /** 状态文本（短暂提示，如「已发送」） */
@@ -140,19 +106,17 @@ const { enabled: autoTakeoverEnabled, enable: enableAutoTakeover, disable: disab
 const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
 const { events: busEvents } = useEventBus()
 const { stripComments, stripBlankLines } = useCodeCleaner()
-// 初始化打字机
-const { twStdout, twStderr, twLines, twErrLines } = useTwDisplay(liveStdout, liveStderr)
+// [tw-removed-v1] 已删 useTwDisplay（打字机缓冲链）：twLines/twErrLines 解构后零消费，
+//   twStdout/twStderr 也只被 TerminalPane 当作「有无输出」布尔用，逐字动画无真实消费者。
+//   空态判定改为直接透传 useRunner 的 liveStdout / liveStderr。
 const {
   loopState,
   isLoopActive,
-  // 回车/发送后进入暂停态：暴露 loopPaused 与 requestPause
-  requestPause,
-  // 发送给 AI 后软暂停（不发 stop、不静音，避免取消刚发出的 fill）
+  // [pause-resume-v1] 软暂停：不打断已发出的 fill，仅拦后续脚本与结果
   softPause,
-  // 真暂停/恢复
   loopPaused,
-  // 暂停点击 = 完全结束循环，回到待发状态（不再软恢复等待）
-  exitPauseToIdle,
+  // [pause-resume-v1] 从暂停态恢复到 waiting（替代旧 exitPauseToIdle）
+  resumeFromPause,
   // 无活跃循环时复位 softPause 残留
   clearSoftPause,
 } = useAutoLoop()
@@ -194,6 +158,32 @@ const { onSideDown, dispose: disposeSideResize } = createSideResize({
   persistWidth: (w) => { try { localStorage.setItem(SIDE_WIDTH_KEY, String(w)) } catch { /* ignore */ } },
 })
 // exec 全流程（refs 由本组件持有）
+// [use-script-panel-actions-wired-v1] 运行逻辑簇已抽到 useScriptPanelActions；先装配后注入 createExecFlow
+// [use-script-panel-actions-wired-v2] toggleAutoTakeover / pauseAll 亦下沉到 composable
+const {
+  buildAiPrompt,
+  onAutoRun,
+  runSmart,
+  onGlobalKey,
+  toggleAutoTakeover,
+  pauseAll,
+} = useScriptPanelActions({
+  script,
+  attachedFiles,
+  result,
+  changes,
+  running,
+  runningCommand,
+  lastRunScript,
+  stripComments,
+  stripBlankLines,
+  autoTakeoverEnabled,
+  scheduleAutoRun,
+  run,
+  startAiWaiting,
+  buildPromptWithAttachments,
+})
+
 const { copyOutput } = createExecFlow({
   running,
   result,
@@ -262,10 +252,6 @@ watch(previewFile, (v) => {
     ? Math.max(sideWidthBase.value, SIDE_WIDTH_DIFF)
     : sideWidthBase.value
 })
-// 内容变化即滚底（打字机感）
-watch(busEvents, _lockedScroll)
-watch(liveStdout, _lockedScroll)
-watch(liveStderr, _lockedScroll)
 watch(running, (v) => {
   if (v) {
     runStartAt = performance.now()
@@ -330,7 +316,6 @@ onMounted(() => {
     }
   } catch { /* ignore */ }
 
-  scrollTermToBottom()
   window.addEventListener('ai-runner:auto-run', onAutoRun)
   window.addEventListener('keydown', onGlobalKey)
   window.addEventListener('ai-runner:drop', onTreeDrop)
@@ -344,194 +329,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('ai-runner:drop', onTreeDrop)
 })
 
-// 窗口尺寸变化后也保持贴底
-if (typeof window !== 'undefined') {
-  window.addEventListener('resize', _lockedScroll)
-  onBeforeUnmount(() => window.removeEventListener('resize', _lockedScroll))
-}
-
-/**
- * 切换 Auto Takeover
- */
-function toggleAutoTakeover() {
-  if (autoTakeoverEnabled.value) {
-    disableAutoTakeover()
-    cancelAutoRun()
-    toast('已关闭自动接管', 'info', 3000)
-  } else {
-    if (!script.value.trim()) {
-      toast('请先在输入提问再开启接管', 'warn', 3000)
-      return
-    }
-    enableAutoTakeover()
-    toast('已开启自动接管：立即执行当前脚本 → 结果发 AI → AI 回填后  自动执行', 'success', 6000)
-    void runSmart()
-  }
-}
-/** 当前 inbox 待取用条数（仅展示用，避免在模板里直接 inbox.value.length 触发响应式开销） */
-/** 取最新一条入队脚本，覆盖当前编辑器内容 */
-
-/** 最后一个运行脚本 */
-
-// 真暂停：已暂停则恢复；否则置 paused（不终止循环）
-/**
- * 执行 pause All
- */
-function pauseAll() {
-  if (autoTakeoverEnabled.value) {
-    disableAutoTakeover()
-    toast('已关闭自动接管', 'info', 3000)
-    return
-  }
-  if (loopPaused.value) {
-    // 有活跃循环 + 暂停态：点击即完全退出循环，复位到待发状态
-    if (isLoopActive.value || running.value) {
-      void exitPauseToIdle()
-      return
-    }
-    // 无活跃循环但 loopPaused 被 softPause 残留置真：
-    // 视为用户点「发送」——复位 paused，走重新发送路径（等价 toggleAutoTakeover 的 else 分支）
-    clearSoftPause()
-    if (autoTakeoverEnabled.value) disableAutoTakeover()
-    if (!script.value.trim()) {
-      toast('请先在编辑器写脚本再发送', 'warn', 3000)
-      return
-    }
-    enableAutoTakeover()
-    toast('已开启自动接管：立即执行当前脚本 → 结果发 AI → AI 回填后 3-10s 自动执行', 'success', 6000)
-    void runSmart()
-    return
-  }
-  if (isLoopActive.value || running.value || autoTakeoverEnabled.value) {
-    requestPause()
-    return
-  }
-  // 无活动循环：退化到立即停（旧行为）
-  disableAutoTakeover()
-  stop()
-}
-async function buildAiPrompt(): Promise<string> {
-  if (!result.value) return ''
-  const errorLocs = parseErrorLocations(`${result.value.stderr || ''}\n${result.value.stdout || ''}`)
-  const p: string[] = []
-  p.push('# 脚本执行结果')
-  p.push(`状态: ${result.value.ok ? '✅ 成功' : '❌ 失败'}`)
-  p.push(`退出码: ${result.value.code}`)
-  p.push(`变更数: ${changes.value.length}`)
-  p.push('')
-
-  const r = result.value
-  await appendFailedSourceFiles(p, r, changes.value, { stripComments: stripComments.value, stripBlankLines: stripBlankLines.value, errorLocs })
-  appendFeedbackSummary(p, r)
-  appendChangeList(p, changes.value)
-  appendDryRunFailure(p, r)
-  appendSmokeReport(p, r)
-  appendTscReport(p, r)
-  appendLintReport(p, r)
-  appendTestReport(p, r)
-  await appendBaselineChanges(p, r, errorLocs)
-  appendClaimMismatch(p, r)
-  appendRawOutputs(p, r)
-
-  const text = p.join('\n')
-  return text
-}
-// append* 系列已抽到 prompt-builder.ts
-
-/**
- * 应用模板：把 code 写入编辑器 script
- * [WHY] 模板按钮与"AI 回填"共用此入口；写值直接触发 watch 触发自动填充判定
- * [CONSTRAINT] 不校验 code 是否合法，调用方负责保证
- * @param code 待写入编辑器的主体代码
- */
-function applyTemplate(code: string) {
-  script.value = code
-}
-/**
- * 自动接管：AI 回填脚本后，延迟 3-10s 交服务端执行（非再发回 AI）
- * [CONSTRAINT] 依赖 autoTakeoverEnabled；running 中跳过并 toast；空脚本跳过
- * [CHANGE-IMPACT] 会清空 script，跑后由 scheduleAutoRun 回填 lastRunScript
- */
-function onAutoRun() {
-  if (!autoTakeoverEnabled.value) return
-  if (running.value) { toast('脚本运行中，跳过本次自动执行', 'warn', 2000); return }
-  scheduleAutoRun(() => {
-    if (!autoTakeoverEnabled.value || running.value) return
-    const text = script.value.trim()
-    if (!text) {
-      toast('AI 回填为空，跳过自动执行', 'warn', 2000)
-      return
-    }
-    // 与手动路径一致：跑后清空编辑器
-    runningCommand.value = ''
-    lastRunScript.value = text
-    script.value = ''
-    run({ script: text })
-  })
-}
-/**
- * 全局键盘快捷键：Alt+R 触发智能发送
- * [WHY] 挂在 window 级监听上，Alt+R 让用户不离开编辑器即可发送
- * [CONSTRAINT] 只在无 ctrl / meta / shift 时响应，避免与浏览器快捷键冲突
- */
-function onGlobalKey(e: KeyboardEvent) {
-  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
-    e.preventDefault()
-    runSmart()
-  }
-}
-/**
- * 发送编辑器内容到 AI 网页
- */
-async function runSmart() {
-  const rawScript = script.value.trim()
-  if (!rawScript) {
-    toast('请先在编辑器写内容再发送', 'warn', 3000)
-    return
-  }
-  const text = attachedFiles.value.length
-    ? await buildPromptWithAttachments(rawScript, attachedFiles.value)
-    : rawScript
-  // 图片走独立 images 通道；prompt 只带位置提示，接收端负责转粘贴
-  // [CONSTRAINT] filter 只取 kind==='image'；content 为 readAsDataUrl 返回值
-  // [CHANGE-IMPACT] images 数组为空时传 undefined，保持旧行为（无图片路径零变化）
-  const images = attachedFiles.value.filter(f => f.kind === 'image').map(f => f.content)
-  const r = await copyAndFill(text, images.length ? { images } : undefined)
-  if (r === 'failed') {
-    toast('发送失败：AI 窗口未打开或已关闭', 'warn', 4000)
-    return
-  }
-  // 提问上屏：发送成功后写 ai:ask 事件，由 TerminalPane.timelineItems 渲染
-  // [CONSTRAINT] 必须在 copyAndFill 成功后（失败已 return）；payload.text 用 rawScript 原文而非拼接后 text
-  // [CHANGE-IMPACT] 与 TerminalPane 的 ai:ask 渲染分支成对；kind 已在 EventKind 白名单
-  emitBus('ai:ask', rawScript.slice(0, 40), { payload: { text: rawScript } })
-  startAiWaiting()
-  // 发送成功后清空编辑器；草稿槽位功能已移除
-  // [WHY] 用户明确不需要草稿；清空即为最终状态，不再被 onMounted 回填
-  // [CONSTRAINT] 仅在 copyAndFill 成功后执行（失败分支已提前 return，不误清用户内容）
-  // [CHANGE-IMPACT] 移除了对 draft-slots 的依赖；AI 回填仍走 inbox.applyToEditor 的 current==='' 安全覆盖分支
-  script.value = ''
-}
-/**
- * 执行 scroll Term To Bottom
- */
-function scrollTermToBottom() {
-  nextTick(() => {
-    const el = chatListRef.value
-    if (!el || !autoScroll.value) return
-    // 双帧兜底：内容渲染后高度可能还在变，连滚两帧
-    el.scrollTop = el.scrollHeight
-    requestAnimationFrame(() => {
-      if (el && autoScroll.value) el.scrollTop = el.scrollHeight
-    })
-  })
-}/**
- * 执行 locked Scroll
- */
-function _lockedScroll() {
-  _scrollLock = Date.now()
-  scrollTermToBottom()
-}
 /**
  * 拖拽悬停：阻止默认行为以允许 drop 事件
  * [CONSTRAINT] 必须 preventDefault，否则浏览器默认在新标签页打开拖入的文件
@@ -572,14 +369,10 @@ function onHtmlDrop(e: DragEvent) {
       <!-- 终端 (上方) -->
       <TerminalPane
         :running="running"
-        :tw-stdout="twStdout"
-        :tw-stderr="twStderr"
-        :tw-lines="twLines"
-        :tw-err-lines="twErrLines"
+        :live-stdout="liveStdout"
+        :live-stderr="liveStderr"
         :done-summary="doneSummary"
-        :line-class="lineClass"
         :ai-waiting="aiWaiting"
-        @apply-template="applyTemplate"
       />
       <!-- 编辑器 (下方) -->
       <ScriptEditor
@@ -602,7 +395,6 @@ function onHtmlDrop(e: DragEvent) {
             :script="script"
             :attached-files-count="attachedFiles.length"
             :ai-waiting="aiWaiting"
-            @apply-template="applyTemplate"
             @clear-all="clearAll"
             @pause-all="pauseAll"
             @toggle-auto-takeover="toggleAutoTakeover"
@@ -659,136 +451,4 @@ function onHtmlDrop(e: DragEvent) {
   </div>
 </template>
 
-<style scoped lang="scss">
-.pane.is-resizing-side,
-.pane.is-resizing-side * {
-  user-select: none;
-  cursor: col-resize;
-}
-
-.pane.is-resizing-side .pane-side {
-  transition: none;
-}
-
-@keyframes pop-in {
-  from {
-    transform: scale(0.9);
-    opacity: 0;
-  }
-  to {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-@media (max-width: 1100px) {
-  .pane {
-    display: flex;
-    flex-direction: row;
-    gap: 0;
-    height: 100%;
-    overflow: hidden;
-    padding: 0;
-  }
-}
-
-@media (max-width: 720px) {
-  .bar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: 34px;
-    padding: 0 8px;
-    flex-shrink: 0;
-  }
-}
-
-@keyframes overlay-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.side-resize-handle {
-  flex-shrink: 0;
-  width: 8px;
-  cursor: col-resize;
-  background: transparent;
-  position: relative;
-  z-index: 5;
-  transition: background 0.15s;
-}
-
-.side-resize-handle::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 2px;
-  height: 24px;
-  border-radius: var(--radius-2);
-  background: var(--border);
-  transition:
-    background 0.15s,
-    height 0.15s;
-}
-
-.side-resize-handle:hover::after,
-.side-resize-handle.active::after {
-  background: var(--primary);
-  height: 40px;
-}
-
-.pane-main {
-  background: var(--bg);
-  color: var(--text);
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 0;
-  min-width: 0;
-  overflow: hidden;
-}
-
-/* waiting-pulse / cursor-blink / dot-pulse 已迁至全局 style.css () */
-
-.overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 50;
-  pointer-events: none;
-  background: rgb(13 17 23 / 70%);
-}
-
-.overlay-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 24px 32px;
-  border-radius: var(--radius-12);
-  background: var(--surface-2);
-  border: 2px dashed var(--primary);
-  color: var(--text);
-}
-
-.overlay.success .overlay-card {
-  border-style: solid;
-  border-color: var(--success);
-}
-
-.overlay-icon {
-  font-size: 32px;
-}
-.overlay-text {
-  font-size: 13px;
-  color: var(--text-2);
-}
-</style>
+<style scoped lang="scss" src="./script-panel.scss"></style>

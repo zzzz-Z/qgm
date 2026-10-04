@@ -111,6 +111,19 @@ const child = spawn(process.execPath, [DIST_ENTRY], {
   env: process.env,
 })
 
+// [signal-forward-v1] 把收到的终止信号转发给 server 子进程
+// [WHY] 不转发则 kill launcher 后子进程变孤儿，继续占着端口，
+//       下次启动被迫换端口（实测 5175 被占后落到 5176）
+// [CONSTRAINT] 宽限 3s 后升级 SIGKILL，防止子进程卡死无法退出
+function forwardSignal(signal) {
+  if (child.exitCode !== null || child.signalCode !== null) process.exit(0)
+  child.kill(signal)
+  const t = setTimeout(() => child.kill('SIGKILL'), 3000)
+  t.unref()
+}
+process.on('SIGTERM', () => forwardSignal('SIGTERM'))
+process.on('SIGINT', () => forwardSignal('SIGINT'))
+
 child.on('exit', (code, signal) => {
   process.exit(signal ? 128 : (code ?? 0))
 })

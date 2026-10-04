@@ -1,6 +1,4 @@
 <script setup lang="ts">
-interface Template { id: string, label: string, title: string, code: string }
-
 // 去 props 变量绑定：模板直接用解构名，赋值给 props 会触发 unused-imports warning
 defineProps<{
   running: boolean
@@ -15,7 +13,6 @@ defineProps<{
 }>()
 /** 派发 */
 const emit = defineEmits<{
-  applyTemplate: [code: string]
   clearAll: []
   pauseAll: []
   toggleAutoTakeover: []
@@ -42,8 +39,8 @@ const emit = defineEmits<{
 
     <button
       v-if="running || isLoopActive || autoTakeoverEnabled"
-      v-tooltip="loopPaused ? '发送：结束本次循环，回到待发状态' : '暂停：不取 AI 脚本、不接收工作台结果'"
-      :aria-label="loopPaused ? '发送脚本' : '暂停循环'"
+      v-tooltip="loopPaused ? '恢复：继续等待 AI 回包' : '暂停：不取 AI 脚本、不接收工作台结果'"
+      :aria-label="loopPaused ? '恢复循环' : '暂停循环'"
       class="primary-btn stop head-run"
       :class="{ 'is-waiting': aiWaiting }"
       :aria-busy="aiWaiting"
@@ -194,27 +191,6 @@ const emit = defineEmits<{
   to {
     transform: rotate(360deg);
   }
-}
-.tpl-bar .tpl-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 26px;
-  padding: 0 12px;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 12px;
-  font-family: var(--mono, monospace);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  flex-shrink: 0;
-}
-.tpl-bar .tpl-chip:hover {
-  color: var(--text);
-  background: var(--surface-2);
 }
 .primary-btn {
   display: inline-flex;

@@ -1,9 +1,11 @@
 // [prompt-builder-v1] 从 ScriptPanel.vue 抽出：AI prompt 拼装的 append* 系列
 // 纯函数 + 结构类型；调用方传入数据，模块本身不做状态访问
 
+// [explicit-imports-v1] buildErrorContext / shouldIncludeChanges 原先靠 auto-import 提供：
+//   app 能跑，但 tsconfig.test.json 没有该插件 —— 本模块一旦被测试 import 就报
+//   `Cannot find name`（AGENTS.md 已把这条列为项目独有约束）。改为显式 import 消除隐患。
 import { buildErrorContext } from '../../utils/contextBuilder'
 import { shouldIncludeChanges } from '../../composables/runner/useRunFeedback'
-import { trimOutput } from './output-utils'
 
 /** 变更条目（type: added / modified / deleted） */
 export interface PromptChange { path: string, type: string }
@@ -21,19 +23,18 @@ export interface PromptResult {
   dryRunReason?: string
   wantChanges?: Array<{ type: string, path: string }>
   errorFiles?: string[]
+  /** [L4b] 服务端用 TS AST 还原的失败定位（文件 + 行号 + 所属符号） */
+  fingerprints?: Array<{ file: string, line: number, symbol: string, kind: string }>
   scriptCtx?: string
   smoke?: { ran: boolean, ok: boolean, error?: string, pages: Array<{ ok: boolean, url: string, errors: string[] }> } | null
   tsc?: { ok: boolean, stdout?: string, stderr?: string } | null
   lint?: { ran: boolean, ok: boolean, stdout?: string, stderr?: string } | null
-  test?: { ran: boolean, ok: boolean, stdout?: string, stderr?: string } | null
+  test?: { ran: boolean, ok: boolean, stdout?: string, stderr?: string, reason?: 'no-test-targets' } | null
   claimMismatch?: { claimed: string[], actual: string[], missing: string[], extra: string[] } | null
 }
 
 /** 错误位置（来自 parseErrorLocations 的返回） */
 type ErrorLocs = ReturnType<typeof import('../../utils/contextBuilder').parseErrorLocations>
-
-/** 预算裁剪：超预算时对「相关文件源码」块做二次裁剪；toast 由调用方传入 */
-type ToastFn = typeof import('../../composables/ui/useToast').toast
 
 /** 失败时把相关文件源码块追加到 prompt 数组（去重后取前 5 个路径） */
 export async function appendFailedSourceFiles(
@@ -68,14 +69,35 @@ export async function appendFailedSourceFiles(
   }
 }
 
+/**
+ * 追加 AST 级失败定位（fingerprints 非空时）
+ * [WHY] errorFiles 只给路径 —— 行号在服务端 extractErrorFiles 的正则里被显式丢弃；
+ *   fingerprints 由 fingerprintErrors 走 TS AST 还原出「文件:行 → 所属符号」，
+ *   让 AI 无需自行解析 stderr 即可直达出错函数，省掉一轮「先定位再改」的往返。
+ * [CONSTRAINT] 仅失败轮有值；空数组不产出块（避免成功轮被无意义章节占预算）
+ */
+export function appendFingerprints(p: string[], r: PromptResult | null): void {
+  const fps = r?.fingerprints
+  if (!fps || fps.length === 0) return
+  p.push('# 失败定位（AST 指纹）')
+  p.push('| 文件 | 行 | 所属符号 | 类别 |')
+  p.push('| :--- | ---: | :--- | :--- |')
+  for (const f of fps) p.push(`| ${f.file} | ${f.line} | \`${f.symbol}\` | ${f.kind} |`)
+  p.push('')
+}
+
 /** 追加三层反馈摘要（行为层 → 类型层 → 代码层，含通过项） */
 export function appendFeedbackSummary(p: string[], r: PromptResult | null): void {
   if (!r) return
   const issues: string[] = []
   const okLine: string[] = []
+  // [test-skip-reason-v1] 「没跑」与「跑了且通过」必须可区分：前者沉默会让人以为行为层已验过
+  const notes: string[] = []
   if (r.test?.ran) {
     if (!r.test.ok) issues.push('行为层: 单测失败（见下 # 单元测试）')
     else okLine.push('test ✓')
+  } else if (r.test?.reason === 'no-test-targets') {
+    notes.push('本轮未运行单测（无测试目标）')
   }
   if (r.smoke?.ran && !r.smoke.ok) issues.push('行为层: 冒烟失败（见下 # 页面冒烟）')
   if (r.dryRunFailed) issues.push('行为层: 脚本运行中断，磁盘零改动')
@@ -98,6 +120,7 @@ export function appendFeedbackSummary(p: string[], r: PromptResult | null): void
     for (const i of issues) p.push(`- ${i}`)
     if (okLine.length) p.push(`已通过：${okLine.join(' / ')}`)
   }
+  if (notes.length) p.push(`说明：${notes.join('；')}`)
   p.push('')
 }
 
@@ -214,9 +237,10 @@ export function appendClaimMismatch(p: string[], r: PromptResult | null): void {
   }
 }
 
+// [trim-output-inlined-v1] 原 trimOutput 已是恒等函数，内联后删除 output-utils.ts
 /** 追加 stderr / stdout 原始输出块 */
 export function appendRawOutputs(p: string[], r: PromptResult | null): void {
   if (!r) return
-  if (r.stderr) p.push('# 错误输出 (stderr)', '```', trimOutput(r.stderr, r.ok, 3000, 12000, r.scriptCtx), '```', '')
-  if (r.stdout) p.push('# Stdout', '```', trimOutput(r.stdout, r.ok, 3000, 12000, r.scriptCtx), '```', '')
+  if (r.stderr) p.push('# 错误输出 (stderr)', '```', r.stderr, '```', '')
+  if (r.stdout) p.push('# Stdout', '```', r.stdout, '```', '')
 }

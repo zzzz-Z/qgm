@@ -1,9 +1,8 @@
+import { useStorage } from '@vueuse/core'
 // [transport-import-fix-v1] sendX 已从 useAiSite 迁至 useAiWindowSend；
 // [CONSTRAINT] useAiWindowSend 反向 import 本模块（ESM 循环安全：callDs 运行时访问 ds[name]，不在顶层解构）；
 // [CHANGE-IMPACT] 修复前 callDs('sendStop') 静默返回 false，暂停信号无法送达油猴；
 import * as ds from './useAiWindowSend'
-import { loopPaused } from './useAiWaiting.js'
-import { useStorage } from '@vueuse/core'
 
 type AiTransportKind = 'tampermonkey' | 'headless'
 
@@ -20,7 +19,8 @@ export interface AiTransport {
   sendNewSession: (sid: string, payload: { summary: string }) => boolean
   /** [headless-login-gui-v1] 引导式登录：请服务端起有头窗口让用户手动登录 */
   sendLoginGui?: (sid: string, url?: string) => boolean
-  onReply: (cb: (r: unknown, sid: string) => void) => () => void
+  // [replay-flag-v1] 第三参 replayed=true 表示断线重连的历史回放帧，消费方仅可做 UI 恢复、禁止重入 auto-loop
+  onReply: (cb: (r: unknown, sid: string, replayed?: boolean) => void) => () => void
   onSummary: (cb: (text: string, sid: string, degraded: boolean) => void) => () => void
   /** [headless-state-err-v1] 订阅服务端 headless:state，UI 侧据此显示 error（如未登录） */
   onState?: (cb: (state: string, detail: string, sid: string) => void) => () => void
@@ -55,6 +55,7 @@ let singleton: AiTransport | null = null
  * [CHANGE-IMPACT] 被 sendFill/sendStop/sendRotate/sendNewSession 依赖，签名变化会破坏油猴通道
  */
 function callDs(name: string, ...args: unknown[]): boolean {
+  // [ds-bag-v1] ds 为油猴注入的全局对象，类型来自运行时；此处一次性收窄为可索引对象，供按名调用
   const bag = ds as unknown as Record<string, unknown>
   const fn = bag[name]
   if (typeof fn !== 'function') return false
@@ -71,7 +72,7 @@ function callDs(name: string, ...args: unknown[]): boolean {
  * [CHANGE-IMPACT] 使用方需在卸载时调用 dispose()，否则 window message 监听泄漏
  */
 export function createTampermonkeyTransport(): AiTransport {
-  const replyCbs = new Set<(r: unknown, sid: string) => void>()
+  const replyCbs = new Set<(r: unknown, sid: string, replayed?: boolean) => void>()
   const summaryCbs = new Set<(t: string, sid: string, d: boolean) => void>()
   const newSidCbs = new Set<(url: string, id: string) => void>()
 
@@ -95,8 +96,9 @@ export function createTampermonkeyTransport(): AiTransport {
   return {
     kind: 'tampermonkey',
     sendFill(sid, payload) {
-      if (loopPaused.value) return false
-      void sid
+      // [manual-fill-bypass-paused-v1] 不在传输层拦截 paused：自动续推（PLAN/@ask/multi/startLoop）
+      // 各调用点已自行检查 loopPaused；此处再拦会误杀「用户在输入框主动发送」——
+      // 而 loopPaused 持久化在 sessionStorage，异常循环残留 true 后刷新不清，手动消息全部静默丢失
       return callDs('sendFill', payload)
     },
     sendStop(sid) { void sid; return callDs('sendStop') },
@@ -127,14 +129,35 @@ export function createTampermonkeyTransport(): AiTransport {
  * @param wsUrl 显式指定 WS 地址；省略时按 location 推导（https→wss）
  */
 export function createHeadlessTransport(wsUrl?: string): AiTransport {
-  const replyCbs = new Set<(r: unknown, sid: string) => void>()
+  const replyCbs = new Set<(r: unknown, sid: string, replayed?: boolean) => void>()
   const summaryCbs = new Set<(t: string, sid: string, d: boolean) => void>()
   const newSidCbs = new Set<(url: string, id: string) => void>()
   // [headless-state-err-v1] 服务端 state 订阅（error 用于 UI 反馈）
   const stateCbs = new Set<(state: string, detail: string, sid: string) => void>()
   let ws: WebSocket | null = null
+  let muted = false
   const queue: string[] = []
   const ackWaiters: Array<{ sid: string, resolve: (ok: boolean) => void, timer: ReturnType<typeof setTimeout> }> = []
+
+  // [ws-reconnect-v1] dev 后端重启 / 网络抖动后旧 socket 半开：浏览器仍报 OPEN，send() 不抛错但帧永不到达，
+  // 表层即「发消息没反应」。close/error 后指数退避自动重连，排队帧在 open 后 flush，业务无感知
+  const RECONNECT_BASE_MS = 500
+  const RECONNECT_MAX_MS = 10000
+  let disposed = false
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let reconnectDelay = RECONNECT_BASE_MS
+  function clearReconnect(): void {
+    if (reconnectTimer !== null) { clearTimeout(reconnectTimer); reconnectTimer = null }
+  }
+  function scheduleReconnect(): void {
+    if (disposed || reconnectTimer !== null) return
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      if (disposed) return
+      try { ensure() } catch { scheduleReconnect() }
+    }, reconnectDelay)
+    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS)
+  }
 
   function resolveUrl(): string {
     if (wsUrl) return wsUrl
@@ -145,24 +168,38 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   /** 确保 */
   function ensure(): WebSocket {
     if (ws && ws.readyState <= 1) return ws
-    ws = new WebSocket(resolveUrl())
+    const sock = new WebSocket(resolveUrl())
+    ws = sock
     // [no-vueuse] WS 事件监听保留原生：生命周期随 transport 而非组件，且需在 dispose 时整体 close
-    ws.addEventListener('open', () => {
+    sock.addEventListener('open', () => {
       // [no-non-null-v1] 捕获局部变量：回调执行前可能被 dispose 置 null；显式判空避免静默抛错
-      const sock = ws
-      if (!sock) return
+      if (ws !== sock) return
+      reconnectDelay = RECONNECT_BASE_MS
       const pending = queue.splice(0)
       for (const m of pending) { try { sock.send(m) } catch { /* swallow: 单个消息 send 失败不阻断其余 queue */ } }
       // 连上后请求服务端重放最近业务消息（reply/summary/new-session-created）
       try { sock.send(JSON.stringify({ t: 'headless:request-replay', sid: 'default' })) } catch { /* swallow: 重放请求失败无副作用，等待新事件即可 */ }
     })
-    ws.addEventListener('message', (ev) => {
+    // [ws-reconnect-v1] error 后浏览器通常还会补发 close；两处共用 scheduleReconnect 的去重守卫
+    sock.addEventListener('error', () => {
+      // 半死连接：readyState 可能仍 CONNECTING，error 后直接摘除引用，避免 ensure() 复用死 socket
+      if (ws === sock) ws = null
+      scheduleReconnect()
+    })
+    sock.addEventListener('close', () => {
+      if (ws === sock) ws = null
+      scheduleReconnect()
+    })
+    sock.addEventListener('message', (ev) => {
       let msg: Record<string, unknown> | null
       try { msg = JSON.parse(String(ev.data)) } catch { return }
       if (!msg || typeof msg.t !== 'string') return
+      if (muted) return
       const sid = String(msg.sid || '')
-      if (msg.t === 'headless:reply') { for (const cb of replyCbs) cb(msg.reply, sid) }
-      else if (msg.t === 'headless:script') { for (const cb of replyCbs) cb({ kind: 'script', item: msg.item }, sid) }
+      // [replay-flag-v1] 重连重放帧带 replay:true；同标记透传给回调，App.vue 据此拒绝重入 auto-loop
+      const replayed = Boolean(msg.replay)
+      if (msg.t === 'headless:reply') { for (const cb of replyCbs) cb(msg.reply, sid, replayed) }
+      else if (msg.t === 'headless:script') { for (const cb of replyCbs) cb({ kind: 'script', item: msg.item }, sid, replayed) }
       else if (msg.t === 'headless:summary') { for (const cb of summaryCbs) cb(String(msg.text || ''), sid, Boolean(msg.degraded)) }
       else if (msg.t === 'headless:new-session-created') { for (const cb of newSidCbs) cb(String(msg.url || ''), String(msg.id || '')) }
       else if (msg.t === 'headless:state') {
@@ -182,7 +219,8 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
         for (const cb of stateCbs) { try { cb(_st, _dt, sid) } catch { /* swallow: 单订阅者异常不阻断其他 */ } }
       }
     })
-    return ws
+    // 返回局部 sock：ws 变量可能被异步 close 回调置空，同步返回新建实例语义更精确
+    return sock
   }
   /** 发送 */
   function send(type: string, payload: Record<string, unknown>): boolean {
@@ -197,19 +235,25 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   return {
     kind: 'headless',
     sendOpen(sid, p) { return send('headless:open', { sid, url: p.url }) },
+    // [manual-fill-bypass-paused-v1] 同 tampermonkey 通道：传输层不拦 paused（理由见上方同名注释）
     // [image-channel-v3] 原实现显式只挑 prompt/context，images 被丢；改为条件展开
     // [CONSTRAINT] images 缺省时不写入字段，保持旧载荷形状兼容旧服务端
     // [CHANGE-IMPACT] 服务端 headless:fill handler 需识别并消费 images，否则静默忽略
-    sendFill(sid, p) { if (loopPaused.value) return false; return send('headless:fill', { sid, prompt: p.prompt, context: p.context, ...(p.images && p.images.length ? { images: p.images } : {}) }) },
+    sendFill(sid, p) { return send('headless:fill', { sid, prompt: p.prompt, context: p.context, ...(p.images && p.images.length ? { images: p.images } : {}) }) },
     // [P3-1c] waitAck：等 headless:state 回包（filling/generating/error 任一），超时返回 false
     waitAck(_t, sid, timeoutMs = 3000) {
+      // [sid-normalize-v1] 服务端 attach-ws 用 `msg.sid || 'default'` 归一化，回包 sid 恒为 'default'；
+      // 客户端若以原始 '' 注册 waiter，永远匹配不上 ACK → 3s 超时（隐藏 bug）
+      const normalizedSid = sid || 'default'
       return new Promise<boolean>((resolve) => {
+        let waiter: { sid: string, resolve: (ok: boolean) => void, timer: ReturnType<typeof setTimeout> }
         const timer = setTimeout(() => {
-          const i = ackWaiters.findIndex(w => w.sid === sid)
+          const i = ackWaiters.indexOf(waiter)
           if (i >= 0) ackWaiters.splice(i, 1)
           resolve(false)
         }, timeoutMs)
-        ackWaiters.push({ sid, resolve, timer })
+        waiter = { sid: normalizedSid, resolve, timer }
+        ackWaiters.push(waiter)
       })
     },
     sendStop(sid) { return send('headless:stop', { sid }) },
@@ -220,9 +264,12 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     onSummary(cb) { summaryCbs.add(cb); return () => { summaryCbs.delete(cb) } },
     onNewSessionCreated(cb) { newSidCbs.add(cb); return () => { newSidCbs.delete(cb) } },
     onState(cb) { stateCbs.add(cb); return () => { stateCbs.delete(cb) } },
-    dispose() { try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear() },
-    mute() { replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear() },
-    unMute() { /* headless 无副作用恢复 */ },
+    // [ws-reconnect-v1] disposed 阻断重连定时器；切换 transport 时旧连接彻底退役，不产生僵尸重连
+    // [dispose-leak-v1] queue / ackWaiters 亦须清理：前者滞留字符串引用，后者悬挂 timer + Promise
+    dispose() { disposed = true; muted = false; clearReconnect(); try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; queue.length = 0; for (const w of ackWaiters) { clearTimeout(w.timer); w.resolve(false) } ackWaiters.length = 0; replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear() },
+    // [mute-flag-v1] 用 flag 静音；原实现清空回调集合不可恢复，unMute 后所有订阅者永久失联
+    mute() { muted = true },
+    unMute() { muted = false },
   }
 }
 
@@ -271,4 +318,16 @@ export function getTransport(): AiTransport {
  */
 export function useAiTransport(): { transport: AiTransport } {
   return { transport: getTransport() }
+}
+
+// [hmr-dispose-v1] dev 热替换本模块前关掉旧单例：否则旧 WS 保持连接、旧回调闭包继续处理帧，
+// 与新模块实例并存 → 同一回复被多代状态机消费（重复续跑/重复弹窗），且旧连接永不释放
+// [CONSTRAINT] 本文件同时被根 tsconfig 类型检查（不含 vite/client 的 ImportMeta.hot 增强），
+// 故局部收窄出 dispose 面，避免跨 tsconfig 依赖类型声明
+const _hmr = (import.meta as unknown as { hot?: { dispose: (cb: () => void) => void } }).hot
+if (_hmr) {
+  _hmr.dispose(() => {
+    try { singleton?.dispose() } catch { /* swallow: HMR 清理竞态 */ }
+    singleton = null
+  })
 }

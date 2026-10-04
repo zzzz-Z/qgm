@@ -9,6 +9,11 @@ import { writeChannelLog } from '../state/snapshot.js'
 // [sensitive-audit-v1] 敏感文件判定（读前审计）
 
 /** 敏感文件路径模式（用于读权限拦截） */
+/** 单文件大小上限（字节）；超出拒绝回传内容 */
+const MAX_FILE_BYTES = 200_000
+/** 二进制嗅探探测字节数 */
+const BINARY_PROBE_BYTES = 512
+
 const SENSITIVE_PATTERNS: RegExp[] = [
   /(^|\/)\.env(\.|$)/,
   /(^|\/)\.git(\/|$)/,
@@ -39,6 +44,10 @@ filesReadHono.post('/files/read', async (c) => {
   const results: Array<{ path: string, content: string, error?: string }> = []
   const root = getRoot()
   const rootWithSep = root + path.sep
+  // [files-read-hoist-v1] realRoot 在循环内每次 realpathSync 是热点；提到循环外仅算一次。
+  // 若 root 本身无法 realpath，保持 null 并跳过软链校验（与原 catch 语义一致）。
+  let realRoot: string | null = null
+  try { realRoot = fs.realpathSync(root) } catch { /* root 不存在时跳过软链校验 */ }
 
   for (const p of paths) {
     const safe = String(p || '').trim()
@@ -53,8 +62,7 @@ filesReadHono.post('/files/read', async (c) => {
     }
     try {
       const realAbs = fs.realpathSync(abs)
-      const realRoot = fs.realpathSync(root)
-      if (realAbs !== realRoot && !realAbs.startsWith(realRoot + path.sep)) {
+      if (realRoot !== null && realAbs !== realRoot && !realAbs.startsWith(realRoot + path.sep)) {
         results.push({ path: safe, content: '', error: '路径越界（软链接）' })
         continue
       }
@@ -69,7 +77,7 @@ filesReadHono.post('/files/read', async (c) => {
         results.push({ path: safe, content: '', error: '是目录' })
         continue
       }
-      if (stat.size > 200000) {
+      if (stat.size > MAX_FILE_BYTES) {
         results.push({ path: safe, content: '', error: '文件过大（>200KB）' })
         continue
       }
@@ -77,7 +85,7 @@ filesReadHono.post('/files/read', async (c) => {
         try { writeChannelLog('decisions', { kind: 'sensitive-read', path: safe, ts: Date.now() }) } catch { /* ignore */ }
       }
       const buf = fs.readFileSync(abs)
-      if (buf.subarray(0, 512).includes(0)) {
+      if (buf.subarray(0, BINARY_PROBE_BYTES).includes(0)) {
         results.push({ path: safe, content: '', error: '二进制文件' })
         continue
       }

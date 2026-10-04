@@ -64,7 +64,9 @@ it('铁律 2: packages/* 里禁止 listen / createServer / import vite / @hono/n
 
 it('铁律 3: packages/client 不得 import packages/core', () => {
   const violators: string[] = []
-  const re = /from\s+['"][^'"]*(?:@qgm\/ai-runner-core|packages\/core|\.\.\/core)[^'"]*['"]/
+  // [guard-regex-pkgname-v1] 包别名是 @qgm/core（旧名 @qgm/ai-runner-core 已不存在，
+  //   写旧名会让 `import ... from '@qgm/core'` 这类违规从铁律 3 下漏过）
+  const re = /from\s+['"][^'"]*(?:@qgm\/core|packages\/core|\.\.\/core)[^'"]*['"]/
   for (const f of walk(path.join(ROOT, 'packages', 'client'))) {
     const txt = fs.readFileSync(f, 'utf8')
     if (re.test(txt)) violators.push(rel(f))

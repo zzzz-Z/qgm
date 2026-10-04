@@ -10,7 +10,7 @@ let cached: PlaywrightModule | null | undefined
  * [WHY] cloakbrowser 在 linux-x64 反检测更强，其余平台直接回落 playwright；
  *        缓存 null 表示永久失败，避免每次调用重复 import 抛错。
  * [CONSTRAINT] 返回 null 时调用方必须给出"请装 playwright"的明确提示。
- * [CHANGE-IMPACT] 影响 smoke / ai-headless 启动结果；重置缓存见 resetBrowserEngineCache。
+ * [CHANGE-IMPACT] 影响 smoke / ai-headless 启动结果。
  */
 export async function resolveBrowserEngine(): Promise<PlaywrightModule | null> {
   if (cached !== undefined) return cached
@@ -38,9 +38,4 @@ export async function resolveBrowserEngine(): Promise<PlaywrightModule | null> {
     console.error('[browser-engine] playwright 未装')
   }
   return cached
-}
-
-/** 清空缓存（测试用；生产路径无需调用）。 */
-export function resetBrowserEngineCache(): void {
-  cached = undefined
 }

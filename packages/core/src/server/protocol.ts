@@ -15,7 +15,7 @@ export interface InboxItemDto {
 }
 
 /** AI 回复类型枚举：脚本 / 纯文本 / DONE / 决策请求 */
-export type AiReplyKind = 'script' | 'done' | 'plain' | 'multi'
+export type AiReplyKind = 'script' | 'done' | 'plain' | 'multi' | 'error' | 'stopped' | 'limit' // [limit-detect-v1]
 
 /** AI 回复的传输对象 */
 export interface AiReplyDto {
@@ -72,12 +72,14 @@ export type ClientMessage
     | { t: 'headless:login-gui', sid: string, url?: string }
 
 /** 服务端 → 客户端消息联合类型 */
+// [replay-flag-v1] 可缓存消息（reply/script/summary/new-session-created）在断线重连重放时带 replay:true；
+// 客户端据此区分「实时回复」与「历史回放」：回放仅供 UI 恢复，禁止重入 auto-loop
 export type ServerMessage
   = | { t: 'hello', version: number }
-    | { t: 'headless:reply', sid: string, reply: AiReplyDto }
-    | { t: 'headless:script', sid: string, item: InboxItemDto }
+    | { t: 'headless:reply', sid: string, reply: AiReplyDto, replay?: boolean }
+    | { t: 'headless:script', sid: string, item: InboxItemDto, replay?: boolean }
     | { t: 'headless:state', sid: string, state: TransportState, detail?: string }
-    | { t: 'headless:new-session-created', sid: string, url: string, id: string }
-    | { t: 'headless:summary', sid: string, text: string, degraded: boolean }
+    | { t: 'headless:new-session-created', sid: string, url: string, id: string, replay?: boolean }
+    | { t: 'headless:summary', sid: string, text: string, degraded: boolean, replay?: boolean }
     | { t: 'headless:list', sessions: unknown[] }
     | { t: 'headless:error', error: string }

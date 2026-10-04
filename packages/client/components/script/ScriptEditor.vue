@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { FileNode } from '../../types'
+import { useFilePicker } from './file-picker'
 import type { Decoration, DecorationSet, EditorView, ViewUpdate } from '@codemirror/view'
-import { fileBadge, fileToneStyle } from '../../utils/format'
 
 // CM 动态 import 聚合类型：从各包具名导出反推，杜绝 any
 interface CMModule {
@@ -50,37 +48,28 @@ let dragDepth = 0
 const isDragging = ref(false)
 /** CodeMirror 编辑器容器 DOM */
 const cmHost = ref<HTMLDivElement | null>(null)
-/* @FILE_PICKER_V1 */
-/** 打开 */
-const pickerOpen = ref(false)
-/** 文件选择器的检索关键词 */
-const pickerQuery = ref('')
-/** 索引 */
-const pickerIndex = ref(0)
-/** 文件选择器弹出位置 */
-const pickerPos = ref(0)
-/** 文件选择器的锚点元素 */
-const pickerAnchor = ref(0)
-/** 文件选择器的 X 坐标 */
-const pickerX = ref(0)
-/** 文件选择器的 Y 坐标 */
-const pickerY = ref(0)
-/** 引用 */
-const pickerRef = ref<HTMLDivElement | null>(null)
-/** 输入引用 */
-const pickerInputRef = ref<HTMLInputElement | null>(null)
-/** 文件 */
-const pickerFiles = ref<string[]>([])
 
-/** 文件选择器的内联样式 */
-const pickerStyle = computed(() => ({ left: `${pickerX.value}px`, top: `${pickerY.value}px` }))
-/** 文件选择器过滤后的结果 */
-const pickerFiltered = computed(() => {
-  const q = pickerQuery.value.toLowerCase()
-  const all = pickerFiles.value
-  if (!q) return all.slice(0, 200)
-  return all.filter(p => p.toLowerCase().includes(q)).slice(0, 200)
-})
+// [file-picker-v1] @ 文件选择器逻辑已抽到 file-picker.ts；本组件只持有实例
+const {
+  pickerOpen,
+  pickerQuery,
+  pickerIndex,
+  pickerPos,
+  pickerAnchor,
+  pickerX,
+  pickerY,
+  pickerRef,
+  pickerInputRef,
+  pickerFiles,
+  pickerStyle,
+  pickerFiltered,
+  pickerLoadFiles,
+  pickerOpenAt,
+  pickerClose,
+  pickerMove,
+  pickerConfirm,
+  pickerPick,
+} = useFilePicker({ getCmView: () => cmView })
 
 watch(() => props.isLoopActive, (v) => {
   if (!cmView || !CM || !editableComp) return
@@ -160,106 +149,6 @@ async function ensureCM(): Promise<CMModule> {
     cmJavascript: j.javascript,
   }
   return CM
-}
-/**
- * 执行 picker Load Files
- */
-async function pickerLoadFiles() {
-  if (pickerFiles.value.length) return
-  try {
-    const res = await fetch('/__ai/files?depth=6')
-    const data = await res.json()
-    const flat: string[] = []
-    const walk = (nodes: FileNode[]) => {
-      for (const n of nodes || []) {
-        if (n.type === 'file') flat.push(n.path)
-        else if (n.children) walk(n.children)
-      }
-    }
-    walk(data.tree || [])
-    pickerFiles.value = flat
-  } catch { pickerFiles.value = [] }
-}
-/**
- * 执行 picker Open At
- * @param atPos - at Pos
- */
-function pickerOpenAt(atPos: number) {
-  pickerOpen.value = true
-  pickerQuery.value = ''
-  pickerIndex.value = 0
-  pickerPos.value = atPos
-  pickerAnchor.value = atPos + 1
-  if (cmView) {
-    const coords = cmView.coordsAtPos(atPos)
-    if (coords) {
-      // 视口边界检测：下方空间不足则向上翻转，左右越界则贴边
-      // [CONSTRAINT] coordsAtPos 返回视口坐标（非文档坐标），与 position:fixed 天然对齐
-      // [CHANGE-IMPACT] 面板估算尺寸与 CSS max-height(240) / max-width(480) 保持一致
-      const M = 8
-      const EST_H = 240
-      const EST_W = 320
-      let left = coords.left
-      let top = coords.bottom + 4
-      if (typeof window !== 'undefined') {
-        // 右侧越界 → 贴右边
-        if (left + EST_W > window.innerWidth - M) {
-          left = Math.max(M, window.innerWidth - EST_W - M)
-        }
-        // 下方空间不足 → 翻到光标上方
-        if (top + EST_H > window.innerHeight - M) {
-          const above = coords.top - EST_H - 4
-          top = above >= M ? above : Math.max(M, window.innerHeight - EST_H - M)
-        }
-      }
-      pickerX.value = left
-      pickerY.value = top
-    }
-  }
-  void pickerLoadFiles()
-  nextTick(() => pickerInputRef.value?.focus())
-}
-/**
- * 执行 picker Close
- */
-function pickerClose() {
-  pickerOpen.value = false
-  pickerQuery.value = ''
-  pickerIndex.value = 0
-}
-/**
- * 在 @ 文件选择器中循环移动选中项
- * [CONSTRAINT] 用模运算实现环回（末项继续下移回到首项）；空列表直接返回
- * [WHY] +d+n 避免负数取模在不同语言下语义不一致
- * @param d 位移量（+1 下移 / -1 上移）
- */
-function pickerMove(d: number) {
-  const n = pickerFiltered.value.length
-  if (!n) return
-  pickerIndex.value = (pickerIndex.value + d + n) % n
-}
-/**
- * 确认当前选中的文件并插入路径（Enter 触发）
- * [CONSTRAINT] 列表为空时静默 no-op；具体插入逻辑在 pickerPick 中
- */
-function pickerConfirm() {
-  const f = pickerFiltered.value[pickerIndex.value]
-  if (f) pickerPick(f)
-}
-/**
- * 执行 picker Pick
- * @param filePath - file Path
- */
-function pickerPick(filePath: string) {
-  if (!cmView) return
-  pickerOpen.value = false
-  const insertText = `@${filePath} `
-  const from = pickerPos.value
-  const to = cmView.state.selection.main.head
-  cmView.dispatch({ changes: { from, to, insert: insertText }, selection: { anchor: from + insertText.length } })
-  pickerQuery.value = ''
-  pickerIndex.value = 0
-  cmView.focus()
 }
 /**
  * 编辑器内容/光标变更回调（驱动 @ 文件选择器）
@@ -507,272 +396,4 @@ defineExpose({ insertText })
   </section>
 </template>
 
-<style scoped lang="scss">
-:deep(.cm-file-chip) {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0 5px 0 3px;
-  margin: 0 1px;
-  border-radius: 5px;
-  background: rgb(127 127 127 / 10%);
-  border: 1px solid rgb(127 127 127 / 18%);
-  color: var(--text, #e6edf3);
-  font-size: 11px;
-  line-height: 1.25;
-  vertical-align: baseline;
-  cursor: default;
-}
-:deep(.cm-file-chip-badge) {
-  padding: 0 3px;
-  border-radius: 3px;
-  /* 配色由 fileToneStyle 按文件类型内联注入，此处只兜底未知类型 */
-  font: 600 8.5px/1.4 var(--mono, monospace);
-  letter-spacing: 0.3px;
-}
-:deep(.cm-file-chip-name) {
-  font-weight: 500;
-}
-.editor.card {
-  flex: 0 0 auto;
-  min-height: 104px;
-  max-height: 300px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--surface-2, rgb(127 127 127 / 6%));
-  border: 1px solid var(--border, rgb(127 127 127 / 15%));
-  border-radius: 14px;
-  box-shadow: 0 1px 2px rgb(15 17 21 / 4%);
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-  max-width: min(820px, calc(100% - 100px));
-  width: 100%;
-  margin: 6px auto 10px;
-  box-sizing: border-box;
-}
-.editor.card.is-running {
-  border-color: rgb(88 166 255 / 40%);
-}
-.editor.card:focus-within {
-  border-color: rgb(88 166 255 / 32%);
-  box-shadow:
-    0 1px 2px rgb(15 17 21 / 6%),
-    0 0 0 3px rgb(88 166 255 / 18%);
-}
-html[data-theme='dark'] .editor.card {
-  background: rgb(127 127 127 / 8%);
-  border-color: rgb(127 127 127 / 22%);
-}
-.editor :deep(.cm-gutters),
-.editor :deep(.cm-lineNumbers),
-.editor :deep(.cm-foldGutter) {
-  display: none;
-}
-.editor :deep(.cm-editor) {
-  color: var(--text, inherit);
-  font-size: 13px;
-  background: transparent;
-}
-.editor :deep(.cm-editor.cm-focused) {
-  outline: none;
-}
-.editor :deep(.cm-scroller) {
-  font-family: inherit;
-  line-height: 1.45;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-.editor :deep(.cm-scroller)::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
-}
-.editor :deep(.cm-scroller)::-webkit-scrollbar-thumb {
-  background: rgb(127 127 127 / 20%);
-  border-radius: 999px;
-}
-.editor :deep(.cm-scroller)::-webkit-scrollbar-thumb:hover {
-  background: rgb(127 127 127 / 38%);
-}
-.editor :deep(.cm-scroller)::-webkit-scrollbar-track {
-  background: transparent;
-}
-.editor :deep(.cm-content) {
-  min-height: 40px;
-  padding: 10px 16px;
-  color: var(--text, inherit);
-  font-size: 13px;
-  line-height: 1.5;
-  background: transparent;
-  caret-color: var(--primary, #58a6ff);
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui,
-    sans-serif;
-}
-.editor :deep(.cm-placeholder) {
-  color: var(--text-3, rgb(127 127 127 / 50%));
-  font-style: normal;
-  pointer-events: none;
-  opacity: 0.85;
-}
-.editor :deep(.cm-cursor),
-.editor :deep(.cm-dropCursor) {
-  border-left-width: 2px;
-  border-left-color: var(--primary, #58a6ff);
-  border-radius: 1px;
-  animation: cm-caret-pulse 1.2s ease-in-out infinite;
-}
-@keyframes cm-caret-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-.editor :deep(.cm-selectionBackground),
-.editor :deep(.cm-content ::selection) {
-  background: rgb(88 166 255 / 18%);
-}
-.editor :deep(.cm-activeLine) {
-  background: transparent;
-}
-.editor :deep(.attach-bar) {
-  padding: 8px 16px 2px;
-  margin: 0;
-  background: transparent;
-  border: 0;
-  gap: 6px;
-}
-.editor-actions {
-  @apply flex justify-end items-center gap-1;
-  padding: 4px 16px 8px;
-}
-.editor-actions :deep(.ghost-btn),
-.editor-actions :deep(.primary-btn) {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.editor-actions :deep(.ghost-btn > span),
-.editor-actions :deep(.primary-btn > span) {
-  display: none;
-}
-.editor-actions :deep(.ghost-btn:hover:not(:disabled)) {
-  background: rgb(127 127 127 / 14%);
-  color: var(--text);
-  border-color: transparent;
-}
-.editor-actions :deep(.primary-btn:hover:not(:disabled)) {
-  filter: brightness(1.08);
-}
-.editor.is-dragging {
-  border-color: rgb(88 166 255 / 70%);
-  box-shadow:
-    0 0 0 3px rgb(88 166 255 / 16%),
-    0 0 24px rgb(88 166 255 / 18%);
-  background: rgb(88 166 255 / 4%);
-}
-.editor.is-dragging::after {
-  content: '📎  松开鼠标以附加文件';
-  position: absolute;
-  inset: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgb(88 166 255 / 8%);
-  border: 2px dashed rgb(88 166 255 / 65%);
-  border-radius: 8px;
-  color: var(--primary-hover, #58a6ff);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  pointer-events: none;
-  z-index: 10;
-  animation: ai-drop-pulse 1.2s ease-in-out infinite;
-}
-@keyframes ai-drop-pulse {
-  0%,
-  100% {
-    opacity: 0.75;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-:deep(.cm-host) {
-  flex: 1 1 0;
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-}
-.editor-body {
-  flex: 1 1 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  position: relative;
-}
-.file-picker {
-  position: fixed;
-  z-index: 9999;
-  min-width: 280px;
-  max-width: 480px;
-  max-height: 240px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-8);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
-  @apply flex flex-col overflow-hidden;
-}
-.fp-input {
-  padding: 8px 12px;
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  background: transparent;
-  color: var(--text);
-  font: 12px/1.4 var(--mono, monospace);
-  outline: 0;
-}
-.fp-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.fp-item {
-  flex-shrink: 0;
-  min-height: 22px;
-  line-height: 1.2;
-  padding: 5px 10px;
-  border-radius: var(--radius-4);
-  font-size: 12px;
-  font-family: var(--mono, monospace);
-  color: var(--text-2);
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.fp-item:hover,
-.fp-item.active {
-  background: var(--primary-bg);
-  color: var(--primary);
-}
-.fp-empty {
-  padding: 12px;
-  text-align: center;
-  color: var(--text-3);
-  font-size: 12px;
-}
-</style>
+<style scoped lang="scss" src="./script-editor.scss"></style>

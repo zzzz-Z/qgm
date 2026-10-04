@@ -1,0 +1,133 @@
+/* [script-panel-style-extract-v1] 从 ScriptPanel.vue 抽出。 */
+
+.pane.is-resizing-side,
+.pane.is-resizing-side * {
+  user-select: none;
+  cursor: col-resize;
+}
+
+.pane.is-resizing-side .pane-side {
+  transition: none;
+}
+
+@keyframes pop-in {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 1100px) {
+  .pane {
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+    height: 100%;
+    overflow: hidden;
+    padding: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 8px;
+    flex-shrink: 0;
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.side-resize-handle {
+  flex-shrink: 0;
+  width: 8px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 5;
+  transition: background 0.15s;
+}
+
+.side-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 24px;
+  border-radius: var(--radius-2);
+  background: var(--border);
+  transition:
+    background 0.15s,
+    height 0.15s;
+}
+
+.side-resize-handle:hover::after,
+.side-resize-handle.active::after {
+  background: var(--primary);
+  height: 40px;
+}
+
+.pane-main {
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* waiting-pulse / cursor-blink / dot-pulse 已迁至全局 style.css () */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  pointer-events: none;
+  background: rgb(13 17 23 / 70%);
+}
+
+.overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 32px;
+  border-radius: var(--radius-12);
+  background: var(--surface-2);
+  border: 2px dashed var(--primary);
+  color: var(--text);
+}
+
+.overlay.success .overlay-card {
+  border-style: solid;
+  border-color: var(--success);
+}
+
+.overlay-icon {
+  font-size: 32px;
+}
+.overlay-text {
+  font-size: 13px;
+  color: var(--text-2);
+}

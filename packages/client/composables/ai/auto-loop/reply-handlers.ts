@@ -1,11 +1,17 @@
 // [reply-handlers-v1] 从 useAutoLoop.ts 抽出：脚本到达 / 非脚本回复 / 单轮执行 三个入口
+import { TOAST_DEFAULT, TOAST_LONG, TOAST_MEDIUM } from '../../../utils/toast-durations'
 import type { Ref } from 'vue'
 import type { AiReply, LoopInstance, RoundOutcome } from './types.js'
+import { setLoopState } from './transitions.js'
 import type { InboxItem } from '../../runner/useScriptInbox'
 
-// [ask-dialog-v1] 交互提问通道；解析放 utils，弹窗状态走单例 composable
-import { parseAsk } from '../../../utils/ask-parser'
+// [ask-dialog-v1] 交互提问通道；解析放 utils，提问状态走单例 composable
+// [ask-card-v1] UI 已从弹窗改为对话流内的可点选卡片（TerminalPane .question-card）；本处契约不变
 import { askUser } from '../../ui/useAsk'
+// [restore-import-v1] parseAsk 早前清理误删（ask-wiring 测试守卫此导入）
+import { parseAsk } from '../../../utils/ask-parser'
+// [limit-detect-v1] 会话触顶自动轮转（总结→新会话→续跑）
+import { onSummary, startHandoff } from './handoff.js'
 
 type ToastFn = typeof import('../../ui/useToast.js').toast
 type Transport = ReturnType<typeof import('../useAiTransport.js').getTransport>
@@ -70,27 +76,43 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
   async function onScriptArrival(inboxItem: InboxItem, sid?: string): Promise<void> {
     if (loopPaused.value) return
     const inst = resolveInst(sid)
-    if (!inst || !isInstActive(inst) || inst.state.value !== 'waiting') return
+    // [preparing-guard-v1] 兼容 'preparing'：startLoop sendFill 后 500ms 缓冲态；
+    // 原实现只接受 'waiting'，500ms 内到达的 AI 回复被静默丢弃（隐藏 bug）
+    if (!inst || !isInstActive(inst) || (inst.state.value !== 'waiting' && inst.state.value !== 'preparing')) return
     disarmTimer(inst)
     if (inst.stopRequest.value !== 'none') { await handleStopAfterRound(inst); return }
     if (inboxItem.hash === inst.lastHash.value) {
-      toast('连续两轮脚本相同，已忽略', 'warn', 3000)
+      toast('连续两轮脚本相同，已忽略', 'warn', TOAST_DEFAULT)
       return
     }
     inst.lastHash.value = inboxItem.hash
-    inst.state.value = 'parsing'
+    // [transitions-v1] SCRIPT 事件：waiting → parsing
+    setLoopState(inst, 'SCRIPT')
     await executeItem(inst, inboxItem)
   }
 
   /** PLAN.md 待办是否未清空（通过 /__ai/tasks 的 planPending） */
-  async function planHasPending(): Promise<boolean> {
+  // [plan-resume-detail-v1] 返回未完成项描述列表；只报数字会让 AI 无的放矢（它看不到本地 PLAN.md），
+  // 续跑轰炸下 AI 会编造「我没有 __AI__ 环境」搪塞。拿不到明细时返回空列表 → 调用方放行 DONE，不空转
+  async function fetchPendingItems(): Promise<string[]> {
     try {
       const r = await fetch('/__ai/tasks', { headers: { accept: 'application/json' }, cache: 'no-store' })
-      if (!r.ok) return false
-      const j = (await r.json()) as { planPending?: number } | null
+      if (!r.ok) return []
+      const j = (await r.json()) as { planPending?: number, todoItems?: Array<{ desc?: string, status?: string }> } | null
+      const items = Array.isArray(j?.todoItems)
+        ? j.todoItems.filter(x => x && String(x.status || '').toLowerCase() !== 'done').map(x => String(x.desc || '').trim()).filter(Boolean)
+        : []
       const n = Number(j?.planPending ?? NaN)
-      return Number.isFinite(n) && n > 0
-    } catch { return false }
+      if (!Number.isFinite(n) || n <= 0) return []
+      // 结构化明细缺失但计数>0：无法告知 AI 具体目标，视为无可续跑内容
+      return items.length > 0 ? items.slice(0, 10) : []
+    } catch { return [] }
+  }
+
+  /** 组装 PLAN 续跑 prompt：必须携带具体剩余项（AI 页面上下文里没有本地 PLAN.md） */
+  function buildPlanResumePrompt(items: string[]): string {
+    const lines = items.map((d, i) => `${i + 1}. ${d}`).join('\n')
+    return `【继续】长期计划仍有 ${items.length} 项未完成：\n${lines}\n请针对下一项输出一个可执行脚本（遵守脚本头契约）；这些项全部完成后才回复 DONE。`
   }
 
   /** 非脚本回复：done / plain / multi */
@@ -99,9 +121,25 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     // [WHY] 与 afterRound 的早退配对，保证「暂停 = 冻结」语义在回复链路上完整
     if (loopPaused.value) return
     const inst = resolveInst(sid)
-    if (!inst || !isInstActive(inst) || inst.state.value !== 'waiting') return
+    // [limit-detect-v1] 轮转（handoff）期间到达的总结回复：下方守卫只放行 waiting/preparing，
+    // 总结（plain/done 形态）会被丢弃 → 30s 后轮转必然超时失败。先于守卫路由给 onSummary 推进轮转
+    if (inst && inst.state.value === 'handoff' && (reply.kind === 'plain' || reply.kind === 'done')) {
+      await onSummary(String(reply.text || ''), sid || '', false)
+      return
+    }
+    // [preparing-guard-v1] 兼容 'preparing'：startLoop sendFill 后 500ms 缓冲态；
+    // 原实现只接受 'waiting'，500ms 内到达的 AI 回复被静默丢弃（隐藏 bug）
+    if (!inst || !isInstActive(inst) || (inst.state.value !== 'waiting' && inst.state.value !== 'preparing')) return
     disarmTimer(inst)
     if (inst.stopRequest.value !== 'none') { await handleStopAfterRound(inst); return }
+
+    // [limit-detect-v1] AI 会话达到长度上限：本会话继续提问不可能有产出，
+    // 触发自动轮转（sendRotate 总结 → 新会话 → 续跑）；失败由 handoffFail 干净终止
+    if (reply.kind === 'limit') {
+      toast('AI 会话已达长度上限，自动轮转新会话续跑', 'warn', 8000)
+      await startHandoff()
+      return
+    }
 
     // [ask-dialog-v1] 交互提问：AI 主动索要用户选择或信息；答案走 sendFill 回填后重入 waiting
     // [CONSTRAINT] 只处理 kind=plain 且 text 命中提问前缀；不影响 done/multi 分类逻辑
@@ -109,29 +147,49 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     if (reply.kind === 'plain' && reply.text && parseAsk(reply.text)) {
       const ask = parseAsk(reply.text)
       if (ask) {
+        // [non-script-reentry-v1] await 前同步离开 waiting：同一帧被重复订阅消费（HMR 残留/双注册）时，
+        // 第二次回调会被函数首守卫拦截，否则两处都会在 fetch 挂起后通过 → 重复提问卡/重复 sendFill
+        // [transitions-v1] DECISION 事件：waiting → waiting-input
+        setLoopState(inst, 'DECISION')
         const answer = await askUser(ask)
         if (answer !== null) {
-          const ok = loopPaused.value ? false : transport.sendFill('', { prompt: `【@ask 回答】${answer}` })
+          const ok = loopPaused.value ? false : transport.sendFill('', { prompt: `【ASK 回答】${answer}` })
           if (ok) {
             enterWaiting(inst)
           } else {
             await finish(inst, 'window-lost', '回答发送失败（窗口已关闭或发送失败）')
           }
         } else {
-          toast('用户已取消提问，等待下一轮', 'warn', 3000)
+          toast('用户已取消提问，等待下一轮', 'warn', TOAST_DEFAULT)
+          // 取消不推进轮次：回到 waiting 等下一条真实回复
+          enterWaiting(inst)
         }
         return
       }
     }
 
+    // [stopped-detect-v1] AI 页面「当前问题已停止」：生成被中止，本轮不可能再产出脚本/DONE，
+    // 立即终止本轮等待而不是干等 90s/180s 超时（前端感知：toast + 循环状态落地）
+    if (reply.kind === 'stopped') {
+      // [transitions-v1] FEEDBACK 事件：waiting → feedback（AI 停止生成）
+      setLoopState(inst, 'FEEDBACK')
+      toast('AI 网页已停止生成（点击了停止或被平台中断），本轮终止', 'warn', TOAST_LONG)
+      await finish(inst, 'ai-stopped', String(reply.text || 'AI 网页已停止生成'))
+      return
+    }
+
     if (reply.kind === 'done') {
+      // [non-script-reentry-v1] 同步占位，防 await planHasPending 期间重复回调重入
+      // [transitions-v1] FEEDBACK 事件：waiting → feedback（DONE 收尾）
+      setLoopState(inst, 'FEEDBACK')
       // [plan-resume-cap-v1] PLAN 续跑加硬上限：连续续跑 PLAN_RESUME_MAX 次后放行 DONE
       if (planResumeAttempts.value < PLAN_RESUME_MAX) {
-        if (await planHasPending()) {
+        const pending = await fetchPendingItems()
+        if (pending.length > 0) {
           planResumeAttempts.value += 1
           const left = PLAN_RESUME_MAX - planResumeAttempts.value
-          toast(`PLAN 仍有待办，续跑（还剩 ${left} 次即强制结束）`, 'warn', 4000)
-          const okSent = loopPaused.value ? false : transport.sendFill('', { prompt: '【继续】长期计划（PLAN.md 待办）尚未清空。请对照 PLAN 剩余项继续输出下一个可执行脚本；只有 PLAN 全部完成才回复 DONE。' })
+          toast(`PLAN 仍有 ${pending.length} 项待办，续跑（还剩 ${left} 次即强制结束）`, 'warn', TOAST_MEDIUM)
+          const okSent = loopPaused.value ? false : transport.sendFill('', { prompt: buildPlanResumePrompt(pending) })
           if (!okSent) { await finish(inst, 'window-lost', 'PLAN 未清空但窗口发送失败'); return }
           ackFill(inst, 'PLAN 续跑')
           bindKeyboard()
@@ -139,13 +197,15 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
           enterWaiting(inst)
           return
         }
-      } else {
-        toast(`PLAN 仍有待办，但已续跑 ${PLAN_RESUME_MAX} 次，强制结束循环`, 'warn', 6000)
+      } else if ((await fetchPendingItems()).length > 0) {
+        toast(`PLAN 仍有待办，但已续跑 ${PLAN_RESUME_MAX} 次，强制结束循环`, 'warn', TOAST_LONG)
       }
       planResumeAttempts.value = 0
       // 防御性二次校验：油猴可能误把含解释/标点的回复判为 done
       if (reply.text !== undefined && !isStrictDone(reply.text)) {
-        toast('回复非严格 DONE，等待下一轮', 'warn', 3000)
+        toast('回复非严格 DONE，等待下一轮', 'warn', TOAST_DEFAULT)
+        // 本分支不结束循环：上面已占位 feedback，需回到 waiting 否则下一条回复被首守卫拦截
+        enterWaiting(inst)
         return
       }
       // [done-summary-archive] 归档 DONE 后总结（第二行起）
@@ -160,6 +220,9 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       return
     }
     if (reply.kind === 'multi') {
+      // [non-script-reentry-v1] 同步占位（与 done 分支一致的纵深防御）
+      // [transitions-v1] FEEDBACK 事件：waiting → feedback（multi 重试）
+      setLoopState(inst, 'FEEDBACK')
       const count = reply.count ?? 0
       const okSent = loopPaused.value ? false : transport.sendFill('', { prompt: buildRetryPrompt(`回复含 ${count || '多个'} 个代码块（契约要求仅一个）`) })
       if (!okSent) {
@@ -167,17 +230,21 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
         return
       }
       ackFill(inst, 'multi 重试')
-      toast('回复含多个代码块，要求 AI 重发（不消耗宽容预算）', 'warn', 4000)
+      toast('回复含多个代码块，要求 AI 重发（不消耗宽容预算）', 'warn', TOAST_MEDIUM)
       enterWaiting(inst)
       return
     }
     // plain：不执行脚本，等下一轮
-    toast('AI 未输出 cjs/bash 代码块（纯文本回复），等待下一轮', 'warn', 3000)
+    toast('AI 未输出 cjs/bash 代码块（纯文本回复），等待下一轮', 'warn', TOAST_DEFAULT)
+    // [plain-rearm-v1] 与 done/multi/@ask 分支一致：重新 arm 90s/180s 等待超时与 ticker，
+    // 否则本分支 disarmTimer 后 roundTimer 永远为 null，超时熔断失效、UI 卡 waiting（报告 §1.1）
+    enterWaiting(inst)
   }
 
   /** 单轮执行：BeforeScript hook → cjs/bash 分流 → afterRound */
   async function executeItem(inst: LoopInstance, inboxItem: InboxItem): Promise<void> {
-    inst.state.value = 'executing'
+    // [transitions-v1] EXECUTE 事件：parsing → executing
+    setLoopState(inst, 'EXECUTE')
     stage.value = 'implement' // AIRUNNER-BATCH47-STAGE-WRITE
     persist(inst)
     const hookRes = await runHook('BeforeScript', {

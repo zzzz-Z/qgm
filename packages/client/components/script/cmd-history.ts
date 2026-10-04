@@ -1,6 +1,4 @@
 import type { Ref } from 'vue'
-import { useLocalStorage } from '@vueuse/core'
-import { LS_CMD_HISTORY_KEY } from '../../utils/storage'
 
 /**
  * 命令历史：从 localStorage 加载 / 追加 / 上下翻

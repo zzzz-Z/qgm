@@ -1,6 +1,6 @@
-// AIRUNNER-BATCH20-4-FIX-SUFFIX: 补 .js 后缀（strip-types 不重写 import 路径）
-import { ref } from 'vue'
 import { useClipboard } from '@vueuse/core'
+import { ref } from 'vue'
+// AIRUNNER-BATCH20-4-FIX-SUFFIX: 补 .js 后缀（strip-types 不重写 import 路径）
 import { toast } from '../ui/useToast.js'
 
 /** 消息 */
@@ -28,8 +28,20 @@ const messages = ref<Message[]>([])
  * [WHY] crypto.randomUUID 全局唯一；截取前 8 位足以区分单机会话，且便于肉眼阅读
  * [CONSTRAINT] 依赖现代浏览器 + HTTPS 环境的 crypto.randomUUID；旧环境需 polyfill
  */
+// [uuid-fallback-v1] 非安全上下文（http + 局域网 IP 访问 Docker 端口）下 crypto.randomUUID 为 undefined，
+// 原实现直接调用会白屏。改为特性检测 + getRandomValues 8 hex 回退。
 function generateId(): string {
-  return `sess_${crypto.randomUUID().slice(0, 8)}`
+  const c = (typeof crypto !== 'undefined' ? crypto : undefined) as Crypto | undefined
+  if (c && typeof c.randomUUID === 'function') return `sess_${c.randomUUID().slice(0, 8)}`
+  // 回退：从 getRandomValues 拼 4 字节 hex（与 randomUUID().slice(0,8) 等长）
+  if (c && typeof c.getRandomValues === 'function') {
+    const buf = new Uint8Array(4)
+    c.getRandomValues(buf)
+    let out = ''
+    for (const b of buf) out += b.toString(16).padStart(2, '0')
+    return `sess_${out}`
+  }
+  return `sess_${Date.now().toString(36).slice(-8)}`
 }
 
 /**

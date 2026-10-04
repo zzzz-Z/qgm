@@ -29,7 +29,7 @@ function loadRuns() {
     try {
       const m = JSON.parse(fs.readFileSync(mf, 'utf8'))
       runs.push({ runId: name, dir, createdAt: m.createdAt || st.mtimeMs, changes: m.changes || [] })
-    } catch { }
+    } catch { /* swallow: manifest 损坏或读失败该 run 跳过 */ }
   }
   runs.sort((a, b) => b.createdAt - a.createdAt)
   return runs

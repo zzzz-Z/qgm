@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
 import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/vue'
-import { useTooltip } from '../../composables/ui/useTooltip'
 
 defineOptions({ name: 'TooltipHost' })
 

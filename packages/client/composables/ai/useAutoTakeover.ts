@@ -1,5 +1,4 @@
 import { useStorage } from '@vueuse/core'
-
 /** 自动接管持久化键 */
 const KEY = '__ai_auto_takeover'
 

@@ -12,6 +12,8 @@ import { searchHono } from './search.js'
 import { runHono } from './run.js'
 import { gitHono } from './git.js'
 import { hooksHono } from './hooks.js'
+import { skillsHono } from './skills.js'
+import { lessonsHono } from './lessons.js'
 
 /** 所有子路由 Hono 应用实例列表 */
 export const HONO_SUB_APPS = [
@@ -28,6 +30,8 @@ export const HONO_SUB_APPS = [
   runHono,
   gitHono,
   hooksHono,
+  skillsHono,
+  lessonsHono,
 ]
 
 // 已迁移到 Hono 的路径前缀——dispatchHono 只对这些前缀做 bridge
@@ -48,4 +52,6 @@ export const HONO_PREFIXES = [
   '/diff-from-baseline',
   '/run',
   '/preset',
+  '/skills',
+  '/lessons',
 ]

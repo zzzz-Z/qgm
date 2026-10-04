@@ -17,8 +17,13 @@ export interface IndexDiffEntry {
   type: 'added' | 'modified' | 'deleted'
 }
 
-/** 项目根目录（进程启动时的 cwd） */
-const ROOT = process.env.AI_RUNNER_ROOT || process.cwd()
+/**
+ * 项目根目录（动态读取 env，兼容 setRoot 运行时切换）
+ * [root-track-v1] 原为 module-level const：setRoot 后仍指向启动 cwd（隐藏 bug，与 git.ts 同类）
+ */
+function getRoot(): string {
+  return process.env.AI_RUNNER_ROOT || process.cwd()
+}
 /** 遍历项目时跳过的目录 */
 const EXCLUDE_DIRS = new Set(['node_modules', '.git', 'dist', '.vite', '.turbo', '.cache'])
 /** 遍历时跳过的路径前缀 */
@@ -75,7 +80,7 @@ export function scanIndex(): Map<string, FileIndex> {
     for (const name of entries) {
       if (name.startsWith('.')) continue
       const full = path.join(dir, name)
-      const rel = path.relative(ROOT, full)
+      const rel = path.relative(getRoot(), full)
       if (isExcludedIdx(rel)) continue
       let stat: fs.Stats
       try { stat = fs.statSync(full) } catch { continue }
@@ -87,7 +92,7 @@ export function scanIndex(): Map<string, FileIndex> {
       }
     }
   }
-  walk(ROOT)
+  walk(getRoot())
   return map
 }
 /**

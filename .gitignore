@@ -4,6 +4,8 @@ dist/
 *.log
 .trae/
 .ai-runner/
+!.ai-runner/skills/
+!.ai-runner/skills/**
 PROJECT-NOTES.md
 client/pnpm-lock.yaml
 client/node_modules/
@@ -16,3 +18,6 @@ client/e2e/playwright-report/
 .env.*
 !.env.example
 coverage/
+
+# 生成物报告（verify-contracts 每次运行重写）：不入版本库、也不纳入文档索引义务
+docs/plan/

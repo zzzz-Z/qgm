@@ -15,6 +15,8 @@ export interface RoundSnapshot {
   changes: unknown[]
   decisions: unknown[]
   exitCode: number | null
+  // [run-timeout-visible-v1] 超时被杀与真失败必须可区分：超时=可能已部分成功
+  timedOut?: boolean
   durationMs: number
   rulesVersion: string
   // [tier2a-3b] 失败诊断字段：失败时落 stderr 首 500 字 + errorFiles，供 extract-failure-patterns 精分类

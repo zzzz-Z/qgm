@@ -25,7 +25,7 @@ const lessonTitles = lessonsRaw.match(/^## .+$/gm) || []
 
 const byAction = {}
 clLines.slice(-200).forEach((l) => {
-  try { const r = JSON.parse(l); byAction[r.action] = (byAction[r.action] || 0) + 1 } catch {}
+  try { const r = JSON.parse(l); byAction[r.action] = (byAction[r.action] || 0) + 1 } catch { /* swallow: 损坏行跳过 */ }
 })
 
 let verifyLine = '(not run)'
@@ -61,8 +61,18 @@ out.push('')
 out.push(`## 改动聚合 (changelog ${clLines.length} 条)`)
 Object.keys(byAction).sort().forEach((k) => { out.push(`- ${k}: ${byAction[k]}`) })
 out.push('')
-out.push(`## 踩坑记录 (lessons ${lessonTitles.length} 条)`)
-lessonTitles.forEach((t) => { out.push(`- ${t.replace(/^## /, '')}`) })
+// [lessons-review-v1] 状态从 scripts/lessons-status.cjs 取（单一 SSOT），
+// 不在此处重复解析——两处规则必然漂移，而漂移的失败方式是静默的（状态列全错但看着正常）
+let lessonStatus = null
+try {
+  lessonStatus = JSON.parse(execFileSync('node', ['scripts/lessons-status.cjs', '--json'], { cwd: ROOT, encoding: 'utf8' }))
+} catch { lessonStatus = null }
+out.push(`## 踩坑记录 (lessons ${lessonTitles.length} 条${lessonStatus ? ` · 待复核 ${lessonStatus.pending}` : ''})`)
+if (lessonStatus) {
+  lessonStatus.items.forEach((it) => { out.push(`- [${it.status}] ${it.title}`) })
+} else {
+  lessonTitles.forEach((t) => { out.push(`- ${t.replace(/^## /, '')}`) })
+}
 out.push('')
 out.push('## 启动新会话')
 out.push('')
@@ -72,7 +82,7 @@ out.push(fence)
 out.push('')
 out.push('## 最近 10 次改动')
 clLines.slice(-10).forEach((l) => {
-  try { const r = JSON.parse(l); out.push(`- ${r.action} ${r.file}${r.detail ? ` -- ${r.detail}` : ''}`) } catch {}
+  try { const r = JSON.parse(l); out.push(`- ${r.action} ${r.file}${r.detail ? ` -- ${r.detail}` : ''}`) } catch { /* swallow: 损坏行跳过 */ }
 })
 out.push('')
 

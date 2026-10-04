@@ -12,7 +12,7 @@ import {
   LOOP_ROUND_TIMEOUT_MS,
 } from './loopLogic'
 
-import { onNewSessionCreated, onSummary, startHandoff, SUMMARY_INSTRUCTION } from './auto-loop/handoff.js'
+import { handoffDisarm, onNewSessionCreated, onSummary, startHandoff, SUMMARY_INSTRUCTION } from './auto-loop/handoff.js'
 import { bindKeyboard, unbindKeyboard } from './auto-loop/keyboard.js'
 import { runHook } from './auto-loop/hooks.js'
 
@@ -23,11 +23,13 @@ import { persist, restore } from './auto-loop/persist.js'
 import { runBash } from './auto-loop/run-bash.js'
 import { createRoundGuards } from './auto-loop/round-guards.js'
 import { createWaiting } from './auto-loop/waiting.js'
+import { disarmTimer } from './auto-loop/timers.js'
 import { createAfterRound } from './auto-loop/after-round.js'
 import { createStopAndFinish } from './auto-loop/stop-and-finish.js'
 import { createPauseControl } from './auto-loop/pause-control.js'
 import { createStartFamily } from './auto-loop/start-family.js'
 import { createReplyHandlers } from './auto-loop/reply-handlers.js'
+import { createDecisionSubmitter } from './auto-loop/decision.js'
 
 // [state-extract-v1] 模块级状态从 state.ts 导入；activeLoop re-export 保持外部契约
 import {
@@ -44,11 +46,13 @@ import {
 
 // 传输层分流：tampermonkey | headless（见 useAiTransport.ts）
 /** 传输层 */
-const transport = getTransport()
+// [transport-dynamic-v1] Proxy 转发到 getTransport() 实时单例：setTransportKind 切换后旧引用不再失效
+const transport = new Proxy({} as ReturnType<typeof getTransport>, {
+  get(_target, prop) { return Reflect.get(getTransport() as object, prop) },
+})
 // [unused-cleanup-v2] 已删 startWaiting：文件内仅定义点，无消费
 const { loopPaused } = useAiWaiting()
 
-// ============================================================================
 // useAutoLoop —— 自动化循环状态机
 // 单例：所有状态模块级，ScriptPanel 与 App.vue 共享同一份
 //
@@ -57,14 +61,11 @@ const { loopPaused } = useAiWaiting()
 //                          ▲                   │                                    │
 //                          │                   └──done/plain/multi/timeout─────────┤
 //                          └──────────────── 任意熔断 ──▶ stopped / interrupted ◀──┘
-// ============================================================================
 
 // [state-extract-v1] 模块级 ref 已移至 auto-loop/state.ts
 
-// ============================================================================
 // LoopInstance 类型 + 单例 activeLoop
 // 单对话模式：全局只有 singletonView 一份实例，inst 参数仅作函数签名一致性
-// ============================================================================
 
 /**
  * 循环实例的完整状态。单对话模式：全局只有 singletonView 一份实例，
@@ -80,43 +81,40 @@ const { loopPaused } = useAiWaiting()
 /** 当前激活循环实例（单例视图，computed 维持响应式依赖） */
 // [state-extract-v1] activeLoop 已移至 auto-loop/state.ts
 
-// [loop-paused:orphan-guard-v1] 无活跃循环时清除 sessionStorage 恢复的孤儿 paused
-// 场景：用户暂停循环 → 刷新 → 循环实例已销毁，但 loopPaused 仍从 sessionStorage 恢复为 true
-// 用 setTimeout 让 onMounted / persist.restore 先跑完，再判定是否为孤儿
-setTimeout(() => {
-  if (!activeLoop.value && loopPaused.value) {
-    loopPaused.value = false
-  }
-}, 0)
-
 let _getActiveSessionId: () => string = () => ''
 
 /** 循环活动的 */
 export const isLoopActive = computed(() => isInstActive(activeLoop.value))
 
-// [waiting-v1] enterWaiting / disarmTimer 已抽到 auto-loop/waiting.ts
-// [stop-and-finish-v1] createWaiting 需要 finish，而 finish 需要 enterWaiting/disarmTimer（循环依赖）→ 用 lateSet
-let _finish: ((inst: LoopInstance, reason: string, detail?: string) => Promise<void>) | null = null
-const { enterWaiting, disarmTimer } = createWaiting({
-  loopPaused,
-  persist,
-  finish: (inst, reason, detail) => _finish ? _finish(inst, reason, detail) : Promise.resolve(),
-  LOOP_ROUND_TIMEOUT_BASH_MS,
-  LOOP_ROUND_TIMEOUT_MS,
-})
+// [loop-paused:orphan-guard-v1] 无活跃循环时清除 sessionStorage 恢复的孤儿 paused
+// 场景：用户暂停循环 → 刷新 → 循环实例已销毁，但 loopPaused 仍从 sessionStorage 恢复为 true
+// 用 setTimeout 让 onMounted / persist.restore 先跑完，再判定是否为孤儿
+setTimeout(() => {
+  // [orphan-guard-fix-v1] activeLoop 是 computed 恒返回 singletonView（非 null），
+  // 原 !activeLoop.value 永假 → 守卫死代码，孤立 paused 永不清除（隐藏 bug）
+  if (!isLoopActive.value && loopPaused.value) {
+    loopPaused.value = false
+  }
+}, 0)
 
-// [stop-and-finish-v1] handleStopAfterRound / finish 已抽到 auto-loop/stop-and-finish.ts
+// [timers-v1] 顺序反转：先生成 finish 再生成 enterWaiting，消 lateSet 补丁（见 timers.ts）
 const { finish, handleStopAfterRound } = createStopAndFinish({
   loopPaused,
-  disarmTimer,
   persist,
-  enterWaiting,
   transport,
   toast,
   runHook,
   unbindKeyboard,
+  handoffDisarm,
 })
-_finish = finish
+
+const { enterWaiting } = createWaiting({
+  loopPaused,
+  persist,
+  finish,
+  LOOP_ROUND_TIMEOUT_BASH_MS,
+  LOOP_ROUND_TIMEOUT_MS,
+})
 
 // [round-guards-v1] 守卫函数已抽到 auto-loop/round-guards.ts
 const { ackFill } = createRoundGuards({
@@ -139,14 +137,10 @@ const { afterRound } = createAfterRound({
   LOOP_MAX_ROUNDS,
 })
 
-// ============================================================================
 // 持久化：刷新后不自动续跑（activeWin 引用已失效）→ 恢复为 stopped
-// ============================================================================
 restore(singletonView)
 
-// ============================================================================
 // tab title 进度
-// ============================================================================
 watch([
   () => activeLoop.value?.state.value,
   () => activeLoop.value?.round.value,
@@ -165,9 +159,7 @@ watch([
 
 // 首轮 prompt 由 session-prompt.buildLoopInitialPrompt 构造（SYSTEM.md + AGENTS.md + goal）
 
-// ============================================================================
 // 主入口
-// ============================================================================
 
 // [start-family-v1] 启动族已抽到 auto-loop/start-family.ts
 // [unused-cleanup-v2] 已删 initLoop：start-family 内部自持
@@ -210,15 +202,11 @@ const { onScriptArrival, onNonScriptReply } = createReplyHandlers({
   resolveInst,
   isInstActive,
 })
-// ============================================================================
 // 回复入口（App.vue 消息桥接调用）
-// ============================================================================
 
 // [reply-handlers-v1] 回复处理四函数已抽到 auto-loop/reply-handlers.ts
 
-// ============================================================================
 // 轮后：反馈 → 熔断检查 → 下一轮
-// ============================================================================
 // [pause-control-v1] pause/resume 家族已抽到 auto-loop/pause-control.ts
 const { resumeFromPause, clearSoftPause, exitPauseToIdle, resumeLoop, requestPause, softPause, killCurrent, stopAndRollback } = createPauseControl({
   loopPaused,
@@ -289,17 +277,17 @@ export const createLoopInstanceFor = (_sid: string): LoopInstance | null => acti
  * 移除 Loop Instance
  * @param _id - id
  */
-function removeLoopInstance(_id: string) { /* no-op: singleton, 用 killCurrent 代替 */ }
 /** 获取循环会话标识 */
 export const getLoopBySessionId = (_sid: string): LoopInstance | null => activeLoop.value
 /** 列表活动的 */
-const listActiveLoops = (): LoopInstance[] => activeLoop.value ? [activeLoop.value] : []
 /** 活动的数量 */
-const activeLoopsCount = computed(() => activeLoop.value ? 1 : 0)
 
 /**
  * 组合式函数 Auto Loop
  */
+const submitDecisionApi = createDecisionSubmitter({ loopPaused, enterWaiting })
+const submitDecision = submitDecisionApi.submitDecision
+
 export function useAutoLoop() {
   // [loopstate-mirror-v1] 把模块级 loopState 镜像到 runtime store（单向：module → store）
   // 用途：UI 侧可通过 runtime.state.kind 读循环状态，为后续彻底迁到 store 做准备
@@ -344,11 +332,8 @@ export function useAutoLoop() {
     exitPauseToIdle,
     clearSoftPause,
     getLoopBySessionId,
-    listActiveLoops,
     setActiveLoopSessionId,
     createLoopInstanceFor,
-    activeLoopsCount,
-    removeLoopInstance,
     isInstActive,
     // 面板/决策点/成本/stage 字段（ponytail: 部分为占位，接入点 PLAN E.5/E.12/E.22/A.18）
     lastGoal: computed(() => activeLoop.value?.goal.value ?? ''),
@@ -359,35 +344,7 @@ export function useAutoLoop() {
   }
 }
 
-// [P3-2c2] submitDecision 接入真实决策通道
-/**
- * 用户对决策卡的回答入口（快捷选项 / 取消 / 自定义文本）
- * [WHY] 决策卡由脚本的 __AI_RUNNER_DECISION__ 标记产生；用户的回答以文本形式回填给 AI 续推
- * [CONSTRAINT] id 三档：'__cancel__' 表示停止循环、'__custom__' 用 customText、其余匹配 options.id 取 label
- * [CHANGE-IMPACT] 会置 pendingDecision=null 并调用 transport.sendFill；回答内容格式是 AI 侧解析契约
- * @param id 选项 id 或两个内建标识（__cancel__ / __custom__）
- * @param customText 自定义回答文本；仅 id='__custom__' 时使用
- */
-function submitDecision(id: string, customText?: string): void {
-  const pd = pendingDecision.value
-  if (!pd) return
-  const opt = pd.options.find(o => o.id === id)
-  const answer = id === '__cancel__'
-    ? '【取消】用户取消循环，停止输出脚本。'
-    : id === '__custom__'
-      ? String(customText || '').trim() || '（空回答）'
-      : opt ? opt.label : id
-  pendingDecision.value = null
-  // [no-non-null-v1] 捕获局部变量：避免后续取 activeLoop.value! 时若被其他回调清空会拿到 null
-  const inst = activeLoop.value
-  const t = inst ? getTransport() : null
-  if (t && inst) {
-    const ok = loopPaused.value ? false : t.sendFill('', { prompt: `【决策回答】${answer}` })
-    if (ok) {
-      enterWaiting(inst)
-    }
-  }
-}
+// [decision-v1] submitDecision 已抽到 auto-loop/decision.ts
 export { onNewSessionCreated, onSummary, startHandoff, SUMMARY_INSTRUCTION }
 
 // 类型 re-export

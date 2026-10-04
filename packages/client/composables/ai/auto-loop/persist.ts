@@ -2,6 +2,7 @@
 // 刷新后不自动续跑：活动态在 restore 时降级为 stopped，供用户「再来一次」。
 
 import type { LoopInstance, LoopState } from './types.js'
+import { setLoopState } from './transitions.js'
 
 /** sessionStorage 中持久化的循环快照结构；只存恢复所需的标量字段，不存窗口/定时器引用 */
 interface PersistShape {
@@ -55,7 +56,9 @@ export function restore(inst: LoopInstance) {
     if (!raw) return
     const snap = JSON.parse(raw) as PersistShape
     // 活动中的循环在刷新后无法续跑（窗口引用丢失）→ 标记 stopped 供用户查看
-    const activeStates: LoopState[] = ['running', 'waiting', 'parsing', 'executing', 'feedback']
+    // [restore-active-states-v1] 补齐 preparing / handoff / waiting-input / paused / budget-limited：
+    // 刷新时非终态应恢复为 stopped 供用户查看；原集合只覆盖 5 态导致这些状态下刷新无提示（隐藏 bug）
+    const activeStates: LoopState[] = ['running', 'preparing', 'waiting', 'parsing', 'executing', 'feedback', 'handoff', 'waiting-input', 'paused', 'budget-limited']
     if (activeStates.includes(snap.state)) {
       inst.id.value = snap.loopId
       inst.goal.value = snap.loopGoal
@@ -63,7 +66,8 @@ export function restore(inst: LoopInstance) {
       inst.startCommit.value = snap.loopStartCommit
       // [U4] 携带进度信息，方便用户判断是否「再来一次」
       inst.stopReason.value = `页面刷新中断 · 已完成 ${snap.loopRound} 轮 · 可点「再来一次」继续`
-      inst.state.value = 'stopped'
+      // [transitions-v1] RESTORE 事件：任意活动态 → stopped（刷新降级）
+      setLoopState(inst, 'RESTORE')
       persist(inst)
     }
   } catch { /* swallow: JSON 损坏 / 结构不符，保持 idle 由用户手动启动 */ }

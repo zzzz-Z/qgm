@@ -1,9 +1,12 @@
 // [pause-control-v1] 从 useAutoLoop.ts 抽出（PLAN P0-2 瘦身）；pause/resume 家族 8 个动作
+import { TOAST_DEFAULT, TOAST_MEDIUM, TOAST_SHORT_MEDIUM, TOAST_VERY_LONG } from '../../../utils/toast-durations'
+// [restore-import-v1] log 早前按 auto-import 名单清理时误删（app 侧兜底可跑，但 tsc --noEmit / vitest 无该插件）
+import { log } from '../../../utils/log'
 import { getTransport } from '../useAiTransport.js'
 import type { ComputedRef, Ref } from 'vue'
 import type { LoopInstance } from './types.js'
+import { setLoopState } from './transitions.js'
 import { toast } from '../../ui/useToast'
-import { log } from '../../../utils/log'
 import { getActiveWin } from '../useAiWindow'
 import { useRuntime } from '../useRuntime.js'
 import { useRunner } from '../../runner/useRunner'
@@ -50,10 +53,11 @@ export function createPauseControl(deps: PauseControlDeps) {
     loopPaused.value = false
     try { getTransport().unMute?.() } catch { /* ignore */ }
     bindKeyboard()
-    inst.state.value = 'waiting'
+    // [transitions-v1] RESUME 事件：paused → waiting
+    setLoopState(inst, 'RESUME')
     persist(inst)
     enterWaiting(inst)
-    toast('▶ 已恢复循环', 'success', 3000)
+    toast('▶ 已恢复循环', 'success', TOAST_DEFAULT)
   }
 
   /**
@@ -74,7 +78,7 @@ export function createPauseControl(deps: PauseControlDeps) {
     if (inst && isInstActive(inst)) {
       await finish(inst, 'interrupted', wasPaused ? '用户点「发送」，从暂停回到待发' : '用户点「发送」，结束当前循环')
     }
-    toast('已结束循环 · 可重新点「发送」', 'info', 2500)
+    toast('已结束循环 · 可重新点「发送」', 'info', TOAST_SHORT_MEDIUM)
   }
   /**
    * 执行 resume Loop
@@ -93,17 +97,16 @@ export function createPauseControl(deps: PauseControlDeps) {
     inst.lastHash.value = ''
     bindKeyboard()
     inst.round.value += 1
-    inst.state.value = 'waiting'
+    // [transitions-v1] RESUME 事件：budget-limited → waiting
+    setLoopState(inst, 'RESUME')
     persist(inst)
     enterWaiting(inst)
-    toast(`▶ 续跑，从第 ${inst.round.value} 轮开始`, 'success', 4000)
+    toast(`▶ 续跑，从第 ${inst.round.value} 轮开始`, 'success', TOAST_MEDIUM)
   }
 
   // [P3-6] sendFill 后统一 ACK 追踪（3s 未回则落 trace；不阻断循环）
 
-  // ============================================================================
   // 用户中断
-  // ============================================================================
 
   /** Esc 暂停：中断当前执行 + 静音，但循环状态保留为 paused，可恢复 */
   function requestPause() {
@@ -125,7 +128,7 @@ export function createPauseControl(deps: PauseControlDeps) {
       inst.stopRequest.value = 'none'
     }
     // [pause-fix-v3] sendStop 失败不再静默：toast 区分信号是否送达
-    toast(stopSent ? '已暂停 · 点「发送」可结束循环回到待发状态' : '已暂停，但停止信号未送达 AI 窗口', 'warn', 3000)
+    toast(stopSent ? '已暂停 · 点「发送」可结束循环回到待发状态' : '已暂停，但停止信号未送达 AI 窗口', 'warn', TOAST_DEFAULT)
   }
 
   /**
@@ -169,13 +172,13 @@ export function createPauseControl(deps: PauseControlDeps) {
           body: JSON.stringify({ ref: inst.startCommit.value }),
         })
         const d = await r.json()
-        if (!d.ok) toast(`回滚失败：${d.reason || '未知错误'}`, 'error', 5000)
-        else toast(`已回滚到 ${inst.startCommit.value}`, 'success', 5000)
+        if (!d.ok) toast(`回滚失败：${d.reason || '未知错误'}`, 'error', TOAST_VERY_LONG)
+        else toast(`已回滚到 ${inst.startCommit.value}`, 'success', TOAST_VERY_LONG)
       } catch (e) {
-        toast(`回滚请求失败：${String(e)}`, 'error', 5000)
+        toast(`回滚请求失败：${String(e)}`, 'error', TOAST_VERY_LONG)
       }
     } else {
-      toast('无循环起点 commit，跳过 git 回滚', 'warn', 4000)
+      toast('无循环起点 commit，跳过 git 回滚', 'warn', TOAST_MEDIUM)
     }
     await finish(inst, 'interrupted', `用户急停并回滚到 ${inst.startCommit.value || '（无）'}`)
   }

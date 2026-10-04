@@ -31,7 +31,7 @@ const AI_PROBE_ROOT_RE = /^\.ai-(?!runner[/\\]).+/
  * 把根级 .ai-* 路径重写到 .ai-runner/probe/ 下；其他路径原样返回
  * @param rel 相对项目根的路径（正斜杠或平台分隔符）
  */
-export function redirectProbePath(rel: string): string {
+function redirectProbePath(rel: string): string {
   return AI_PROBE_ROOT_RE.test(rel) ? `.ai-runner/probe/${rel}` : rel
 }
 
