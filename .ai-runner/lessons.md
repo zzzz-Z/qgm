@@ -876,3 +876,15 @@ tsc 报 `Index signature for type 'string' is missing in type 'RejectLogEntry'`�
 ## DONE 采集侧不去重，会追加同文重复
 
 本轮再次出现（L757/L759，与 WO-07 时同一机制）。清掉后 pending 不变（因为这条原本在 22 条里、且不增不减）—— 但记录层面是脏数据，本次已手工订正。修复采集侧不在本会话范围（见遗留风险）。
+
+## vitest 对新建测试文件存在缓存
+
+`packages/core/tests/crash-recursion-guard.node-test.ts` 写入后首次运行报「旧测试名 + 2 failed」，磁盘文件确为新版。清 `node_modules/.vite` 缓存后 3 项全绿。守卫测试失败时，先 `readText` 核对磁盘实况，勿直接改断言。
+
+## 静态守卫测试的裸文本断言易被注释误伤
+
+`console.error` 出现在注释里会被 `filter` 误判为「裸调用」。过滤条件需同时排除 `//` 开头行与 `try { console.error` 前缀行。
+
+## `__AI__.shell(['rm','-rf',...])` 被黑名单拦截（`SECURITY_BLOCKED: rm-recursive-force`）
+
+清理 vite 缓存应避免强删，改用 vitest 的 `--no-cache` 或直接重跑。

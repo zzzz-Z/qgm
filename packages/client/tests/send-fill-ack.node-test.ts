@@ -87,7 +87,7 @@ describe('sendFillToAsync（WO-20261006-01 fill-ack 闭环，宿主侧动态补�
     assert.equal(await pending, 'failed')
   })
 
-  it('ackId 不匹配的回执被忽略（并发防串话的前提）→ 走超时 failed', async () => {
+  it('ackId 不匹配的回执被忽略（并发防串话的前提）→ 走超时 unacked', async () => {
     stubHostWindow()
     const { win, sent } = makeTarget()
     setWindowEntry('s1', { win, url: URL_OK })
@@ -95,27 +95,27 @@ describe('sendFillToAsync（WO-20261006-01 fill-ack 闭环，宿主侧动态补�
     const pending = sendFillToAsync('s1', { prompt: 'p' }, 40)
     dispatch({ type: 'ai-runner:fill-ack', ackId: 'fa_others', ok: true })
     dispatch({ type: 'ai-runner:other', ackId: sent[0].msg.ackId, ok: true })
-    assert.equal(await pending, 'failed')
+    assert.equal(await pending, 'unacked')
     assert.ok(Date.now() - t0 >= 30, '不该被无关帧提前 resolve')
   })
 
-  it('无回执 → timeoutMs 后 failed（就绪竞态的兜底路径）', async () => {
+  it('无回执 → timeoutMs 后 unacked（旧版油猴不回 fill-ack 的兜底路径，调用方降级为已发送）', async () => {
     stubHostWindow()
     const { win } = makeTarget()
     setWindowEntry('s1', { win, url: URL_OK })
     const t0 = Date.now()
     const r = await sendFillToAsync('s1', { prompt: 'p' }, 30)
-    assert.equal(r, 'failed')
+    assert.equal(r, 'unacked')
     assert.ok(Date.now() - t0 >= 25, `应等满超时窗口，实际 ${Date.now() - t0}ms`)
     assert.equal(listeners.size, 0, '超时后也必须移除监听')
   })
 
-  it('postMessage 抛错（跨域异常）→ 立即 failed', async () => {
+  it('postMessage 抛错（跨域异常）→ 立即 unacked（发帧结果未知，非油猴明确拒绝）', async () => {
     stubHostWindow()
     const { win } = makeTarget({ throwOnPost: true })
     setWindowEntry('s1', { win, url: URL_OK })
     const r = await sendFillToAsync('s1', { prompt: 'p' })
-    assert.equal(r, 'failed')
+    assert.equal(r, 'unacked')
     assert.equal(listeners.size, 0)
   })
 
@@ -149,5 +149,13 @@ describe('waitWindowReady 接线（结构性断言，与 fill-ack 闭环配套�
       '就绪判据必须同时接受 session-id / reply / fill-ack 三种回信',
     )
     assert.ok(src.includes('await waitWindowReady('), 'openAiSession 新窗口分支必须实际等待就绪')
+  })
+
+  it('unacked 必须被降级为按已发送处理（fillWithDegrade 接线，旧版油猴兼容）', () => {
+    const src = readFileSync(new URL('../composables/ai/useAiWindow.ts', import.meta.url), 'utf8')
+    assert.ok(src.includes('function fillWithDegrade'), '降级包装必须存在')
+    assert.ok(/r !== .unacked./.test(src), 'unacked 分支必须被显式拦截')
+    assert.ok(!src.includes('await sendFillToAsync(sid, { prompt: finalPrompt'), 'copyAndFill 内不得绕过降级包装直调 sendFillToAsync')
+    assert.ok((src.match(/fillWithDegrade\(sid,/g) || []).length === 3, 'copyAndFill 三个窗口分支都必须走降级包装')
   })
 })

@@ -27,6 +27,11 @@
       "url": "https://github.com/honojs/skills/blob/HEAD/skills/hono/SKILL.md"
     },
     {
+      "name": "playwright",
+      "source": "fellipeutaka/leon",
+      "url": "https://github.com/fellipeutaka/leon/blob/HEAD/skills/playwright/SKILL.md"
+    },
+    {
       "name": "playwright-skill",
       "source": "lackeyjb/playwright-skill",
       "url": "https://github.com/lackeyjb/playwright-skill/blob/HEAD/skills/playwright-skill/SKILL.md"
@@ -85,6 +90,11 @@
       "name": "vitest",
       "source": "antfu/skills",
       "url": "https://github.com/antfu/skills/blob/HEAD/skills/vitest/SKILL.md"
+    },
+    {
+      "name": "vitest-testing",
+      "source": "oakoss/agent-skills",
+      "url": "https://github.com/oakoss/agent-skills/blob/HEAD/skills/vitest-testing/SKILL.md"
     },
     {
       "name": "vue",

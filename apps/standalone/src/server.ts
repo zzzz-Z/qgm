@@ -51,17 +51,24 @@ const CRASH_LOG_MAX_BYTES = 2 * 1024 * 1024
  * @param kind - 事件名（uncaughtException / unhandledRejection）
  * @param e - 异常或拒绝原因
  */
+let _inCrash = false
 function logCrash(kind: string, e: unknown): void {
-  const err = e instanceof Error ? e : new Error(String(e))
-  console.error(`✗ [air-server] ${kind}（已兜住，进程继续运行）: ${err.message}`)
+  // [crash-recursion-guard-v1] stderr 断开(EIO)时 console.error 本身抛异常 → 再触发 uncaughtException → 无限递归
+  //   实测 2026-10-05：295ms 内 933 次同源崩溃。故：① 递归闸门 ② 首句写 stderr 必须兜住 ③ catch 内不得再写 stderr
+  if (_inCrash) return
+  _inCrash = true
   try {
-    const file = crashLogPath()
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    const size = fs.existsSync(file) ? fs.statSync(file).size : 0
-    if (size > CRASH_LOG_MAX_BYTES) fs.writeFileSync(file, '')
-    fs.appendFileSync(file, `[${new Date().toISOString()}] ${kind}: ${err.message}\n${err.stack || '(无堆栈)'}\n\n`)
-  } catch (werr) {
-    console.error('[air-server] 崩溃日志写入失败:', werr)
+    const err = e instanceof Error ? e : new Error(String(e))
+    try { console.error(`✗ [air-server] ${kind}（已兜住，进程继续运行）: ${err.message}`) } catch { /* stderr 已断，仅落盘 */ }
+    try {
+      const file = crashLogPath()
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      const size = fs.existsSync(file) ? fs.statSync(file).size : 0
+      if (size > CRASH_LOG_MAX_BYTES) fs.writeFileSync(file, '')
+      fs.appendFileSync(file, `[${new Date().toISOString()}] ${kind}: ${err.message}\n${err.stack || '(无堆栈)'}\n\n`)
+    } catch { /* 落盘也失败时不再写 stderr，避免二次递归 */ }
+  } finally {
+    _inCrash = false
   }
 }
 process.on('uncaughtException', (e) => { logCrash('uncaughtException', e) })

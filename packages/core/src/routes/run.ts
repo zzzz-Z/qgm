@@ -131,8 +131,13 @@ runHono.post('/run', async (c) => {
         // 与响应体里的 scriptSize 同口径（都量 effectiveScript）：两处数字必须可比
         sizeScope: 'effective',
       })
+      // [top-await-hint-v1] 顶层 await 是 /run 最高频的「原地重试陷阱」（2026-10-06 实测两个会话连踩 5+ 次）：
+      //   脚本按 CJS 形态加载，顶层 await 必然语法错误；裸报错不给出路时 AI 只会换个写法再撞同一堵墙。
+      const topAwaitHint = /await is only valid in async/.test(syntax.error || '')
+        ? '。/run 脚本不支持顶层 await：请把异步逻辑包进 `;(async () => { ... })()` 再提交'
+        : ''
       return c.json({
-        error: `脚本语法错误：${syntax.error}`,
+        error: `脚本语法错误：${syntax.error}${topAwaitHint}`,
         syntaxError: true,
         truncated: syntax.truncated,
         scriptSize: measureScriptSize(effectiveScript),

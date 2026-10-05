@@ -122,6 +122,28 @@ async function _prependFirstPromptRules(prompt: string): Promise<string> {
  * @param prompt 待发送的原始问题；空串直接返回 failed
  * @param opts.forceRules true 时绕过 sid 去重，开新窗时强制注入规则
  */
+// [unacked-degrade-v1] 「未回执」一次性提示标记：旧版油猴不回 fill-ack，每次 fill 都提示会刷屏
+let _unackedHintShown = false
+
+/**
+ * fill 降级包装：把 sendFillToAsync 的三态收敛为调用方可用的二元语义
+ * [WHY] unacked（超时/抛错，发帧结果未知）≠ failed：旧版油猴不回 fill-ack 时 fill 实际已被处理，
+ *   硬判 failed 会让「新窗口加载系统提示词」每次都弹「首问未送达」误报（用户实测 2026-10-06）。
+ *   降级为按已发送处理（与 WO-01 之前的 fire-and-forget 行为一致），并一次性提示更新油猴脚本；
+ *   只有油猴明确拒绝（ack ok=false）才报真错误。
+ * [CONSTRAINT] win=null / origin="" 的 failed 是「明知没有窗口」，不经过本函数降级
+ */
+async function fillWithDegrade(sid: string, payload: { prompt: string, images?: string[] }): Promise<'sent' | 'failed'> {
+  const r = await sendFillToAsync(sid, payload)
+  if (r !== 'unacked') return r
+  log.warn('[copyAndFill] fill 未收到回执（油猴脚本可能为旧版），降级按已发送处理 sid=', sid)
+  if (!_unackedHintShown) {
+    _unackedHintShown = true
+    toast('AI 窗口未回执：油猴脚本可能为旧版（不回 fill-ack），已按已发送处理；建议更新油猴脚本以获得准确的送达判定', 'warn')
+  }
+  return 'sent'
+}
+
 export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean, skipRules?: boolean, images?: string[] }): Promise<FillResult> {
   if (!prompt) return 'failed'
   let finalPrompt = prompt
@@ -173,9 +195,9 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
   // 1. 内存里有引用且活着
   let win = getActiveWin()
   if (win && !win.closed) {
-    const r = await sendFillToAsync(sid, { prompt: finalPrompt, ...imagePayload })
+    const r = await fillWithDegrade(sid, { prompt: finalPrompt, ...imagePayload })
     if (r === 'failed') {
-      log.warn('[copyAndFill] B1 sendFillToAsync failed sid=', sid, 'name=', name)
+      log.warn('[copyAndFill] B1 fill failed sid=', sid, 'name=', name)
       toast('首问未送达（窗口未就绪/输入框未就绪）；完整内容已复制到剪贴板，请手动粘贴', 'error')
     }
     return r
@@ -193,7 +215,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
   } catch { /* cross-origin 抛错视为找回失败 */ }
 
   if (win && !win.closed) {
-    const ok1 = await sendFillToAsync(sid, { prompt: finalPrompt, ...imagePayload })
+    const ok1 = await fillWithDegrade(sid, { prompt: finalPrompt, ...imagePayload })
     if (ok1 === 'sent') return 'sent'
   }
 
@@ -201,7 +223,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
   const w = openSite()
   if (w) {
     await promiseTimeout(1500)
-    const ok2 = await sendFillToAsync(sid, { prompt: finalPrompt, ...imagePayload })
+    const ok2 = await fillWithDegrade(sid, { prompt: finalPrompt, ...imagePayload })
     if (ok2 === 'failed') {
       toast('首问未送达（窗口未就绪/输入框未就绪）；完整内容已复制到剪贴板，请手动粘贴', 'error')
     }

@@ -441,7 +441,8 @@ export function readTaskState(sid?: string): TaskState {
  */
 function getSessionId(): string {
   if (_sessionId) return _sessionId
-  const env = process.env.AIR_SESSION_ID
+  // [session-single-source-v1] 主读 AI_RUNNER_SESSION_ID（与沙箱注入名一致），AIR_SESSION_ID 保留兼容
+  const env = process.env.AI_RUNNER_SESSION_ID ?? process.env.AIR_SESSION_ID
   _sessionId = env && env.length ? env : `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   return _sessionId
 }
@@ -617,7 +618,8 @@ export function commitTaskState(next: TaskState, sid?: string, expectedVersion?:
     ...(sid ? {} : next),
     tasksBySid: nextBySid,
     version: prevVersion + 1,
-    sessionId: getSessionId(),
+    // [session-single-source-v1] 有真 sid 时以它为最近活跃会话，保证 sessionId ∈ tasksBySid keys
+    sessionId: sid || getSessionId(),
   }
   const tmp = `${statePath()}.tmp-${process.pid}`
   fs.writeFileSync(tmp, JSON.stringify(merged, null, 2))

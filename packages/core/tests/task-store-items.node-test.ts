@@ -266,3 +266,22 @@ test('回归: applyTaskMutation 无 items 时从 todo/done 自举（旧调用方
   assert.equal(next.running, '')
   assert.deepEqual(next.done.map(d => d.item), ['Z', 'A'])
 })
+// [session-single-source-v1] 写端 sessionId: sid || getSessionId() 的守卫：
+//   回退到无条件 getSessionId() 时，state.sessionId 变随机值，本组必红。
+test('P0-1: state.sessionId 与 tasksBySid keys 一致（单 sid）', () => {
+  const dir = withTempRoot({ round: 0, status: 'idle' })
+  commitTaskState(makeState({ items: [item('A')] }), 'sid-a')
+  const disk = JSON.parse(fs.readFileSync(path.join(dir, '.ai-runner', 'state.json'), 'utf8'))
+  const st = readTaskState()
+  assert.equal(st.sessionId, 'sid-a', 'sessionId 应为真 sid 而非随机生成')
+  assert.ok(Object.keys(disk.tasksBySid).includes('sid-a'), 'sid-a 应在 tasksBySid')
+  assert.ok(Object.keys(disk.tasksBySid).includes(st.sessionId), 'sessionId 必须 ∈ tasksBySid keys')
+})
+
+test('P0-1: 多 sid 时 sessionId 等于最后写入的 sid', () => {
+  withTempRoot({ round: 0, status: 'idle' })
+  commitTaskState(makeState({ items: [item('A')] }), 'sid-a')
+  commitTaskState(makeState({ items: [item('B')] }), 'sid-b')
+  const st = readTaskState()
+  assert.equal(st.sessionId, 'sid-b', '多会话共存时 sessionId 取最近活跃')
+})

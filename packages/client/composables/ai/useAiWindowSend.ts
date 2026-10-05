@@ -90,20 +90,25 @@ export function sendFill(payload: FillPayload): boolean {
 }
 
 /**
- * 异步 fill：发帧后等油猴回 fill-ack，超时判 failed
+ * 异步 fill：发帧后等油猴回 fill-ack；明确拒绝 = failed，超时/抛错 = unacked（结果未知）
  * [WHY] 同步 sendFillTo 的 postMessage 恒返回 true，对端是否存在/是否处理完全不可知 → UI 假「已发送」
+ * [unacked-degrade-v1] 原实现在超时时硬判 failed → 旧版油猴（不回 fill-ack，仓库脚本须手动更新）
+ *   每次新窗口注入系统提示词必弹「首问未送达」报错，但 fill 实际已被处理 → 误报。
+ *   三态化：ack ok=true → sent；ack ok=false → failed（油猴明确说没送达）；
+ *   超时/postMessage 抛错 → unacked（发帧结果未知，由调用方降级为按已发送处理并提示更新油猴）
  * [CONSTRAINT] ackId 由本函数生成并随帧下发；只匹配自己的 ackId，避免并发 fill 串话
- * [CHANGE-IMPACT] 新窗口路径（copyAndFill 三处）改调本函数；循环轮次内路径仍用 sendFillTo（行为不变）
+ * [CHANGE-IMPACT] 返回类型从二元改三态：调用方（useAiWindow.fillWithDegrade 与测试）需同步适配；
+ *   循环轮次内路径仍用 sendFillTo（行为不变）
  */
-export function sendFillToAsync(sid: string, payload: FillPayload, timeoutMs = 5000): Promise<'sent' | 'failed'> {
+export function sendFillToAsync(sid: string, payload: FillPayload, timeoutMs = 5000): Promise<'sent' | 'failed' | 'unacked'> {
   const win = getWindowBySid(sid)
   if (!win) { log.warn('[sendFillToAsync] win=null sid=', sid); return Promise.resolve('failed') }
   const origin = targetOriginFor(sid)
   if (!origin) { log.warn('[sendFillToAsync] origin="" sid=', sid); return Promise.resolve('failed') }
   const ackId = `fa_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-  return new Promise<'sent' | 'failed'>((resolve) => {
+  return new Promise<'sent' | 'failed' | 'unacked'>((resolve) => {
     let done = false
-    function finish(r: 'sent' | 'failed'): void {
+    function finish(r: 'sent' | 'failed' | 'unacked'): void {
       if (done) return
       done = true
       window.removeEventListener('message', onMsg)
@@ -122,10 +127,10 @@ export function sendFillToAsync(sid: string, payload: FillPayload, timeoutMs = 5
       win.postMessage({ type: 'ai-runner:fill', ...payload, ackId }, origin)
     } catch (e) {
       log.warn('[sendFillToAsync] postMessage threw', e)
-      finish('failed')
+      finish('unacked')
       return
     }
-    setTimeout(finish, timeoutMs, 'failed')
+    setTimeout(finish, timeoutMs, 'unacked')
   })
 }
 
