@@ -68,9 +68,16 @@ const config: Promise<Linter.Config[]> = antfu({
   // [review-doc-exempt-v1] 审查报告用代码块引用现有代码作为证据，那些片段本来就不该
   // 被当作可运行示例检查：它们摘录的是问题现状，变量未使用正是被举报的现象本身。
   // WHY: 全仓库关掉 markdown lint 会让所有文档示例失去质量保障，只豁免审查类文档。
-  // CONSTRAINT: 仅 REVIEW 类文档豁免；普通指南/教程类 md 仍受 markdown 规则约束。
+  // CONSTRAINT: 仅 REVIEW / AUDIT 类文档豁免；普通指南/教程类 md 仍受 markdown 规则约束。
   // CHANGE-IMPACT: 新增审查报告无需再为代码块加 eslint-disable。
-  files: ['docs/*REVIEW*.md', 'docs/*AUDIT*.md'],
+  // [review-doc-exempt-v2] 大小写三态各写一遍：minimatch 的 files 是大小写敏感的，
+  //   原版只写 `*REVIEW*` ⇒ 实际命名 `defect-review.md`（小写）**不匹配**、拿不到豁免（实测）。
+  // [CONSTRAINT] 本豁免只关 no-unused-vars，**管不了围栏伪代码**：```ts 里的省略号/裸对象字面量
+  //   会被当 TS 解析并报 parsing error。节选与伪代码请用 ```text 围栏（见 AGENTS.md 独有约束）。
+  files: [
+    'docs/**/*{REVIEW,Review,review}*.md',
+    'docs/**/*{AUDIT,Audit,audit}*.md',
+  ],
   rules: {
     'unused-imports/no-unused-vars': 'off',
     'ts/no-unused-vars': 'off',

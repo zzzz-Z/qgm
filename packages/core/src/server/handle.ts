@@ -74,7 +74,24 @@ export async function handle(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const url = new URL(req.url || '/', 'http://localhost')
+  // [url-parse-guard-v3] req.url 是**任意字节串**，不一定能被 URL 解析：
+  //   `GET // HTTP/1.1` ⇒ new URL('//', 'http://localhost') 抛 ERR_INVALID_URL。
+  // [WHY] 本函数是所有业务的唯一分发入口（业务 → 首页 → launcher → 404），抛出后只会落到
+  //   调用方的 `.catch`（apps/standalone/src/server.ts、apps/vite-plugin/src/plugin.ts）
+  //   被统一记成 **500** —— 而「请求目标畸形」是**客户端过错**，正确语义是 400。
+  //   实测：修完 serveStatic 之后，`GET //` 的响应从「挂到超时」变成 500 Internal Server Error。
+  // [CONSTRAINT] 必须在这里判掉：下钻的 nodeToFetchRequest（hono-bridge）会**再次**解析同一个
+  //   req.url，此处放行即等于把它一起覆盖；hono-bridge 的调用方只有本函数这一处。
+  // [CHANGE-IMPACT] 畸形目标由「500 + 堆栈噪音」变为「400 Bad Request」；422/415 等既有语义不变。
+  //   由 url-parse-guard.node-test.ts 守卫。
+  let url: URL
+  try {
+    url = new URL(req.url || '/', 'http://localhost')
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' })
+    res.end('Bad Request')
+    return
+  }
   const pathname = url.pathname
 
   if (await dispatchHono(req, res, url)) return

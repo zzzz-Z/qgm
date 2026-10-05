@@ -121,6 +121,12 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
     （`verifyFillSentInPage` 拒收判定 + `resetReplyDedupInPage` 基线），由 `rate-marker-guard` 守卫。
 - **`eslint --fix` 会重写正则**（`regexp/no-useless-non-capturing-group` 删冗余非捕获组），
   fix 之后必须重跑上述三处一致性对比再提交。
+- **审查类文档里的「节选」「伪代码」必须用 `text` 语言标注围栏**：`docs/**` 的 md 经 markdown
+  处理器会把标为 `ts` 的代码块当**真实可解析的 TS** 送去解析，节选片段（`{ ... }` 省略号、
+  顶层裸对象字面量）会直接报 parsing error 把 `pnpm lint` / `pnpm verify` 卡红。
+  `eslint.config.ts` 的 `[review-doc-exempt-v1]` 只关掉 `no-unused-vars`，**管不了解析错误**；
+  它现在按大小写三态匹配（`REVIEW`/`Review`/`review`），所以 `defect-review.md` 这类命名能拿到豁免。
+  只有能独立编译的示例才写 `ts`。
 - **模板里不要对 auto-import 符号赋值**：会生成 `__unimport_xxx`，
   dev 不报错但 build 阶段抛 `Cannot assign to this expression`。需要可变就显式 import。
 - **`scripts/anchors.json` 的 `file` 必须是相对仓库根的完整路径**：校验器只做

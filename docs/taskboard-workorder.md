@@ -55,6 +55,7 @@
 3. 沙箱提供 `__AI__.tasks.list()` 读回，AI 可见自己的看板；
 4. 面板消费结构化任务（含 failed 态），连续拉取失败给出陈旧提示；
 5. POST 写入加乐观锁（version 前置条件），冲突返回 409 由调用方重试一次。
+   > [doc-sync-v1] 第 5 条是**原设计**，未按此实现：改走服务端 CAS + 重放（无 `expectVersion` 字段、无 409），见 §四 W5「实施版」与 §九 偏差。
 
 ### 非目标（本单明确不做）
 
@@ -122,7 +123,8 @@
 - G3（P0-3）：`startedAt` 超阈值的 running 投影回 pending 且带 `expiredRunning`；未超阈值不动。
 - G4（W2）：`fail()` 后项进 failed 态，面板渲染 ✗（组件测试断言 class）。
 - G5（W3）：`tasks.list()` 返回全量 items；服务不可达时 `{ok:false}` 不抛。
-- G6（W5）：`expectVersion` 不符返回 409 且磁盘不被改写；相符则正常写入。
+- G6（W5）：`commitTaskState(next, sid, expectedVersion)` 的 `expectedVersion` 与磁盘版本不符时**磁盘不被改写**（返回冲突、由 `mutateTaskState` 重放，最多 5 次，耗尽 `degraded: true`）；相符则正常写入。
+  > [doc-sync-v1] 本条原写「`expectVersion` 不符返回 409」——那是 W5 的**原设计**，已在 §九 改方案（服务端 CAS + 重放，取消客户端 409 协议），全仓无 `expectVersion` 字段。判据必须描述已实现的行为，否则这条判据本身失效。
 - G7（兼容）：旧格式 state.json（纯 `todo: string[]`）读后升格为 items 且 done 时刻不丢。
 - G8（既有守卫不回退）：`taskboard-sid-guard`、`task-progress-panel` 既有断言全绿。
 - 端到端：`pnpm build` → 重启 → `curl /__ai/tasks` 实测新字段存在（**运行时 ≠ 源码**：以活端点行为为准，不以「已 build + restart」自述为准）；源码 mtime 必须 < 产物 mtime。

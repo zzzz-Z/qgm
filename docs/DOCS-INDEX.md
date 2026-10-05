@@ -23,13 +23,15 @@
 
 ## docs/
 
-| 路径                             | 作用                                                                                                               |
-| :------------------------------- | :----------------------------------------------------------------------------------------------------------------- |
-| `docs/DOCS-INDEX.md`             | 本文件。全仓文档一览 + 维护规则。                                                                                  |
-| `docs/USAGE.md`                  | 打包后四种使用形态：仓库内 dev / 构建产物自托管 / 发布安装到外部项目 / Docker 容器运行。                           |
-| `docs/FRONTEND-REVIEW.md`        | 前端（`packages/client`）全量审查：3 个高风险隐藏 Bug、22 项 P1/P2 缺陷、死代码清单与优化点，含 `file:line` 证据。 |
-| `docs/session-view-diagnosis.md` | 会话展示台前置诊断：资产盘点（哪些组件/composable 可复用）、展示台该收口在哪个环节。                               |
-| `docs/taskboard-workorder.md`    | 任务看板改造工单：问题清单（附 file:line 证据）、P0-P2 分级、W1-W5 改造方案、承重验收判据与回滚。                  |
+| 路径                                 | 作用                                                                                                                 |
+| :----------------------------------- | :------------------------------------------------------------------------------------------------------------------- |
+| `docs/DOCS-INDEX.md`                 | 本文件。全仓文档一览 + 维护规则。                                                                                    |
+| `docs/USAGE.md`                      | 打包后四种使用形态：仓库内 dev / 构建产物自托管 / 发布安装到外部项目 / Docker 容器运行。                             |
+| `docs/FRONTEND-REVIEW.md`            | 前端（`packages/client`）全量审查：3 个高风险隐藏 Bug、22 项 P1/P2 缺陷、死代码清单与优化点，含 `file:line` 证据。   |
+| `docs/session-view-diagnosis.md`     | 会话展示台前置诊断：资产盘点（哪些组件/composable 可复用）、展示台该收口在哪个环节。                                 |
+| `docs/taskboard-workorder.md`        | 任务看板改造工单：问题清单（附 file:line 证据）、P0-P2 分级、W1-W5 改造方案、承重验收判据与回滚。                    |
+| `docs/defect-review.md`              | 应用缺陷分析报告：e2e 套件、Playwright 配置、构建链路、仓库卫生共 5 项缺陷（P0-P3），含 file:line 证据与修复优先级。 |
+| `docs/defect-review-verification.md` | 缺陷复验报告（逻辑级）：对 defect-review.md 的 D1-D11 逐条复验，含源码级逻辑推演与独立哈希取证。                     |
 
 ## 规则与包说明
 

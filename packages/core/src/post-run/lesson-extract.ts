@@ -28,6 +28,46 @@ function stripBullet(line: string): string | null {
   return null
 }
 
+/**
+ * 位置 at 是否落在行内代码（反引号对内）里
+ * [WHY] 标题/正文的分界冒号不能取行内代码里的那个。
+ * [lesson-inline-code-runs-v1] 数**反引号连续段**（runs）的奇偶，而不是单个反引号的奇偶：
+ *   CommonMark 允许用 `` `` `` 这类**多反引号定界**代码段，定界符本身贡献 2 个反引号 ⇒
+ *   旧口径（数单个反引号）会把「双反引号段内的冒号」误判成段外，于是标题仍可能从代码中间劈开。
+ *   段数奇偶对单/双/三反引号定界一律成立。写入边界另有 sanitizeTitle 兜底。
+ * @param s - 待检字符串
+ * @param at - 待检字符下标
+ * @returns true = 位于未闭合的反引号对内
+ */
+function insideInlineCode(s: string, at: number): boolean {
+  let runs = 0
+  let prevIsTick = false
+  const stop = Math.min(at, s.length)
+  for (let i = 0; i < stop; i += 1) {
+    const isTick = s[i] === '`'
+    if (isTick && !prevIsTick) runs += 1
+    prevIsTick = isTick
+  }
+  return runs % 2 === 1
+}
+
+/**
+ * 从右往左找第一个「不在行内代码里」的冒号（半角或全角）
+ * [WHY] 无粗体列表按末冒号切标题；但 `docs:verify` 这类含冒号的行内代码令牌会被
+ *   从中间劈开，产出反引号不配对、正文首截并进标题的破损条目（实测发生过两次）。
+ * @param s - 已剥掉前导粗体标记的整行
+ * @returns 下标；找不到返回 -1
+ */
+function lastSeparatorColon(s: string): number {
+  for (let i = s.length - 1; i >= 0; i -= 1) {
+    const c = s[i]
+    if (c !== ':' && c !== '\uFF1A') continue
+    if (insideInlineCode(s, i)) continue
+    return i
+  }
+  return -1
+}
+
 function splitTitleBody(raw: string): { title: string, body: string } | null {
   const s0 = raw.trim()
   // [lesson-title-boundary-v1-fix] 先记「有没有前导粗体」再剥，否则闭合探测恒假——
@@ -43,9 +83,9 @@ function splitTitleBody(raw: string): { title: string, body: string } | null {
     if (t) return { title: t, body: b }
   }
   // 无闭合粗体时按**末**冒号切（原取首冒号会把 `shell: false` 这类标题腰斩）
-  const ascii = s.lastIndexOf(':')
-  const wide = s.lastIndexOf('\uFF1A')
-  const cut = Math.max(ascii, wide)
+  // [lesson-colon-in-code-v1] 但行内代码里的冒号不算分界：`docs:verify` 被从中间劈开
+  //   会产出「反引号不配对 + 正文首截并进标题」的破损条目（实测已发生两次）。
+  const cut = lastSeparatorColon(s)
   if (cut <= 0) return null
   const title = s.slice(0, cut).replace(/\*+$/, '').trim()
   const body = s.slice(cut + 1).trim()
@@ -117,6 +157,24 @@ function readLessons(file: string): string {
 }
 
 /**
+ * 落盘前把标题规范成「单行 + 反引号配对」
+ * [WHY] 台账的解析契约是「按 `## ` 切条 + 状态写在标题后首个非空行」。标题一旦跨行或
+ *   反引号悬空，后续解析会把正文首段当成标题延续，lessons-hygiene 守卫也会直接变红
+ *   （实测：应用端两次 DONE 采集因此把 `pnpm verify` 由绿转红）。
+ *   提取侧的两条路径都可能产出破损标题（`###` 折行只取一行 / 行内代码被冒号劈开），
+ *   在写入边界兜一层不变量比逐个修补提取路径更稳。
+ * [CONSTRAINT] 只规范化，不改语义：折行并回一行、悬空反引号就地补闭合。
+ * [CHANGE-IMPACT] 由 post-run-lesson-extract.node-test.ts 的破损标题用例守卫。
+ * @param t - 提取出的原始标题
+ * @returns 合法的单行标题（反引号数为偶数）
+ */
+function sanitizeTitle(t: string): string {
+  const one = String(t || '').replace(/\s*\n\s*/g, ' ').trim()
+  const ticks = (one.match(/`/g) || []).length
+  return ticks % 2 === 1 ? `${one}\`` : one
+}
+
+/**
  * 追加到 .ai-runner/lessons.md；标题已存在则跳过。
  * [WHY] 去重按标题而非全文——同一教训的不同措辞会重复出现，标题唯一性能抓住主要重复。
  * [CONSTRAINT] 文件不存在时静默跳过（不自动创建），避免在非项目根 cwd 下写脏数据。
@@ -140,7 +198,9 @@ export function appendLessons(items: ExtractedLesson[], rootDir?: string): numbe
     if (h && h.level === 2) seen.add(norm(h.title))
   }
 
-  const fresh = items.filter(x => x.title && !seen.has(norm(x.title)))
+  const fresh = items
+    .map(x => ({ title: sanitizeTitle(x.title), body: x.body }))
+    .filter(x => x.title && !seen.has(norm(x.title)))
   if (!fresh.length) return 0
 
   const entries = fresh.map(x => `## ${x.title}\n\n${x.body || '(待补充)'}\n`)

@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { WebSocket } from 'ws'
 
 // 若被 node --test 拾取（NODE_TEST_CONTEXT 由 node 子进程自动设置），立即退出
@@ -21,6 +23,17 @@ const HTTP_URL = `http://${HOST}:${PORT}/__ai/`
 
 let child: ChildProcess | null = null
 
+// [e2e-ready-budget-v1] air-server 的就绪预算
+// [WHY] apps/standalone/bin/air-server.cjs 在「源码比 dist 新」时**先跑一次全量构建**再 listen
+//   （首行日志「检测到源码更新，先构建...」），冷启动远超原来的 15s ⇒ 该文件 7 例里 6 例「did not run」。
+// [CONSTRAINT] 本预算必须 < playwright.config.ts 的 timeout：beforeAll 钩子同样受 timeout 封顶
+//   （实测：config timeout=30s 时，钩子内睡 45s 直接以 hook timeout 失败）。
+//   当前 150s 预算 / 180s 上限 —— 让失败信息是「服务未就绪」，而不是笼统的钩子超时。
+/** 等待 air-server 就绪的最长毫秒数（可用 AIR_TEST_READY_MS 覆盖） */
+const READY_BUDGET_MS = Number(process.env.AIR_TEST_READY_MS) || 150_000
+/** 产物入口：air-server 的 build 判据（见 apps/standalone/bin/air-server.cjs） */
+const SERVER_ENTRY = 'apps/standalone/dist/_server/index.js'
+
 /**
  * 轮询等待 HTTP 服务就绪（e2e 测试辅助）
  * [WHY] dev server 启动需时间；固定 sleep 不可靠，用轮询 + 超时更稳
@@ -40,10 +53,14 @@ async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
   return false
 }
 
-// [refactor] air-server 依赖 pnpm build，被 pnpm supply-chain policy 拦截时无法启动；
+// [refactor] air-server 依赖 pnpm build；被 pnpm supply-chain policy 拦截时无法启动，
 // 该用例需在 pnpm policy 放开的环境跑，此处条件 skip
 test.beforeAll(async () => {
   if (process.env.AIR_SERVER_SKIP === '1') { test.skip(); return }
+  // [e2e-ready-budget-v1] 产物缺失时显式告警：此时 air-server 会先跑全量构建，首轮耗时最长
+  if (!existsSync(join(ROOT, SERVER_ENTRY))) {
+    console.warn(`[e2e] ${SERVER_ENTRY} 不存在 —— air-server 将先执行一次全量构建，就绪预算 ${READY_BUDGET_MS}ms`)
+  }
   child = spawn(process.execPath, ['apps/standalone/bin/air-server.cjs'], {
     cwd: ROOT,
     env: Object.assign({}, process.env, { AIR_SERVER_PORT: String(PORT), AIR_SERVER_HOST: HOST }),
@@ -51,8 +68,14 @@ test.beforeAll(async () => {
   })
   child.stdout?.on('data', d => process.stdout.write(`[air-server] ${d.toString()}`))
   child.stderr?.on('data', d => process.stderr.write(`[air-server:err] ${d.toString()}`))
-  const ready = await waitForHttp(HTTP_URL, 15000)
-  if (!ready) throw new Error(`air-server 未在 15s 内就绪（${HTTP_URL}）`)
+  const ready = await waitForHttp(HTTP_URL, READY_BUDGET_MS)
+  if (!ready) {
+    throw new Error(
+      `air-server 未在 ${READY_BUDGET_MS}ms 内就绪（${HTTP_URL}）。`
+      + `若首行日志是「检测到源码更新，先构建...」，说明它正在跑全量构建：先手动 pnpm build 再重跑，`
+      + `或用 AIR_TEST_READY_MS 提高预算。`,
+    )
+  }
 })
 
 test.afterAll(async () => {

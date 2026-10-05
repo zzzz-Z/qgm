@@ -60,7 +60,25 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
   const wss = new WebSocketServer({ noServer: true })
 
   const onUpgrade = (req: IncomingMessage, socket: Socket, head: Buffer) => {
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+    // [url-parse-guard-v2] 与 serveStatic（apps/standalone/src/server.ts）同族：req.url 是**任意字节串**，
+    //   `GET // HTTP/1.1` + Upgrade 头 ⇒ new URL('//', base) 抛 ERR_INVALID_URL（已隔离实测）。
+    // [WHY] 抛出点在 'upgrade' **事件监听器**内（注册于 httpServer.on('upgrade')），与普通请求回调不同：
+    //   这里没有调用方 .catch 接，只能落到进程级 uncaughtException。旧实现下 D8 兜底让进程没死，
+    //   但客户端**收不到任何字节**（挂到客户端超时），且每次畸形请求都往 server-crash.log 写一条
+    //   **假崩溃**（请求畸形 ≠ 服务端 bug），把真正的崩溃信号淹掉。实测：日志从 488 B 长到 859 B，
+    //   堆栈顶部是 Server.onUpgrade。
+    // [CONSTRAINT] 解析失败**只 return、绝不 socket.destroy()**：本函数与 Vite dev server 共用同一个
+    //   http server（apps/vite-plugin/src/plugin.ts 的 attachWs），HMR 的 websocket 监听器也挂在
+    //   'upgrade' 上。销毁 socket 会把本不属于我们的升级请求从 Vite 手里抢走、打死 HMR。
+    //   与既有「pathname !== WS_PATH 就 return，交给别的监听器试」保持同一策略。
+    // [CHANGE-IMPACT] 畸形目标的行为与「非 WS 路径」完全一致（不抛、不写崩溃日志、不响应）；
+    //   由 attach-ws-upgrade-guard.node-test.ts 守卫。
+    let url: URL
+    try {
+      url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+    } catch {
+      return
+    }
     if (url.pathname !== WS_PATH) return
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit('connection', ws, req)

@@ -2,6 +2,7 @@
 import { attachWs, createRouter, loadPersistedWorkspace, PREFIX, ROOT, setRoot } from '@qgm/core'
 import http from 'node:http'
 import fs from 'node:fs'
+import { pipeline } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -12,16 +13,59 @@ let PORT = Number(process.env.AIR_SERVER_PORT) || 5175
 const HOST = process.env.AIR_SERVER_HOST || '127.0.0.1'
 /** WS_PATH（相关状态/数据） */
 const WS_PATH = `${PREFIX}/ws`
-// [pkg-v1] 优先包内 dist/client（发布），回退 packages/client/dist（仓库内）
-// [pkg-v1] ESM 下无 __dirname，用 import.meta.url 求当前文件目录
+// [pkg-v1] ESM 下无 __dirname，用 import.meta.url 求当前文件目录；HERE 随运行形态变化（见下）
 /** HERE（相关状态/数据） */
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-/** CLIENT_DIST_PKG（相关状态/数据） */
-const CLIENT_DIST_PKG = path.join(HERE, '..', 'dist', 'client')
-/** CLIENT_DIST_REPO（相关状态/数据） */
-const CLIENT_DIST_REPO = path.join(ROOT, 'packages', 'client', 'dist')
+// [static-root-v1] SPA 根：优先包内 dist/client（发布自足），回退 packages/client/dist（仓库内）
+// [static-root-v1-candidates] 打包会改变目录层级，原来的单条 path.join(HERE,'..','dist','client') 只在源码态成立：
+//   - 源码态 HERE = apps/standalone/src        ⇒ apps/standalone/dist/client        ✓
+//   - 打包态 HERE = apps/standalone/dist/_server ⇒ apps/standalone/dist/dist/client  ✗（多一层 dist）
+//   ⇒ 打包态**必然**回退到仓库内 packages/client/dist（实测：哨兵文件判别 + 崩溃日志里的路径），
+//     即 build-all step 2.5 每次同步进 apps/standalone/dist/client 的 SPA **运行时永远不读**。
+// [WHY] 逐个候选做存在性探测，而不是继续猜层级；发布形态下若 cwd 不含 packages/，包内副本是唯一可用的根
+// [CHANGE-IMPACT] 打包态切到 apps/standalone/dist/client（与仓库内产物逐字节一致，含 .br/.gz 预压缩变体）
+// [CONSTRAINT] 候选顺序即优先级，由 server-bootstrap-guard.node-test.ts 守卫
+/** SPA 根候选（按优先级） */
+const CLIENT_DIST_CANDIDATES = [
+  path.join(HERE, '..', 'dist', 'client'),
+  path.join(HERE, '..', 'client'),
+  path.join(ROOT, 'packages', 'client', 'dist'),
+]
 /** CLIENT_DIST（相关状态/数据） */
-const CLIENT_DIST = fs.existsSync(CLIENT_DIST_PKG) ? CLIENT_DIST_PKG : CLIENT_DIST_REPO
+const CLIENT_DIST = CLIENT_DIST_CANDIDATES.find(p => fs.existsSync(p)) ?? CLIENT_DIST_CANDIDATES[CLIENT_DIST_CANDIDATES.length - 1]
+// [crash-guard-v1] 服务进程必须自己兜住未捕获异常
+// [WHY] 本进程不只是「一个请求的处理器」：attachWs 之后它持有全部 WebSocket 会话
+//   （含正在跑的 auto-loop / 双 AI 会议），任何一处漏 catch 都是**进程级自杀**，代价是所有会话一起断。
+//   沙箱子进程早已装了同样兜底（interceptor.cjs），服务进程此前漏装 —— D1 的静态资源崩溃只是该缺口的一个实例。
+// [CONSTRAINT] 只兜底、不静默：异常必须同时落盘 + 打 stderr。用「加兜底会掩盖 bug」拒绝兜底是错的，
+//   掩盖的代价可以用留痕抵消，而进程自杀的代价无法抵消。
+// [CHANGE-IMPACT] 未捕获异常不再退出进程；如某处确实需要崩溃退出，请显式 process.exit
+/** 崩溃日志路径（按当前 ROOT 惰性求值：ROOT 会被 setRoot 改写） */
+function crashLogPath(): string {
+  return path.join(ROOT, '.ai-runner', 'logs', 'server-crash.log')
+}
+/** 崩溃日志单文件上限：超过即清空，防长驻进程无限追加 */
+const CRASH_LOG_MAX_BYTES = 2 * 1024 * 1024
+/**
+ * 记录一次被兜住的进程级异常
+ * @param kind - 事件名（uncaughtException / unhandledRejection）
+ * @param e - 异常或拒绝原因
+ */
+function logCrash(kind: string, e: unknown): void {
+  const err = e instanceof Error ? e : new Error(String(e))
+  console.error(`✗ [air-server] ${kind}（已兜住，进程继续运行）: ${err.message}`)
+  try {
+    const file = crashLogPath()
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const size = fs.existsSync(file) ? fs.statSync(file).size : 0
+    if (size > CRASH_LOG_MAX_BYTES) fs.writeFileSync(file, '')
+    fs.appendFileSync(file, `[${new Date().toISOString()}] ${kind}: ${err.message}\n${err.stack || '(无堆栈)'}\n\n`)
+  } catch (werr) {
+    console.error('[air-server] 崩溃日志写入失败:', werr)
+  }
+}
+process.on('uncaughtException', (e) => { logCrash('uncaughtException', e) })
+process.on('unhandledRejection', (r) => { logCrash('unhandledRejection', r) })
 // [workspace-mode-v1] 生产环境启动策略：默认无工作区，仅当用户曾选择过才恢复
 // [WHY] 独立部署时 ROOT 默认进程启动目录，不应隐式视为"已选工作区"；从 ~/.ai-runner/workspace.json 恢复是唯一合法入口
 // [CONSTRAINT] 必须在 createRouter 之前调用，保证 hasWorkspace 与 ROOT 在首个请求前就位
@@ -102,8 +146,13 @@ const MIME: Record<string, string> = {
  */
 function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boolean {
   if (!fs.existsSync(CLIENT_DIST)) return false
-  const url = new URL(req.url || '/', 'http://x')
-  const p = url.pathname
+  // [url-parse-guard-v1] 请求目标是**任意字节串**，不一定能被 URL 解析：
+  //   `GET // HTTP/1.1` ⇒ new URL('//', 'http://x') 抛 ERR_INVALID_URL（已隔离实测）。
+  //   抛出点位于 http 请求回调内，Node 不会替你接住 ⇒ 旧实现下**一次畸形请求就让进程退出**
+  //   （实测复现：旧产物 exitCode=1、服务端日志是 ERR_INVALID_URL 崩溃横幅）。
+  // [CHANGE-IMPACT] 解析失败一律视为「不是静态资源」，交回上层路由兜底（那里有 .catch 收口）。
+  let p: string
+  try { p = new URL(req.url || '/', 'http://x').pathname } catch { return false }
   let rel
   if (p === PREFIX || p === `${PREFIX}/` || p === '/' || p === '/index.html') rel = '/index.html'
   else if (p.startsWith(`${PREFIX}/`)) rel = p.slice(PREFIX.length)
@@ -151,12 +200,47 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boole
     res.end()
     return true
   }
-  res.writeHead(200, {
-    'Content-Type': MIME[path.extname(abs).toLowerCase()] || 'application/octet-stream',
-    'Content-Length': String(st.size),
-    ...baseHeaders,
+  // [static-stream-guard-v1] 必须先 open 成功再写 200 头，且 stream 与 res 两侧都要有 'error' 监听者
+  // [WHY] /assets/* 的 meta 走长期缓存（loadMeta 命中即 return，不再实探磁盘），而每次构建都会清空
+  //   CLIENT_DIST ——「已缓存 + 文件暂缺」的窗口期内 stat 出来的 st 是旧值，createReadStream 才会失败
+  //   （ENOENT）。旧实现先 writeHead(200) 再 pipe：既已无法改判状态码，又让 ReadStream 的 'error'
+  //   无人接收 ⇒ unhandled 'error' ⇒ 整个 Node 进程退出（实测发生，见 prod-server.log）。
+  // [CONSTRAINT] pipe 只单向传递错误：res 侧（客户端中断）仍会漏，故用 pipeline 同时管住两端
+  // [CHANGE-IMPACT] 失败降级为 404 + 删脏缓存条目，进程不再自杀；由 static-stream-guard.node-test.ts 守卫
+  const stream = fs.createReadStream(served)
+  let opened = false
+  stream.once('open', (fd: number) => {
+    opened = true
+    // 客户端可能在 open 之前就断开：此时写头无意义，放弃这次传输
+    if (res.destroyed) { stream.destroy(); return }
+    // [static-length-fresh-v1] Content-Length 取**已打开文件**的真实大小，而不是 meta 缓存里的尺寸。
+    // [WHY] st 来自 loadMeta（/assets/* 走长期缓存）；预压缩变体可能与缓存元信息不同步
+    //   （改了压缩配置而资源内容不变时，文件名带的内容哈希不变、`.br` 字节数却变了），
+    //   陈旧长度会让客户端按旧长度截断或一直等不到结尾。fd 由 'open' 事件直接给出，一次 fstat 即可对齐。
+    // [CHANGE-IMPACT] 每个 /assets 请求多一次 fstat（同一 syscall 批次，可忽略）；
+    //   fstat 失败时仍回退 st.size，行为与旧实现一致。由 static-stream-guard 的对应用例守卫。
+    let size = st.size
+    try { size = fs.fstatSync(fd).size } catch { /* 回退 st.size */ }
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(abs).toLowerCase()] || 'application/octet-stream',
+      'Content-Length': String(size),
+      ...baseHeaders,
+    })
+    pipeline(stream, res, (err) => {
+      if (err && !res.destroyed) console.error('[air-server] 静态资源传输中断:', err.message)
+    })
   })
-  fs.createReadStream(served).pipe(res)
+  stream.once('error', (err) => {
+    // 缓存里的 meta 已与磁盘不符 ⇒ 删条目，让下一次请求重新 stat 并正常走 404
+    if (rel.startsWith('/assets/')) staticMetaCache.delete(rel)
+    if (!opened && !res.headersSent && !res.destroyed) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+      res.end('Not Found')
+    } else if (!res.destroyed) {
+      res.destroy()
+    }
+    console.error('[air-server] 静态资源读取失败，已降级不退出进程:', err.message)
+  })
   return true
 }
 

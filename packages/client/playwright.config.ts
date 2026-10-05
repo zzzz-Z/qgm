@@ -2,12 +2,23 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
-  timeout: 30_000,
+  // [e2e-timeout-v1] 180s：beforeAll 钩子**同样**受本项封顶（实测：30s 下钩子内睡 45s 直接失败），
+  //   而 headless-ws.spec.ts 的 beforeAll 要等 air-server 冷启动 —— 源码比 dist 新时它会先跑一次全量构建。
+  // [CONSTRAINT] spec 内的自设预算必须小于本值，好让失败信息是「服务未就绪」而不是笼统的 hook timeout。
+  timeout: 180_000,
   fullyParallel: false,
   workers: 1,
   reporter: process.env.CI
     ? [['list'], ['html', { outputFolder: 'e2e/playwright-report', open: 'never' }]]
     : 'list',
+  // [snapshot-no-platform-v1] 默认模板含 {-snapshotSuffix}（= process.platform），
+  //   基线名会被钉成 *-chromium-darwin.png —— 换平台后 Playwright 找不到对应文件即判失败，
+  //   表象是「像素差异」而实为「快照名不匹配」，误导排查方向。这里显式去掉该段。
+  // [CHANGE-IMPACT] 既有基线的文件名需从 *-chromium-darwin.png 改为 *-chromium.png
+  //   （用 --update-snapshots 重建即可，见 visual.spec.ts 头注释）。
+  // [CONSTRAINT] 去掉平台段不等于「跨平台基线通用」：Linux 的字体/抗锯齿与 macOS 不同，
+  //   真要在多平台跑视觉用例，须为各平台单独提交基线（或另设 snapshotDir）。
+  snapshotPathTemplate: '{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}{-projectName}{ext}',
   use: {
     baseURL: 'http://localhost:5174/__ai/',
     trace: 'retain-on-failure',
@@ -20,7 +31,10 @@ export default defineConfig({
     // [fix-webserver-cmd] 根 package.json 实际脚本为 dev:web；原 web:dev 从不存在，
     // 仅因 reuseExistingServer 复用已运行实例而长期未暴露
     command: 'pnpm dev:web',
-    cwd: '..',
+    // [fix-webserver-cwd-v1] cwd 按**配置文件目录**解析（Playwright 源码：path.resolve(configDir, cwd)），
+    //   本文件在 packages/client/ ⇒ '..' = packages/，那里没有 dev:web 脚本。
+    //   正解是回到仓库根（packages/client/../..）。
+    cwd: '../..',
     url: 'http://localhost:5174/__ai/',
     reuseExistingServer: true,
     timeout: 120_000,

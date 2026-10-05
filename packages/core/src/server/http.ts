@@ -123,8 +123,20 @@ export function guardRequest(req: IncomingMessage, res: ServerResponse, options:
     }
   }
   if (!options.allowRemote && !hostIsLoopback(String(req.headers.host || ''))) {
-    const url = new URL(req.url || '/', 'http://localhost')
-    if (url.pathname === '/exec' || url.pathname === '/run') {
+    // [url-parse-guard-v3] req.url 是任意字节串：`POST // HTTP/1.1` + `Content-Type: application/json`
+    //   + 非 loopback Host 会走到这里，旧实现下 new URL('//', 'http://localhost') 抛 ERR_INVALID_URL
+    //   ⇒ 抛穿到 router 调用方的 .catch ⇒ 客户端过错被记成 500 服务端故障。
+    // [WHY] 不在本函数发 400：guardRequest 是**安全闸门**（CSRF / DNS-rebinding），不是路由，
+    //   它此刻还**没有解析结果**可用；而无法解析的目标**不可能**是 /exec 或 /run，
+    //   所以解析失败即视为「无需拦截」，放行交给 handle() 统一判 400。
+    // [CHANGE-IMPACT] 解析失败从「抛穿 → 500」变为「放行 → handle 的 400」；对 /exec、/run 的拦截语义不变。
+    let pathname = ''
+    try {
+      pathname = new URL(req.url || '/', 'http://localhost').pathname
+    } catch {
+      pathname = ''
+    }
+    if (pathname === '/exec' || pathname === '/run') {
       sendJSON(res, { error: '拒绝：dev server 正以非本机 Host 访问，命令执行端点已禁用（aiRunner({ allowRemote: true }) 可显式放开）' }, 403)
       return false
     }

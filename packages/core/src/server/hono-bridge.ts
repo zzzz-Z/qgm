@@ -65,12 +65,38 @@ export async function fetchResponseToNode(res: ServerResponse, response: Respons
 /**
  * 从请求头推断当前请求的 origin
  * [WHY] 反代（Nginx 等）场景下 Node 看不到真实协议，靠 x-forwarded-proto 补回
- * [CONSTRAINT] 无 Host 头时回落 localhost；无 x-forwarded-proto 时按 http 处理
+ * [CONSTRAINT] 无 Host 头时回落 localhost；x-forwarded-proto 只认 http/https，且取**第一段**；
+ * 拼不出的 origin 一律回落 http://localhost（见 [origin-guard-v1]）
  * [CHANGE-IMPACT] origin 结果直接影响 URL 解析与 CSRF 校验（guardRequest 使用同一 host 语义）
  * @param req Node 请求对象
  */
 export function inferOrigin(req: IncomingMessage): string {
-  const host = (req.headers.host as string) || 'localhost'
-  const proto = req.headers['x-forwarded-proto'] || 'http'
-  return `${proto}://${host}`
+  // [origin-guard-v1] Host 与 x-forwarded-proto 都是**任意字节串** —— Node 只挡控制字符，
+  //   不校验二者的语义。而 `${proto}://${host}` 会被 nodeToFetchRequest 当作 base
+  //   （`new URL(req.url, origin)`）⇒ 拼不出合法 URL 就抛 ERR_INVALID_URL，
+  //   被调用方的 .catch 统一记成 **500 服务端故障**（实为客户端请求头畸形）。
+  // [实测] `.ai-runner/tmp/d16-host-probe.cjs` 对活实例打 5 例 500：
+  //   `Host: a b`、`Host: %`、`Host: [`、`X-Forwarded-Proto: file`、
+  //   `X-Forwarded-Proto: https, http` —— 最后一项**真实反代就会发**（逗号列表），不只是攻击面。
+  // [WHY] 兜底就放在这里而不是 handle：本函数的契约本来就是「给出一个可用的 origin」，
+  //   换了别的层都只是把问题推给下一个调用者。
+  // [CONSTRAINT] 回落只给 http://localhost，**不按 host 反查 DNS**：invalid host 不可能是
+  //   可解析的主机名，故不引入 rebinding 面；且 origin 仅用于补全 url，路由只匹配 pathname。
+  // [CHANGE-IMPACT] 畸形 Host / proto 由「500 + 堆栈噪音」变为「按 localhost 正常处理」；
+  //   合法 https 反代、带端口 Host、IPv6 Host 的返回值**逐字不变**。
+  //   由 url-parse-guard.node-test.ts 的行为用例守卫。
+  const rawHost = (req.headers.host as string) || 'localhost'
+  const rawProto = String(req.headers['x-forwarded-proto'] || 'http')
+    .split(',')[0]
+    .trim()
+    .toLowerCase()
+  const proto = rawProto === 'https' ? 'https' : 'http'
+  const candidate = `${proto}://${rawHost}`
+  try {
+    const parsed = new URL(candidate)
+    // 只借「能否解析」这一事实；返回原串而非 parsed.origin，以免改动既有字符串行为
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? candidate : 'http://localhost'
+  } catch {
+    return 'http://localhost'
+  }
 }
