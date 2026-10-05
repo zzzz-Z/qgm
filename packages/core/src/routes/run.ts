@@ -3,6 +3,7 @@
 import { Hono } from 'hono'
 import {
   applyOverlay,
+  buildRejectEntry,
   checkScriptSyntax,
   computeClaimMismatch,
   computeCompliance,
@@ -43,6 +44,8 @@ import {
 } from '../deps.js'
 import type { Change, ClaimMismatch, LintResult, SmokeResult } from '../deps.js'
 import { createPipeline, markFailed, markOk, markRunning } from '../state/pipeline.js'
+// [control-log-v1] 前置拒收留痕（详见 routes/control-log.ts）；
+// [hclc-fix] buildRejectEntry 经 deps barrel 引入——直连会使本文件唯一模块数达 9（>8 阻断）
 import { hashScript, writeRoundSnapshot } from '../state/timeline.js'
 import { writeChannelLog } from '../state/snapshot.js'
 import { checkSlow, deserialize, recordSample, serialize } from '../state/perf.js'
@@ -77,9 +80,22 @@ runHono.post('/run', async (c) => {
   const gitCommit = Boolean(body?.gitCommit)
   // [tasks-api-sid-v1] 会话 id 由客户端经 /run 传入，服务端注入沙箱 env 供 __AI__.tasks 分桶用
   // [CONSTRAINT] 沙箱脚本不自传 sid（防伪造/串台）
+  // [control-log-v1] 上移到前置拦截之前：三条拒收留痕都要带 sid，否则「哪个会话老在被截断」不可分桶
   const sessionId = String(body?.sessionId || '')
   const gitVerify = Boolean(body?.gitVerify)
-  if (!script) return c.json({ error: '脚本为空' }, 400)
+  // [control-log-v1] /run 的三条前置拒收此前**零留痕**（4xx 发生在 NDJSON 流开始之前，
+  //   写不进按流写的 runner.jsonl），而它们正是「脚本被截断」这一最高频故障的唯一现场：
+  //   频率 / 体积分布 / 所属 sid / 是截断还是真语法错，全靠这条日志才可测。详见 routes/control-log.ts。
+  const logReject = (script: string, kind: 'empty' | 'head-contract' | 'syntax', extra: { reason?: string, error?: string, truncated?: boolean, sizeScope?: 'raw' | 'effective' } = {}) => {
+    const entry = buildRejectEntry(script, kind, { sid: sessionId, ...extra })
+    writeChannelLog('reject', entry)
+    // 同时落进程 stderr：宿主 tail prod-server.log 即可看到「这一轮没执行」的原因，不必翻 jsonl
+    console.warn(`[ai-runner][reject] kind=${entry.kind} bytes=${entry.bytes} lines=${entry.lines} overBudget=${entry.overBudget} truncated=${entry.truncated === true} sid=${entry.sid || '-'}${entry.reason ? ` reason=${entry.reason}` : ''}${entry.error ? ` error=${entry.error}` : ''}`)
+  }
+  if (!script) {
+    logReject('', 'empty')
+    return c.json({ error: '脚本为空' }, 400)
+  }
 
   // [g2-narrow-v1] 脚本头契约前置拦截（先于 splitShebang 与语法检查）
   const head = scanScriptHead(script)
@@ -92,6 +108,7 @@ runHono.post('/run', async (c) => {
     const hint = reason.startsWith('ILLEGAL_SHEBANG')
       ? '（/run 仅执行 node 脚本；bash 请改用自动循环或 `!` 命令行通道）'
       : ''
+    logReject(script, 'head-contract', { reason })
     return c.json({
       error: `脚本头契约违规：${reason}${hint}`,
       metaError: true,
@@ -108,6 +125,12 @@ runHono.post('/run', async (c) => {
       //   AI 于是原地重发同样长的脚本，必然再次被截断，两轮后熔断冻结。
       //   truncated=true 让客户端改发「缩小本轮范围、拆成多个小脚本」的指令。
       //   scriptSize 是判断「本轮本来就超预算」的唯一线索（到达体积已接近 12 KB）。
+      logReject(effectiveScript, 'syntax', {
+        error: syntax.error,
+        truncated: syntax.truncated === true,
+        // 与响应体里的 scriptSize 同口径（都量 effectiveScript）：两处数字必须可比
+        sizeScope: 'effective',
+      })
       return c.json({
         error: `脚本语法错误：${syntax.error}`,
         syntaxError: true,

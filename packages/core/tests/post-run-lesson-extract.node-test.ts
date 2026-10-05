@@ -2,6 +2,7 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { appendLessons, extractLessons } from '../../../packages/core/src/post-run/lesson-extract.js'
+import { isNearDuplicateTitle } from '../../../packages/core/src/post-run/lesson-title-similarity.js'
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -274,5 +275,128 @@ test('appendLessons: 跨行 / 悬空反引号的标题落盘前被规范', () =>
     const heads = fs.readFileSync(file, 'utf8').split(NL).filter(l => l.startsWith('## '))
     assert.equal(heads.length, 1)
     assert.equal((heads[0].match(/`/g) || []).length % 2, 0, `标题反引号必须配对：${heads[0]}`)
+  })
+})
+// [lesson-dedup-shared-v1] 段一（工单 WO-20261005-03）：写入侧必须拦住闸门侧会判红的近重复。
+// 承重：把 isNearDuplicateTitle 换成 () => false（恒不命中），本用例变红——
+//   近重复条目会被当作新条写入，落盘后 lessons-hygiene 立即判红。
+test('appendLessons: 近重复标题并入既有条目，不新增', () => {
+  withTempRoot((root) => {
+    const file = path.join(root, '.ai-runner', 'lessons.md')
+    const seed = [
+      '# Lessons',
+      '',
+      '## docs/plan 被 gitignore 但不在 eslint ignores 里',
+      '',
+      '原始正文。',
+      '',
+    ].join(NL)
+    fs.writeFileSync(file, seed, 'utf8')
+    // 近重复标题：Jaccard >= 0.35（实测 0.41）但归一化后不相等
+    const near = 'docs/plan 被 gitignore 但 @antfu/eslint-config 会自动忽略'
+    const n = appendLessons([{ title: near, body: '被并入的补充内容。' }], root)
+    assert.equal(n, 1, '并入应计 1')
+    const after = fs.readFileSync(file, 'utf8')
+    const heads = after.split(NL).filter(l => l.startsWith('## '))
+    assert.equal(heads.length, 1, '不得新增独立条目')
+    assert.ok(after.includes('补充（'), '必须留痕：并入内容应追加到既有条目正文')
+    assert.ok(after.includes('被并入的补充内容。'), '被并入正文不得丢失')
+  })
+})
+// [lesson-dedup-shared-v1] 段一：写入侧拦住闸门侧会判红的近重复。
+// 承重：把 isNearDuplicateTitle 换成 () => false 即变红。
+
+// [scenario-B-merge-v1] 段一场景 B：同批两条近重复、原文件无该标题。
+// 旧实现在写入阶段按 key 找行，key 若是本轮新标题则命中不了 ⇒ 被并入正文蒸发。
+// 承重：本用例断言磁盘上必须含 B 的正文，而不只是「标题数 == 1」。
+test('appendLessons: 同批两条近重复且原文件无该标题，B 的正文不得丢失', () => {
+  withTempRoot((root) => {
+    const file = path.join(root, '.ai-runner', 'lessons.md')
+    fs.writeFileSync(file, `# Lessons${NL}`, 'utf8')
+    const A = 'docs/plan 被 gitignore 但不在 eslint ignores 里'
+    const B = 'docs/plan 被 gitignore 但 @antfu/eslint-config 会自动忽略'
+    assert.ok(isNearDuplicateTitle(A, B), '前提：A/B 必须近重复，否则本用例是真空判据')
+    const n = appendLessons([
+      { title: A, body: 'A 的正文。' },
+      { title: B, body: 'B 的补充正文。' },
+    ], root)
+    const after = fs.readFileSync(file, 'utf8')
+    assert.ok(after.includes('A 的正文。'), `A 正文必须在磁盘上，实际:\n${after}`)
+    assert.ok(after.includes('B 的补充正文。'), `B 正文必须在磁盘上（旧实现会静默丢弃），实际:\n${after}`)
+    assert.equal(n, 2, `返回值必须等于实际处理的条目数，实际：${n}`)
+    const heads = after.split(NL).filter(l => l.startsWith('## '))
+    assert.equal(heads.length, 1, `B 应并入 A，只落一个 ## 块，实际：${heads.join(' | ')}`)
+  })
+})
+
+// [lesson-merge-append-v1] 并入既有条目时，补充段必须**追加在正文之后**，
+//   且前缀只许一个 —— 旧实现把 `补充（…）：` 插到标题正下方，把状态行挤成非首位：
+//   `lessons-hygiene` 的「状态行只在标题后首个非空行」当场判红（实测 2026-10-05 现网台账）。
+// 承重：① 把写入分支改回 `out.push(...补充)` 在 head 之后 ⇒ 「状态行仍在首位」断言变红；
+//   ② 删掉 stripSupplementPrefix 调用 ⇒ 「前缀只出现一次」断言变红。
+test('appendLessons: 并入既有条目时状态行仍在首位，且补充前缀只出现一次', () => {
+  withTempRoot((root) => {
+    const file = path.join(root, '.ai-runner', 'lessons.md')
+    const stamp = new Date().toISOString().slice(0, 10)
+    const E = 'docs/plan 被 gitignore 但不在 eslint ignores 里'
+    const N = 'docs/plan 被 gitignore 但 @antfu/eslint-config 会自动忽略'
+    assert.ok(isNearDuplicateTitle(E, N), '前提：E/N 必须近重复，否则本用例是真空判据')
+    fs.writeFileSync(file, [
+      '# Lessons',
+      '',
+      `## ${E}`,
+      '',
+      '[VERIFIED] 2026-10-04 A · 实测忽略规则',
+      '',
+      '原始正文一句。',
+      '',
+    ].join(NL), 'utf8')
+
+    // 正文自带同名前缀：旧实现会叠加成 `补充（A）：补充（A）：…`
+    const n = appendLessons([{ title: N, body: `补充（${stamp}）：被并入的补充正文。` }], root)
+    assert.equal(n, 1, `并入应计 1，实际：${n}`)
+    const after = fs.readFileSync(file, 'utf8')
+    const lines = after.split(NL)
+
+    // ① 状态行必须在标题后的首个非空行
+    const hi = lines.findIndex(l => l.startsWith('## '))
+    assert.ok(hi >= 0, `找不到条目标题，实际:\n${after}`)
+    const firstNonEmpty = lines.slice(hi + 1).find(l => l.trim() !== '')
+    assert.ok(
+      String(firstNonEmpty).startsWith('[VERIFIED]'),
+      `状态行被挤离首位（lessons-hygiene 会判红），实际首个非空行：${JSON.stringify(firstNonEmpty)}`,
+    )
+
+    // ② 补充段追加在正文之后，且前缀唯一
+    const pi = lines.findIndex(l => l.includes('被并入的补充正文。'))
+    const bi = lines.findIndex(l => l.includes('原始正文一句。'))
+    assert.ok(pi > bi, `补充段必须排在既有正文之后，实际 补充@${pi} 正文@${bi}`)
+    const marked = lines.filter(l => l.startsWith(`补充（${stamp}）：`)).length
+    assert.equal(marked, 1, `补充前缀只允许一个，实际 ${marked} 处:\n${after}`)
+    assert.ok(!after.includes(`补充（${stamp}）：补充（${stamp}）：`), `出现双前缀:\n${after}`)
+  })
+})
+
+// [lesson-merge-append-v1] 同批 nearFresh 路径同样不得叠前缀。
+// 承重：删掉 nearFresh 分支里的 stripSupplementPrefix 调用 ⇒ 「双前缀」断言变红
+//   （实测 M8：带前缀的必须是**被并入方** B，写成 A 带前缀则判据真空——A 原样写入，压根不走剥离）。
+test('appendLessons: 同批 nearFresh 并入时正文自带的前缀不被叠加', () => {
+  withTempRoot((root) => {
+    const file = path.join(root, '.ai-runner', 'lessons.md')
+    const stamp = new Date().toISOString().slice(0, 10)
+    fs.writeFileSync(file, `# Lessons${NL}`, 'utf8')
+    const A = 'docs/plan 被 gitignore 但不在 eslint ignores 里'
+    const B = 'docs/plan 被 gitignore 但 @antfu/eslint-config 会自动忽略'
+    assert.ok(isNearDuplicateTitle(A, B), '前提：A/B 必须近重复，否则本用例是真空判据')
+    assert.equal(appendLessons([
+      { title: A, body: 'A 的正文。' },
+      { title: B, body: `补充（${stamp}）：B 的正文。` },
+    ], root), 2)
+    const after = fs.readFileSync(file, 'utf8')
+    assert.ok(!after.includes(`补充（${stamp}）：补充（${stamp}）：`), `出现双前缀:\n${after}`)
+    assert.ok(after.includes('A 的正文。') && after.includes('B 的正文。'), `两条正文都必须在磁盘上:\n${after}`)
+    // A 原样写入（无前缀），B 由写入层加一个前缀 ⇒ 恰好 1 处带前缀的行
+    const marked = after.split(NL).filter(l => l.startsWith(`补充（${stamp}）：`)).length
+    assert.equal(marked, 1, `应恰好 1 处带前缀（B 的），实际 ${marked}:\n${after}`)
   })
 })

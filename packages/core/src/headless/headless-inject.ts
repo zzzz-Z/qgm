@@ -32,6 +32,9 @@ export function detectReplyInPage() {
   if (!dedup._preCache) dedup._preCache = new WeakMap()
   if (typeof dedup._seenGrowth !== 'boolean') dedup._seenGrowth = false
   if (typeof dedup._stableCount !== 'number') dedup._stableCount = 0
+  // [script-closure-gate-v1] 结构闭合门的挂点（见 extractLatestScript）：跨轮不残留，
+  //   依赖 stillStreamingReply 的「正文长度变化即重置」自愈，这里只保证键存在
+  if (typeof w.__aiRunnerClosureGate === 'undefined') w.__aiRunnerClosureGate = null
   // [stopped-detect-v2] 冷启动基线 = 当前存量标记数。页面刷新（F5 / rotate / 新开）会清空
   //   __aiRunnerDedup，而 DeepSeek 的「已停止」角标会**永久留在历史消息下方**；旧逻辑冷启动
   //   基线硬编码 0 → 首次 poll 就把历史角标当成「本轮被停止」误报 {kind:'stopped'}，
@@ -239,6 +242,63 @@ export function detectReplyInPage() {
   }
 
   function extractLatestScript() {
+    // [script-closure-gate-v1] 结构闭合门 —— 未闭合的块**不当作完整脚本推送**。
+    // [WHY] 在此之前，「不把流式半截块推出去」的唯一屏障是调用方的稳定判据
+    //   （内置通道 = 「连续 2 帧同 hash」即 800ms 无变化；油猴通道 = 350ms 防抖 + 生成中门）。
+    //   两者都只要求「这段时间内文本没变」，**都不要求块本身闭合**，于是：
+    //   · 流式中途任何一次超过该窗口的停顿（网络抖动 / 站点渲染卡顿 / 模型思考）都会让半截块被判为完整；
+    //   · 油猴通道另有一处：站点把回复切成「已停止」后「停止生成」按钮消失 ⇒ isGenerating() 转 false，
+    //     而代码块并未闭合，半截块被当作完整脚本 post 出去。
+    //   两者都让 /run 报 `Unexpected end of input` + 结构未闭合 ⇒ 与上游 max_tokens 截断的报错**完全同形**，
+    //   应用端只能读成「脚本被截断」，于是反复拆小重发、白烧轮次。
+    //   （[multi-script-v1] 记的是接收侧「只取最后一块」那一种成因；本条是接收侧的第三种。）
+    // [CONSTRAINT] **只延迟、不丢弃**：正文长度连续 CLOSURE_ACCEPT_TICKS 次不变仍未闭合 ⇒
+    //   判定为「上游真截断」，照旧放行（下游 400 会给「拆小重发」提示，补救路径不变）。
+    //   故对正常脚本零影响（闭合块直接跳过本段）；含正则字面量等扫描器识别不了的形态最多延迟 ~2.4s。
+    // [CONSTRAINT] 门状态挂在 window 上（不用 dedup）⇒ 内置通道与油猴通道本段**逐字同构**；
+    //   本函数经 page.evaluate 序列化执行，禁止引用外部闭包变量。
+    // [CONSTRAINT] 扫描器语义必须与 packages/core/src/post-run/script-check.ts 的 hasUnclosedStructure
+    //   一致（那边是服务端判据），由 script-closure-gate 用例做语料对拍
+    function hasUnclosedStructureJs(src) {
+      const stack = []
+      let state = 'code'
+      for (let i = 0; i < src.length; i++) {
+        const ch = src[i]
+        const nx = src[i + 1]
+        if (state === 'line-comment') { if (ch === '\n' || ch === '\r') state = 'code'; continue }
+        if (state === 'block-comment') { if (ch === '*' && nx === '/') { state = 'code'; i++ } continue }
+        if (state === 'single' || state === 'double' || state === 'template') {
+          const q = state === 'single' ? '\'' : state === 'double' ? '"' : '`'
+          if (ch === '\\') { i++; continue }
+          if (ch === q) state = 'code'
+          continue
+        }
+        if (ch === '/' && nx === '/') { state = 'line-comment'; i++; continue }
+        if (ch === '/' && nx === '*') { state = 'block-comment'; i++; continue }
+        if (ch === '\'') { state = 'single'; continue }
+        if (ch === '"') { state = 'double'; continue }
+        if (ch === '`') { state = 'template'; continue }
+        if (ch === '{' || ch === '(' || ch === '[') { stack.push(ch); continue }
+        if (ch === '}' || ch === ')' || ch === ']') {
+          const want = ch === '}' ? '{' : ch === ')' ? '(' : '['
+          if (stack.length === 0 || stack[stack.length - 1] !== want) return true
+          stack.pop()
+        }
+      }
+      if (state === 'single' || state === 'double' || state === 'template' || state === 'block-comment') return true
+      return stack.length > 0
+    }
+    /** 正文长度变了 ⇒ 回复仍在增长，继续等；连续 3 次等长 ⇒ 判定为「上游真截断」并放行 */
+    function stillStreamingReply() {
+      const body = String((document.body && document.body.textContent) || '')
+      const gate = window.__aiRunnerClosureGate
+      if (!gate || gate.len !== body.length) {
+        window.__aiRunnerClosureGate = { len: body.length, ticks: 0 }
+        return true
+      }
+      gate.ticks++
+      return gate.ticks < 3
+    }
     // 只扫最后一条 assistant 消息，排除历史/用户消息
     const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
     const root = blocks.length > 0 ? blocks[blocks.length - 1] : document
@@ -282,6 +342,11 @@ export function detectReplyInPage() {
       // [CHANGE-IMPACT] 语言不可判定的声明块不再进 script 分支（降级为 plain 走 Markdown 渲染）；
       //   bash 仍可采集（供自动循环的 /exec 通道），但不再有「被当成 js 交给 /run」的错路。
       if (lang !== 'js' && lang !== 'bash') continue
+      // [script-closure-gate-v1] 未闭合 ⇒ 极可能仍在流式生成中途（或站点把回复切断了）：
+      //   继续等下一帧；只有「正文长度连续 N 次不变」才判定为上游真截断并放行（约束见函数头）
+      if (hasUnclosedStructureJs(text)) {
+        if (stillStreamingReply()) continue
+      }
       let _h
       const _cached = dedup._preCache.get(pre)
       if (_cached && _cached.len === text.length) { _h = _cached.hash }

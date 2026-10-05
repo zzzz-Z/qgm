@@ -6,61 +6,25 @@
 'use strict'
 const fs = require('node:fs')
 const path = require('node:path')
+// [lessons-parse-shared-v1] 解析实现抽到共享模块：与 hygiene 守卫同源，消除两套口径。
+const { parseLessons: sharedParseLessons, parseStateLine: sharedParseStateLine } = require('./lessons-parse.cjs')
 
 const ROOT = process.cwd()
 const FILE = path.join(ROOT, '.ai-runner', 'lessons.md')
 const NL = String.fromCharCode(10)
-
-// 已复核状态；缺省（未标）= 待复核。
-// [lessons-review-v1] 只有复核方（A）亲跑证据后才写这三种状态，应用端不得自评。
-const STATES = ['VERIFIED', 'REJECTED', 'STALE']
 
 /**
  * 解析状态行：形如 `[VERIFIED] 2026-10-04 A · <证据>`。
  * [CONSTRAINT] 只认条目**首个非空行**——正文里出现的 `[VERIFIED]` 是散文引用，不算数。
  * WHY: 会议检测器曾因 `[RESOLVED]` 出现在图例里而虚高（把说明文字当下文），此处同类风险。
  */
-function parseStateLine(text) {
-  const t = String(text || '').trim()
-  if (t.charAt(0) !== '[') return null
-  const close = t.indexOf(']')
-  if (close < 2) return null
-  const token = t.slice(1, close).toUpperCase()
-  if (!STATES.includes(token)) return null
-  return { status: token, evidence: t.slice(close + 1).trim() }
-}
+const parseStateLine = sharedParseStateLine
 
 /**
  * 把 lessons.md 解析成条目数组。
  * [CHANGE-IMPACT] 纯解析，无副作用、不写盘。
  */
-function parseLessons(raw) {
-  const lines = String(raw || '').replace(/\r\n/g, NL).split(NL)
-  const items = []
-  let cur = null
-  let expectingState = false
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]
-    if (line.slice(0, 3) === '## ') {
-      const title = line.slice(3).trim()
-      if (!title) continue
-      cur = { title, status: 'UNVERIFIED', evidence: '', line: i + 1 }
-      items.push(cur)
-      expectingState = true
-      continue
-    }
-    if (!cur || !expectingState) continue
-    // 标题后的空行不消耗「首个非空行」名额
-    if (!line.trim()) continue
-    expectingState = false
-    const st = parseStateLine(line)
-    if (st) {
-      cur.status = st.status
-      cur.evidence = st.evidence
-    }
-  }
-  return items
-}
+const parseLessons = sharedParseLessons
 
 function summarize(items) {
   const counts = { VERIFIED: 0, REJECTED: 0, STALE: 0, UNVERIFIED: 0 }

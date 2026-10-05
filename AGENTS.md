@@ -119,6 +119,11 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
     `scripts/tampermonkey-session-id.user.js`（`countLimitMarkers`），由 `limit-marker-guard` 守卫；
   - 发送频控正则 3 处：`headless-inject.ts`（回复探测）、`headless-inject-simple.ts`
     （`verifyFillSentInPage` 拒收判定 + `resetReplyDedupInPage` 基线），由 `rate-marker-guard` 守卫。
+- **`.gitignore` 就是 eslint 的忽略清单**：`@antfu/eslint-config` 默认把 `.gitignore` 读进 `ignores`
+  （`eslint.config.ts` 里的显式 `ignores` 只是其中一层）⇒ 把一个文件从 gitignore 覆盖区**移出**，
+  等于同时把它拉进 `pnpm lint`。2026-10-05 对照实测：同一份未对齐表格的 md，放 `docs/plan/`
+  → `File ignored because of a matching ignore pattern`、exit 0；放 `docs/` 根 → 3 个
+  `format/prettier` error、exit 1。**跨区搬运后必须补 `npx eslint <file> --fix`。**
 - **`eslint --fix` 会重写正则**（`regexp/no-useless-non-capturing-group` 删冗余非捕获组），
   fix 之后必须重跑上述三处一致性对比再提交。
 - **审查类文档里的「节选」「伪代码」必须用 `text` 语言标注围栏**：`docs/**` 的 md 经 markdown
@@ -160,6 +165,11 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   `pnpm session:start` 第 4 步也会列出。`[VERIFIED]` 中「会出事的铁律」分流到
   `.workbuddy/memory/MEMORY.md`、「可复用工作流」到技能库；已有 SSOT 的只留指针。
   完整语义（三态定义 / 首行锚定 / 蒸馏去路）见 `.ai-runner/lessons.md` 头部。
+- **派给应用端（工作台里的 AI）的工单必须落 `docs/` 根并登记 `docs/DOCS-INDEX.md`**：
+  `docs/plan/**` 整目录被 `.gitignore` 忽略（`.gitignore:51`），且 `scripts/verify-docs-index.cjs`
+  的 `SKIP_PATHS` 又显式豁免它 —— 放在那里的工单既不进 git 变更、也不进索引，应用端开箱看不到
+  （2026-10-05 实测，该目录已积压 4 份 workorder）。草稿可留 `docs/plan/`，**派发前移到 `docs/`**；
+  移入后 `pnpm docs:verify` 会双向守（实测把索引里的工单名改掉 → 报「悬空链接 + 未收录」exit 2）。
 
 ## 详见
 

@@ -55,6 +55,12 @@ export {
   runProcess,
 } from './process/index.js'
 
+// [hclc-fix] 控制面留痕（见 routes/control-log.ts）
+//   run.ts 直 import `./control-log.js` 会使该文件唯一模块数回到 9（>8 阻断）——
+//   run.ts 本就是 route 层模块数最紧的文件，新增任何直连依赖都会顶格。
+//   与 scanScriptHead 同理：上提 barrel，令 routes/ 调用方统一从 deps 入口引入。
+export { buildBoardEntry, buildRejectEntry } from './routes/control-log.js'
+
 // HTTP 辅助
 export {
   type IncomingMessage,

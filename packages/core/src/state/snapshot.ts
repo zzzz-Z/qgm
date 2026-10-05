@@ -15,7 +15,11 @@ export interface SnapshotData {
   meta: Map<string, FileMeta>
 }
 
-export type LogChannel = 'runner' | 'pipeline' | 'decisions'
+// [control-log-v1] 新增两个控制面通道（详见 routes/control-log.ts 的 WHY）：
+//   `reject` = /run 的前置拒收（体积 / 截断 / 契约 / 语法）—— 此前**零留痕**，
+//     而这类 4xx 发生在 NDJSON 流开始之前，写不进按流写的 runner.jsonl；
+//   `board`  = /tasks 的写请求 —— 用于判定「AI 声称已 start/complete 但看板没变」是否真的发生过。
+export type LogChannel = 'runner' | 'pipeline' | 'decisions' | 'reject' | 'board'
 // AIRUNNER-BATCH4-3A-INLINE-CONST
 // 从 src/config.ts 内联常量；strip-types 无法解析 .js 后缀 import（T6）。
 // 可变路径用 getter（config.setRoot 会写 AI_RUNNER_ROOT 到 env；避免 ESM 常量快照）。
@@ -310,10 +314,14 @@ export function readManifest(runId: string): Manifest | null {
  * 追加一条三通道结构化日志到 logs/{channel}.jsonl
  * [CONSTRAINT] 自动注入 ts 字段，调用方 entry 若含 ts 会被覆盖；单行 JSON 便于后续流式解析
  * [CHANGE-IMPACT] 每行必须单行（不得含换行符），否则 jsonl 结构破坏
- * @param channel 通道名（runner / pipeline / decisions）
+ * [WHY generic] 形参从 `Record<string, unknown>` 放宽成泛型：日志体来自具名 interface
+ *   （如 `RejectLogEntry` / `BoardLogEntry`），interface 没有索引签名，无法赋给
+ *   `Record<string, unknown>` —— 收紧形参只会把「加一条日志」变成「改一处类型声明再补一次 cast」，
+ *   而本函数的契约本就不约束字段形状（只要求可 JSON 序列化 + 单行）。
+ * @param channel 通道名（runner / pipeline / decisions / reject / board）
  * @param entry 日志体；写入时会被展开到 { ts, ...entry }
  */
-export function writeChannelLog(channel: LogChannel, entry: Record<string, unknown>): void {
+export function writeChannelLog<T extends object>(channel: LogChannel, entry: T): void {
   try {
     fs.mkdirSync(getLogsDir(), { recursive: true })
     const file = path.join(getLogsDir(), `${channel}.jsonl`)

@@ -3,6 +3,10 @@ import { Hono } from 'hono'
 import fs from 'node:fs'
 import path from 'node:path'
 import { mutateTaskState, readTaskPlan, readTaskState, readTrustSnapshot } from '../state/task-store.js'
+import { writeChannelLog } from '../state/snapshot.js'
+// [control-log-v1] 看板写请求留痕（详见 routes/control-log.ts）
+// [hclc-fix] 经 deps barrel 引入，与 run.ts 同一条入口（routes/ 统一从 barrel 取依赖）
+import { buildBoardEntry } from '../deps.js'
 import { getRoot } from '../config.js'
 import type { TaskDoneItem, TaskItem } from '../state/task-store.js'
 
@@ -58,6 +62,13 @@ tasksHono.post('/tasks', async (c) => {
   const sid = body.sid || c.req.query('sid') || undefined
   // [task-store-cas-v1] 事务化读-改-写：version 冲突自动重放（跨进程双实例并发不丢更新）
   const out = mutateTaskState(sid, body)
+  // [control-log-v1] 看板写请求留痕。
+  // [WHY] 「任务状态不更新」的真因判定全靠这一条：2026-10-05 实测某 sid 桶里后 10 项**全是 pending**
+  //   （前 21 项正常 done），而 `state.json` 与 curl 亲测都证明服务端状态机无缺陷 ⇒ 是收尾调用
+  //   （start/complete/fail）根本没发出。但「AI 声称发过」与「请求真的到了服务端」此前无法区分——
+  //   本日志给出判据：keys 是它提交的目标、hit/miss 由 warnings 显式点名、四态计数是落盘后的真实状态。
+  // [CONSTRAINT] 只留痕，不改返回值（返回体被 helpers.cjs 的 __AI__.tasks._post 解析，形状锁死）
+  writeChannelLog('board', buildBoardEntry(body as Record<string, unknown>, out, sid))
   return c.json({
     ...out.state,
     warnings: out.warnings,

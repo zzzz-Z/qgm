@@ -188,6 +188,10 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
       }
       case 'headless:stop': {
         const sid = String(msg.sid || 'default')
+        // [reply-poll-stop-v1] finish('ai-stopped') 会打到这里；必须同步停掉该 sid 的 replyPoller，
+        // 否则 800ms 轮询继续空转，直到下一次 fill 的 oldStop() 或 headless:close 才停。
+        const stopPoll = replyPollers.get(sid)
+        if (stopPoll) { stopPoll(); replyPollers.delete(sid) }
         const ok = await pool.stopGenerating(sid)
         send({ t: 'headless:state', sid, state: ok ? 'idle' : 'error', detail: ok ? undefined : 'stop 失败（未找到停止按钮）' })
         break

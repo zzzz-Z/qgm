@@ -138,5 +138,8 @@ export function resetReplyDedupInPage() {
   // [rate-retry-v1] 频控基线：与 headless-inject detectReplyInPage、本文件 verifyFillSentInPage 三处内联同构（守卫测试 rate-marker-guard）
   const rateMessages = ((document.body && document.body.textContent) || '').match(/(?:消息|发送|操作|请求|访问)过于频繁|过于频繁[，,\s]*请稍后重试|please\s+slow\s+down|too\s+many\s+requests|rate\s+limit/gi) || []
   window.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: sig, _pendingScriptHash: null, _plainSentInCycle: false, _stableCount: 0, _seenGrowth: false, _baselineBlocks: baselineBlocks, _busyErrorBaseline: busyMessages.length, _busyErrorReported: false, _stoppedBaseline: stoppedMessages.length, _stoppedReported: false, _limitBaseline: limitMessages.length, _limitReported: false, _rateBaseline: rateMessages.length, _rateReported: false }
+  // [script-closure-gate-v1] 结构闭合门随轮次重置：上一轮遗留的门会拿旧长度当基线，
+  //   让新回复第一帧就被判定为「已静止」→ 未闭合块提前放行（门本身见 headless-inject.ts）
+  window.__aiRunnerClosureGate = null
   return true
 }

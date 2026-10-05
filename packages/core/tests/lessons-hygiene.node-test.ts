@@ -8,13 +8,15 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { createRequire } from 'node:module'
+import { jaccardSimilarity, LESSON_DUP_THRESHOLD, lessonTitleBigrams, normLessonTitle } from '../../../packages/core/src/post-run/lesson-title-similarity.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..', '..')
 const FILE = path.join(ROOT, '.ai-runner', 'lessons.md')
 const NL = String.fromCharCode(10)
-const STATES = ['VERIFIED', 'REJECTED', 'STALE']
-const THRESHOLD = 0.35
+// [lesson-dedup-shared-v1] 阈值从共享模块取，与写入侧同源（不得本地再写一份 0.35）
+const THRESHOLD = LESSON_DUP_THRESHOLD
 
 interface LessonItem {
   title: string
@@ -26,53 +28,24 @@ interface LessonItem {
  * [CONSTRAINT] 与 `scripts/lessons-status.cjs` 同口径——只认首个非空行，
  *   正文里出现的 `[VERIFIED]` 是散文引用，不算状态。
  */
+// [lessons-parse-shared-v1] 解析实现从共享模块引入：与 lessons-status.cjs 同源。
+const require = createRequire(import.meta.url)
+const { parseLessons: sharedParseLessons } = require('../../../scripts/lessons-parse.cjs') as {
+  parseLessons: (raw: string) => Array<{ title: string, status: string }>
+}
+
 function parseLessons(raw: string): LessonItem[] {
-  const lines = String(raw || '').replace(/\r\n/g, NL).split(NL)
-  const items: LessonItem[] = []
-  let cur: LessonItem | null = null
-  let expecting = false
-  for (const line of lines) {
-    if (line.slice(0, 3) === '## ') {
-      cur = { title: line.slice(3).trim(), status: 'UNVERIFIED' }
-      if (cur.title) items.push(cur)
-      expecting = true
-      continue
-    }
-    if (!cur || !expecting) continue
-    if (!line.trim()) continue
-    expecting = false
-    const m = line.trim().match(/^\[([a-z]+)\]/i)
-    if (m && STATES.includes(m[1].toUpperCase())) cur.status = m[1].toUpperCase()
-  }
-  return items
+  return sharedParseLessons(raw).map(x => ({ title: x.title, status: x.status }))
 }
 
 /**
  * 标题归一化：剥掉代码标记与一切非「字母/数字/CJK」字符，再小写。
  * [CONSTRAINT] 故意保留 CJK——近重复恰恰表现为「中文主体相同、只差一个语气词/标点」。
  */
-function normTitle(t: string): string {
-  return String(t)
-    .replace(/`/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\u4E00-\u9FA5]+/g, '')
-}
-
-/** 归一化标题的字符二元组集合，用来算 Jaccard（比整串相等宽容、比中文分词稳定）。 */
-function bigrams(s: string): Set<string> {
-  const out = new Set<string>()
-  for (let i = 0; i + 1 < s.length; i += 1) out.add(s.slice(i, i + 2))
-  return out
-}
-
-function jaccard(a: Set<string>, b: Set<string>): number {
-  if (!a.size || !b.size) return 0
-  let inter = 0
-  for (const x of a) {
-    if (b.has(x)) inter += 1
-  }
-  return inter / (a.size + b.size - inter)
-}
+// [lesson-dedup-shared-v1] 三件套已抽到共享模块：写入侧与守卫侧同源，消除「两套口径」。
+const normTitle = normLessonTitle
+const bigrams = lessonTitleBigrams
+const jaccard = jaccardSimilarity
 
 const raw = fs.existsSync(FILE) ? fs.readFileSync(FILE, 'utf8') : null
 const items = raw === null ? [] : parseLessons(raw)
@@ -143,5 +116,28 @@ describe('lessons.md 卫生', () => {
       if (isState) late.push(cur.slice(0, 60))
     }
     expect(late, `状态行出现在非首行（会被当成散文引用，状态丢失）：${NL}${late.join(NL)}`).toEqual([])
+  })
+})
+
+describe('lessons 解析器共享与围栏跳过', () => {
+  it('跳过代码围栏：围栏内的 ## 行不算条目', () => {
+    const fenced = [
+      '## 真条目',
+      '正文',
+      '```text',
+      '## 示例标题（在围栏里）',
+      '示例正文',
+      '```',
+      '## 另一真条目',
+      '正文2',
+    ].join(NL)
+    expect(parseLessons(fenced).map(x => x.title)).toEqual(['真条目', '另一真条目'])
+  })
+
+  it('与 scripts/lessons-status.cjs 同源（共享解析模块）', () => {
+    const shared = path.join(ROOT, 'scripts', 'lessons-parse.cjs')
+    expect(fs.existsSync(shared), `${shared} 不存在`).toBe(true)
+    const statusSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'lessons-status.cjs'), 'utf8')
+    expect(statusSrc.includes('./lessons-parse.cjs')).toBe(true)
   })
 })

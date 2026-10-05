@@ -33,6 +33,7 @@
 ⇒ 「同轮内写文件 → 起子进程验证」结构性不可行，**变异验证与端到端冒烟必须跨轮**（写 → 退出 → 跑 → 读）。
 判据统一为：**该步骤是否读「本脚本刚写的文件」**，是则必须跨轮。
 [同族并入] 「`curl --data @file` 读不到刚写的 body」原为独立 REPEATED 条，实为同一机制，已并入。
+[同族并入] 「overlay 与磁盘不同步」（2026-10-05，应用端采集）同为一条：修法是**改走 `node -e` / `awk` 直改磁盘**，或写入与验证分两轮。判据若落在「子进程看到的内容」上，必须先确认该子进程读的是盘还是 overlay。
 
 ## 沙箱三档语义：`read-only` 不等于「禁止写盘」
 
@@ -168,6 +169,8 @@ REPL 沙箱脚本想 `require('node:fs')` 必须先 `globalThis.require = requir
 真相：`opts.marker` 是**幂等短路**（设计行为），命中时返回 `{ ok: true, skipped: true, reason: 'marker present' }` 并提前退出，**连 changelog 也不记**。
 规避：待改段含 marker 时不要传 `opts.marker`；判「是否落盘」只看磁盘证据（`exists`/`fileSig`/`stat`），不看变更追踪或退出码。
 
+补充（2026-10-05）：我从 `readText` 缓存的单引号文本构造锚点，但写入轮锚点未命中——跨轮缓存会失效。稳妥做法是写盘前用 `sh cat` 再取一次真实文本。
+
 ## 多轮 patch 的锚点会漂移（第 6 次记录，已收敛）
 
 [VERIFIED] 2026-10-05 A · ① `same-round-read-v1` 已写入 SYSTEM.md；② E1 已把失配变成 `ANCHOR_NOT_FOUND` + `nearLines` + `hint`；③ 病历：看板 D-0b 终局 `exit 7`——取「文件末尾 10 字符」当 `unique` 锚点，命中多处 → `helpers.cjs:245 patchFile` 裸抛未捕获
@@ -212,6 +215,13 @@ REPL 沙箱脚本想 `require('node:fs')` 必须先 `globalThis.require = requir
 **早于** `server-manager.ts` ⇒ 那份端到端验的是旧产物。判据 = `stat` 比对产物与源文件 mtime，源码更新即须自己重建。
 [构建成功的唯一标志] `step 2.5 synced` + `step 3 copied` + `done` 三者齐现——只看 tail 会把 step 2.5 的 safe-delete 失败误当成功。
 命令环境与「运行时 ≠ 源码」细则见 `.workbuddy/memory/MEMORY.md`。
+
+[补充 2026-10-05 A] **产物有两级，只重建一级等于没修**：`packages/core/dist/**`（tsc 逐文件）与
+`apps/standalone/dist/_server/index.js`（vite SSR 打包，**运行中的服务端读的就是这份**）是两份产物。
+实测：应用端只重建了 core 产物（`dist/post-run/lesson-extract.js` mtime 21:10，`nearFresh` 命中 3），
+而 `apps/standalone/dist/_server/index.js` 仍是 20:49（`nearFresh` 命中 **0**、`replyPollers.delete` **2** 处
+vs 源码 **3** 处）⇒ 运行态**没有**修复。判据：**两份产物都要 grep 新符号**，且进程启动时间晚于产物 mtime；
+`bin/air-server.cjs` 的「源码新则自动重建」只在**经它启动**时生效，对已跑的进程无效。
 
 ## 「路由文件改动不会热重载」已推翻
 
@@ -399,6 +409,10 @@ scoped + 不同 SFC ⇒ 在一处加的类对另一组件无效，必须在对�
 - 修假阴性易退化成假阳性（围栏豁免写成 `/^```$/` 只认裸围栏 ⇒ 代码块里的 `}` 被当正文重复）；
   豁免规则须与判据同层处理，代码块是「内容单元」而非「行」。
 - 定位重复用**内容锚点**而非行号。
+- [补充 2026-10-05 A] **用例的输入与被判对象不同层 ⇒ 假绿**：`packages/core/tests/lessons-add.node-test.ts`
+  经由 `scripts/lessons-add-core.cjs` 断言的是 **`packages/core/dist/post-run/lesson-extract.js`**（编译产物），
+  而源码是 `packages/core/src/post-run/lesson-extract.ts`。产物一旧，用例就在测**旧实现**并全绿
+  （dist 缺失才会抛错，属「会红」的好情形）。判据要么落在源码上，要么**显式断言产物不落后于源码**。
 
 完整协议见技能库 `qgm-dual-ai-review`。
 
@@ -584,3 +598,212 @@ config 改对了，但磁盘上 10 个 `*-darwin.png` 不会自动改名为无�
 [VERIFIED] 2026-10-05 B · 本轮亲跑：`upgrade` 通道打畸形目标 `//` 后，`.ai-runner/logs/server-crash.log` 从 488 B 涨到 859 B，堆栈顶为 `Server.onUpgrade (index.js:1511:7)`；而同样不响应的 `/nope` 零增长 ⇒ 「假崩溃」确实由兜底产生
 
 D8 装兜底后进程不死了，但 `attach-ws` 的畸形请求会被记成「假崩溃」，把真正的崩溃信号淹掉——这是修 A 引出 B 的典型，须由 `attach-ws-upgrade-guard` 单独清理。
+
+## 「落盘后自动 lint」的目标集合曾漏掉 markdown：写 md 的 agent 不跑 lint，第三方闸门被移动靶
+
+`/run` 落盘后本就会对**本次变更文件**跑 `eslint --fix`（`routes/run.ts` → `pickLintTargets` → `runEslint`），
+但目标集合 `LINT_EXTS` 只列了代码扩展名，**`.md` 不在其中** ⇒ 「写 markdown 的 agent 不跑 lint 就落盘」
+这条路径上没有任何机制接住：未对齐的表格会一直留在盘上，直到**第三方**跑全量 `pnpm lint` 才炸，
+把别人的提交闸门变成移动靶（实测同一小时内复发三次，第三次正好打红正在跑的 `pnpm verify`）。
+
+修法（2026-10-05）：`LINT_EXTS` 增补 `.md`，并补 `LINT_SKIP_SEGMENTS` 跳过 eslint 已忽略的目录
+（显式把 ignored 文件传给 eslint 只会打印 `File ignored…` 告警 + exit 0 —— 纯噪声，且让 `lint.ok`
+的语义「本次变更的代码是否 lint 干净」变模糊）。
+
+两个已被实测钉住的前提：未对齐表格 → `format/prettier` error（exit 1）；同一文件 `--fix` 后与原文
+**逐字节一致**（`diff -q` 无输出）⇒ 修复只动格式、不动语义。
+
+判据：守卫 `packages/core/tests/post-run-lint-targets.node-test.ts`（两种变异都变红：删 `.md` / 删 `dist`）；
+端到端探针 `.ai-runner/tmp/d11-e2e-probe.cjs`（对照：同一份内容**不经** `/run` 直接落 `docs/` → eslint
+4 个 error；**经** `/run` 落盘 → `lint.files=1` 且落盘后 0 error、内容被改写；落在跳过段内则逐字节未动）。
+
+## 直派工单放进 docs/plan/ 等于没派发：整目录被 gitignore，且 docs:verify 对它显式豁免
+
+证据（宿主侧亲跑，可复现）：
+
+- `git check-ignore -v docs/plan/workorder-defect-closure-2026-10-05.md` → 命中 `.gitignore:51`
+  的 `docs/plan/`，**整目录**被忽略；
+- `scripts/verify-docs-index.cjs` 里 `SKIP_PATHS = [path.join('docs','plan')]` —— 该脚本本是
+  「索引里每条链接都在 + 磁盘上每个 md 都被收录」的双向对账，却对 `docs/plan/**` 显式豁免
+  ⇒ 放进这里的 md 连「漏收录」都报不出来；
+- 后果：`docs/plan/` 已积压 4 份 workorder（phase1 / phase2-L2 / taskboard-fix / defect-closure），
+  应用端既看不到 git 变更、也无从索引发现，只能靠人工指路 —— 等于没派发。
+
+对策：派发前移到 `docs/` 根 + 在 `docs/DOCS-INDEX.md` 加一行；移入后由 `pnpm docs:verify` 守住。
+变异实测：把索引里的工单名改掉 → 同时报「悬空链接 1 + 未收录 1」，exit 2；还原 → exit 0。
+
+## `hono-bridge.ts:76` 是注释里的字符串，不是调用点
+
+[VERIFIED] 2026-10-05 A · 亲跑 `grep -rn "new URL(req.url" packages/core/src apps/standalone/src` → 命中 6 处，其中 `hono-bridge.ts:76` 在 `//` 注释内；真实调用点 5 处（attach-ws:78 / http:135 / handle:89 / hono-bridge:15 / standalone/server.ts:155）。
+`grep "new URL(req.url"` 会同时命中注释与真实调用，做「族内几处」计数时必须逐条读上下文，不能只看命中数。我上一版报告写「四处」正是只数了前四处文件、漏了 `hono-bridge.ts:15` 这个真实第五处。
+
+## `docs/plan/**` 在 `.gitignore` 里但不在 eslint `ignores` 里
+
+[REJECTED] 2026-10-05 A · 实测推翻「不在 eslint `ignores` 里」：`node node_modules/eslint/bin/eslint.js docs/plan/__lint-probe.md` → `File ignored because of a matching ignore pattern`（exit 0）⇒ 它**在** eslint 的忽略范围内。`eslint.config.ts` 的显式 `ignores` 只是其中**一层**，另一层是 `@antfu/eslint-config` 默认读入的 `.gitignore`。
+
+正确归因（两层来源，两个方向）：
+
+- **eslint 侧**：`docs/plan/**` 被忽略（经 `.gitignore`）⇒ 传给 eslint 只得到 `File ignored…` warning + exit 0，纯噪声、无破坏。「危害有限」的结论侥幸成立，但理由是错的。
+- **`pickLintTargets` 侧**：`LINT_SKIP_SEGMENTS` 确实**不含** `docs/plan` ⇒ 会把它当 lint 目标返回。按路径段匹配的机制表达不了这个路径（段名 `plan` 太泛，加进去会误伤 `packages/*/plan/**`），已在 `lint-targets.ts` 的 `[BOUNDARY]` 里显式登记为已知边界。
+- **守卫缺口**：`与 eslint.config.ts 的 ignores 不漂移`那条用例只解析显式数组（仓库无 .gitignore 解析器）⇒ 对第二层是盲的。所以真正的问题不是「两个忽略清单不同源」，而是「**同一套忽略语义有两层来源，守卫只覆盖了静态那一半**」。
+
+合并记录（2026-10-05 A）：本条为 SSOT。同日 DONE 自报踩坑经自动采集追加的同族条目
+「`docs/plan/**` 在 `.gitignore` 里 `@antfu/eslint-config` 会自动忽略，但 `LINT_SKIP_SEGMENTS` 不会」
+（归一化二元组 Jaccard 0.41）已并入本条并删除，其表述「两个忽略集不同源」正是本条更正掉的错误归因。
+采集侧无近重复检测 ⇒ 已被复核更正的条目会被原样重新追加（见 WO-20261005-03 段一）。
+
+## `git diff --exit-code` 用 exit code 传达结果，而非 stdout
+
+[VERIFIED] 2026-10-05 A · 本会话多次亲用：干净时走 0 分支且 stdout 为空；有差异走 1 分支且 stdout 有内容。
+干净时 `stdout` 为空、`code=0`；有差异时 `stdout` 有内容、`code=1`。只看 stdout 会误判成「无差异」。
+
+## `pnpm verify` 全链约 80s，超出 `/run` 沙箱 60s 硬超时
+
+[VERIFIED] 2026-10-05 A · 亲跑 `pnpm verify`（宿主侧 bash 通道）三次：1m16s / 1m39s / 1m42s，均 > 60s ⇒ `/run` 单轮跑不完的结论成立。
+需要跑完整闸门时要么拆成 `lint` + `test:unit` 分别跑，要么走 bash 直执行通道，不能指望一轮 `/run` 跑完。
+
+## `--print-config` 对 ignored 文件不输出
+
+[VERIFIED] 2026-10-05 A · 亲跑（宿主侧 bash 通道）：`eslint --print-config docs/plan/workorder-selfcheck-phase2-L2.md`（该文件 `git check-ignore` 命中 `.gitignore:51`）→ **exit 0、stdout 10 字节、内容为字面量 `undefined\n`**；对照受追踪的 `docs/USAGE.md` → 43 963 字节真配置。措辞更正：「返回空」不准确，实为 `undefined`（判「空」写成 `stdout === ''` 会落空；判据应写 `stdout.trim() === 'undefined'` 或改用 `git check-ignore`）。
+探针跑 `eslint --print-config docs/plan/x.md` 返回空 —— 因为 ignored 文件连配置都不解析。判断「是否被忽略」应直接看 `eslint <file>` 的输出或 `git check-ignore`，不能靠 `--print-config`。
+
+并入（2026-10-05，Jaccard 0.56）：采集侧另进了同条表述「输出字面量 `undefined` 而非空串」——其正文仅复述本条已给出的措辞更正，唯一新增信息是归类为「判据文本对 ≠ 判据对」，即判据要落在**值**上而不是**形状**上。
+
+## 「工作区中间态删除」≠「相对 HEAD 删除」
+
+[VERIFIED] 2026-10-05 A · 亲跑：`git diff --numstat .ai-runner/lessons.md` → 新增为正、**删除列为 0**（本轮该列的绝对值随采集变动，故本条不再引用具体数字——数字型断言会即刻腐化，改述为「只显示新增、删除列为 0」）。结论成立：比较基准不说清就会得出与操作相反的判断。
+我在工作区里删过一条、但那条在 HEAD 里本就没有独立版本，所以 `git diff --numstat` 相对 HEAD 只显示新增、删除列为 0。判断「是否删除」必须明确比较基准（工作区 vs index vs HEAD），否则会得出与自己操作相反的结论。
+
+## 记忆/日志 markdown 的嵌套列表续行缩进会打红闸门（不止「不用表格」那一条）
+
+[VERIFIED] 2026-10-05 A · 亲历：往 `.workbuddy/memory/2026-10-05.md` 追加一段含**嵌套列表**的日志后，
+`pnpm verify` 由全绿转 `4 errors (85 warnings) → exit 1`，4 个 error 全是 `format/prettier` 的
+「Insert `··`」，位置（584-586、593）全在该文件的嵌套项续行上。
+
+原始输出：
+
+```text
+/workbuddy/memory/2026-10-05.md
+  584:3  error  Insert `··`   format/prettier
+  585:1  error  Insert `··`   format/prettier
+  586:1  error  Insert `··`   format/prettier
+  593:1  error  Insert `···`  format/prettier
+✖ 89 problems (4 errors, 85 warnings)   [ELIFECYCLE] Command failed with exit code 1
+```
+
+定向 `eslint --fix .workbuddy/memory/2026-10-05.md` 后 0 error；`diff` 显示**只改了 4 行缩进、内容零变化**
+（`601 → 601` 行）。
+
+两个易踩点：
+
+- 记忆/日志文件**是 lint 目标**（`.workbuddy/memory/*` 受审，见 `MEMORY.md` 命令环境段），
+  但「用列表不用表格」这条**不足以**保证通过 —— **续行缩进**同样被 prettier 管：
+  父项 `- **X**：` 的续行必须与父项内容对齐，写成 2 空格而父项实际要求 4/5 空格即报 `Insert ··`。
+- heredoc 写日志时缩进是手写的 ⇒ **追加记忆后必须重跑 `eslint`（或整条 `pnpm verify`）**，
+  不要以为「只是写 md」不会影响闸门。修法是定向 `--fix` 该文件（全仓 `--fix` 会重写 headless 正则，禁用）。
+
+## `Map<string, T[]>` 里存对象 + 模板字面量 `${b}` 会插值成 `[object Object]`
+
+[VERIFIED] 2026-10-05 A · 宿主侧读 diff 取证：`lesson-extract.ts` 现已声明 `Map<string, string[]>`，写入端为 `arr.push(item.body || '(待补充)')`（存**字符串**而非对象）。与 `post-run-lesson-extract` 的「被并入正文不得丢失」用例互为印证。
+这是本轮「被并入正文不得丢失」的根因——`merged.set(near, [{title, body}])` 后在写入端 `补充（${stamp}）：${b}` 得到 `[object Object]`。修法是存字符串（`arr.push(item.body || '(待补充)')`），同时把 Map 类型改为 `Map<string, string[]>`。
+
+## 两套口径的「宽窄方向」决定危害形态
+
+[VERIFIED] 2026-10-05 A · 宿主侧逐行比对：新共享模块 `packages/core/src/post-run/lesson-title-similarity.ts` 的 `normLessonTitle` / `lessonTitleBigrams` / `jaccardSimilarity` 与守卫侧 HEAD 版本的三件套**逐字等价**，`size < 6` 过滤两侧也都存在（守卫侧 `lessons-hygiene:78`）。口径统一属实，非「悄悄放宽闸门」。
+写入侧用「相等」（宽）、闸门侧用「Jaccard ≥ 0.35」（严）时，写入方按自己口径完全合规，却能合法写出立刻让 `pnpm verify` 变红的状态。这与「内联常量必须同构」同源——判定语义的 SSOT 必须在写入侧与闸门侧是同一个模块，而不是两处各写一份。
+
+## `git diff --numstat` 的第二列（删除数）比第一列（新增数）更稳定
+
+[VERIFIED] 2026-10-05 A · 宿主侧亲跑 `git diff --numstat .ai-runner/lessons.md`：第二列恒为 `0`（本轮该文件无删除），而第一列随采集追加持续变化。结论成立。
+本轮改述为「只显示新增、删除列为 0」比引用具体行数更耐采集追加——数字型断言在文档写下的瞬间就开始过期。
+
+## appendLessons 的近重复并入在「key 为本轮新条目」时静默丢正文
+
+[VERIFIED] 2026-10-05 A · 宿主侧变异复现：把 `nearExisting` 的搜索域还原为「原文件已有 + 本轮 fresh」（旧形态）后重跑 `packages/core/tests/post-run-lesson-extract.node-test.ts` → `1 failed | 23 passed`，失败行正是 `assert.ok(after.includes('B 的补充正文。'))`（`B 正文必须在磁盘上（旧实现会静默丢弃）`）；还原后 24 passed。另：`isNearDuplicateTitle` 恒 `false` 变异使该文件 `2 failed`（场景 A/B 各一）。
+已修复（WO-20261005-04 段一）：`merged` 的 key 只取**原文件已有**标题，同批近重复改走 `nearFresh` 就地并入；返回值为 `handled`（实际处理条目数）；日志措辞同步更正。守卫即上条用例本体。
+
+`appendLessons` 的「并入而非丢弃」实现在一种路径上会**静默丢正文**：当近重复命中的是**本轮刚接受的新条目**（而不是原文件里已有的条目）时。
+
+根因：`existingTitles` 把「原文件已有标题」与「本轮 `fresh.push` 的新标题」混在一个数组里，`merged` 的 key 可能取到后者；而写入阶段只遍历 `cur`（原文件内容）的行去找 `## <key>` —— 原文件里当然没有那个新标题，命中不了 ⇒ 该 key 下的并入内容无处可写、直接蒸发。
+
+后果三者同时出现：**正文丢失**、返回值虚报（计入了并入数）、`console.warn` 打印「并入 N 条」的**假日志**。
+
+宿主侧亲跑原始输出（探针 `packages/core/tests/__probe-merge.node-test.ts`，跑后已删）——原文件里没有 `A`，一次提交 `[A, B]`（A 与 B 近重复）：
+
+```text
+[lessons] 近重复并入「docs/plan 被 gitignore 但不在 eslint ignores 里」：1 条
+[探针B] 返回 = 2 | 标题数 = 1
+[探针B] 含A正文 = true | 含B补充 = false
+文件内容：
+# Lessons
+〈空行〉
+〈此处的二级标题行已被降级：lessons.md 的解析器按「任何 `## ` 行」识别条目，
+不跳代码围栏 ⇒ 原样引用会把示例标题变成一个伪条目。原文即
+「docs/plan 被 gitignore 但不在 eslint ignores 里」〉
+〈空行〉
+A 的正文。
+```
+
+对照组（近重复命中**既有条目**）：`返回 = 1 | 含B补充 = true` ⇒ 内容保留。差异就在 key 是否已存在于文件。
+
+教训：**「不新增条目」不等于「内容被保留」**。用例只断言「标题数 == 1」就放行，等于判据只覆盖了一半路径 —— 属「命中另一条路径」型真空判据。同类判据必须同时断言**落盘内容含被并入的正文**。
+
+附带机制坑（本次亲历）：`lessons.md` 的条目解析 = 「任何以 `## ` 开头的行」（`scripts/lessons-status.cjs` 与 `lessons-hygiene` 同口径），**且不跳过代码围栏**。因此「原样粘贴含二级标题的原始输出」会凭空造出一个伪条目，而该伪条目必然与它所引用的真条目近重复 ⇒ 必然打红闸门。写台账引用原始输出时，必须把围栏内的 `## ` 行降级（加说明或改前缀）。根治方向：解析器跳过代码围栏内的内容。
+
+## 沙箱 `ps` 对外部进程无输出
+
+`ps -p <pid>` / `ps ax` 在 `/run` 里拿不到宿主进程的启动时间（lsof 能看到 pid 与 cwd）。故段一「进程启动晚于产物 mtime」未能取证，改以「产物含新符号 + 端点存活」为准并如实记录。
+
+## `grep -c "'headless:stop'"` 在打包产物里得 0
+
+[VERIFIED] 2026-10-05 A · 宿主侧亲跑：`grep -c "'headless:stop'" apps/standalone/dist/_server/index.js` → `0`；裸 token `grep -c headless:stop` → `3`
+
+SSR 打包把单引号转成双引号，稳妥做法是先搜裸 token（`headless:stop`）再取上下文判断。
+[同族] 方向相反但同源的另一种误读（`grep -c` 数行数不数次数）见下条——都是把工具的**输出口径**当成了事实。
+
+## `grep -c` 数的是匹配**行数**，不是出现次数
+
+[VERIFIED] 2026-10-05 A · 宿主侧亲跑（复核 WO-20261005-05 回执时自踩）：
+
+```text
+packages/core/src/post-run/lesson-extract.ts   的 nearFresh：
+  grep -c "nearFresh"                          -> 3   （行数：3 行命中）
+  (s.match(/nearFresh/g) || []).length         -> 4   （次数：第 227 行的 nearFresh 出现两次）
+packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
+```
+
+- 实测后果：宿主侧据 `grep -c = 3` 一度判定「应用端回执报 `nearFresh=4` 属虚报」，
+  两次口径对照后才发现是**自己的判据口径错**（对方是对的）。同一条命令，口径不同即可得到
+  截然相反的结论，且**没有任何报错**。
+- 与上一条同源：都是把工具输出直接当事实，而没有先说清「这个数字数的是什么」。
+- 纪律：**计数类证据必须附口径与可复现命令**——`grep -c`（行）／`match(/x/g)`（次数）／
+  `grep -o … | wc -l`（次数）。回执、判决、工单里的每个数字都应如此；**无口径的数字视为未取证**。
+
+## overlay 与磁盘不同步
+
+`/run` 沙箱的 `writeText`/`patchFile` 落在 overlay，但 `shell` 派生的子进程（`npx eslint`、`node`）读的是磁盘 —— 同轮 `eslint` 会看到旧内容。修法是改走 `node -e` / `awk` 直改磁盘，或写入与验证分两轮（exit 0 落盘后再跑子进程）。
+
+## 沙箱 output 通道本会话严重不稳定：多次出现脚本尾部被截断、被注入 `SCRIPT`/代码围栏文本、`node -e` 转义失败。有效的规避是
+
+单轮脚本压到极小、写盘用 `node -e` 直改磁盘绕过 overlay、验证与写入分两轮。
+
+## 无索引签名的 interface 不能赋给 `Record<string, unknown>`；加依赖后必跑 hclc-guard
+
+`writeChannelLog(channel, entry: Record<string, unknown>)` 接不住 `RejectLogEntry` / `BoardLogEntry`，
+tsc 报 `Index signature for type 'string' is missing in type 'RejectLogEntry'`。
+根因：**interface 没有隐式索引签名**（type alias 有，interface 没有），所以具名 interface 不能赋给 `Record<string, unknown>`。
+
+修法选择：
+
+- **入参侧**（首选）：形状不敏感的入参用泛型 `export function writeChannelLog<T extends object>(channel: LogChannel, entry: T)`；
+- **被赋侧**：给 interface 加索引签名（会污染该类型的文档语义，不推荐）。
+
+**不要**用 `as unknown as Record<string, unknown>` 绕过 —— 仓库禁 `as any` / `as unknown as`（除非注释写明理由）。
+
+同轮另一条：新增模块级依赖后**必跑 `hclc-guard.node-test.ts`**（`packages/core/src/**` 每文件**唯一 import 模块数 ≤ 8**，阻断级）。
+本轮 `run.ts` 因新增 `import … from './control-log.js'` 达 9 被判红 ⇒ 修法是把被引符号上提 `src/deps.ts` barrel
+（沿用文件内既有的 `[hclc-fix]` 先例），调用方改从 `../deps.js` 引入。
+**barrel 里导出行还要满足 `perfectionist/sort-exports`（按源路径排序）**——首次提交因把
+`./routes/control-log.js` 排在 `./post-run/index.js` 之前，eslint 直接 0 error → 1 error。
+
+判据：口径 = 唯一模块数 `new Set(源码里 from '…' 的模块路径).size`（不是出现次数）；`run.ts` 修完应为 **8**。

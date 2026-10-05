@@ -49,6 +49,19 @@ jobs:
       - name: 构建（tsc + SPA + server + copy-runtime）
         run: pnpm build
 
+      # [gen-drift-guard-v1] 生成物漂移对账（P3 后半项的收口，2026-10-05）
+      # [WHY] `packages/client/auto-imports.d.ts` 是 unplugin-auto-import 的产物却**被追踪**，
+      #   且刻意保持追踪：AGENTS.md 明令「不手工编辑自动生成的文件」，而干净检出下
+      #   `pnpm verify` 不含 build、`tsc:client` 又依赖它的全局声明 ⇒ 改成 untrack 会直接
+      #   打破本仓库刚建立的「干净检出上 pnpm verify 全绿」性质。
+      #   追踪的代价是：配置漂移时它以**未跟踪的 diff** 静默污染 git status，让
+      #   「git status 不得包含运行态文件」这条铁律失去判别力。本步骤把静默污染换成
+      #   **显式、可修的失败**：跑一次 build 后生成物必须是干净的，否则说明提交的基线已过期。
+      # [EVIDENCE] 实测（2026-10-05 19:12）`pnpm build` 后该文件 mtime 被刷新而 sha256 不变
+      #   （e4342cf6…），`git diff --exit-code` 退出 0 ⇒ 生成是确定的，本步骤不会常红。
+      - name: 生成物漂移对账
+        run: git diff --exit-code -- packages/client/auto-imports.d.ts
+
       - name: 文档索引双向对账
         run: pnpm docs:verify
 
