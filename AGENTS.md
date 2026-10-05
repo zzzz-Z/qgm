@@ -127,6 +127,12 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   `eslint.config.ts` 的 `[review-doc-exempt-v1]` 只关掉 `no-unused-vars`，**管不了解析错误**；
   它现在按大小写三态匹配（`REVIEW`/`Review`/`review`），所以 `defect-review.md` 这类命名能拿到豁免。
   只有能独立编译的示例才写 `ts`。
+- **审查类文档别用 markdown 表格，用列表**：`docs/**/*.md` 同样过 `format/prettier`，
+  而 prettier 要求表格每列按显示宽度补齐 ⇒ 手写的 `| a | b |` 几乎必然报
+  `Replace … format/prettier`（实测单篇 13 个 error，直接把 `pnpm lint` / `pnpm verify` 卡红）。
+  这条在本仓库**反复复发**：2026-10-05 两小时内出现两次，写入方都是并行运行的另一个 AI
+  ——`eslint.config.ts` 只豁免了审查类文档的 `no-unused-vars`，**不豁免** `format/prettier`。
+  交付 md 前先跑 `npx eslint <file> --fix`；要矩阵式对比就用「每项一行 + `：`」的列表。
 - **模板里不要对 auto-import 符号赋值**：会生成 `__unimport_xxx`，
   dev 不报错但 build 阶段抛 `Cannot assign to this expression`。需要可变就显式 import。
 - **`scripts/anchors.json` 的 `file` 必须是相对仓库根的完整路径**：校验器只做

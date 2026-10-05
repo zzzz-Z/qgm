@@ -10,6 +10,8 @@
 - `grep -E`（`\|` 交替在本环境静默失效）；`find -newermt` 恒 0 ⇒ 用 `mtimeMs`；`rm -rf` 被静默拦 ⇒ `CODEBUDDY_SAFE_DELETE_ENABLED=0`。
 - 变异/测试：先剥 ANSI（否则 `includes('× ')` 全假）；判据 `Test Files  1 failed`；插唯一 `console.error('MUTANT-…')` 证变异真加载；改工作区根必须 `setRoot(tmp)`（`getRoot()` 模块级缓存）；源码串判据锚定声明行（`T_TOTAL=` 曾被注释抢命中）。
 - `eslint .` 连 markdown（含 `.workbuddy/memory/*`）一起审；`--fix` 只对目标文件。顺序 `eslint → vitest → 4×tsc → build-all`，四套 tsc 缺一；并发 vitest 使 guard 的 5s timeout 误报；超时两层时外层必须 > 内层（`5s<12s`）。
+- **`sh -c '…'` 里嵌 heredoc 传文本：正文含单引号会提前闭合外层引号串** ⇒ 整条命令被静默截断（实测：`git commit -F -` 的消息在第一个 `'` 处腰斩、前置 `echo` 全无输出，**退出码仍 0**）。要传含引号的文本，一律 Write 落文件再 `git commit -F <file>`。
+- 含中英文引号/反引号的探针脚本别写内联 `node -e "…"`：中文引号会破坏 shell 引号配对（实测 `unmatched '`）。落 `.ai-runner/tmp/*.cjs` 再跑。
 
 ## 结构铁律
 
@@ -46,3 +48,5 @@
 - 自检闸三层：L0 对账 → L1 快档（目标 tsc + 改动文件 lint，对 baseline）→ L2 终验轮全量（vitest + 4×tsc + lint + 产物反查）。语义：矛盾必拦、缺证据不拦（`degraded` 放行 + 标注）；判据排除运行态（`.workbuddy/`、`.ai-runner/`）。
 - 双 AI 会议细则见 `docs/plan/skill-autoload-loop-guard.md` + 对应 skill；`C-contract-drift.*` 别手删；`docs/plan/` 三重豁免。
 - Docker：`COPY . .` 在 install/build 之后；三个 cache mount 不可删；回滚 `pre/<runId>` ref 必须回收。
+- **git 追踪边界**（2026-10-05 决策）：`.gitignore` 必须是 `.ai-runner/*` + `!.ai-runner/lessons.md` + `!.ai-runner/skills/**`（不许写 `.ai-runner/`——被排除**目录**下的 re-include 结构性失效）；**知识库入库、运行态不入库**。判「改 `.ai-runner/` 会不会动 `git status`」先分这两类。仓库根 `tmp/` 用根锚定 `/tmp/` 忽略（裸 `tmp/` 会连带匹配任意层级同名目录）。
+- **CI 与本地闸门等价**（同上）：`ci.yml` 不传 `--exclude`，靠「知识库入库 + 先 `pnpm build`」满足前置。因此**新增测试若依赖 `.ai-runner/**` 运行态（state/logs/runs）在 CI 上必红** —— 那是测试把运行态当输入，改写 fixture，别再加 exclude。
