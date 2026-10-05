@@ -161,3 +161,38 @@ it('unlinkSync 删除标记且 readFileSync 读到 ENOENT 视图', () => {
   assert.deepEqual(r.entries[path.join(r.dir, 'gone.txt')], { op: 'delete', data: null, dir: false })
   fs.rmSync(r.dir, { recursive: true, force: true })
 })
+
+// [readonly-write-regression-v1] read-only 沙盒下「经 __AI__ helpers 写入」必须零落盘。
+// 承重：历史上实测过一次「只传 env 不 -r interceptor」导致 read-only 形同虚设（真写盘）；
+//   本组第一条在那种回归下会变红。第二条是阳性对照——同一脚本在 full 下确实写盘，
+//   否则第一条可能因为 writeText 自身坏掉而「假绿」。
+function runWithHelpers(scriptBody: string, opts?: { env?: Record<string, string>, setup?: (dir: string) => void }) {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'air-ro-')))
+  if (opts && opts.setup) opts.setup(dir)
+  const overlay = path.join(dir, 'overlay.json')
+  const helpers = path.resolve(__dirname, '..', '..', '..', 'packages', 'core', 'src', 'helpers.cjs')
+  const r = spawnSync(process.execPath, ['-r', interceptor, '-r', helpers, '-e', scriptBody], {
+    cwd: dir,
+    env: { ...process.env, AI_RUNNER_OVERLAY: overlay, AI_RUNNER_TOOL_LOG: '', ...(opts && opts.env) },
+    encoding: 'utf8',
+  })
+  const entries = fs.existsSync(overlay) ? JSON.parse(fs.readFileSync(overlay, 'utf8')) : {}
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr, entries, dir }
+}
+
+it('read-only：__AI__.writeText 只进 overlay，磁盘零改动', () => {
+  const r = runWithHelpers('__AI__.writeText(\'ro.txt\', \'hello\')')
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(!fs.existsSync(path.join(r.dir, 'ro.txt')), 'read-only 下磁盘不应出现 ro.txt')
+  const e = r.entries[path.join(r.dir, 'ro.txt')]
+  assert.ok(e && e.op === 'write', 'overlay 应记录 ro.txt')
+  assert.equal(Buffer.from(e.data, 'base64').toString(), 'hello')
+  fs.rmSync(r.dir, { recursive: true, force: true })
+})
+
+it('阳性对照：同一脚本在 full 沙盒下确实写盘', () => {
+  const r = runWithHelpers('__AI__.writeText(\'fw.txt\', \'hello\')', { env: { AI_RUNNER_SANDBOX: 'full' } })
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(path.join(r.dir, 'fw.txt'), 'utf8'), 'hello')
+  fs.rmSync(r.dir, { recursive: true, force: true })
+})

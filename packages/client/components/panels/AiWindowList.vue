@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { TOAST_MEDIUM, TOAST_SHORT_MEDIUM } from '../../utils/toast-durations'
+// [win-sid-namespace-v1] 站点窗口槽位 sid 用共享命名来源（与 App.vue 开窗路径一致）
+import { isWindowMarkedOpened, markWindowOpened, probeWindowBySid, winSidOf } from '../../composables/ai/useAiWindowTable'
 // [defensive-refresh-v1] 跨域窗口无 close 事件可监听，只能轮询兜底；
 // 但仅在前台标签页轮询，后台标签页无需刷新列表可显著降低 CPU。
 // [CONSTRAINT] visibilitychange 时立即补一次 windowsTick，保证切回前台马上同步。
@@ -27,7 +29,7 @@ const items = computed(() => {
   listWindows()
   const active = getActiveWinSid()
   return MODELS.map((m) => {
-    const sid = sidOf(m.id)
+    const sid = winSidOf(m.id)
     const win = getWindowBySid(sid)
     return {
       id: m.id,
@@ -45,17 +47,35 @@ const items = computed(() => {
 /** 已激活数（用于头部角标） */
 const openedCount = computed(() => items.value.filter(it => it.opened).length)
 
+// [win-opened-marker-v1] 挂载时探测一次（无标记时不做任何探测，无副作用）
+onMounted(() => { probeAllMarked() })
+
 if (typeof document !== 'undefined') {
   const onVis = () => {
     _pollEnabled.value = document.visibilityState === 'visible'
-    if (_pollEnabled.value) windowsTick.value++
+    if (!_pollEnabled.value) return
+    // [win-opened-marker-v1] 切回前台校正：用户手动关窗后无需刷新即降级
+    probeAllMarked()
   }
   onMounted(() => document.addEventListener('visibilitychange', onVis))
   onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVis))
 }
 
-/** 固定 sid：每站点一个稳定 id，不随会话切换变化 */
-function sidOf(modelId: string): string { return `win_${modelId}` }
+/**
+ * [win-opened-marker-v1] 探测所有已标记 sid：
+ * 标记存在 → `window.open('', name)` 拿回引用（同源 about:blank 会被 close 回收）；
+ * 探测成功写回 windowTable，opened 判据即有真值；探测失败自动清标记（用户关窗场景纠偏）。
+ * [CONSTRAINT] MODELS 数量小（个位数），一次全探；单个失败不阻断其他站点。
+ */
+function probeAllMarked(): void {
+  if (typeof window === 'undefined') return
+  for (const m of MODELS) {
+    const sid = winSidOf(m.id)
+    if (!isWindowMarkedOpened(sid)) continue
+    try { probeWindowBySid(sid) } catch { /* 单个失败不阻断 */ }
+  }
+  windowsTick.value++
+}
 /**
  * 点击某站点：
  * - 已开窗口 → 激活切换
@@ -84,6 +104,9 @@ async function onClick(item: { id: string, label: string, url: string, sid: stri
 /** 关闭某站点窗口：仅从表中移除引用，不强制 win.close */
 function dismiss(sid: string, label: string): void {
   removeWindowBySid(sid)
+  // [win-opened-marker-v1] 同步清「已打开」标记：否则刷新后 sessionStorage 残留
+  // 会让列表误显示「已打开」（用户关窗后重新加载工作台的场景）
+  markWindowOpened(sid, false)
   windowsTick.value++
   toast(`已移除 ${label} 的窗口引用`, 'info', TOAST_SHORT_MEDIUM)
 }
@@ -184,10 +207,32 @@ function dismiss(sid: string, label: string): void {
   transition: background 0.12s ease;
 }
 .awl-item:hover {
-  background: rgba(127, 127, 127, 0.08);
+  background: rgba(127, 127, 127, 0.12);
+}
+/* [ui-list-v2] 未打开项降色阶：凸显已打开/激活项 */
+.awl-item:not(.opened) .awl-label {
+  color: var(--text-2);
+}
+.awl-item:not(.opened) .awl-sub {
+  color: var(--text-3);
+  opacity: 0.7;
+}
+/* [ui-list-v2] 激活项：竖条 + 背景加强 + 微左边距 */
+.awl-item {
+  position: relative;
 }
 .awl-item.active {
-  background: rgba(88, 166, 255, 0.1);
+  background: rgba(88, 166, 255, 0.12);
+}
+.awl-item.active::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--primary, #58a6ff);
 }
 
 .awl-dot {

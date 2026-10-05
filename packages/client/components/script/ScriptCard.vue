@@ -1,4 +1,7 @@
 <script setup lang="ts">
+// [ui-p2c-render-probe-v1] V9 验收①：dev-only 渲染打点（生产 enabled() 早退）
+import { onMounted, onUpdated } from 'vue'
+import { probeRender } from '../../composables/ui/render-probe'
 // [script-card-split-v1] 从 TerminalPane 拆出的脚本卡片子组件
 // [WHY] TerminalPane 行数超架构红线上限；卡片是最大块，可自持展开状态，优先独立
 // [CHANGE-IMPACT] TerminalPane 的 script 分支改为 <ScriptCard :card="card" />；样式随迁
@@ -45,6 +48,10 @@ const resultClass = computed(() => {
   if (isFailed.value) return 'stat-fail'
   return props.card.changeCount > 0 ? 'stat-changed' : 'stat-none'
 })
+
+// [ui-p2c-render-probe-v1] mount/update 各打一次；判据①用 update delta 算单事件重渲染卡数
+onMounted(() => probeRender(`sc:${props.card.key}`, 'mount'))
+onUpdated(() => probeRender(`sc:${props.card.key}`, 'update'))
 
 function toggle(): void { expanded.value = !expanded.value }
 </script>

@@ -4,10 +4,14 @@
 // 事件流单例（localStorage 持久化），用于渲染每轮脚本 desc
 // [rd-import-v1] 引入抽出的轮次分隔条组件
 import RoundDivider from './RoundDivider.vue'
+import TaskProgressPanel from './TaskProgressPanel.vue'
+// [panel-resize-scroll-v1] D4：面板尺寸变化时补偿 chat-list scrollTop，防贴底跳变
+import { computeCompensatedScrollTop } from '../../utils/panel-resize-scroll'
 // [sc-wire-v1] 脚本卡片抽为子组件
 import ScriptCard from './ScriptCard.vue'
 // [timeline-denoise-v1] 长文本卡片的展开/收起入口
-import FoldToggle from './FoldToggle.vue'
+// [round-card-v1] done / text / ask / question 四类卡片抽为子组件
+import RoundCard from './RoundCard.vue'
 // [timeline-denoise-v1] 长文本预览 / 原始输出尾部折叠（纯函数，见 utils/timeline-preview.ts）
 // [CONSTRAINT] 显式 import 而非依赖 auto-import：vitest 与 tsc 没有 auto-import 插件
 import { clampTextPreview, tailTextPreview } from '../../utils/timeline-preview'
@@ -79,6 +83,21 @@ interface QuestionItem extends PreviewFields {
   answered: boolean
   answer: string
 }
+/**
+ * 每轮脚本卡片：从 busEvents 提取 run:start 事件（desc/why/lang/phase）
+ * [WHY] 事件流 updateKey 原地更新，同一脚本多次 phase 变化只留一条；desc 用 renderMarkdown 呈现
+ * [CONSTRAINT] 仅收 payload.desc 或 summary 非空的事件；无内容的不渲染，避免空卡
+ * [CHANGE-IMPACT] 依赖 App.vue / useRunner 的 emit 契约（run:start + payload.desc/why/lang/phase）
+ * [timeline-denoise-v1] 长文本一律先给预览（clampTextPreview），脚本原始输出只留尾部若干行
+ *   （tailTextPreview）；折叠判定在数据层完成，模板只读 truncated/hiddenLines，避免渲染期计算
+ */
+// [ui-p2c-stable-ref-v1] V9 判据①核心：卡对象引用稳定化。
+// [WHY] computed 每次重算都新建全部卡对象 → v-for 里所有子组件的 props.card 引用变化，
+//   触发全量 updated（无论内容是否真的变了）；判据①「单事件重渲染卡数 ≤ 3」因此不达标。
+//   本函数把内容等价的卡替换回上一次的对象引用，v-for 命中同 key + 同 props 时不再触发 updated。
+// [CONSTRAINT] 必须组件内私有 cache；浅比较（字段全等 + 数组用 JSON 串）足够，卡字段均为原始类型/纯数组。
+// [CHANGE-IMPACT] 若误用「长寿命外部 cache」会跨组件实例泄漏，务必保持本声明。
+type AnyCard = ScriptItem | TextItem | DoneItem | AskItem | QuestionItem | DividerItem
 
 /** 组件接收的 props 定义 */
 const props = defineProps<{
@@ -111,42 +130,44 @@ const DONE_PREVIEW = { lines: 30, chars: 3000 }
 // [timeline-denoise-v1] 脚本卡原始输出的保留策略（与 useRunner 的 slice(-400) 对齐）
 const TAIL_KEEP_LINES = 5
 const TAIL_MAX_CHARS = 400
-/** 阶段类名 → 是否属于终态（用于进度条统计，避免散落字面量） */
-const PHASE_DONE_CLASS = 'phase-done'
-const PHASE_ERROR_CLASS = 'phase-error'
-// [terminal-md-cache-removed-v1] 本地 _mdCache 已冗余：renderMarkdown（useMarkdown）
-// 现已内置模块级 LRU 缓存，所有调用点共享同一份，无需在组件内重复实现。
-const renderMarkdownCached = renderMarkdown
+// 总结写入后自动滚到底部，确保用户第一眼看到
+// [CONSTRAINT] 需 nextTick 等 DOM 更新完成后再滚；仅当有新内容时触发（props.doneSummary 从空→非空 或 变内容）
+// [CHANGE-IMPACT] 若父组件清空 doneSummary（新一轮开始）不滚动；避免滚动位置抖动
+// [scroll-snap-v3] 方向敏感 + 精确到底：
+//   向上滚（cur < last）→ 立即停吸，不看距离 —— 用户想读历史就给静态视图
+//   精确到底（距底 <= 8px）→ 恢复吸附 —— 只在真到底时才自动跟随
+//   向下滚但未到底 → 保持现状 —— 不因接近底部误吸附
+// [WHY] v2 只判距离，用户在阈值内轻微上翻仍被拽回；方向敏感后不存在此窗口。
+// [CONSTRAINT] atBottom 由 chat-list 的 scroll 事件维护；lastScrollTop 是方向判据。
+// [CHANGE-IMPACT] 模板已加 @scroll；去掉会让吸附失效。
+const BOTTOM_THRESHOLD_PX = 8
+let lastScrollTop = 0
+const _cardCache = new Map<string, AnyCard>()
+const _seenScriptKeys = new Set<string>()
+// [panel-resize-scroll-v1] D4：面板高度变化（出现 / 消失 / 折叠）时补偿 chat-list scrollTop
+// [WHY] 面板在 chat-list 上方，其高度变化侵占/释放 chat-list 空间；
+//   用户此前已贴底时会出现「视觉位置跳变」；按 delta 平移 scrollTop 保持视觉稳定
+// [CONSTRAINT] 仅当「用户此前处于贴底」时才补偿；否则尊重用户当前阅读位置不动
+// [CHANGE-IMPACT] 不改变 force-scroll-on-script-start-v1 语义（该逻辑仍独立）
+let _lastPanelHeight = 0
+let _panelRo: ResizeObserver | null = null
 
 // 等待时长本地计时：aiWaiting 为 true 时启动，false 时停止并归零
 // [WHY] 用本地 interval 而非改 useAiWaiting 契约（避免污染其他消费方）；仅用于展示层
 // [CONSTRAINT] useIntervalFn 组件卸载自动清理；watch 双向同步启停
 // [CHANGE-IMPACT] 与 wait-banner 模板成对；去掉 watch 会让秒数永远为 0
 const waitElapsed = ref(0)
-// [sc-deadcode-v1] 脚本卡的 expanded/toggle 已下沉到 ScriptCard.vue（各自持有展开态）
-// [timeline-denoise-v1] 长文本卡片（text / ask / done）的展开态：按卡片 key 记录，
-//   不在集合中即为折叠态（默认折叠）；与脚本卡的展开态互不影响
-const expandedCards = ref<Set<string>>(new Set())
 /** 列表 */
 const chatListRef = ref<HTMLElement | null>(null)
-/** 各提问卡的自由输入草稿；[CONSTRAINT] 按卡片 key 分桶，多张历史卡片互不串味 */
-const askDrafts = ref<Record<string, string>>({})
+// [panel-resize-scroll-v1] TaskProgressPanel 宿主容器：监听其尺寸变化补偿滚动
+const panelHostRef = ref<HTMLElement | null>(null)
+const atBottom = ref(true)
 
 const { events: busEvents } = useEventBus()
-// [ask-card-v1] 当前活跃提问（单例）；用于判断某张提问卡是否仍可点选
-const { askState, resolveAsk } = useAsk()
 const { pause: pauseWaitTimer, resume: resumeWaitTimer } = useIntervalFn(() => {
   waitElapsed.value += 1
 }, 1000, { immediate: false })
 
-/**
- * 每轮脚本卡片：从 busEvents 提取 run:start 事件（desc/why/lang/phase）
- * [WHY] 事件流 updateKey 原地更新，同一脚本多次 phase 变化只留一条；desc 用 renderMarkdown 呈现
- * [CONSTRAINT] 仅收 payload.desc 或 summary 非空的事件；无内容的不渲染，避免空卡
- * [CHANGE-IMPACT] 依赖 App.vue / useRunner 的 emit 契约（run:start + payload.desc/why/lang/phase）
- * [timeline-denoise-v1] 长文本一律先给预览（clampTextPreview），脚本原始输出只留尾部若干行
- *   （tailTextPreview）；折叠判定在数据层完成，模板只读 truncated/hiddenLines，避免渲染期计算
- */
 const timelineItems = computed(() => {
   const out: Array<ScriptItem | TextItem | DoneItem | AskItem | QuestionItem | DividerItem> = []
   // [round-divider-v1] 追踪上一张脚本卡的轮次；跨轮时插入分隔条（初始 0 表示尚未出现任何轮次）
@@ -256,56 +277,129 @@ const timelineItems = computed(() => {
     })
   }
 
-  return out
-})
-// [script-progress-v1] 任务进度：完成与失败分开统计，模板据此显示「已完成 N/M · 失败 K」
-// [WHY] 原实现把 error 计入 done，用户看到「7/7 tasks completed」却混着失败步骤，
-//   与预期不符；拆开后进度条仍按终态合计推进，语义与视觉都不丢信息
-// [CONSTRAINT] 只统计当前 timelineItems 中的脚本卡；随清屏 / 刷新同步更新
-// [CHANGE-IMPACT] 与模板 .progress-header 成对；去掉会让顶部进度消失
-const scriptProgress = computed(() => {
-  const items = timelineItems.value.filter(c => c.type === 'script') as Array<{ phaseClass: string }>
-  let done = 0
-  let failed = 0
-  for (const c of items) {
-    if (c.phaseClass === PHASE_DONE_CLASS) done += 1
-    else if (c.phaseClass === PHASE_ERROR_CLASS) failed += 1
-  }
-  return { done, failed, finished: done + failed, total: items.length }
+  return stabilizeCardRefs(out)
 })
 
 watch(() => props.aiWaiting, (v) => {
   if (v) { waitElapsed.value = 0; resumeWaitTimer() }
   else { pauseWaitTimer(); waitElapsed.value = 0 }
 }, { immediate: true })
-// 总结写入后自动滚到底部，确保用户第一眼看到
-// [CONSTRAINT] 需 nextTick 等 DOM 更新完成后再滚；仅当有新内容时触发（props.doneSummary 从空→非空 或 变内容）
-// [CHANGE-IMPACT] 若父组件清空 doneSummary（新一轮开始）不滚动；避免滚动位置抖动
 watch(
   () => [props.doneSummary, timelineItems.value.length] as const,
   async ([v]) => {
     if (!v && timelineItems.value.length === 0) return
     await nextTick()
-    const el = chatListRef.value
-    if (el) el.scrollTop = el.scrollHeight
+    scrollToBottomIfAtBottom()
   },
+)
+watch(
+  () => timelineItems.value,
+  (items) => {
+    let latest: AnyCard | null = null
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i].type === 'script') { latest = items[i]; break }
+    }
+    if (!latest) return
+    if (_seenScriptKeys.has(latest.key)) return
+    _seenScriptKeys.add(latest.key)
+    void nextTick(forceScrollToBottom)
+  },
+  { flush: 'post' },
 )
 
 // 页面刷新时自动滚到最后一条：
 // [WHY] 上面的 watch 非 immediate，刷新时 busEvents 若同步恢复则不触发；需挂载后主动滚一次
-// [CONSTRAINT] rAF 二次滚动兜底字体/异步渲染造成的高度变化；一次性，不持续 watch
+// [CONSTRAINT] 仅一次 nextTick 后滚底 —— 不再 rAF 三帧兜底（见上方 [scroll-snap-v2]）
 // [CHANGE-IMPACT] 与上面的 watch 互补：watch 管运行时新增，onMounted 管首次挂载
 onMounted(async () => {
   await nextTick()
-  // 连续 3 帧滚动：兜底字体/异步渲染/图片导致的高度变化
-  for (let i = 0; i < 3; i++) {
-    requestAnimationFrame(() => {
-      const el = chatListRef.value
-      if (el) el.scrollTop = el.scrollHeight
-    })
+  scrollToBottomIfAtBottom()
+  // [panel-resize-scroll-v1] D4：挂 ResizeObserver 观察面板高度变化
+  // [CONSTRAINT] 只在浏览器有 ResizeObserver 时挂（SSR/老环境降级为不补偿）
+  if (typeof ResizeObserver !== 'undefined' && panelHostRef.value) {
+    _lastPanelHeight = panelHostRef.value.getBoundingClientRect().height
+    _panelRo = new ResizeObserver(onPanelResize)
+    _panelRo.observe(panelHostRef.value)
   }
 })
+onBeforeUnmount(() => {
+  // [panel-resize-scroll-v1] 卸载时断开 ResizeObserver，防内存泄漏
+  if (_panelRo) { _panelRo.disconnect(); _panelRo = null }
+})
 
+// [ui-p2c-stable-ref-fix-v1] 判别联合转 Record 需走 unknown 两步（TS2352）
+function asRecord(card: AnyCard): Record<string, unknown> {
+  return card as unknown as Record<string, unknown>
+}
+function shallowCardEqual(a: AnyCard, b: AnyCard): boolean {
+  const ra = asRecord(a)
+  const rb = asRecord(b)
+  const ka = Object.keys(ra)
+  const kb = Object.keys(rb)
+  if (ka.length !== kb.length) return false
+  for (const k of ka) {
+    const va = ra[k]
+    const vb = rb[k]
+    if (va === vb) continue
+    if (Array.isArray(va) && Array.isArray(vb) && JSON.stringify(va) === JSON.stringify(vb)) continue
+    return false
+  }
+  return true
+}
+function stabilizeCardRefs(cards: AnyCard[]): AnyCard[] {
+  const seen = new Set<string>()
+  for (let i = 0; i < cards.length; i++) {
+    const card = cards[i]
+    const prev = _cardCache.get(card.key)
+    if (prev && shallowCardEqual(prev, card)) cards[i] = prev
+    else _cardCache.set(card.key, card)
+    seen.add(card.key)
+  }
+  for (const k of [..._cardCache.keys()]) { if (!seen.has(k)) _cardCache.delete(k)
+  }
+  return cards
+}
+function updateAtBottom(): void {
+  const el = chatListRef.value
+  if (!el) return
+  const cur = el.scrollTop
+  const distance = el.scrollHeight - cur - el.clientHeight
+  if (cur < lastScrollTop - 1) atBottom.value = false
+  else if (distance <= BOTTOM_THRESHOLD_PX) atBottom.value = true
+  lastScrollTop = cur
+}
+function scrollToBottomIfAtBottom(): void {
+  if (!atBottom.value) return
+  const el = chatListRef.value
+  if (el) el.scrollTop = el.scrollHeight
+}
+// [force-scroll-on-script-start-v1] 脚本开始运行强制可视
+// [WHY] scroll-snap-v3 下用户任何上翻即 atBottom=false；新脚本开跑时卡片落在下方，
+//   用户完全看不到本轮进展。run:start 是「新脚本开始」的锚点事件。
+// [CONSTRAINT] 判据是 updateKey 首次出现（一轮一个）；同轮 phase 更新复用同 key 不触发——
+//   否则 running 每 250ms 一次节流会把用户上翻持续拽回，破坏「用户上翻解除吸附」语义。
+// [CHANGE-IMPACT] 只认 type==='script' 的新卡；文本 / ask 卡不触发，保持其原有吸附语义。
+function forceScrollToBottom(): void {
+  const el = chatListRef.value
+  if (!el) return
+  el.scrollTop = el.scrollHeight
+  lastScrollTop = el.scrollTop
+  atBottom.value = true
+}
+function onPanelResize(): void {
+  const host = panelHostRef.value
+  if (!host) return
+  const nextH = host.getBoundingClientRect().height
+  const delta = nextH - _lastPanelHeight
+  _lastPanelHeight = nextH
+  if (delta === 0) return
+  const el = chatListRef.value
+  if (!el) return
+  if (!atBottom.value) return
+  const target = computeCompensatedScrollTop(el.scrollTop, delta)
+  el.scrollTop = target
+  lastScrollTop = el.scrollTop
+}
 /**
  * 事件时刻 → HH:MM:SS 本地时间标签
  * [WHY] 原实现在 ask / done / text 三处各写一份 pad + timeLabel 闭包，格式变更要改三处
@@ -315,26 +409,6 @@ function hmsLabel(ts?: number): string {
   const d = new Date(ts || Date.now())
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
-/**
- * 切换长文本卡片的展开态
- * [CONSTRAINT] Set 必须整体替换才触发响应式更新（与 treeExpanded 同惯例）
- */
-function toggleCard(key: string): void {
-  const next = new Set(expandedCards.value)
-  if (next.has(key)) next.delete(key)
-  else next.add(key)
-  expandedCards.value = next
-}
-/**
- * 选择长文本卡片的渲染内容：折叠态给预览、展开态给全文
- * [WHY] 不预渲染 html 字段：折叠态下若把全文也 renderMarkdown 一遍，长回复会白白付一次解析成本
- *   （renderMarkdown 自带 LRU 缓存，此处按文本命中，重复渲染成本仅为一次查表）
- * [CONSTRAINT] 依赖 expandedCards；模板中调用，展开态切换即重新求值
- */
-function cardHtml(card: PreviewFields & { key: string }): string {
-  const collapsed = card.truncated && !expandedCards.value.has(card.key)
-  return renderMarkdownCached(collapsed ? card.preview : card.text)
 }
 /**
  * 规整事件 payload 里的选项数组
@@ -353,57 +427,18 @@ function normalizeAskOptions(raw: unknown): Array<{ id: string, label: string }>
   }
   return out
 }
-/**
- * 该提问卡是否仍可交互
- * [WHY] 已答 / 被新提问取代 / 页面刷新（Promise 已丢失）三种情况都不可再提交，
- *   否则用户点完无人接收，看起来像"点了没反应"
- * @param card 提问卡
- */
-function isAskActive(card: QuestionItem): boolean {
-  return !card.answered && Boolean(card.askId) && askState.value?.id === card.askId
-}
-/**
- * 提交提问卡的回答（按钮点选与自由输入共用同一出口）
- * [CONSTRAINT] 空文本与失效卡片一律忽略；提交前清空该卡草稿
- */
-function submitAskAnswer(card: QuestionItem, text: string): void {
-  const t = String(text || '').trim()
-  if (!t || !isAskActive(card)) return
-  askDrafts.value = { ...askDrafts.value, [card.key]: '' }
-  resolveAsk(t)
-}
-/**
- * 更新某张提问卡的输入草稿
- * [WHY] 不用 v-model 绑定 `askDrafts[key]`（动态成员表达式），显式事件更利于类型检查与守卫测试
- * [CONSTRAINT] Set 语义整体替换，与 expandedCards 同惯例
- */
-function onAskInput(key: string, e: Event): void {
-  const value = (e.target as HTMLInputElement | null)?.value || ''
-  askDrafts.value = { ...askDrafts.value, [key]: value }
-}
 </script>
 
 <template>
   <section class="terminal">
     <!-- [flow-timeline] 全流程时间线 -->
     <div class="flow-timeline">
-      <!-- [script-progress-v1] 顶部进度：完成与失败分开显示；无脚本卡时不渲染 -->
-      <div v-if="scriptProgress.total > 0" class="progress-header">
-        <span class="progress-dot" :class="{ 'is-active': scriptProgress.finished < scriptProgress.total }" />
-        <span class="progress-text">
-          已完成 {{ scriptProgress.finished }}/{{ scriptProgress.total }} 步
-        </span>
-        <span v-if="scriptProgress.failed > 0" class="progress-failed">
-          失败 {{ scriptProgress.failed }}
-        </span>
-        <span class="progress-bar">
-          <span
-            class="progress-bar-fill"
-            :style="{ width: `${scriptProgress.total ? (scriptProgress.finished / scriptProgress.total * 100) : 0}%` }"
-          />
-        </span>
+      <!-- [task-progress-panel-v1] 任务完成详情：待办 + 已完成划线，替代原「已完成 N/M 步」 -->
+      <!-- [panel-resize-scroll-v1] 容器 ref 供 ResizeObserver 观察 -->
+      <div ref="panelHostRef" class="panel-host">
+        <TaskProgressPanel />
       </div>
-      <div ref="chatListRef" class="chat-list">
+      <div ref="chatListRef" class="chat-list" @scroll="updateAtBottom">
         <!-- 每轮脚本 desc：Markdown 渲染；来源 busEvents（已持久化到 localStorage） -->
         <template v-for="card in timelineItems" :key="card.key">
           <!-- [rd-tpl-v1] 已抽为子组件 -->
@@ -417,101 +452,11 @@ function onAskInput(key: string, e: Event): void {
             :key="card.key"
             :card="card"
           />
-          <section v-else-if="card.type === 'done'" class="done-summary">
-            <div class="done-summary-head">
-              任务完成 · 总结
-            </div>
-            <div class="done-summary-body" v-html="cardHtml(card)" />
-            <!-- [timeline-denoise-v1] 超长总结默认折叠，避免"文字墙"淹没结论 -->
-            <FoldToggle
-              v-if="card.truncated"
-              :expanded="expandedCards.has(card.key)"
-              :hidden-lines="card.hiddenLines"
-              @toggle="toggleCard(card.key)"
-            />
-          </section>
-          <!-- 非 cjs 文本卡片：与总结同排版 -->
-          <section v-else-if="card.type === 'text'" class="text-card">
-            <header class="text-card-head">
-              <span class="text-card-badge">AI</span>
-              <span class="script-card-time">{{ card.timeLabel }}</span>
-            </header>
-            <div class="done-summary-body" v-html="cardHtml(card)" />
-            <FoldToggle
-              v-if="card.truncated"
-              :expanded="expandedCards.has(card.key)"
-              :hidden-lines="card.hiddenLines"
-              @toggle="toggleCard(card.key)"
-            />
-          </section>
-          <!-- 用户提问/回答卡：badge 用「你」区分 AI；回答额外走 answer-card 视觉 -->
-          <section v-else-if="card.type === 'ask'" class="text-card" :class="card.role === 'user-answer' ? 'answer-card' : 'ask-card'">
-            <header class="text-card-head">
-              <span class="text-card-badge" :class="card.role === 'user-answer' ? 'answer-badge' : 'ask-badge'">你</span>
-              <span class="script-card-time">{{ card.timeLabel }}</span>
-            </header>
-            <div class="done-summary-body" v-html="cardHtml(card)" />
-            <FoldToggle
-              v-if="card.truncated"
-              :expanded="expandedCards.has(card.key)"
-              :hidden-lines="card.hiddenLines"
-              @toggle="toggleCard(card.key)"
-            />
-          </section>
-          <!-- [ask-card-v1] AI 提问卡：替代旧弹窗，直接渲染在对话流里，可点选也可自由输入 -->
-          <section
-            v-else-if="card.type === 'question'"
-            class="question-card"
-            :class="{ 'is-answered': card.answered, 'is-stale': !card.answered && !isAskActive(card) }"
-          >
-            <header class="text-card-head">
-              <span class="text-card-badge question-badge">ASK</span>
-              <span class="script-card-time">{{ card.timeLabel }}</span>
-              <span v-if="card.answered" class="question-state">已回答</span>
-              <span v-else-if="!isAskActive(card)" class="question-state is-stale">已失效</span>
-            </header>
-            <div v-if="card.text" class="done-summary-body" v-html="cardHtml(card)" />
-            <FoldToggle
-              v-if="card.truncated"
-              :expanded="expandedCards.has(card.key)"
-              :hidden-lines="card.hiddenLines"
-              @toggle="toggleCard(card.key)"
-            />
-            <div v-if="card.options.length" class="question-options">
-              <button
-                v-for="o in card.options" :key="o.id"
-                class="question-opt" type="button"
-                :disabled="!isAskActive(card)"
-                @click="submitAskAnswer(card, o.label)"
-              >
-                {{ o.label }}
-              </button>
-            </div>
-            <div v-if="card.answered" class="question-answer">
-              你的回答：{{ card.answer || '（已取消）' }}
-            </div>
-            <form
-              v-else-if="isAskActive(card)"
-              class="question-input-row"
-              @submit.prevent="submitAskAnswer(card, askDrafts[card.key])"
-            >
-              <input
-                class="question-input"
-                :value="askDrafts[card.key] || ''"
-                :placeholder="card.options.length ? '或输入自定义回答…' : '输入你的回答…'"
-                @input="onAskInput(card.key, $event)"
-              >
-              <button
-                class="question-send" type="submit"
-                :disabled="!(askDrafts[card.key] || '').trim()"
-              >
-                发送
-              </button>
-            </form>
-            <div v-else class="question-stale">
-              此提问已失效（已被新的提问取代，或页面已刷新）
-            </div>
-          </section>
+          <RoundCard
+            v-else
+            :key="card.key"
+            :card="card"
+          />
         </template>
 
         <!-- 空态：无卡片 / 无输出 / 无总结 -->

@@ -21,11 +21,17 @@ test('useAsk：经事件流投递提问卡，并回写已回答态', () => {
   assert.ok(src.includes('answered: true'), 'resolveAsk 应回写 answered 态')
 })
 
-test('TerminalPane：渲染提问卡并接上 resolveAsk', () => {
-  const src = read('packages/client/components/script/TerminalPane.vue')
-  assert.ok(src.includes('card.type === \'question\''), '应有 question 渲染分支')
-  assert.ok(src.includes('resolveAsk('), '提交应调用 resolveAsk')
-  assert.ok(src.includes('normalizeAskOptions'), 'payload 选项应先收窄类型')
+// [ui-p1-tests-cascade-v1] V9 拆分后：TerminalPane 产出 question 卡片数据，
+// RoundCard 负责渲染与提交，断言须覆盖两端（原来只扫 TerminalPane）。
+test('对话流：question 卡片从 TerminalPane 产出，由 RoundCard 渲染并接上 resolveAsk', () => {
+  const tp = read('packages/client/components/script/TerminalPane.vue')
+  assert.ok(tp.includes('ai:question'), 'TerminalPane 应消费 ai:question 事件')
+  assert.ok(tp.includes('type: \'question\''), 'TerminalPane 应产出 question 类型卡片')
+  assert.ok(tp.includes('normalizeAskOptions'), 'payload 选项应先收窄类型')
+
+  const rc = read('packages/client/components/script/RoundCard.vue')
+  assert.ok(rc.includes('card.type === \'question\''), 'RoundCard 应有 question 渲染分支')
+  assert.ok(rc.includes('resolveAsk('), 'RoundCard 提交应调用 resolveAsk')
 })
 
 test('弹窗已拆除：AskDialog 组件与挂载点都不复存在', () => {

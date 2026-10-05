@@ -133,6 +133,14 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     }
 
     if (kind === 'done') {
+      // [done-to-loop-v1] 循环内的 DONE 交由循环引擎全权处理（BeforeDone 自检 + finish + 清空看板）
+      // [WHY] 原实现此处无条件 killCurrent + return，使 reply-handlers 的 done 分支（含 finish）成为死代码，
+      //   自检闸门（hooks.json BeforeDone）与看板清空从未真正触发过
+      // [CHANGE-IMPACT] 循环内 DONE 时引擎自带 done-summary-archive 通知；本处不再重复 emitBus
+      if (routedToLoop) {
+        void autoLoop.onNonScriptReply({ kind: 'done', text: String(payload.text || '') }, sid)
+        return
+      }
       if (autoLoop.isLoopActive.value) {
         try { void autoLoop.killCurrent() } catch (err) { log.error('[done-stop-loop]', err) }
       }
@@ -175,7 +183,10 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
         toast(`📥 脚本 · ${lang} · ${lineCount} 行${item.desc ? ` · ${item.desc}` : ''}`, 'info', TOAST_MEDIUM_SHORT)
         const runKey = takePendingAskKey() || uid('run')
         if (routedToLoop) {
-          void autoLoop.onScriptArrival(item, sid)
+          void autoLoop.onScriptArrival(item, sid).catch((e: unknown) => {
+            toast('脚本分发异常，已复位', 'error', 5000)
+            log.error?.(`[ai-runner] onScriptArrival 失败：${String(e)}`)
+          })
         } else {
           const retryRun = async (attempt: number): Promise<void> => {
             if (!runner.running.value) {
@@ -226,7 +237,10 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       const inst = sid ? autoLoop.getLoopBySessionId(sid) : undefined
       const routedToLoop = Boolean(inst && autoLoop.isInstActive(inst))
       if (routedToLoop) {
-        void autoLoop.onScriptArrival(item, sid)
+        void autoLoop.onScriptArrival(item, sid).catch((e: unknown) => {
+          toast('脚本分发异常，已复位', 'error', 5000)
+          log.error?.(`[ai-runner] onScriptArrival 失败：${String(e)}`)
+        })
       } else {
         const runKey = uid('run')
         const delayMs = 3000 + Math.random() * 4000

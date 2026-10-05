@@ -79,7 +79,7 @@ watch(
 
 <style scoped>
 .tt-host {
-  z-index: 2147483647;
+  z-index: var(--z-toast);
   max-width: 360px;
   padding: 6px 10px;
   background: rgb(15 23 42 / 96%);

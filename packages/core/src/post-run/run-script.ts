@@ -28,6 +28,7 @@ export interface RunResult {
  * @param toolLogPath 工具调用 JSONL 日志路径
  * @param onChunk stdout / stderr 流式回调；缺省则不流式回传
  * @param sandbox 沙箱级别（read-only / workspace-write / full）
+ * @param sessionId 当前会话 id（注入 AI_RUNNER_SESSION_ID 供 __AI__.tasks 分桶用）
  */
 export async function runScript(
   scriptPath: string,
@@ -36,7 +37,8 @@ export async function runScript(
   overlayPath?: string,
   toolLogPath?: string,
   onChunk?: (stream: 'stdout' | 'stderr', data: string) => void,
-  sandbox?: string
+  sandbox?: string,
+  sessionId?: string
 ): Promise<RunResult> {
   try {
     const raw = fs.readFileSync(scriptPath, 'utf8')
@@ -89,6 +91,7 @@ export async function runScript(
       AI_RUNNER_OVERLAY: overlayPath || '',
       AI_RUNNER_TOOL_LOG: toolLogPath || '',
       AI_RUNNER_SANDBOX: sandbox || 'read-only',
+      AI_RUNNER_SESSION_ID: sessionId || '',
     },
     timeoutMs,
     signal,

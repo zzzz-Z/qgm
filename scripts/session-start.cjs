@@ -97,6 +97,19 @@ if (fs.existsSync(clPath)) {
 } else { warn('no changelog')
 }
 
+head('5.5 signals')
+// [signal-gate-v1] 阶段 4 观察期的开闸机制必须在会话首轮可见。
+// WHY: bin/check-status.cjs 的结论段自述「阶段 0 - 3.2 产物到位，阶段 4 观察期就绪；
+//   规则：>= 2 周不做新功能；仅触发信号达阈值时开下一阶段」。但实测该机制全仓零发射点、
+//   空状态下连阈值阶梯都不打印、且不进 preflight ⇒ 既没人记信号也没人看见它，
+//   「开新阶段」只能靠拍脑袋，规则形同虚设。preflight 是唯一每次会话都会跑的入口。
+// CONSTRAINT: 只读显示不 block——观察期是常态，缺信号不该挡住开发（同上面 lessons 步）。
+try {
+  const out = execFileSync('node', ['bin/log-signal.cjs'], { cwd: ROOT, encoding: 'utf8' })
+  out.trim().split(NL).forEach((l) => { if (l.trim()) console.log(`  ${l.trim()}`) })
+  console.log('      记录入口: node bin/log-signal.cjs <类别> "<备注>"（pnpm signals 同）')
+} catch (e) { warn(`log-signal 读取失败: ${String(e.message || e).slice(0, 80)}`) }
+
 head('6. state')
 const stPath = path.join(AI_DIR, 'state.json')
 if (fs.existsSync(stPath)) {

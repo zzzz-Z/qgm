@@ -16,12 +16,8 @@
   --color-bg-3: var(--surface-2);
   /* 边框 */
   --color-border: var(--border);
-  /* 字号语义别名 */
-  --font-xs: 11px;
-  --font-sm: 12px;
-  --font-md: 14px;
-  --font-lg: 16px;
-  --font-xl: 20px;
+  /* [ui-p1a-fonts-v1] V1 字号令牌归一：xs/sm/md/lg/xl 别名已删除（全仓 0 引用），
+     唯一事实来源 = --font-10 ~ --font-20（含既有 --font-11 ~ --font-14 兼容项）。 */
   --bg: #0f0f0f;
   --surface: #1a1a1a;
   --surface-2: #252525;
@@ -75,6 +71,17 @@
   --transition-fast: 0.12s ease;
   --transition-base: 0.18s ease;
 
+  /* [ui-p1b-zindex-v1] V10 z-index 4 档令牌：
+     base    = 组件内相对层叠（resize handle / 局部 close 按钮 / 拖放提示）
+     overlay = 覆盖内容但非模态的浮层（diff overlay、panel overlay）
+     modal   = 模态遮罩/弹窗/下拉选择器（file picker / file dialog / modal-mask）
+     toast   = 最上层瞬态提示（toast / tooltip / 拖拽鬼影）
+     [CONSTRAINT] 全仓禁止裸魔数，一律 var(--z-*)。 */
+  --z-base: 1;
+  --z-overlay: 100;
+  --z-modal: 1000;
+  --z-toast: 10000;
+
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   /* AIRUNNER-TOKENS-v1 */
@@ -121,6 +128,7 @@
 }
 
 [data-theme='light'] {
+  color-scheme: light; /* [ui-p1a-cs-light-v1] */
   --bg: #ffffff;
   --surface: #f6f8fa;
   --surface-2: #eaeef2;
@@ -217,7 +225,20 @@ body {
 }
 
 html {
-  color-scheme: light;
+  /* [ui-p1a-cs-dark-v1] V11 color-scheme 跟随 data-theme：原写死 light 与默认暗色矛盾。 */
+  color-scheme: dark;
+}
+
+/* [ui-p1b-theme-transition-v1] V2 主题切换过渡：
+   [WHY] 主题切换改 data-theme 属性，CSS 变量突变 → 底色/前景色跳变；
+   [CONSTRAINT] 必须包在 no-preference 内，与底部 reduce 块互补，尊重无障碍偏好。 */
+@media (prefers-reduced-motion: no-preference) {
+  html,
+  body {
+    transition:
+      background-color var(--transition-base),
+      color var(--transition-base);
+  }
 }
 
 * {
@@ -230,20 +251,9 @@ html {
   display: none;
 }
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.14);
-}
+/* [ui-p1a-scrollbar-v1] V11 滚动条裁决：全局 * 与 *::-webkit-scrollbar 已声明隐藏，
+   本段 8px 定义与之抵消且残留 display:none → 实为死代码，删除；
+   局部细滚动条保留在 uno shortcut scroll-thin。 */
 
 button:focus-visible,
 a:focus-visible,
@@ -299,16 +309,8 @@ button {
   box-shadow: none !important;
 }
 
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-[role='button']:focus-visible,
-[tabindex='0']:focus-visible {
-  outline: 2px solid var(--accent, rgb(88 166 255 / 90%));
-  outline-offset: 2px;
-}
+/* [ui-p1a-focus-v1] V11 focus-visible 裁决：本段引用未定义的 --accent，
+   统一以上方 var(--primary) 版本为唯一权威（消除重复定义与 specificity 竞争）。 */
 
 button:focus-visible:where([class*='ghost']),
 button:focus-visible:where([class*='chip']) {

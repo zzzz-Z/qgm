@@ -3,7 +3,7 @@
 export { fingerprintErrors } from './error-fingerprint.js'
 export type { Fingerprint } from './error-fingerprint.js'
 
-export { diffIndexes, readIndex, saveIndex, scanIndex } from './file-index.js'
+export { diffIndexes, readIndex, readIndexBefore, saveIndex, saveIndexBefore, scanIndex } from './file-index.js'
 export type { FileIndex, IndexDiffEntry } from './file-index.js'
 
 export { runHook } from './hooks.js'

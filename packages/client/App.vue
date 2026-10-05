@@ -4,6 +4,8 @@ import ScriptPanel from './components/script/ScriptPanel.vue'
 // [ask-standalone-v1] 交互提问独立通道：手动模式同样生效，不再依赖 loop 状态
 import { useAiReplyHandlers } from './composables/ai/useAiReplyHandlers'
 import { useAppStartup } from './composables/ui/useAppStartup'
+// [userscript-update-v1] 显式导入：模板 @click 直接引用，不依赖 auto-import（构建期 dts 未必已含该项）
+import { updateUserscript } from './composables/ui/useUserscriptUpdate'
 import ToastHost from './components/feedback/ToastHost.vue'
 import TooltipHost from './components/feedback/TooltipHost.vue'
 // [app-storage-extracted-v1]
@@ -11,7 +13,10 @@ import type { SessionEntry } from './composables/ui/useAppStorage'
 // [theme-binding-v1] theme 必须显式值导入：模板 @click 里有 `theme = theme === 'dark' ? ...` 赋值，
 // 若靠 auto-import 解析，编译器会生成 __unimport_theme 引用 → 对 auto-import 符号赋值非法，
 // vite build / rolldown 报 [PARSE_ERROR] Cannot assign to this expression（dev 模式不报，只有构建才炸）
-import { theme } from './composables/ui/useAppStorage'
+// [fallback-sid-v1] effectiveSessionId 为 computed，auto-imports.d.ts 未收录 → 显式导入（与 theme 合并，守 no-duplicates）
+import { effectiveSessionId, theme } from './composables/ui/useAppStorage'
+// [win-sid-namespace-v1] 站点窗口槽位 sid 共享命名 + 切换活跃槽位
+import { setActiveWinSid, winSidOf } from './composables/ai/useAiWindowTable'
 // [useSitesStore-import-v1] 统一 store 启动时迁移 + 切站点写 activeModelId
 // [workspace-guide-lazy-v1] 引导页仅 !hasWorkspace 时渲染（v-if 闸门），异步拆包不进首屏 chunk
 const WorkspaceGuide = defineAsyncComponent(() => import('./components/panels/WorkspaceGuide.vue'))
@@ -92,6 +97,14 @@ watch(modelId, (newId, oldId) => {
   sessionHistory.value = loadHistoryBySite(newId)
   activeSessionId.value = loadActiveSessionIdBySite(newId)
 })
+// [win-sid-namespace-v1] modelId → activeWinSid 同步：站点选中即窗口槽位激活
+// [WHY] AiWindowList 用 win_<modelId> 判「是否已打开」；开窗路径未传 sid 会登记到 default，
+//   两套 sid 从不重合 → 站点列表恒显示未打开。此处联动后二者共用 win_<modelId>。
+// [CONSTRAINT] immediate 覆盖首帧（App.vue 初次挂载即绑定）；新增站点切换由上面的 watch 兜底
+// [CHANGE-IMPACT] activeWinSid 语义变化：不再恒 default，而是跟随选中站点
+watch(modelId, (v) => {
+  setActiveWinSid(winSidOf(String(v || 'deepseek')))
+}, { immediate: true })
 watch(activeSessionId, (v) => {
   // [use-storage-v1] 落盘由 useStorage 托管；此处仅保留 loop/window 表同步副作用
   // 同步到 loop 实例表与窗口表（多循环并发的前提）
@@ -119,7 +132,9 @@ onMounted(async () => {
   maybeScheduleReopen()
   subscribeHeadlessReply()
   // 注入 activeSessionId 读取器：循环启动时取当前活动会话 id 绑定到 loopSessionId
-  setActiveSessionIdGetter(() => activeSessionId.value)
+  // [fallback-sid-v1] 用 effectiveSessionId：无真实 AI 会话时退化为每 tab fallback，
+  //   保证循环 sessionId 绑定非空 → tasks 写入正确桶 + finish 时能清空
+  setActiveSessionIdGetter(() => effectiveSessionId.value)
   await replayRecentMessages()
 })
 
@@ -216,7 +231,7 @@ async function onOpenAiWin() {
   // [CHANGE-IMPACT] 只清事件流，不动 sessionId / messages；影响面小于 onNewSession
   try { clearEvents() } catch { /* 未就绪时忽略 */ }
   // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 规则注入一次完成
-  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，到 GitHub 搜索适配本项目的 skill，总结后列出供用户选择。', forceRules: true })
+  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), sid: winSidOf(String(modelId.value || 'deepseek')), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，到 GitHub 搜索适配本项目的 skill，总结后列出供用户选择。', forceRules: true })
   if (!win && transportKind.value !== 'headless') {
     toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', TOAST_MEDIUM)
     return
@@ -246,7 +261,7 @@ async function onNewSession() {
   loopPaused.value = true
   autoTakeover.disable()
   // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
-  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，到 GitHub 搜索适配本项目的 skill，总结后列出供用户选择。', forceRules: true })
+  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), sid: winSidOf(String(modelId.value || 'deepseek')), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，到 GitHub 搜索适配本项目的 skill，总结后列出供用户选择。', forceRules: true })
   if (!win) {
     toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', TOAST_MEDIUM)
     return
@@ -257,6 +272,16 @@ async function onNewSession() {
   } else {
     toast('发送失败，请检查 AI 窗口是否就绪', 'warn', TOAST_MEDIUM)
   }
+}
+/**
+ * [userscript-update-v1] 安装 / 更新油猴脚本
+ * [WHY] 脚本改动后需让 Tampermonkey 重新拉取；分发端点每次请求都重读磁盘，
+ *       故「打开端点 URL」即等价于「更新到最新版本」。
+ * [CONSTRAINT] 判定与开窗逻辑在 useUserscriptUpdate 内（先同步开窗保手势），此处只转发。
+ */
+function onUpdateUserscript() {
+  // [CONSTRAINT] 不必 await：失败原因由该函数内部 toast 呈现，这里不做二段处理
+  void updateUserscript()
 }
 /**
  * 全局键盘快捷键：Shift+? 开关快捷键帮助、Escape 关闭
@@ -394,6 +419,14 @@ function onLoginGui() {
         @click="gitCommit = !gitCommit"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 0 1 2 2v7" /><line x1="6" y1="9" x2="6" y2="21" /></svg>
+      </button>
+      <!-- [userscript-update-v1] 安装 / 更新油猴脚本：打开本地分发端点，Tampermonkey 拦截并弹更新页 -->
+      <button
+        v-tooltip="'安装 / 更新油猴脚本（打开本地分发端点，Tampermonkey 会弹出安装或更新确认）'"
+        aria-label="更新油猴脚本" class="userscript-toggle"
+        @click="onUpdateUserscript"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
       </button>
     </div>
   </header>

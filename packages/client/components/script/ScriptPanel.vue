@@ -14,6 +14,8 @@ import { createPreviewManager } from './preview-manager'
 import { createSideResize } from './side-resize'
 // exec 全流程已抽到 exec-flow.ts
 import { createExecFlow } from './exec-flow'
+// [multi-script-v1] 同一条回复还有排队脚本时抑制中途回传（见 pending-scripts.ts 的 CONSTRAINT）
+import { pendingScriptCount } from '../../composables/ai/auto-loop/pending-scripts'
 // 组件内定时器统一走 vueuse：随组件卸载自动清理，省去手动 clear
 // [script-panel-utils-v2-extracted]
 import TerminalPane from './TerminalPane.vue'
@@ -99,7 +101,16 @@ const { toast, confirmDialog } = useToast()
 // U.3: CodeMirror 全家桶懒加载——首建编辑器时才 await import，CM 打进独立 chunk
 
 // 已删 persistWarning：文件内无消费点
-const { script, lastRunCode, running, result, changes, rolling, busyAll, liveStdout, liveStderr, doneSummary, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback } = useRunner()
+const { script, lastRunCode, running, result, changes, rolling, busyAll, liveStdout, liveStderr, doneSummary, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback, changeView, cumulativeLoading, cumulativeError, visibleChanges, setChangeView } = useRunner()
+/**
+ * [cumulative-baseline-v1] 视图切换的写入口必须收敛到 useRunner.setChangeView
+ * [WHY] 若把 v-model 直接绑到 changeView，切换只改了值、不触发累积拉取——面板会停在上一次的
+ *   累计上且没有任何报错。用可写 computed 做单一入口，也让「切换即加载」能在 node 测试里断言。
+ */
+const changeViewProxy = computed<'round' | 'cumulative'>({
+  get: () => changeView.value,
+  set: (v) => { setChangeView(v) },
+})
 // 已删除 countdown（延迟机制移除）
 const { enabled: autoTakeoverEnabled, enable: enableAutoTakeover, disable: disableAutoTakeover, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
 // ── 领域 composable ──
@@ -138,10 +149,15 @@ const { pushCmdHistory, cmdHistoryPrev, cmdHistoryNext } = createCmdHistory({ sc
 // 附件簇（attachedFiles 由本组件持有，供 addTreePaths 等共享）
 const { removeAttach, clearAll, onEditorPaste, onDesktopDrop } = createAttachManager({ attachedFiles, script, fileSuccess })
 // 树拖入 / 目录展开 / 脚本拼装（attachedFiles 由本组件持有）
-const { onTreeDrop, buildPromptWithAttachments } = createTreeAttach({ attachedFiles })
+// [ui-p2a-drag-bus-wire-v1] V12：drop 通道改显式订阅；ai-runner:auto-run 全局无派发方，dead 监听一并删除
+const { registerTreeDrop, buildPromptWithAttachments } = createTreeAttach({ attachedFiles })
+/** V12 显式通道取消订阅句柄；onMounted 赋值、onBeforeUnmount 释放 */
+let unsubscribeTreeDrop: (() => void) | undefined
 // 预览/撤回（previewFile/Before/After 由本组件持有）
+// [cumulative-baseline-v1] 这里传 visibleChanges（随视图切换）而非 changes：
+//   getChangeType 与「改动前」内容的取用都必须跟面板显示的是同一套口径
 const { getChangeType, onPreviewFile, onRollback, onRollbackAll } = createPreviewManager({
-  changes,
+  changes: visibleChanges,
   result,
   previewFile,
   previewBefore,
@@ -160,9 +176,9 @@ const { onSideDown, dispose: disposeSideResize } = createSideResize({
 // exec 全流程（refs 由本组件持有）
 // [use-script-panel-actions-wired-v1] 运行逻辑簇已抽到 useScriptPanelActions；先装配后注入 createExecFlow
 // [use-script-panel-actions-wired-v2] toggleAutoTakeover / pauseAll 亦下沉到 composable
+// [ui-p2a-drag-bus-wire-consumer-v1] V12：onAutoRun 死变量删除（全仓无 ai-runner:auto-run 派发方）
 const {
   buildAiPrompt,
-  onAutoRun,
   runSmart,
   onGlobalKey,
   toggleAutoTakeover,
@@ -197,6 +213,7 @@ const { copyOutput } = createExecFlow({
   confirmDialog,
   startAiWaiting,
   softPause,
+  isLoopActive,
 })
 
 // 分栏比例（终端占比）
@@ -228,7 +245,7 @@ watch(lastStreamId, (id) => {
   }
 })
 watch(
-  () => changes.value.length,
+  () => visibleChanges.value.length,
   (len, prevLen) => {
     if (len === 0) {
       previewFile.value = null
@@ -266,6 +283,11 @@ watch(running, (v) => {
     runningElapsed.value = ''
     const ms = performance.now() - runStartAt
     lastDuration.value = ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`
+    // [multi-script-v1] 同一条 AI 回复还有排队脚本未跑完 → 本轮不做中途回传
+    // [WHY] 批量脚本执行到一半就把中间结果塞给 AI，会在 AI 侧开启新一轮回复，
+    //   与仍在排队/执行中的块互相踩踏；等队列清空后由最后一块统一回传。
+    // [CONSTRAINT] 只在循环内生效：非循环路径没有队列概念，行为保持原样
+    const midBatch = isLoopActive.value && pendingScriptCount.value > 0
     if (result.value.dryRunFailed) {
       statusText.value = '⚠ 预检失败 · 未落盘'
       statusClass.value = 'err'
@@ -274,8 +296,13 @@ watch(running, (v) => {
         'warn',
         5000,
       )
-      if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput(autoFeedbackRequested.value) })
-      else void copyOutput(autoFeedbackRequested.value)
+      if (midBatch) {
+        // 队列未清空：等最后一块跑完统一回传，避免在批量中途把 AI 唤醒
+      } else if (autoTakeoverEnabled.value) {
+        scheduleAutoRun(() => { void copyOutput(autoFeedbackRequested.value) })
+      } else {
+        void copyOutput(autoFeedbackRequested.value)
+      }
     } else {
       statusText.value = result.value.ok ? '✅ 成功' : '❌ 失败'
       statusClass.value = result.value.ok ? 'ok' : 'err'
@@ -290,7 +317,7 @@ watch(running, (v) => {
           || result.value.tsc?.ok === false
           || result.value.lint?.ok === false
           || result.value.test?.ok === false
-      if (shouldAutoAsk && result.value.error !== '已取消') {
+      if (shouldAutoAsk && !midBatch && result.value.error !== '已取消') {
         if (forceFeedback) clearAutoFeedback()
         if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput(forceFeedback) })
         else void copyOutput(forceFeedback)
@@ -316,17 +343,15 @@ onMounted(() => {
     }
   } catch { /* ignore */ }
 
-  window.addEventListener('ai-runner:auto-run', onAutoRun)
+  unsubscribeTreeDrop = registerTreeDrop()
   window.addEventListener('keydown', onGlobalKey)
-  window.addEventListener('ai-runner:drop', onTreeDrop)
 })
 onBeforeUnmount(() => {
   disposeSideResize()
   // elapsedTimer 已由 useIntervalFn 内部在组件卸载时自动 pause，无需手动清理
 
-  window.removeEventListener('ai-runner:auto-run', onAutoRun)
+  unsubscribeTreeDrop?.()
   window.removeEventListener('keydown', onGlobalKey)
-  window.removeEventListener('ai-runner:drop', onTreeDrop)
 })
 
 /**
@@ -428,8 +453,11 @@ function onHtmlDrop(e: DragEvent) {
     <!-- SIDE_VIF_CHANGES -->
     <SidePane
       v-model:side-drawer-open="sideDrawerOpen"
+      v-model:change-view="changeViewProxy"
       :side-width="sideWidth"
-      :changes="changes"
+      :changes="visibleChanges"
+      :cumulative-loading="cumulativeLoading"
+      :cumulative-error="cumulativeError"
       :rolling="rolling"
       :busy-all="busyAll"
       :preview-file="previewFile"
@@ -441,7 +469,7 @@ function onHtmlDrop(e: DragEvent) {
     />
 
     <DiffOverlay
-      v-if="changes.length && previewFile && previewBefore !== null"
+      v-if="visibleChanges.length && previewFile && previewBefore !== null"
       :file-name="previewFile"
       :before="previewBefore"
       :after="previewAfter"

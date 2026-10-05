@@ -276,8 +276,14 @@
 
   function extractLatestScript() {
     const pres = document.querySelectorAll('pre')
-    let last = null
-    let lastMarked = null
+    // [multi-script-v1] 一条回复可携带多个脚本：本函数只放行**首个尚未推送**的合格块，
+    //   调用方推送后清空并再跑一次分类，逐块送出（前端串行执行）。
+    // [WHY] 旧实现 `lastMarked || last` 只取最后一块，前面的块被静默丢弃；
+    //   而最后一块恰恰是上游截断最可能切中的那一块 → 整轮白跑。
+    // [CONSTRAINT] 与 headless-inject.ts 的 extractLatestScript 同义（那边用 dedup.seenHashes 数组，
+    //   这边用闭包内的 seenHashes Set，故去重写法不同）；两处不得只改一处。
+    let firstUnseen = null
+    let firstUnseenMarked = null
     for (const pre of pres) {
       // [code-text-clean-v1] 优先从 <pre><code> 取文本，避开代码块头的语言标签与「复制/下载」按钮文字
       // [WHY] pre.textContent 会把头部按钮文字并入首行，污染后 #! 锚点失配、语言判定失败导致整块跳过
@@ -304,13 +310,25 @@
       // [CONSTRAINT] 与 packages/core/src/headless/headless-inject.ts 的 extractLatestScript 逐字同构
       if (lang !== 'js' && lang !== 'bash') continue
       const item = { lang, code: text, hash: hash32(text) }
-      last = item
+      // [multi-script-v1] 已推送过的块不再参与选取，否则「首个未见」会永远卡在同一块上
+      if (seenHashes.has(item.hash)) continue
+      if (!firstUnseen) firstUnseen = item
       const marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
         || /^\s*\/\/\s*@desc\b/m.test(text)
         || /^\s*#\s*@desc\b/m.test(text)
-      if (marked) lastMarked = item
+      if (marked && !firstUnseenMarked) firstUnseenMarked = item
     }
-    return lastMarked || last
+    return firstUnseenMarked || firstUnseen
+  }
+
+  // [multi-script-v1] 是否还有「尚未推送」的合格块；决定推送后要不要再跑一次分类
+  // [WHY] 本通道靠 MutationObserver 触发，推完第一块后若 DOM 不再变动就再也不会被唤醒 →
+  //   同一回复里的第 2、3 个脚本会一直躺着不发
+  function hasMoreUnseenBlocks() {
+    try {
+      const s = extractLatestScript()
+      return Boolean(s && !seenHashes.has(s.hash))
+    } catch { return false }
   }
 
   // [md-fence-fallback-v1] DOM <pre> 提取失败时，从 Markdown 文本提取 ``` 围栏代码块
@@ -563,6 +581,10 @@
           sessionId: extractSidFromHash(),
         })
         lastBodySig = bodySignature()
+        // [multi-script-v1] 同一回复里还有未推送的脚本 → 主动再跑一次分类
+        // [WHY] 本通道只由 MutationObserver（350ms 防抖）唤醒；推完第一块后 DOM 已静止，
+        //   observer 不会再触发，后续块会一直躺着不发
+        if (hasMoreUnseenBlocks()) setTimeout(classifyAndPost, 80)
         return
       }
 

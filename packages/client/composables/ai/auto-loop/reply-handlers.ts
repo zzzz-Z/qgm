@@ -1,9 +1,12 @@
 // [reply-handlers-v1] 从 useAutoLoop.ts 抽出：脚本到达 / 非脚本回复 / 单轮执行 三个入口
-import { TOAST_DEFAULT, TOAST_LONG, TOAST_MEDIUM } from '../../../utils/toast-durations'
-import type { Ref } from 'vue'
-import type { AiReply, LoopInstance, RoundOutcome } from './types.js'
+import { TOAST_DEFAULT, TOAST_LONG, TOAST_MEDIUM, TOAST_MEDIUM_SHORT } from '../../../utils/toast-durations'
+import type { AiReply, InboxItem, LoopInstance, Ref, RoundOutcome } from './types.js'
 import { setLoopState } from './transitions.js'
-import type { InboxItem } from '../../runner/useScriptInbox'
+// [multi-script-v1] 同一条回复的后续脚本队列（InboxItem 类型经 ./types.js 再导出，
+// 避免为本功能多出一个 import 语句而顶破「单文件 import ≤ 8」红线）
+import { clearScripts, enqueueScript, shiftScript } from './pending-scripts.js'
+// [loop-feedback-authority-v1] R1：循环引擎自行回传结果，不再依赖 ScriptPanel watch
+import { buildLoopResultPrompt } from './loop-result-prompt.js'
 
 // [ask-dialog-v1] 交互提问通道；解析放 utils，提问状态走单例 composable
 // [ask-card-v1] UI 已从弹窗改为对话流内的可点选卡片（TerminalPane .question-card）；本处契约不变
@@ -17,7 +20,21 @@ type ToastFn = typeof import('../../ui/useToast.js').toast
 type Transport = ReturnType<typeof import('../useAiTransport.js').getTransport>
 
 /** 回复处理三入口依赖面 */
-export interface ReplyHandlersDeps {
+export // [selfcheck-gate-v1] 期一自检熔断：同一循环连续 2 次 BeforeDone reject → finish
+const _selfcheckFailCount = new Map<string, number>()
+const SELFCHECK_MAX_FAILS = 2
+
+/**
+ * 组装自检失败报告（AI 照单修）
+ * [CONSTRAINT] 固定格式 [SELF-FAIL] <级别> | <判据> | 实测值 | 期望值
+ */
+function buildSelfcheckFailPrompt(reason: string): string {
+  const lines = String(reason || '').split('\n').map(s => s.trim()).filter(Boolean)
+  const body = lines.length ? lines.join('\n') : '[SELF-FAIL] L0 | selfcheck | 自检未通过 | 全部通过'
+  return `【自检未通过】请修复以下判据后重新回复 DONE：\n${body}`
+}
+
+interface ReplyHandlersDeps {
   loopPaused: Ref<boolean>
   stage: Ref<'' | 'plan' | 'implement' | 'verify'>
   planResumeAttempts: Ref<number>
@@ -76,9 +93,20 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
   async function onScriptArrival(inboxItem: InboxItem, sid?: string): Promise<void> {
     if (loopPaused.value) return
     const inst = resolveInst(sid)
+    if (!inst || !isInstActive(inst)) return
+    // [multi-script-v1] 非等待态 = 同一条回复里的后续块（首块正在执行）→ 入队，轮末串行掏。
+    // [WHY] 原实现把「非 waiting/preparing」直接 return：一条回复改多个文件时，
+    //   只有第 1 块被执行，其余被静默丢弃；而页面侧现已逐块推送，丢弃即等于多段执行失效。
+    // [CONSTRAINT] 入队不 disarmTimer：计时归首个块那一轮的，队列由本轮末尾的 drainPending 消化
+    const st = inst.state.value
+    if (st !== 'waiting' && st !== 'preparing') {
+      if (inboxItem.hash === inst.lastHash.value) return
+      const depth = enqueueScript(inst.id.value, inboxItem)
+      toast(`📥 已排队第 ${depth} 个脚本（本轮结束后串行执行）`, 'info', TOAST_MEDIUM_SHORT)
+      return
+    }
     // [preparing-guard-v1] 兼容 'preparing'：startLoop sendFill 后 500ms 缓冲态；
     // 原实现只接受 'waiting'，500ms 内到达的 AI 回复被静默丢弃（隐藏 bug）
-    if (!inst || !isInstActive(inst) || (inst.state.value !== 'waiting' && inst.state.value !== 'preparing')) return
     disarmTimer(inst)
     if (inst.stopRequest.value !== 'none') { await handleStopAfterRound(inst); return }
     if (inboxItem.hash === inst.lastHash.value) {
@@ -89,6 +117,24 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     // [transitions-v1] SCRIPT 事件：waiting → parsing
     setLoopState(inst, 'SCRIPT')
     await executeItem(inst, inboxItem)
+  }
+
+  /**
+   * [multi-script-v1] 轮末掏队列：还有排队脚本就立刻串行执行下一块，不等 AI 回复
+   * [WHY] 队列内容来自**同一条** AI 回复，AI 已经给过它们，不需要也不能再问一次；
+   *   不掏队列则多段执行退化为「只跑第一块」。
+   * [CONSTRAINT] 循环已终止/暂停时**必须清空队列**：残留计数会让 pendingScriptCount 长期 > 0，
+   *   永久抑制 ScriptPanel 的结果回传（循环随后必然 90s 超时，且现象难以归因）
+   */
+  async function drainPending(inst: LoopInstance): Promise<void> {
+    if (loopPaused.value || !isInstActive(inst)) { clearScripts(inst.id.value); return }
+    const next = shiftScript(inst.id.value)
+    if (!next) return
+    if (next.hash === inst.lastHash.value) { await drainPending(inst); return }
+    disarmTimer(inst)
+    inst.lastHash.value = next.hash
+    setLoopState(inst, 'SCRIPT')
+    await executeItem(inst, next)
   }
 
   /** PLAN.md 待办是否未清空（通过 /__ai/tasks 的 planPending） */
@@ -208,6 +254,26 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
         enterWaiting(inst)
         return
       }
+      // [selfcheck-gate-v1] BeforeDone 自检闸：DONE 前必须过闸
+      // [CONSTRAINT] reject 不 finish（循环续命）；连续 2 次熔断
+      const hookRes = await runHook('BeforeDoneFinal', { loopId: inst.id.value, round: inst.round.value, startCommit: String(inst.startCommit?.value ?? ''), doneText: String(reply.text ?? ''), runIds: Array.isArray(inst.runIds?.value) ? inst.runIds.value : [], final: true })
+      if (hookRes.action === 'reject') {
+        const n = (_selfcheckFailCount.get(inst.id.value) || 0) + 1
+        _selfcheckFailCount.set(inst.id.value, n)
+        if (n >= SELFCHECK_MAX_FAILS) {
+          _selfcheckFailCount.delete(inst.id.value)
+          toast(`自检连续失败 ${n} 次，终止循环`, 'warn', TOAST_LONG)
+          await finish(inst, 'selfcheck-failed', hookRes.reason || 'selfcheck rejected')
+          return
+        }
+        toast(`自检未通过（第 ${n}/${SELFCHECK_MAX_FAILS} 次），继续修复`, 'warn', TOAST_MEDIUM)
+        const okSent = loopPaused.value ? false : transport.sendFill('', { prompt: buildSelfcheckFailPrompt(hookRes.reason || '') })
+        if (!okSent) { await finish(inst, 'window-lost', '自检失败但窗口已关闭'); return }
+        ackFill(inst, '自检重试')
+        bindKeyboard()
+        enterWaiting(inst)
+        return
+      }
       // [done-summary-archive] 归档 DONE 后总结（第二行起）
       try {
         const doneText = String(reply.text ?? '').slice(0, 4000)
@@ -241,8 +307,22 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     enterWaiting(inst)
   }
 
-  /** 单轮执行：BeforeScript hook → cjs/bash 分流 → afterRound */
+  /**
+   * 单轮执行的外壳：恒定在轮末掏一次队列（见 drainPending）
+   * [WHY] 内层有多个 return 分支（hook 拒绝 / 停止请求 / 无结果 / bash 黑名单 / 脏工作区），
+   *   逐处补掏队列必漏；用 finally 保证「无论本轮怎么结束都掏一次」。
+   * [CONSTRAINT] 递归深度 = 队列长度（同一条回复的脚本块数，量级个位数），无需改为循环
+   */
   async function executeItem(inst: LoopInstance, inboxItem: InboxItem): Promise<void> {
+    try {
+      await executeItemInner(inst, inboxItem)
+    } finally {
+      await drainPending(inst)
+    }
+  }
+
+  /** 单轮执行：BeforeScript hook → cjs/bash 分流 → afterRound */
+  async function executeItemInner(inst: LoopInstance, inboxItem: InboxItem): Promise<void> {
     // [transitions-v1] EXECUTE 事件：parsing → executing
     setLoopState(inst, 'EXECUTE')
     stage.value = 'implement' // AIRUNNER-BATCH47-STAGE-WRITE
@@ -264,19 +344,29 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
 
     if (inboxItem.lang !== 'bash') {
       runner.script.value = inboxItem.code
-      await runner.run()
-      const r = runner.result.value
+      // [run-skip-retry-v1] R2：被守卫吞掉（running=true）时返回 'skipped'，
+      // 不得读共享 runner.result.value，不得误判 exec-error；等待重试 ≤3 次×1s
+      let r: Awaited<ReturnType<typeof runner.run>> = null
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const ret = await runner.run()
+        if (ret === 'skipped') {
+          await new Promise<void>(resolve => setTimeout(resolve, 1000))
+          continue
+        }
+        r = ret
+        break
+      }
       if (inst.stopRequest.value === 'kill' || inst.stopRequest.value === 'rollback') {
         await handleStopAfterRound(inst)
         return
       }
-      if (!r) {
-        await finish(inst, 'exec-error', 'cjs 执行无返回结果')
+      if (r === null) {
+        await finish(inst, 'exec-error', 'cjs 执行无返回结果（连试 3 次均被守卫跳过或返回 null）')
         return
       }
       const changeCount = runner.changes.value.length
       inst.lastExec.value = { lang: inboxItem.lang, exit: r.code, changes: changeCount, durationMs: Date.now() - startedAt }
-      await afterRound(inst, {
+      const cjsOutcome: RoundOutcome = {
         lang: inboxItem.lang,
         desc: inboxItem.desc,
         exit: r.code,
@@ -285,7 +375,13 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
         stderr: r.stderr || '',
         changeCount,
         changedFiles: runner.changes.value.map(c => c.path),
-      })
+      }
+      await afterRound(inst, cjsOutcome)
+      // [loop-feedback-authority-v1] R1：循环引擎自行回传结果
+      // [CONSTRAINT] afterRound 若触发 finish（熔断/硬上限/stopRequest）会置 loopPaused=true，此时不发
+      if (!loopPaused.value && isInstActive(inst)) {
+        transport.sendFill('', { prompt: buildLoopResultPrompt(cjsOutcome) })
+      }
       return
     }
 
@@ -304,7 +400,7 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       return
     }
     inst.lastExec.value = { lang: 'bash', exit: exec.code, changes: 0, durationMs: Date.now() - startedAt }
-    await afterRound(inst, {
+    const bashOutcome: RoundOutcome = {
       lang: 'bash',
       desc: inboxItem.desc,
       exit: exec.code,
@@ -313,7 +409,12 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       stderr: exec.stderr,
       changeCount: 0,
       changedFiles: [],
-    })
+    }
+    await afterRound(inst, bashOutcome)
+    // [loop-feedback-authority-v1] R1：bash 分支同样由循环引擎自行回传
+    if (!loopPaused.value && isInstActive(inst)) {
+      transport.sendFill('', { prompt: buildLoopResultPrompt(bashOutcome) })
+    }
   }
 
   return { onScriptArrival, onNonScriptReply, executeItem }

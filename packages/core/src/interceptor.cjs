@@ -606,3 +606,7 @@ process.on('uncaughtException', (e) => { dump(); throw e })
 process.on('unhandledRejection', (e) => { dump(); throw e })
 process.on('SIGTERM', () => { dump(); process.exit(143) })
 process.on('SIGINT', () => { dump(); process.exit(130) })
+// [repl-flush-v1] 持久 REPL 帧末主动 flush 钩子：
+// [WHY] 原 dump 只由进程退出事件触发；REPL 进程不退，须由 repl-loop 每帧末主动调用。
+// [CONSTRAINT] 仅暴露函数引用，不改既有退出触发语义。
+globalThis.__AI_FLUSH_OVERLAY = dump

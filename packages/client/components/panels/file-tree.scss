@@ -271,6 +271,64 @@
     transform: rotate(360deg);
   }
 }
+
+/* [ui-p2b-skeleton-v1] V6 首屏骨架屏：
+   [WHY] 首屏只显示"加载中…"感知卡顿；灰条能提前占位出「将出现文件行」的形状；
+   [CONSTRAINT] 只有透明度脉动，避免布局抖动（骨架与最终行高度一致）；
+   [CONSTRAINT] prefers-reduced-motion 下关动画仅留静态灰条。 */
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 8px;
+}
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  padding-left: calc((var(--sk-depth, 0)) * 18px + 8px);
+}
+.skeleton-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--surface-3, rgb(127 127 127 / 22%));
+  flex-shrink: 0;
+}
+.skeleton-line {
+  height: 10px;
+  border-radius: 3px;
+  background: var(--surface-3, rgb(127 127 127 / 22%));
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+.skeleton-line.sk-w-40 {
+  width: 40%;
+}
+.skeleton-line.sk-w-55 {
+  width: 55%;
+}
+.skeleton-line.sk-w-70 {
+  width: 70%;
+}
+.skeleton-line.sk-w-85 {
+  width: 85%;
+}
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-line {
+    animation: none;
+    opacity: 0.7;
+  }
+}
 /* [ws-browser-v1] */
 .ws-nav:disabled {
   opacity: 0.35;
@@ -307,7 +365,7 @@ html.ai-runner-dragging body {
   position: fixed;
   top: 0;
   left: 0;
-  z-index: 2147483000;
+  z-index: var(--z-toast);
   pointer-events: none;
   display: flex;
   align-items: center;
@@ -602,7 +660,7 @@ html.ai-runner-dragging body {
 .ft-mask {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: var(--z-modal);
   background: rgb(0 0 0 / 55%);
   display: flex;
   align-items: center;

@@ -32,7 +32,12 @@ const STAGES = [
 ]
 const PKG_REL = 'package.json'
 const SCRIPTS = ['dev', 'build', 'lint', 'tsc', 'test:unit', 'test:e2e', 'run-all', 'recover']
-const THRESH = { 'manual-copy': 3, 'style-regress': 2, 'prompt-budget': 3 }
+// [signals-ssot-v1] 阈值表与台账解析一律复用 bin/log-signal.cjs —— 它是阶段 4 信号闸门的 SSOT。
+// WHY: 旧版此处自带第二份 THRESH（裸数字、无 label）+ 第二份解析正则 + 第二份 14 天窗口；
+//   且 .ai-runner/signals.md 不存在时 info + return ⇒ 空状态下连阶梯都不打印，与本文件结论段
+//   「仅触发信号达阈值时开下一阶段」自相矛盾：读取端看不到判据，阶梯就只能靠翻源码得知。
+// CHANGE-IMPACT: 显示端多出 label（达标后开什么阶段）；空状态照样打印阶梯。计数口径不变。
+const { THRESHOLDS: SIGNAL_LADDER, parse: parseSignals } = require('./log-signal.cjs')
 
 function files() {
   head('阶段产物')
@@ -60,20 +65,21 @@ function pkg() {
 }
 function signals() {
   head('观察期')
-  if (!exists('.ai-runner/signals.md')) { info('无 .ai-runner/signals.md'); return }
-  const lines = read('.ai-runner/signals.md').split('\n').filter(l => /^- \d{4}-\d{2}-\d{2} \[/.test(l))
-  const recent = lines.filter(l => Date.now() - new Date(l.slice(2, 12)).getTime() < 14 * 86400000)
-  info(`总 ${lines.length} 条 / 近 14 天 ${recent.length} 条`)
+  const rows = parseSignals()
+  const cutoff = Date.now() - 14 * 86400000
   const cats = {}
-  for (const l of recent) {
-    const m = l.match(/\[([\w-]+)\]/)
-    if (m) cats[m[1]] = (cats[m[1]] || 0) + 1
+  for (const r of rows) {
+    if (new Date(r.date).getTime() >= cutoff) cats[r.cat] = (cats[r.cat] || 0) + 1
   }
-  for (const [cat, need] of Object.entries(THRESH)) {
+  const recentCount = Object.values(cats).reduce((a, b) => a + b, 0)
+  info(`总 ${rows.length} 条 / 近 14 天 ${recentCount} 条`)
+  // [ladder-always-v1] 与 bin/log-signal.cjs 同源：阈值阶梯恒定可见，空状态也不例外。
+  for (const [cat, t] of Object.entries(SIGNAL_LADDER)) {
     const n = cats[cat] || 0
-    const mark = n >= need ? c(31, 'x') : n > 0 ? c(33, '!') : ' '
-    console.log(`  ${mark} ${cat.padEnd(16)} ${n}/${need}`)
+    const mark = n >= t.need ? c(31, 'x') : n > 0 ? c(33, '!') : ' '
+    console.log(`  ${mark} ${cat.padEnd(16)} ${n}/${t.need}  ${t.label}`)
   }
+  if (!rows.length) info('（暂无记录）记录入口：node bin/log-signal.cjs <类别> "<备注>"')
 }
 function git() {
   head('git')

@@ -25,7 +25,11 @@ syncClientDist()
 console.log('[build-all] step 3/3: copy runtime .cjs')
 const distRoot = path.join(ROOT, 'apps', 'standalone', 'dist')
 fs.mkdirSync(distRoot, { recursive: true })
-for (const f of ['interceptor.cjs', 'helpers.cjs', 'logger.cjs']) {
+// [repl-loop-dist-copy-v1] repl-loop.cjs 必须一并复制：
+// session-manager.ts 用 new URL('../repl-loop.cjs', import.meta.url) 定位 REPL 子进程入口，
+// bundle 落在 dist/_server/index.js ⇒ 解析为 dist/repl-loop.cjs。缺它 → 子进程 Cannot find module → REPL_EXITED。
+// CHANGE-IMPACT: 删 repl-loop.cjs → /session 系列端点 create 成功但每帧 500 REPL_EXITED。
+for (const f of ['interceptor.cjs', 'helpers.cjs', 'logger.cjs', 'repl-loop.cjs']) {
   const src = path.join(ROOT, 'packages', 'core', 'src', f)
   const dst = path.join(distRoot, f)
   if (fs.existsSync(src)) { fs.copyFileSync(src, dst); console.log(`[build-all] copied ${f}`) }

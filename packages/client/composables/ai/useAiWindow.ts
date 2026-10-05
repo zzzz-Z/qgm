@@ -10,6 +10,7 @@ import {
   getActiveWinSid,
   getWindowBySid,
   listWindows,
+  markWindowOpened,
   removeWindowBySid,
   setActiveWin,
   setActiveWinSid,
@@ -67,6 +68,8 @@ export function openSite(atUrl?: string, sid?: string): Window | null {
   if (win) {
     setWindowEntry(useSid, { win, url: target })
     setActiveWinSid(useSid)
+    // [win-opened-marker-v1] 标记已打开：sessionStorage 支撑刷新后列表判定
+    markWindowOpened(useSid, true)
   }
   return win
 }

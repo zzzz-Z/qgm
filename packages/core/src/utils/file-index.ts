@@ -122,17 +122,55 @@ export function diffIndexes(
   }
   return out.sort((x, y) => x.path.localeCompare(y.path))
 }
+/** 运行**后**索引文件名（该 run 结束时的磁盘状态） */
+const INDEX_FILE = '_index.json'
+/**
+ * [cumulative-baseline-v1] 运行**前**索引文件名（该 run 开始时的磁盘状态）。
+ * [WHY] _index.json 只能回答「自该轮结束以来的改动」；累积视图要的是
+ *   「自该轮开始前以来的改动」，两者差一轮，必须分别留存。
+ * [CONSTRAINT] 与 _index.json 同目录、同结构，仅文件名不同；改名会使历史 run 无法回读
+ */
+const INDEX_BEFORE_FILE = '_index.before.json'
+
+/** 把索引 Map 序列化为 {rel: FileIndex} 并写入 dir/<file> */
+function writeIndexTo(dir: string, file: string, idx: Map<string, FileIndex>): void {
+  const out: Record<string, FileIndex> = {}
+  for (const [k, v] of idx) out[k] = v
+  fs.writeFileSync(path.join(dir, file), JSON.stringify(out))
+}
+
+/** 从 dir/<file> 反序列化索引；缺失或 JSON 损坏返回 null */
+function readIndexFrom(dir: string, file: string): Map<string, FileIndex> | null {
+  const target = path.join(dir, file)
+  if (!fs.existsSync(target)) return null
+  try {
+    const obj = JSON.parse(fs.readFileSync(target, 'utf8'))
+    return new Map(Object.entries(obj))
+  } catch { return null }
+}
+
 /**
  * 把索引序列化为 {rel: FileIndex} JSON 落盘到 dir/_index.json
  * [CONSTRAINT] Map 转普通对象时键顺序按插入序保留；写入不做缩进优化（体积优先）
  * [CHANGE-IMPACT] 与 readIndex 严格配对；文件名 _index.json 硬编码，改名会导致历史 run 无法回读
+ * @param runId 本次运行的 id（不参与落盘：目录已由调用方按 runId 开好，保留入参只为调用点对称）
  * @param idx 索引 Map（来自 scanIndex）
  * @param dir 目标目录；调用方负责保证已存在
  */
 export function saveIndex(runId: string, idx: Map<string, FileIndex>, dir: string): void {
-  const out: Record<string, FileIndex> = {}
-  for (const [k, v] of idx) out[k] = v
-  fs.writeFileSync(path.join(dir, '_index.json'), JSON.stringify(out))
+  writeIndexTo(dir, INDEX_FILE, idx)
+}
+/**
+ * [cumulative-baseline-v1] 落盘运行**前**索引（dir/_index.before.json）
+ * [WHY] 累积口径的基准必须是「该轮开始前的磁盘状态」；用运行后索引会把基准轮自身的
+ *   改动漏掉，也会让「本会话第一轮」成为不可观测的盲区。
+ * [CONSTRAINT] 与 readIndexBefore 严格配对；调用方须在 **runScript 之前** 取好 idx
+ * [CHANGE-IMPACT] 每个 run 目录多一份索引（约与 _index.json 同量级），随 gcSnapshots(20) 一起回收
+ * @param idx 索引 Map（来自运行前的 scanIndex）
+ * @param dir 目标 run 目录；调用方负责保证已存在
+ */
+export function saveIndexBefore(idx: Map<string, FileIndex>, dir: string): void {
+  writeIndexTo(dir, INDEX_BEFORE_FILE, idx)
 }
 /**
  * 从 dir/_index.json 反序列化索引
@@ -140,10 +178,13 @@ export function saveIndex(runId: string, idx: Map<string, FileIndex>, dir: strin
  * [CHANGE-IMPACT] 与 saveIndex 严格配对；返回的 Map 键为 POSIX 路径
  */
 export function readIndex(dir: string): Map<string, FileIndex> | null {
-  const file = path.join(dir, '_index.json')
-  if (!fs.existsSync(file)) return null
-  try {
-    const obj = JSON.parse(fs.readFileSync(file, 'utf8'))
-    return new Map(Object.entries(obj))
-  } catch { return null }
+  return readIndexFrom(dir, INDEX_FILE)
+}
+/**
+ * [cumulative-baseline-v1] 读回运行**前**索引（dir/_index.before.json）
+ * [CONSTRAINT] 该文件是本功能之后才写入的：更早的 run 目录里没有它，返回 null（调用方须给用户
+ *   可操作的提示，而不是当成「工作区没变」）
+ */
+export function readIndexBefore(dir: string): Map<string, FileIndex> | null {
+  return readIndexFrom(dir, INDEX_BEFORE_FILE)
 }

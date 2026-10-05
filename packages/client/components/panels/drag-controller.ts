@@ -1,5 +1,7 @@
 // [drag-controller-v1] 从 FileTree.vue 抽出：树节点拖拽（ghost / pointer 事件 / drop 派发）
 import type { ComputedRef } from 'vue'
+// [ui-p2a-drag-bus-wire-v1] V12：drop 改走显式通道；drag / drag-cancel 无任何消费者，删除
+import { emitTreeDrop } from '../../composables/ui/drag-bus'
 import type { FileNode } from '../../types'
 
 /** 拖拽状态（内部） */
@@ -115,7 +117,7 @@ export function createDragController(deps: DragControllerDeps) {
     window.addEventListener('pointercancel', onPointerCancel)
   }
 
-  /** 移动：超过 4px 才视为拖拽；派发 ai-runner:drag 事件 */
+  /** 移动：超过 4px 才视为拖拽 */
   function onPointerMove(e: PointerEvent): void {
     if (!drag) return
     const dx = e.clientX - drag.startX
@@ -128,13 +130,10 @@ export function createDragController(deps: DragControllerDeps) {
       lockPage()
     }
     moveGhost(e.clientX, e.clientY)
-    window.dispatchEvent(new CustomEvent('ai-runner:drag', {
-      detail: { primary: drag.node.path, type: drag.node.type, count: drag.paths.length, x: e.clientX, y: e.clientY },
-    }))
     e.preventDefault()
   }
 
-  /** 松开：未移动则视为点击（目录切换展开 / 文件复制路径）；移动则派发 ai-runner:drop */
+  /** 松开：未移动则视为点击（目录切换展开 / 文件复制路径）；移动则派发树拖拽落点 */
   function onPointerUp(e: PointerEvent): void {
     const wasMoved = drag?.moved
     const d = drag
@@ -147,16 +146,13 @@ export function createDragController(deps: DragControllerDeps) {
       }
       return
     }
-    window.dispatchEvent(new CustomEvent('ai-runner:drop', {
-      detail: { paths: d.paths, primary: d.node.path, x: e.clientX, y: e.clientY },
-    }))
+    emitTreeDrop({ paths: d.paths, primary: d.node.path, x: e.clientX, y: e.clientY })
   }
 
-  /** 取消拖拽：清理 + 派发 cancel 事件 */
+  /** 取消拖拽：仅清理本地状态（落点通道不感知取消） */
   function onPointerCancel(): void {
     cleanup()
     drag = null
-    window.dispatchEvent(new CustomEvent('ai-runner:drag-cancel'))
   }
 
   /** 清理监听 + 销毁 ghost + 解锁页面（幂等） */

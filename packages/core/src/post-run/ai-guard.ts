@@ -46,9 +46,178 @@ const AI_JSDOC = [
   ' */',
 ].join('\n')
 
-/** 剥离注释，避免把说明性文字里的 fs. 当调用命中 */
-function stripComments(code: string): string {
-  return code.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ')
+/** 词法剥离产物：可执行代码骨架 + 被剥离的字面量内容 */
+export interface Tokenized {
+  /** 字面量/注释内容替换为空格（换行保留）后的代码骨架 */
+  code: string
+  /** 所有字符串与模板字面量的内容原文（不含引号），供动态执行通道二次扫描 */
+  literals: string[]
+}
+
+/** 这些关键字之后的 `/` 是正则起始而不是除号 */
+const RE_PREFIX_WORDS = new Set([
+  'return',
+  'typeof',
+  'instanceof',
+  'case',
+  'in',
+  'of',
+  'delete',
+  'void',
+  'do',
+  'else',
+  'yield',
+  'await',
+])
+
+/** 上一有意义字符落在这些符号上时，`/` 是除号（前一个表达式已产出「值」） */
+const RE_DIVISION_TAIL = /\w[$)\]'"`]/
+
+/** 骨架以这些片段收尾时，紧随的字面量是 require / import 的模块名（语义参数，不剥） */
+const MODULE_SPEC_TAIL = /(?:\brequire\s*\(|\bfrom|\bimport)\s*$/
+
+/**
+ * [ai-guard-tokenize-v2] 单遍词法剥离：把「字符串 / 模板字面量 / 正则字面量 / 注释」的内容
+ * 替换为空格，只留下可执行代码骨架；**换行原样保留**。
+ *
+ * [WHY] 旧实现是 `stripComments(stripStrings(code))` 两步拼接，有两个结构性漏洞：
+ *   ① 顺序漏洞：剥字符串时注释尚未移除 → 注释里的撇号（`// don't`）被当成字符串起始，
+ *      一路吞到下一个撇号，把真实代码行一起吃掉（漏检，且无从察觉）。
+ *   ② 行号错位：旧占位符 'STR'/'S' 不保留换行 → 跨行模板字面量让行数与原文不一致，
+ *      scanNativeApisWithFallback 的 `@L<n>` 与降级标记回溯（hasFallbackNear）全部错位。
+ *
+ * [CONSTRAINT] 一个通道刻意**不剥离**：`require(...)` / `import ... from '...'` 的模块名。
+ *   它是语义参数而非惰性文本——`const fs = require('fs')` 挖掉引号内容后就再也拦不住了。
+ *   判别方式：看已产出骨架是否以 `require(` / `from` / `import` 收尾。
+ * [CONSTRAINT] 正则字面量按「前一有意义字符不可能是值」判别；误判最坏只波及当前行
+ *   （正则体不跨行）。注释与字面量都在同一遍里处理，故不存在「注释撇号吞代码」。
+ * [CHANGE-IMPACT] 是 scanNativeApis / scanNativeApisWithFallback 的唯一前置步骤。
+ *   语义变化：**写在普通字面量里的黑名单词不再拦截**（例如把测试源码当文本写入的那一排
+ *   字符串、配置文件的原有代码）。这正是本改动的目的；eval / new Function 的实参仍会被
+ *   执行，由 literals 二次扫描兜住。
+ *
+ * @param code 脚本源码原文
+ */
+export function tokenize(code: string): Tokenized {
+  const src = String(code || '')
+  const n = src.length
+  const literals: string[] = []
+  let out = ''
+  let i = 0
+  /** 最近一个非空白源码字符，用于区分正则与除号 */
+  let prev = ''
+  /** 正在累积的标识符 */
+  let word = ''
+  /** 上一个完整标识符（用于 `return /re/` 这类关键字后置正则） */
+  let lastWord = ''
+
+  const isWordChar = (c: string): boolean => /[\w$]/.test(c)
+  const blankRun = (from: number, to: number): string => {
+    let s = ''
+    for (let k = from; k < to; k += 1) s += src[k] === '\n' ? '\n' : ' '
+    return s
+  }
+
+  while (i < n) {
+    const ch = src[i]
+
+    // 行注释：剥到行尾（不含换行本身）
+    if (ch === '/' && src[i + 1] === '/') {
+      let j = i
+      while (j < n && src[j] !== '\n') j += 1
+      out += blankRun(i, j)
+      i = j
+      continue
+    }
+
+    // 块注释：整段替换为空格，内部换行保留
+    if (ch === '/' && src[i + 1] === '*') {
+      let j = i + 2
+      while (j < n && !(src[j] === '*' && src[j + 1] === '/')) j += 1
+      j = Math.min(j + 2, n)
+      out += blankRun(i, j)
+      i = j
+      continue
+    }
+
+    // 正则字面量
+    if (ch === '/' && (!RE_DIVISION_TAIL.test(prev) || (word === '' && RE_PREFIX_WORDS.has(lastWord)))) {
+      let j = i + 1
+      let inClass = false
+      while (j < n) {
+        const c = src[j]
+        if (c === '\\') { j += 2; continue }
+        if (c === '\n') break
+        if (c === '[') { inClass = true }
+        else if (c === ']') { inClass = false }
+        else if (c === '/' && !inClass) { j += 1; break }
+        j += 1
+      }
+      out += blankRun(i, j)
+      i = j
+      prev = ')'
+      lastWord = ''
+      continue
+    }
+
+    // 字符串 / 模板字面量
+    if (ch === '\'' || ch === '"' || ch === '`') {
+      const q = ch
+      let j = i + 1
+      while (j < n) {
+        const c = src[j]
+        if (c === '\\') { j += 2; continue }
+        if (c === q) break
+        // 单双引号不跨行：未闭合时防御性停在行尾，避免吞掉后续真实代码
+        if (q !== '`' && c === '\n') break
+        j += 1
+      }
+      const closed = j < n && src[j] === q
+      literals.push(src.slice(i + 1, j))
+      // 模块名是语义参数，原样保留；其余字面量一律视为惰性文本
+      const isModuleSpec = MODULE_SPEC_TAIL.test(out.slice(-40))
+      const end = closed ? j + 1 : j
+      out += (isModuleSpec && closed) ? src.slice(i, end) : blankRun(i, end)
+      i = end
+      prev = q
+      lastWord = ''
+      continue
+    }
+
+    out += ch
+    if (isWordChar(ch)) {
+      word += ch
+      prev = ch
+    }
+    else if (/\s/.test(ch)) {
+      if (word) { lastWord = word; word = '' }
+    }
+    else {
+      if (word) { lastWord = word; word = '' }
+      prev = ch
+    }
+    i += 1
+  }
+
+  return { code: out, literals }
+}
+
+/**
+ * 动态执行通道：`eval('...')` / `Function('...')` 的实参是字符串却会被当作代码执行，
+ * 故此时额外把「所有字面量的内容」按代码再扫一遍。
+ * [CONSTRAINT] 只在骨架里真的出现调用时才启用——否则会把「要写入的文本」重新变成误报源。
+ */
+const DYNAMIC_EXEC_RE = /\beval\s*\(|\bFunction\s*\(/
+
+/** 命中清单里的动态执行标记后缀（这些命中没有行号，因为来源是字面量内容） */
+const EVAL_TAG = ' @eval'
+
+function scanLiterals(literals: string[], matches: string[]): void {
+  if (!literals.length) return
+  const joined = literals.join('\n')
+  for (const f of FORBIDDEN) {
+    if (f.re.test(joined)) matches.push(`${f.name}${EVAL_TAG}`)
+  }
 }
 
 /** 扫描脚本源码，返回是否命中禁用 API 及命中清单 */
@@ -62,7 +231,7 @@ export function scanScriptHead(code: string): HeadResult {
     if (!isNode) {
       return {
         ok: false,
-        reason: `ILLEGAL_SHEBANG: ${first.trim()}`
+        reason: `ILLEGAL_SHEBANG: ${first.trim()}`,
       }
     }
   }
@@ -73,19 +242,21 @@ export function scanScriptHead(code: string): HeadResult {
 
   return { ok: true }
 }
+
 /**
  * 扫描脚本源码中的禁用的原生 API 调用
  * [WHY] 沙箱运行时注入的是 __AI__ 命名空间，禁止直接 require fs / path / child_process；此扫描为编译前拦截
- * [CONSTRAINT] 先 stripComments 再匹配，避免注释内示例触发误报；命中规则在 FORBIDDEN 表
+ * [CONSTRAINT] 先 tokenize 剥掉字面量与注释，只对代码骨架匹配；命中规则在 FORBIDDEN 表
  * [CHANGE-IMPACT] 被 run-script 用于前置拦截；FORBIDDEN 表新增规则会波及既有脚本的兼容性
  * @param code 脚本源码原文
  */
 export function scanNativeApis(code: string): ScanResult {
-  const cleaned = stripComments(code)
+  const { code: skeleton, literals } = tokenize(code)
   const matches: string[] = []
   for (const f of FORBIDDEN) {
-    if (f.re.test(cleaned)) matches.push(f.name)
+    if (f.re.test(skeleton)) matches.push(f.name)
   }
+  if (DYNAMIC_EXEC_RE.test(skeleton)) scanLiterals(literals, matches)
   return { hit: matches.length > 0, matches }
 }
 
@@ -102,17 +273,18 @@ function hasFallbackNear(lines: string[], idx: number, lookback = 3): boolean {
 
 /** 带降级协议豁免的扫描：命中位置附近的显式降级标记可豁免该行 */
 export function scanNativeApisWithFallback(code: string): ScanResult {
-  // [guard-v2] 先用 stripComments 处理整段再逐行——
+  // [guard-v2] 整段先做词法剥离再逐行——
   //   WHY: 旧实现只剥行尾 //，导致 injectAiJsdoc 注入的头部 JSDoc 内关键字被命中，
   //        每一条脚本都会被误报 NATIVE_API_FORBIDDEN，静态扫描形同虚设。
   //   [CONSTRAINT] fallback 检查必须用原始行（注释原文），否则降级协议标记会随注释一起被剥掉。
-  //   [CHANGE-IMPACT] 影响所有经 run-script 前置校验的脚本；不再误伤含 JSDoc 的合规脚本。
-  const stripped = stripComments(code)
-  const strippedLines = stripped.split(/\r?\n/)
+  //   [CONSTRAINT] tokenize 保留换行 → 骨架行号与原文行号一一对应，`@L<n>` 与回溯才可信。
+  //   [CHANGE-IMPACT] 影响所有经 run-script 前置校验的脚本；不再误伤「把原生 API 当文本写入」的脚本。
+  const { code: skeleton, literals } = tokenize(code)
+  const skeletonLines = skeleton.split(/\r?\n/)
   const origLines = code.split(/\r?\n/)
   const matches: string[] = []
-  for (let i = 0; i < strippedLines.length; i++) {
-    const line = strippedLines[i]
+  for (let i = 0; i < skeletonLines.length; i++) {
+    const line = skeletonLines[i]
     for (const f of FORBIDDEN) {
       if (f.re.test(line) && !hasFallbackNear(origLines, i)) {
         matches.push(`${f.name} @L${i + 1}`)
@@ -120,6 +292,7 @@ export function scanNativeApisWithFallback(code: string): ScanResult {
       }
     }
   }
+  if (DYNAMIC_EXEC_RE.test(skeleton)) scanLiterals(literals, matches)
   return { hit: matches.length > 0, matches }
 }
 

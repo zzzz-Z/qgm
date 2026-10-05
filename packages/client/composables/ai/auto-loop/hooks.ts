@@ -1,7 +1,7 @@
 // 生命周期 hook（HTTP 调用 /__hooks/run）
 
 /** 循环生命周期事件枚举；[CONSTRAINT] 与 core/src/utils/hooks-config.ts 的事件表一一对应，改名单需两侧同步 */
-export type HookEvent = 'BeforeFill' | 'BeforeScript' | 'AfterScript' | 'AfterResult' | 'LoopStop'
+export type HookEvent = 'BeforeFill' | 'BeforeScript' | 'AfterScript' | 'AfterResult' | 'LoopStop' | 'BeforeDone' | 'BeforeDoneFinal'
 /** 钩子执行结果：是否通过 + 拒绝原因 */
 export interface HookResult {
   event: HookEvent

@@ -1,5 +1,7 @@
 // AIRUNNER-BATCH26-3-INCLUDE-TEST-TS: include 同时覆盖 .node-test.ts 与 .test.ts
 import { defineConfig } from 'vitest/config'
+// [vue-sfc-in-vitest-v1] 组件级测试需编译 .vue；本插件只影响 SFC 转换，不改变 node 环境
+import vue from '@vitejs/plugin-vue'
 
 // HOST-POWER-LIMIT: 宿主是 16 核 i9-9880H，且 96W 适配器实际只协商到 60W（SMC 限频，
 // CPU_Speed_Limit 常年在 41~52）。vitest 默认按核数开 worker，满载时互相抢 CPU，
@@ -10,6 +12,7 @@ const MAX_WORKERS = process.env.VITEST_MAX_WORKERS === '0'
   : Number(process.env.VITEST_MAX_WORKERS) || 4
 
 export default defineConfig({
+  plugins: [vue()],
   test: {
     environment: 'node',
     include: [

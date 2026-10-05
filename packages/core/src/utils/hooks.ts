@@ -14,6 +14,19 @@ function configPath(): string {
 }
 /** 单个钩子执行的超时上限（毫秒） */
 const HOOK_TIMEOUT_MS = 5000
+/**
+ * 按事件覆盖超时：[selfcheck-hook-timeout-v1]
+ * BeforeDone 的 hook 壳会同步跑 L1 回归（目标 vue-tsc --noEmit 实测约 15s，
+ * 多 target 时更久），5s 全局超时必然强杀 → exit -1 被 onFail:reject 判拒 →
+ * 正常 DONE 连拒两次熔断（实测 2026-10-05：探针 A/B 全部超时）。
+ * 其余事件仍是轻量用户脚本，维持 5s。
+ */
+// [selfcheck-l2-v1] BeforeDoneFinal 跑 L2 全量（全量 vitest + 4×tsc + 全仓 eslint），
+// 实测可能 3～10 分钟，初值 960s；由响应体 durationMs 校准。
+// [selfcheck-l2-budget-v2] 复核修正：960s 与 fullgate 内部总预算 T_TOTAL 相等 = **骑在边界上**，
+// 只要端点序列化/回传稍慢即会被 hook 先强杀 → exit -1 → onFail:reject → 正常 DONE 连拒两次熔断
+// （与期一 `5s < 12s` 同族）。现 hook 抬到 1200s，内部 T_TOTAL 保持 960s，留 4 分钟余量。
+const HOOK_TIMEOUT_BY_EVENT: Partial<Record<HookEvent, number>> = { BeforeDone: 180_000, BeforeDoneFinal: 1_200_000 }
 
 // 配置加载已外移至 hooks-config.ts；此处只传路径
 
@@ -47,7 +60,7 @@ export async function runHook(event: HookEvent, payload: unknown): Promise<HookR
       // setRoot 切换工作区后 hook 仍在旧目录执行（隐藏 bug，与 git.ts 同类）
       cwd: getRoot(),
       shell: true,
-      timeoutMs: HOOK_TIMEOUT_MS,
+      timeoutMs: HOOK_TIMEOUT_BY_EVENT[event] ?? HOOK_TIMEOUT_MS,
       timeoutLabel: `hook ${event} 超时`,
       stdin: input,
     })

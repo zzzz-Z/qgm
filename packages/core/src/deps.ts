@@ -24,6 +24,7 @@ export {
   hasEslint,
   hashRules,
   type LintResult,
+  measureScriptSize,
   parseClaimed,
   parseDecisionMarkers,
   parseScriptMeta,
@@ -35,6 +36,7 @@ export {
   runScript,
   runTests,
   runTsc,
+  type ScriptSize,
   splitShebang,
 } from './post-run/index.js'
 
@@ -78,5 +80,6 @@ export {
 export {
   fingerprintErrors,
   saveIndex,
+  saveIndexBefore,
   scanIndex,
 } from './utils/index.js'

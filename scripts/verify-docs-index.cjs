@@ -12,6 +12,10 @@ const ROOT = path.resolve(__dirname, '..')
 const INDEX = path.join(ROOT, 'docs', 'DOCS-INDEX.md')
 // 非项目文档：运行态 / 依赖 / 产物 / 会话工作记忆
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.ai-runner', '.workbuddy', '.trae', '.vscode', 'coverage'])
+// [docs-index-testartifacts-v1] Playwright 生成物：error-context.md 等只在用例失败时写出，
+// 属运行态而非项目文档；不排除则「跑一次红 e2e → docs:verify 恒 exit 2」（2026-10-05 实测）。
+SKIP_DIRS.add('test-results')
+SKIP_DIRS.add('playwright-report')
 // [docs-index-generated-v1] 生成物文档目录（相对根）：docs/plan/** 由 verify-contracts.cjs 每次运行时写出，
 // 不属人工维护文档 → 不纳入索引义务，否则「跑完 verify:contracts 再跑 docs:verify」必 exit 2。
 // SKIP_DIRS 只按目录名匹配，表达不了这种具体路径，故单列前缀表。

@@ -21,6 +21,8 @@ interface StartFamilyDeps {
   finish: (inst: LoopInstance, reason: string, detail?: string) => Promise<void>
   bindKeyboard: () => void
   stage: Ref<'' | 'plan' | 'implement' | 'verify'>
+  /** [session-isolation-v1] 读当前活动会话 id；循环启动时绑定到实例，用于消息 sid 过滤 */
+  getActiveSessionId: () => string
   transport: AiTransport
   setOriginalTitle: (v: string) => void
 }
@@ -33,7 +35,7 @@ interface StartFamilyDeps {
  * @param deps 启动族依赖面（含 loopPaused / transport / stage 等外部引用）
  */
 export function createStartFamily(deps: StartFamilyDeps) {
-  const { loopPaused, activeLoop, isLoopActive, persist, enterWaiting, runHook, finish, bindKeyboard, stage, transport, setOriginalTitle } = deps
+  const { loopPaused, activeLoop, isLoopActive, persist, enterWaiting, runHook, finish, bindKeyboard, stage, transport, setOriginalTitle, getActiveSessionId } = deps
   /**
    * 重置循环实例为初态（id / goal / 轮次 / 起始 commit），准备下一轮
    * [CONSTRAINT] AI 窗口未打开时直接返回 false 并 toast，不修改 inst；成功后 bindKeyboard
@@ -63,6 +65,8 @@ export function createStartFamily(deps: StartFamilyDeps) {
       head = d.head || ''
     } catch { /* swallow: git 不可用/非仓库，head 保持空串（无回滚基线） */ }
     inst.id.value = `${prefix}_${Date.now().toString(36)}`
+    // [session-isolation-v1] 绑定当前活动会话 id；空串=未绑定（旧油猴不带 sessionId，getLoopBySessionId 会放行）
+    inst.sessionId.value = getActiveSessionId()
     inst.goal.value = goal
     inst.round.value = 1
     inst.startCommit.value = head

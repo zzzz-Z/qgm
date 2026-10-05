@@ -2,25 +2,35 @@
 import { Hono } from 'hono'
 import fs from 'node:fs'
 import path from 'node:path'
-import { readTaskPlan, readTaskState, readTrustSnapshot, writeTaskState } from '../state/task-store.js'
+import { mutateTaskState, readTaskPlan, readTaskState, readTrustSnapshot } from '../state/task-store.js'
 import { getRoot } from '../config.js'
-import type { TaskDoneItem, TaskState } from '../state/task-store.js'
+import type { TaskDoneItem, TaskItem } from '../state/task-store.js'
 
 interface Body {
-  mode?: 'set' | 'push' | 'complete'
+  mode?: 'set' | 'push' | 'complete' | 'start' | 'fail'
   todo?: string[]
   done?: TaskDoneItem[]
   status?: string
   round?: number
   pushTodo?: string[]
   complete?: string[]
+  // [task-running-v1] 开始执行的任务（单项）
+  start?: string[]
+  // [task-board-fail-v1] 标记失败的任务
+  fail?: string[]
+  // [task-board-items-v1] set 模式直接给结构化任务
+  items?: TaskItem[]
+  // [tasks-by-sid-v1] 会话 id；存在则写入分桶
+  sid?: string
 }
 
 /** tasks 路由的 Hono 实例 */
 export const tasksHono = new Hono()
 
 tasksHono.get('/tasks', (c) => {
-  const st = readTaskState()
+  // [tasks-by-sid-v1] sid 存在 → 只读该会话分桶；无 sid 回落全局（旧行为兼容）
+  const sid = c.req.query('sid') || undefined
+  const st = readTaskState(sid)
   const plan = readTaskPlan()
   if (plan && plan.tiers) {
     st.tiers = plan.tiers
@@ -44,33 +54,14 @@ tasksHono.get('/tasks', (c) => {
 
 tasksHono.post('/tasks', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as Body
-  const cur = readTaskState()
-  const mode = body.mode || (Array.isArray(body.pushTodo) ? 'push' : Array.isArray(body.complete) ? 'complete' : 'set')
-  let next: TaskState
-  if (mode === 'push') {
-    const add = Array.isArray(body.pushTodo)
-      ? body.pushTodo.map(String)
-      : (Array.isArray(body.todo) ? body.todo.map(String) : [])
-    const merged = cur.todo.concat(add.filter(x => x && !cur.todo.includes(x)))
-    next = { ...cur, todo: merged }
-  } else if (mode === 'complete') {
-    const items = Array.isArray(body.complete) ? body.complete.map(String) : []
-    const remains: string[] = []
-    const moved: TaskDoneItem[] = []
-    for (const t of cur.todo) {
-      if (items.includes(t)) moved.push({ item: t, at: Date.now(), round: cur.round })
-      else remains.push(t)
-    }
-    next = { ...cur, todo: remains, done: cur.done.concat(moved) }
-  } else {
-    next = {
-      round: typeof body.round === 'number' ? body.round : cur.round,
-      status: typeof body.status === 'string' ? body.status : cur.status,
-      todo: Array.isArray(body.todo) ? body.todo.map(String) : cur.todo,
-      done: Array.isArray(body.done) ? body.done : cur.done,
-      doneAt: cur.doneAt,
-    }
-  }
-  writeTaskState(next)
-  return c.json(next)
+  // [tasks-by-sid-v1] sid 优先取 body，回落 query；无则全局（旧行为）
+  const sid = body.sid || c.req.query('sid') || undefined
+  // [task-store-cas-v1] 事务化读-改-写：version 冲突自动重放（跨进程双实例并发不丢更新）
+  const out = mutateTaskState(sid, body)
+  return c.json({
+    ...out.state,
+    warnings: out.warnings,
+    // [task-board-degraded-v1] 重试耗尽（并发写持续冲突）：调用方据此判断本次变更可能未落盘
+    degraded: out.degraded,
+  })
 })

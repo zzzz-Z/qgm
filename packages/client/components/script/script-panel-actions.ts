@@ -14,6 +14,7 @@ import { useRunner } from '../../composables/runner/useRunner'
 import { parseErrorLocations } from '../../utils/context-error-locations'
 import {
   appendBaselineChanges,
+  appendBudgetNotice,
   appendChangeList,
   appendClaimMismatch,
   appendDryRunFailure,
@@ -22,6 +23,7 @@ import {
   appendFingerprints,
   appendLintReport,
   appendRawOutputs,
+  appendScriptInvalid,
   appendSmokeReport,
   appendTestReport,
   appendTscReport,
@@ -86,10 +88,17 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
     p.push(`变更数: ${changes.value.length}`)
     p.push('')
     const r = result.value
+    // [truncation-detect-v1] 前置拦截块必须**最先**出现——它决定 AI 怎么解读整条消息
+    //   （截断 = 通道故障，不是逻辑失败）。压在末尾会被源码块与反馈摘要淹没。
+    appendScriptInvalid(p, r)
     await appendFailedSourceFiles(p, r, changes.value, { stripComments: stripComments.value, stripBlankLines: stripBlankLines.value, errorLocs })
     // [p3-4-fingerprint-visible-v1] 失败定位紧跟源码块：AI 拿到源码的同时拿到「哪一行、哪个符号」
     appendFingerprints(p, r)
     appendFeedbackSummary(p, r)
+    // [budget-feedback-v1] 体积账本紧跟反馈摘要：AI 先看到「这轮结果如何」，紧接着看到
+    //   「这轮用掉多少输出预算」——两者合起来才是下一轮的规划依据。
+    //   （前置拦截轮无 runId，体积由上方 appendScriptInvalid 给出，此处自动跳过不重复）
+    appendBudgetNotice(p, r)
     appendChangeList(p, changes.value)
     appendDryRunFailure(p, r)
     appendSmokeReport(p, r)

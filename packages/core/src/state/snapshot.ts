@@ -221,6 +221,16 @@ export function runDir(runId: string) {
 }
 
 /**
+ * [cumulative-baseline-v1] 运行记录根目录（.ai-runner/runs）
+ * [WHY] 累积视图要枚举历史 run 的 manifest 找「归属轮」；gcSnapshots 只做回收，
+ *   没有对外暴露遍历入口，故补一个只读访问器（与 runDir 同源，避免调用方自行拼路径）
+ * [CONSTRAINT] 不保证目录存在；调用方须自行兜住 readdirSync 失败
+ */
+export function runsDir(): string {
+  return getRunsDir()
+}
+
+/**
  * 保留最近 keep 个快照目录，其余按 mtime 逆序删除
  * [CONSTRAINT] keep=0 时清空全部；单项 stat 失败视为不可用条目，直接从候选集剔除
  * [CHANGE-IMPACT] 会删除磁盘文件，误传 keep 会导致历史快照丢失

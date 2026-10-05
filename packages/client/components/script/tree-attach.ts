@@ -1,6 +1,8 @@
 // [tree-attach-v1] 从 ScriptPanel.vue 抽出：文件树拖拽 → 附件 / 目录展开 / 脚本拼装
 import { isInEditor } from './script-panel-utils'
 import type { FileNode, FilesReadResponse } from '../../types'
+import { subscribeTreeDrop } from '../../composables/ui/drag-bus'
+import type { TreeDropDetail } from '../../composables/ui/drag-bus'
 import type { Ref } from 'vue'
 import { uid } from '../../utils/id'
 import type { AttachedFile } from './attach-manager'
@@ -94,10 +96,14 @@ export function createTreeAttach(deps: { attachedFiles: Ref<AttachedFile[]> }) {
   }
 
   /** 树拖入编辑区：仅在编辑器范围响应 */
-  function onTreeDrop(e: Event): void {
-    const d = (e as CustomEvent).detail as { paths: string[], x: number, y: number }
+  function onTreeDrop(d: TreeDropDetail): void {
     if (!d || !isInEditor(d.x, d.y)) return
     void addTreePaths(d.paths || [])
+  }
+
+  /** 订阅显式落点通道；返回取消订阅函数 */
+  function registerTreeDrop(): () => void {
+    return subscribeTreeDrop(onTreeDrop)
   }
 
   /** 脚本 + 附件 → 拼装成最终脚本文本（bash 用 #、cjs 用 //） */
@@ -130,6 +136,7 @@ export function createTreeAttach(deps: { attachedFiles: Ref<AttachedFile[]> }) {
   return {
     addTreePaths,
     onTreeDrop,
+    registerTreeDrop,
     buildPromptWithAttachments
   }
 }

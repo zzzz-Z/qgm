@@ -26,6 +26,9 @@ interface WorklogResult {
 
 const props = defineProps<{ active: boolean }>()
 
+// [ui-p2b-skeleton-wire-v2] V6 加载骨架行数/宽度档位（同 FileTree，但样式独立 scoped）
+const SKELETON_ROWS = 4
+const SKELETON_WIDTHS = ['sk-w-70', 'sk-w-55', 'sk-w-85', 'sk-w-40']
 /**
  * 订阅 transport onReply：pendingCommitRequest 为 true 时消费下一条作为 commit message
  * [WHY] 用户要求生成按钮改为'发 git diff 给 AI → 拿回复'；用一次性门控避免拦截其它无关回复
@@ -367,8 +370,12 @@ async function copyFullLog(): Promise<void> {
     </div>
 
     <div class="wl-scroll">
-      <div v-if="loading" class="wl-empty">
-        加载中…
+      <!-- [ui-p2b-skeleton-wire-v2] V6：加载态改骨架屏（3 行灰条） -->
+      <div v-if="loading" class="skeleton-list" aria-busy="true" aria-label="正在加载变更">
+        <div v-for="sk in SKELETON_ROWS" :key="sk" class="skeleton-row">
+          <span class="skeleton-icon" />
+          <span class="skeleton-line" :class="SKELETON_WIDTHS[sk % SKELETON_WIDTHS.length]" />
+        </div>
       </div>
       <div v-else-if="error" class="wl-empty wl-error">
         {{ error }}

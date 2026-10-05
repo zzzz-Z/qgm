@@ -58,7 +58,7 @@
   cursor: col-resize;
   background: transparent;
   position: relative;
-  z-index: 5;
+  z-index: var(--z-base);
   transition: background 0.15s;
 }
 
@@ -102,7 +102,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
+  z-index: var(--z-overlay);
   pointer-events: none;
   background: rgb(13 17 23 / 70%);
 }

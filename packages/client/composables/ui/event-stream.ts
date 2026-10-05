@@ -1,4 +1,7 @@
 import { ref } from 'vue'
+// [ui-p2c-env-typing-v1] 复用 utils/log.ts 的宽档断言：test tsconfig 无 env.d.ts，
+//   直接访问 import.meta.env 会 TS2339；此写法两种 tsconfig 下都通过。
+const IS_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV)
 // AIRUNNER-BATCH19-2-SPLIT-EVENT-STREAM: 从 useEventStream.ts 抽出的纯模块级状态与函数（无 useAiSite 依赖）
 
 /**
@@ -99,6 +102,18 @@ export function flushEventSave(): void {
   flushSave()
 }
 
+// [ui-p2c-event-stream-hooks-v1] V9 探针配套：DEV 下把 emit/clear 挂 window，
+// [WHY] e2e 需在页面内构造「500 事件 + 一条新事件」的场景，验证判据①；
+// [CONSTRAINT] 仅 DEV 挂载，生产构建不暴露任何可变全局；测试方负责清理（clear）。
+if (IS_DEV && typeof window !== 'undefined') {
+  (window as unknown as { __AI_EVENT_HOOKS__?: unknown }).__AI_EVENT_HOOKS__ = {
+    emit,
+    clear: clearEvents,
+    flush: flushEventSave,
+    count: () => events.value.length,
+  }
+}
+
 /**
  * 事件总线组合式入口
  * [CONSTRAINT] events 是模块级单例，多组件共享同一队列；直接传引用而非拷贝
@@ -170,3 +185,11 @@ export function takePendingAskKey(): string {
  * [CONSTRAINT] 与 takePendingAskKey 相对；用于日志 / 断言，不应作为消费入口
  */
 export function peekPendingAskKey(): string { return pendingAskKey.value }
+
+// [ui-p2c-probe-bridge-v1] V9 验收①：DEV 下暴露测试桥，供 Playwright e2e 驱动 500 事件会话
+// [WHY] 判据「单事件到达重渲染卡数 ≤ 3」需要一个可编程的触发点；生产构建整段为 no-op。
+// [CONSTRAINT] 仅 import.meta.env.DEV 生效；生产树摇后不残留任何全局符号。
+if (IS_DEV && typeof window !== 'undefined') {
+  const w = window as unknown as { __AI_EVENT_BRIDGE__?: { emit: typeof emit, clearEvents: typeof clearEvents } }
+  w.__AI_EVENT_BRIDGE__ = { emit, clearEvents }
+}

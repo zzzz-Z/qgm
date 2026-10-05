@@ -116,6 +116,18 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
     // [WHY] 新循环 initLoop 已复位 loopPaused=false 并写入新 loopId；此处覆盖会让新循环立即被误判为暂停
     // [CONSTRAINT] 该 return 不影响本循环已完成的 state / persist / commit；只保护"后续新循环不被污染"
     if (inst.id.value !== finishingLoopId) return
+    // [tasks-reset-on-finish-v1] 循环结束清空任务面板
+    // [WHY] R2：新循环不应看到上一轮残留任务；清空是「结束」语义的一部分
+    // [CONSTRAINT] fire-and-forget：失败不阻断收尾；放在 new-loop 守卫之后，避免新循环启动时误清
+    // [taskboard-sid-guard-v1] sid 空即跳过清空：多窗口下全局桶=别家数据，
+    // 宁残留旧数据不可误清他窗（对齐面板侧的禁用策略）
+    if (inst.sessionId.value) {
+      void fetch('/__ai/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'set', sid: inst.sessionId.value, todo: [], done: [] }),
+      }).catch(() => {})
+    }
     // [auto-idle-after-finish-v1] 整轮结束自动回初始态：按钮切「发送」
     loopPaused.value = true
     inst.stopRequest.value = 'none'

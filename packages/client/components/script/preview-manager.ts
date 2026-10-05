@@ -2,7 +2,12 @@
 import type { Ref } from 'vue'
 
 /** 变更条目最小形状（只声明本模块用到的字段） */
-interface ChangeLite { path: string, type: string }
+interface ChangeLite {
+  path: string
+  type: string
+  /** [cumulative-baseline-v1] 归属轮；累积视图下「改动前」内容要按它取，而非本轮 */
+  runId?: string
+}
 
 /** 执行结果最小形状（只声明 runId） */
 interface ResultLite { runId?: string }
@@ -53,8 +58,12 @@ export function createPreviewManager(deps: PreviewManagerDeps) {
       const dataAfter = await resAfter.json()
       if (seq !== previewSeq) return
       previewAfter.value = dataAfter.files?.[0]?.content || ''
-      if (!result.value?.runId) { previewBefore.value = ''; return }
-      const resBefore = await fetch('/__ai/files/before', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: result.value.runId, file: p }) })
+      // [cumulative-baseline-v1] 「改动前」要按条目的**归属轮**取：累积视图里该文件的上一次改动
+      //   可能发生在几轮前，用本轮 runId 会拿到本轮开始时（已被改过）的内容，diff 直接变空。
+      //   归属轮运行前的内容 == 会话基准态，正是累积 diff 期望的左值。
+      const beforeRunId = changes.value.find(x => x.path === p)?.runId || result.value?.runId
+      if (!beforeRunId) { previewBefore.value = ''; return }
+      const resBefore = await fetch('/__ai/files/before', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: beforeRunId, file: p }) })
       const dataBefore = await resBefore.json()
       if (seq !== previewSeq) return
       previewBefore.value = dataBefore.content ?? ''

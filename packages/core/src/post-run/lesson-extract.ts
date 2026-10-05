@@ -29,15 +29,23 @@ function stripBullet(line: string): string | null {
 }
 
 function splitTitleBody(raw: string): { title: string, body: string } | null {
-  let s = raw.trim()
-  // 剥离列表项左侧粗体标记；右侧由下方 title 的尾部剥离处理
-  if (s.startsWith('**')) s = s.slice(2)
-  const ascii = s.indexOf(':')
-  const wide = s.indexOf('\uFF1A')
-  let cut = -1
-  if (ascii >= 0 && wide >= 0) cut = Math.min(ascii, wide)
-  else if (ascii >= 0) cut = ascii
-  else if (wide >= 0) cut = wide
+  const s0 = raw.trim()
+  // [lesson-title-boundary-v1-fix] 先记「有没有前导粗体」再剥，否则闭合探测恒假——
+  //   旧写法 `if (s.startsWith('**')) s = s.slice(2)` 之后紧跟 `s.startsWith('**') ? ...`，
+  //   前导标记已被剥掉 ⇒ close 恒为 -1 ⇒ 闭合粗体分支是死代码，一路落到「末冒号」。
+  //   后果：正文含冒号（「原因：…」这类常态）时，末冒号切进正文，把正文前半截并进标题。
+  const bolded = s0.startsWith('**')
+  const s = bolded ? s0.slice(2) : s0
+  const close = bolded ? s.indexOf('**') : -1
+  if (close > 0) {
+    const t = s.slice(0, close).trim()
+    const b = s.slice(close + 2).replace(/^[\s:\uFF1A]+/, '').trim()
+    if (t) return { title: t, body: b }
+  }
+  // 无闭合粗体时按**末**冒号切（原取首冒号会把 `shell: false` 这类标题腰斩）
+  const ascii = s.lastIndexOf(':')
+  const wide = s.lastIndexOf('\uFF1A')
+  const cut = Math.max(ascii, wide)
   if (cut <= 0) return null
   const title = s.slice(0, cut).replace(/\*+$/, '').trim()
   const body = s.slice(cut + 1).trim()
@@ -123,13 +131,16 @@ export function appendLessons(items: ExtractedLesson[], rootDir?: string): numbe
   const cur = readLessons(file)
   if (!cur) return 0
 
+  // [lesson-dedup-norm-v1] 归一化标题去重：去空白/反引号/冒号/标点后比对，
+  // 避免「差一字 / 换个冒号位置」即视为新条（原精确匹配抓不住近重复）。
+  const norm = (t: string): string => String(t || '').toLowerCase().replace(/[\s`:'"\uFF1A\u3001\u3002,.;!?()[\]{}|/<>~\-\u2014_*]+/g, '')
   const seen = new Set<string>()
   for (const line of cur.split('\n')) {
     const h = parseHeading(line)
-    if (h && h.level === 2) seen.add(h.title)
+    if (h && h.level === 2) seen.add(norm(h.title))
   }
 
-  const fresh = items.filter(x => x.title && !seen.has(x.title))
+  const fresh = items.filter(x => x.title && !seen.has(norm(x.title)))
   if (!fresh.length) return 0
 
   const entries = fresh.map(x => `## ${x.title}\n\n${x.body || '(待补充)'}\n`)

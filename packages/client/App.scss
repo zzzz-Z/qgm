@@ -143,6 +143,28 @@
   background: var(--primary-bg);
 }
 
+// [userscript-update-v1] 安装 / 更新油猴脚本入口：与 .theme-toggle 同尺寸，避免 header 高度抖动
+.userscript-toggle {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-6);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: 0.15s;
+}
+
+.userscript-toggle:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
 .layout-row {
   flex: 1;
   min-height: 0;
@@ -221,22 +243,7 @@
   display: block;
 }
 
-.theme-toggle,
-.open-ai-toggle {
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-2);
-  transition:
-    background 0.12s ease,
-    color 0.12s ease,
-    border-color 0.12s ease;
-}
-.theme-toggle:hover,
-.open-ai-toggle:hover {
-  background: rgb(255 255 255 / 6%);
-  color: var(--text);
-  border-color: rgb(255 255 255 / 10%);
-}
+/* [ui-p1a-appscss-dedup-v1] V11 去重：与紧随其后的同一选择器块重复（后者为权威，text-3 / 8% 版本）。 */
 
 .theme-toggle,
 .open-ai-toggle {

@@ -188,16 +188,18 @@ ScriptPanel 编辑器里若脚本 **无 shebang**，点「运行」会走 `ask-f
 
 仓库内部 `bin/` 目录（开发辅助，未对外发布）：
 
-| 脚本                    | 通过 `pnpm` 调用        | 用途                                          |
-| :---------------------- | :---------------------- | :-------------------------------------------- |
-| `check-status.cjs`      | —                       | 工程化自检：阶段产物 / package scripts / 阈值 |
-| `check-regression.cjs`  | `pnpm check-regression` | 回归基线对比                                  |
-| `log-signal.cjs`        | —                       | 记录触发信号到 `.ai-runner/signals.md`        |
-| `recover.cjs`           | `pnpm recover`          | 交互式从 `.ai-runner/runs` 选择快照恢复       |
-| `run-all.cjs`           | `pnpm run-all`          | 全量回归（typecheck / 单测 / e2e / 冒烟）     |
-| `compliance-report.cjs` | —                       | 合规报告                                      |
-| `gen-notes.cjs`         | —                       | 生成笔记                                      |
-| `headless-cli.cjs`      | —                       | Playwright headless CLI（cssom / screenshot） |
+| 脚本                    | 通过 `pnpm` 调用        | 用途                                                    |
+| :---------------------- | :---------------------- | :------------------------------------------------------ |
+| `check-status.cjs`      | —                       | 工程化自检：阶段产物 / package scripts / 阈值           |
+| `check-regression.cjs`  | `pnpm check-regression` | 回归基线对比                                            |
+| `log-signal.cjs`        | `pnpm signals`          | 阶段 4 信号闸门：阈值 SSOT / 记录触发信号               |
+| `recover.cjs`           | `pnpm recover`          | 交互式从 `.ai-runner/runs` 选择快照恢复                 |
+| `run-all.cjs`           | `pnpm run-all`          | 全量回归（typecheck / 单测 / e2e / 冒烟）               |
+| `compliance-report.cjs` | —                       | 合规报告                                                |
+| `gen-notes.cjs`         | —                       | 生成笔记                                                |
+| `headless-cli.cjs`      | —                       | Playwright headless CLI（cssom / screenshot）           |
+| `lessons-add.cjs`       | `pnpm lessons:add`      | 手工补记踩坑记录（`-` 从 stdin 读）                     |
+| `selfcheck.cjs`         | —                       | hook 自检：DONE 声称跑过的命令须在 toolLog 有 exec 记录 |
 
 ---
 
@@ -213,7 +215,7 @@ ScriptPanel 编辑器里若脚本 **无 shebang**，点「运行」会走 `ask-f
 | `tmp/<runId>-tools.jsonl`  | 沙盒内文件系统调用日志                                              | 运行后即删     |
 | `config.json`              | DeepSeek key / baseUrl / model 配置                                 | —              |
 | `state.json`               | 循环状态机（round / rulesVersion / todo / branch）                  | 手动管理       |
-| `signals.md`               | 触发信号累积（观察期阈值由 `check-status.cjs` 评估）                | 手动管理       |
+| `signals.md`               | 触发信号累积（阈值 SSOT：`bin/log-signal.cjs`，`pnpm signals`）     | 手动管理       |
 
 ---
 

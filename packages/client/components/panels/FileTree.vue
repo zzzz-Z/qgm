@@ -7,8 +7,14 @@ import { createDragController } from './drag-controller'
 import { getFileIcon, iconSvg } from './file-tree-icons'
 import type { FileNode } from '../../types'
 import { TOAST_MEDIUM } from '../../utils/toast-durations'
+// [ui-p1c-tree-expand-wire-v1] V4：展开态抽到同目录 composable（显式 import 兜住 vitest 无 auto-import）
+import { useTreeExpand } from './use-tree-expand'
 
 defineOptions({ name: 'FileTree' })
+
+// [ui-p2b-skeleton-wire-v1] V6 首屏骨架行数/宽度档位（静态常量，避免模板内重复字面量）
+const SKELETON_ROWS = 6
+const SKELETON_WIDTHS = ['sk-w-70', 'sk-w-40', 'sk-w-55', 'sk-w-85']
 
 /** 向父组件请求打开"添加项目"流程（空工作区按钮触发） */
 const emit = defineEmits<{
@@ -44,12 +50,8 @@ const fold = useFoldState('default', 'filetree')
 /** 当前工作区项目名；初值兜底 '工作区'，onMounted 后按 /__ai/workspace 或 package.json name 修正 */
 const projectName = ref('工作区')
 
-/** 是否展开 */
-const expanded = reactive(new Set<string>())
-// 初始化：把所有 true 的 key 塞入 expanded
-for (const [k, v] of Object.entries(fold.all.value)) {
-  if (v) expanded.add(k)
-}
+// [ui-p1c-tree-expand-wire-v1] V4：展开态 + 持久化 + 懒加载触发统一由 composable 承载
+const { expanded, toggle, isOpen, rehydrate } = useTreeExpand(fold, loadChildren)
 
 // [file-dialog] 双击文件弹窗查看详情 + 复制
 /** 双击文件后的查看弹窗状态；null 表示未打开 */
@@ -105,8 +107,8 @@ if (props.root) {
   onMounted(async () => {
     await load()
     // [expanded-rehydrate-v1] 刷新后 expanded 已从持久化恢复，但 loadChildren 从未被调过，
-    // 子节点空 → 展开态但内容空白（报告 §2.5）。此处为每个已展开目录补拉子节点。
-    for (const p of expanded) { void loadChildren(p) }
+    // 子节点空 → 展开态但内容空白（报告 §2.5）。
+    rehydrate()
     // 优先用 /__ai/workspace 返回的 root 目录名；其次 package.json name
     try {
       const ws = await fetch('/__ai/workspace', { headers: { accept: 'application/json' } })
@@ -168,40 +170,7 @@ function list(): FileNode[] { return props.root ? tree.value : (props.nodes || [
  */
 function level(): number { return props.depth || 0 }
 
-/**
- * 执行 persist Expanded
- */
-function _persistExpanded(changedPath: string, isOpen: boolean): void {
-  // [filetree-persist-merge-v1] 增量写：只改本次 toggle 涉及的 key，保留其他递归实例的展开态。
-  // 原全量覆写会让子实例的 toggle 抹掉根实例已展开的目录（报告 §2.6）。
-  const next: Record<string, boolean> = { ...fold.all.value }
-  if (isOpen) next[changedPath] = true
-  else delete next[changedPath]
-  fold.all.value = next
-}
-
-/**
- * 展开/折叠某目录；展开时按需拉取子节点
- * [CONSTRAINT] 折叠不释放已加载的 children（useFileTree 缓存），再次展开无需重新请求
- * [CHANGE-IMPACT] 每次切换调用 _persistExpanded 全量覆写 fold.all，避免拖拽/刷新后展开态丢失
- * @param p 目录相对路径（与 isOpen / loadChildren 使用同一键）
- */
-function toggle(p: string) {
-  const wasOpen = expanded.has(p)
-  if (wasOpen) {
-    expanded.delete(p)
-  } else {
-    expanded.add(p)
-    loadChildren(p)
-  }
-  _persistExpanded(p, !wasOpen)
-}
-
-/**
- * 判断目录是否处于展开态
- * [CONSTRAINT] 只读 expanded Set，不触发加载；首次渲染时未持久化的目录默认折叠
- */
-function isOpen(p: string): boolean { return expanded.has(p) }
+// [ui-p1c-tree-expand-wire-v1] 展开态/持久化/懒加载逻辑已迁至 use-tree-expand.ts
 
 // 收集目录下所有文件路径。因懒加载，目录的 children 可能未拉取，
 // 所以遇目录时向后端请求完整子树（depth=32）。
@@ -346,9 +315,16 @@ async function chooseWorkspace(): Promise<void> {
       </button>
     </div>
 
-    <div v-if="props.root && loading && !tree.length" class="empty">
-      <svg class="ft-icon empty-icon spin" viewBox="0 0 24 24"><path fill="currentColor" d="M12 4V2A10 10 0 002 12h2a8 8 0 018-8z" /></svg>
-      <span>加载中…</span>
+    <!-- [ui-p2b-skeleton-wire-v1] V6：首屏改骨架屏，占位出「文件行」的形状 -->
+    <div v-if="props.root && loading && !tree.length" class="skeleton-list" aria-busy="true" aria-label="正在加载文件树">
+      <div
+        v-for="sk in SKELETON_ROWS" :key="sk"
+        class="skeleton-row"
+        :style="{ '--sk-depth': sk % 3 === 0 ? 1 : 0 }"
+      >
+        <span class="skeleton-icon" />
+        <span class="skeleton-line" :class="SKELETON_WIDTHS[sk % SKELETON_WIDTHS.length]" />
+      </div>
     </div>
     <!-- [fix-tree-title] 空工作区：添加项目 -->
     <div v-else-if="props.root && !tree.length" class="empty empty-workspace">
@@ -476,7 +452,7 @@ html.ai-runner-dragging body {
   position: fixed;
   top: 0;
   left: 0;
-  z-index: 2147483000;
+  z-index: var(--z-toast);
   pointer-events: none;
   display: flex;
   align-items: center;

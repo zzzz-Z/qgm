@@ -19,8 +19,10 @@ import { fetchResponseToNode, inferOrigin, nodeToFetchRequest } from './hono-bri
  * @param res Node 响应对象（仅在命中时写入）
  * @param url 已解析的 URL；用于补全 origin 与透传 pathname
  */
-/** 无工作区时仍放行的业务前缀：选择入口自身、预置规则（不依赖工作区） */
-const WORKSPACE_EXEMPT_PREFIXES = ['/workspace', '/preset']
+// [userscript-update-v1] /userscript 进豁免：油猴脚本属于「建立连接的前置条件」，
+//   与用户是否选过工作区无关——引导页阶段同样要能装/更新脚本。
+/** 无工作区时仍放行的业务前缀：选择入口自身、预置规则、油猴脚本分发（均不依赖工作区） */
+const WORKSPACE_EXEMPT_PREFIXES = ['/workspace', '/preset', '/userscript']
 
 /**
  * 判定当前请求是否需要工作区

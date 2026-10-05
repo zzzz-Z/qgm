@@ -1,7 +1,7 @@
 import { computed, watch } from 'vue'
 import { useAiWaiting } from './useAiWaiting.js'
 import { useRuntime } from './useRuntime.js'
-import { pushTerminalNotice, useRunner } from '../runner/useRunner'
+import { pushTerminalNotice, runIds as runnerRunIds, useRunner } from '../runner/useRunner'
 import { getTransport } from './useAiTransport.js'
 import { toast } from '../ui/useToast'
 import {
@@ -30,10 +30,12 @@ import { createPauseControl } from './auto-loop/pause-control.js'
 import { createStartFamily } from './auto-loop/start-family.js'
 import { createReplyHandlers } from './auto-loop/reply-handlers.js'
 import { createDecisionSubmitter } from './auto-loop/decision.js'
+import { pickInstanceBySessionId } from './auto-loop/session-isolation.js'
 
 // [state-extract-v1] 模块级状态从 state.ts 导入；activeLoop re-export 保持外部契约
 import {
   activeLoop,
+  loopRunIds,
   loopState,
   originalTitle,
   pendingDecision,
@@ -156,6 +158,12 @@ watch([
     if (originalTitle.value) document.title = originalTitle.value
   }
 })
+// [selfcheck-observed-cmds-v1] 镜像 useRunner.runIds 到 LoopInstance.runIds
+// [WHY] hook 壳读取 runIds 找对应 toolLog 文件，汇总 observedCommands 供自检对账
+watch(runnerRunIds, (v) => { loopRunIds.value = v })
+// [selfcheck-observed-cmds-v1] 镜像 useRunner.runIds 到 LoopInstance.runIds
+// [WHY] hook 壳读取 runIds 找对应 toolLog 文件，汇总 observedCommands 供自检对账
+watch(runnerRunIds, (v) => { loopRunIds.value = v })
 
 // 首轮 prompt 由 session-prompt.buildLoopInitialPrompt 构造（SYSTEM.md + AGENTS.md + goal）
 
@@ -175,6 +183,7 @@ const { startLoop, startTakeover } = createStartFamily({
   stage,
   transport,
   setOriginalTitle: (v: string) => { originalTitle.value = v },
+  getActiveSessionId: () => _getActiveSessionId(),
 })
 // [reply-handlers-v1] 回复处理三入口
 // [unused-cleanup-v2] 已删 executeItem：reply-handlers 内部自持
@@ -223,11 +232,12 @@ const { resumeFromPause, clearSoftPause, exitPauseToIdle, resumeLoop, requestPau
 
 // ── [分区] 模块工具函数 ──
 /**
- * 解析为 Inst
- * @param _sid - sid
+ * 按 sid 解析循环实例；sid 空串视为未绑定（兼容旧油猴）
+ * [WHY] 双窗口并发时须按 sid 路由，否则事件串流（见 session-isolation.ts）
+ * @param sid - 消息携带的会话 id，可为空
  */
-function resolveInst(_sid?: string): LoopInstance | null {
-  return activeLoop.value
+export function resolveInst(sid?: string): LoopInstance | null {
+  return pickInstanceBySessionId(activeLoop.value, sid ?? '')
 }
 
 /** 判断实例是否处于活动状态（非 idle/stopped/interrupted） */
@@ -262,7 +272,6 @@ export function setActiveSessionIdGetter(getter: () => string): void {
  * - 循环模式 + 油猴传 sessionId：必须与当前循环实例的 sessionId 一致才接受
  *   （同 origin 多窗口情况下 source 比对可能失效，靠 sessionId 兜底）
  */
-// [unused-cleanup-v2] 已删 isFromCurrentLoop 函数体：文件内仅定义点（第二处为注释提及）
 
 // [multi-loop-step1]
 // 单例桩函数（PLAN #17 回退后多循环 Map 已删，保留接口给 App.vue/ScriptPanel 调用）
@@ -278,7 +287,9 @@ export const createLoopInstanceFor = (_sid: string): LoopInstance | null => acti
  * @param _id - id
  */
 /** 获取循环会话标识 */
-export const getLoopBySessionId = (_sid: string): LoopInstance | null => activeLoop.value
+export function getLoopBySessionId(sid: string): LoopInstance | null {
+  return pickInstanceBySessionId(activeLoop.value, sid)
+}
 /** 列表活动的 */
 /** 活动的数量 */
 

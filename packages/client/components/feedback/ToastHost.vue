@@ -72,7 +72,7 @@ function onToastClick(t: { id: number }) {
   position: fixed;
   top: 20px;
   right: 20px;
-  z-index: 2147483647;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -143,7 +143,7 @@ function onToastClick(t: { id: number }) {
 .modal-mask {
   position: fixed;
   inset: 0;
-  z-index: 2147483646;
+  z-index: var(--z-modal);
   background: rgb(15 30 60 / 32%);
 
   display: flex;

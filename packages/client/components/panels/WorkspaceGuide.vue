@@ -118,8 +118,9 @@ async function selectByPath() {
 
 .ws-primary {
   color: #fff;
-  background: var(--accent);
-  border-color: var(--accent);
+  /* [ui-p1a-accent-v1] V11 --accent 未定义，改用已定义语义令牌 --primary */
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 .ws-divider {

@@ -20,7 +20,10 @@
   //   tsc 报 TS18003「No inputs were found」→ 该检查长期形同虚设，测试里的类型错误无人拦截
   // [CHANGE-IMPACT] 覆盖面从「无输入」变为 core + client 全部 node-test；首次可能暴露存量错误
   "include": [
-    "packages/*/tests/**/*.ts"
+    "packages/*/tests/**/*.ts",
+    // [vue-shim-for-tests-v1] 测试 import .vue 时需 env.d.ts 的 declare module '*.vue'
+    // 否则 test:tsc 报 TS2307（此处是 .vue 在 tests 中的首个消费点）
+    "packages/client/env.d.ts"
   ],
   "exclude": [
     "node_modules",

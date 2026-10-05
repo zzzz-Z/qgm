@@ -16,6 +16,7 @@ import {
   gitSnapshot,
   hasEslint,
   hashRules,
+  measureScriptSize,
   parseClaimed,
   parseDecisionMarkers,
   parseScriptMeta,
@@ -30,6 +31,7 @@ import {
   runTests,
   runTsc,
   saveIndex,
+  saveIndexBefore,
   saveSnapshot,
   scanIndex,
   scanMeta,
@@ -53,6 +55,7 @@ interface RunBody {
   gitVerify?: boolean
   sandbox?: string
   loopCtx?: { loopId?: string, round?: number, max?: number }
+  sessionId?: string
   smoke?: boolean
 }
 
@@ -72,6 +75,9 @@ runHono.post('/run', async (c) => {
     if (parseScriptMeta(script).mode === 'diff') sandbox = 'read-only'
   } catch { /* ignore */ }
   const gitCommit = Boolean(body?.gitCommit)
+  // [tasks-api-sid-v1] 会话 id 由客户端经 /run 传入，服务端注入沙箱 env 供 __AI__.tasks 分桶用
+  // [CONSTRAINT] 沙箱脚本不自传 sid（防伪造/串台）
+  const sessionId = String(body?.sessionId || '')
   const gitVerify = Boolean(body?.gitVerify)
   if (!script) return c.json({ error: '脚本为空' }, 400)
 
@@ -95,7 +101,20 @@ runHono.post('/run', async (c) => {
   const { isNodeScript, effectiveScript } = splitShebang(script)
   if (isNodeScript) {
     const syntax = checkScriptSyntax(effectiveScript)
-    if (!syntax.ok) return c.json({ error: `脚本语法错误：${syntax.error}`, syntaxError: true }, 400)
+    if (!syntax.ok) {
+      // [truncation-detect-v1] 分流「通道故障」与「写错了」：
+      //   截断（上游 max_tokens 切断尾部）不该被当成可重试的逻辑失败——
+      //   原实现只回 `脚本语法错误`，客户端把它渲染成「退出码 400」，
+      //   AI 于是原地重发同样长的脚本，必然再次被截断，两轮后熔断冻结。
+      //   truncated=true 让客户端改发「缩小本轮范围、拆成多个小脚本」的指令。
+      //   scriptSize 是判断「本轮本来就超预算」的唯一线索（到达体积已接近 12 KB）。
+      return c.json({
+        error: `脚本语法错误：${syntax.error}`,
+        syntaxError: true,
+        truncated: syntax.truncated,
+        scriptSize: measureScriptSize(effectiveScript),
+      }, 400)
+    }
   }
 
   const enc = new TextEncoder()
@@ -126,6 +145,11 @@ runHono.post('/run', async (c) => {
         const beforeSnap = snapshot()
         const before = beforeSnap.contents
         const beforeMeta = beforeSnap.meta
+        // [cumulative-baseline-v1] 运行**前**索引：累积视图的基准必须落在「本轮开始前」。
+        //   必须在 runScript 之前取——脚本一跑完磁盘状态就变了，after 再扫就取不到基准态。
+        //   与 beforeMeta 的差别：beforeMeta 来自 snapshot() 的 FileMeta，这里是 scanIndex 的
+        //   FileIndex（同字段不同遍历），下游 /diff-from-baseline 用的是 FileIndex 口径，不能混用。
+        const beforeIndex = scanIndex()
         // [pipeline-flow-v1] run.ts 仅能观测 EXECUTE 段；其余段由客户端/headless 侧完成，
         // 服务端无法插桩。补标前置段为 ok，让前端 5 段聚合有完整数据（否则恒 pending）
         for (const seg of ['ASK_LOCAL', 'ASK_RELAY', 'ASK_INJECT', 'AI_GENERATE', 'AI_COMPLETE', 'EXTRACT', 'SCRIPT_VALIDATE'] as const) {
@@ -134,7 +158,7 @@ runHono.post('/run', async (c) => {
         markRunning(pipeline, 'EXECUTE')
         const result = await runScript(scriptPath, 60000, ac.signal, overlayPath, toolLogPath, (s: string, data: string) => {
           writeFrame({ type: 'chunk', stream: s, data })
-        }, sandbox)
+        }, sandbox, sessionId)
         const scriptOk = result.code === 0
         if (scriptOk) markOk(pipeline, 'EXECUTE'); else markFailed(pipeline, 'EXECUTE', `exit ${result.code}`)
         // [pipeline-flow-v1] 补标 COLLECT（tools 读取成功即视为完成）与 RESULT_RELAY / RESULT_INJECT
@@ -153,7 +177,8 @@ runHono.post('/run', async (c) => {
           if (slow.slow) writeChannelLog('runner', { runId, perfSlow: true, ratio: slow.ratio, baselineMs: slow.baselineMs })
         } catch { /* ignore */ }
         const tools = await readToolLogWithRetry(toolLogPath)
-        try { fs.unlinkSync(toolLogPath) } catch { /* ignore */ }
+        // [selfcheck-evidence-v1] 保留 toolLog 作为自检命令对账证据（期一 L0-commands 数据源）；
+        // 清理策略归期二（按 mtime 过期清理），tmp 目录累积量可忽略
         let dryRunFailed = false
         let dryRunChangeCount = 0
         let dryRunReason: string | undefined
@@ -187,6 +212,9 @@ runHono.post('/run', async (c) => {
         // gitRestoreFile；ref 缺失（非 git / 快照失败）才退回内容副本，两路都能还原。
         saveSnapshot(runId, before, changes, gitInfo.ref ? { gitRef: gitInfo.ref } : undefined)
         try { saveIndex(runId, scanIndex(), runDir(runId)) } catch { /* ignore */ }
+        // [cumulative-baseline-v1] 与运行后索引同目录落一份运行前索引，供 /diff-from-baseline
+        //   的 mode='before' 计算「自本轮开始前以来」的累积改动。失败不阻断本轮（累积视图降级）。
+        try { saveIndexBefore(beforeIndex, runDir(runId)) } catch { /* ignore */ }
         gcSnapshots(20)
         const testFiles = changes.filter(ch => ch.type !== 'deleted' && /\.(?:test|spec)\.(?:ts|js|mjs|cjs)$/.test(ch.path)).map(ch => ch.path)
         const [tsc, test] = await Promise.all([runTsc(pickTscTargets(changes), runId), runTests(testFiles)])
@@ -278,6 +306,12 @@ runHono.post('/run', async (c) => {
           needFiles,
           scriptMode: scriptMeta.mode,
           scriptCtx: scriptMeta.ctx,
+          // [budget-feedback-v1] **每一轮**都下发脚本体积，不只在被截断时。
+          // [WHY] AI 无法自行测量自己的输出长度（它看不到 token 计数），若只在 400 时才告知，
+          //   它就永远在「已经撞墙」之后才知道墙在哪——只能事后补救，无法事前收窄。
+          //   把每轮实测体积带回决策回路，AI 才能主动决定「这轮还能加多少」。
+          // [CONSTRAINT] 与上方 400 分支共用 effectiveScript 口径（都不含脚本头），两处数字必须可比。
+          scriptSize: measureScriptSize(effectiveScript),
           stdoutTail: scriptMeta.ctx === 'full' ? result.stdout : (result.stdout.length > 2000 ? result.stdout.slice(-2000) : result.stdout),
           stderrTail: scriptMeta.ctx === 'full' ? result.stderr : (result.stderr.length > 4000 ? result.stderr.slice(-4000) : result.stderr),
           notice: applyError ? `[overlay apply error] ${applyError}` : undefined,
@@ -306,7 +340,7 @@ runHono.post('/run', async (c) => {
         })
       } finally {
         try { fs.unlinkSync(overlayPath) } catch { /* ignore */ }
-        try { fs.unlinkSync(toolLogPath) } catch { /* ignore */ }
+        // [selfcheck-evidence-v1] toolLog 不在此删除：作为自检证据保留（见上方说明）
         try { fs.unlinkSync(scriptPath) } catch { /* ignore */ }
       }
       controller.close()

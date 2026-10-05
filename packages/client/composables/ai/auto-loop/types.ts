@@ -1,7 +1,13 @@
 import type { Ref } from 'vue'
 import type { InboxItem } from '../../runner/useScriptInbox'
+// [multi-script-v1] 转出队列条目类型：本模块已是 auto-loop 的类型汇聚点，消费方
+// （reply-handlers）经此取类型可**不新增 import 语句**——该文件有「单文件 import ≤ 8」架构红线。
+export type { InboxItem } from '../../runner/useScriptInbox'
 // AIRUNNER-BATCH5-0A-TYPES-SPLIT
 // 从 useAutoLoop.ts 抽出的类型定义（batch5-0a，HCLC 类型分离）
+
+// [hclc-ref-v1] 再导出 Ref，供 reply-handlers 等消费方合并 import 到本文件（避免顶破 8 红线）
+export type { Ref } from 'vue'
 
 /** 循环状态（类型别名） */
 export type LoopState
@@ -40,6 +46,8 @@ export interface AiReply {
 export interface LoopInstance {
   state: Ref<LoopState>
   id: Ref<string>
+  /** [session-isolation-v1] 循环归属的 AI 会话 id；空串=未绑定（旧油猴不带 sessionId，兼容） */
+  sessionId: Ref<string>
   round: Ref<number>
   goal: Ref<string>
   startCommit: Ref<string>
@@ -51,6 +59,8 @@ export interface LoopInstance {
   waitingElapsed: Ref<number>
   roundTimeoutMs: Ref<number>
   pendingRound: Ref<RoundOutcome | null>
+  /** [selfcheck-observed-cmds-v1] 本轮循环已产生的 runId 列表（供 DONE 时自检对账 toolLog） */
+  runIds: Ref<string[]>
   /** 定时器句柄（非响应式，随实例生命周期） */
   roundTimer: ReturnType<typeof setTimeout> | null
   waitingTicker: ReturnType<typeof setInterval> | null

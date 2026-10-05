@@ -15,6 +15,19 @@ export interface Change {
   afterLines?: number
 }
 
+/**
+ * [cumulative-baseline-v1] 带「归属轮」的变更条目（累积视图专用）
+ * [WHY] 累积视图里一条变更可能来自任意历史轮，而 `/__ai/rollback` 只接受「该文件属于该 runId 的
+ *   manifest」——所以列表必须自带归属轮，否则回滚会被服务端 400 拒绝。
+ * [CONSTRAINT] runId 缺失表示窗口内找不到归属（对应 run 已被 GC），此时 rollbackable 必为 false
+ */
+export interface ChangeEntry extends Change {
+  /** 窗口内**最早**触碰该文件的 run（回滚恢复到该轮运行前 = 基准态） */
+  runId?: string
+  /** 该归属轮的历史内容是否仍可用（gitRef / .before 之一存在，或类型为 added） */
+  rollbackable?: boolean
+}
+
 /** toolcall（接口） */
 export interface ToolCall {
   op: 'write' | 'delete'
@@ -44,7 +57,7 @@ export interface ClaimMismatch {
 /** 差异 */
 export interface BaselineDiffResponse {
   baselineRunId: string
-  changes: Change[]
+  changes: ChangeEntry[]
   error?: string
 }
 /** 运行 */
@@ -66,6 +79,19 @@ export interface RunResponse {
   /** 失败时服务端从错误输出里提取的项目内文件路径（相对路径） */
   errorFiles?: string[]
   scriptCtx?: string
+  /**
+   * [truncation-detect-v1] 服务端判定「本轮脚本在尾部被上游截断」
+   * [WHY] 截断是输出通道故障，不是 AI 的逻辑失败：反馈文案必须从「重试」改成
+   *   「缩小本轮范围、拆成多个小脚本」，否则 AI 会原地重发同样长的脚本再被截断
+   * [CONSTRAINT] 仅前置拦截（4xx）时出现；成功轮脚本必然已完整到达
+   */
+  truncated?: boolean
+  /**
+   * [truncation-detect-v1] 服务端收到的脚本体积（行/字节）与 §10 预算比对结果
+   * [budget-feedback-v1] 前置拦截轮与正常执行轮**都**下发：前者解释「为什么被截断」，
+   *   后者供每轮体积配额反馈（AI 无法自行测量输出长度，缺此字段则永远撞墙后才知道墙在哪）
+   */
+  scriptSize?: { lines: number, bytes: number, overBudget: boolean, maxLines: number, maxBytes: number }
   /** [L4b] 服务端从错误输出提取的符号指纹，用于连续 2 轮未变检测 */
   fingerprints?: Array<{ file: string, line: number, symbol: string, kind: string }>
   git?: {

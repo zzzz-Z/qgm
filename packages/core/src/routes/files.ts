@@ -3,8 +3,8 @@ import { Hono } from 'hono'
 import fs from 'node:fs'
 import path from 'node:path'
 import { EXCLUDE_DIRS, ROOT } from '../config.js'
-import { runDir } from '../state/snapshot.js'
-import { diffIndexes, readIndex, scanIndex } from '../utils/file-index.js'
+import { readManifest, runDir, runsDir } from '../state/snapshot.js'
+import { diffIndexes, readIndex, readIndexBefore, scanIndex } from '../utils/file-index.js'
 
 interface FileNode {
   name: string
@@ -127,16 +127,116 @@ filesHono.post('/files/before', async (c) => {
   }
 })
 
+/** 窗口内的一轮历史运行：runId + 创建时刻 + 该轮变更过的路径集合 */
+interface RunTouch {
+  runId: string
+  createdAt: number
+  paths: Set<string>
+}
+
+/**
+ * [cumulative-baseline-v1] 枚举历史 run 的「触碰面」（runId + 变更路径集合），按时间升序
+ * [WHY] 累积视图的每条变更必须能回答「谁改的」——回滚要落到具体的 runId，
+ *   而 /rollback 只认该 run 的 manifest。manifest 里的 changes 就是现成的触碰记录。
+ * [CONSTRAINT] 只认 manifest 可读的 run 目录；排序用 (createdAt, runId) 双键，
+ *   避免同毫秒的两次运行顺序不稳导致归属漂移
+ * [CHANGE-IMPACT] 与 resolveOwners 的窗口切片配对；GC 掉 manifest 会让对应 run 退出窗口
+ */
+function listRunTouches(): RunTouch[] {
+  let names: string[] = []
+  try { names = fs.readdirSync(runsDir()).filter(n => !n.startsWith('.')) } catch { return [] }
+  const out: RunTouch[] = []
+  for (const name of names) {
+    const m = readManifest(name)
+    if (!m) continue
+    out.push({ runId: name, createdAt: m.createdAt, paths: new Set(m.changes.map(ch => ch.path)) })
+  }
+  return out.sort((a, b) => (a.createdAt - b.createdAt) || a.runId.localeCompare(b.runId))
+}
+
+/**
+ * 判定某 run 是否还能把该文件回滚（内容来源是否仍可用）
+ * [WHY] 与 /rollback 的 restoreOne 判定完全同构：added 只需删除、不需要历史内容；
+ *   其余要么有 gitRef、要么有 .before 副本。前端据此禁用按钮，避免点了才报 500。
+ * [CONSTRAINT] type 取自**该 run 的 manifest**（不是累积口径的 net type）——restoreOne 用的也是它
+ * @param runId 归属轮
+ * @param file 相对仓库根路径
+ */
+function canRollback(runId: string, file: string): boolean {
+  const m = readManifest(runId)
+  if (!m) return false
+  const entry = m.changes.find(ch => ch.path === file)
+  if (!entry) return false
+  if (entry.type === 'added') return true
+  if (m.gitRef) return true
+  return fs.existsSync(path.join(runDir(runId), `${file}.before`))
+}
+
+/**
+ * 为累积变更解析「归属轮」：窗口内**最早**触碰该文件的 run
+ * [WHY] 回滚语义是「恢复到某 run 运行前」。取最早触碰者 → 恢复点就是基准态，
+ *   等于「撤销该文件的全部累计改动」；取最新触碰者只能撤掉最后一轮，那是单轮视图已有的能力。
+ * [CONSTRAINT] 窗口 = 基准 run 之后（mode='after'）或含基准 run（mode='before'）；
+ *   基准在所有 manifest 中都找不到时退化为全窗口（GC 后的降级路径）
+ * [CHANGE-IMPACT] 窗口切错会让归属漂到基准之前，回滚会把更早的改动一起吃掉
+ * @param paths 待归属的路径集合（累积 diff 的产物）
+ * @param baselineRunId 基准 run
+ * @param includeBaseline true 表示基准轮自身的改动也算进累积集（对应 mode='before'）
+ */
+function resolveOwners(
+  paths: string[],
+  baselineRunId: string,
+  includeBaseline: boolean,
+): Map<string, { runId: string, rollbackable: boolean }> {
+  const all = listRunTouches()
+  const cut = all.findIndex(r => r.runId === baselineRunId)
+  const window = cut < 0 ? all : (includeBaseline ? all.slice(cut) : all.slice(cut + 1))
+  const want = new Set(paths)
+  const owners = new Map<string, { runId: string, rollbackable: boolean }>()
+  for (const run of window) {
+    for (const p of run.paths) {
+      if (!want.has(p) || owners.has(p)) continue
+      owners.set(p, { runId: run.runId, rollbackable: canRollback(run.runId, p) })
+    }
+    if (owners.size === want.size) break
+  }
+  return owners
+}
+
+/**
+ * 计算「基准 → 现在」的变更集
+ * [CONSTRAINT] mode 默认 `after`（读基准轮的运行后索引），保持既有调用方语义不变；
+ *   `before` 读运行前索引，才是「自该轮开始前以来」的累积口径
+ * [CHANGE-IMPACT] withOwner 打开时每条会多带 runId / rollbackable，供 UI 直接驱动回滚
+ */
 filesHono.post('/diff-from-baseline', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { baselineRunId?: string } | null
+  const body = (await c.req.json().catch(() => null)) as
+    | { baselineRunId?: string, mode?: string, withOwner?: boolean }
+    | null
   const baselineRunId = String(body?.baselineRunId || '')
   if (!baselineRunId) return c.json({ error: '缺 baselineRunId' }, 400)
   const dir = runDir(baselineRunId)
   if (!fs.existsSync(dir)) return c.json({ error: '基准记录不存在' }, 404)
-  const baseIdx = readIndex(dir)
-  if (!baseIdx) return c.json({ error: '基准索引缺失' }, 404)
+  const useBefore = String(body?.mode || 'after') === 'before'
+  const baseIdx = useBefore ? readIndexBefore(dir) : readIndex(dir)
+  if (!baseIdx) {
+    return c.json({
+      error: useBefore
+        ? '基准缺少运行前索引（该轮早于累积基线能力，请重新运行一轮以重新锚定基准）'
+        : '基准索引缺失',
+    }, 404)
+  }
   const curIdx = scanIndex()
   const entries = diffIndexes(baseIdx, curIdx)
-  const changes = entries.map(e => ({ path: e.path, type: e.type }))
-  return c.json({ baselineRunId, changes })
+  if (body?.withOwner !== true) {
+    return c.json({ baselineRunId, changes: entries.map(e => ({ path: e.path, type: e.type })) })
+  }
+  const owners = resolveOwners(entries.map(e => e.path), baselineRunId, useBefore)
+  return c.json({
+    baselineRunId,
+    changes: entries.map((e) => {
+      const o = owners.get(e.path)
+      return { path: e.path, type: e.type, runId: o?.runId, rollbackable: o?.rollbackable === true }
+    }),
+  })
 })

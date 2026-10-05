@@ -5,10 +5,14 @@ import { computed, ref } from 'vue'
 import { LOOP_ROUND_TIMEOUT_MS } from '../loopLogic.js'
 import type { LoopInstance, LoopState, RoundOutcome, StopRequest } from './types.js'
 
+// [selfcheck-observed-cmds-v1] 本轮循环已产生的 runId 列表（供 DONE 时自检对账 toolLog）
+export const loopRunIds = ref<string[]>([])
 /** 循环状态 */
 export const loopState = ref<LoopState>('idle')
 /** 循环标识 */
 export const loopId = ref('')
+/** [session-isolation-v1] 循环归属的 AI 会话 id；空串=未绑定（旧油猴不带 sessionId，兼容） */
+export const loopSessionId = ref('')
 /** 循环轮次 */
 export const loopRound = ref(0)
 /** 循环目标 */
@@ -40,6 +44,7 @@ export const roundTimeoutMs = ref(LOOP_ROUND_TIMEOUT_MS)
 export const singletonView: LoopInstance = {
   state: loopState,
   id: loopId,
+  sessionId: loopSessionId,
   round: loopRound,
   goal: loopGoal,
   startCommit: loopStartCommit,
@@ -50,6 +55,7 @@ export const singletonView: LoopInstance = {
   waitingStartedAt,
   waitingElapsed,
   roundTimeoutMs,
+  runIds: loopRunIds,
   pendingRound: ref<RoundOutcome | null>(null),
   roundTimer: null,
   waitingTicker: null,

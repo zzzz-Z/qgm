@@ -2,7 +2,7 @@
 import fs from 'node:fs'
 
 /** 钩子触发事件枚举：BeforeFill / BeforeScript 等 */
-export type HookEvent = 'BeforeFill' | 'BeforeScript' | 'AfterScript' | 'AfterResult' | 'LoopStop'
+export type HookEvent = 'BeforeFill' | 'BeforeScript' | 'AfterScript' | 'AfterResult' | 'LoopStop' | 'BeforeDone' | 'BeforeDoneFinal'
 
 /** 单个钩子定义：事件、匹配规则、动作 */
 export interface HookDef {

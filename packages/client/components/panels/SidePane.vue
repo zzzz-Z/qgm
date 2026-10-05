@@ -1,19 +1,23 @@
 <script setup lang="ts">
 import FileTree from './FileTree.vue'
 import FileList from './FileList.vue'
-import PipelineStrip from './PipelineStrip.vue'
+import type { ChangeEntry } from '../../types'
 
 /** 标签页类型：从 _tabAllowed 派生，保证与运行时白名单一致 */
 // [WHY] TS 类型别名编译期惰性求值，`typeof _tabAllowed` 引用后置 const 无 TDZ 风险
 type SideTab = typeof _tabAllowed[number]
 
 const props = defineProps<{
-  changes: { path: string, type: 'added' | 'modified' | 'deleted' }[]
+  changes: ChangeEntry[]
   rolling: Record<string, boolean>
   busyAll: boolean
   previewFile: string | null
   result: { tools?: unknown[] } | null
   sideWidth: number
+  /** [cumulative-baseline-v1] 累积视图加载中 */
+  cumulativeLoading: boolean
+  /** [cumulative-baseline-v1] 累积视图加载失败原因（空串 = 无错） */
+  cumulativeError: string
 }>()
 const emit = defineEmits<{
   rollback: [file: string]
@@ -22,6 +26,12 @@ const emit = defineEmits<{
   preview: [file: string]
 }>()
 
+/**
+ * [cumulative-baseline-v1] 变更视图（本轮 / 累积）双向绑定
+ * [WHY] 「本轮 / 累积」切换必须常驻可见——放在 FileList 头部时，列表为空就没有切换入口，
+ *   用户会卡在累积视图（列表空）回不到本轮，看起来像「功能坏了」
+ */
+const changeView = defineModel<'round' | 'cumulative'>('changeView', { required: true })
 const model = defineModel<boolean>('sideDrawerOpen', { required: true })
 
 defineOptions({ name: 'SidePane' })
@@ -102,22 +112,39 @@ function selectTab(tab: (typeof sideTab)['value']): void {
         </svg>
       </button>
     </div>
-    <!-- [pipeline-wire-v1] 链路状态条：自取 /__ai/tasks，有 pipeline 数据时展示 -->
-    <PipelineStrip />
     <div v-show="sideTab === 'tree'" class="side-tree text-sm flex flex-col flex-1 min-h-0 overflow-hidden">
       <FileTree root draggable />
     </div>
     <div v-show="sideTab === 'changes'" class="side-changes p-4 flex flex-col flex-1 gap-3 min-h-0 overflow-hidden">
-      <div v-if="!props.result && !props.changes.length" class="side-empty text-[var(--text-3)] p-8 border border-[var(--border-2)] rounded-8 border-dashed bg-[var(--surface)] flex flex-col flex-1 gap-4 items-center justify-center">
+      <!-- [cumulative-baseline-v1] 视图切换常驻在列表之外：列表为空时也必须能切回「本轮」 -->
+      <div class="view-seg" role="group" aria-label="变更视图">
+        <button
+          v-tooltip="'只看最近一次运行的改动'" class="seg-btn" :class="{ active: changeView === 'round' }"
+          :aria-pressed="changeView === 'round'" @click="changeView = 'round'"
+        >
+          本轮
+        </button>
+        <button
+          v-tooltip="'看自本会话第一次运行以来的全部改动（含各轮归属）'" class="seg-btn" :class="{ active: changeView === 'cumulative' }"
+          :aria-pressed="changeView === 'cumulative'" @click="changeView = 'cumulative'"
+        >
+          累积
+        </button>
+        <span v-if="changeView === 'cumulative' && props.cumulativeLoading" class="seg-hint">加载中…</span>
+      </div>
+      <div v-if="!props.changes.length" class="side-empty text-[var(--text-3)] p-8 border border-[var(--border-2)] rounded-8 border-dashed bg-[var(--surface)] flex flex-col flex-1 gap-4 items-center justify-center">
         <div class="side-empty-icon text-8">
           📋
         </div>
         <div class="side-empty-text text-sm">
-          运行后显示变更
+          {{ changeView === 'cumulative' ? (props.cumulativeError || '累积视图暂无变更（基准就绪后显示跨轮改动）') : '运行后显示变更' }}
+        </div>
+        <div v-if="changeView === 'cumulative' && props.cumulativeError && !props.result" class="side-empty-text text-xs">
+          运行一轮即可重新锚定累积基准
         </div>
       </div>
       <FileList
-        v-if="props.changes.length" :changes="props.changes" :rolling="props.rolling" :busy-all="props.busyAll"
+        v-if="props.changes.length" :changes="props.changes" :rolling="props.rolling" :busy-all="props.busyAll" :view="changeView"
         :active-file="props.previewFile!" @rollback="(f) => emit('rollback', f)" @rollback-all="() => emit('rollbackAll')" @save="() => emit('save', '')"
         @preview="(f) => emit('preview', f)"
       />
@@ -199,5 +226,40 @@ function selectTab(tab: (typeof sideTab)['value']): void {
   :deep(.changes) {
     max-height: 42%;
   }
+}
+
+/* [cumulative-baseline-v1] 变更视图切换：常驻在列表上方，列表为空时也可用 */
+.view-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.seg-btn {
+  padding: 3px 10px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-3);
+  background: transparent;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+.seg-btn:hover {
+  color: var(--text);
+  border-color: var(--text-3);
+}
+.seg-btn.active {
+  color: var(--primary);
+  background: var(--surface-2);
+  border-color: var(--primary);
+}
+.seg-hint {
+  font-size: 11px;
+  color: var(--text-3);
 }
 </style>

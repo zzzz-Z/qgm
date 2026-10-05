@@ -243,8 +243,15 @@ export function detectReplyInPage() {
     const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
     const root = blocks.length > 0 ? blocks[blocks.length - 1] : document
     const pres = root.querySelectorAll('pre')
-    let last = null
-    let lastMarked = null
+    // [multi-script-v1] 一条回复允许携带多个脚本：本函数每帧只放行**一个**尚未推送的块，
+    //   由调用方的「连续 2 帧同 hash」稳定判据逐块送出，前端再串行执行。
+    // [WHY] 旧实现 `lastMarked || last` 只取最后一块，前面所有块被**静默丢弃**；
+    //   而最后一块恰恰是上游截断最可能切中的那一块 → 一整轮白跑（用户实测的「脚本被截断」）。
+    // [CONSTRAINT] 仍优先取「带脚本头契约标记」的块（shebang / @desc），避免把正文里的示例代码当脚本；
+    //   无标记块只在没有任何未见过的标记块时才兜底。seenHashes 去重保证同一块不会重复放行。
+    const seenHashes = dedup.seenHashes
+    let firstUnseen = null
+    let firstUnseenMarked = null
     for (const pre of pres) {
       // [code-text-clean-v1] 优先从 <pre><code> 取文本，避开代码块头的语言标签与「复制/下载」按钮文字
       // [WHY] pre.textContent 会把头部按钮文字并入首行，污染后 #! 锚点失配、语言判定失败导致整块跳过
@@ -280,13 +287,15 @@ export function detectReplyInPage() {
       if (_cached && _cached.len === text.length) { _h = _cached.hash }
       else { _h = hash32(text); dedup._preCache.set(pre, { len: text.length, hash: _h }) }
       const item = { lang, code: text, hash: _h }
-      last = item
+      // [multi-script-v1] 已推送过的块不再参与选取，否则「首个未见」会永远卡在同一块上
+      if (seenHashes.includes(_h)) continue
+      if (!firstUnseen) firstUnseen = item
       const marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
         || /^\s*\/\/\s*@desc\b/m.test(text)
         || /^\s*#\s*@desc\b/m.test(text)
-      if (marked) lastMarked = item
+      if (marked && !firstUnseenMarked) firstUnseenMarked = item
     }
-    return lastMarked || last
+    return firstUnseenMarked || firstUnseen
   }
 
   // 取当前页面主文本（AI 回复区）

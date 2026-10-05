@@ -144,3 +144,78 @@ test('appendLessons: 混合条目只追加未重复部分', () => {
     assert.equal(n, 1)
   })
 })
+
+// [lesson-title-boundary-v1] 标题边界：标题内部含冒号时不得在**首个**冒号处腰斩。
+// 承重：把切分改回「取首个冒号」，下面两条即变红（这正是 .ai-runner/lessons.md 里
+// 8 条标题结构破损的成因：`## …默认 \`shell` + 孤儿行 `false\`：…`）。
+test('extractLessons: 无粗体列表按末冒号切分（标题含冒号不腰斩）', () => {
+  const src = ['### 踩坑记录', '- 只跑 tsc：漏了 test:tsc：本轮教训'].join(NL)
+  const items = extractLessons(src)
+  assert.equal(items.length, 1)
+  assert.equal(items[0].title, '只跑 tsc：漏了 test:tsc')
+  assert.equal(items[0].body, '本轮教训')
+})
+
+test('extractLessons: 全角冒号同样按末冒号切分', () => {
+  const src = ['### 踩坑记录', `- 结论${WIDE}含${WIDE}正文`].join(NL)
+  const items = extractLessons(src)
+  assert.equal(items.length, 1)
+  assert.equal(items[0].title, `结论${WIDE}含`)
+  assert.equal(items[0].body, '正文')
+})
+
+test('extractLessons: 闭合粗体优先于冒号（**A：B**：正文）', () => {
+  const src = ['### 踩坑记录', `- **A${WIDE}B**${WIDE}正文`].join(NL)
+  const items = extractLessons(src)
+  assert.equal(items.length, 1)
+  assert.equal(items[0].title, `A${WIDE}B`)
+  assert.equal(items[0].body, '正文')
+})
+
+// 正文里含冒号是常态（「原因：…」「做法：…」）。粗体标题必须按**闭合粗体**切，
+// 否则「末冒号」会切进正文里，把正文前半截并进标题。
+test('extractLessons: 正文含冒号时粗体标题仍按闭合粗体切', () => {
+  const src = ['### 踩坑记录', `- **临时目录要先 realpath**${WIDE}原因${WIDE}macOS 的 /tmp 是软链`].join(NL)
+  const items = extractLessons(src)
+  assert.equal(items.length, 1)
+  assert.equal(items[0].title, '临时目录要先 realpath')
+  assert.equal(items[0].body, `原因${WIDE}macOS 的 /tmp 是软链`)
+})
+
+// [lesson-dedup-norm-v1] 归一化去重：差异只在空白/反引号/冒号半全角/标点时视为同一条。
+test('appendLessons: 近重复标题（只差反引号与冒号半全角）被挡住', () => {
+  withTempRoot((root) => {
+    const file = path.join(root, '.ai-runner', 'lessons.md')
+    fs.writeFileSync(file, `# Lessons${NL}${NL}## \`shell: false\` 默认${NL}${NL}旧内容${NL}`, 'utf8')
+    const n = appendLessons([{ title: 'shell：false 默认', body: '新内容' }], root)
+    assert.equal(n, 0)
+    assert.ok(!fs.readFileSync(file, 'utf8').includes('新内容'))
+  })
+})
+
+test('appendLessons: 归一化不得吞掉真正的新标题（反例控制，防判据恒真）', () => {
+  withTempRoot((root) => {
+    const file = path.join(root, '.ai-runner', 'lessons.md')
+    fs.writeFileSync(file, `# Lessons${NL}${NL}## \`shell: false\` 默认${NL}`, 'utf8')
+    assert.equal(appendLessons([{ title: '另一个完全不同的坑', body: 'y' }], root), 1)
+  })
+})
+
+test('往返：DONE 提取 → 落盘 → 再提取，标题不腰斩且第二次被去重', () => {
+  withTempRoot((root) => {
+    const file = path.join(root, '.ai-runner', 'lessons.md')
+    fs.writeFileSync(file, `# Lessons${NL}`, 'utf8')
+    const done = ['### 踩坑记录', '- shell: false 是默认：正文内容'].join(NL)
+
+    const items = extractLessons(done)
+    assert.equal(items.length, 1)
+    assert.equal(items[0].title, 'shell: false 是默认')
+    assert.equal(appendLessons(items, root), 1)
+
+    // 同一段 DONE 再来一次：归一化去重必须挡住（否则每轮 DONE 都会再追加一条）
+    assert.equal(appendLessons(extractLessons(done), root), 0)
+
+    const heads = fs.readFileSync(file, 'utf8').split(NL).filter(l => l.startsWith('## '))
+    assert.deepEqual(heads, ['## shell: false 是默认'])
+  })
+})

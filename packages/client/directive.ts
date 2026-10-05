@@ -40,6 +40,19 @@ function ensureHandlers(el: TooltipEl) {
  * [CHANGE-IMPACT] 指令的 unmounted 钩子调用此函数；未调用会残留监听导致内存泄漏
  * @param el 指令绑定的 DOM 元素
  */
+
+/* [ui-p1b-tooltip-a11y-v1] V3 可达性：把 tooltip 文本同步为 title + aria-label，
+   [WHY] 原实现只挂鼠标事件，键盘/屏幕阅读器用户完全拿不到按钮语义（图标按钮无文本）；
+   [CONSTRAINT] 必须带 setAttribute 存在性判断——测试里的 MockEl 未实现 DOM 方法，
+   直接调用会让既有 25 个单测抛错；
+   [CONSTRAINT] 已有显式 aria-label 的按钮不覆盖（作者意图更精确）。 */
+function syncA11yLabel(el: TooltipEl, text: string) {
+  if (typeof el.setAttribute !== 'function') return
+  if (!text) return
+  if (!el.hasAttribute || !el.hasAttribute('title')) el.setAttribute('title', text)
+  if (!el.hasAttribute || !el.hasAttribute('aria-label')) el.setAttribute('aria-label', text)
+}
+
 function detach(el: TooltipEl) {
   if (!el.__ttOnEnter) return
   el.removeEventListener('mouseenter', el.__ttOnEnter)
@@ -55,10 +68,12 @@ function detach(el: TooltipEl) {
 export const vTooltip: Directive<TooltipEl, string | undefined> = {
   mounted(el, binding) {
     el.__ttText = String(binding.value ?? '')
+    syncA11yLabel(el, el.__ttText)
     ensureHandlers(el)
   },
   updated(el, binding) {
     el.__ttText = String(binding.value ?? '')
+    syncA11yLabel(el, el.__ttText)
   },
   beforeUnmount(el) {
     detach(el)

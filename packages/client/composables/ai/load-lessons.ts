@@ -78,7 +78,11 @@ export async function buildLessonsBlock(): Promise<string> {
     '# 历史踩坑记录（.ai-runner/lessons.md）',
     '',
     '> 本项目**既往踩过的坑**，按标题去重、append-only。生成脚本前先扫一遍，避免重踩。',
-    '> 条目状态行由复核方标注；缺省 = 待复核 —— 可作参考，勿当铁律。',
+    '> 状态行（`## 标题` 后首个非空行）含义 —— **不看这份图例会误读**：',
+    '> - `[VERIFIED]` 已亲跑确证 ⇒ 可当铁律',
+    '> - `[REJECTED]` 已被实测推翻 ⇒ **正文描述是错的，不要照做**',
+    '> - `[STALE]` 曾为真但机制已改 ⇒ **现在已不适用，别照着修**',
+    '> - `（待复核）` 或无状态行 ⇒ 尚未复核，可参考、勿当铁律',
   ]
   if (truncated) head.push(`> ⚠️ 条目过多，此处仅注入最近 ${picked.length}/${entries.length} 条；完整见 \`.ai-runner/lessons.md\`。`)
   head.push('')

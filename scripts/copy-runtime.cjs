@@ -7,7 +7,9 @@ const path = require('node:path')
 const ROOT = process.cwd()
 const distDir = path.join(ROOT, 'dist')
 fs.mkdirSync(distDir, { recursive: true })
-const files = ['interceptor.cjs', 'helpers.cjs', 'logger.cjs']
+// [repl-loop-dist-copy-v1] repl-loop.cjs 与 interceptor/helpers 同一约定：
+// 被 new URL('../<name>.cjs', import.meta.url) 引用 ⇒ 必须与 bundle 同级才会有命中。
+const files = ['interceptor.cjs', 'helpers.cjs', 'logger.cjs', 'repl-loop.cjs']
 let copied = 0
 for (const f of files) {
   const src = path.join(ROOT, 'packages', 'core', 'src', f)

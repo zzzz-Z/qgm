@@ -1,13 +1,15 @@
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useSessionStorage } from '@vueuse/core'
 import { emit } from '../ui/useEventStream'
-import type { Change, DecisionPayload, RunResponse } from '../../types'
+import type { BaselineDiffResponse, Change, ChangeEntry, DecisionPayload, RunResponse } from '../../types'
 import { uid } from '../../utils/id'
 // [restore-import-v1] readNdjson 早前被按 auto-import 名单清理时误删：app 侧兜底可跑，
 // 但 tsc --noEmit 报 Cannot find name 'readNdjson'（run 的 NDJSON 流解析依赖它）
 import { readNdjson } from '../../utils/stream'
 // [restore-import-v1] log 早前按 auto-import 名单清理时误删（app 侧兜底可跑，但 tsc --noEmit / vitest 无该插件）
 import { log } from '../../utils/log'
+// [tasks-api-sid-v1] 沙箱 __AI__.tasks 分桶需会话 id；显式 import 便于 vitest 裸跑
+import { effectiveSessionId } from '../ui/useAppStorage'
 
 /** sessionStorage 键：脚本内容 */
 const STORAGE_KEY_SCRIPT = '__ai_runner_script'
@@ -19,6 +21,10 @@ const STORAGE_KEY_CHANGES = '__ai_runner_changes'
 const STORAGE_KEY_SMOKE = '__ai_runner_smoke'
 /** sessionStorage 键：基线 runId */
 const STORAGE_KEY_BASELINE = '__ai_runner_baseline'
+/** sessionStorage 键：会话累积基准 runId */
+const STORAGE_KEY_SESSION_BASELINE = '__ai_runner_session_baseline'
+/** sessionStorage 键：变更视图（本轮 / 累积） */
+const STORAGE_KEY_CHANGE_VIEW = '__ai_runner_change_view'
 /** sessionStorage 键：git 提交开关 */
 const GIT_KEY = '__ai_runner_git_commit'
 /** 运行中止控制器；非响应式模块单例，与 stop() 成对管理 */
@@ -43,15 +49,26 @@ const lastRunCode = ref('')
 const running = ref(false)
 /** 最近一次运行结果；[CONSTRAINT] 值置 null 时 useSessionStorage 会自动移除存储项 */
 const result = useSessionStorage<RunResponse | null>(STORAGE_KEY_RESULT, null)
+// [selfcheck-observed-cmds-v1] 本轮循环所有 runId 累积（供 DONE 时自检读 toolLog 对账）
+export const runIds = ref<string[]>([])
+/**
+ * 按 path 去重：同一文件只保留一条（后到的覆盖先到的）
+ * [WHY] 变更列表按 path 唯一才与「撤回单文件」一一对应；三处调用点（初值 / summary 帧 / 累积）
+ *   必须同构，否则同一份数据会因入口不同而条数不一致
+ */
+function dedupByPath<T extends { path: string }>(list: T[]): T[] {
+  return list.reduce<T[]>((acc, c) => {
+    const i = acc.findIndex(x => x.path === c.path)
+    if (i >= 0) acc[i] = c
+    else acc.push(c)
+    return acc
+  }, [])
+}
+
 // DEDUP_LAST_RUN: 按 path 去重，只保留最近一次每文件的变更记录
-/** 变更列表（按 path 去重）；初始化后立即 dedup 一次，兼容老版本 sessionStorage 残留 */
-const changes = useSessionStorage<Change[]>(STORAGE_KEY_CHANGES, [])
-changes.value = changes.value.reduce<Change[]>((acc, c) => {
-  const i = acc.findIndex(x => x.path === c.path)
-  if (i >= 0) acc[i] = c
-  else acc.push(c)
-  return acc
-}, [])
+/** 变更列表（**本轮增量**）；初始化后立即 dedup 一次，兼容老版本 sessionStorage 残留 */
+const changes = useSessionStorage<ChangeEntry[]>(STORAGE_KEY_CHANGES, [])
+changes.value = dedupByPath(changes.value)
 /** 单文件回滚进行中标志（键 = 文件路径） */
 const rolling = ref<Record<string, boolean>>({})
 /** 全局忙状态（rollbackAll / save 进行中） */
@@ -68,6 +85,29 @@ const liveStderr = ref('')
 const smokeEnabled = useSessionStorage<boolean>(STORAGE_KEY_SMOKE, true)
 /** 基线 runId（用于对比 diff）；持久化到 sessionStorage */
 const baselineRunId = useSessionStorage<string>(STORAGE_KEY_BASELINE, '')
+/**
+ * [cumulative-baseline-v1] 会话累积基准 runId
+ * [WHY] 上面那个 baselineRunId 是「上一次成功轮」的滚动基准（供 AI 回填 prompt 用），只能看一轮；
+ *   跨轮累积视图要的是「本页会话第一次成功运行」这个锚点。两者语义不同，不能共用一个键。
+ * [CONSTRAINT] 确认改动 / 撤回全部会把它清空（那是新的起点）；基准被 GC 后也清空，由下一轮重新锚定
+ */
+const sessionBaselineRunId = useSessionStorage<string>(STORAGE_KEY_SESSION_BASELINE, '')
+/** 变更视图：`round` = 本轮增量，`cumulative` = 自会话基准以来的累积；持久化到 sessionStorage */
+const changeView = useSessionStorage<'round' | 'cumulative'>(STORAGE_KEY_CHANGE_VIEW, 'round')
+/** 累积变更列表（每条带归属轮）；仅累积视图下展示 */
+const cumulativeChanges = ref<ChangeEntry[]>([])
+/** 累积列表是否加载中 */
+const cumulativeLoading = ref(false)
+/** 累积列表加载失败原因（空串 = 无错） */
+const cumulativeError = ref('')
+/**
+ * 当前应展示的变更列表：由 changeView 决定
+ * [WHY] 面板、diff 预览、回滚三处必须共用同一份口径——若面板显示累积而回滚按本轮算，
+ *   用户点「撤回」会被服务端以「该文件不在本次改动中」拒绝
+ */
+const visibleChanges = computed<ChangeEntry[]>(() =>
+  changeView.value === 'cumulative' ? cumulativeChanges.value : changes.value,
+)
 // [auto-feedback] 一次性标志：AI 直接返回的脚本执行后无条件回传结果
 /** 是否已请求执行后自动回传（一次性，消费后由 clearAutoFeedback 重置） */
 const autoFeedbackRequested = ref(false)
@@ -107,6 +147,71 @@ function stop() {
 }
 
 /**
+ * [cumulative-baseline-v1] 拉取「自会话基准以来」的累积变更
+ * [WHY] 服务端 /__ai/diff-from-baseline 已有基线 diff 能力（此前只被 AI 回填 prompt 消费），
+ *   mode='before' 才是累积口径：基准取**该轮运行前**的索引，否则基准轮自身的改动会漏掉。
+ *   withOwner 让每条带上归属轮 runId，回滚才有地方落。
+ * [CONSTRAINT] 失败一律降级为空列表 + 可读原因，绝不抛给调用方（面板不该因累积视图挂掉）；
+ *   基准失效（被 GC / 早于该能力）时清空锚点，由下一轮运行重新锚定——自愈而非死循环报错
+ */
+async function loadCumulative(): Promise<void> {
+  const base = sessionBaselineRunId.value
+  cumulativeError.value = ''
+  if (!base) {
+    cumulativeChanges.value = []
+    return
+  }
+  cumulativeLoading.value = true
+  try {
+    const res = await fetch('/__ai/diff-from-baseline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baselineRunId: base, mode: 'before', withOwner: true }),
+    })
+    const data = (await res.json().catch(() => null)) as BaselineDiffResponse | null
+    if (!data || data.error) {
+      const msg = String(data?.error || '累积视图加载失败')
+      cumulativeChanges.value = []
+      if (/基准记录不存在|运行前索引/.test(msg)) {
+        sessionBaselineRunId.value = ''
+        cumulativeError.value = '累积基准已失效（已被回收或早于该能力），下一轮运行会自动重新锚定'
+      } else {
+        cumulativeError.value = msg
+      }
+      return
+    }
+    cumulativeChanges.value = dedupByPath(data.changes || [])
+  } catch {
+    cumulativeChanges.value = []
+    cumulativeError.value = '累积视图加载失败（网络异常）'
+  } finally {
+    cumulativeLoading.value = false
+  }
+}
+
+/**
+ * 切换变更视图；切到累积时按需拉取（本轮视图不需要请求，数据在 summary 帧里）
+ * [WHY] 返回 Promise 而非 `void` 触发：调用方（含测试）需要一个可等待的边界，
+ *   否则「切了但没加载完」与「切了没加载」在断言上无法区分
+ */
+function setChangeView(v: 'round' | 'cumulative'): Promise<void> {
+  changeView.value = v
+  return v === 'cumulative' ? loadCumulative() : Promise.resolve()
+}
+
+/**
+ * 清空两套变更视图并重置会话锚点
+ * [WHY] 「确认改动」与「撤回全部」都是语义上的**新的起点**：此后累计应从下一轮算起，
+ *   否则已确认的改动会一直挂在累积列表里，越积越假
+ */
+function resetChangeViews(): void {
+  changes.value = []
+  cumulativeChanges.value = []
+  cumulativeError.value = ''
+  sessionBaselineRunId.value = ''
+}
+
+/**
  * 从脚本源码猜一个可读的一行摘要（脚本头无 @desc 时的兜底）
  * [WHY] 统一回落到「执行脚本」会让时间线上多张卡片完全同形，用户无从判断这是哪一步；
  *   取首个有效代码行至少能表意（例如 `fs.rmSync(tmp, { recursive: true })`）
@@ -132,11 +237,14 @@ function guessDesc(code: string): string {
  * @param opts.runKey 事件聚合 key；缺省自动生成 `run-<ts>-<rand>`
  * @param opts.autoFeedback 置位后本轮结束自动回传结果（一次性）
  */
-async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boolean }) {
+async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boolean }): Promise<RunResponse | 'skipped' | null> {
   const code = (opts?.script ?? script.value).trim()
-  if (!code || running.value) return
-  // [auto-feedback-after-guard-v1] 原在守卫之前置位，被跳过的 run 把一次性标志留给下一轮
-  // （报告 §2.19）；改为守卫通过后再置位。
+  // [run-skip-identifiable-v1] 被守卫吞掉时返回可辨识标记（R2）；调用方据此判定重试，不读 result
+  if (!code || running.value) return 'skipped'
+  // [auto-feedback-reset-v1] 每次 run() 开始重置该标志（R3）：杜绝跨轮漂移
+  // [WHY] 上一次 autoFeedback 若未被消费（如被 ScriptPanel 分支遗漏），残留会误触发下一轮
+  // [CONSTRAINT] 重置在前、置位在后 —— 保证「本轮想要」才算数
+  autoFeedbackRequested.value = false
   if (opts?.autoFeedback) autoFeedbackRequested.value = true
   const myToken = ++activeRunToken
   const isStale = () => myToken !== activeRunToken
@@ -192,13 +300,28 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         script: code,
         gitCommit: gitCommit.value,
         smoke: smokeEnabled.value,
+        sessionId: effectiveSessionId.value || undefined,
         sandbox: (() => { try { return localStorage.getItem('__ai_sandbox') || 'read-only' } catch { return 'read-only' } })(),
       }),
       signal: abortController.signal,
     })
     if (!res.ok || !res.body) {
       let detail = ''
-      try { detail = await res.text() } catch { /* swallow: body 已被消费 / 网络中断，detail 保持空串 */ }
+      // [truncation-detect-v1] 前置拦截的响应体是 JSON（{error, syntaxError, truncated, scriptSize}）。
+      // 原实现只 res.text() 摊平成一坨字符串 → 客户端无从区分「被上游截断」与「AI 写错了」，
+      // 于是两者都渲染成「退出码 400」，AI 对截断也走原地重试，必然再次被截断（两轮后熔断）。
+      // 结构化提升只做白名单字段，其余一律保持原文，避免把未知结构带进 result。
+      const meta: Pick<RunResponse, 'truncated' | 'scriptSize'> = {}
+      try {
+        const rawText = await res.text()
+        detail = rawText
+        try {
+          const parsed = JSON.parse(rawText) as { truncated?: unknown, scriptSize?: unknown }
+          if (parsed.truncated === true) meta.truncated = true
+          const sz = parsed.scriptSize as RunResponse['scriptSize'] | undefined
+          if (sz && typeof sz.lines === 'number' && typeof sz.bytes === 'number') meta.scriptSize = sz
+        } catch { /* 非 JSON 响应（代理错误页等）：保持原文，不做结构化提升 */ }
+      } catch { /* swallow: body 已被消费 / 网络中断，detail 保持空串 */ }
       result.value = {
         runId: '',
         code: res.status,
@@ -207,8 +330,9 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         stderr: `HTTP ${res.status} ${res.statusText}${detail ? `\n${detail}` : ''}`,
         changes: [],
         error: `请求失败 (HTTP ${res.status})`,
+        ...meta,
       }
-      return
+      return result.value
     }
     const frames: Record<string, unknown>[] = []
     // [P3-2c] summary 帧消费
@@ -241,7 +365,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       return null
     })()
     if (summary) {
-      if (isStale()) return
+      if (isStale()) return null
       const s = summary
       const data: RunResponse = {
         runId: String(s.runId || ''),
@@ -258,6 +382,9 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         tsc: (s.tsc as RunResponse['tsc']) ?? null,
         errorFiles: (s.errorFiles as string[]) || undefined,
         scriptCtx: (s.scriptCtx as string) || undefined,
+        // [budget-feedback-v1] 正常轮的脚本体积（服务端每轮都下发，成功轮同样有值）：
+        //   缺此字段时 AI 只在被截断后才第一次知道体积，无法事前收窄本轮范围。
+        scriptSize: (s.scriptSize as RunResponse['scriptSize']) ?? undefined,
         fingerprints: (s.fingerprints as RunResponse['fingerprints']) || undefined,
         git: s.git as RunResponse['git'],
         dryRunFailed: Boolean(s.dryRunFailed),
@@ -267,20 +394,22 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         tools: s.tools as RunResponse['tools'],
         smoke: (s.smoke as RunResponse['smoke']) ?? null,
         claimMismatch: (s.claimMismatch as RunResponse['claimMismatch']) ?? null,
-        // [pipeline-in-summary-v1] 捕获 summary 帧下发的 pipeline，供 PipelineStrip 即时渲染
+        // [pipeline-in-summary-v1] 捕获 summary 帧下发的 pipeline，供 /__ai/tasks 消费方读取
         pipeline: (s.pipeline as RunResponse['pipeline']) ?? undefined,
       }
+      // [selfcheck-observed-cmds-v1] 累积 runId（供自检读 toolLog）
+      if (data.runId && !runIds.value.includes(data.runId)) runIds.value = [...runIds.value, data.runId]
       const prevBaseline = baselineRunId.value
       result.value = data
       // DEDUP_LAST_RUN: 按 path 去重，只保留本次运行每个文件一条记录
-      changes.value = (data.changes || []).reduce<Change[]>((acc, c) => {
-        const i = acc.findIndex(x => x.path === c.path)
-        if (i >= 0) acc[i] = c
-        else acc.push(c)
-        return acc
-      }, [])
+      changes.value = dedupByPath(data.changes || [])
+      // [cumulative-baseline-v1] 会话累积锚点：只认本页会话第一次**成功**的 run。
+      //   失败轮不落盘（overlay 仅在 exit 0 才 apply），故锚到成功轮不会漏改动。
+      if (data.ok && data.runId && !sessionBaselineRunId.value) sessionBaselineRunId.value = data.runId
       if (data.ok && data.runId) baselineRunId.value = data.runId
       if (result.value) result.value.baselineRunId = prevBaseline
+      // 累积视图打开时每轮结束都要刷新——否则面板停在旧累计上，用户以为改动没生效
+      if (changeView.value === 'cumulative') await loadCumulative()
       wrappedEmitStep(data.ok ? 'done' : 'error', { exit: data.code, changeCount: changes.value.length })
     } else {
       result.value = {
@@ -296,7 +425,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       wrappedEmitStep('error', { reason: '未收到 summary 帧' })
     }
   } catch (e) {
-    if (isStale()) return
+    if (isStale()) return null
     const aborted = (e as { name?: string })?.name === 'AbortError'
     result.value = {
       runId: '',
@@ -318,26 +447,35 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       running.value = false
     }
   }
+  return result.value
 }
 
 /**
- * 回滚单个文件的变更到本轮运行前状态
- * [CONSTRAINT] 无 result.value 时静默 no-op；rolling[file] 置位期间 UI 会显示行级 loading
- * [CHANGE-IMPACT] 成功时会从 changes 中移除该文件；失败时保留并返回 data（含错误信息）
+ * 回滚单个文件到「它所属那一轮」运行前的状态
+ * [WHY] [cumulative-baseline-v1] 归属轮由列表条目自带：累积视图里一条变更可能来自好几轮前，
+ *   若一律用本轮 runId，/__ai/rollback 会以「该文件不在本次改动中」400 拒绝——
+ *   而用户看到的是「列表里有这个文件」，静默失败比报错更糟。本轮视图下条目无 runId，回落本轮。
+ * [CONSTRAINT] 无 result.value 时静默 no-op；rolling[file] 置位期间 UI 显示行级 loading
+ * [CHANGE-IMPACT] 成功时从两套列表同时移除该文件（否则另一个视图里还留着已还原的文件）
  * @param file 文件相对路径；与 /__ai/rollback 的 file 字段一致
  */
 async function rollback(file: string) {
   if (!result.value) return
+  const entry = visibleChanges.value.find(c => c.path === file)
+  const runId = entry?.runId || result.value.runId
   rolling.value[file] = true
   try {
     const res = await fetch('/__ai/rollback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runId: result.value.runId, file }),
+      body: JSON.stringify({ runId, file }),
     })
     // [rollback-catch-v1] res.json() 无 catch 会在网络异常时 unhandled rejection（报告 §2.20）
     const data = await res.json().catch(() => ({ ok: false }))
-    if (data.ok) changes.value = changes.value.filter(c => c.path !== file)
+    if (data.ok) {
+      changes.value = changes.value.filter(c => c.path !== file)
+      cumulativeChanges.value = cumulativeChanges.value.filter(c => c.path !== file)
+    }
     return data
   } finally {
     rolling.value[file] = false
@@ -346,18 +484,36 @@ async function rollback(file: string) {
 
 /**
  * 执行 rollback All
+ * [WHY] [cumulative-baseline-v1] 累积视图下必须逐条按各自归属轮回滚：/__ai/rollback-all 只处理
+ *   单个 runId 的 manifest，用它撤累积列表等于「只撤最后一轮」——而按钮写着「撤回全部」，
+ *   这种静默漏撤比直接报错更难被发现。
+ * [CONSTRAINT] 逐条串行，避免并发写同一工作区；任一条失败不中断其余，最后如实汇报失败条数
  */
 async function rollbackAll() {
   if (!result.value) return
   busyAll.value = true
   try {
+    if (changeView.value === 'cumulative' && cumulativeChanges.value.length) {
+      const paths = cumulativeChanges.value.map(c => c.path)
+      let failed = 0
+      for (const p of paths) {
+        const d = await rollback(p)
+        if (!d || !d.ok) failed += 1
+      }
+      if (failed === 0) {
+        resetChangeViews()
+        return { ok: true, count: paths.length }
+      }
+      await loadCumulative()
+      return { ok: false, error: `${failed} / ${paths.length} 个文件撤回失败（其余已还原）` }
+    }
     const res = await fetch('/__ai/rollback-all', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ runId: result.value.runId }),
     })
     const data = await res.json().catch(() => ({ ok: false }))
-    if (data.ok) changes.value = []
+    if (data.ok) resetChangeViews()
     return data
   } finally {
     busyAll.value = false
@@ -365,7 +521,9 @@ async function rollbackAll() {
 }
 
 /**
- * 执行 save
+ * 执行 save（确认改动）
+ * [NOTE] [cumulative-baseline-v1] 累积视图下本操作只回收**本轮**的运行前 ref；更早各轮的
+ *   ref/快照会留到 gcSnapshots(20) 自然回收。用户可见语义（列表清空、起点重置）不受影响。
  */
 async function save() {
   if (!result.value) return
@@ -376,7 +534,7 @@ async function save() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ runId: result.value.runId }),
     }).catch(() => null)
-    changes.value = []
+    resetChangeViews()
   } finally {
     busyAll.value = false
   }
@@ -391,6 +549,8 @@ export function useRunner() {
     lastRunCode,
     running,
     result,
+    // [selfcheck-observed-cmds-v1] 本轮循环已累积 runId 列表
+    runIds,
     changes,
     rolling,
     busyAll,
@@ -398,6 +558,15 @@ export function useRunner() {
     gitCommit,
     smokeEnabled,
     baselineRunId,
+    // [cumulative-baseline-v1] 跨轮累积视图
+    sessionBaselineRunId,
+    changeView,
+    cumulativeChanges,
+    cumulativeLoading,
+    cumulativeError,
+    visibleChanges,
+    loadCumulative,
+    setChangeView,
     liveStdout,
     liveStderr,
     doneSummary,

@@ -1,4 +1,5 @@
 import { useStorage } from '@vueuse/core'
+import { computed, ref } from 'vue'
 // [app-storage-v1] PLAN 4.7 阈值整改：从 App.vue 抽出的 localStorage 纯函数
 // 所有访问都在 try/catch 内，SSR/无 localStorage 环境安全降级
 // [unified-store-v1] 会话历史主写统一 store
@@ -53,6 +54,27 @@ export const theme = useStorage<'light' | 'dark'>(KEY_THEME, 'dark')
  * [CHANGE-IMPACT] 空串不再触发 removeItem（useStorage 写空串），读取语义等价（均为"未选择"）
  */
 export const activeSessionId = useStorage<string>(ACTIVE_SESSION_KEY, '')
+
+// [fallback-sid-v1] 工作台就绪时即使无 AI 会话也应有 sid
+// [WHY] activeSessionId 由 AI 会话消息回写（useAiReplyHandlers），未建立会话时长期为空 →
+//   面板按 D2 设计不渲染、沙箱 __AI__.tasks 写顶层脏桶、循环 sessionId 绑定失效
+// [CONSTRAINT] fallback 存 sessionStorage（每 tab 独立）→ 满足 D2「多窗口不串台」；
+//   真实会话到来后 activeSessionId 非空，effectiveSessionId 自动切到真值
+// [CHANGE-IMPACT] 面板 / useRunner / App.vue sessionId getter 应读 effectiveSessionId
+const FALLBACK_SID_KEY = '__ai_tab_fallback_sid'
+function initFallbackSessionId(): string {
+  try {
+    if (typeof sessionStorage === 'undefined') return ''
+    const existing = sessionStorage.getItem(FALLBACK_SID_KEY)
+    if (existing) return existing
+    const fresh = `sess-tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    sessionStorage.setItem(FALLBACK_SID_KEY, fresh)
+    return fresh
+  } catch { return '' }
+}
+export const fallbackSessionId = ref<string>(initFallbackSessionId())
+/** 有效会话 id：真实会话优先，无则退化为每 tab 独立 fallback（永不为空，除 sessionStorage 不可用） */
+export const effectiveSessionId = computed<string>(() => activeSessionId.value || fallbackSessionId.value)
 
 /**
  * 读取 localStorage 并吞掉所有异常

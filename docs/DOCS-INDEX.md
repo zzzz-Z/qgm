@@ -29,6 +29,7 @@
 | `docs/USAGE.md`                  | 打包后四种使用形态：仓库内 dev / 构建产物自托管 / 发布安装到外部项目 / Docker 容器运行。                           |
 | `docs/FRONTEND-REVIEW.md`        | 前端（`packages/client`）全量审查：3 个高风险隐藏 Bug、22 项 P1/P2 缺陷、死代码清单与优化点，含 `file:line` 证据。 |
 | `docs/session-view-diagnosis.md` | 会话展示台前置诊断：资产盘点（哪些组件/composable 可复用）、展示台该收口在哪个环节。                               |
+| `docs/taskboard-workorder.md`    | 任务看板改造工单：问题清单（附 file:line 证据）、P0-P2 分级、W1-W5 改造方案、承重验收判据与回滚。                  |
 
 ## 规则与包说明
 

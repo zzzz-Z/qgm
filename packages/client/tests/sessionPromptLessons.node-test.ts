@@ -80,3 +80,49 @@ it('lessons 超预算：按条目边界截断且优先保留最新条目', async
   assert.ok(p.includes('新坑'), '应优先保留文件尾（较新）的条目')
   assert.ok(!p.includes('旧坑'), '超出 6000 预算的旧条目应被截断')
 })
+
+// ── 状态行图例：台账里有「已被推翻 / 已失效」的条目时，头部必须给出解释 ─────────────
+// [lessons-status-legend-v1] 背景：lessons.md 的条目带状态行 —— `[VERIFIED]` / `[REJECTED]`
+//   （实测推翻，**正文是错的**）/ `[STALE]`（曾为真、机制已改，**现在不适用**）/ `（待复核）`。
+//   实测（治理后 56 条）：尾 6,000 字符注入窗口内含 **2 条 `[STALE]`**，而头部消息此前只说
+//   「缺省 = 待复核」——AI 读到一条「某 bug 存在」的 STALE 正文，无从知道它已被修好，
+//   会照着**已失效的现象**去修。图例是这条链上唯一的解释来源，故守卫它：
+//   ① 四种状态可辨识；② `[REJECTED]`/`[STALE]` 必须是「叫停」语义，不能与 `[VERIFIED]` 同档；
+//   ③ 图例挂在 `head` 上、不进 6,000 字符条目预算 ⇒ 截断路径下同样必须在。
+
+const LESSONS_MIXED_STATUS = [
+  '## 已修掉的坑',
+  '[STALE] 2026-10-05 A · 机制已改，缺口已修',
+  '正文：旧现象描述',
+  '',
+  '## 已被推翻的坑',
+  '[REJECTED] 2026-10-05 A · 实测推翻',
+  '正文：错误归因',
+  '',
+].join('\n')
+
+it('注入块必须携带状态行图例：四种状态都可辨识', async () => {
+  vi.stubGlobal('fetch', makeFetch({ lessons: LESSONS_MIXED_STATUS }))
+  const p = await buildLoopInitialPrompt('目标L')
+  for (const s of ['`[VERIFIED]`', '`[REJECTED]`', '`[STALE]`', '`（待复核）`']) {
+    assert.ok(p.includes(s), `图例缺少状态 ${s}：AI 无从判断该条结论是否仍然成立`)
+  }
+  assert.ok(p.includes('已修掉的坑'), '图例不得挤掉条目正文')
+})
+
+it('图例语义：REJECTED / STALE 必须是否定措辞，不能与 VERIFIED 同档', async () => {
+  vi.stubGlobal('fetch', makeFetch({ lessons: LESSONS_MIXED_STATUS }))
+  const p = await buildLoopInitialPrompt('目标M')
+  assert.match(p, /\[REJECTED\][^\n]*不要照做/, 'REJECTED 未说明「正文是错的」：会被当现行结论')
+  assert.match(p, /\[STALE\][^\n]*不适用/, 'STALE 未说明「现已不适用」：会被当成现存的 bug 去修')
+  // 双向：不许为了强调否定而把 VERIFIED 也写成参考级，否则真实约束被弱化
+  assert.match(p, /\[VERIFIED\][^\n]*铁律/)
+})
+
+it('截断路径下图例同样存在（图例不计入 6000 字符条目预算）', async () => {
+  const big = (t: string) => `## ${t}\n${'x'.repeat(4000)}\n`
+  vi.stubGlobal('fetch', makeFetch({ lessons: big('旧坑') + big('新坑') }))
+  const p = await buildLoopInitialPrompt('目标N')
+  assert.ok(p.includes('`[STALE]`'), '截断时图例丢了：条目只剩状态标记，AI 无从解读')
+  assert.match(p, /仅注入最近 1\/2 条/, '截断提示本身也必须在位')
+})

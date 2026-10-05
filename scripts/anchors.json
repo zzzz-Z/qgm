@@ -89,6 +89,10 @@
       "contains": "handoff:gen"
     },
     {
+      "file": "package.json",
+      "contains": "screenshot-baseline.cjs"
+    },
+    {
       "file": "packages/core/src/logger.cjs",
       "contains": "module.exports = L"
     },
@@ -211,6 +215,10 @@
     {
       "file": "scripts/session-start.cjs",
       "contains": "lessons-status.cjs"
+    },
+    {
+      "file": "scripts/session-start.cjs",
+      "contains": "log-signal.cjs"
     },
     {
       "file": "scripts/lessons-status.cjs",

@@ -26,6 +26,13 @@ export interface PromptResult {
   /** [L4b] 服务端用 TS AST 还原的失败定位（文件 + 行号 + 所属符号） */
   fingerprints?: Array<{ file: string, line: number, symbol: string, kind: string }>
   scriptCtx?: string
+  /** [truncation-detect-v1] 服务端判定「脚本在尾部被上游截断」（仅 4xx 前置拦截时有值） */
+  truncated?: boolean
+  /**
+   * [truncation-detect-v1] 服务端收到的脚本体积与 §10 预算比对结果
+   * [budget-feedback-v1] 正常执行轮也有值（服务端每轮下发），供 appendBudgetNotice 做每轮配额反馈
+   */
+  scriptSize?: { lines: number, bytes: number, overBudget: boolean, maxLines: number, maxBytes: number }
   smoke?: { ran: boolean, ok: boolean, error?: string, pages: Array<{ ok: boolean, url: string, errors: string[] }> } | null
   tsc?: { ok: boolean, stdout?: string, stderr?: string } | null
   lint?: { ran: boolean, ok: boolean, stdout?: string, stderr?: string } | null
@@ -86,6 +93,44 @@ export function appendFingerprints(p: string[], r: PromptResult | null): void {
   p.push('')
 }
 
+/**
+ * [budget-feedback-v1] 单轮体积的「预警线」比例
+ * [WHY] §10 的 300 行 / 12 KB 是**硬上限**，但撞到上限时已经站在被截断的边缘了；
+ *   预警线取硬上限的 70%（≈210 行 / 8.4 KB），在还来得及收窄时就提示。
+ * [CONSTRAINT] 必须 < 1.0，否则「预警」与「超预算」两档合并，退化成永不触发的死分支。
+ */
+export const BUDGET_WARN_RATIO = 0.7
+
+/**
+ * 追加「本轮输出体积」块（服务端实测值，供下一轮规划）
+ * [WHY] AI 无法测量自己的输出长度——它看不到 token 计数，也数不准自己写了多少行。
+ *   只在被截断时才告知体积，等于永远事后补救（撞了墙才知道墙在哪）；每轮把实测值带回
+ *   决策回路，它才能在动手前判断「这轮还能加多少」，而不是写完才发现超了。
+ * [CONSTRAINT] 仅 `runId` 非空（脚本**真跑过**）时产出：前置拦截轮（无 runId）的体积
+ *   由 appendScriptInvalid 说明——那是「为什么被截断」的因果解释，两处输出体积会互相重复。
+ * [CONSTRAINT] 措辞必须**双向**：余量充足时也要说清「还能写」，否则 AI 会一律按最小值输出，
+ *   把一轮能做完的事拆成三轮——过度拆分同样烧轮次，且让每轮都重新加载上下文、更易截断。
+ */
+export function appendBudgetNotice(p: string[], r: PromptResult | null): void {
+  const sz = r?.scriptSize
+  if (!r || !r.runId || !sz) return
+  const ratio = Math.max(sz.lines / sz.maxLines, sz.bytes / sz.maxBytes)
+  const pct = Math.round(ratio * 100)
+  const kb = sz.bytes / 1024
+  const maxKb = Math.round(sz.maxBytes / 1024)
+  p.push('# 本轮输出体积（服务端实测）')
+  p.push(`- 上一轮脚本：${sz.lines} 行 / ${kb.toFixed(1)} KB`)
+  p.push(`- §10 预算：硬上限 ${sz.maxLines} 行 / ${maxKb} KB；**单轮建议 ≤ 150 行**（给截断留余量）`)
+  if (sz.overBudget) {
+    p.push(`- ⚠ 上一轮**已超预算**（用掉 ${pct}%）：它能完整到达属于侥幸，下一轮务必拆成多个小脚本`)
+  } else if (ratio >= BUDGET_WARN_RATIO) {
+    p.push(`- ⚠ 已用掉 ${pct}% 的预算：余量不多，下一轮请**主动拆小**，不要在单轮里继续叠加改动`)
+  } else {
+    p.push(`- 余量充足（已用 ${pct}%）：本轮可以适度多推进，不必把一轮能做完的事拆成多轮`)
+  }
+  p.push('')
+}
+
 /** 追加三层反馈摘要（行为层 → 类型层 → 代码层，含通过项） */
 export function appendFeedbackSummary(p: string[], r: PromptResult | null): void {
   if (!r) return
@@ -101,7 +146,13 @@ export function appendFeedbackSummary(p: string[], r: PromptResult | null): void
   }
   if (r.smoke?.ran && !r.smoke.ok) issues.push('行为层: 冒烟失败（见下 # 页面冒烟）')
   if (r.dryRunFailed) issues.push('行为层: 脚本运行中断，磁盘零改动')
-  if (r.code !== 0 && !r.dryRunFailed && r.code !== -1) {
+  // [truncation-detect-v1] 4xx 且无 runId = 服务端在**执行前**拦下的。
+  // 报「退出码 400」会让 AI 以为是运行时失败、去翻一个根本不存在的运行日志；
+  // 真正的原因由 appendScriptInvalid 单独成块说明。
+  const preflightBlocked = !r.runId && r.code >= 400
+  if (preflightBlocked) {
+    issues.push('行为层: 脚本未通过前置校验，服务端未执行（见下「脚本未通过前置校验」）')
+  } else if (r.code !== 0 && !r.dryRunFailed && r.code !== -1) {
     issues.push(`行为层: 退出码 ${r.code}`)
   }
   if (r.tsc) {
@@ -243,4 +294,61 @@ export function appendRawOutputs(p: string[], r: PromptResult | null): void {
   if (!r) return
   if (r.stderr) p.push('# 错误输出 (stderr)', '```', r.stderr, '```', '')
   if (r.stdout) p.push('# Stdout', '```', r.stdout, '```', '')
+}
+
+/**
+ * 从 4xx 响应体里取出人类可读的错误描述
+ * [WHY] 前置拦截的 stderr 形如 `HTTP 400 Bad Request` + 换行 + `{"error":"脚本语法错误：…"}`；
+ *   直接贴首行只会让 AI 看到 "HTTP 400"，真正的判据（哪种语法错）反而被淹掉。
+ * [CONSTRAINT] 纯字符串处理，不做完整 JSON 解析（响应体可能被代理截断成半截 JSON）
+ * @param stderr 客户端拼装的 stderr 文本
+ */
+function extractErrorLine(stderr: string | undefined): string {
+  const lines = String(stderr || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+  const jsonish = lines.find(l => l.includes('"error"'))
+  if (jsonish) {
+    const m = /"error"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(jsonish)
+    if (m) return m[1].replace(/\\"/g, '"').replace(/\\n/g, ' ')
+  }
+  return lines[1] || lines[0] || '（无错误详情）'
+}
+
+/**
+ * 追加「脚本未通过前置校验」块（服务端 4xx 拦截：语法错误 / 脚本头契约违规 / 被截断）
+ * [WHY] 这是**唯一**告知 AI「脚本根本没执行」的地方。原有 append* 系列全部面向「跑过一轮」的场景：
+ *   4xx 只会落进 appendRawOutputs 的一段裸 HTTP 文本，于是 AI 把截断误读成运行失败、
+ *   原地重发同样长的脚本、再次被截断，两轮后触发熔断冻结。
+ * [CONSTRAINT] 仅 `runId` 为空且 `code >= 400` 时产出（即真正的前置拦截，而非运行中途失败）；
+ *   truncated 分支的措辞必须是「通道故障 + 拆小重发」，**不得**出现「重新生成完整脚本」式规劝
+ * @param p prompt 行数组（原地追加）
+ * @param r 运行结果
+ */
+export function appendScriptInvalid(p: string[], r: PromptResult | null): void {
+  if (!r || r.runId || r.code < 400) return
+  p.push('# ⚠ 脚本未通过前置校验（服务端已拦截：脚本未执行，磁盘零改动）')
+  if (r.truncated) {
+    p.push('**判定：本轮脚本在尾部被上游截断 —— 这是输出通道故障，不是你的逻辑错误。**')
+    p.push(`- 服务端收到的脚本在尾部被切断：${extractErrorLine(r.stderr)}`)
+    if (r.scriptSize) {
+      const kb = (r.scriptSize.bytes / 1024).toFixed(1)
+      p.push(
+        `- 到达体积：${r.scriptSize.lines} 行 / ${kb} KB`
+        + `（预算上限 ${r.scriptSize.maxLines} 行 / ${Math.round(r.scriptSize.maxBytes / 1024)} KB）`,
+      )
+      p.push(r.scriptSize.overBudget
+        ? '- ⚠ 到达体积**已超预算**：这一轮本就输出不完，与任务难度无关，纯粹是单轮太长'
+        : '- 到达体积未超预算：说明本轮恰好卡在上限附近，下一轮务必留出余量')
+    }
+    p.push('')
+    p.push('请这样做（**不要原地重试**）：')
+    p.push('1. **禁止**重发同样长度的脚本——同样长度必然再次被切断，只是白烧一轮')
+    p.push('2. 把本轮改动**拆成多个小脚本**：一条回复里可以给出多个代码块，它们会被**串行**执行')
+    p.push('3. 每个脚本只推进一个原子步骤，**建议 ≤ 150 行**（给上限留出至少一半余量）')
+    p.push('4. 若前几个块已成功落盘，只重发**尚未完成**的部分，不要从头再来')
+  } else {
+    p.push('**判定：脚本语法/契约不合法，服务端在解析阶段就拦下了它（未执行）。**')
+    p.push(`- 原因：${extractErrorLine(r.stderr)}`)
+    p.push('- 请修正后重新生成；不要假设部分改动已落盘——磁盘零改动')
+  }
+  p.push('')
 }

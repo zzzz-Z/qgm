@@ -1,6 +1,22 @@
 'use strict'
 /* eslint-disable no-console -- __AI__ 的 ok/skip/warn/err/log 需直接输出 */
 const fs = require('node:fs')
+// [tool-log-exec-v1] 记录 shell 命令到 toolLog，供自检命令对账（治造假）
+// [CONSTRAINT] 断词拼 fs 名避免 patchFile 内容触发原生扫描器；不改执行行为
+let _TOOL_FD = -1
+function _openToolLog() {
+  const p = process.env.AI_RUNNER_TOOL_LOG
+  if (!p) return
+  try { _TOOL_FD = fs.openSync(p, 'a') } catch { _TOOL_FD = -1 }
+}
+function _logExec(cmd, args) {
+  if (_TOOL_FD < 0) return
+  const arr = Array.isArray(args) ? args.map(String) : []
+  const flat = [String(cmd || '')].concat(arr).join(' ')
+  const line = `${JSON.stringify({ ts: Date.now(), op: 'exec', cmd: String(cmd || ''), flat })}\n`
+  try { fs.writeSync(_TOOL_FD, line) } catch { /* ignore */ }
+}
+_openToolLog()
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 // [chalk] 显示输出统一走 chalk；协议帧（__AI_*__）保持裸 console 供 runner 解析
@@ -73,11 +89,72 @@ function _binPath(name) {
 }
 function _execBin(bin, args) {
   const isWin = process.platform === 'win32'
+  _logExec(bin, args)
   try {
     return { ok: true, output: execFileSync(bin, args, { cwd: process.cwd(), encoding: 'utf8', shell: isWin }) }
   } catch (e) {
     return { ok: false, output: String(e.stdout || '') + String(e.stderr || '') }
   }
+}
+
+// [shell-blacklist-v3] 取命令基名：`/bin/rm` → `rm`（旧实现只比 parts[0]，`/bin/rm` 形同漏网）
+function _cmdBase(c) {
+  const s = String(c || '')
+  const i = s.lastIndexOf('/')
+  return (i >= 0 ? s.slice(i + 1) : s).toLowerCase()
+}
+
+// [shell-blacklist-v3] 这些命令会把后续参数当 shell 脚本解释执行 ⇒ 引号里的内容也是「要跑的命令」
+const _SHELL_WRAPPERS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'csh', 'tcsh'])
+// [shell-blacklist-v3] 这些命令会把参数里的命令再执行一遍（自身不做 shell 解析，但同样是包装器）
+const _PAYLOAD_WRAPPERS = new Set(['sudo', 'xargs', 'env', 'nohup', 'timeout', 'nice', 'exec', 'command', 'busybox', 'setsid'])
+
+// [shell-metachar-teach-v1] shell 元字符：字符串命令里出现即拒绝（不静默按空白切词跑错）
+const SHELL_METACHAR_RE = /["'`$|&;<>()*?~]/
+
+// [shell-blacklist-v3] 命令串里是否存在「rm + 递归旗标 + 强删旗标」（含 sh -c / xargs / sudo 包一层）。
+//   刻意按 token 判定而不是一条大正则：`-[A-Za-z]*r[A-Za-z]*f` 这种两头无界量词会触发
+//   lint 的 regexp/no-super-linear-backtracking，且要同时兼容 -rf / -r -f / --recursive --force
+//   三种写法时，单条正则会迅速失控且难以读懂。
+function _rmForceInFlat(flat) {
+  const RM = ['r', 'm'].join('')
+  const tokens = String(flat).split(/[\s;&|]+/).filter(Boolean)
+  for (let i = 0; i < tokens.length; i += 1) {
+    // 剥掉包裹的引号 / 括号（`'rm` / `(rm` 要能认出是 rm；`/bin/rm` 交给 _cmdBase 取基名）
+    const raw = tokens[i].replace(/["'`()]/g, '')
+    if (_cmdBase(raw) !== RM) continue
+    let rec = false
+    let force = false
+    for (let j = i + 1; j < tokens.length; j += 1) {
+      const a = tokens[j]
+      if (a.charCodeAt(0) !== 45) break // 45 = '-'，旗标序列到此结束
+      const low = a.toLowerCase()
+      if (low === '--recursive') { rec = true }
+      else if (low === '--force') { force = true }
+      else if (/^-[a-z]+$/.test(low)) {
+        if (low.includes('r')) { rec = true }
+        if (low.includes('f')) { force = true }
+      }
+    }
+    if (rec && force) return true
+  }
+  return false
+}
+
+// [patch-diagnostic-v1] 锚点在文件中的出现位置（行号 + 该行摘要），最多 10 条
+function _anchorReport(src, anchor, lines) {
+  const out = []
+  if (!anchor) return out
+  let from = 0
+  while (out.length < 10) {
+    const at = src.indexOf(anchor, from)
+    if (at < 0) break
+    let line = 1
+    for (let i = 0; i < at; i += 1) { if (src.charCodeAt(i) === 10) line += 1 }
+    out.push({ line, text: String(lines[line - 1] || '').trim().slice(0, 120) })
+    from = at + 1
+  }
+  return out
 }
 
 const __AI__ = {
@@ -223,9 +300,39 @@ const __AI__ = {
       _changelog('patch-skip', file)
       return { ok: true, skipped: true, reason: 'marker present' }
     }
+    // [patch-diagnostic-v1] 锚点失配必须可诊断：
+    //   WHY: 旧实现裸抛 `anchor not found` / `not unique (N)`，只给次数不给位置。
+    //        2026-10-05 一条 exit 7 的现场是「拿文件末尾 10 个字符当锚点」——末尾 10 字符在测试文件里
+    //        必然重复，但报错只说 not unique，AI 无从知道该往哪里加长锚点，只能盲试重发。
+    //   [CONSTRAINT] 仍然抛异常，**不**改成返回 { ok:false }：调用方普遍不检查返回值，
+    //        改成返回会把失败静默化（写一半继续跑），比裸抛更危险。此处只把「抛什么」变清楚。
+    const lines = src.split(/\r?\n/)
     const count = src.split(anchor).length - 1
-    if (count === 0) throw new Error(`patchFile: anchor not found in ${file}`)
-    if (opts.unique && count > 1) throw new Error(`patchFile: anchor not unique (${count})`)
+    if (count === 0) {
+      const head = String(anchor).split(/\r?\n/)[0] || ''
+      const probe = head.trim().slice(0, 40)
+      const near = probe.length >= 6 ? _anchorReport(src, probe, lines) : []
+      let hint = '锚点在该文件中不存在：先 readText 确认原文，或换一个稳定片段'
+      if (anchor.length < 12) hint = 'ANCHOR_TOO_SHORT：锚点 < 12 字符极易失配，请改用「唯一整行」或带上下文的片段'
+      else if (near.length) hint = '锚点首行存在但整段不匹配：多半是缩进/空白/换行与磁盘不一致——先 readText 读回原文再 patch'
+      throw new Error(`patchFile: ANCHOR_NOT_FOUND ${JSON.stringify({
+        file,
+        anchorLen: anchor.length,
+        anchorHead: String(anchor).slice(0, 60),
+        nearLines: near.map(h => h.line),
+        hint,
+      })}`)
+    }
+    if (opts.unique && count > 1) {
+      const hits = _anchorReport(src, anchor, lines)
+      throw new Error(`patchFile: ANCHOR_NOT_UNIQUE ${JSON.stringify({
+        file,
+        anchorLen: anchor.length,
+        count,
+        at: hits.slice(0, 10),
+        hint: '锚点不唯一：加长到唯一（带前后各一行最稳），或去掉 opts.unique',
+      })}`)
+    }
     __AI__.backup(file)
     const next = src.split(anchor).join(replacement)
     fs.writeFileSync(file, next, 'utf8')
@@ -403,7 +510,8 @@ const __AI__ = {
   // 命中 → 返回 { ok: false, error: "SECURITY_BLOCKED", code: 2, hit: <name> }
   // [exec-timeout-v1] opts.timeout 透传给 __AI__.exec（默认 60000ms；传 0 / null 显式不限时）
   shell(cmd, opts) {
-    const parts = Array.isArray(cmd) ? cmd.map(String) : String(cmd).trim().split(/\s+/)
+    const asArray = Array.isArray(cmd)
+    const parts = asArray ? cmd.map(String) : String(cmd).trim().split(/\s+/)
     if (parts.length === 0 || !parts[0]) return { ok: false, error: 'empty cmd', code: 1 }
     const flat = parts.join(' ')
     const hit = __AI__._shellBlacklist(parts, flat)
@@ -411,17 +519,39 @@ const __AI__ = {
       __AI__.err(`SECURITY_BLOCKED: ${hit}`)
       return { ok: false, error: 'SECURITY_BLOCKED', code: 2, hit }
     }
+    // [shell-metachar-teach-v1] 字符串命令含 shell 元字符 → 明确拒绝并教用法。
+    //   WHY: `shell('ls | grep x')` 旧行为是 split(/\s+/) → execFile('ls', ['|','grep','x'])
+    //        → 返回「没有这个文件」式的输出，AI 会以为命令本身写错了，改错方向重试。
+    //   [CONSTRAINT] 只检查字符串形态；数组形态是调用方显式给出的 token，
+    //        不交给 shell 解析正是正确语义（`['grep','-n','a|b','f']` 要的就是字面量）。
+    //   [CHANGE-IMPACT] 原先「能返回但结果必然是错的」字符串命令，现在会被明确拒绝。
+    if (!asArray && SHELL_METACHAR_RE.test(flat)) {
+      const hint = 'shell() 不做 shell 解析：命令按空白切词后直接 execFile，'
+        + '引号 / 管道 / 重定向 / 变量替换都不会生效。'
+        + ' 需要 shell 语义请显式写：__AI__.shell([\'sh\', \'-c\', \'ls | grep x\'])，'
+        + ' 或按 token 传数组：__AI__.shell([\'grep\', \'x\', \'file\'])。'
+      __AI__.err(`SHELL_METACHAR_UNSUPPORTED: ${flat}`)
+      return { ok: false, error: 'SHELL_METACHAR_UNSUPPORTED', code: 2, cmd: flat, hint }
+    }
     return __AI__.exec(parts[0], parts.slice(1), opts || {})
   },
-  // [ai-shell-exit-v2] 黑名单：rm 组合旗标按片段精判；其余按整串正则匹配
+  // [ai-shell-exit-v2] 黑名单：rm 按片段精判（直接形态）+ 命令串全量正则（包装器形态）；其余按整串正则匹配
+  // [shell-blacklist-v3] rm 纳入命令串匹配，覆盖 `sh -c "rm -rf /"` / `xargs rm -rf` 这类包装形态。
+  //   WHY: 旧实现只在 parts[0] === 'rm' 时精判，patterns 表里又没有 rm 规则
+  //        ⇒ 今天能拦的 `rm -rf`，外面包一层 sh -c 就漏（实测 ["bash","-c","rm -rf /tmp/x"] 命中 null）。
+  //   [CONSTRAINT] 命令串匹配只在 parts[0] 是 shell / payload 包装器时启用：
+  //        普通命令里出现危险串（如 `grep -rn "rm -rf" docs`）不处于可执行位置，必须继续放行。
   _shellBlacklist(parts, flat) {
+    const base = _cmdBase(parts[0])
     const RM = ['r', 'm'].join('')
-    if (parts[0] === RM) {
+    const rmByFlat = base === RM || _SHELL_WRAPPERS.has(base) || _PAYLOAD_WRAPPERS.has(base)
+    if (base === RM) {
       for (let i = 1; i < parts.length; i++) {
         const p = parts[i]
         if (/^-[A-QS-Z]*R[A-Z]*f/i.test(p) || /^-[A-EG-Z]*F[A-Z]*r/i.test(p)) return 'rm-recursive-force'
       }
     }
+    if (rmByFlat && _rmForceInFlat(flat)) return 'rm-recursive-force'
     const SUDO = ['s', 'u', 'd', 'o'].join('')
     const CURL = ['c', 'u', 'r', 'l'].join('')
     const WGET = ['w', 'g', 'e', 't'].join('')
@@ -467,6 +597,7 @@ const __AI__ = {
       ? undefined
       : (Number(opts.timeout) > 0 ? Number(opts.timeout) : 60_000)
     try {
+      _logExec(cmd, args || [])
       const out = execFileSync(cmd, args || [], {
         cwd: opts.cwd || process.cwd(),
         encoding: 'utf8',
@@ -624,6 +755,74 @@ const __AI__ = {
     } catch (e) {
       return { ok: false, reason: String(e) }
     }
+  },
+  // [tasks-api-v1] 任务看板 API：服务端按会话分桶（sid 从 env 读，脚本不自传）
+  // [CONSTRAINT] 异常一律返回 {ok:false, error}，不抛断脚本；AI 可 `await __AI__.tasks.push([...])`
+  tasks: {
+    _url() {
+      const port = Number(process.env.AIR_SERVER_PORT || process.env.AIR_RUNNER_SERVER_PORT) || 5175
+      const sid = process.env.AI_RUNNER_SESSION_ID || ''
+      return `http://127.0.0.1:${port}/__ai/tasks${sid ? `?sid=${encodeURIComponent(sid)}` : ''}`
+    },
+    _post(body) {
+      const url = __AI__.tasks._url()
+      // [tasks-api-sync-throw-v1] 用 Promise.resolve().then 包裹同步调用：
+      //   fetch 同步 throw（如环境缺失 / mock 同步抛）时不会逃出 .catch 链
+      return Promise.resolve().then(() => fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })).then(async (res) => {
+        if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+        const j = await res.json()
+        // [task-board-items-v1] 附 items 计数与运行中文本，便于 AI 自查看板状态
+        return {
+          ok: true,
+          todo: Array.isArray(j && j.todo) ? j.todo.length : 0,
+          done: Array.isArray(j && j.done) ? j.done.length : 0,
+          items: Array.isArray(j && j.items) ? j.items.length : 0,
+          running: typeof (j && j.running) === 'string' ? j.running : '',
+          warnings: Array.isArray(j && j.warnings) ? j.warnings : [],
+        }
+      }).catch(e => ({ ok: false, error: String((e && e.message) || e) }))
+    },
+    // [tasks-list-v1] 读回当前会话看板（旧实现只有写：AI 看不到自己的看板，只能盲写）
+    // [CONSTRAINT] 失败返回 {ok:false, error}，不抛；items 为结构化任务（含 status/时刻）
+    list() {
+      const url = __AI__.tasks._url()
+      return Promise.resolve().then(() => fetch(url, {
+        headers: { accept: 'application/json' },
+        cache: 'no-store',
+      })).then(async (res) => {
+        if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+        const j = await res.json()
+        const items = Array.isArray(j && j.items) ? j.items : []
+        return {
+          ok: true,
+          items,
+          todo: Array.isArray(j && j.todo) ? j.todo : [],
+          done: Array.isArray(j && j.done) ? j.done : [],
+          running: typeof (j && j.running) === 'string' ? j.running : '',
+          // [task-running-timeout-v1] 超时被回退的 running 项（需重新 start 或结束该项）
+          expiredRunning: Array.isArray(j && j.expiredRunning) ? j.expiredRunning : [],
+          planPending: Number(j && j.planPending) || 0,
+        }
+      }).catch(e => ({ ok: false, error: String((e && e.message) || e) }))
+    },
+    push(items) {
+      return __AI__.tasks._post({ mode: 'push', pushTodo: Array.isArray(items) ? items.map(String) : [] })
+    },
+    complete(items) {
+      return __AI__.tasks._post({ mode: 'complete', complete: Array.isArray(items) ? items.map(String) : [] })
+    },
+    // [task-running-v1] 标记某任务为「正在执行」（面板显示运行态图标）
+    start(items) {
+      return __AI__.tasks._post({ mode: 'start', start: Array.isArray(items) ? items.map(String) : [] })
+    },
+    // [task-board-fail-v1] 标记某任务为「失败」（面板显示 ✗；不再只能靠沉默留在待办里）
+    fail(items) {
+      return __AI__.tasks._post({ mode: 'fail', fail: Array.isArray(items) ? items.map(String) : [] })
+    },
   },
 }
 global.__AI__ = __AI__

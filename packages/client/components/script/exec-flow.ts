@@ -28,6 +28,8 @@ export interface ExecFlowDeps {
   confirmDialog: (msg: string, opts?: { type?: 'danger' | 'default', okText?: string, cancelText?: string }) => Promise<boolean>
   startAiWaiting: () => void
   softPause: () => void
+  // [loop-no-pause-v1] R1：循环活动时禁止 softPause，需注入循环状态
+  isLoopActive: Ref<boolean>
 }
 
 /**
@@ -35,7 +37,7 @@ export interface ExecFlowDeps {
  * @param deps - 依赖面
  */
 export function createExecFlow(deps: ExecFlowDeps) {
-  const { running, result, changes, liveStdout, liveStderr, copied, runningCommand, pushCmdHistory, buildAiPrompt, confirmDialog, startAiWaiting, softPause } = deps
+  const { running, result, changes, liveStdout, liveStderr, copied, runningCommand, pushCmdHistory, buildAiPrompt, confirmDialog, startAiWaiting, softPause, isLoopActive } = deps
   const { toast } = useToast()
   const execPolicyOverride = ref<string | null>(null)
   const lastAutoAskedRunId = ref('')
@@ -133,7 +135,9 @@ export function createExecFlow(deps: ExecFlowDeps) {
       const r = await copyAndFill(text)
       // [send-fail-no-pause-v1] 原顺序 `if (r) softPause()` 在 'failed' 判定之前，
       // 'failed' 是真值 → 发送失败仍先暂停循环（报告 §2.10）。改为仅成功时暂停。
-      if (r !== 'failed') softPause()
+      // [loop-no-pause-v1] R1：循环活动时不得 softPause ——
+      //   回传权已归循环引擎（executeItemInner），ScriptPanel 侧不再置暂停
+      if (r !== 'failed' && !isLoopActive.value) softPause()
       if (r === 'failed') {
         toast('发送失败，已复制到剪贴板', 'warn', TOAST_MEDIUM)
         return

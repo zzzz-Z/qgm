@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import type { Change, ChangeType } from '../../types'
+import type { ChangeEntry, ChangeType } from '../../types'
 
 /** 组件接收的 props 定义 */
 const props = defineProps<{
-  changes: Change[]
+  changes: ChangeEntry[]
   rolling: Record<string, boolean>
   busyAll: boolean
   activeFile?: string
+  /** [cumulative-baseline-v1] 当前视图：影响撤回文案与「归属轮不可用」的提示口径 */
+  view: 'round' | 'cumulative'
 }>()
 /** 派发 */
 const emit = defineEmits<{
@@ -24,12 +26,30 @@ const summary = computed(() => {
   for (const c of props.changes) s[c.type]++
   return s
 })
+/**
+ * [cumulative-baseline-v1] 撤回全部按钮的提示：累积视图下逐条按归属轮还原，措辞必须与实现一致
+ * [WHY] 否则用户以为「撤的是最后一轮」，实际撤的是整个会话累计——文案与行为不符是误导
+ */
+const rollbackAllTitle = computed(() => {
+  if (props.busyAll) return '处理中…'
+  return props.view === 'cumulative'
+    ? '把所有列出的文件按各自归属轮还原到基准状态'
+    : '把本次运行改动的文件全部还原到改动前'
+})
 // [filelist-rows-v1] 报告 §5.1.4：模板里每行调用 metaOf 2 次 + splitPath 2 次；
 // 改为一次预生成，重渲染时零重复计算。依赖 props.changes，自动随变更集刷新。
 const rows = computed(() => props.changes.map((c) => {
   const meta = metaOf(c.type)
   const sp = splitPath(c.path)
-  return { path: c.path, type: c.type, label: meta.label, title: meta.title, dir: sp.dir, name: sp.name }
+  // [cumulative-baseline-v1] rollbackable === false：归属轮的历史内容已被 gcSnapshots 回收，
+  //   服务端 /rollback 会 500；前端直接禁用并为「为什么点不了」给出原因
+  const locked = c.rollbackable === false
+  const undoTitle = locked
+    ? '该文件所属运行的历史内容已被回收，无法撤回'
+    : props.view === 'cumulative'
+      ? `撤销 ${c.path} 自基准以来的全部改动`
+      : `撤回 ${c.path}`
+  return { path: c.path, type: c.type, label: meta.label, title: meta.title, dir: sp.dir, name: sp.name, locked, undoTitle }
 }))
 
 /**
@@ -63,7 +83,7 @@ function splitPath(p: string) {
   <section class="changes">
     <header class="changes-bar">
       <div class="summary">
-        <span class="summary-title">变更</span>
+        <span class="summary-title">{{ view === 'cumulative' ? '累积变更' : '变更' }}</span>
         <span class="summary-count">{{ changes.length }}</span>
         <span class="summary-dots">
           <span v-if="summary.modified" v-tooltip="`修改 ${summary.modified}`" class="s-pill modified">
@@ -78,7 +98,7 @@ function splitPath(p: string) {
         </span>
       </div>
       <div class="bar-actions">
-        <button v-tooltip="busyAll ? '处理中…' : '把本次运行改动的文件全部还原到改动前'" class="ghost-btn" :disabled="busyAll" @click="emit('rollbackAll')">
+        <button v-tooltip="rollbackAllTitle" class="ghost-btn" :disabled="busyAll" @click="emit('rollbackAll')">
           {{ busyAll ? '处理中…' : '撤回全部' }}
         </button>
         <button
@@ -101,10 +121,10 @@ function splitPath(p: string) {
           <span class="dir">{{ c.dir }}</span><span class="name">{{ c.name }}</span>
         </span>
         <button
-          v-tooltip="`撤回 ${c.path}`"
-          :aria-label="`撤回 ${c.path}`"
+          v-tooltip="c.undoTitle"
+          :aria-label="c.undoTitle"
           class="undo-btn"
-          :disabled="rolling[c.path]"
+          :disabled="rolling[c.path] || c.locked"
           @click.stop="emit('rollback', c.path)"
         >
           <span v-if="rolling[c.path]" class="spinner-mini" />

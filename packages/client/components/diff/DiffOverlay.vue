@@ -47,7 +47,7 @@ function onKeydown(e: KeyboardEvent): void {
 .diff-overlay {
   position: absolute;
   inset: 0;
-  z-index: 30;
+  z-index: var(--z-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -97,7 +97,7 @@ function onKeydown(e: KeyboardEvent): void {
   position: absolute;
   top: 6px;
   right: 8px;
-  z-index: 2;
+  z-index: var(--z-base);
   width: 24px;
   height: 24px;
   display: inline-flex;

@@ -186,7 +186,7 @@ html[data-theme='dark'] .editor.card {
   font-weight: 600;
   letter-spacing: 0.3px;
   pointer-events: none;
-  z-index: 10;
+  z-index: var(--z-base);
   animation: ai-drop-pulse 1.2s ease-in-out infinite;
 }
 @keyframes ai-drop-pulse {
@@ -214,7 +214,7 @@ html[data-theme='dark'] .editor.card {
 }
 .file-picker {
   position: fixed;
-  z-index: 9999;
+  z-index: var(--z-modal);
   min-width: 280px;
   max-width: 480px;
   max-height: 240px;

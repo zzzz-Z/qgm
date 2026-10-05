@@ -2,10 +2,10 @@
 import { Hono } from 'hono'
 import { runHook } from '../utils/hooks.js'
 
-type HookEvent = 'BeforeFill' | 'BeforeScript' | 'AfterScript' | 'AfterResult' | 'LoopStop'
+type HookEvent = 'BeforeFill' | 'BeforeScript' | 'AfterScript' | 'AfterResult' | 'LoopStop' | 'BeforeDone' | 'BeforeDoneFinal'
 
 /** 允许的钩子事件白名单 */
-const ALLOWED: HookEvent[] = ['BeforeFill', 'BeforeScript', 'AfterScript', 'AfterResult', 'LoopStop']
+const ALLOWED: HookEvent[] = ['BeforeFill', 'BeforeScript', 'AfterScript', 'AfterResult', 'LoopStop', 'BeforeDone', 'BeforeDoneFinal']
 
 /** hooks 路由的 Hono 实例 */
 export const hooksHono = new Hono()

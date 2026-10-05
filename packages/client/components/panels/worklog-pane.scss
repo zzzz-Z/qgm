@@ -391,3 +391,59 @@
   color: var(--text);
   font-weight: 700;
 }
+
+/* [ui-p2b-skeleton-v2] V6 骨架屏样式（与 file-tree 同族，本组件 scoped 独立副本）：
+   [CONSTRAINT] WorklogPane 的 style 为 scoped，无法复用 file-tree.scss 内定义；
+   改一处必须两处同步，否则视觉漂移。 */
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 8px;
+}
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+}
+.skeleton-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--surface-3, rgb(127 127 127 / 22%));
+  flex-shrink: 0;
+}
+.skeleton-line {
+  height: 10px;
+  border-radius: 3px;
+  background: var(--surface-3, rgb(127 127 127 / 22%));
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+.skeleton-line.sk-w-40 {
+  width: 40%;
+}
+.skeleton-line.sk-w-55 {
+  width: 55%;
+}
+.skeleton-line.sk-w-70 {
+  width: 70%;
+}
+.skeleton-line.sk-w-85 {
+  width: 85%;
+}
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-line {
+    animation: none;
+    opacity: 0.7;
+  }
+}
