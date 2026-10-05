@@ -297,7 +297,13 @@ export function detectReplyInPage() {
         return true
       }
       gate.ticks++
-      return gate.ticks < 3
+      // [closure-timeout-v1] 放行瞬间打点：事后可区分「上游真截断被放行」与「完整块正常放行」
+      // [CONSTRAINT] releasedAt 仅在此写入，被 detectReplyInPage 一次性消费后置 null
+      if (gate.ticks >= 3) {
+        gate.releasedAt = Date.now()
+        return false
+      }
+      return true
     }
     // 只扫最后一条 assistant 消息，排除历史/用户消息
     const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
@@ -473,6 +479,12 @@ export function detectReplyInPage() {
       dedup._pendingScriptHash = null
       dedup.seenHashes.push(script.hash)
       dedup.lastBodySig = bodySignature()
+      const gateNow = window.__aiRunnerClosureGate
+      if (gateNow && gateNow.releasedAt) {
+        const info = { closureRelease: true, closureTicks: gateNow.ticks, closureLen: gateNow.len }
+        gateNow.releasedAt = null
+        return { kind: 'script', code: script.code, lang: script.lang, hash: script.hash, ...info }
+      }
       return { kind: 'script', code: script.code, lang: script.lang, hash: script.hash }
     }
     dedup._pendingScriptHash = script.hash

@@ -7,6 +7,7 @@ import { PREFIX } from '../config.js'
 import { createHeadlessPool } from '../headless/ai-headless.js'
 // [lesson-autocapture-v1] DONE 总结中的踩坑记录自动落盘，见 post-run/lesson-extract.ts
 import { appendLessons, extractLessons } from '../post-run/lesson-extract.js'
+import { writeChannelLog } from '../state/snapshot.js'
 import type { ServerMessage, TransportMessage } from './protocol.js'
 // Vite 可能是 HttpServer | Http2SecureServer，取交集的最小子集
 
@@ -119,6 +120,9 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
       await pool.resetReplyDedup(sid)
       const stopReply = pool.startReplyPoll(sid, (reply) => {
         try {
+          if (reply.closureRelease) {
+            try { writeChannelLog('runner', { runId: 'closure-release', sid, closureTicks: reply.closureTicks, closureLen: reply.closureLen }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
+          }
           if (reply.kind === 'script' && reply.code) {
             send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now() } } })
           } else {

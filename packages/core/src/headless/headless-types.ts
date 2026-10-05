@@ -39,6 +39,9 @@ export interface HeadlessReply {
   lang?: string
   hash?: string
   text?: string
+  closureRelease?: boolean
+  closureTicks?: number
+  closureLen?: number
 }
 
 /** 无头会话池：管理并发会话与排队，防止资源竞争 */

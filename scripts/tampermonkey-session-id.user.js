@@ -80,6 +80,13 @@
   }
   setInterval(_drainPending, 1000)
 
+  // [fill-ack-v1] fill 回执：所有失败/跳过路径必须回 ack，否则客户端 sendFillToAsync 无法感知丢帧
+  // [WHY] 新窗口场景站点加载 >1.5s 时油猴已注入但输入框未渲染，旧实现 console.warn 后静默 return
+  // [CONSTRAINT] reason 是短枚举字符串；sid 由 URL hash 取，客户端按 sid 匹配最近一条 ack
+  function ackFill(ok, reason, ackId) {
+    post({ type: 'ai-runner:fill-ack', ok: Boolean(ok), reason: String(reason || ''), ackId: String(ackId || ''), sid: extractSidFromHash() })
+  }
+
   let lastId = ''
   let lastSid = ''
 
@@ -957,12 +964,15 @@
       resumeReplyObserver() // [stop-v2] stop 后首次 fill 恢复回复监听
       syncStopMarkerBaseline() // [stopped-detect-v1] 开新一轮：以当前「已停止」计数为新基线
       syncLimitMarkerBaseline() // [limit-detect-v1] 开新一轮：以当前「上限」计数为新基线
-      if (d.msgId && _seenInbound.has(d.msgId)) return
+      // [script-closure-gate-v1] 结构闭合门随轮次重置：上一轮遗留的门会拿旧长度当基线，
+      //   让新回复第一帧就被判定为「已静止」→ 未闭合块提前放行（门本身见 headless-inject.ts）
+      window.__aiRunnerClosureGate = null
+      if (d.msgId && _seenInbound.has(d.msgId)) { ackFill(false, 'dedup-skip', d.ackId); return }
       if (d.msgId) { _seenInbound.add(d.msgId); if (_seenInbound.size > 200) _seenInbound.delete(_seenInbound.values().next().value) }
       const prompt = String(d.prompt || '')
-      if (!prompt) return
+      if (!prompt) { ackFill(false, 'empty-prompt', d.ackId); return }
       const box = findInputBox()
-      if (!box) { console.warn('[ai-runner] 未找到输入框'); return }
+      if (!box) { console.warn('[ai-runner] 未找到输入框'); ackFill(false, 'no-input-box', d.ackId); return }
       const prevHref = location.href
       const replySrc = e.source
       // [image-paste-v2] 图片先于文本注入：图片上传多为异步，先占位可避免文本覆盖图片区
@@ -972,6 +982,7 @@
       if (imgs.length) pasteImages(box, imgs)
       fillInput(box, prompt)
       setTimeout(doSend, 300, box)
+      ackFill(true, '', d.ackId)
       // [url-updated] 发送后轮询 URL 变化并回传（最多 8s）
       let urlTries = 0
       const urlPoll = setInterval(() => {
@@ -994,6 +1005,9 @@
       resumeReplyObserver() // [stop-v2] stop 后首次 rotate 恢复回复监听
       syncStopMarkerBaseline() // [stopped-detect-v1] 开新一轮：以当前「已停止」计数为新基线
       syncLimitMarkerBaseline() // [limit-detect-v1] 开新一轮：以当前「上限」计数为新基线
+      // [script-closure-gate-v1] 结构闭合门随轮次重置：上一轮遗留的门会拿旧长度当基线，
+      //   让新回复第一帧就被判定为「已静止」→ 未闭合块提前放行（门本身见 headless-inject.ts）
+      window.__aiRunnerClosureGate = null
       if (d.msgId && _seenInbound.has(d.msgId)) return
       if (d.msgId) { _seenInbound.add(d.msgId); if (_seenInbound.size > 200) _seenInbound.delete(_seenInbound.values().next().value) }
       const instruction = String(d.instruction || '')

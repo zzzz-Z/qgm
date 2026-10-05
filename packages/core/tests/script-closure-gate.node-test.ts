@@ -261,3 +261,12 @@ test('closure-gate: 内置通道的轮次重置必须清掉门基线', () => {
     'resetReplyDedupInPage 未清门 ⇒ 上一轮的长度基线会让新回复第一帧就被判「已静止」，未闭合块提前放行',
   )
 })
+
+test('closure-gate: 油猴通道 fill/rotate 开新一轮时必须清掉门基线', () => {
+  const src = read(TAMPERMONKEY_SRC)
+  const hits = (src.match(/window\.__aiRunnerClosureGate = null/g) || []).length
+  assert.ok(
+    hits >= 2,
+    `油猴通道未在 fill / rotate 开新一轮时清门 ⇒ 上一轮 ticks=3 会带入新轮，首帧直接放行未闭合块（实测命中 ${hits} 次，期望 ≥ 2）`,
+  )
+})

@@ -754,6 +754,8 @@ A 的正文。
 
 `ps -p <pid>` / `ps ax` 在 `/run` 里拿不到宿主进程的启动时间（lsof 能看到 pid 与 cwd）。故段一「进程启动晚于产物 mtime」未能取证，改以「产物含新符号 + 端点存活」为准并如实记录。
 
+补充（2026-10-05）：验证「进程启动晚于产物 mtime」改用等价可核验判据——`stat -f '%Sm'` 取 pid 文件 mtime 与产物 mtime 对比，或 `kill -0 $PID` 探活。
+
 ## `grep -c "'headless:stop'"` 在打包产物里得 0
 
 [VERIFIED] 2026-10-05 A · 宿主侧亲跑：`grep -c "'headless:stop'" apps/standalone/dist/_server/index.js` → `0`；裸 token `grep -c headless:stop` → `3`
@@ -807,3 +809,70 @@ tsc 报 `Index signature for type 'string' is missing in type 'RejectLogEntry'`�
 `./routes/control-log.js` 排在 `./post-run/index.js` 之前，eslint 直接 0 error → 1 error。
 
 判据：口径 = 唯一模块数 `new Set(源码里 from '…' 的模块路径).size`（不是出现次数）；`run.ts` 修完应为 **8**。
+
+## overlay-atomic-v1 会让同轮变异对子进程不可见：在 `/run` 沙箱里 `writeText` 变异 + `exec npx vitest` 验证，vitest 读的是磁盘旧文件 ⇒ 变异看着"没红"。正确做法是拆两轮
+
+一轮只写盘（本轮结束提交 overlay），下一轮再跑测试。
+
+## `__AI__.exec` 里跑长时间前台进程会被 60s 硬超时打断
+
+启动 dev/prod 服务一律 `nohup ... &`（后台）+ 单独 `sleep` 采样，不要把等待和启动放在同一次 exec。
+
+## 自检闸门与「已清理的 tmp 备份」互斥
+
+段五变异流程习惯把基线存到 `.ai-runner/tmp/*.txt` 用于「还原后字节一致」核验，但自检清理步骤会删它。下一轮会话若再跑变异，必须先重建基线，不能复用历史路径。
+
+## `git status` 里会出现非本会话的并行改动（本会话出现 3 项
+
+`DOCS-INDEX.md` / 新工单 / workbuddy memory）。DONE 的「变更文件」表只列自己的改动，多列即触发 selfcheck-gate 对账失败。
+
+## reject.jsonl / board.jsonl 不按日分片：重跑定界所需一切
+
+出处：WO-20261005-07 段四选定 (B) 挂账；WO-20261005-08 段二把它从口头落成文字。
+
+挂账事实：`reject.jsonl` / `board.jsonl` 走 `writeChannelLog` 的固定名 `${channel}.jsonl`（全量单文件，与 `runner.jsonl` 同形态）。`gcLogs()` 按 mtime 整文件回收（30 天窗口），因此这两条通道要么永不轮转、要么 30 天无写入后整段历史一次性消失。
+
+重跑定界所需的三条命令（口径写死）：
+
+- M1 截断放行率 = `closure-release` 行数 ÷ 含 `exit` 字段的行数；命令：
+  ```text
+  node -e "const fs=require('fs');const R=fs.readFileSync('.ai-runner/logs/runner.jsonl','utf8').split('\n').filter(Boolean).map(l=>JSON.parse(l));const rel=R.filter(e=>e.runId==='closure-release').length;const scr=R.filter(e=>e.exit!==undefined).length;console.log('M1',rel,'/',scr,'=',scr?(rel/scr).toFixed(4):'n/a')"
+  ```
+
+- M2 误放行率 = `closure-release` 中同 `sid` 5 分钟内出现 `syntax+truncated` 的比例；命令：
+  ```text
+  node -e "const fs=require('fs');const P=f=>fs.readFileSync(f,'utf8').split('\n').filter(Boolean).map(l=>JSON.parse(l));const R=P('.ai-runner/logs/runner.jsonl'),J=P('.ai-runner/logs/reject.jsonl');const W=300000;const rel=R.filter(e=>e.runId==='closure-release');const hit=rel.filter(r=>J.some(j=>j.sid===r.sid&&j.kind==='syntax'&&j.truncated===true&&j.ts>=r.ts&&j.ts-r.ts<=W));console.log('M2',hit.length,'/',rel.length,'=',rel.length?(hit.length/rel.length).toFixed(4):'n/a')"
+  ```
+
+- M3 收尾丢失率 = `board.jsonl` 中 `push` 后 10 分钟内无 `complete`/`fail` 的比例（探针 sid 已排除）；命令：
+  ```text
+  node -e "const fs=require('fs');const B=fs.readFileSync('.ai-runner/logs/board.jsonl','utf8').split('\n').filter(Boolean).map(l=>JSON.parse(l));const W=600000;const P=B.filter(b=>b.mode==='push'&&!/^sess-probe/.test(b.sid));const O=P.filter(p=>!B.some(b=>b.sid===p.sid&&(b.mode==='complete'||b.mode==='fail')&&b.ts>p.ts&&b.ts-p.ts<=W));console.log('M3',O.length,'/',P.length,'=',P.length?(O.length/P.length).toFixed(4):'n/a')"
+  ```
+
+需排除的探针 sid（人为注入，不是真实工作负载）：`sess-probe-reject` / `sess-probe-board` / `sess-live-restart` / `sess-restart-check`。M3 命令已用 `!/^sess-probe/` 过滤前两类，其余两类要人工核。
+
+历史基线（2026-10-05 首跑）：
+
+- M1 = 0/6945 = 0.0000（闭合门上线至今还没触发过「延迟 3 帧后放行」）
+- M2 = 0/0 = n/a（无 closure-release 样本，无法算）
+- M3 = 0/2 = 0.0000（排除探针后，2 个真实 push 都接到了收尾）
+- `reject.jsonl` 累计 53 条：`empty` 3 / `syntax` 18 / `head-contract` 32。
+
+观察期出口判据（提前写死，防事后挪门）：累计 ≥ 30 次 `closure-release` 或观察 ≥ 7 天后出报告；若 M2 误放行率 ≤ 10% 则「继续生成」按钮方案保持挂账不动；> 10% 则把 WO-20261005-04 段四的判定拿出来重议。
+  `syntax` 中 `truncated:true` 占 16/18，且集中在 `sess-tab-muur5dop-t4oqfu`（闭合门上线前的现场）。
+
+## 工单段二给的采集命令在 `/run` 脚本里内嵌会被上游截断：`node -e "...长字符串..."` 嵌进脚本会因引号/反斜杠转义 + 中文 + 长度叠加触发 `400 truncated`。规避
+
+命令本身照原文交给宿主（写进 `lessons.md` 的 `text` 围栏），执行时改用「读全文 + JS 侧计算」的方式重跑，不原样复制 `node -e`。
+
+## `patchFile` / `writeText` 追加长文本仍会触发上游截断：本轮 WO-08 段四追加约 40 行文本时连续 2 次被截。规避
+
+把长条目拆成 7 个 ≤ 27 行的小脚本串行追加，每段自带一句稳定锚点。
+
+## `lessons-status` 的 pending 数会随会话推进变化：我上一轮 TEXT 里的「22 条」是在 DONE 采集前读到的快照；DONE 提交后 DONE 里的「踩坑记录」段被自动采集新增 2 条（L866 / L870），pending 变 24。教训
+
+任何数字类陈述必须当场重跑一次取数，不能复用几轮前的快照。
+
+## DONE 采集侧不去重，会追加同文重复
+
+本轮再次出现（L757/L759，与 WO-07 时同一机制）。清掉后 pending 不变（因为这条原本在 22 条里、且不增不减）—— 但记录层面是脏数据，本次已手工订正。修复采集侧不在本会话范围（见遗留风险）。

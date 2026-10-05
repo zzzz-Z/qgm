@@ -283,6 +283,7 @@ declare global {
   const scanReplyMarks: typeof import('./utils/reply-mark').scanReplyMarks
   const sendFill: typeof import('./composables/ai/useAiWindowSend').sendFill
   const sendFillTo: typeof import('./composables/ai/useAiWindowSend').sendFillTo
+  const sendFillToAsync: typeof import('./composables/ai/useAiWindowSend').sendFillToAsync
   const sendNewSession: typeof import('./composables/ai/useAiWindowSend').sendNewSession
   const sendNewSessionTo: typeof import('./composables/ai/useAiWindowSend').sendNewSessionTo
   const sendRotate: typeof import('./composables/ai/useAiWindowSend').sendRotate
@@ -914,6 +915,7 @@ declare module 'vue' {
     readonly scanReplyMarks: UnwrapRef<typeof import('./utils/reply-mark')['scanReplyMarks']>
     readonly sendFill: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['sendFill']>
     readonly sendFillTo: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['sendFillTo']>
+    readonly sendFillToAsync: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['sendFillToAsync']>
     readonly sendNewSession: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['sendNewSession']>
     readonly sendNewSessionTo: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['sendNewSessionTo']>
     readonly sendRotate: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['sendRotate']>

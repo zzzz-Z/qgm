@@ -89,6 +89,46 @@ export function sendFill(payload: FillPayload): boolean {
   return sendFillTo(getActiveWinSid(), payload)
 }
 
+/**
+ * 异步 fill：发帧后等油猴回 fill-ack，超时判 failed
+ * [WHY] 同步 sendFillTo 的 postMessage 恒返回 true，对端是否存在/是否处理完全不可知 → UI 假「已发送」
+ * [CONSTRAINT] ackId 由本函数生成并随帧下发；只匹配自己的 ackId，避免并发 fill 串话
+ * [CHANGE-IMPACT] 新窗口路径（copyAndFill 三处）改调本函数；循环轮次内路径仍用 sendFillTo（行为不变）
+ */
+export function sendFillToAsync(sid: string, payload: FillPayload, timeoutMs = 5000): Promise<'sent' | 'failed'> {
+  const win = getWindowBySid(sid)
+  if (!win) { log.warn('[sendFillToAsync] win=null sid=', sid); return Promise.resolve('failed') }
+  const origin = targetOriginFor(sid)
+  if (!origin) { log.warn('[sendFillToAsync] origin="" sid=', sid); return Promise.resolve('failed') }
+  const ackId = `fa_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  return new Promise<'sent' | 'failed'>((resolve) => {
+    let done = false
+    function finish(r: 'sent' | 'failed'): void {
+      if (done) return
+      done = true
+      window.removeEventListener('message', onMsg)
+      resolve(r)
+    }
+    function onMsg(e: MessageEvent): void {
+      const d = e && e.data
+      if (!d || typeof d !== 'object') return
+      const m = d as { type?: string, ackId?: string, ok?: boolean }
+      if (m.type !== 'ai-runner:fill-ack') return
+      if (String(m.ackId || '') !== ackId) return
+      finish(m.ok ? 'sent' : 'failed')
+    }
+    try {
+      window.addEventListener('message', onMsg)
+      win.postMessage({ type: 'ai-runner:fill', ...payload, ackId }, origin)
+    } catch (e) {
+      log.warn('[sendFillToAsync] postMessage threw', e)
+      finish('failed')
+      return
+    }
+    setTimeout(finish, timeoutMs, 'failed')
+  })
+}
+
 /** 通知油猴停止（清 lastScript / Observer / 监听） */
 export function sendStopTo(sid: string): boolean {
   const win = getWindowBySid(sid)

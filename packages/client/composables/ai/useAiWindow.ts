@@ -16,12 +16,19 @@ import {
   setActiveWinSid,
   setWindowEntry,
   targetOrigin,
+  // [host-fix-tsc-v1] waitWindowReady 用的是按 sid 取 origin 的 targetOriginFor，
+  //   误写成只导入 targetOrigin（activeWinSid 版）⇒ test:tsc 无 auto-import 兜底时报 TS2304
+  targetOriginFor,
 } from './useAiWindowTable'
+// [host-fix-tsc-v1] toast 原依赖 auto-import 兜底：app 能跑、test:tsc/vitest 裸跑必 TS2304
+//   （AGENTS.md「auto-import 会掩盖导入错误」——本轮 test:tsc 实抓，显式导入修复）
+import { toast } from '../ui/useToast'
 import {
   isHeadless,
   loadTransport,
   sendFill,
   sendFillTo,
+  sendFillToAsync,
   sendNewSession,
   sendNewSessionTo,
   sendRotate,
@@ -166,8 +173,11 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
   // 1. 内存里有引用且活着
   let win = getActiveWin()
   if (win && !win.closed) {
-    const r = sendFill({ prompt: finalPrompt, ...imagePayload }) ? 'sent' : 'failed'
-    if (r === 'failed') log.warn('[copyAndFill] B1 sendFill failed sid=', sid, 'name=', name)
+    const r = await sendFillToAsync(sid, { prompt: finalPrompt, ...imagePayload })
+    if (r === 'failed') {
+      log.warn('[copyAndFill] B1 sendFillToAsync failed sid=', sid, 'name=', name)
+      toast('首问未送达（窗口未就绪/输入框未就绪）；完整内容已复制到剪贴板，请手动粘贴', 'error')
+    }
     return r
   }
   log.info('[copyAndFill] B1 skipped win=', !!win, 'closed=', win ? win.closed : 'n/a')
@@ -183,15 +193,19 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
   } catch { /* cross-origin 抛错视为找回失败 */ }
 
   if (win && !win.closed) {
-    const ok1 = sendFill({ prompt: finalPrompt, ...imagePayload })
-    if (ok1) return 'sent'
+    const ok1 = await sendFillToAsync(sid, { prompt: finalPrompt, ...imagePayload })
+    if (ok1 === 'sent') return 'sent'
   }
 
   // 3. 都失败 → 尝试开新窗口（可能被 popup blocker 拦截）
   const w = openSite()
   if (w) {
     await promiseTimeout(1500)
-    return sendFill({ prompt: finalPrompt, ...imagePayload }) ? 'opened' : 'failed'
+    const ok2 = await sendFillToAsync(sid, { prompt: finalPrompt, ...imagePayload })
+    if (ok2 === 'failed') {
+      toast('首问未送达（窗口未就绪/输入框未就绪）；完整内容已复制到剪贴板，请手动粘贴', 'error')
+    }
+    return ok2 === 'sent' ? 'opened' : 'failed'
   }
 
   // 4. 全失败
@@ -208,6 +222,35 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
  * 组合式函数：窗口与发送 API 统一出口
  * [CHANGE-IMPACT] 实现分居 useAiWindowTable / useAiWindowSend；本函数保留原语义供组合式调用方使用
  */
+/**
+ * [window-ready-wait-v1] 等新窗口油猴就绪：任一 ai-runner:* 回信即视为已就绪
+ * [WHY] 固定 1500ms 在站点加载 >1.5s 时 fill 必丢；改为轮询回信信号，就绪即发
+ * [CONSTRAINT] 只有 preWin 为空（新窗口）才需要等；已活窗口 tampermonkey 已就绪
+ */
+function waitWindowReady(sid: string, maxMs = 15000): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const origin = targetOriginFor(sid)
+    let done = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    function finish(ok: boolean): void {
+      if (done) return
+      done = true
+      window.removeEventListener('message', onMsg)
+      if (timer) clearTimeout(timer)
+      resolve(ok)
+    }
+    function onMsg(e: MessageEvent): void {
+      if (origin && e.origin && e.origin !== origin) return
+      const d = e && e.data
+      if (!d || typeof d !== 'object') return
+      const t = String((d as { type?: string }).type || '')
+      if (t === 'ai-runner:session-id' || t === 'ai-runner:reply' || t === 'ai-runner:fill-ack') finish(true)
+    }
+    window.addEventListener('message', onMsg)
+    timer = setTimeout(finish, maxMs, false)
+  })
+}
+
 /**
  * [session-open-facade] 统一开新会话入口：openSite + 可选首问（可强制带规则）
  * [WHY] 三处开窗入口（手动按钮 / 开新会话按钮 / 切项目自动）需一致走规则注入；
@@ -243,7 +286,7 @@ export async function openAiSession(opts?: {
   }
   if (!win) return { win: null, fill: null }
   if (!p) return { win, fill: null }
-  if (!preWin) await promiseTimeout(1500)
+  if (!preWin) await waitWindowReady(preSid)
   const fill = await copyAndFill(p, { forceRules: opts?.forceRules, skipRules: opts?.skipRules })
   return { win, fill }
 }
