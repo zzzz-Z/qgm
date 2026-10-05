@@ -3,16 +3,40 @@ dist/
 .DS_Store
 *.log
 .trae/
-.ai-runner/
+# [gitignore-dir-vs-content-v1] 必须忽略「.ai-runner 的内容」而不是目录本身。
+# WHY: Git 明文规定「已在被排除**目录**之下的文件无法被 re-include」——原写法 `.ai-runner/` +
+#   `!.ai-runner/skills/**` 因此结构性地永远失效（实测 `git check-ignore -v
+#   .ai-runner/skills/skill-discovery/SKILL.md` 命中 `.gitignore:6:.ai-runner/`，
+#   `git ls-files .ai-runner/skills` = 0 个）。而 AGENTS.md 把
+#   `.ai-runner/skills/skill-discovery/SKILL.md` 当作技能发现协议的 SSOT 引用。
+# CHANGE-IMPACT: 改成忽略内容后，`.ai-runner/skills/**`（76 文件 / 600K）会以未跟踪状态出现在
+#   git status，`git add .ai-runner/skills` 即可完成入库；若团队决定不追踪技能语料，
+#   删掉这三行里的两条 `!` 即可回到「全部忽略」（但那时 skills-* 相关测试在干净检出下无意义）。
+# [knowledge-base-in-repo-v1] 2026-10-05 决策：`.ai-runner/skills/**` 与 `.ai-runner/lessons.md`
+#   **纳入版本库**。WHY: 这两者是「提交闸门」的输入而非运行态 —— 干净检出下 `pnpm test:unit`
+#   有 7 个用例红，全部只因它们缺失（lessons-hygiene 断言 lessons.md 存在；
+#   `tests/fixtures/real-skills.ts` 遍历 `.ai-runner/skills/*/SKILL.md`）。
+#   入库后 CI 不再需要 `--exclude`，`ci.yml` 才真正等价于本地 `pnpm verify`。
+# CHANGE-IMPACT: 入库后 `.ai-runner/lessons.md` 会随 DONE 自动采集而增长 ⇒ 提交时会带 diff
+#   （这是刻意的：台账本就是被评审的产物）。其余 `.ai-runner/**`（state/日志/runs/备份/tmp）
+#   仍是运行态，**不得**入库。
+# [tmp-scratch-v1] 仓库根的 tmp/ 是一次性探针脚本的落地处，无任何脚本/配置引用（实测 grep
+#   package.json / scripts / bin / 各包 manifest 均为 0 命中）⇒ 忽略，避免长期污染 git status。
+#   写成根锚定 `/tmp/`：裸 `tmp/` 会连带匹配任意层级的同名目录（如 packages/*/tmp/）。
+.ai-runner/*
+!.ai-runner/lessons.md
 !.ai-runner/skills/
 !.ai-runner/skills/**
+/tmp/
 PROJECT-NOTES.md
-client/pnpm-lock.yaml
-client/node_modules/
+packages/client/pnpm-lock.yaml
+packages/client/node_modules/
 
 # [refactor] e2e 运行态产物
-client/test-results/
-client/e2e/playwright-report/
+# [gitignore-path-v1] 前缀必须是 packages/client/…：旧的 client/… 指不到任何实际目录
+# （实测 packages/client/test-results 3.4 MB / 109 文件曾以未跟踪状态灌进 git status）
+packages/client/test-results/
+packages/client/e2e/playwright-report/
 # --- 环境与本地产物（HCLC/RULES 安全基线） ---
 .env
 .env.*

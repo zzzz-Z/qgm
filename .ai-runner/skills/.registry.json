@@ -1,0 +1,105 @@
+{
+  "note": "技能来源标注。已装清单以磁盘 .ai-runner/skills/*/SKILL.md 为唯一事实来源（services: GET /__ai/skills）；本表由 reconcileRegistry 自动对齐磁盘，不要手工编辑。",
+  "entries": [
+    {
+      "name": "antfu",
+      "source": "antfu/skills",
+      "url": "https://github.com/antfu/skills/blob/HEAD/skills/antfu/SKILL.md"
+    },
+    {
+      "name": "browser-testing-with-devtools",
+      "source": "addyosmani/agent-skills",
+      "url": "https://github.com/addyosmani/agent-skills/blob/HEAD/skills/browser-testing-with-devtools/SKILL.md"
+    },
+    {
+      "name": "debugging-and-error-recovery",
+      "source": "addyosmani/agent-skills",
+      "url": "https://github.com/addyosmani/agent-skills/blob/HEAD/skills/debugging-and-error-recovery/SKILL.md"
+    },
+    {
+      "name": "demo-skill",
+      "source": "(local)",
+      "url": "(local)"
+    },
+    {
+      "name": "hono",
+      "source": "honojs/skills",
+      "url": "https://github.com/honojs/skills/blob/HEAD/skills/hono/SKILL.md"
+    },
+    {
+      "name": "playwright-skill",
+      "source": "lackeyjb/playwright-skill",
+      "url": "https://github.com/lackeyjb/playwright-skill/blob/HEAD/skills/playwright-skill/SKILL.md"
+    },
+    {
+      "name": "playwright-test-data-isolation",
+      "source": "stablyai/agent-skills",
+      "url": "https://github.com/stablyai/agent-skills/blob/HEAD/skills/playwright-test-data-isolation/SKILL.md"
+    },
+    {
+      "name": "pnpm",
+      "source": "(unknown)",
+      "url": "(unknown)"
+    },
+    {
+      "name": "skill-discovery",
+      "source": "(local)",
+      "url": "(local)"
+    },
+    {
+      "name": "source-driven-development",
+      "source": "addyosmani/agent-skills",
+      "url": "https://github.com/addyosmani/agent-skills/blob/HEAD/skills/source-driven-development/SKILL.md"
+    },
+    {
+      "name": "systematic-debugging",
+      "source": "obra/superpowers",
+      "url": "https://github.com/obra/superpowers/blob/HEAD/skills/systematic-debugging/SKILL.md"
+    },
+    {
+      "name": "tdd-red-green-refactor",
+      "source": "addyosmani/agent-skills",
+      "url": "https://github.com/addyosmani/agent-skills/blob/HEAD/skills/test-driven-development/SKILL.md"
+    },
+    {
+      "name": "test-driven-development",
+      "source": "obra/superpowers",
+      "url": "https://github.com/obra/superpowers/blob/HEAD/skills/test-driven-development/SKILL.md"
+    },
+    {
+      "name": "unocss",
+      "source": "antfu/skills",
+      "url": "https://github.com/antfu/skills/blob/HEAD/skills/unocss/SKILL.md"
+    },
+    {
+      "name": "verification-before-completion",
+      "source": "obra/superpowers",
+      "url": "https://github.com/obra/superpowers/blob/HEAD/skills/verification-before-completion/SKILL.md"
+    },
+    {
+      "name": "vite",
+      "source": "antfu/skills",
+      "url": "https://github.com/antfu/skills/blob/HEAD/skills/vite/SKILL.md"
+    },
+    {
+      "name": "vitest",
+      "source": "antfu/skills",
+      "url": "https://github.com/antfu/skills/blob/HEAD/skills/vitest/SKILL.md"
+    },
+    {
+      "name": "vue",
+      "source": "antfu/skills",
+      "url": "https://github.com/antfu/skills/blob/HEAD/skills/vue/SKILL.md"
+    },
+    {
+      "name": "vueuse-functions",
+      "source": "vueuse/skills",
+      "url": "(unknown)"
+    },
+    {
+      "name": "webapp-testing",
+      "source": "anthropics/skills",
+      "url": "https://github.com/anthropics/skills/blob/HEAD/skills/webapp-testing/SKILL.md"
+    }
+  ]
+}

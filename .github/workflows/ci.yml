@@ -1,0 +1,62 @@
+# [ci-v1] 在干净环境复跑提交闸门。
+# [WHY] 本仓库长期没有 CI，而这正是几类缺陷能潜伏的共同**使能条件**（2026-10-05 复核实测）：
+#   - Playwright 快照名默认含 {-snapshotSuffix}（= process.platform）⇒ 基线被钉成 *-chromium-darwin.png，
+#     换机器/换平台报的是「像素差异」，实际是「快照名不匹配」，排查方向被带偏；
+#   - playwright.config.ts 的 webServer.cwd 少一级（'..' 落在 packages/）⇒ 只因本机常年复用已在运行的
+#     dev server（reuseExistingServer）而从未真正走启动分支；
+#   - 视觉基线自身退化成 dark ≡ light、01 ≡ 02（10 张图只有 4 个唯一哈希），而 e2e 不在 verify 里。
+# [CONSTRAINT] 这里**不跑 e2e**：视觉基线是平台相关的（Linux 的字体与抗锯齿与 macOS 不同），
+#   在 ubuntu runner 上跑必然与 darwin 基线不符。e2e 仍属本地闸门（pnpm run-all）；
+#   而它最容易静默失效的两处 —— 遮罩选择器锈蚀、基线退化 —— 已由单测
+#   packages/client/tests/visual-spec-guard.node-test.ts 守住，CI 能覆盖。
+# [CONSTRAINT] test:unit **不再传 --exclude**。2026-10-05 决策：知识库纳入版本库
+#   （`.ai-runner/skills/**` + `.ai-runner/lessons.md`，见 .gitignore 的 [knowledge-base-in-repo-v1]）。
+#   依据是实测：干净检出下 pnpm test:unit 曾有 8 个用例红，其中 7 个纯粹因为这两个知识库缺失
+#   （lessons-hygiene 断言 lessons.md 存在；tests/fixtures/real-skills.ts 遍历 .ai-runner/skills/*/SKILL.md），
+#   第 8 个（selfcheck-l2 G12）是缺产物，本 workflow 先 build 即解决。
+#   [CHANGE-IMPACT] 因此本地新增测试若依赖 `.ai-runner/**` 下的**运行态**（state/日志/runs），
+#   在 CI 上仍会红 —— 那说明该测试把运行态当成了输入，应改为自造 fixture。
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # [ci-pnpm-version] 与本地工具链一致（`pnpm -v` = 11.8.0）；版本不符会让 --frozen-lockfile 失败
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建（tsc + SPA + server + copy-runtime）
+        run: pnpm build
+
+      - name: 文档索引双向对账
+        run: pnpm docs:verify
+
+      - name: 类型检查（四套）
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: 单元测试
+        run: pnpm test:unit
