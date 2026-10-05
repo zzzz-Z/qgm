@@ -566,3 +566,21 @@ config 改对了，但磁盘上 10 个 `*-darwin.png` 不会自动改名为无�
 **修法**：给 03 加**只在它用**的额外遮罩（`.wl-scroll`），**只遮 git 派生的清单、保留提交框等稳定 chrome** —— 整窗格遮掉会让截图退化成空白、失去回归价值。守卫里额外断言「03 的用例体必须真的引用该遮罩数组」，防有人把 mask 改回旧写法而守卫仍绿。
 
 **可迁移结论**：像素基线**不能覆盖「由仓库/运行状态派生」的 UI 区域**（git 变更清单、文件树、计数器、时长、日志）。这类区域红不代表回归，只代表你今天写了代码 —— 它会把视觉回归变成「每次都要 `--update-snapshots`」的噪音源，最终没人再看它。加基线时先问一句：**这块内容会不会因为「我改了别的代码」而变？**
+
+## 同一文件名不同平台的快照不会自动改名
+
+[VERIFIED] 2026-10-05 B · 本轮亲跑：`snapshotPathTemplate` 去掉平台段后，`git status` 里 10 个 `*-darwin.png` 为 `D`、10 个新名称为 `??`；重采后 `ls packages/client/e2e/visual.spec.ts-snapshots | wc -l` = 10，无 `-darwin` 残留
+
+`snapshotPathTemplate` 去掉 `{platform}` 段后，路径修好了，但旧 `*-darwin.png` 成为孤儿文件，需随 `--update-snapshots` 一并清理，否则快照目录混着两套。
+
+## `new URL(req.url, base)` 在 Node 里可抛 `ERR_INVALID_URL`
+
+[VERIFIED] 2026-10-05 B · 本轮亲跑：裸 TCP 发 `GET // HTTP/1.1` ⇒ 旧产物 `exitCode=1`（进程退出）；`grep -rn "new URL(req.url" packages/core/src apps/standalone/src` 实测五处真实调用点
+
+`req.url` 是任意字节串（如 `GET // HTTP/1.1`），不是合法 URL。[补正] 实测是**五处**（`grep -rn "new URL(req.url" packages/core/src apps/standalone/src` 命中五处，另有一处 `hono-bridge.ts:76` 是注释），失败分支各自不同 —— `standalone/src/server.ts:155`(serveStatic) 返回 false、`handle.ts:89` 返回 400、`http.ts:135`(guardRequest) 放行、`attach-ws.ts:78`(onUpgrade) 只 return 不 destroy（因与 Vite 共用 http server，销毁会打死 HMR）、`hono-bridge.ts:15`(nodeToFetchRequest) 依赖 `inferOrigin` 兜底（Host / x-forwarded-proto 未校验时落到 localhost）。**不能机械统一。**
+
+## `uncaughtException` 兜底的隐藏代价
+
+[VERIFIED] 2026-10-05 B · 本轮亲跑：`upgrade` 通道打畸形目标 `//` 后，`.ai-runner/logs/server-crash.log` 从 488 B 涨到 859 B，堆栈顶为 `Server.onUpgrade (index.js:1511:7)`；而同样不响应的 `/nope` 零增长 ⇒ 「假崩溃」确实由兜底产生
+
+D8 装兜底后进程不死了，但 `attach-ws` 的畸形请求会被记成「假崩溃」，把真正的崩溃信号淹掉——这是修 A 引出 B 的典型，须由 `attach-ws-upgrade-guard` 单独清理。
