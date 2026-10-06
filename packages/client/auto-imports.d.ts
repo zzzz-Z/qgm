@@ -28,6 +28,7 @@ declare global {
   const PHASE_ERROR_CLASS: typeof import('./utils/timeline-build').PHASE_ERROR_CLASS
   const PHASE_LABEL: typeof import('./utils/timeline-build').PHASE_LABEL
   const PLAN_RESUME_MAX: typeof import('./composables/ai/auto-loop/state').PLAN_RESUME_MAX
+  const ROUND_MERGE_MS: typeof import('./composables/ai/auto-loop/pending-scripts').ROUND_MERGE_MS
   const SESSION_HISTORY_KEY: typeof import('./composables/ui/useAppStorage').SESSION_HISTORY_KEY
   const SUMMARY_INSTRUCTION: typeof import('./composables/ai/useAutoLoop').SUMMARY_INSTRUCTION
   const TAIL_MAX_CHARS: typeof import('./utils/timeline-build').TAIL_MAX_CHARS
@@ -42,6 +43,7 @@ declare global {
   const TOAST_SHORT_MEDIUM: typeof import('./utils/toast-durations').TOAST_SHORT_MEDIUM
   const TOAST_VERY_LONG: typeof import('./utils/toast-durations').TOAST_VERY_LONG
   const TRANSITIONS: typeof import('./composables/ai/auto-loop/transitions').TRANSITIONS
+  const _selfcheckFailCount: typeof import('./composables/ai/auto-loop/reply-handlers')._selfcheckFailCount
   const activeLoop: typeof import('./composables/ai/useAutoLoop').activeLoop
   const activeSessionId: typeof import('./composables/ui/useAppStorage').activeSessionId
   const applyToEditor: typeof import('./composables/runner/useScriptInbox').applyToEditor
@@ -59,9 +61,14 @@ declare global {
   const buildLoopResultPrompt: typeof import('./composables/ai/auto-loop/loop-result-prompt').buildLoopResultPrompt
   const buildNewSessionPrompt: typeof import('./composables/ai/session-prompt').buildNewSessionPrompt
   const buildOneCard: typeof import('./utils/timeline-build').buildOneCard
+  const buildPlanResumePrompt: typeof import('./composables/ai/auto-loop/loop-result-prompt').buildPlanResumePrompt
   const buildRetryPrompt: typeof import('./composables/ai/loopLogic').buildRetryPrompt
+  const buildRoundBatchPrompt: typeof import('./composables/ai/auto-loop/loop-result-prompt').buildRoundBatchPrompt
+  const buildSelfcheckFailPrompt: typeof import('./composables/ai/auto-loop/loop-result-prompt').buildSelfcheckFailPrompt
   const buildSkillsBlock: typeof import('./composables/ai/skill-registry').buildSkillsBlock
+  const cancelRoundMerge: typeof import('./composables/ai/auto-loop/pending-scripts').cancelRoundMerge
   const clampTextPreview: typeof import('./utils/timeline-preview').clampTextPreview
+  const classifyRoundFailure: typeof import('./composables/ai/auto-loop/loop-result-prompt').classifyRoundFailure
   const clearEvents: typeof import('./composables/ui/useEventStream').clearEvents
   const clearInbox: typeof import('./composables/runner/useScriptInbox').clearInbox
   const clearProbeLog: typeof import('./composables/ui/render-probe').clearProbeLog
@@ -233,6 +240,7 @@ declare global {
   const peekAll: typeof import('./composables/runner/useScriptInbox').peekAll
   const peekPendingAskKey: typeof import('./composables/ui/useEventStream').peekPendingAskKey
   const peekPendingScripts: typeof import('./composables/ai/auto-loop/pending-scripts').peekPendingScripts
+  const peekRoundOutcomes: typeof import('./composables/ai/auto-loop/pending-scripts').peekRoundOutcomes
   const pendingDecision: typeof import('./composables/ai/auto-loop/state').pendingDecision
   const pendingScriptCount: typeof import('./composables/ai/auto-loop/pending-scripts').pendingScriptCount
   const persist: typeof import('./composables/ai/useAutoLoop').persist
@@ -309,6 +317,7 @@ declare global {
   const singletonView: typeof import('./composables/ai/auto-loop/state').singletonView
   const softPause: typeof import('./composables/ai/useAutoLoop').softPause
   const stage: typeof import('./composables/ai/auto-loop/state').stage
+  const stageRoundOutcome: typeof import('./composables/ai/auto-loop/pending-scripts').stageRoundOutcome
   const startHandoff: typeof import('./composables/ai/useAutoLoop').startHandoff
   const startLoop: typeof import('./composables/ai/useAutoLoop').startLoop
   const startWaiting: typeof import('./composables/ai/useAiWaiting').startWaiting
@@ -331,6 +340,7 @@ declare global {
   const toRefs: typeof import('vue').toRefs
   const toValue: typeof import('vue').toValue
   const toast: typeof import('./composables/ui/useToast').toast
+  const traceSend: typeof import('./composables/ai/send-trace').traceSend
   const transition: typeof import('./composables/ai/auto-loop/transitions').transition
   const transportKind: typeof import('./composables/ai/useAiTransport').transportKind
   const triggerRef: typeof import('vue').triggerRef
@@ -567,6 +577,9 @@ declare global {
   export type { LoopEvent } from './composables/ai/auto-loop/transitions'
   import('./composables/ai/auto-loop/transitions')
   // @ts-ignore
+  export type { SendTraceInput } from './composables/ai/send-trace'
+  import('./composables/ai/send-trace')
+  // @ts-ignore
   export type { MatchedSkill } from './composables/ai/skill-registry'
   import('./composables/ai/skill-registry')
   // @ts-ignore
@@ -662,6 +675,7 @@ declare module 'vue' {
     readonly PHASE_ERROR_CLASS: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_ERROR_CLASS']>
     readonly PHASE_LABEL: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_LABEL']>
     readonly PLAN_RESUME_MAX: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['PLAN_RESUME_MAX']>
+    readonly ROUND_MERGE_MS: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['ROUND_MERGE_MS']>
     readonly SESSION_HISTORY_KEY: UnwrapRef<typeof import('./composables/ui/useAppStorage')['SESSION_HISTORY_KEY']>
     readonly SUMMARY_INSTRUCTION: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['SUMMARY_INSTRUCTION']>
     readonly TAIL_MAX_CHARS: UnwrapRef<typeof import('./utils/timeline-build')['TAIL_MAX_CHARS']>
@@ -676,6 +690,7 @@ declare module 'vue' {
     readonly TOAST_SHORT_MEDIUM: UnwrapRef<typeof import('./utils/toast-durations')['TOAST_SHORT_MEDIUM']>
     readonly TOAST_VERY_LONG: UnwrapRef<typeof import('./utils/toast-durations')['TOAST_VERY_LONG']>
     readonly TRANSITIONS: UnwrapRef<typeof import('./composables/ai/auto-loop/transitions')['TRANSITIONS']>
+    readonly _selfcheckFailCount: UnwrapRef<typeof import('./composables/ai/auto-loop/reply-handlers')['_selfcheckFailCount']>
     readonly activeLoop: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['activeLoop']>
     readonly activeSessionId: UnwrapRef<typeof import('./composables/ui/useAppStorage')['activeSessionId']>
     readonly applyToEditor: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['applyToEditor']>
@@ -693,9 +708,14 @@ declare module 'vue' {
     readonly buildLoopResultPrompt: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-result-prompt')['buildLoopResultPrompt']>
     readonly buildNewSessionPrompt: UnwrapRef<typeof import('./composables/ai/session-prompt')['buildNewSessionPrompt']>
     readonly buildOneCard: UnwrapRef<typeof import('./utils/timeline-build')['buildOneCard']>
+    readonly buildPlanResumePrompt: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-result-prompt')['buildPlanResumePrompt']>
     readonly buildRetryPrompt: UnwrapRef<typeof import('./composables/ai/loopLogic')['buildRetryPrompt']>
+    readonly buildRoundBatchPrompt: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-result-prompt')['buildRoundBatchPrompt']>
+    readonly buildSelfcheckFailPrompt: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-result-prompt')['buildSelfcheckFailPrompt']>
     readonly buildSkillsBlock: UnwrapRef<typeof import('./composables/ai/skill-registry')['buildSkillsBlock']>
+    readonly cancelRoundMerge: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['cancelRoundMerge']>
     readonly clampTextPreview: UnwrapRef<typeof import('./utils/timeline-preview')['clampTextPreview']>
+    readonly classifyRoundFailure: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-result-prompt')['classifyRoundFailure']>
     readonly clearEvents: UnwrapRef<typeof import('./composables/ui/useEventStream')['clearEvents']>
     readonly clearInbox: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['clearInbox']>
     readonly clearProbeLog: UnwrapRef<typeof import('./composables/ui/render-probe')['clearProbeLog']>
@@ -865,6 +885,7 @@ declare module 'vue' {
     readonly peekAll: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['peekAll']>
     readonly peekPendingAskKey: UnwrapRef<typeof import('./composables/ui/useEventStream')['peekPendingAskKey']>
     readonly peekPendingScripts: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['peekPendingScripts']>
+    readonly peekRoundOutcomes: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['peekRoundOutcomes']>
     readonly pendingDecision: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['pendingDecision']>
     readonly pendingScriptCount: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['pendingScriptCount']>
     readonly persist: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['persist']>
@@ -941,6 +962,7 @@ declare module 'vue' {
     readonly singletonView: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['singletonView']>
     readonly softPause: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['softPause']>
     readonly stage: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['stage']>
+    readonly stageRoundOutcome: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['stageRoundOutcome']>
     readonly startHandoff: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['startHandoff']>
     readonly startLoop: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['startLoop']>
     readonly startWaiting: UnwrapRef<typeof import('./composables/ai/useAiWaiting')['startWaiting']>
@@ -963,6 +985,7 @@ declare module 'vue' {
     readonly toRefs: UnwrapRef<typeof import('vue')['toRefs']>
     readonly toValue: UnwrapRef<typeof import('vue')['toValue']>
     readonly toast: UnwrapRef<typeof import('./composables/ui/useToast')['toast']>
+    readonly traceSend: UnwrapRef<typeof import('./composables/ai/send-trace')['traceSend']>
     readonly transition: UnwrapRef<typeof import('./composables/ai/auto-loop/transitions')['transition']>
     readonly transportKind: UnwrapRef<typeof import('./composables/ai/useAiTransport')['transportKind']>
     readonly triggerRef: UnwrapRef<typeof import('vue')['triggerRef']>

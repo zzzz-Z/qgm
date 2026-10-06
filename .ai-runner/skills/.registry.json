@@ -32,6 +32,11 @@
       "url": "https://github.com/fellipeutaka/leon/blob/HEAD/skills/playwright/SKILL.md"
     },
     {
+      "name": "playwright-best-practices",
+      "source": "currents-dev/playwright-best-practices-skill",
+      "url": "https://github.com/currents-dev/playwright-best-practices-skill/blob/HEAD/playwright-best-practices/SKILL.md"
+    },
+    {
       "name": "playwright-skill",
       "source": "lackeyjb/playwright-skill",
       "url": "https://github.com/lackeyjb/playwright-skill/blob/HEAD/skills/playwright-skill/SKILL.md"
@@ -70,6 +75,16 @@
       "name": "test-driven-development",
       "source": "obra/superpowers",
       "url": "https://github.com/obra/superpowers/blob/HEAD/skills/test-driven-development/SKILL.md"
+    },
+    {
+      "name": "testing-vue-vitest",
+      "source": "535803710/ai-rd-skills",
+      "url": "https://github.com/535803710/ai-rd-skills/blob/HEAD/skills/testing-vue-vitest/SKILL.md"
+    },
+    {
+      "name": "typescript-pro",
+      "source": "agenticaiengineer/ai-engineer-skills",
+      "url": "https://github.com/agenticaiengineer/ai-engineer-skills/blob/HEAD/skills/typescript-pro/SKILL.md"
     },
     {
       "name": "unocss",

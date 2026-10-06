@@ -61,6 +61,9 @@ export {
 //   与 scanScriptHead 同理：上提 barrel，令 routes/ 调用方统一从 deps 入口引入。
 export { buildBoardEntry, buildRejectEntry } from './routes/control-log.js'
 
+// [reject-breaker-v1] 前置拒收熔断器（见 routes/reject-breaker.ts）
+export { type BreakerVerdict, recordReject, REJECT_BREAKER_MAX, resetRejectStreak } from './routes/reject-breaker.js'
+
 // HTTP 辅助
 export {
   type IncomingMessage,

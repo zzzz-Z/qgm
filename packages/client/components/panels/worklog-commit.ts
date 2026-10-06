@@ -48,6 +48,31 @@ export function useWorklogCommit(deps: UseWorklogCommitDeps) {
   const pendingCommitSid = ref('')
   let pendingTimer: ReturnType<typeof setTimeout> | null = null
 
+  /**
+   * [commit-message-multiline-v1] 从 AI 回复文本提取完整 commit message（保留多行 body/footer）。
+   * [WHY] 原 extractCommitLine 只取首行非空 → body/footer 全丢；用户要求完整回填输入框。
+   * [CONSTRAINT] 只剥围栏行、首行列表/标题前缀、整段首尾反引号；body 里的列表原样保留。
+   */
+  function extractCommitMessage(text: string): string {
+    const raw = String(text || '').replace(/\r\n?/g, '\n').trim()
+    if (!raw) return ''
+    const Q = String.fromCharCode(96)
+    const FENCE = Q + Q + Q
+    const lines = raw.split(String.fromCharCode(10)).filter(ln => !ln.trim().startsWith(FENCE))
+    let msg = lines.join('\n').trim()
+    while (msg.startsWith(Q) && msg.endsWith(Q) && msg.length > 1) {
+      msg = msg.slice(1, -1).trim()
+    }
+    const arr = msg.split(String.fromCharCode(10))
+    const firstIdx = arr.findIndex(ln => ln.trim().length > 0)
+    // [commit-message-multiline-v2] 仅单行时剥列表/标题前缀；多行 message 保留首行原样
+    //   （AI 生成的多行 body 首行若恰为列表项，剥前缀会改变语义）
+    if (firstIdx >= 0 && arr.filter(ln => ln.trim().length > 0).length === 1) {
+      arr[firstIdx] = arr[firstIdx].replace(/^(?:[-*+]\s+|#{1,6}\s+)/, '').trim()
+    }
+    return arr.join('\n').trim()
+  }
+
   /** 从 AI 回复文本中提取单行 commit message（去围栏 / 列表前缀 / 首尾反引号） */
   function extractCommitLine(text: string): string {
     const raw = String(text || '').trim()
@@ -179,5 +204,5 @@ export function useWorklogCommit(deps: UseWorklogCommitDeps) {
     if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null }
   }
 
-  return { aiGenerating, aiCommitMsg, aiError, pendingCommitRequest, pendingCommitSid, extractCommitLine, generateLocalCommitMsg, generateCommitMsg, cleanup }
+  return { aiGenerating, aiCommitMsg, aiError, pendingCommitRequest, pendingCommitSid, extractCommitLine, extractCommitMessage, generateLocalCommitMsg, generateCommitMsg, cleanup }
 }

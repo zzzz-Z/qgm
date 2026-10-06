@@ -153,3 +153,44 @@ export function buildBoardEntry(
     attempts: Number(out.attempts) || 0,
   }
 }
+
+// [send-trace-v1] 出站 fill 留痕：`reject` / `board` 记的都是「脚本已经到服务端之后」的事，
+//   而「应用往 AI 页面投了多少条提问」在服务端此前**零留痕** —— 于是
+//   ① 频控阈值只能拍；② 「同轮双发」只能猜；③ 「一条回复含 N 块 ⇒ N 次提问」只能从 run 数间接推算。
+//   本条通道把出站事件变成可数事实：`ts` 序列 ⇒ 真实间隔分布；`source` ⇒ 调用点占比；
+//   `promptHead` ⇒ 肉眼判「这条是不是结果回传」。**只记首部摘要，不记完整 prompt 正文。**
+
+/** 出站 fill 的留痕条目（由页面通道经 `/send-log` 上报） */
+export interface SendLogEntry {
+  channel: 'send'
+  /** 会话 id（页面通道形如 `sess-tab-*`；headless 池常为空串，由服务端归一化） */
+  sid: string
+  /** 投递路径：tm = 页面 postMessage（经油猴）；headless = 服务端浏览器池 */
+  via: string
+  /** 调用点归因：loop-round（循环引擎回传）/ copyOutput（ScriptPanel 结果回传）/ … */
+  source: string
+  /** prompt 的 UTF-8 字节数（体积判据；不落正文） */
+  promptBytes: number
+  /** prompt 前 120 字符（单行化）——足以判「结果回传 / 自检 / 续跑 / 用户提问」 */
+  promptHead: string
+  /** 调用方自报的投递结果；headless 分支恒为 true（fire-and-forget 无回执） */
+  ok: boolean
+}
+
+/**
+ * 组装出站 fill 的日志条目（纯函数，无 IO，便于值级单测）
+ * [CONSTRAINT] 所有字符串字段单行化 + 限长：jsonl 一行一条，正文换行会破坏结构；
+ *   且这是**唯一**由浏览器可控内容写入的通道，必须假定入参是任意字节串（不信任长度与类型）。
+ * @param body `/send-log` 的请求体（字段全部可选，缺省即用安全默认值）
+ */
+export function buildSendEntry(body: Record<string, unknown>): SendLogEntry {
+  return {
+    channel: 'send',
+    sid: toSingleLine(String(body.sid ?? ''), 120),
+    via: toSingleLine(String(body.via ?? ''), 16),
+    source: toSingleLine(String(body.source ?? ''), 40),
+    promptBytes: Math.max(0, Math.trunc(Number(body.promptBytes) || 0)),
+    promptHead: toSingleLine(String(body.promptHead ?? ''), 120),
+    ok: body.ok === true,
+  }
+}

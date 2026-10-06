@@ -63,9 +63,15 @@ function submitAnswer(text: string): void {
     <div class="done-summary-head">
       任务完成 · 总结
     </div>
-    <div class="done-summary-body" v-html="html" />
     <FoldToggle
       v-if="card.truncated"
+      :expanded="expanded"
+      :hidden-lines="card.hiddenLines"
+      @toggle="toggle"
+    />
+    <div class="done-summary-body" v-html="html" />
+    <FoldToggle
+      v-if="card.truncated && expanded"
       :expanded="expanded"
       :hidden-lines="card.hiddenLines"
       @toggle="toggle"
@@ -78,9 +84,15 @@ function submitAnswer(text: string): void {
       <span class="text-card-badge">AI</span>
       <span class="script-card-time">{{ card.timeLabel }}</span>
     </header>
-    <div class="done-summary-body" v-html="html" />
     <FoldToggle
       v-if="card.truncated"
+      :expanded="expanded"
+      :hidden-lines="card.hiddenLines"
+      @toggle="toggle"
+    />
+    <div class="done-summary-body" v-html="html" />
+    <FoldToggle
+      v-if="card.truncated && expanded"
       :expanded="expanded"
       :hidden-lines="card.hiddenLines"
       @toggle="toggle"
@@ -97,9 +109,15 @@ function submitAnswer(text: string): void {
       <span class="text-card-badge" :class="card.role === 'user-answer' ? 'answer-badge' : 'ask-badge'">你</span>
       <span class="script-card-time">{{ card.timeLabel }}</span>
     </header>
-    <div class="done-summary-body" v-html="html" />
     <FoldToggle
       v-if="card.truncated"
+      :expanded="expanded"
+      :hidden-lines="card.hiddenLines"
+      @toggle="toggle"
+    />
+    <div class="done-summary-body" v-html="html" />
+    <FoldToggle
+      v-if="card.truncated && expanded"
       :expanded="expanded"
       :hidden-lines="card.hiddenLines"
       @toggle="toggle"
@@ -118,13 +136,13 @@ function submitAnswer(text: string): void {
       <span v-if="qCard.answered" class="question-state">已回答</span>
       <span v-else-if="!isAskActive" class="question-state is-stale">已失效</span>
     </header>
-    <div v-if="card.text" class="done-summary-body" v-html="html" />
     <FoldToggle
       v-if="card.truncated"
       :expanded="expanded"
       :hidden-lines="card.hiddenLines"
       @toggle="toggle"
     />
+    <div v-if="card.text" class="done-summary-body" v-html="html" />
     <div v-if="qCard.options.length" class="question-options">
       <button
         v-for="o in qCard.options" :key="o.id"
@@ -156,6 +174,12 @@ function submitAnswer(text: string): void {
     <div v-else class="question-stale">
       此提问已失效（已被新的提问取代，或页面已刷新）
     </div>
+    <FoldToggle
+      v-if="card.truncated && expanded"
+      :expanded="expanded"
+      :hidden-lines="card.hiddenLines"
+      @toggle="toggle"
+    />
   </section>
 </template>
 

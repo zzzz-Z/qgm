@@ -13,7 +13,8 @@ gitHono.get('/git/head', async (c) => {
 gitHono.post('/git/commit-loop', async (c) => {
   let body: { message?: string } | null = null
   try { body = await c.req.json() } catch { body = null }
-  const message = String(body?.message || 'ai-runner: loop commit').slice(0, 200)
+  // [commit-message-multiline-v1] 上限 2000：AI 生成的 body/footer 常超 200，截断会丢信息
+  const message = String(body?.message || 'ai-runner: loop commit').slice(0, 2000)
   const r = await gitCommitAll(message)
   return c.json(r, r.ok ? 200 : 400)
 })

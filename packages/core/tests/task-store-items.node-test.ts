@@ -9,11 +9,14 @@ import {
   applyTaskMutation,
   bucketItems,
   commitTaskState,
+  gcStaleBuckets,
   matchItems,
+  MAX_TERMINAL_ITEMS,
   mutateTaskState,
   normKey,
   readTaskState,
   RUNNING_TIMEOUT_MS,
+  STALE_BUCKET_MS,
   taskId,
 } from '../src/state/task-store.js'
 import type { TaskItem, TaskState } from '../src/state/task-store.js'
@@ -45,24 +48,27 @@ function withTempRoot(state: Record<string, unknown>): string {
 
 // ---------- G1 三级匹配：id / 归一化漂移 / 唯一子串 ----------
 
-test('G1: complete 按 id 命中（不再要求逐字一致）', () => {
+test('G1: complete 按 id 命中并移除该项', () => {
   const cur = makeState({ items: [item('跑全量测试'), item('写工单')] })
   const next = applyTaskMutation(cur, { mode: 'complete', complete: [taskId('写工单')] })
-  assert.equal(next.done.length, 1)
-  assert.equal(next.done[0].item, '写工单')
+  assert.equal(next.done.length, 0)
+  assert.ok(!(next.items || []).some(i => i.desc === '写工单'), '命中项已移除')
+  assert.ok((next.items || []).some(i => i.desc === '跑全量测试'), '未命中项保留')
 })
 
-test('G1: complete 措辞漂移（多空格 / 全半角冒号）仍命中', () => {
+test('G1: complete 措辞漂移仍命中并移除', () => {
   const cur = makeState({ items: [item('修复看板：running 超时')] })
   const next = applyTaskMutation(cur, { mode: 'complete', complete: ['修复看板:  running 超时'] })
-  assert.equal(next.done.length, 1, '归一化后应命中')
+  assert.equal(next.done.length, 0)
+  assert.equal((next.items || []).length, 0, '归一化命中即移除')
 })
 
-test('G1: complete 唯一子串包含命中（多一个限定词也算完成）', () => {
+test('G1: complete 唯一子串包含命中并移除', () => {
   const cur = makeState({ items: [item('补未完成部分'), item('整理文档')] })
   const next = applyTaskMutation(cur, { mode: 'complete', complete: ['只补未完成部分'] })
-  assert.equal(next.done.length, 1)
-  assert.equal(next.done[0].item, '补未完成部分')
+  assert.equal(next.done.length, 0)
+  assert.ok(!(next.items || []).some(i => i.desc === '补未完成部分'))
+  assert.ok((next.items || []).some(i => i.desc === '整理文档'))
 })
 
 test('G1: 无命中 → 状态不动且告警（不静默失败）', () => {
@@ -153,12 +159,13 @@ test('G4: fail 未命中 → 告警且原状态不变', () => {
 
 // ---------- G5 deps 告警 ----------
 
-test('G5: 依赖未完成 → complete 仍然成功但带 deps 告警', () => {
+test('G5: 依赖未完成 → complete 仍然移除但带 deps 告警', () => {
   const a = item('前置任务')
   const b = item('后续任务', 'pending', { deps: [taskId('前置任务')] })
   const cur = makeState({ items: [a, b] })
   const next = applyTaskMutation(cur, { mode: 'complete', complete: ['后续任务'] })
-  assert.equal(next.done.length, 1, '不阻断完成')
+  assert.equal(next.done.length, 0)
+  assert.ok(!(next.items || []).some(i => i.desc === '后续任务'), '不阻断移除')
   assert.ok((next.warnings || []).some(w => w.includes('deps 未完成')), `应告警: ${JSON.stringify(next.warnings)}`)
 })
 
@@ -252,19 +259,44 @@ test('回归: matchItems 空键与短键不误配', () => {
   assert.equal(matchItems(items, ['T1']).hit.length, 1, '归一化精确仍可命中短键')
 })
 
-test('G1b: 中文短键（3 字）在唯一候选时可子串命中（活端点验收 ⑥ 的回归）', () => {
+test('G1b: 中文短键（3 字）唯一候选时子串命中并移除', () => {
   const cur = makeState({ items: [item('跑全量测试'), item('写工单')] })
   const next = applyTaskMutation(cur, { mode: 'complete', complete: ['跑全量'] })
-  assert.equal(next.done.length, 1, '「跑全量」应唯一命中「跑全量测试」')
-  assert.equal(next.done[0].item, '跑全量测试')
+  assert.equal(next.done.length, 0)
+  assert.ok(!(next.items || []).some(i => i.desc === '跑全量测试'), '「跑全量」唯一命中并移除')
+  assert.ok((next.items || []).some(i => i.desc === '写工单'))
 })
 
+// [task-batch-clear-v3] 守卫：新 push 保留历史终结项（不再全清），活动项永不淘汰
+test('task-batch-clear-v3: 新 push 保留旧批 done（不再消失）', () => {
+  const cur = makeState({ items: [item('旧A', 'done', { doneAt: 1 }), item('旧B', 'done', { doneAt: 2 })] })
+  const next = applyTaskMutation(cur, { mode: 'push', pushTodo: ['新任务'] })
+  assert.deepEqual((next.items || []).map(i => i.desc).sort(), ['新任务', '旧A', '旧B'].sort(), '旧 done 必须保留')
+  assert.equal(next.done.length, 2)
+})
+
+test('task-batch-clear-v3: 保留 pending 与 done 混合', () => {
+  const cur = makeState({ items: [item('旧A', 'done', { doneAt: 1 }), item('旧B', 'pending')] })
+  const next = applyTaskMutation(cur, { mode: 'push', pushTodo: ['新任务'] })
+  assert.deepEqual((next.items || []).map(i => i.desc).sort(), ['新任务', '旧A', '旧B'].sort())
+})
+
+test('task-batch-clear-v3: 终结项超上限时淘汰最旧（活动项不淘汰）', () => {
+  const many = Array.from({ length: MAX_TERMINAL_ITEMS + 5 }, (_, i) => item(`终${i}`, 'done', { doneAt: i + 1 }))
+  const cur = makeState({ items: [...many, item('活动')] })
+  const next = applyTaskMutation(cur, { mode: 'push', pushTodo: ['新任务'] })
+  const descs = (next.items || []).map(i => i.desc)
+  assert.equal(descs.filter(d => d.startsWith('终')).length, MAX_TERMINAL_ITEMS, '终结项保留上限')
+  assert.ok(descs.includes('活动'), '活动项永不淘汰')
+  assert.ok(!descs.includes('终0'), '最旧的终结项被淘汰')
+})
 test('回归: applyTaskMutation 无 items 时从 todo/done 自举（旧调用方兼容）', () => {
   const cur = makeState({ todo: ['A', 'B'], done: [{ item: 'Z', at: 1, round: 1 }], running: 'A' })
   const next = applyTaskMutation(cur, { mode: 'complete', complete: ['A'] })
   assert.deepEqual(next.todo, ['B'])
   assert.equal(next.running, '')
-  assert.deepEqual(next.done.map(d => d.item), ['Z', 'A'])
+  // [task-complete-remove-v1] complete 改为移除命中项：A 被移除，Z（既有 done）保留
+  assert.deepEqual(next.done.map(d => d.item), ['Z'])
 })
 // [session-single-source-v1] 写端 sessionId: sid || getSessionId() 的守卫：
 //   回退到无条件 getSessionId() 时，state.sessionId 变随机值，本组必红。
@@ -284,4 +316,26 @@ test('P0-1: 多 sid 时 sessionId 等于最后写入的 sid', () => {
   commitTaskState(makeState({ items: [item('B')] }), 'sid-b')
   const st = readTaskState()
   assert.equal(st.sessionId, 'sid-b', '多会话共存时 sessionId 取最近活跃')
+})
+
+// [task-bucket-gc-v1] 桶 GC 守卫
+test('GC: updatedAt 超期 → 桶被清', () => {
+  const now = Date.now()
+  const { kept, dropped } = gcStaleBuckets({ 'old-sid': { items: [], updatedAt: now - STALE_BUCKET_MS - 1000 } }, now)
+  assert.deepEqual(dropped, ['old-sid'])
+  assert.deepEqual(Object.keys(kept), [])
+})
+
+test('GC: updatedAt 未超期 → 桶保留', () => {
+  const now = Date.now()
+  const { kept, dropped } = gcStaleBuckets({ 'active-sid': { items: [], updatedAt: now - 1000 } }, now)
+  assert.deepEqual(dropped, [])
+  assert.deepEqual(Object.keys(kept), ['active-sid'])
+})
+
+test('GC: 无 updatedAt（老桶）→ 保留，防误删', () => {
+  const now = Date.now()
+  const { kept, dropped } = gcStaleBuckets({ 'legacy-sid': { items: [] } }, now)
+  assert.deepEqual(dropped, [])
+  assert.deepEqual(Object.keys(kept), ['legacy-sid'])
 })

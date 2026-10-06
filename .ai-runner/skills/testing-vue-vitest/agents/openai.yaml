@@ -1,0 +1,3 @@
+display_name: Vue Vitest 测试
+short_description: 为 Vue 3 + Vitest 项目补齐组件和页面测试。
+default_prompt: 为这个 Vue 功能补齐 Vitest 测试，优先覆盖核心路径、权限、异常和回归场景。

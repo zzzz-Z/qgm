@@ -62,11 +62,30 @@ function globToRe(glob) {
 // 读缓存改用模块级 Map：同进程内有效（脚本内多次读同一文件时可去重）
 const _rcMem = {}
 
+// [host-owned-write-guard-v1] 宿主独占文件的写入门禁。观察期：只留痕 + stderr 告警，不阻断。
+// WHY: `packages/core/SYSTEM.md` 是提示词 SSOT，2026-10-06 实证两个写入者并发改同一份文件——
+//   changelog 记到的两条 patch 出自 /run 通道，宿主侧走 Edit 工具不入台账；实例归属条款
+//   (instance-ownership-v1) 只约束 5175 进程，文件级是设计缺口（无单一所有者 ⇒ 锚点会指向旧内容）。
+// [CONSTRAINT] 不阻断（不 exit）：SSOT 的并发写入里存在**正确修订**（如 reject 日志路径纠错），
+//   硬拦会连带挡掉合法修复；且非零退出会让本轮 overlay 全部丢弃，把小事故放大成整轮写入丢失。
+//   故按 verify-contract-v1 先例走观测期，族谱：先记账，攒够样本再决定是否闸门。
+// CHANGE-IMPACT: changelog.jsonl 记录新增 hostOwned 键；消费方若做严格 schema 校验需容忍新键。
+// 已知缺口：bash(/exec) 通道的重定向写入不经本漏斗，需另立工单。
+const HOST_OWNED = new Set(['packages/core/SYSTEM.md'])
+
+function _isHostOwned(rel) {
+  try { return HOST_OWNED.has(String(rel).replace(/\\/g, '/')) } catch { return false }
+}
+
 function _changelog(action, file, extra) {
   try {
     let rel = file
     try { rel = path.relative(process.cwd(), file).replace(/\\/g, '/') } catch { }
     const rec = { ts: Date.now(), action, file: rel }
+    if (_isHostOwned(rel)) {
+      rec.hostOwned = true
+      process.stderr.write(`[host-owned-write] ${action} → ${rel}（宿主独占，应用端只提案）\n`)
+    }
     if (extra) { for (const k in extra) rec[k] = extra[k] }
     const dir = path.join(process.cwd(), '.ai-runner')
     try { fs.mkdirSync(dir, { recursive: true }) } catch { }
@@ -207,6 +226,9 @@ const __AI__ = {
     if (count === 0) throw new Error(`replaceInFile: oldString 未出现于 ${p}`)
     if (unique && count > 1) throw new Error(`replaceInFile: oldString 在 ${p} 出现 ${count} 次，非唯一`)
     fs.writeFileSync(p, src.split(oldString).join(newString))
+    // [host-owned-write-guard-v1] 补记账：本入口此前是 5 个写入口中唯一不进 changelog 的，
+    //   导致经它改写宿主独占文件时审计断链（见 _changelog 上方的门禁说明）。
+    _changelog('replace', p)
     return { replaced: count }
   },
   readFiles(glob) {

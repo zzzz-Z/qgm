@@ -25,8 +25,6 @@ const STORAGE_KEY_BASELINE = '__ai_runner_baseline'
 const STORAGE_KEY_SESSION_BASELINE = '__ai_runner_session_baseline'
 /** sessionStorage 键：变更视图（本轮 / 累积） */
 const STORAGE_KEY_CHANGE_VIEW = '__ai_runner_change_view'
-/** sessionStorage 键：git 提交开关 */
-const GIT_KEY = '__ai_runner_git_commit'
 /** 运行中止控制器；非响应式模块单例，与 stop() 成对管理 */
 let abortController: AbortController | null = null
 let activeRunToken = 0
@@ -111,8 +109,8 @@ const visibleChanges = computed<ChangeEntry[]>(() =>
 // [auto-feedback] 一次性标志：AI 直接返回的脚本执行后无条件回传结果
 /** 是否已请求执行后自动回传（一次性，消费后由 clearAutoFeedback 重置） */
 const autoFeedbackRequested = ref(false)
-/** 是否启用 git 提交（每轮打点）；持久化到 sessionStorage */
-const gitCommit = useSessionStorage<boolean>(GIT_KEY, true)
+/** [git-commit-always-on-v1] git 提交常开：开关已移除，每轮运行后自动存档 */
+const gitCommit = ref(true)
 
 // 脚本持久化：仅 script 一项需要手工 watch（见上方注释）；其余键由 useSessionStorage 内部管理
 watch(script, (v) => {
@@ -311,13 +309,14 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       // 原实现只 res.text() 摊平成一坨字符串 → 客户端无从区分「被上游截断」与「AI 写错了」，
       // 于是两者都渲染成「退出码 400」，AI 对截断也走原地重试，必然再次被截断（两轮后熔断）。
       // 结构化提升只做白名单字段，其余一律保持原文，避免把未知结构带进 result。
-      const meta: Pick<RunResponse, 'truncated' | 'scriptSize'> = {}
+      const meta: Partial<Pick<RunResponse, 'truncated' | 'scriptSize' | 'breaker'>> = {}
       try {
         const rawText = await res.text()
         detail = rawText
         try {
-          const parsed = JSON.parse(rawText) as { truncated?: unknown, scriptSize?: unknown }
+          const parsed = JSON.parse(rawText) as { truncated?: unknown, scriptSize?: unknown, breaker?: unknown }
           if (parsed.truncated === true) meta.truncated = true
+          if (parsed.breaker === true) meta.breaker = true
           const sz = parsed.scriptSize as RunResponse['scriptSize'] | undefined
           if (sz && typeof sz.lines === 'number' && typeof sz.bytes === 'number') meta.scriptSize = sz
         } catch { /* 非 JSON 响应（代理错误页等）：保持原文，不做结构化提升 */ }

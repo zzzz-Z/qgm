@@ -155,7 +155,14 @@ test('control-log: tasks.ts 的写路径必须留痕（含 degraded 与 warnings
   )
 })
 
-test('control-log: LogChannel 已接纳 reject / board 两个通道', () => {
+test('control-log: LogChannel 已接纳控制面通道（reject / board / send）', () => {
   const src = read('packages/core/src/state/snapshot.ts')
-  assert.ok(src.includes('export type LogChannel = \'runner\' | \'pipeline\' | \'decisions\' | \'reject\' | \'board\''), 'LogChannel 未扩展 ⇒ 写 reject/board 会被类型检查挡下（或静默落到别处）')
+  const m = src.match(/export type LogChannel = ([^\n]+)/)
+  assert.ok(m, 'LogChannel 声明缺失 ⇒ 写这些通道会被类型检查挡下（或静默落到别处）')
+  // [send-trace-v1] 由「逐字快照整行」改为「逐通道包含」：原断言把新增通道也变成一次改动成本，
+  //   而它真正要防的是**移除**（通道没了 ⇒ writeChannelLog 的入参类型不再接纳 ⇒ 静默落到别处）。
+  //   逐通道包含同样能抓到移除（承重不变），且不再阻塞扩展。
+  for (const ch of ['reject', 'board', 'send']) {
+    assert.ok((m as RegExpMatchArray)[1].includes(`'${ch}'`), `LogChannel 缺 '${ch}' ⇒ 写 ${ch}.jsonl 的类型契约不成立`)
+  }
 })

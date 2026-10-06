@@ -9,7 +9,8 @@ import { computeClaimMismatch, computeCompliance } from '../../../packages/core/
 
 // ============ computeCompliance ============
 test('computeCompliance: 空 script + 空 desc → 全 false', () => {
-  assert.deepEqual(computeCompliance('', ''), { hasDesc: false, hasSelfCheck: false, isDecision: false })
+  // [real-selfcheck-observe-v1] hasRealSelfCheck 与旧字段并存（判据 syntaxCheck|typeCheck）
+  assert.deepEqual(computeCompliance('', ''), { hasDesc: false, hasSelfCheck: false, hasRealSelfCheck: false, isDecision: false })
 })
 
 test('computeCompliance: desc 非空 → hasDesc=true', () => {
@@ -46,7 +47,14 @@ test('computeCompliance: 完整脚本命中全部特征', () => {
   const NL = String.fromCharCode(10)
   const script = ['#!/usr/bin/env node', '// @desc: 例子', 'try {', '  __AI__.assert(true, 0)', '} catch {}', 'await __AI__.exitNeedInput()'].join(NL)
   const r = computeCompliance(script, '例子')
-  assert.deepEqual(r, { hasDesc: true, hasSelfCheck: true, isDecision: true })
+  // 该脚本只有 assert（旧判据），没有 syntaxCheck/typeCheck → hasRealSelfCheck=false
+  assert.deepEqual(r, { hasDesc: true, hasSelfCheck: true, hasRealSelfCheck: false, isDecision: true })
+})
+
+test('computeCompliance: 含 __AI__.syntaxCheck → hasRealSelfCheck=true（新旧判据独立计数）', () => {
+  const r = computeCompliance('await __AI__.syntaxCheck(code, "a.js")', '')
+  assert.equal(r.hasRealSelfCheck, true)
+  assert.equal(r.hasSelfCheck, false)
 })
 
 test('computeCompliance: 无自我检查代码 → hasSelfCheck=false', () => {

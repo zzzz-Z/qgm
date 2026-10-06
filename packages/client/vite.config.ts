@@ -7,6 +7,7 @@ import { defineConfig } from 'vite'
 import UnoCSS from 'unocss/vite'
 import vue from '@vitejs/plugin-vue'
 import { compression } from 'vite-plugin-compression2'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import AutoImport from 'unplugin-auto-import/vite'
@@ -16,7 +17,17 @@ const CLIENT_ROOT = path.dirname(fileURLToPath(import.meta.url))
 /** pkg根目录 */
 const PKG_ROOT = path.dirname(CLIENT_ROOT)
 /** BACKEND（相关状态/数据） */
-const BACKEND = process.env.AIR_BACKEND_URL || 'http://127.0.0.1:5175'
+// [port-drift-file-v1] 后端漂移端口落 .ai-runner/.server-port；env 显式优先，其次读文件，末选 5175
+const REPO_ROOT = path.dirname(PKG_ROOT)
+function resolveBackend(): string {
+  if (process.env.AIR_BACKEND_URL) return process.env.AIR_BACKEND_URL
+  try {
+    const raw = fs.readFileSync(path.join(REPO_ROOT, '.ai-runner', '.server-port'), 'utf8').trim()
+    if (/^\d+$/.test(raw)) return `http://127.0.0.1:${raw}`
+  } catch { /* 文件缺失即用默认 */ }
+  return 'http://127.0.0.1:5175'
+}
+const BACKEND = resolveBackend()
 
 /** [chunk-split-v1] 包名 → chunk 归组；顺序敏感（@vueuse 必须先于裸 vue 判定） */
 const CHUNK_GROUPS: ReadonlyArray<readonly [string, RegExp]> = [

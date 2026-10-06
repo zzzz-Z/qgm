@@ -31,6 +31,9 @@ test('P0-2: logCrash 内不再有裸 console.error', () => {
   const i = src.indexOf('function logCrash(')
   const j = src.indexOf('process.on(', i)
   const body = src.slice(i, j)
-  const naked = body.split('\n').filter(l => /console\.error/.test(l) && !/try \{ console\.error/.test(l))
+  // [guard-comment-exempt] 注释里提及 console.error 字样不算裸调用（否则说明文字本身会让守卫误报）
+  const naked = body.split('\n')
+    .filter(l => !/^\s*(?:\/\/|\*)/.test(l))
+    .filter(l => /console\.error/.test(l) && !/try \{ console\.error/.test(l))
   assert.deepEqual(naked, [], `仍有裸 console.error: ${naked.join(' | ')}`)
 })

@@ -170,6 +170,13 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       }
       const display = cleanSummary ? `[任务完成]\n\n${cleanSummary}` : '[任务完成] AI 回复 DONE'
       pushTerminalNotice(display, { divider: true })
+      // [auto-restart-v1] 任务完成后触发宿主侧重启（detached + 5s 延迟，不截断本回执）。
+      // [CONSTRAINT] 服务端 /restart 端点在收到请求后立刻返回 ok，实际重启在 5s 后由独立子进程执行；
+      //   .ai-runner/auto-restart.json 缺失或 enabled !== true 时服务端静默跳过。
+      // [CHANGE-IMPACT] 仅影响 prod（pm2 托管）；dev 双进程下该端点为 no-op。
+      // [auto-restart-notice-v1] 重启前弹窗：WS 断连前告知用户，避免「页面突然刷新」困惑
+      toast('服务将在 5 秒后自动重启以应用新产物，页面将短暂断开', 'info', TOAST_LONGEST)
+      void fetch('/__ai/restart', { method: 'POST' }).catch(() => { /* swallow: 重启请求失败不影响任务完成 */ })
       return
     }
 

@@ -19,7 +19,10 @@ export interface SnapshotData {
 //   `reject` = /run 的前置拒收（体积 / 截断 / 契约 / 语法）—— 此前**零留痕**，
 //     而这类 4xx 发生在 NDJSON 流开始之前，写不进按流写的 runner.jsonl；
 //   `board`  = /tasks 的写请求 —— 用于判定「AI 声称已 start/complete 但看板没变」是否真的发生过。
-export type LogChannel = 'runner' | 'pipeline' | 'decisions' | 'reject' | 'board'
+// [send-trace-v1] `send` = **出站 fill** 的留痕（页面通道每次投递一条，见 routes/send-log.ts 的 WHY）：
+//   runner/reject 都是「脚本已到服务端」之后的事，而「应用往 AI 页面发了多少条提问」在服务端此前
+//   完全不可见 —— 频控阈值、同轮双发、多块放大都没法验收，只能靠 run 数间接推算。
+export type LogChannel = 'runner' | 'pipeline' | 'decisions' | 'reject' | 'board' | 'send'
 // AIRUNNER-BATCH4-3A-INLINE-CONST
 // 从 src/config.ts 内联常量；strip-types 无法解析 .js 后缀 import（T6）。
 // 可变路径用 getter（config.setRoot 会写 AI_RUNNER_ROOT 到 env；避免 ESM 常量快照）。
@@ -219,9 +222,21 @@ export function ensureDirs() {
 /**
  * 计算某次运行对应的快照目录绝对路径
  * [CONSTRAINT] 不做存在性校验，调用方负责 mkdir；与 getRunsDir 相对布局配套
+ * [rundir-traversal-guard-v1] runId 有两个来源：内部生成（`<ts>-<rand>`）与 HTTP body
+ *   （/rollback /rollback-all /save /diff-from-baseline 的 runId 参数直传到此）。
+ *   裸 path.join 时 `../` 可逃出 runs/，而调用方（rollback-all/save）随后会
+ *   `fs.rmSync(dir, { recursive: true, force: true })` —— 路径穿越 + 递归强删叠加，
+ *   误传/恶意 runId 可删掉 runs 外的任意目录。故先压成安全字符集，再校验解析结果
+ *   必须落在 runs/ 内；非法即抛（路由层由 Hono 兜成 500，不静默放行）。
  */
 export function runDir(runId: string) {
-  return path.join(getRunsDir(), runId)
+  const safe = String(runId).replace(/[^\w.-]/g, '')
+  const dir = path.join(getRunsDir(), safe)
+  const rel = path.relative(getRunsDir(), dir)
+  if (!rel || rel === '..' || rel.startsWith(`..${path.sep}`)) {
+    throw new Error(`非法 runId（越出运行记录目录）: ${JSON.stringify(runId)}`)
+  }
+  return dir
 }
 
 /**

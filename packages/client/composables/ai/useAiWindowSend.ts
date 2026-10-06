@@ -4,6 +4,7 @@
 import * as transportMod from './useAiTransport.js'
 import { getActiveWinSid, getWindowBySid, targetOriginFor } from './useAiWindowTable'
 import { log } from '../../utils/log' // [restore-import-v1] 早前清理误删
+import { traceSend } from './send-trace' // [send-trace-v1] 出站留痕（P1-3）
 
 /** fill 消息载荷：向 AI 窗口投递的提问文本 */
 export interface FillPayload {
@@ -17,6 +18,12 @@ export interface FillPayload {
    * [CHANGE-IMPACT] 消费方 sendFillTo / headless transport.sendFill；旧接收端不识该字段不报错
    */
   images?: string[]
+  /**
+   * [send-trace-v1] 出站留痕的调用点归因（loop-round / copyOutput / …）
+   * [CONSTRAINT] **不进入线上协议**：postMessage 前会被剥掉 —— 油猴不认这个字段，
+   *   多带只会污染协议载荷；它纯粹是本地的观测标记。
+   */
+  source?: string
 }
 
 /** rotate 消息载荷：切换会话/话题的指令 */
@@ -73,7 +80,11 @@ export function sendFillTo(sid: string, payload: FillPayload): boolean {
   const origin = targetOriginFor(sid)
   if (!origin) { log.warn('[sendFillTo] origin="" sid=', sid); return false }
   try {
-    win.postMessage({ type: 'ai-runner:fill', ...payload }, origin)
+    // [send-trace-v1] source 只服务留痕：剥掉后再上线，避免污染协议载荷
+    const { source: traceSource, ...wire } = payload
+    win.postMessage({ type: 'ai-runner:fill', ...wire }, origin)
+    // [send-trace-v1] 出站留痕（P1-3）：逐条记 ts/sid/source/首部，供「发送间隔分布」与「同轮双发」定案
+    traceSend({ sid, via: 'tm', source: traceSource || 'direct', prompt: payload.prompt, ok: true })
     return true
   } catch (e) {
     log.warn('[sendFillTo] postMessage threw', e)
@@ -85,8 +96,13 @@ export function sendFillTo(sid: string, payload: FillPayload): boolean {
  * [CONSTRAINT] headless 分支 fire-and-forget 恒返回 true；tampermonkey 分支返回实际发送结果
  */
 export function sendFill(payload: FillPayload): boolean {
-  if (isHeadless()) { headlessSend('sendFill', getActiveWinSid(), payload); return true }
-  return sendFillTo(getActiveWinSid(), payload)
+  if (isHeadless()) {
+    headlessSend('sendFill', getActiveWinSid(), payload)
+    traceSend({ sid: getActiveWinSid(), via: 'headless', source: payload.source || 'loop-round', prompt: payload.prompt, ok: true })
+    return true
+  }
+  // [send-trace-v1] 生产路径里 sendFillTo 的直接调用方只有 ds 桥（循环引擎），故此处显式标 loop-round
+  return sendFillTo(getActiveWinSid(), { source: 'loop-round', ...payload })
 }
 
 /**
@@ -122,14 +138,20 @@ export function sendFillToAsync(sid: string, payload: FillPayload, timeoutMs = 5
       if (String(m.ackId || '') !== ackId) return
       finish(m.ok ? 'sent' : 'failed')
     }
+    // [send-trace-v1] source 只服务留痕：剥掉后再上线，避免污染协议载荷
+    const { source: traceSource, ...wire } = payload
+    let posted = false
     try {
       window.addEventListener('message', onMsg)
-      win.postMessage({ type: 'ai-runner:fill', ...payload, ackId }, origin)
+      win.postMessage({ type: 'ai-runner:fill', ...wire, ackId }, origin)
+      posted = true
     } catch (e) {
       log.warn('[sendFillToAsync] postMessage threw', e)
-      finish('unacked')
-      return
     }
+    // [send-trace-v1] 出站留痕（P1-3）：抛错同样是一次真实出站尝试，用 ok 区分「送达」与「噪声」。
+    //   本函数的唯一生产调用方是 copyAndFill（ScriptPanel/exec-flow 的结果回传），故默认归因 copyOutput。
+    traceSend({ sid, via: 'tm', source: traceSource || 'copyOutput', prompt: payload.prompt, ok: posted })
+    if (!posted) { finish('unacked'); return }
     setTimeout(finish, timeoutMs, 'unacked')
   })
 }

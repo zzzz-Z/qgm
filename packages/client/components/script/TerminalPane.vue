@@ -289,7 +289,12 @@ watch(
   async ([v]) => {
     if (!v && timelineItems.value.length === 0) return
     await nextTick()
-    scrollToBottomIfAtBottom()
+    // [done-scroll-bottom-v1] 总结到达时强制滚底：
+    // [WHY] 原走 scrollToBottomIfAtBottom（受 atBottom 门控）；用户上翻一次即 atBottom=false，
+    //   总结卡落在下方却看不到，与「总结 = 本轮终点」的预期冲突。
+    // [CONSTRAINT] 仅当 doneSummary 非空（有新总结）才强制；新一轮清空不滚，避免抖动。
+    if (v) forceScrollToBottom()
+    else scrollToBottomIfAtBottom()
   },
 )
 watch(

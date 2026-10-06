@@ -300,6 +300,14 @@ server.on('error', (e: NodeJS.ErrnoException) => {
 })
 server.listen(PORT, HOST, () => {
   const base = `http://${HOST}:${PORT}`
+  // [port-drift-file-v1] 端口漂移后前端 proxy 需知真实端口；原子写避免读到半截
+  try {
+    const portFile = path.join(ROOT, '.ai-runner', '.server-port')
+    fs.mkdirSync(path.dirname(portFile), { recursive: true })
+    const tmp = `${portFile}.tmp-${process.pid}`
+    fs.writeFileSync(tmp, String(PORT))
+    fs.renameSync(tmp, portFile)
+  } catch { /* 端口文件失败不阻断启动 */ }
   console.log(`  AI Runner server:  ${base}${PREFIX}/`)
   console.log(`  WebSocket:         ${base}${WS_PATH}`)
 })

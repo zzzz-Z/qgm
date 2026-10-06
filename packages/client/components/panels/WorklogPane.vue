@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { useWorklogCommit } from './worklog-commit'
+import { useToast } from '../../composables/ui/useToast'
+import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
 // @desc VSCode 源码管理风格侧栏：提交框 + 变更文件列表 + 点击展开行级 diff
 // @why 用户要求把工作日志从弹窗改为 SidePane tab，视觉参照 VSCode 源代码管理面板
 // @change-impact 依赖 /__ai/git/worklog 端点；父组件 SidePane 通过 v-show 切换本面板可见性
@@ -52,7 +54,13 @@ const result = ref<WorklogResult | null>(null)
 const error = ref('')
 const commitMsg = ref('')
 const expanded = ref<Set<string>>(new Set())
+// [git-commit-real-v1] 真实提交：/git/commit-loop 落盘后刷新列表
+// [CONSTRAINT] committing 防重复点击；成功后清空消息框
+const committing = ref(false)
+// [git-head-display-v1] 当前 HEAD（短 sha）；空串时模板隐藏
+const headRef = ref('')
 
+const { toast } = useToast()
 // [use-worklog-commit-v1] commit msg 生成簇已抽到 useWorklogCommit
 const {
   aiGenerating,
@@ -61,6 +69,7 @@ const {
   pendingCommitRequest,
   pendingCommitSid,
   extractCommitLine,
+  extractCommitMessage,
   generateCommitMsg,
   generateLocalCommitMsg,
   cleanup: cleanupWorklogCommit,
@@ -101,21 +110,21 @@ onMounted(() => {
     const t = getTransport()
     unsubscribeReply = t.onReply((raw: unknown, sid: string) => {
       if (!pendingCommitRequest.value) return
-      // [worklog-sid-gate-v1] 仅接受与本次 commit 请求同 sid 的回复；
-      // sid 空串归一化为 default（与服务端 attach-ws 的归一化一致）
-      const incoming = sid || 'default'
-      const expected = pendingCommitSid.value || 'default'
-      if (incoming !== expected) return
+      // [worklog-sid-gate-v2] 移除 sid 比对：tampermonkey 回包 sid=sessionId（会话 hash），
+      // 而 pendingCommitSid=getActiveWinSid()（槽位 id），两值来源不同必然失配 → 回填永久失效。
+      // 一次性 pendingCommitRequest 标志即正确闸门：消费后立即置 false，不会重复触发。
+      void sid
       const reply = raw as { kind?: string, text?: string } | null
       if (!reply) return
       const kind = String(reply.kind || 'plain')
       if (kind !== 'plain' && kind !== 'multi' && kind !== 'done') return
       const text = String(reply.text || '').trim()
       if (!text) return
-      const line = extractCommitLine(text)
-      if (!line) return
-      aiCommitMsg.value = line
-      commitMsg.value = line
+      // [commit-message-multiline-v1] 用多行提取：保留 AI 生成的 body/footer
+      const msg = extractCommitMessage(text) || extractCommitLine(text)
+      if (!msg) return
+      aiCommitMsg.value = msg
+      commitMsg.value = msg
       aiGenerating.value = false
       pendingCommitRequest.value = false
       pendingCommitSid.value = ''
@@ -215,17 +224,19 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const [wlRes, diffRes] = await Promise.all([
+    const [wlRes, diffRes, headRes] = await Promise.all([
       fetch('/__ai/git/worklog', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ includeHistory: false }),
+        // [worklog-history-v1] 打开提交历史：模板渲染 history 列表
+        body: JSON.stringify({ includeHistory: true }),
       }),
       fetch('/__ai/git/diff', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({}),
       }),
+      fetch('/__ai/git/head', { cache: 'no-store' }),
     ])
     if (mySeq !== _loadSeq) return
     const j = await wlRes.json().catch(() => ({})) as WorklogResult
@@ -246,6 +257,12 @@ async function load(): Promise<void> {
         }
       }
     } catch { /* ignore: diff 请求失败时仅保留 worklog 结果 */ }
+    // head 独立消费；失败仅清空显示
+    try {
+      const hj = await headRes.json().catch(() => ({})) as { ok?: boolean, head?: string }
+      if (mySeq !== _loadSeq) return
+      headRef.value = hj && hj.ok && hj.head ? String(hj.head).slice(0, 12) : ''
+    } catch { /* ignore */ }
     if (mySeq !== _loadSeq) return
     result.value = j
   } catch (e) {
@@ -257,12 +274,33 @@ async function load(): Promise<void> {
     if (mySeq === _loadSeq) loading.value = false
   }
 }
-/** 提交：把 commitMsg 复制到剪贴板（后端不做实际 git commit，避免越权） */
+/** 提交：调 /git/commit-loop 落盘，成功 toast + 刷新（原实现仅复制剪贴板） */
 async function doCommit(): Promise<void> {
-  if (!result.value || !commitMsg.value.trim()) return
+  if (!result.value || !commitMsg.value.trim() || committing.value) return
+  committing.value = true
   try {
-    await navigator.clipboard.writeText(commitMsg.value)
-  } catch { /* ignore: 剪贴板不可用时静默 */ }
+    const r = await fetch('/__ai/git/commit-loop', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: commitMsg.value.trim() }),
+    })
+    const j = await r.json().catch(() => ({})) as { ok?: boolean, commit?: string, empty?: boolean, reason?: string }
+    if (!r.ok || !j.ok) {
+      toast(j.reason || `提交失败（HTTP ${r.status}）`, 'error', TOAST_LONG)
+      return
+    }
+    if (j.empty) {
+      toast('无变更可提交', 'warn', TOAST_MEDIUM)
+      return
+    }
+    toast(`已提交 ${j.commit ? j.commit.slice(0, 8) : ''}`.trim(), 'success', TOAST_MEDIUM)
+    commitMsg.value = ''
+    await load()
+  } catch (e) {
+    toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG)
+  } finally {
+    committing.value = false
+  }
 }
 /** 复制完整工作日志 Markdown，供窄区按钮消费 */
 async function copyFullLog(): Promise<void> {
@@ -277,16 +315,21 @@ async function copyFullLog(): Promise<void> {
   <div class="wl-pane">
     <!-- [source-control] 顶部：提交消息框 + 生成按钮 + 分体式提交按钮（VSCode 风格） -->
     <div class="wl-commit">
+      <!-- [git-head-display-v1] 当前 HEAD：空串时隐藏；有值时显示短 sha 徽章 -->
+      <div v-if="headRef" class="wl-head-row">
+        <span class="wl-head-label">HEAD</span>
+        <code class="wl-head-sha">{{ headRef }}</code>
+      </div>
       <div class="wl-commit-row">
-        <input
+        <textarea
           v-model="commitMsg"
           class="wl-commit-input"
-          type="text"
+          rows="3"
           placeholder="消息（⌘Enter 提交）"
           :disabled="loading"
           @keydown.meta.enter.prevent="doCommit"
           @keydown.ctrl.enter.prevent="doCommit"
-        >
+        />
         <!-- 根据变更生成 commit message -->
         <button
           class="wl-commit-gen"
@@ -409,6 +452,18 @@ async function copyFullLog(): Promise<void> {
           </li>
         </ul>
       </template>
+      <!-- [worklog-history-v1] 提交历史：最近若干条，来自 /git/worklog includeHistory -->
+      <div v-if="result && result.history && result.history.length" class="wl-history">
+        <div class="wl-group">
+          <span class="wl-group-title">最近提交</span>
+          <span class="wl-group-count">{{ result.history.length }}</span>
+        </div>
+        <ul class="wl-history-list" role="list">
+          <li v-for="(h, i) in result.history" :key="`h-${i}`" class="wl-history-item">
+            {{ h }}
+          </li>
+        </ul>
+      </div>
     </div>
   </div>
 </template>

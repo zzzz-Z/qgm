@@ -26,6 +26,8 @@ const parseStateLine = sharedParseStateLine
  */
 const parseLessons = sharedParseLessons
 
+// [lessons-review-v1] lessons 复核状态的唯一聚合口径：待复核清单 / 三态计数。
+// WHY: 采集 ≠ 沉淀，锚点盯住本文件确保「谁验过」永远有机器可查的出口。
 function summarize(items) {
   const counts = { VERIFIED: 0, REJECTED: 0, STALE: 0, UNVERIFIED: 0 }
   for (const it of items) counts[it.status] += 1

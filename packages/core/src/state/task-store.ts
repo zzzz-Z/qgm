@@ -33,6 +33,36 @@ export interface TaskItem {
 // [WHY] start 后 AI 崩溃/忘记 complete ⇒ 面板动画永转，无任何对账机制；过期后回退 pending 可自愈
 export const RUNNING_TIMEOUT_MS = 30 * 60 * 1000
 
+// [task-bucket-gc-v1] 桶 GC 阈值：最后写入超过 12h 的会话桶视为废弃，自动清理
+// [WHY] 陈旧 tab 遗留桶会无限累积（实测某桶 62 项 4h 无写入）；不清则 state.json 无界膨胀
+// [CONSTRAINT] 只按时间清，不看内容——活跃会话必然在 12h 内有写请求；无 updatedAt 的老桶保留（防误删）
+export const STALE_BUCKET_MS = 12 * 60 * 60 * 1000
+
+// [task-batch-clear-v3] 桶内保留的终结项（done/failed）上限：防历史无界堆积
+// [WHY] v2 的「新批全清旧批」使做完的任务从面板消失，被读成数据丢失；改为保留最近 N 条
+// [CONSTRAINT] 只对终结项设限；活动项（pending/running）永不淘汰，保证执行中的清单不丢
+export const MAX_TERMINAL_ITEMS = 50
+
+/**
+ * 清理过期会话桶（纯函数，无 IO）
+ * [task-bucket-gc-v1] 判据：updatedAt 存在且早于 now - STALE_BUCKET_MS
+ * @param bySid 当前桶映射
+ * @param now 当前时刻
+ * @returns 保留的桶 + 被清桶的 sid 列表
+ */
+export function gcStaleBuckets(bySid: Record<string, SidBucket>, now: number): { kept: Record<string, SidBucket>, dropped: string[] } {
+  const kept: Record<string, SidBucket> = {}
+  const dropped: string[] = []
+  for (const [k, v] of Object.entries(bySid)) {
+    if (typeof v.updatedAt === 'number' && now - v.updatedAt > STALE_BUCKET_MS) {
+      dropped.push(k)
+      continue
+    }
+    kept[k] = v
+  }
+  return { kept, dropped }
+}
+
 const ITEM_STATUS = new Set(['pending', 'running', 'done', 'failed'])
 
 /** 由任务文本生成确定性 ID（同一文本重推幂等） */
@@ -46,6 +76,8 @@ export interface SidBucket {
   todo?: string[]
   done?: TaskDoneItem[]
   running?: string
+  // [task-bucket-gc-v1] 该桶最后写入时间戳（GC 用）
+  updatedAt?: number
 }
 
 /** 任务状态：待办列表 + 已完成列表 + 当前步骤 */
@@ -527,11 +559,20 @@ export function applyTaskMutation(cur: TaskState, body: TaskMutationBody): TaskS
     }))
   }
   if (mode === 'push') {
+    // [task-batch-clear-v3] 新 push 保留历史终结项：
+    // [WHY] v2「新批全清旧批」让已完成任务从面板消失，用户读成 bug；改为保留最近 MAX_TERMINAL_ITEMS 条
+    // [CONSTRAINT] pending/running 永不淘汰；终结项按 doneAt/failedAt 从旧到新淘汰超限者
+    const terminal = items
+      .filter(it => it.status === 'done' || it.status === 'failed')
+      .sort((a, b) => (Number(b.doneAt || b.failedAt) || 0) - (Number(a.doneAt || a.failedAt) || 0))
+    const keptTerminal = new Set(terminal.slice(0, MAX_TERMINAL_ITEMS).map(it => it.id))
+    const baseItems = items.filter(it =>
+      it.status === 'pending' || it.status === 'running' || keptTerminal.has(it.id))
     const add = Array.isArray(body.pushTodo)
       ? body.pushTodo.map(String)
       : (Array.isArray(body.todo) ? body.todo.map(String) : [])
     // [task-board-push-dedupe-v1] 归一化去重（全文，不再截断 80 字符）；只对活动项去重，已完成/失败项允许重新登记
-    const active = new Set(items.filter(it => it.status === 'pending' || it.status === 'running').map(it => normKey(it.desc)))
+    const active = new Set(baseItems.filter(it => it.status === 'pending' || it.status === 'running').map(it => normKey(it.desc)))
     const now = Date.now()
     const added: TaskItem[] = []
     for (const raw of add) {
@@ -542,7 +583,7 @@ export function applyTaskMutation(cur: TaskState, body: TaskMutationBody): TaskS
       active.add(k)
       added.push({ id: taskId(desc), desc, status: 'pending', createdAt: now })
     }
-    return withProjection(cur, items.concat(added))
+    return withProjection(cur, baseItems.concat(added))
   }
   if (mode === 'complete') {
     const keys = Array.isArray(body.complete) ? body.complete.map(String) : []
@@ -556,8 +597,9 @@ export function applyTaskMutation(cur: TaskState, body: TaskMutationBody): TaskS
       if (unmet.length) warnings.push(`deps 未完成: ${it.desc} ← ${unmet.join(',')}`)
     }
     const ids = new Set(hit.map(h => h.id))
-    const now = Date.now()
-    return withProjection(cur, items.map(it => (ids.has(it.id) ? { ...it, status: 'done' as const, doneAt: now, failedAt: undefined, round: cur.round } : it)), warnings)
+    // [task-complete-remove-v1] 完成即从看板移除：不再标 done 留存（用户要求「做完就不占地方」）
+    // [WHY] 旧行为标 done 留在 items 里，面板持续渲染已完成项；任务完成 = 该项使命结束
+    return withProjection(cur, items.filter(it => !ids.has(it.id)), warnings)
   }
   if (mode === 'fail') {
     const keys = Array.isArray(body.fail) ? body.fail.map(String) : []
@@ -610,8 +652,14 @@ export function commitTaskState(next: TaskState, sid?: string, expectedVersion?:
       const { [sid]: _dropped, ...rest } = prevBySid
       nextBySid = rest
     } else {
-      nextBySid = { ...prevBySid, [sid]: { items } }
+      // [task-bucket-gc-v1] 写入时打 updatedAt，供 GC 判定活跃度
+      nextBySid = { ...prevBySid, [sid]: { items, updatedAt: Date.now() } }
     }
+  }
+  // [task-bucket-gc-v1] 落盘前清过期桶（仅当本次未删空该桶时；空桶已在上方删）
+  {
+    const gc = gcStaleBuckets(nextBySid, Date.now())
+    nextBySid = gc.kept
   }
   const merged: Record<string, unknown> = {
     ...disk,

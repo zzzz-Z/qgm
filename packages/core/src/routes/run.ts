@@ -25,6 +25,10 @@ import {
   pickTscTargets,
   readOverlayChanges,
   readToolLogWithRetry,
+  recordReject,
+
+  resetRejectStreak,
+
   runDir,
   runEslint,
   runScript,
@@ -89,12 +93,15 @@ runHono.post('/run', async (c) => {
   const logReject = (script: string, kind: 'empty' | 'head-contract' | 'syntax', extra: { reason?: string, error?: string, truncated?: boolean, sizeScope?: 'raw' | 'effective' } = {}) => {
     const entry = buildRejectEntry(script, kind, { sid: sessionId, ...extra })
     writeChannelLog('reject', entry)
+    // [reject-breaker-v1] 同 sid 同 kind 连续 >=2 次即熔断（tripped 时供客户端 finish）
+    const verdict = recordReject(sessionId, kind)
     // 同时落进程 stderr：宿主 tail prod-server.log 即可看到「这一轮没执行」的原因，不必翻 jsonl
-    console.warn(`[ai-runner][reject] kind=${entry.kind} bytes=${entry.bytes} lines=${entry.lines} overBudget=${entry.overBudget} truncated=${entry.truncated === true} sid=${entry.sid || '-'}${entry.reason ? ` reason=${entry.reason}` : ''}${entry.error ? ` error=${entry.error}` : ''}`)
+    console.warn(`[ai-runner][reject] kind=${entry.kind} bytes=${entry.bytes} lines=${entry.lines} overBudget=${entry.overBudget} truncated=${entry.truncated === true} sid=${entry.sid || '-'} streak=${verdict.count}${verdict.tripped ? ' BREAKER-TRIPPED' : ''}${entry.reason ? ` reason=${entry.reason}` : ''}${entry.error ? ` error=${entry.error}` : ''}`)
+    return verdict
   }
   if (!script) {
-    logReject('', 'empty')
-    return c.json({ error: '脚本为空' }, 400)
+    const v = logReject('', 'empty')
+    return c.json({ error: '脚本为空', breaker: v.tripped }, v.tripped ? 429 : 400)
   }
 
   // [g2-narrow-v1] 脚本头契约前置拦截（先于 splitShebang 与语法检查）
@@ -108,12 +115,13 @@ runHono.post('/run', async (c) => {
     const hint = reason.startsWith('ILLEGAL_SHEBANG')
       ? '（/run 仅执行 node 脚本；bash 请改用自动循环或 `!` 命令行通道）'
       : ''
-    logReject(script, 'head-contract', { reason })
+    const v = logReject(script, 'head-contract', { reason })
     return c.json({
       error: `脚本头契约违规：${reason}${hint}`,
       metaError: true,
       rule: 'SYSTEM.md',
-    }, 400)
+      breaker: v.tripped,
+    }, v.tripped ? 429 : 400)
   }
   const { isNodeScript, effectiveScript } = splitShebang(script)
   if (isNodeScript) {
@@ -125,7 +133,7 @@ runHono.post('/run', async (c) => {
       //   AI 于是原地重发同样长的脚本，必然再次被截断，两轮后熔断冻结。
       //   truncated=true 让客户端改发「缩小本轮范围、拆成多个小脚本」的指令。
       //   scriptSize 是判断「本轮本来就超预算」的唯一线索（到达体积已接近 12 KB）。
-      logReject(effectiveScript, 'syntax', {
+      const v = logReject(effectiveScript, 'syntax', {
         error: syntax.error,
         truncated: syntax.truncated === true,
         // 与响应体里的 scriptSize 同口径（都量 effectiveScript）：两处数字必须可比
@@ -141,7 +149,8 @@ runHono.post('/run', async (c) => {
         syntaxError: true,
         truncated: syntax.truncated,
         scriptSize: measureScriptSize(effectiveScript),
-      }, 400)
+        breaker: v.tripped,
+      }, v.tripped ? 429 : 400)
     }
   }
 
@@ -189,6 +198,8 @@ runHono.post('/run', async (c) => {
         }, sandbox, sessionId)
         const scriptOk = result.code === 0
         if (scriptOk) markOk(pipeline, 'EXECUTE'); else markFailed(pipeline, 'EXECUTE', `exit ${result.code}`)
+        // [reject-breaker-v1] 成功执行清 streak：偶发失败不误伤，只有连续拒收才熔断
+        if (scriptOk) resetRejectStreak(sessionId)
         // [pipeline-flow-v1] 补标 COLLECT（tools 读取成功即视为完成）与 RESULT_RELAY / RESULT_INJECT
         // （由客户端消费 summary 帧，服务端不插桩）
         markOk(pipeline, 'COLLECT')

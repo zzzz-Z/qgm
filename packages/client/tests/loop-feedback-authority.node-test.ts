@@ -20,7 +20,14 @@ test('G1: 循环引擎在 executeItemInner 阶段必须 sendFill 回传结果', 
   const src = readSrc(HANDLERS_SRC)
   const m = src.match(/async function executeItemInner[\s\S]*?\n {2}\}/)
   assert.ok(m, '找不到 executeItemInner 函数体')
-  assert.ok(m[0].includes('transport.sendFill'), 'executeItemInner 内无 sendFill：结果回传未由循环引擎承接')
+  // [round-merge-v1] 出站口为守 §4 体积 ratchet 被上收到 flushRoundOutcome（不可内联：
+  //   reply-handlers.ts 冻结在 413 行）。故判据拆成两段：① 两条分支都在 executeItemInner 内交出结果；
+  //   ② 唯一出站口确实调用了 transport.sendFill。两段缺一即等于「结果回传未由循环引擎承接」。
+  assert.ok(m[0].includes('stageRoundOutcome(inst.id.value, cjsOutcome'), 'cjs 分支未交出结果：结果回传未由循环引擎承接')
+  assert.ok(m[0].includes('stageRoundOutcome(inst.id.value, bashOutcome'), 'bash 分支未交出结果：结果回传未由循环引擎承接')
+  const flush = src.match(/function flushRoundOutcome[\s\S]*?\n {2}\}/)
+  assert.ok(flush, '找不到 flushRoundOutcome 出站口')
+  assert.ok(flush[0].includes('transport.sendFill'), '出站口内无 sendFill：结果回传未由循环引擎承接')
 })
 
 test('G2: exec-flow 里 softPause 必须被 isLoopActive 守卫', () => {

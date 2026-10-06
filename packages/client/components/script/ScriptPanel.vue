@@ -296,8 +296,9 @@ watch(running, (v) => {
         'warn',
         5000,
       )
-      if (midBatch) {
-        // 队列未清空：等最后一块跑完统一回传，避免在批量中途把 AI 唤醒
+      if (midBatch || isLoopActive.value) {
+        // 队列未清空 / 循环活动：回传权归循环引擎（reply-handlers 的 executeItemInner），
+        // 此处不得再发一次，否则同一次执行会出现「循环引擎 + ScriptPanel」双发
       } else if (autoTakeoverEnabled.value) {
         scheduleAutoRun(() => { void copyOutput(autoFeedbackRequested.value) })
       } else {
@@ -317,7 +318,9 @@ watch(running, (v) => {
           || result.value.tsc?.ok === false
           || result.value.lint?.ok === false
           || result.value.test?.ok === false
-      if (shouldAutoAsk && !midBatch && result.value.error !== '已取消') {
+      // [loop-feedback-authority-v2] 循环活动时回传权归循环引擎，ScriptPanel 一律不再发：
+      //   本块执行完时循环引擎也会发（且已按队列是否清空合并成一次），两处都发即为同轮双发。
+      if (shouldAutoAsk && !midBatch && !isLoopActive.value && result.value.error !== '已取消') {
         if (forceFeedback) clearAutoFeedback()
         if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput(forceFeedback) })
         else void copyOutput(forceFeedback)

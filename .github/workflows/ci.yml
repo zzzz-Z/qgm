@@ -65,6 +65,18 @@ jobs:
       - name: 文档索引双向对账
         run: pnpm docs:verify
 
+      # [ci-anchors-gate-v1] 锚点对账进 CI（2026-10-06）
+      # [WHY] `scripts/anchors.json` 声明的 (file, contains) 此前**只在 `pnpm session:start` 校验**，
+      #   而 CI 不跑 ⇒ 提交态里改坏锚点句（含 SYSTEM.md 的 2 条行为句锚点）、或改了文件名/落点，
+      #   都不会被拦 —— 闸门只在开发者本地首次会话生效。与上一步「文档索引双向对账」同属
+      #   「文档/规则完整性」闸门，故相邻放置。本步骤是 §0.1 讨论中「改 SYSTEM.md 不得改写锚点句」
+      #   这条规则的**唯一可执行载体**（规则写进规则文件本身没有执行者，写进 CI 才有）。
+      # [EVIDENCE] 目标全部是仓库内追踪文件（packages/ 54、scripts/ 12、package.json 3、
+      #   AGENTS.md 2、bin/ 1），实测零 `.ai-runner`/`dist/`/`runs/` 运行态路径
+      #   ⇒ 干净检出即可跑，**不依赖 build**（与 typecheck/lint 相比无前置）。
+      - name: 锚点对账
+        run: pnpm anchors:verify
+
       - name: 类型检查（四套）
         run: pnpm typecheck
 

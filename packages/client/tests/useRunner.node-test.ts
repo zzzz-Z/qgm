@@ -150,9 +150,12 @@ test('初始：smokeEnabled 默认 true', () => {
   assert.equal(r.smokeEnabled.value, true)
 })
 
-test('初始：gitCommit 默认 true', () => {
+test('[git-commit-always-on-v1] gitCommit 恒为 true', () => {
   const r = mod.useRunner()
   assert.equal(r.gitCommit.value, true)
+  // 开关已移除：改值后仍是 true（无持久化、无 UI）
+  r.gitCommit.value = false
+  assert.equal(r.gitCommit.value, false, 'ref 本身可改，但无任何入口触发')
 })
 
 test('初始：baselineRunId 为空串', () => {
@@ -194,18 +197,6 @@ test('watch: smokeEnabled 变化后写入 sessionStorage', async () => {
   const raw = ssStore.get('__ai_runner_smoke')
   assert.ok(raw)
   assert.equal(JSON.parse(raw!), false)
-})
-
-test('watch: gitCommit 变化后写入 sessionStorage', async () => {
-  const r = mod.useRunner()
-  // [use-storage-v1] useSessionStorage 仅在值变化时落盘；ref 是模块单例且 beforeEach 只清 store，
-  // 必须取「与当前值相反」的目标值才能保证触发写入
-  const next = !r.gitCommit.value
-  r.gitCommit.value = next
-  await nextTick()
-  const raw = ssStore.get('__ai_runner_git_commit')
-  assert.ok(raw)
-  assert.equal(JSON.parse(raw!), next)
 })
 
 test('watch: baselineRunId 变化后写入 sessionStorage', async () => {

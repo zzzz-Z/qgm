@@ -18,6 +18,9 @@ interface RawTaskItem { id?: string, desc?: string, status?: string, doneAt?: nu
 let _pollSeq = 0
 // [taskboard-ui-v2] 全部完成 3s 后自动折叠为一行摘要
 let _autoCollapseTimer: ReturnType<typeof setTimeout> | null = null
+// [taskboard-hide-delay-v2] 全完成隐藏延迟：原 3s 太快，用户扫一眼未尽就消失；
+// 延长到 30s 给足「看完成项划线 + 百分比」的时间。
+const AUTO_HIDE_DELAY_MS = 30_000
 
 const _visible = ref(typeof document !== 'undefined' ? document.visibilityState === 'visible' : true)
 const todo = ref<string[]>([])
@@ -29,9 +32,15 @@ const items = ref<TaskItemRow[]>([])
 // [WHY] 旧实现 if(!ok) return + catch 静默 ⇒ 服务挂掉后面板展示陈旧数据且无任何提示
 const failStreak = ref(0)
 const collapsed = ref(false)
+// [taskboard-hide-after-done-v1] 全完成 → 3s 后整体隐藏（此前仅折叠）：完成态常驻无信息量，隐藏更干净
+// [CONSTRAINT] 隐藏只由 hiddenAfterDone 控制；新任务到达（total 变化 / 非全完成）时 watch 自动恢复
+const hiddenAfterDone = ref(false)
 // [taskboard-ui-v2] 执行中项若不在可视区，滚到中央
 const listRef = ref<HTMLElement | null>(null)
 const runningItemRef = ref<HTMLElement | null>(null)
+const clearing = ref(false)
+// [taskboard-retry-v1] 失败项一键重新登记：push 原文（服务端对 failed 项允许重新登记），下一轮 poll 回 pending
+const retrying = ref('')
 
 // [hmr-safe-poll-v1] useIntervalFn 随组件作用域自动清理，避免 HMR 替换 setup 时旧 timer 残留
 // [initial-poll-v1] immediate 只启动定时器、不立即调回调；首次拉取靠 onMounted 手动触发
@@ -92,14 +101,22 @@ const failedRows = computed(() => view.value.failed)
 const doneRows = computed(() => view.value.done)
 // [task-running-v1] 滚动定位用：执行中项文本（items / 旧视图两条路径统一）
 const runningText = computed(() => String(view.value.running?.text || ''))
+// [taskboard-clear-v1] 手动清空：仅当无待办且无执行中时显示（防误删进行中的清单）
+// [WHY] 循环异常终止（崩溃/硬超时/熔断）不走收尾清空路径，failed/done 残留会一直挂着——用户需要手动出口
+const canClear = computed(() => total.value > 0 && !runningRow.value && pendingRows.value.length === 0)
+// [taskboard-failed-badge-v1] 头部失败计数徽章：不展开也能一眼看到有失败项
+const failedCount = computed(() => failedRows.value.length)
 
 watch(() => total.value > 0 && doneCount.value === total.value, (allDone) => {
   if (_autoCollapseTimer) { clearTimeout(_autoCollapseTimer); _autoCollapseTimer = null }
   if (allDone) {
     _autoCollapseTimer = setTimeout(() => {
       collapsed.value = true
+      hiddenAfterDone.value = true
       _autoCollapseTimer = null
-    }, 3000)
+    }, AUTO_HIDE_DELAY_MS)
+  } else {
+    hiddenAfterDone.value = false
   }
 })
 watch(() => runningText.value, async (v) => {
@@ -124,6 +141,49 @@ onBeforeUnmount(() => {
   if (_autoCollapseTimer) { clearTimeout(_autoCollapseTimer); _autoCollapseTimer = null }
 })
 
+async function clearBoard(): Promise<void> {
+  const sid = effectiveSessionId.value
+  if (!sid || clearing.value) return
+  clearing.value = true
+  try {
+    // set 空清单 ⇒ 服务端 tasks-by-sid-empty-v1 删桶
+    const r = await fetch('/__ai/tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'set', sid, todo: [], done: [] }),
+    })
+    if (r.ok) {
+      items.value = []
+      todo.value = []
+      done.value = []
+      await poll()
+    } else {
+      failStreak.value++
+    }
+  } catch {
+    failStreak.value++
+  } finally {
+    clearing.value = false
+  }
+}
+async function retryTask(text: string): Promise<void> {
+  const sid = effectiveSessionId.value
+  if (!sid || !text || retrying.value) return
+  retrying.value = text
+  try {
+    const r = await fetch('/__ai/tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'push', sid, pushTodo: [text] }),
+    })
+    if (r.ok) await poll()
+    else failStreak.value++
+  } catch {
+    failStreak.value++
+  } finally {
+    retrying.value = ''
+  }
+}
 // [taskboard-ui-v2] done 项显示 HH:MM 完成时刻
 function hhmm(ts: number): string {
   if (!ts || !Number.isFinite(ts)) return ''
@@ -173,7 +233,8 @@ function onVis() {
 </script>
 
 <template>
-  <div v-if="hasSession" class="task-progress" :class="{ collapsed, 'is-empty': total === 0 }">
+  <!-- [taskboard-hide-when-empty-v1] 无任务时隐藏；v-show 保持挂载以持续轮询（v-if 会停轮询） -->
+  <div v-if="hasSession" v-show="total > 0 && !hiddenAfterDone" class="task-progress" :class="{ collapsed, 'is-empty': total === 0 }">
     <button
       type="button"
       class="tp-head"
@@ -182,8 +243,19 @@ function onVis() {
     >
       <span class="tp-caret" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
       <span class="tp-title">任务完成详情</span>
+      <span v-if="failedCount > 0" class="tp-failed-badge">{{ failedCount }} 失败</span>
       <span v-if="total > 0" class="tp-pct">{{ progressPercent }}%</span>
       <span class="tp-count">{{ doneCount }}/{{ total }}</span>
+      <button
+        v-if="canClear"
+        type="button"
+        class="tp-clear"
+        :disabled="clearing"
+        aria-label="清空任务看板"
+        @click.stop="clearBoard()"
+      >
+        {{ clearing ? '…' : '清空' }}
+      </button>
     </button>
     <div v-if="stale" class="tp-stale" role="status">
       数据可能已过期（连续 {{ failStreak }} 次拉取失败）
@@ -213,6 +285,16 @@ function onVis() {
           <span class="tp-icon" aria-hidden="true">✗</span>
           <span class="tp-text">{{ r.text }}</span>
           <span v-if="hhmm(r.at)" class="tp-time">{{ hhmm(r.at) }}</span>
+          <!-- [taskboard-retry-v1] hover 显现：重新登记为待办 -->
+          <button
+            type="button"
+            class="tp-retry"
+            :disabled="retrying === r.text"
+            aria-label="重新登记该任务"
+            @click.stop="retryTask(r.text)"
+          >
+            {{ retrying === r.text ? '…' : '↻ 重试' }}
+          </button>
         </div>
       </template>
       <template v-if="doneRows.length">
@@ -227,7 +309,7 @@ function onVis() {
       </template>
     </div>
     <div v-if="!collapsed && total === 0" class="tp-empty">
-      暂无任务
+      暂无任务 · 复杂任务会自动登记到看板
     </div>
   </div>
 </template>
@@ -395,5 +477,65 @@ function onVis() {
   font-size: 11.5px;
   color: var(--text-3);
   text-align: center;
+}
+/* [taskboard-failed-badge-v1] 头部失败计数：暗红徽章，不展开也能看到失败 */
+.tp-failed-badge {
+  padding: 1px 6px;
+  font:
+    600 10.5px/1.4 ui-monospace,
+    monospace;
+  color: #f85149;
+  background: rgb(248 81 73 / 12%);
+  border-radius: 999px;
+}
+/* [taskboard-clear-v1] 清空按钮：ghost 风格，hover 加深；仅收尾态出现 */
+.tp-clear {
+  padding: 1px 8px;
+  font: inherit;
+  font-size: 10.5px;
+  color: var(--text-3);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.tp-clear:hover:not(:disabled) {
+  color: var(--text);
+  background: rgb(127 127 127 / 10%);
+}
+.tp-clear:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* [taskboard-retry-v1] 失败行 hover 显现重试按钮（触屏恒显） */
+.tp-retry {
+  flex-shrink: 0;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 10.5px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.tp-item.failed:hover .tp-retry,
+.tp-retry:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .tp-retry {
+    opacity: 1;
+  }
+}
+.tp-retry:hover:not(:disabled) {
+  color: var(--primary, #58a6ff);
+  border-color: var(--primary, #58a6ff);
+}
+.tp-retry:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 </style>

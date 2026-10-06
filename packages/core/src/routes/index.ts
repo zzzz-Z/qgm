@@ -18,6 +18,9 @@ import { lessonsHono } from './lessons.js'
 import { userscriptHono } from './userscript.js'
 import { sessionHono } from './session.js'
 import { selfcheckHono } from './selfcheck.js'
+import { restartHono } from './restart.js'
+// [send-trace-v1] 出站 fill 留痕入口（页面通道每次投递上报一条 ⇒ logs/send.jsonl）
+import { sendLogHono } from './send-log.js'
 
 /** 所有子路由 Hono 应用实例列表 */
 export const HONO_SUB_APPS = [
@@ -39,6 +42,8 @@ export const HONO_SUB_APPS = [
   userscriptHono,
   sessionHono,
   selfcheckHono,
+  restartHono,
+  sendLogHono,
 ]
 
 // 已迁移到 Hono 的路径前缀——dispatchHono 只对这些前缀做 bridge
@@ -65,4 +70,6 @@ export const HONO_PREFIXES = [
   '/userscript',
   '/session',
   '/selfcheck',
+  '/restart',
+  '/send-log',
 ]

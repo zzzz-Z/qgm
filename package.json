@@ -34,6 +34,7 @@
     "lessons:status": "node scripts/lessons-status.cjs",
     "signals": "node bin/log-signal.cjs",
     "docs:verify": "node scripts/verify-docs-index.cjs",
+    "anchors:verify": "node scripts/verify-anchors.cjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "tsc": "tsc -p tsconfig.json --noEmit",

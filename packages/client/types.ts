@@ -92,6 +92,12 @@ export interface RunResponse {
    *   后者供每轮体积配额反馈（AI 无法自行测量输出长度，缺此字段则永远撞墙后才知道墙在哪）
    */
   scriptSize?: { lines: number, bytes: number, overBudget: boolean, maxLines: number, maxBytes: number }
+  /**
+   * [reject-breaker-v1] 服务端判定「同 sid 同 kind 连续 ≥2 次拒收」已熔断
+   * [WHY] 客户端据此 finish(inst, 'breaker-rejected')，避免 AI 无限原地重发
+   * [CONSTRAINT] 仅前置拦截（4xx/429）时出现；成功轮必然 undefined
+   */
+  breaker?: boolean
   /** [L4b] 服务端从错误输出提取的符号指纹，用于连续 2 轮未变检测 */
   fingerprints?: Array<{ file: string, line: number, symbol: string, kind: string }>
   git?: {

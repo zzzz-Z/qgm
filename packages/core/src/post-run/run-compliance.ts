@@ -7,6 +7,12 @@ import type { ClaimMismatch } from './types.js'
 export interface ComplianceFlags {
   hasDesc: boolean
   hasSelfCheck: boolean
+  /**
+   * [real-selfcheck-observe-v1] verify-contract-v1 判据：脚本是否调用 syntaxCheck / typeCheck
+   * [WHY] 旧 hasSelfCheck 判 assert/exit(1)，与 SYSTEM.md 定义不符；此字段前向观测真实命中率
+   * [CONSTRAINT] 仅采集不闸门（观测期）；命中率达标后再评估是否接入 DONE 拒收
+   */
+  hasRealSelfCheck: boolean
   isDecision: boolean
 }
 
@@ -24,6 +30,8 @@ export function computeCompliance(effectiveScript: string, desc: string): Compli
   return {
     hasDesc: desc.length > 0,
     hasSelfCheck: /__AI__\.assert|\.assert\(|process\.exit\(1\)/.test(effectiveScript),
+    // [real-selfcheck-observe-v1] 兼容 __AI__.syntaxCheck(...) 与解构后裸调用（含空行前后缀不误判）
+    hasRealSelfCheck: /__AI__\.(?:syntaxCheck|typeCheck)\b|(?:^|[^\w.])syntaxCheck\(|(?:^|[^\w.])typeCheck\(/.test(effectiveScript),
     isDecision: /__AI__\.exitNeedInput|__AI_RUNNER_DECISION__/.test(effectiveScript),
   }
 }

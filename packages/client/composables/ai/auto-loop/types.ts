@@ -1,13 +1,9 @@
 import type { Ref } from 'vue'
 import type { InboxItem } from '../../runner/useScriptInbox'
-// [multi-script-v1] 转出队列条目类型：本模块已是 auto-loop 的类型汇聚点，消费方
-// （reply-handlers）经此取类型可**不新增 import 语句**——该文件有「单文件 import ≤ 8」架构红线。
-export type { InboxItem } from '../../runner/useScriptInbox'
+// [cohesion-over-budget-v1] 原此处再导出 InboxItem / Ref，只为让 reply-handlers「不新增 import 语句」
+// 以躲开「单文件 import ≤ 8」。上限放宽到 20 后该绕道已无必要，消费方改直连真实来源
 // AIRUNNER-BATCH5-0A-TYPES-SPLIT
 // 从 useAutoLoop.ts 抽出的类型定义（batch5-0a，HCLC 类型分离）
-
-// [hclc-ref-v1] 再导出 Ref，供 reply-handlers 等消费方合并 import 到本文件（避免顶破 8 红线）
-export type { Ref } from 'vue'
 
 /** 循环状态（类型别名） */
 export type LoopState

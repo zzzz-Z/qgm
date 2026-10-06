@@ -5,8 +5,13 @@
 // [CONSTRAINT] 用全局 Response 造响应，不用 `as any`；load-rules 有 Promise 缓存，每个用例前必须 clearRulesCache()。
 import { afterEach, beforeEach, it, vi } from 'vitest'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { buildLoopInitialPrompt, buildNewSessionPrompt } from '../composables/ai/session-prompt.js'
 import { clearRulesCache } from '../composables/ai/load-rules.js'
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
 const LESSONS_MD = '> 维护者协议引言（应被丢弃）\n\n## 坑A：某年某月的坑\n正文A\n'
 const LESSONS_MARK = '.ai-runner/lessons.md'
@@ -125,4 +130,45 @@ it('截断路径下图例同样存在（图例不计入 6000 字符条目预算�
   const p = await buildLoopInitialPrompt('目标N')
   assert.ok(p.includes('`[STALE]`'), '截断时图例丢了：条目只剩状态标记，AI 无从解读')
   assert.match(p, /仅注入最近 1\/2 条/, '截断提示本身也必须在位')
+})
+
+// ── 注入窗口的状态质量：全局比例达标 ≠ 窗口干净 ────────────────────────────────
+// [lessons-window-hygiene-v1] 背景：`lessons-hygiene.node-test.ts` 只守**全局**待复核比例（≤30%）。
+//   但注入窗口是**从文件尾往前**截的，而台账 append-only ⇒ 新条目（缺省即未复核）必然堆在尾部
+//   ——「全局达标、窗口全脏」是真实盲区：2026-10-06 实测全局 64/141 = 45.4% 的同时，
+//   窗口内 30/30 = **100% 未复核**，即 AI 读到的东西 100% 未经证据检验。
+// [CONSTRAINT] 读**真实台账**（仓库里的 `.ai-runner/lessons.md`）、走**真实实现**
+//   （`buildLessonsBlock` 的窗口选择），不复制一份算法——复制品会与被守对象漂移。
+// [阈值标定 2026-10-06] 治理前窗口 pending 占比 = 1.00（30/30）；治理后 = 0.50（4/8）。
+//   取 0.60：两侧都留有区分度，且允许「新采集的 pending 占窗口一半」这一正常态。
+const WINDOW_PENDING_MAX = 0.6
+
+function injectedEntries(prompt: string): string[] {
+  const m = prompt.match(/<file path="\.ai-runner\/lessons\.md">([\s\S]*?)<\/file>/)
+  if (!m) return []
+  const i = m[1].indexOf('\n## ')
+  if (i < 0) return []
+  return m[1].slice(i + 1).split(/\n(?=## )/).filter(e => e.startsWith('## '))
+}
+
+function isPendingEntry(e: string): boolean {
+  // 与 lessons-status.cjs / lessons-hygiene 同口径：`## 标题` 后的**首个非空行**才是状态行
+  const first = e.split('\n').slice(1).find(l => l.trim() !== '') || ''
+  return !/^\[(?:VERIFIED|REJECTED|STALE)\]/i.test(first.trim())
+}
+
+it('注入窗口内待复核占比 ≤ 60%：全局达标不等于 AI 看到的是干净的', async () => {
+  const md = fs.readFileSync(path.join(ROOT, '.ai-runner', 'lessons.md'), 'utf8')
+  vi.stubGlobal('fetch', makeFetch({ lessons: md }))
+  const p = await buildLoopInitialPrompt('目标H')
+  const entries = injectedEntries(p)
+  // 防空转：窗口为空时 ratio 会退化成 0/0，判据就恒真了
+  assert.ok(entries.length >= 3, `窗口内只解析到 ${entries.length} 条，判据可能被真空满足`)
+  const pending = entries.filter(isPendingEntry)
+  const ratio = pending.length / entries.length
+  assert.ok(
+    ratio <= WINDOW_PENDING_MAX,
+    `注入窗口内待复核 ${pending.length}/${entries.length} = ${(ratio * 100).toFixed(0)}%，超 ${WINDOW_PENDING_MAX * 100}%。`
+    + ` AI 只读窗口 ⇒ 积压必须清到窗口以外才有意义。窗口内首条待复核：${pending[0]?.split('\n')[0] || '(无)'}`,
+  )
 })

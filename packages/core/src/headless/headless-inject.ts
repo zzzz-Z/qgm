@@ -508,7 +508,10 @@ export function detectReplyInPage() {
     return null
   }
   if (!dedup._seenGrowth) return null
-  if (dedup._plainSentInCycle) return null
+  // [ask-any-cycle-v1] ASK 标记不受「本轮已推过 plain」约束：
+  //   流式回复常先出无标记文本（被推成 plain）再补 ASK 块，若一并被去重拦下，提问卡永不出现。
+  //   ASK 分支本身有 _stableCount>=3 稳定门槛，重复推的风险由该门槛承担。
+  if (dedup._plainSentInCycle && marks.ask < 0) return null
   dedup._stableCount = (dedup._stableCount || 0) + 1
   if (dedup._stableCount < 3) return null
   const plainText = getMainText()
@@ -525,6 +528,13 @@ export function detectReplyInPage() {
   // [text-mark-v1] TEXT 标记的载荷：取 DOM→Markdown 反推正文并剥掉标记行。
   // [WHY] getMainText() 是 textContent——块级标签之间不插换行，标记行会与正文粘成一行，
   //   前端 renderMarkdown 拿到的是「TEXTxxx」一整段，段落/列表全塌。
+  // [ask-card-newline-v1] ASK 标记回复同样必须用 extractReplyMd 保留换行。
+  // [WHY] 与 TEXT 同坑（见下）：getMainText 的 textContent 无换行，前端 parseAsk 的
+  //   「首个非空行 = 独占标记行」判据失配 → askUser 不触发 → ai:question 不入流 → 提问卡不渲染。
+  // [CONSTRAINT] 传 extractReplyMd(replyRoot) 原样（不剥标记行）：parseAsk 需按标记行定位问题正文。
+  if (marks.ask > 0) {
+    return { kind: 'plain', text: extractReplyMd(replyRoot) }
+  }
   if (marks.text > 0) {
     const body = extractReplyMd(replyRoot).split(/\r?\n/).slice(marks.text).join('\n').trim()
     return { kind: 'plain', text: body || plainText }

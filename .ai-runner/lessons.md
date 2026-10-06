@@ -286,14 +286,6 @@ G4 类「API 异常不抛」的判据必须三类都覆盖，否则漏检（本�
 
 ESM 测试文件里 `require.resolve` 的相对基准是**测试文件自身**；从 `packages/core/tests/` 到仓库根 `bin/` 是三层 `../../../`，不是 `../../`。
 
-## `{ value: false }` 不能冒充 Vue `Ref<boolean>`
-
-（待复核）测试里必须 `import { ref }` 真实构造——plain 对象缺 `[RefSymbol]`（TS2741）。
-
-## `ExecFlowDeps` 加字段后必须同轮补调用方
-
-（待复核）`ScriptPanel.vue` 未同步注入时 tsc 报 `Property 'isLoopRunning' is missing`（SYSTEM.md §9 跨文件级联）。
-
 ## 「vitest 复用 transform 缓存导致测试跑旧代码」是误诊
 
 [REJECTED] 2026-10-05 A · 本文件旧记录已自纠（「那个诊断是我 ROUND 22 段2a 的误诊」）；真因是 overlay 跨进程（见本区第一条）；`pnpm typecheck` + 全量 vitest 1,184 用例在**不带** `--no-cache` 下全绿
@@ -330,11 +322,6 @@ ESM 测试文件里 `require.resolve` 的相对基准是**测试文件自身**�
 [VERIFIED] 2026-10-05 A · `fullgate.ts` 的 `T_TOTAL = 960_000`，注释明写「须 < hooks.ts 的 BeforeDoneFinal 超时（1200s）」
 
 不检查则 hook 会在执行器跑完前强杀（期一 5s < 12s 同族问题）。
-
-## 写入后立即跑 eslint / vitest 的时序窗口
-
-（待复核）写入落盘与工具首次扫描之间的窗口：`eslint <path>` 可能报「No files matching」，
-`vitest run <path>` 可能报 `No test files found`；文件实际已存在，重跑即消失（vitest 侧清 `node_modules/.vite` 亦可）。
 
 ## 找技能必须先按技术栈搜
 
@@ -386,10 +373,6 @@ scoped + 不同 SFC ⇒ 在一处加的类对另一组件无效，必须在对�
 [VERIFIED] 2026-10-05 A · 读 @vueuse/shared@15.0.0 `dist/index.js:1632-1654`：`immediate` 只走 `resume()` → `setInterval(cb, interval)`；「挂载即调一次回调」是**另一个独立选项** `immediateCallback`（默认 false）。
 
 不立即触发回调。要「挂载即拉一次」须在 `onMounted` 里手动调 `poll()`，否则首屏前 2s 空白。要「挂载即拉一次」须在 `onMounted` 里手动调 `poll()`，否则首屏前 2s 空白。
-
-## `__AI__.browser.cssom` 对 SPA 首屏根元素返回「选择器未命中」不代表 dev 挂了
-
-（待复核）工作台懒挂载，`.hdr` 在选择器匹配时刻可能尚未渲染。用 `body` 探活即可。
 
 ## Playwright 冷启动 + 单张截图约 3s
 
@@ -448,15 +431,6 @@ scoped + 不同 SFC ⇒ 在一处加的类对另一组件无效，必须在对�
 宿主侧同理：判 `.ai-runner/**` 是否落盘只能看 `stat` / `od -c` / `sha256`，不能看 `git status`。
 推论：`pnpm git:archive -- --path .ai-runner/...` 会失败（被忽略），需退回文件级备份。
 
-## `__AI__.writeText` 的输出容易被误拼
-
-（待复核）曾输出 `cleaned; lines=4573`（本想拼 `before.length`）。改用 `__AI__.log('lines=' + ...)` 单参数。
-
-## 测试里构造含引号的断言字符串极易出语法错
-
-（待复核）`.replace(/\'/g, '"')` 这种「先写错再替换」因转义层级混乱直接报 TS1005。
-直接用外层单引号、内层双引号的字符串字面量。
-
 ## `src.indexOf(...)` 会先命中注释里的同名字符串
 
 [VERIFIED] 2026-10-05 A · 最小样例实测：两行同含 `new URL(req.url …`，`indexOf` 的首个命中落在**注释行**内（at=16，所在行以 `//` 开头）——`String.indexOf` 不感知注释语法。
@@ -479,18 +453,6 @@ packages/client/dist 是仓库内 prod 的 SPA 根（`apps/standalone/src/server
 ## install 端点的「文件数」按仓库全树计数，不看 path 子目录：`antfu/skills` 装 `vueuse-functions` 时报 `文件数 268 超过上限 80`，`vueuse/skills` 同样报 271——因为该仓库挂了大体量 git submodule / 子模块，端点把整个 tree 都算进去了，即使技能本体只有 `SKILL.md` + `references/`。修法
 
 改用 raw 直取 `SKILL.md` 落盘兜底（`raw.githubusercontent.com/<repo>/HEAD/<path>/SKILL.md`），校验 frontmatter 的 `name` 与 `description` 后再写 `.ai-runner/skills/<name>/`。
-
-## `curl` 在 `/run` 沙箱须用 `__AI__.exec('curl', [args])` 数组形式
-
-`__AI__.shell('sh', ['-c', 'curl ...'])` 的 stdout 会被吞掉（返回空串），而 `exec` 直调能拿到真实输出。探网络出口 / 调宿主端点一律用 `exec`。
-
-## 宿主端点可达性 ≠ 稳定：连续 3 轮 `TypeError: Failed to fetch`
-
-与脚本内容无关（纯 `readText`/`listDir` 也失败），是宿主连接抖动；按 §8 熔断停止重试、改用 `!` 手工通道或等待恢复即可，不要换策略硬刚。
-
-## Playwright 快照的「像素差异」可能是文件名不匹配
-
-`toHaveScreenshot` 失败报 `N pixels are different`，很容易误判为样式改动。但默认命名按 `process.platform` 插入平台段，基线为 `-darwin` 时，Linux 上找不到 `-linux` 文件会直接判失败——表象与像素问题无异，实为快照名不匹配。定位靠看快照目录文件名的后缀，而非读 diff 图。
 
 ## `docs/` 是 git 追踪区，`.ai-runner/` 的**运行态部分**不是：新增 `docs/*.md` 会真实出现在 `git status`（与技能安装落 `.ai-runner/` 时 changeCount 恒 0 相反）；且任何新增 md 必须同步进 `docs/DOCS-INDEX.md`，否则 `docs:verify` 的双向对账（悬空链接 / 漏收录）会失败。
 
@@ -565,22 +527,6 @@ config 改对了，但磁盘上 10 个 `*-darwin.png` 不会自动改名为无�
 
 `static-stream-guard` 6 例、`lesson-extract` 21 例全绿，但守卫由修复者自写，只覆盖已知路径。靠手推边界（双反引号、缓存 size 陈旧）才找到两处未覆盖边界——跑测试通过不等于逻辑无洞。
 
-## 像素基线不能覆盖 git 状态派生的 UI 区域（视觉回归会退化成噪音源）
-
-**现象**：`visual.spec.ts` 的 `03 工作日志` 两条主题基线**确定性**失败（6503 像素 / ratio 0.01，重试三次数字完全相同 ⇒ 不是抖动，是内容真变了）。
-
-**根因**：`WorklogPane.vue` 是「VSCode 源码管理风格侧栏」，其变更文件清单来自 `/__ai/git/worklog` ⇒ **内容 = 当前 git 工作区状态**。基线拍摄时是 22 个变更，重跑时 27 个（多出本轮改过的 `AGENTS.md` 等）。
-
-**定位路径**（每步排除了一个想当然的解释，可直接复用）：
-- diff 图显示差异只集中在右侧窗格的列表行 ⇒ 先看是不是整幅样式变了（不是）。
-- expected 计数 22 / actual 27 ⇒ 锁定是「内容」而非「样式」。
-- 10 张基线 mtime 全是同一分钟（仅一张稍后重采）⇒ 排除「基线拍自不同时刻」。
-- `SidePane.vue` 的 `.side-tab-badge`（变更计数）挂在标签栏、所有视图可见 ⇒ 若是它则 01–04 应全红，实际只有 03 红 ⇒ 排除，进而定位到只有 03 渲染的那个清单。
-
-**修法**：给 03 加**只在它用**的额外遮罩（`.wl-scroll`），**只遮 git 派生的清单、保留提交框等稳定 chrome** —— 整窗格遮掉会让截图退化成空白、失去回归价值。守卫里额外断言「03 的用例体必须真的引用该遮罩数组」，防有人把 mask 改回旧写法而守卫仍绿。
-
-**可迁移结论**：像素基线**不能覆盖「由仓库/运行状态派生」的 UI 区域**（git 变更清单、文件树、计数器、时长、日志）。这类区域红不代表回归，只代表你今天写了代码 —— 它会把视觉回归变成「每次都要 `--update-snapshots`」的噪音源，最终没人再看它。加基线时先问一句：**这块内容会不会因为「我改了别的代码」而变？**
-
 ## 同一文件名不同平台的快照不会自动改名
 
 [VERIFIED] 2026-10-05 B · 本轮亲跑：`snapshotPathTemplate` 去掉平台段后，`git status` 里 10 个 `*-darwin.png` 为 `D`、10 个新名称为 `??`；重采后 `ls packages/client/e2e/visual.spec.ts-snapshots | wc -l` = 10，无 `-darwin` 残留
@@ -598,24 +544,6 @@ config 改对了，但磁盘上 10 个 `*-darwin.png` 不会自动改名为无�
 [VERIFIED] 2026-10-05 B · 本轮亲跑：`upgrade` 通道打畸形目标 `//` 后，`.ai-runner/logs/server-crash.log` 从 488 B 涨到 859 B，堆栈顶为 `Server.onUpgrade (index.js:1511:7)`；而同样不响应的 `/nope` 零增长 ⇒ 「假崩溃」确实由兜底产生
 
 D8 装兜底后进程不死了，但 `attach-ws` 的畸形请求会被记成「假崩溃」，把真正的崩溃信号淹掉——这是修 A 引出 B 的典型，须由 `attach-ws-upgrade-guard` 单独清理。
-
-## 「落盘后自动 lint」的目标集合曾漏掉 markdown：写 md 的 agent 不跑 lint，第三方闸门被移动靶
-
-`/run` 落盘后本就会对**本次变更文件**跑 `eslint --fix`（`routes/run.ts` → `pickLintTargets` → `runEslint`），
-但目标集合 `LINT_EXTS` 只列了代码扩展名，**`.md` 不在其中** ⇒ 「写 markdown 的 agent 不跑 lint 就落盘」
-这条路径上没有任何机制接住：未对齐的表格会一直留在盘上，直到**第三方**跑全量 `pnpm lint` 才炸，
-把别人的提交闸门变成移动靶（实测同一小时内复发三次，第三次正好打红正在跑的 `pnpm verify`）。
-
-修法（2026-10-05）：`LINT_EXTS` 增补 `.md`，并补 `LINT_SKIP_SEGMENTS` 跳过 eslint 已忽略的目录
-（显式把 ignored 文件传给 eslint 只会打印 `File ignored…` 告警 + exit 0 —— 纯噪声，且让 `lint.ok`
-的语义「本次变更的代码是否 lint 干净」变模糊）。
-
-两个已被实测钉住的前提：未对齐表格 → `format/prettier` error（exit 1）；同一文件 `--fix` 后与原文
-**逐字节一致**（`diff -q` 无输出）⇒ 修复只动格式、不动语义。
-
-判据：守卫 `packages/core/tests/post-run-lint-targets.node-test.ts`（两种变异都变红：删 `.md` / 删 `dist`）；
-端到端探针 `.ai-runner/tmp/d11-e2e-probe.cjs`（对照：同一份内容**不经** `/run` 直接落 `docs/` → eslint
-4 个 error；**经** `/run` 落盘 → `lint.files=1` 且落盘后 0 error、内容被改写；落在跳过段内则逐字节未动）。
 
 ## 直派工单放进 docs/plan/ 等于没派发：整目录被 gitignore，且 docs:verify 对它显式豁免
 
@@ -750,12 +678,6 @@ A 的正文。
 
 附带机制坑（本次亲历）：`lessons.md` 的条目解析 = 「任何以 `## ` 开头的行」（`scripts/lessons-status.cjs` 与 `lessons-hygiene` 同口径），**且不跳过代码围栏**。因此「原样粘贴含二级标题的原始输出」会凭空造出一个伪条目，而该伪条目必然与它所引用的真条目近重复 ⇒ 必然打红闸门。写台账引用原始输出时，必须把围栏内的 `## ` 行降级（加说明或改前缀）。根治方向：解析器跳过代码围栏内的内容。
 
-## 沙箱 `ps` 对外部进程无输出
-
-`ps -p <pid>` / `ps ax` 在 `/run` 里拿不到宿主进程的启动时间（lsof 能看到 pid 与 cwd）。故段一「进程启动晚于产物 mtime」未能取证，改以「产物含新符号 + 端点存活」为准并如实记录。
-
-补充（2026-10-05）：验证「进程启动晚于产物 mtime」改用等价可核验判据——`stat -f '%Sm'` 取 pid 文件 mtime 与产物 mtime 对比，或 `kill -0 $PID` 探活。
-
 ## `grep -c "'headless:stop'"` 在打包产物里得 0
 
 [VERIFIED] 2026-10-05 A · 宿主侧亲跑：`grep -c "'headless:stop'" apps/standalone/dist/_server/index.js` → `0`；裸 token `grep -c headless:stop` → `3`
@@ -781,50 +703,9 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 - 纪律：**计数类证据必须附口径与可复现命令**——`grep -c`（行）／`match(/x/g)`（次数）／
   `grep -o … | wc -l`（次数）。回执、判决、工单里的每个数字都应如此；**无口径的数字视为未取证**。
 
-## overlay 与磁盘不同步
-
-`/run` 沙箱的 `writeText`/`patchFile` 落在 overlay，但 `shell` 派生的子进程（`npx eslint`、`node`）读的是磁盘 —— 同轮 `eslint` 会看到旧内容。修法是改走 `node -e` / `awk` 直改磁盘，或写入与验证分两轮（exit 0 落盘后再跑子进程）。
-
 ## 沙箱 output 通道本会话严重不稳定：多次出现脚本尾部被截断、被注入 `SCRIPT`/代码围栏文本、`node -e` 转义失败。有效的规避是
 
 单轮脚本压到极小、写盘用 `node -e` 直改磁盘绕过 overlay、验证与写入分两轮。
-
-## 无索引签名的 interface 不能赋给 `Record<string, unknown>`；加依赖后必跑 hclc-guard
-
-`writeChannelLog(channel, entry: Record<string, unknown>)` 接不住 `RejectLogEntry` / `BoardLogEntry`，
-tsc 报 `Index signature for type 'string' is missing in type 'RejectLogEntry'`。
-根因：**interface 没有隐式索引签名**（type alias 有，interface 没有），所以具名 interface 不能赋给 `Record<string, unknown>`。
-
-修法选择：
-
-- **入参侧**（首选）：形状不敏感的入参用泛型 `export function writeChannelLog<T extends object>(channel: LogChannel, entry: T)`；
-- **被赋侧**：给 interface 加索引签名（会污染该类型的文档语义，不推荐）。
-
-**不要**用 `as unknown as Record<string, unknown>` 绕过 —— 仓库禁 `as any` / `as unknown as`（除非注释写明理由）。
-
-同轮另一条：新增模块级依赖后**必跑 `hclc-guard.node-test.ts`**（`packages/core/src/**` 每文件**唯一 import 模块数 ≤ 8**，阻断级）。
-本轮 `run.ts` 因新增 `import … from './control-log.js'` 达 9 被判红 ⇒ 修法是把被引符号上提 `src/deps.ts` barrel
-（沿用文件内既有的 `[hclc-fix]` 先例），调用方改从 `../deps.js` 引入。
-**barrel 里导出行还要满足 `perfectionist/sort-exports`（按源路径排序）**——首次提交因把
-`./routes/control-log.js` 排在 `./post-run/index.js` 之前，eslint 直接 0 error → 1 error。
-
-判据：口径 = 唯一模块数 `new Set(源码里 from '…' 的模块路径).size`（不是出现次数）；`run.ts` 修完应为 **8**。
-
-## overlay-atomic-v1 会让同轮变异对子进程不可见：在 `/run` 沙箱里 `writeText` 变异 + `exec npx vitest` 验证，vitest 读的是磁盘旧文件 ⇒ 变异看着"没红"。正确做法是拆两轮
-
-一轮只写盘（本轮结束提交 overlay），下一轮再跑测试。
-
-## `__AI__.exec` 里跑长时间前台进程会被 60s 硬超时打断
-
-启动 dev/prod 服务一律 `nohup ... &`（后台）+ 单独 `sleep` 采样，不要把等待和启动放在同一次 exec。
-
-## 自检闸门与「已清理的 tmp 备份」互斥
-
-段五变异流程习惯把基线存到 `.ai-runner/tmp/*.txt` 用于「还原后字节一致」核验，但自检清理步骤会删它。下一轮会话若再跑变异，必须先重建基线，不能复用历史路径。
-
-## `git status` 里会出现非本会话的并行改动（本会话出现 3 项
-
-`DOCS-INDEX.md` / 新工单 / workbuddy memory）。DONE 的「变更文件」表只列自己的改动，多列即触发 selfcheck-gate 对账失败。
 
 ## reject.jsonl / board.jsonl 不按日分片：重跑定界所需一切
 
@@ -861,30 +742,193 @@ tsc 报 `Index signature for type 'string' is missing in type 'RejectLogEntry'`�
 观察期出口判据（提前写死，防事后挪门）：累计 ≥ 30 次 `closure-release` 或观察 ≥ 7 天后出报告；若 M2 误放行率 ≤ 10% 则「继续生成」按钮方案保持挂账不动；> 10% 则把 WO-20261005-04 段四的判定拿出来重议。
   `syntax` 中 `truncated:true` 占 16/18，且集中在 `sess-tab-muur5dop-t4oqfu`（闭合门上线前的现场）。
 
-## 工单段二给的采集命令在 `/run` 脚本里内嵌会被上游截断：`node -e "...长字符串..."` 嵌进脚本会因引号/反斜杠转义 + 中文 + 长度叠加触发 `400 truncated`。规避
+## 头部快照无法用于历史重放
 
-命令本身照原文交给宿主（写进 `lessons.md` 的 `text` 围栏），执行时改用「读全文 + JS 侧计算」的方式重跑，不原样复制 `node -e`。
+`run.ts:294` 硬编码成功轮只存脚本前 500 字符、失败轮 2000 字符；而自检调用通常写在脚本尾部（收尾段）→ 头部快照必然取不到。原工单的「重放 compliance.jsonl 统计命中率」在数据源层面不可行，只能走前向观测。
 
-## `patchFile` / `writeText` 追加长文本仍会触发上游截断：本轮 WO-08 段四追加约 40 行文本时连续 2 次被截。规避
+## 判据错位 vs 数据缺口是两件事
 
-把长条目拆成 7 个 ≤ 27 行的小脚本串行追加，每段自带一句稳定锚点。
+`hasSelfCheck` 判 assert 与 verify-contract 定义不符（判据错位）；但即便判据改对，历史数据仍无法重放（数据缺口）。前者改代码可解，后者只能靠前向采集。
 
-## `lessons-status` 的 pending 数会随会话推进变化：我上一轮 TEXT 里的「22 条」是在 DONE 采集前读到的快照；DONE 提交后 DONE 里的「踩坑记录」段被自动采集新增 2 条（L866 / L870），pending 变 24。教训
+## `git checkout HEAD -- <file>` 会丢弃该文件所有未提交改动
 
-任何数字类陈述必须当场重跑一次取数，不能复用几轮前的快照。
+回滚前须先确认目标文件的未提交改动仅来自本轮（用 `git diff --name-only HEAD -- <file>` 核对），否则会误删他人改动。本次两文件在会话开始时为 clean，故回滚安全。
 
-## DONE 采集侧不去重，会追加同文重复
+## GC 对历史老桶无效：老桶（GC 上线前创建）无 `updatedAt` 字段，被 `gcStaleBuckets` 判为「时刻未知，防误删」而保留。这意味着 GC 只对上线后新写的桶生效，存量老桶需一次性手动清。修法
 
-本轮再次出现（L757/L759，与 WO-07 时同一机制）。清掉后 pending 不变（因为这条原本在 22 条里、且不增不减）—— 但记录层面是脏数据，本次已手工订正。修复采集侧不在本会话范围（见遗留风险）。
+本会话已手动清掉存量废弃桶；后续所有桶都会有 `updatedAt`。
 
-## vitest 对新建测试文件存在缓存
+## `getMainText()` vs `extractReplyMd(replyRoot)` 的语义差异是本仓库头号陷阱
 
-`packages/core/tests/crash-recursion-guard.node-test.ts` 写入后首次运行报「旧测试名 + 2 failed」，磁盘文件确为新版。清 `node_modules/.vite` 缓存后 3 项全绿。守卫测试失败时，先 `readText` 核对磁盘实况，勿直接改断言。
+前者是 DOM textContent（无换行、无块级分隔），后者是 DOM→Markdown 反推（保留换行）。任何依赖「首行/行结构」的判据（`scanReplyMarks` / `parseAsk`）都必须基于后者。该陷阱在 `headless-inject.ts` L521-522 已有注释明写，但只对 TEXT 分支打了补丁，ASK 分支漏改——同类问题的修法必须全分支扫一遍，不能只补报告的那一个。
 
-## 静态守卫测试的裸文本断言易被注释误伤
+## 服务端熔断期间 `HTTP 429` 的 `MISSING_DESC` 是误导性文案
 
-`console.error` 出现在注释里会被 `filter` 误判为「裸调用」。过滤条件需同时排除 `//` 开头行与 `try { console.error` 前缀行。
+[VERIFIED]（2026-10-06 宿主侧实证：429 是应用**自建熔断器** `routes/reject-breaker.ts` 的产物，回执沿用 `MISSING_DESC` 文案；`reject.jsonl` 真实数据 + 本轮 P1-3 出站留痕通道佐证。原正文的 7 段同文重复「补充」已按「采集不去重」口径清理为 1 段。）
+脚本本身可能头部完整，429 是限流前置拦截，`MISSING_DESC` 只是回执模板的固定错误码。诊断时应先看 HTTP 状态码而非 `error` 字段。
 
-## `__AI__.shell(['rm','-rf',...])` 被黑名单拦截（`SECURITY_BLOCKED: rm-recursive-force`）
+## `.vue` 单文件组件中 `<style scoped>` 不拆分时更容易触发 500 行红线
 
-清理 vite 缓存应避免强删，改用 vitest 的 `--no-cache` 或直接重跑。
+[STALE]（2026-10-06 §4 阈值放宽：组件 500 → 1000 行，本条的约束前提已消失；拆分依据改为**职责边界**而非行数。）
+本组件 538 行（含样式），但样式与逻辑耦合较深，抽出独立 scss 收益不大。后续若继续增长应优先抽 composable。
+
+## 后端 `slice(0, 200)` 是提交信息截断的隐性来源
+
+前端已支持多行回填，但 `routes/git.ts` 的 `String(body?.message).slice(0, 200)` 会静默切掉 body/footer。这类「前端支持但后端截断」的缺口在两端分层架构下反复出现——改前端回显能力时必须同步核对后端字段上限。
+
+## 结论「做不到」必须附带「能做到什么 + 下一步」
+
+结论是「我做不到 X」时必须同时给出「我能做什么」+ 立即可执行的下一步，不能只解释约束；人类反复追问同一个动作，多半是上一轮答复没落到可执行层面。（原 SYSTEM.md §13 沟通纪律，2026-10-06 压缩下沉）
+
+## 跨来源比对同一个「sid」是最隐蔽的失效模式：项目里 sid 有两个语义——`activeWinSid`（窗口槽位）与 `sessionId`（会话 hash），命名相同但含义不同。本 bug 就是拿 A 去比对 B，恒不等且无任何日志输出，表现为「功能静默失效」。教训
+
+命名相同但来源不同的标识符参与相等比较时，必须在注释里写明各自来源；本修复的注释已补上这一点。
+
+## 像素基线不能覆盖「由仓库/运行状态派生」的 UI 区域
+
+- **现象**：`visual.spec.ts` 的 `03 工作日志` 两条主题基线**确定性**失败（6503 像素 / ratio 0.01，重试三次数字完全相同
+  ⇒ 不是抖动，是内容真变了）。**根因**：`WorklogPane.vue` 的变更清单来自 `/__ai/git/worklog` ⇒ 内容 = 当前 git 工作区状态
+  （基线拍摄 22 个变更、重跑 27 个，多出本轮改过的 `AGENTS.md` 等）。
+- **定位路径**（每步排除一个想当然的解释，可直接复用）：diff 只集中在右侧窗格列表行 ⇒ 先看是否整幅样式变（不是）；
+  expected 22 / actual 27 ⇒ 锁定「内容」而非「样式」；10 张基线 mtime 同一分钟 ⇒ 排除「拍摄自不同时刻」；
+  `SidePane.vue` 的 `.side-tab-badge` 挂在标签栏、所有视图可见 ⇒ 若它则应 01–04 全红（实际只 03 红）⇒ 排除。
+- **修法**：给 03 加**只在它用**的额外遮罩（`.wl-scroll`），只遮 git 派生清单、保留提交框等稳定 chrome
+  （整窗格遮掉会让截图退化成空白、失去回归价值）；守卫额外断言「03 的用例体必须真的引用该遮罩数组」。
+- **同类陷阱**：`toHaveScreenshot` 报 `N pixels are different` 也可能是**快照名不匹配**——默认按 `process.platform` 插平台段，
+  基线为 `-darwin` 时 Linux 上找不到 `-linux` 直接判失败，表象与像素问题无异 ⇒ 先看快照目录**文件名后缀**，别急着读 diff 图。
+- **可迁移结论**：像素基线不能覆盖「由仓库/运行状态派生」的 UI 区域（git 变更清单、文件树、计数器、时长、日志）——
+  这类红不代表回归、只代表你今天写了代码，会把视觉回归变成「每次都要 `--update-snapshots`」的噪音源。
+  加基线前先问一句：**这块内容会不会因为「我改了别的代码」而变？**
+
+## Vue 侧两条：轮询组件用 `v-show`、折叠入口固定在卡头
+
+- 靠 `useIntervalFn` 轮询的组件必须 `v-show` 而非 `v-if`：`v-if="total > 0"` 在空态卸载组件 ⇒ 轮询停止
+  ⇒ 服务端有了新任务也永远收不到 ⇒ 面板永不出现。`v-show` 只切 `display`，组件保持挂载、轮询持续。
+- 长卡片的折叠按钮必须固定在**卡头之后**而非正文之后，否则长正文会把按钮推到视口下方；
+  项目 `round-card-v1` 四类卡共用一套布局，任意一类调整都需要**四类同步**，否则交互不一致。
+
+## 观测数据源只有「脚本头部快照」：历史重放不可行，只能前向采集
+
+[VERIFIED]（2026-10-06 宿主侧源码实证：`routes/run.ts:294` 为 `head: effectiveScript.slice(0, result.code === 0 ? 500 : 2000)`；
+`post-run/run-compliance.ts:12` 注释自陈「旧 hasSelfCheck 判 assert/exit(1)，**与 SYSTEM.md 定义不符**」）
+——本条合并「头部快照无法用于历史重放」与「判据错位 vs 数据缺口是两件事」，差异点已并入。
+
+- `round-N.json` 只存脚本**头部**快照（成功轮前 500 字符、失败轮 2000 字符），而自检调用通常写在脚本**尾部**（收尾段）
+  ⇒ 「重放 `compliance.jsonl` 统计命中率」在**数据源层面**就不可行，只能走**前向观测**（新字段从上线时刻开始记）。
+- 「判据错位」与「数据缺口」是**两件事**，别混为一谈：判据错位 = 判据与文档定义不符（`hasSelfCheck` 判 `assert`/`exit(1)`）⇒ **改代码可解**；
+  数据缺口 = 即便判据改对，历史数据仍无法重放 ⇒ **改代码也解不了**，只能前向采集。
+- 落地形态：新增 `hasRealSelfCheck` 等**前向字段**（旧字段保留以求兼容），并在注释里写明「此字段前向观测真实命中率」。
+
+## 类型侧三坑：Ref 冒充 / 合同加字段 / interface 无索引签名
+
+- `{ value: false }` 不能冒充 `Ref<boolean>`（plain 对象缺 `[RefSymbol]`，TS2741）⇒ 测试里必须真实 `import { ref }` 构造。
+- 给 `*Deps` 合同加字段必须**同轮补调用方**：`ScriptPanel.vue` 未同步注入 ⇒ `Property 'isLoopRunning' is missing`
+  （SYSTEM.md §9 跨文件级联）。
+- 具名 interface **没有隐式索引签名**（type alias 有）⇒ 不能赋给 `Record<string, unknown>`，
+  tsc 报 `Index signature for type 'string' is missing in type 'XxxEntry'`。修法首选**入参侧泛型** `<T extends object>`，
+  次选给 interface 加索引签名（会污染文档语义，不推荐）；**禁用** `as unknown as` 绕过（仓库禁 `as any` / `as unknown as`，除非注释写明理由）。
+- 新增模块级依赖后**必跑** `hclc-guard.node-test.ts`（`packages/core/src/**` 每文件唯一 import 模块数，口径 =
+  `new Set(源码里 from '…' 的模块路径).size`，不是出现次数）；越线修法是把被引符号上提 `src/deps.ts` barrel，
+  且 barrel 导出行要满足 `perfectionist/sort-exports`（按源路径排序）。
+
+## lessons 采集侧不去重会追加同文重复；状态数是快照不是常量
+
+[VERIFIED]（2026-10-06 实证：`HTTP 429 的 MISSING_DESC` 一条正文内被追加 **7 段**同文「补充（2026-10-06）」
+——正是本条描述的机制在自身条目上的复现）——本条为 lessons 采集机制 SSOT。
+
+- DONE 总结的「踩坑记录」段被自动采集（`packages/core/src/post-run/lesson-extract.ts`，接入点 `attach-ws.ts` 的 done 分支），
+  **不去重**（标题级去重只对「不同条目」生效）⇒ 同一主张被反复追加成同文重复段。
+- 修复采集侧**不在治理范围**（属写入链路工单，见遗留风险）；治理时的判据是「同一条目内是否出现同文重复段」，发现即手工订正。
+- `scripts/lessons-status.cjs` 的 pending 数**会随会话推进变化**：DONE 采集在提交后才入库
+  ⇒ 任何数字类陈述必须**当场重跑取数**，不能复用几轮前的快照。
+
+## 长文本写入被上游截断：拆段重发 + 截断后先读盘
+
+- `node -e "…长字符串…"` 内嵌进脚本、或 `patchFile`/`writeText` 追加约 40 行长文本，都会因
+  「引号 / 反斜杠转义 + 中文 + 长度」叠加触发 `400 truncated`（到达体积可能只有 0.2-0.9 KB）。
+- 规避：长条目拆成 **≤27 行**的小段串行追加，每段自带一句稳定锚点；
+  采集命令照原文交给宿主（写进 `text` 围栏），**执行时改「读全文 + JS 侧计算」重跑**，不原样复制 `node -e`。
+- 截断后**先读盘再决定动作**：前序成功轮的改动可能**已在盘**
+  （实测 `extractCommitMessage` 与 `<textarea>` 其实已落盘，只有 scss 适配和后端 slice 未做）⇒ 盲目重发会造成重复注入。
+
+## `/run` 落盘后自动 lint 的覆盖区：`.md` 与 `.workbuddy/memory/*.md` 都在网内
+
+[VERIFIED]（2026-10-06 宿主侧实证：`.workbuddy/memory/*.md` 未对齐即报 `format/prettier` error，`--fix` 只动格式）
+——本条为「lint 覆盖区」SSOT，合并 `落盘后自动 lint 漏掉 markdown` 与 `.workbuddy/memory/*.md 也在 lint 覆盖区内`。
+
+- `/run` 落盘后本就会对**本次变更文件**跑 `eslint --fix`（`routes/run.ts` → `pickLintTargets` → `runEslint`）；
+  目标集合 `LINT_EXTS` 曾**漏掉 `.md`** ⇒ 「写 markdown 的 agent 不跑 lint 就落盘」这条路径无人接住，
+  未对齐表格一直留到**第三方**跑全量 `pnpm lint` 才炸（实测一小时内复发三次，第三次正好打红正在跑的 `pnpm verify`）。
+- 修法：`LINT_EXTS` 增补 `.md` + `LINT_SKIP_SEGMENTS` 跳过 eslint 已忽略的目录
+  （显式把 ignored 文件传给 eslint 只打印 `File ignored…` + exit 0，是纯噪声，且让 `lint.ok` 语义变模糊）。
+- `.workbuddy/memory/*.md` **也在 lint 覆盖区内**（`.gitignore` 未排除，`.md` 经 prettier 检查）
+  ⇒ 任何 `.md` 写入后先 `npx eslint <file> --fix` 再提交。
+- 守卫 `packages/core/tests/post-run-lint-targets.node-test.ts`（删 `.md` / 删 `dist` 两种变异都变红）。
+
+## 测试侧自坑：transform 缓存 / 裸文本断言 / 重复注入 / 落盘时序
+
+- vitest 对**新建测试文件**存在 transform 缓存：写入后首跑可能报「旧测试名 + failed」而磁盘已是新版 ⇒
+  先 `readText` 核磁盘实况，必要时清 `node_modules/.vite`，**别急着改断言**。
+- 静态守卫的**裸文本断言易被注释误伤**：`console.error` 出现在 `//` 注释或 `try { console.error` 里会被 `filter` 误判为裸调用
+  ⇒ 过滤条件要同时排除这两类行。
+- 测试**重复注入无守卫**：同名 `test()` 不被 vitest 去重、重复用例**静默通过**
+  （实测同一批测试被中英文两次写入，`task-batch-clear` 出现 8 处、测试数 29→32 才暴露）⇒ 批量追加后核对测试数增量与预期一致。
+- 含引号的断言字符串别玩「先写错再 replace」（`.replace(/\'/g, '"')` 因转义层级混乱直接 TS1005）⇒ 直接用外层单引号 + 内层双引号字面量。
+- `pnpm tsc --force` 报 `TS5093`（`--force` 只能配 `--build`）；要强制重检**直接重跑**即可。
+- 写入与验证的**时序窗口**：`eslint <path>` 可能报 `No files matching`、`vitest run <path>` 报 `No test files found`，文件其实已存在，重跑即消失。
+- 自检清理会删 `.ai-runner/tmp/*.txt` 基线 ⇒ 变异脚本的「还原后逐字节一致」基线**每轮重建**，不要复用历史路径。
+
+## 重启运行实例：detached 延迟 + 与验证拆轮，绝不自杀式同轮
+
+- 在 pm2 托管的进程内直接 `pm2 restart` ⇒ 承载脚本回执 / DONE 通道的进程被自己杀掉，
+  脚本以 `TypeError: network error`（退出码 -1）失败——**但重启本身已成功**，别据此以为重启失败。
+- 解法：前端触发 + 服务端 **detached 延迟**（`nohup sh -c "sleep 3 && pm2 restart …" &`，HTTP 响应先返回）。
+- 「重启」与「重启后验证」**拆两轮**：重启轮预期失败，验证轮在进程恢复后独立取证，别在同轮 `await` 重启后状态。
+- `instance-ownership-v1`：AI 不自行 kill 实例；只有用户**显式授权**才跨越该边界。
+
+## 改完源码要验到「运行实例行为已变」：单测绿 ≠ 活端点绿
+
+[VERIFIED]（2026-10-06 宿主侧实证：build 后活端点取到新串、`pm2 restart` 后进程 mtime 晚于产物、
+产物 grep 需搜语义片段）——本条为「产物/运行态核验」SSOT，与既有 `验收运行实例必须先用哨兵文件判别它读哪个目录` 同源。
+
+- vitest **直读源码**、进程跑**编译产物** ⇒ 改 `packages/core/src/**` 后必须 build + 重启，否则活端点行为不变。
+- 「产物已更新」≠「进程已加载」：判生效看**进程启动时间 vs 产物 mtime**（`pm2 describe` uptime / pid 文件 mtime）或**打活端点**，
+  别用「我已 build」自证（实测 `/restart` 已进 dist 但 pm2 uptime 44m，内存里跑的是旧代码）。
+- 打包器会**剔除源码注释**、并把单引号转双引号 ⇒ 产物 grep 必须搜**可执行代码片段**（如 `status === 'pending' || it.status === 'running'`）
+  或语义片段（`pm2 restart ai-runner`）；用源码字面量（注释标记 `[xxx-v1]`、单引号串）会**假阴性**。
+- `git status` 里会混入**非本会话**的并行改动（实测 3 项：`DOCS-INDEX.md` / 新工单 / workbuddy memory）
+  ⇒ 自检的「变更文件」表只列自己的，多列即触发 selfcheck-gate 对账失败。
+
+## `/run` 写入工具：锚点唯一性预检 + 跨轮锚点一律过期
+
+- **锚点必须逐字节来自同一轮** `readText`；跨轮缓存一律视为过期（SYSTEM.md §2 `same-round-read-v1`）。
+  沿用过轮锚点 ⇒ `count=0` ⇒ 脚本 exit 2 ⇒ overlay **整体回滚**（磁盘零改动，别以为「部分已落盘」）。
+- 写前预检：`content.split(anchor).length - 1 === 1`；多段组合**先全部预检通过再逐个写盘**
+  （`overlay-atomic-v1` 保证了失败轮零副作用，但也意味着**不能假设「部分已落盘」**）。
+- 跨熔断/重试后**先读回全文确认目标片段唯一**再写：实测同一 `if (marks.ask > 0) { … }` 分支被插 3 次；
+  `server.ts` 端口写入块出现两份（303-310 与 311-316，因前序 replacement 与后续锚点重叠）。
+- 删块别用 `indexOf("})\n")` 之类找终点——会多吞一个 `})` 导致 `Declaration or statement expected`；删后立即回读核对边界。
+- `writeText` 覆写会**吃掉前序 patch 的段落**（实测 import 段被覆盖 ⇒ `Cannot find name 'test'` 连环报错）
+  ⇒ 先 `readText` 再决定 patch 还是整写；大文件优先 `patchFile` + 尾行锚点，避免整文件重写。
+- `patchFile` 返回 `{ok:true}` 而 tsc 仍报旧错 = tsc 增量缓存，重跑 `pnpm tsc` 即恢复，**不是写入失败**。
+
+## `/run` 沙箱三档语义：落盘是「整轮原子」，同轮验证必验旧盘
+
+[VERIFIED]（2026-10-06 宿主侧实证：变异脚本跨轮生效、单轮不透传子进程）——本条为沙箱语义 SSOT，
+与既有 `沙箱写入对子进程不可见` / `沙箱三档语义` / `deleteFile-overlay 语义` 三条同源，差异点已并入。
+
+- `read-only`（默认）**不是写保护**，是「整轮原子」：写入进 overlay、**子进程不可见**（`npx eslint` / `node` 读磁盘旧文件）；
+  `exit 0` ⇒ 轮末照样落盘；`exit≠0` ⇒ 整轮丢弃。判据挂在 `routes/run.ts` 的 `if (scriptOk) applyOverlay(...)`，无模式判断。
+- ⇒ **写入与验证必须拆两轮**：同轮「改文件 + 跑 vitest/eslint」驗的是旧盘（曾把变异验成「没红」）。
+  绕法是 `node -e` 直改磁盘，或 exit 0 落盘后下一轮再跑子进程。
+- 工具用法：调宿主端点/探网络出口用 `__AI__.exec('curl',[args])`——`shell('sh',['-c','curl …'])` 的 stdout 会被吞成空串；
+  `exec` 跑长前台进程会被 **60s 硬超时**打断 ⇒ `nohup … &` + 另起一轮采样；
+  `__AI__.shell(['rm','-rf',…])` 被黑名单拦（`SECURITY_BLOCKED: rm-recursive-force`）。
+- `__AI__.grep` 的 `ext` **不能带点号**：`['.js']` 生成 `\.(.js)$`，命中恒 0 且不报错（曾误判「UI 组件不存在」）⇒ 命中 0 时先怀疑它。
+- 沙箱 `ps` 对外部进程**无输出**（拿不到宿主进程启动时间）⇒ 用 pid 文件 mtime 或 `kill -0` 替代。
+- `__AI__.writeText` 的日志输出易被误拼（曾把 `before.length` 拼成常量）⇒ 一律 `__AI__.log('k=' + …)` 单参数。
+- `cssom` 对 SPA 首屏根元素报「选择器未命中」不代表 dev 挂了（工作台懒挂载），用 `body` 探活即可。
+- 宿主端点**可达 ≠ 稳定**：连续多轮 `TypeError: Failed to fetch`（纯 `readText` 也失败）是连接抖动，按熔断停止重试，别换策略硬刚。
+- 脚本里同时存在两套语境（沙箱脚本 vs **被写入的源码字符串**）：误在宿主源码里写 `__AI__.join(...)` ⇒ `Cannot find name '__AI__'`。
+- 输出通道曾严重不稳定（脚本尾部被截断、被注入 `SCRIPT`/代码围栏文本、`node -e` 转义失败）：
+  规避是**单轮脚本压到极小** + 写盘走 `node -e` 直改磁盘（绕 overlay）+ 验证与写入分两轮——三条都是上面「整轮原子」的直接推论。

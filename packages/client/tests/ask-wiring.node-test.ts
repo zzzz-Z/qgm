@@ -21,7 +21,10 @@ test('reply-handlers: 分支已就位', () => {
   assert.ok(src.includes('askUser(ask)'))
 })
 
-test('reply-handlers: 单文件 import ≤ 8（架构红线）', () => {
+// [cohesion-over-budget-v1] 2026-10-06：上限 8 → 20（与 SYSTEM.md §4 同值）。
+// 原值在本文件只剩「不许再增一条 import」的效果，逼出的是绕道写法，不是更少的依赖；
+// 真正的接线要求由上面前三条守（符号在不在、分支在不在）。
+test('reply-handlers: 单文件 import ≤ 20（架构红线）', () => {
   const imports = (src.match(/^import\s/gm) || []).length
-  assert.ok(imports <= 8, `import 数 ${imports} 超出上限 8`)
+  assert.ok(imports <= 20, `import 数 ${imports} 超出上限 20`)
 })

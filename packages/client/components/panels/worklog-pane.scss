@@ -32,6 +32,12 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   outline: none;
+  /* [commit-message-multiline-v1] textarea 适配：行高 / 字体继承 / 纵向 resize / 等宽 */
+  font-family: inherit;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 56px;
+  max-height: 200px;
 }
 .wl-commit-input:focus {
   border-color: var(--primary, #2563eb);
@@ -446,4 +452,56 @@
     animation: none;
     opacity: 0.7;
   }
+}
+
+/* [git-head-display-v1] 当前 HEAD：VSCode 分支徽章风格 */
+.wl-head-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 2px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.wl-head-label {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgb(127 127 127 / 12%);
+  font: 400 9.5px/1.5 var(--mono, monospace);
+  letter-spacing: 0.4px;
+}
+.wl-head-sha {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 11px/1.4 var(--mono, monospace);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* [worklog-history-v1] 提交历史：单列紧凑列表 */
+.wl-history {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.wl-history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wl-history-item {
+  padding: 3px 8px;
+  font: 400 11.5px/1.5 var(--mono, monospace);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wl-history-item:nth-child(odd) {
+  background: rgb(127 127 127 / 4%);
+  border-radius: 4px;
 }

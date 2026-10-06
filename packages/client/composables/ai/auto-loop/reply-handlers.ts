@@ -1,12 +1,15 @@
 // [reply-handlers-v1] 从 useAutoLoop.ts 抽出：脚本到达 / 非脚本回复 / 单轮执行 三个入口
 import { TOAST_DEFAULT, TOAST_LONG, TOAST_MEDIUM, TOAST_MEDIUM_SHORT } from '../../../utils/toast-durations'
-import type { AiReply, InboxItem, LoopInstance, Ref, RoundOutcome } from './types.js'
+import type { Ref } from 'vue'
+import type { AiReply, LoopInstance, RoundOutcome } from './types.js'
+import type { InboxItem } from '../../runner/useScriptInbox'
 import { setLoopState } from './transitions.js'
-// [multi-script-v1] 同一条回复的后续脚本队列（InboxItem 类型经 ./types.js 再导出，
-// 避免为本功能多出一个 import 语句而顶破「单文件 import ≤ 8」红线）
-import { clearScripts, enqueueScript, shiftScript } from './pending-scripts.js'
+// [multi-script-v1] 同一条回复的后续脚本队列（stageRoundOutcome 同源同句）
+// [cohesion-over-budget-v1] 原先 InboxItem 经 ./types.js 再导出、下面几个依赖面写成内联 `typeof import()`，
+//   都只是为了不顶破「单文件 import ≤ 8」。上限放宽到 20 后回归直读直写，types.ts 的再导出已删
+import { clearScripts, enqueueScript, shiftScript, stageRoundOutcome } from './pending-scripts.js'
 // [loop-feedback-authority-v1] R1：循环引擎自行回传结果，不再依赖 ScriptPanel watch
-import { buildLoopResultPrompt } from './loop-result-prompt.js'
+import { buildPlanResumePrompt, buildRoundBatchPrompt, buildSelfcheckFailPrompt } from './loop-result-prompt.js'
 
 // [ask-dialog-v1] 交互提问通道；解析放 utils，提问状态走单例 composable
 // [ask-card-v1] UI 已从弹窗改为对话流内的可点选卡片（TerminalPane .question-card）；本处契约不变
@@ -15,25 +18,22 @@ import { askUser } from '../../ui/useAsk'
 import { parseAsk } from '../../../utils/ask-parser'
 // [limit-detect-v1] 会话触顶自动轮转（总结→新会话→续跑）
 import { onSummary, startHandoff } from './handoff.js'
+// 下面 6 条是**纯类型**依赖面（全部经 deps 注入，本模块不直接调用）
+import type { toast } from '../../ui/useToast.js'
+import type { getTransport } from '../useAiTransport.js'
+import type { runHook } from './hooks.js'
+import type { runBash } from './run-bash.js'
+import type { useRunner } from '../../runner/useRunner'
+import type { persist } from './persist.js'
 
-type ToastFn = typeof import('../../ui/useToast.js').toast
-type Transport = ReturnType<typeof import('../useAiTransport.js').getTransport>
+type ToastFn = typeof toast
+type Transport = ReturnType<typeof getTransport>
 
-/** 回复处理三入口依赖面 */
-export // [selfcheck-gate-v1] 期一自检熔断：同一循环连续 2 次 BeforeDone reject → finish
-const _selfcheckFailCount = new Map<string, number>()
+// [selfcheck-gate-v1] 期一自检熔断：同一循环连续 2 次 BeforeDone reject → finish
+export const _selfcheckFailCount = new Map<string, number>()
 const SELFCHECK_MAX_FAILS = 2
 
-/**
- * 组装自检失败报告（AI 照单修）
- * [CONSTRAINT] 固定格式 [SELF-FAIL] <级别> | <判据> | 实测值 | 期望值
- */
-function buildSelfcheckFailPrompt(reason: string): string {
-  const lines = String(reason || '').split('\n').map(s => s.trim()).filter(Boolean)
-  const body = lines.length ? lines.join('\n') : '[SELF-FAIL] L0 | selfcheck | 自检未通过 | 全部通过'
-  return `【自检未通过】请修复以下判据后重新回复 DONE：\n${body}`
-}
-
+/** 回复处理三入口依赖面 */
 interface ReplyHandlersDeps {
   loopPaused: Ref<boolean>
   stage: Ref<'' | 'plan' | 'implement' | 'verify'>
@@ -48,10 +48,10 @@ interface ReplyHandlersDeps {
   enterWaiting: (inst: LoopInstance) => void
   disarmTimer: (inst: LoopInstance) => void
   bindKeyboard: () => void
-  runHook: typeof import('./hooks.js').runHook
-  runBash: typeof import('./run-bash.js').runBash
-  useRunner: typeof import('../../runner/useRunner').useRunner
-  persist: typeof import('./persist.js').persist
+  runHook: typeof runHook
+  runBash: typeof runBash
+  useRunner: typeof useRunner
+  persist: typeof persist
   isStrictDone: (text: string) => boolean
   buildRetryPrompt: (detail: string) => string
   pushTerminalNotice: (msg: string, opts?: { divider?: boolean }) => void
@@ -137,7 +137,6 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     await executeItem(inst, next)
   }
 
-  /** PLAN.md 待办是否未清空（通过 /__ai/tasks 的 planPending） */
   // [plan-resume-detail-v1] 返回未完成项描述列表；只报数字会让 AI 无的放矢（它看不到本地 PLAN.md），
   // 续跑轰炸下 AI 会编造「我没有 __AI__ 环境」搪塞。拿不到明细时返回空列表 → 调用方放行 DONE，不空转
   async function fetchPendingItems(): Promise<string[]> {
@@ -153,12 +152,6 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       // 结构化明细缺失但计数>0：无法告知 AI 具体目标，视为无可续跑内容
       return items.length > 0 ? items.slice(0, 10) : []
     } catch { return [] }
-  }
-
-  /** 组装 PLAN 续跑 prompt：必须携带具体剩余项（AI 页面上下文里没有本地 PLAN.md） */
-  function buildPlanResumePrompt(items: string[]): string {
-    const lines = items.map((d, i) => `${i + 1}. ${d}`).join('\n')
-    return `【继续】长期计划仍有 ${items.length} 项未完成：\n${lines}\n请针对下一项输出一个可执行脚本（遵守脚本头契约）；这些项全部完成后才回复 DONE。`
   }
 
   /** 非脚本回复：done / plain / multi */
@@ -364,6 +357,11 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
         await finish(inst, 'exec-error', 'cjs 执行无返回结果（连试 3 次均被守卫跳过或返回 null）')
         return
       }
+      // [reject-breaker-v1] 服务端已判「同 sid 同 kind 连续 >=2 次拒收」→ 立即终止，不再原地重发
+      if (r.breaker === true) {
+        await finish(inst, 'breaker-rejected', `连续拒收触发熔断（exit=${r.code}）`)
+        return
+      }
       const changeCount = runner.changes.value.length
       inst.lastExec.value = { lang: inboxItem.lang, exit: r.code, changes: changeCount, durationMs: Date.now() - startedAt }
       const cjsOutcome: RoundOutcome = {
@@ -377,11 +375,9 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
         changedFiles: runner.changes.value.map(c => c.path),
       }
       await afterRound(inst, cjsOutcome)
-      // [loop-feedback-authority-v1] R1：循环引擎自行回传结果
-      // [CONSTRAINT] afterRound 若触发 finish（熔断/硬上限/stopRequest）会置 loopPaused=true，此时不发
-      if (!loopPaused.value && isInstActive(inst)) {
-        transport.sendFill('', { prompt: buildLoopResultPrompt(cjsOutcome) })
-      }
+      // [round-merge-v1] R1：块末不再直接出站，改入轮内合并窗（静默 Δ 后合成一条）。原因与口径见
+      //   pending-scripts.ts 的合并窗注释：「队列是否为空」只是瞬时快照，而下一块常尚未被页面推送
+      stageRoundOutcome(inst.id.value, cjsOutcome, outcomes => flushRoundOutcome(inst, outcomes))
       return
     }
 
@@ -411,10 +407,15 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       changedFiles: [],
     }
     await afterRound(inst, bashOutcome)
-    // [loop-feedback-authority-v1] R1：bash 分支同样由循环引擎自行回传
-    if (!loopPaused.value && isInstActive(inst)) {
-      transport.sendFill('', { prompt: buildLoopResultPrompt(bashOutcome) })
-    }
+    // [round-merge-v1] bash 分支同 cjs：R1 回传权归循环引擎，但同样入合并窗
+    stageRoundOutcome(inst.id.value, bashOutcome, outcomes => flushRoundOutcome(inst, outcomes))
+  }
+
+  /** [round-merge-v1] 合并窗到点后的唯一出站口：守卫在发出前再判一次（窗口异步）；false = 放弃不补发 */
+  function flushRoundOutcome(inst: LoopInstance, outcomes: RoundOutcome[]): boolean {
+    if (loopPaused.value || !isInstActive(inst)) return false
+    transport.sendFill('', { prompt: buildRoundBatchPrompt(outcomes) })
+    return true
   }
 
   return { onScriptArrival, onNonScriptReply, executeItem }

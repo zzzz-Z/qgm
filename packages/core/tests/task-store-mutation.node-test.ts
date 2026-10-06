@@ -20,14 +20,12 @@ test('G1 push: todo 追加（去重）', () => {
   assert.deepEqual(next.todo, ['A', 'B', 'C'])
 })
 
-test('G2 complete: 原文匹配后移入 done（含 at/round）', () => {
+test('G2 complete: 原文匹配后该项被移除（完成即删）', () => {
   const cur = makeState({ todo: ['A', 'B', 'C'], round: 7 })
   const next = applyTaskMutation(cur, { mode: 'complete', complete: ['B'] })
   assert.deepEqual(next.todo, ['A', 'C'])
-  assert.equal(next.done.length, 1)
-  assert.equal(next.done[0].item, 'B')
-  assert.equal(next.done[0].round, 7)
-  assert.ok(typeof next.done[0].at === 'number' && next.done[0].at > 0)
+  assert.equal(next.done.length, 0)
+  assert.ok(!(next.items || []).some(i => i.desc === 'B'), '完成项必须从 items 移除')
 })
 
 test('G3 complete: 文本不匹配 → todo 不动', () => {

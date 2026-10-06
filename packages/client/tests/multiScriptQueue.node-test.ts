@@ -137,3 +137,44 @@ test('wiring: 队列未清空时 ScriptPanel 不得中途回传结果', () => {
     'autoAsk 分支未被 midBatch 拦住 → 中途回传仍会发生',
   )
 })
+
+// ============ 结果回传频率（站点限流放大器）============
+//
+// 背景：2026-10-06 实测「应用频繁提问导致 AI 网页限流」。宿主侧用 .ai-runner/logs/{runner,reject}.jsonl
+// 把 run 与 reject 合并成同一时间线、按「相邻事件空闲 < 1.5s 即同一条回复的后续块」切链后量得：
+//   事件 1176 → 链 714 条，其中多块链 167 条、非首块事件 462（39.3%），最长链 14 块。
+//
+// 2026-10-06 18:2x 复算（.ai-runner/tmp/reject-cascade-probe.cjs，按 sid 分组，因 runner.jsonl 无 sid）：
+//   原「队列是否为空」收口判据**只对耗时 ≥ 80ms 的块有效** —— 页面逐块推送、块间固定 80ms
+//   （tampermonkey-session-id.user.js:668），快块（拒收瞬时）结束时下一块尚未推送 ⇒ 判据恒真。
+//   实盘 10-06 同 sid 亚秒级拒收级联 63 条、最长 13 块，146 次出站属同回复非首块。
+// 故收口判据改为「轮内合并窗」（pending-scripts.ts [round-merge-v1]）：
+//   块末静默 ROUND_MERGE_MS 仍未等到新块才出站 ⇒ N 块 1 次。行为级判据见 round-merge.node-test.ts，
+// 本文件只守「两条分支都必须走合并窗」这一接线结构。
+
+test('wiring: 循环引擎的结果回传须经轮内合并窗（N 块 1 次，不是 N 次）', () => {
+  const src = read(HANDLERS_SRC)
+  const staged = src.split('stageRoundOutcome(inst.id.value,').length - 1
+  assert.equal(
+    staged,
+    2,
+    'cjs 与 bash 两条回传分支都必须交出结果给合并窗；漏一条，含 N 块的回复就逐块回传（N 次提问）',
+  )
+  assert.ok(
+    !src.includes('buildLoopResultPrompt('),
+    'reply-handlers 中仍有逐块回传点（buildLoopResultPrompt）→ 合并窗被绕过，逐块回传回归（限流放大器复现）',
+  )
+  assert.equal(
+    src.split('transport.sendFill(\'\', { prompt: buildRoundBatchPrompt(outcomes) })').length - 1,
+    1,
+    '合并窗到点后的出站口必须唯一（两条分支共用 flushRoundOutcome），否则又出现第二个出站点',
+  )
+})
+
+test('wiring: 循环活动时 ScriptPanel 不得回传（回传权归循环引擎，防同轮双发）', () => {
+  const src = read(PANEL_SRC)
+  assert.ok(
+    src.includes('shouldAutoAsk && !midBatch && !isLoopActive.value &&'),
+    'ScriptPanel 在循环活动时仍会回传 → 与循环引擎同轮双发（一次执行 = 两次提问）',
+  )
+})

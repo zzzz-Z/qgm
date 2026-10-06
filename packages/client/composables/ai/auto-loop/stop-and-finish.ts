@@ -5,6 +5,9 @@ import type { LoopInstance } from './types.js'
 import type { AiTransport } from '../useAiTransport.js'
 import { disarmTimer } from './timers.js'
 import { setLoopState } from './transitions.js'
+// [round-merge-v1] 终止即撤下「轮内结果合并窗」：窗口是异步的，若让它到点后再出站，
+// 用户已经点了停止（finish 内已 sendStop），却还会有一条迟到的结果回传 —— 停止形同按不动
+import { cancelRoundMerge } from './pending-scripts.js'
 
 type ToastFn = typeof import('../../ui/useToast.js').toast
 type RunHookFn = typeof import('./hooks.js').runHook
@@ -76,6 +79,8 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
     disarmTimer(inst)
     handoffDisarm(inst)
     inst.pendingRound.value = null
+    // [round-merge-v1] 与 pendingRound 同性质：本轮的「未出站结果」一并作废（终止即抑制回传，语义不变）
+    cancelRoundMerge(inst.id.value)
     const wasRollback = inst.stopRequest.value === 'rollback'
     const interrupted = reason === 'interrupted'
     inst.stopReason.value = detail || reason
