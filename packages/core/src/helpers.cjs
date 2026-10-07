@@ -699,6 +699,33 @@ const __AI__ = {
       return { ok: false, reason: String(e) }
     }
   },
+  // [lessons-match-v1] 沙箱侧 lessons 检索：任务中途遇非显而易见报错时可主动查知识库。
+  // [WHY] 此前检索只在「会话首问 / 循环首轮」按 goal 预加载一次；中途换新错误类型不会重检索
+  //   ⇒ AI 只能靠首轮注入的几条，或手动读全文（受 §10 预算）。本方法补上按需检索通道。
+  // [CONSTRAINT] 走与 tasks 相同的 HTTP 端口机制（AIR_SERVER_PORT）；失败返回 {ok:false,error}，不抛。
+  // [CHANGE-IMPACT] 被 AI 脚本 `await __AI__.lessons.match('<错误文本>')` 消费；端点 POST /__ai/lessons/match。
+  lessons: {
+    match(query, limit) {
+      const port = Number(process.env.AIR_SERVER_PORT || process.env.AIR_RUNNER_SERVER_PORT) || 5175
+      const q = String(query || '').slice(0, 2000)
+      if (!q) return Promise.resolve({ ok: false, error: 'empty-query', matches: [] })
+      const n = Number(limit)
+      const body = { query: q, limit: Number.isFinite(n) && n > 0 && n <= 10 ? Math.floor(n) : 3 }
+      return Promise.resolve().then(() => fetch(`http://127.0.0.1:${port}/__ai/lessons/match`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+        body: JSON.stringify(body),
+      })).then(async (res) => {
+        if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, matches: [] }
+        const j = await res.json()
+        return {
+          ok: Boolean(j && j.ok),
+          query: q,
+          matches: Array.isArray(j && j.matches) ? j.matches : [],
+        }
+      }).catch(e => ({ ok: false, error: String((e && e.message) || e), matches: [] }))
+    },
+  },
   // [tasks-api-v1] 任务看板 API：服务端按会话分桶（sid 从 env 读，脚本不自传）
   // [CONSTRAINT] 异常一律返回 {ok:false, error}，不抛断脚本；AI 可 `await __AI__.tasks.push([...])`
   tasks: {

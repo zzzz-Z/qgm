@@ -30,7 +30,7 @@ function blockBody(outcome: RoundOutcome): string {
  * @param outcome 本轮执行结果（由 executeItemInner 构造）
  */
 export function buildLoopResultPrompt(outcome: RoundOutcome): string {
-  return `${blockBody(outcome)}\n请阅读终端输出并给出下一步。`
+  return `${blockBody(outcome)}\n请阅读终端输出。下一个回答必须以 SCRIPT 开头且只输出脚本，不要输出任何文本总结。`
 }
 
 /** 拒收/失败分桶标签（无分桶价值时返回空串） */
@@ -82,7 +82,7 @@ export function buildRoundBatchPrompt(outcomes: RoundOutcome[]): string {
   const blocks = outcomes
     .map((o, i) => `── 块 ${i + 1}/${outcomes.length} ──\n${blockBody(o)}`)
     .join('\n')
-  return `【本轮执行结果】本回复共 ${outcomes.length} 块（成功 ${okCount} · 失败 ${outcomes.length - okCount}）${bucketLine}\n${blocks}\n请阅读终端输出并给出下一步。`
+  return `【本轮执行结果】本回复共 ${outcomes.length} 块（成功 ${okCount} · 失败 ${outcomes.length - okCount}）${bucketLine}\n${blocks}\n请阅读终端输出。下一个回答必须以 SCRIPT 开头且只输出脚本，不要输出任何文本总结。`
 }
 
 /**

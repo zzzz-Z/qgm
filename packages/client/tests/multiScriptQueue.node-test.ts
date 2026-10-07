@@ -169,9 +169,16 @@ test('wiring: 循环引擎的结果回传须经轮内合并窗（N 块 1 次，�
     'reply-handlers 中仍有逐块回传点（buildLoopResultPrompt）→ 合并窗被绕过，逐块回传回归（限流放大器复现）',
   )
   assert.equal(
-    src.split('transport.sendFill(\'\', { prompt: buildRoundBatchPrompt(outcomes) })').length - 1,
+    src.split('void fillWithLessons(transport, outcomes').length - 1,
     1,
     '合并窗到点后的出站口必须唯一（两条分支共用 flushRoundOutcome），否则又出现第二个出站点',
+  )
+  // [loop-lessons-refresh-v1] sendFill 唯一产地移入 loop-lessons-fill.ts（出站前置检索）
+  const fillSrc = read('packages/client/composables/ai/auto-loop/loop-lessons-fill.ts')
+  assert.equal(
+    fillSrc.split('transport.sendFill(').length - 1,
+    1,
+    'fillWithLessons 内 sendFill 必须唯一（出站点漂移会导致双发）',
   )
 })
 

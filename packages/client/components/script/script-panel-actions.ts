@@ -108,6 +108,8 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
     await appendBaselineChanges(p, r, errorLocs)
     appendClaimMismatch(p, r)
     appendRawOutputs(p, r)
+    p.push('')
+    p.push('下一个回答必须以 SCRIPT 开头且只输出脚本，不要输出任何文本总结。')
     return p.join('\n')
   }
 

@@ -100,6 +100,9 @@ const rows = computed(() => (result.value?.files || []).map((f) => {
   }
 }))
 const changeCount = computed(() => result.value?.files?.length || 0)
+// [worklog-stat-v1] 汇总 +/-：分组头展示；数据源同 result.files，与每行数值一致
+const addTotal = computed(() => (result.value?.files || []).reduce((s, f) => s + (f.added || 0), 0))
+const delTotal = computed(() => (result.value?.files || []).reduce((s, f) => s + (f.removed || 0), 0))
 
 // [worklog-lazy-v1] immediate：组件在 tab 激活时才异步挂载，挂载即 active=true，非 immediate watch 不会触发
 watch(() => props.active, (v) => { if (v && !result.value && !loading.value) void load() }, { immediate: true })
@@ -306,7 +309,10 @@ async function copyFullLog(): Promise<void> {
   if (!result.value || !result.value.markdown) return
   try {
     await navigator.clipboard.writeText(result.value.markdown)
-  } catch { /* ignore: 剪贴板不可用时静默 */ }
+    toast('已复制完整工作日志', 'success', TOAST_MEDIUM)
+  } catch {
+    toast('复制失败：剪贴板不可用', 'error', TOAST_MEDIUM)
+  }
 }
 </script>
 
@@ -429,6 +435,10 @@ async function copyFullLog(): Promise<void> {
         <div class="wl-group">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
           <span class="wl-group-title">更改</span>
+          <span v-if="addTotal || delTotal" class="wl-group-stat">
+            <span class="wl-add">+{{ addTotal }}</span>
+            <span class="wl-del">−{{ delTotal }}</span>
+          </span>
           <span class="wl-group-count">{{ changeCount }}</span>
         </div>
         <ul class="wl-list" role="list">
@@ -445,6 +455,10 @@ async function copyFullLog(): Promise<void> {
               </span>
               <span class="wl-name">{{ f.name }}</span>
               <span class="wl-dir">{{ f.dir }}</span>
+              <span v-if="f.added || f.removed" class="wl-stat">
+                <span v-if="f.added" class="wl-add">+{{ f.added }}</span>
+                <span v-if="f.removed" class="wl-del">−{{ f.removed }}</span>
+              </span>
               <span class="wl-st" :class="f.stCls">{{ f.stLetter }}</span>
             </div>
             <div v-if="expanded.has(f.path)" class="wl-diff" v-html="fileDiffHtml(f.path)" />

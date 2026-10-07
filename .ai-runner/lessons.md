@@ -1358,3 +1358,113 @@ TEXT 短路已在两处代码实现，但测试只断言字符串存在。存在
 ## `indexOf('</template>')` 会命中 slot 的闭合
 
 Vue SFC 的 template 内有多个 `<template #slot>`，首个 `</template>` 不是根模板结尾。判据取「根模板段」须用 `lastIndexOf('</template>')` 或按标签配对扫描——否则切片过短，判据基线自己就红（本轮实测踩到）。
+
+## `writeText('/tmp/x')` + 同轮 `git commit -F /tmp/x` 必失败：`writeText` 走 overlay，同轮子进程读不到（`git` 读的是真盘）。`fatal: could not read log file: No such file or directory` 即此因。修法
+
+`git commit -m '<msg>'` 直接传，或跨轮（写 → 下一轮 commit）。这正是台账 `overlay-atomic` 那条的又一实例。
+
+## 测试写「响应形状」须与组件实际消费的字段一致
+
+v1 测试 mock 返回 `{ results: [...] }`（wiki 字段），v2 组件读 `{ matches: [...] }`（lessons 字段）——改组件后旧测试全红。更新测试时须同时核对「mock 的 URL」与「mock 的字段名」，二者任一不符都会红。
+
+## `node -e` 里做字符串替换，引号转义极易让 `replace` 空转：本轮变异用 `node -e '...replace("'tree', ...' ...)'`，外层单引号把内层单引号截断 → `replace` 未匹配 → 文件原样 → 测试仍绿，误判「判据不承重」。改用 `python3 -c` + `chr(39)` 构造引号后，变异正确生效（1 failed）。教训
+
+变异后若测试没红，先核验「被变异文件是否真的变了」（`grep` 变异点），别直接怀疑判据。
+
+## 重写 Vue 组件时必须逐段核对 SFC 三块是否齐全：我从 v1 重写 `KnowledgePanel.vue` v2 时，只写了 `<script setup>` + `<template>`，漏了 `<style scoped>`。代码「能跑」（类名都在、测试也绿——因为测试断言的是类名存在，非样式生效），但渲染全无样式。修法
+
+重写 SFC 后先 `grep '<style'` 确认三块齐全；且样式类的新增须同时检查 `<style>` 段内有对应规则。
+
+## `.ai-runner/tmp/` 会吞掉 `git stash show -p` 的大输出
+
+本轮先写 `.ai-runner/tmp/stash-backup-*.patch` 备份，但 `ls -la .ai-runner/tmp/` 里混着 300+ 个 `-tools.jsonl` 运行态文件，肉眼极难定位。后续应固定用独立子目录（如 `.ai-runner/tmp/git-cleanup/`）。
+
+## `core.hooksPath` 指向不存在目录是静默失效
+
+`.githooks` 目录在磁盘上 MISSING，但 `git config --get core.hookspath` 返回 `.githooks`——所有 hook 早已不触发，且无任何报错。本轮一度 unset 该配置，后判定属越权改动（antfu skill 文档明确 `prepare` 脚本会 `git config core.hooksPath .githooks` 重建），已恢复原值。
+
+## `branch -d` 会连带清理 `branch.<name>.*` 配置
+
+删 3 个 `agents/*` 后，`branch.agents.*.vscode-merge-base` 也随之消失——这是 git 预期行为，非缺陷。
+
+## `03` 基线的「整片遮罩」是视觉回归的隐性真空
+
+遮 `.wl-scroll` 确实消除了 git 派生抖动，但代价是该面板所有 UI 改动都不进判据——「不红」被误读成「没回归」。正解不是遮罩而是 route mock 固定数据，让内容确定化后再撤遮罩。守卫必须同时断言「mock 三个端点」+「不得再遮 `.wl-scroll`」+「等真实数据行出现」，三者缺一都会退化成恒真。
+
+## `.node-test.ts` 在 `packages/client/` 下跑 vitest 匹配不到
+
+该包 vitest 默认 include 为 `**/*.{test,spec}.?(c|m)[jt]s?(x)`，不含 `node-test`。必须从仓库根跑 `npx vitest run packages/client/tests/xxx.node-test.ts`。
+
+## 在途改动会把「别人的 tab」算到你头上
+
+`git status` 里 `SidePane.vue` + `useSidePaneTab.ts` 是会话开始前就存在的在途改动（新增第 4 个 `kb` tab），它使 01/02/04/05/06 基线稳定差 422–532px。归因靠「单跑差异量级稳定 + 03 单独通过 + 定位到具体 DOM 变化」，不能笼统归为「基线过期」。
+
+## `overlay-atomic-v1` 使「同轮写盘 + 同轮 exec 读同一文件」失效：本轮变异验证第一次尝试在同一脚本里 `writeText` 后立刻 `exec('vitest')`，vitest 读到的是磁盘旧内容（原文件），守卫保持全绿造成假阴性。写入先落 overlay、仅脚本 exit 0 才整体落盘 —— 同轮 `exec` 起的子进程看不到。变异验证必须跨轮
+
+一轮只写、下一轮才跑。
+
+## 脚本内拼接过长字符串数组会触发 `Unexpected token '...'`
+
+用 `[...].join('\n')` 拼 30+ 行守卫代码时，服务端解析器在字符串字面量中途报错。拆成小步（先加常量、再加 test）即可。
+
+## `.node-test.ts` 的守卫清单必须双向断言
+
+只断言「mask 里不含 token」会漏掉「清单锈蚀」（类名改了 token 已不存在却仍留在清单里）；反过来只断言「token 在源码中存在」又漏掉「mask 里偷偷加了」。两条都要。
+
+## 沙箱只加载 `dist/helpers.cjs`，不加载 `src`
+
+`__AI__.lessons.match` 写进 `packages/core/src/helpers.cjs` 后活体调用失败（`Cannot read properties of undefined (reading 'match')`），运行时读的是 `apps/standalone/dist/helpers.cjs`。改 `helpers.cjs` 必须 `pnpm build` 才生效——这是 §13 runtime-vs-source 的一个具体实例。
+
+## 沙箱原生 API 扫描器会拦变量名 `fs`
+
+脚本里写 `const fs = __AI__.readText(...)` 触发 `NATIVE_API_FORBIDDEN @L30`。变量名不能叫 `fs` / `path` 等——扫描器看的是代码骨架，不区分「这是别名还是真的 fs」。
+
+## `host-owned-write-guard-v1` 已在 SYSTEM.md 上触发告警
+
+写入时 stderr 输出了 `[host-owned-write] patch -> packages/core/SYSTEM.md`（两次）。观察期不阻断，但已留痕。本轮为用户显式授权的直改，我在下一轮读盘核验了实际内容而非只信 exit 0。
+
+## 重启当轮脚本会返回 `Failed to fetch`
+
+pm2 restart 使承载会话的进程瞬断，HTTP 通道中断。这是预期现象，不是失败——须跨轮探活（下轮 `pm2 jlist` + curl 即恢复）。AGENTS.md 已记录此条，本次实测再次印证。
+
+补充（2026-10-07）：pm2 restart 使承载会话的进程瞬断，HTTP 通道中断。属预期现象，不是失败——须跨轮探活（下轮 `pm2 jlist` + curl 即恢复）。本次为会话内第 2 次实测印证，AGENTS.md 已记录此条。
+
+## `:(exclude)<dir>` 与「同 dir 下的具体文件」冲突
+
+`git add -- <paths> :(exclude).ai-runner` 里，当 `<paths>` 本身是 `.ai-runner/lessons.md`（gitignore 白名单文件）时，exclude 让 pathspec 交集为空，git 报 `did not match any files`。修法是判 paths 是否落 exclude 区内再决定加不加 exclude，而不是无脑叠加。
+
+## `hasRunnerPath` 是局部变量名，build 后被打包器重命名
+
+直接 `grep hasRunnerPath dist/...` 命中 0，但换搜语义片段 `paths.some` 就命中 1 处。产物核验必须搜语义片段，不能搜局部变量名。
+
+## `writeFile` 报成功但磁盘只剩 4 字节：一轮内 `writeFile` → `readText` 验长度时发现 `CONTENT_LEN=4`，`fileInfo` 显示 `size:4` / `mtimeMs` 为新时间戳。原因排查：同轮 181 行 / 6KB 脚本贴近输出上限，写盘请求疑被上游截断但未报错。修法
+
+写后立即 `readText` 回读并校验长度，不足即 `exit(2)`，下一轮覆盖重写。写盘成功 ≠ 内容正确，必须回读取证。
+
+## `/run` 只收 node 脚本，bash shebang 会被硬拦：首轮用 `#! /usr/bin/env bash` 触发 `ILLEGAL_SHEBANG`，且连发触发 429 熔断。修法
+
+构建/进程管理走 `__AI__.exec`（js 通道内调 `pnpm`）或 `__AI__.shell(['sh','-c', ...])`，不要用 bash shebang 提交 `/run`。
+
+## pm2 restart 当轮脚本会 `network error`（预期）：重启导致 HTTP 通道瞬断，脚本以 `-1` 收场。修法
+
+跨轮探活复验（AGENTS.md 已明示），不要在当轮判失败或立即重试。
+
+## `/__ai/session` 路径不存在（404）
+
+探活端点要选真实存在的（`/`、`/__ai/files`、`/__ai/tasks`）。
+
+## 注释里写 `{([` 字面量会破坏 `extractInner` 花括号配平：测试用 `extractInner` 抠函数体时只按 `{`/`}` 计数、不识别注释与字符串。我在 `hasExecutableContent` 的注释里写了「注释里没有 `{([`」→ 那个 `{` 被当函数体起点 → inner 残缺 → vm 编译报 `Unexpected token ':'`。修法
+
+改注释文案，不放括号字面量。
+
+## 变异验证别在函数体外注入同名函数：JS 函数声明提升 + 内层遮蔽 ⇒ 外层变异版从未被调用，`extractLatestScript` 仍用自己那份原版 → 变异验证假通过。正确做法
+
+在抠出的函数体字符串内部做替换（`if (!hasExecutableContent(text)) continue` → `if (false) continue`）。
+
+## 变异串不能带行注释
+
+`'return true // MUTATION'` 会注释掉紧随的 `}` → `Unexpected token ')'`。去掉注释即可。
+
+## `writeFile`/`patchFile` 同轮写入 overlay，`vitest` 子进程读真磁盘看不见
+
+变异验证必须在同进程 vm 里做，不能靠子进程跑测试。

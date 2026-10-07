@@ -1,49 +1,67 @@
 <script setup lang="ts">
-// [wiki-panel-v1] 工作台「知识库」只读面板：调 /wiki/health 显示在线/离线态，调 /wiki/search 展示命中。
-// [WHY] 离线态必须渲染「离线」而非空列表——空列表会让用户误判为「知识库里没有」。
-// [CONSTRAINT] 只读：不做「一键注入对话」（首问/上下文污染风险）。样式用 scoped，避让 App.scss。
+// [kb-panel-v2] 工作台「知识库」面板：支持三源——lessons（本地台账）/ docs（本地文档）/ wiki（外部 LLM Wiki）。
+// [WHY] v1 只接 /wiki/*（需外部 token，恒 degraded），而真正可用的 /lessons/match（含 scope=docs）未接——
+//   「能用的没接、接了的不能用」。v2 默认 lessons，让面板开箱即用。
+// [CONSTRAINT] 只读：不做「一键注入对话」（首问/上下文污染风险）。样式 scoped，避让 App.scss。
 import { onMounted, ref } from 'vue'
 
+type Source = 'lessons' | 'docs' | 'wiki'
 interface Health { ok: boolean, degraded?: boolean, reason?: string }
-interface Hit { path?: string, snippet?: string }
+interface Match { title?: string, body?: string, state?: string, src?: string, score?: number, path?: string, snippet?: string }
 
-const online = ref<boolean | null>(null)
-const reason = ref('')
+// lessons/docs 走本地端点，无 token 依赖——开箱即用；wiki 需外部服务。
+const LOCAL = new Set<Source>(['lessons', 'docs'])
+
+const source = ref<Source>('lessons')
 const query = ref('')
-const hits = ref<Hit[]>([])
+const hits = ref<Match[]>([])
 const searched = ref(false)
 const busy = ref(false)
+const degraded = ref(false)
+const reason = ref('')
 
-onMounted(checkHealth)
+onMounted(() => { if (source.value === 'wiki') void checkWikiHealth() })
 
-async function checkHealth() {
+function switchSource(s: Source) {
+  source.value = s
+  hits.value = []
+  searched.value = false
+  degraded.value = false
+  reason.value = ''
+  if (s === 'wiki') void checkWikiHealth()
+}
+async function checkWikiHealth() {
   try {
     const r = await fetch('/__ai/wiki/health')
     const j = (await r.json()) as Health
-    online.value = Boolean(j.ok) && !j.degraded
+    degraded.value = Boolean(j.degraded) || !j.ok
     reason.value = j.reason || ''
-  } catch {
-    online.value = false
-    reason.value = 'network'
-  }
+  } catch { degraded.value = true; reason.value = 'network' }
 }
 async function search() {
   const q = query.value.trim()
   if (!q) return
   busy.value = true
   searched.value = true
+  degraded.value = false
+  reason.value = ''
   try {
-    const r = await fetch(`/__ai/wiki/search?q=${encodeURIComponent(q)}`)
-    const j = (await r.json()) as { ok: boolean, degraded?: boolean, results?: Hit[], reason?: string }
-    if (j.degraded) {
-      online.value = false
-      reason.value = j.reason || 'degraded'
-      hits.value = []
-      return
+    if (LOCAL.has(source.value)) {
+      const r = await fetch('/__ai/lessons/match', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: q, scope: source.value, limit: 8 }),
+      })
+      const j = (await r.json()) as { ok: boolean, matches?: Match[] }
+      hits.value = Array.isArray(j.matches) ? j.matches : []
+    } else {
+      const r = await fetch(`/__ai/wiki/search?q=${encodeURIComponent(q)}`)
+      const j = (await r.json()) as { ok: boolean, degraded?: boolean, results?: Match[], reason?: string }
+      if (j.degraded) { degraded.value = true; reason.value = j.reason || 'degraded'; hits.value = []; return }
+      hits.value = Array.isArray(j.results) ? j.results : []
     }
-    hits.value = Array.isArray(j.results) ? j.results : []
   } catch {
-    online.value = false
+    degraded.value = true
     reason.value = 'network'
     hits.value = []
   } finally {
@@ -56,18 +74,22 @@ async function search() {
   <section class="kb-panel">
     <header class="kb-head">
       <span class="kb-title">知识库</span>
-      <span class="kb-status" :class="online ? 'on' : 'off'">
-        <template v-if="online === null">检测中…</template>
-        <template v-else-if="online">在线</template>
-        <template v-else>离线{{ reason ? `（${reason}）` : '' }}</template>
+      <span v-if="source === 'wiki'" class="kb-status" :class="degraded ? 'off' : 'on'">
+        {{ degraded ? `离线${reason ? `（${reason}）` : ''}` : '在线' }}
       </span>
     </header>
+    <div class="kb-sources" role="tablist">
+      <button
+        v-for="s in (['lessons', 'docs', 'wiki'] as const)" :key="s"
+        role="tab" :aria-selected="source === s" class="kb-src" :class="{ active: source === s }"
+        @click="switchSource(s)"
+      >
+        {{ s === 'lessons' ? '经验台账' : s === 'docs' ? '项目文档' : '外部 Wiki' }}
+      </button>
+    </div>
     <div class="kb-search">
       <input
-        v-model="query"
-        class="kb-input"
-        placeholder="搜索知识库…"
-        spellcheck="false"
+        v-model="query" class="kb-input" placeholder="搜索知识库…" spellcheck="false"
         @keydown.enter.prevent="search"
       >
       <button class="kb-btn" :disabled="busy || !query.trim()" @click="search">
@@ -76,16 +98,20 @@ async function search() {
     </div>
     <ul v-if="hits.length" class="kb-hits">
       <li v-for="(h, i) in hits" :key="i" class="kb-hit">
-        <div class="kb-path">
-          {{ h.path || "（无路径）" }}
+        <div class="kb-hit-head">
+          <span class="kb-path">{{ h.src || h.path || '（无路径）' }}</span>
+          <span v-if="h.state" class="kb-state">{{ h.state }}</span>
+        </div>
+        <div class="kb-hit-title">
+          {{ h.title || '' }}
         </div>
         <div class="kb-snippet">
-          {{ h.snippet || "" }}
+          {{ h.snippet || (h.body || '').slice(0, 160) }}
         </div>
       </li>
     </ul>
-    <p v-else-if="online === false" class="kb-offline">
-      知识库离线，无法检索
+    <p v-else-if="degraded" class="kb-offline">
+      知识库离线，无法检索（{{ reason }}）
     </p>
     <p v-else-if="searched" class="kb-empty">
       无命中
@@ -115,21 +141,44 @@ async function search() {
 .kb-status.off {
   color: #d29922;
 }
+/* 源切换按钮：等宽分段，激活态高亮 */
+.kb-sources {
+  display: flex;
+  gap: 4px;
+}
+.kb-src {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 12px;
+  border: 1px solid var(--border-2, #3a3a3a);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.kb-src.active {
+  opacity: 1;
+  border-color: var(--primary, #58a6ff);
+  color: var(--primary, #58a6ff);
+  background: rgb(88 166 255 / 8%);
+}
 .kb-search {
   display: flex;
   gap: 6px;
 }
 .kb-input {
   flex: 1;
+  min-width: 0;
   padding: 4px 8px;
-  border: 1px solid #3a3a3a;
+  border: 1px solid var(--border-2, #3a3a3a);
   border-radius: 4px;
   background: transparent;
   color: inherit;
 }
 .kb-btn {
   padding: 4px 10px;
-  border: 1px solid #3a3a3a;
+  border: 1px solid var(--border-2, #3a3a3a);
   border-radius: 4px;
   background: transparent;
   color: inherit;
@@ -148,18 +197,38 @@ async function search() {
   gap: 6px;
 }
 .kb-hit {
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--border-2, #2a2a2a);
   border-radius: 4px;
   padding: 6px 8px;
+}
+.kb-hit-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .kb-path {
   font-family: monospace;
   font-size: 12px;
   opacity: 0.8;
 }
+.kb-state {
+  font-size: 11px;
+  opacity: 0.6;
+  margin-left: auto;
+}
+.kb-hit-title {
+  margin-top: 2px;
+  font-size: 12px;
+  opacity: 0.9;
+}
 .kb-snippet {
   margin-top: 2px;
+  font-size: 12px;
   opacity: 0.7;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .kb-empty,
 .kb-offline {

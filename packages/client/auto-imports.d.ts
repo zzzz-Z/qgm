@@ -62,6 +62,7 @@ declare global {
   const buildErrorContext: typeof import('./utils/contextBuilder').buildErrorContext
   const buildFullContext: typeof import('./utils/contextBuilder').buildFullContext
   const buildLessonsBlock: typeof import('./composables/ai/load-lessons').buildLessonsBlock
+  const buildLessonsQuery: typeof import('./composables/ai/auto-loop/loop-lessons-fill').buildLessonsQuery
   const buildLoopInitialPrompt: typeof import('./composables/ai/session-prompt').buildLoopInitialPrompt
   const buildLoopResultPrompt: typeof import('./composables/ai/auto-loop/loop-result-prompt').buildLoopResultPrompt
   const buildMergedFeedbackText: typeof import('./composables/runner/feedback-merge').buildMergedFeedbackText
@@ -142,6 +143,7 @@ declare global {
   const fallbackSessionId: typeof import('./composables/ui/useAppStorage').fallbackSessionId
   const fileBadge: typeof import('./utils/format').fileBadge
   const fileToneStyle: typeof import('./utils/format').fileToneStyle
+  const fillWithLessons: typeof import('./composables/ai/auto-loop/loop-lessons-fill').fillWithLessons
   const fmtSize: typeof import('./utils/format').fmtSize
   const fnv1a8: typeof import('./utils/hash').fnv1a8
   const formatLimitToast: typeof import('./utils/limit-notice').formatLimitToast
@@ -287,6 +289,7 @@ declare global {
   const restore: typeof import('./composables/ai/auto-loop/persist').restore
   const resumeFromPause: typeof import('./composables/ai/useAutoLoop').resumeFromPause
   const resumeLoop: typeof import('./composables/ai/useAutoLoop').resumeLoop
+  const revealSideTab: typeof import('./composables/ui/useSidePaneTab').revealSideTab
   const roundMergePending: typeof import('./composables/ai/auto-loop/pending-scripts').roundMergePending
   const roundTimeoutMs: typeof import('./composables/ai/auto-loop/state').roundTimeoutMs
   const runBash: typeof import('./composables/ai/auto-loop/run-bash').runBash
@@ -325,6 +328,8 @@ declare global {
   const shiftScript: typeof import('./composables/ai/auto-loop/pending-scripts').shiftScript
   const shouldIncludeChanges: typeof import('./composables/runner/useRunFeedback').shouldIncludeChanges
   const showTooltip: typeof import('./composables/ui/useTooltip').showTooltip
+  const sidePaneRevealTick: typeof import('./composables/ui/useSidePaneTab').sidePaneRevealTick
+  const sidePaneTab: typeof import('./composables/ui/useSidePaneTab').sidePaneTab
   const singletonView: typeof import('./composables/ai/auto-loop/state').singletonView
   const softPause: typeof import('./composables/ai/useAutoLoop').softPause
   const stage: typeof import('./composables/ai/auto-loop/state').stage
@@ -639,6 +644,9 @@ declare global {
   export type { FoldState } from './composables/ui/useFoldState'
   import('./composables/ui/useFoldState')
   // @ts-ignore
+  export type { SidePaneTab } from './composables/ui/useSidePaneTab'
+  import('./composables/ui/useSidePaneTab')
+  // @ts-ignore
   export type { SiteSession, SiteEntry, UnifiedStore } from './composables/ui/useSitesStore'
   import('./composables/ui/useSitesStore')
   // @ts-ignore
@@ -723,6 +731,7 @@ declare module 'vue' {
     readonly buildErrorContext: UnwrapRef<typeof import('./utils/contextBuilder')['buildErrorContext']>
     readonly buildFullContext: UnwrapRef<typeof import('./utils/contextBuilder')['buildFullContext']>
     readonly buildLessonsBlock: UnwrapRef<typeof import('./composables/ai/load-lessons')['buildLessonsBlock']>
+    readonly buildLessonsQuery: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-lessons-fill')['buildLessonsQuery']>
     readonly buildLoopInitialPrompt: UnwrapRef<typeof import('./composables/ai/session-prompt')['buildLoopInitialPrompt']>
     readonly buildLoopResultPrompt: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-result-prompt')['buildLoopResultPrompt']>
     readonly buildMergedFeedbackText: UnwrapRef<typeof import('./composables/runner/feedback-merge')['buildMergedFeedbackText']>
@@ -803,6 +812,7 @@ declare module 'vue' {
     readonly fallbackSessionId: UnwrapRef<typeof import('./composables/ui/useAppStorage')['fallbackSessionId']>
     readonly fileBadge: UnwrapRef<typeof import('./utils/format')['fileBadge']>
     readonly fileToneStyle: UnwrapRef<typeof import('./utils/format')['fileToneStyle']>
+    readonly fillWithLessons: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-lessons-fill')['fillWithLessons']>
     readonly fmtSize: UnwrapRef<typeof import('./utils/format')['fmtSize']>
     readonly fnv1a8: UnwrapRef<typeof import('./utils/hash')['fnv1a8']>
     readonly formatLimitToast: UnwrapRef<typeof import('./utils/limit-notice')['formatLimitToast']>
@@ -948,6 +958,7 @@ declare module 'vue' {
     readonly restore: UnwrapRef<typeof import('./composables/ai/auto-loop/persist')['restore']>
     readonly resumeFromPause: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['resumeFromPause']>
     readonly resumeLoop: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['resumeLoop']>
+    readonly revealSideTab: UnwrapRef<typeof import('./composables/ui/useSidePaneTab')['revealSideTab']>
     readonly roundMergePending: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['roundMergePending']>
     readonly roundTimeoutMs: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['roundTimeoutMs']>
     readonly runBash: UnwrapRef<typeof import('./composables/ai/auto-loop/run-bash')['runBash']>
@@ -986,6 +997,8 @@ declare module 'vue' {
     readonly shiftScript: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['shiftScript']>
     readonly shouldIncludeChanges: UnwrapRef<typeof import('./composables/runner/useRunFeedback')['shouldIncludeChanges']>
     readonly showTooltip: UnwrapRef<typeof import('./composables/ui/useTooltip')['showTooltip']>
+    readonly sidePaneRevealTick: UnwrapRef<typeof import('./composables/ui/useSidePaneTab')['sidePaneRevealTick']>
+    readonly sidePaneTab: UnwrapRef<typeof import('./composables/ui/useSidePaneTab')['sidePaneTab']>
     readonly singletonView: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['singletonView']>
     readonly softPause: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['softPause']>
     readonly stage: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['stage']>

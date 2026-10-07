@@ -9,7 +9,8 @@ import { setLoopState } from './transitions.js'
 //   都只是为了不顶破「单文件 import ≤ 8」。上限放宽到 20 后回归直读直写，types.ts 的再导出已删
 import { clearScripts, enqueueScript, shiftScript, stageRoundOutcome } from './pending-scripts.js'
 // [loop-feedback-authority-v1] R1：循环引擎自行回传结果，不再依赖 ScriptPanel watch
-import { buildPlanResumePrompt, buildRoundBatchPrompt, buildSelfcheckFailPrompt } from './loop-result-prompt.js'
+import { buildPlanResumePrompt, buildSelfcheckFailPrompt } from './loop-result-prompt.js'
+import { fillWithLessons } from './loop-lessons-fill.js'
 
 // [ask-dialog-v1] 交互提问通道；解析放 utils，提问状态走单例 composable
 // [ask-card-v1] UI 已从弹窗改为对话流内的可点选卡片（TerminalPane .question-card）；本处契约不变
@@ -411,10 +412,13 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     stageRoundOutcome(inst.id.value, bashOutcome, outcomes => flushRoundOutcome(inst, outcomes))
   }
 
-  /** [round-merge-v1] 合并窗到点后的唯一出站口：守卫在发出前再判一次（窗口异步）；false = 放弃不补发 */
+  // [round-merge-v1] 合并窗到点后的唯一出站口。
+  // [loop-lessons-refresh-v1] 出站改经 fillWithLessons：先按本轮错误检索 lessons 再发（异步）。
+  // 返回值仅表「已受理出站」；真正的守卫在 fillWithLessons 内 sendFill 前再判一次（窗口异步）。
+  /** 合并窗到点后的唯一出站口（详情见上两行注释） */
   function flushRoundOutcome(inst: LoopInstance, outcomes: RoundOutcome[]): boolean {
     if (loopPaused.value || !isInstActive(inst)) return false
-    transport.sendFill('', { prompt: buildRoundBatchPrompt(outcomes) })
+    void fillWithLessons(transport, outcomes, () => loopPaused.value || !isInstActive(inst))
     return true
   }
 

@@ -96,9 +96,15 @@ test('合并窗：一条回复多块逐块完成 ⇒ 只出站 1 次，且文案
   assert.match(sent[0], /shebang 非法 ×1/)
   assert.match(sent[0], /语法\+截断 ×1/)
   assert.equal(
-    (sent[0].match(/请阅读终端输出并给出下一步。/g) || []).length,
+    (sent[0].match(/请阅读终端输出/g) || []).length,
     1,
     '收尾句在合并文本里只能出现一次（逐块堆叠会退化成「N 条拼在一起」）',
+  )
+  // [script-reminder-v1] 回传必须提醒 AI「只输出脚本」，否则它会带文本总结
+  assert.equal(
+    (sent[0].match(/下一个回答必须以 SCRIPT 开头/g) || []).length,
+    1,
+    '回传 prompt 必须含「下一回答以 SCRIPT 开头」提醒（承重：删掉提醒句本用例应变红）',
   )
   assert.equal((sent[0].match(/── 块 /g) || []).length, 5, '每块都要有独立小节，否则中间块的结果对 AI 不可见')
 })

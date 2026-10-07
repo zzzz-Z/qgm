@@ -83,9 +83,27 @@ const SPEC_CLASS_TOKENS = [
 const SPEC_LABELS = ['文件树', '变更列表', '工作日志']
 
 const MASK_SELECTORS = stringArray(SPEC_SRC, 'MASK_SELECTORS')
-// [volatile-worklog-mask-v1] 只在 03 用：WorklogPane 的变更文件清单来自 /__ai/git/worklog，
-// 内容 = 当前 git 工作区状态 ⇒ 会随任何开发活动变化（实测 22 → 27），必须遮罩。
-const MASK_VOLATILE_WORKLOG = stringArray(SPEC_SRC, 'MASK_VOLATILE_WORKLOG')
+
+/**
+ * [scroll-mask-ban-v1] 本仓真实滚动容器类名（.vue 模板里带 overflow-y:auto / overflow:auto 的块）。
+ * [WHY] §15 明令禁止「加宽遮罩 / 遮掉整片滚动区」，但此前无机器判据：把 .wl-scroll 加回 mask
+ *   或新增一条 '.diff-body' 遮罩，都不会让任何测试变红 —— 于是「视觉回归在某面板上真空」的
+ *   缺陷可以再次潜伏（2026-10-07 实测：03 工作日志一度遮整片 .wl-scroll，滚动区内所有 UI 改动都不进判据）。
+ * [CONSTRAINT] 清单须与源码双向同步：token 不在源码中 ⇒ 清单锈蚀变红；mask 里出现清单 token ⇒ 真空变红。
+ * [CHANGE-IMPACT] 内容不确定的用例应改用 page.route() mock 固定数据（见 03 的 WORKLOG_FIXTURE_*），
+ *   而不是加宽遮罩；增删滚动容器时改这里 + 跑本文件。
+ */
+const SCROLL_CONTAINER_TOKENS = [
+  'wl-scroll', // WorklogPane 变更文件清单
+  'diff-body', // DiffViewer 行级 diff 体
+  'file-list', // FileList 变更列表体
+  'awl-list', // AiWindowList 窗口列表
+  'tp-list', // TaskProgressPanel 任务列表
+  'script-card-tail', // ScriptCard 输出尾
+  'attach-bar', // ScriptAttachBar / ScriptPanel 附件条
+  'chat-list', // TerminalPane 聊天流
+  'flow-timeline', // TerminalPane 时间线
+]
 
 test('每个遮罩选择器都真实存在于客户端源码（防选择器锈蚀）', () => {
   assert.ok(MASK_SELECTORS.length >= 3, `遮罩太少（${MASK_SELECTORS.length}）：<3 时基线必然抖动`)
@@ -104,29 +122,39 @@ test('遮罩清单不得为空转：至少有一个遮罩真的能在运行时�
   assert.ok(MASK_SELECTORS.every(s => s.length > 1), `存在空选择器：${JSON.stringify(MASK_SELECTORS)}`)
 })
 
-// [volatile-worklog-mask-v1] 03 工作日志的基线内容里有 git 派生的文件清单（实测 22 → 27）。
-// [WHY] 不遮罩 ⇒ 每次改代码（改 git status）这条基线必红，视觉回归退化成噪音源。
-// CHANGE-IMPACT: 把 03 的 mask 改回只含 MASK_SELECTORS、或删掉 MASK_VOLATILE_WORKLOG ⇒ 本文件变红。
-test('03 工作日志必须遮罩 git 派生的易变区域，且该选择器真实存在', () => {
-  assert.ok(
-    MASK_VOLATILE_WORKLOG.length >= 1,
-    `MASK_VOLATILE_WORKLOG 不得为空：工作日志窗格的文件清单是 git 状态派生（实测 22→27），不遮罩则基线必抖`,
-  )
-  for (const sel of MASK_VOLATILE_WORKLOG) {
-    assert.ok(sel.startsWith('.'), `易变区域遮罩应为类选择器，实际 ${sel}`)
-    assert.ok(
-      hasClassToken(CLIENT_SRC, sel.slice(1)),
-      `${sel} 在客户端源码中不存在 ⇒ 遮罩静默失效（WorklogPane 改名后未同步本清单）`,
-    )
-  }
-  // 03 的用例体必须真的用上它 —— 否则清单还在、mask 却退回了只含 MASK_SELECTORS，守卫恒绿
+// [worklog-fixture-v1] 03 工作日志的基线一度靠「遮掉整片 .wl-scroll」来消除 git 派生抖动，
+// 但那使「文件列表 / 分组头 / diff 展开区」的任何 UI 改动都不进判据 —— 视觉回归在该面板上真空。
+// 改为 route mock 固定数据：内容确定化 ⇒ 撤掉宽遮罩，滚动区真正进基线。
+// [CONSTRAINT] mock 必须比 03 点击 worklog tab 更早注册（WorklogPane 挂载即 fetch）；
+//   mock 后不得再引入对滚动区的整片遮罩。
+// CHANGE-IMPACT: 把 03 改回「真实 git 端点 + 遮 .wl-scroll」⇒ 本文件变红。
+test('03 工作日志必须用 route mock 固定数据，且不得整体遮罩滚动区', () => {
   const at = SPEC_SRC.indexOf('03 工作日志')
   assert.notEqual(at, -1, 'visual.spec.ts 找不到 03 工作日志 用例')
   const next = SPEC_SRC.indexOf('04 编辑器聚焦', at)
   const body = SPEC_SRC.slice(at, next === -1 ? SPEC_SRC.length : next)
+
+  // 三个 git 端点必须全部被 route 拦截
+  for (const endpoint of ['git/worklog', 'git/diff', 'git/head']) {
+    assert.ok(
+      body.includes(endpoint),
+      `03 用例必须 route mock ${endpoint}：未 mock 则内容 = 当前 git 工作区状态，基线必抖；`
+      + `或被改回整片遮罩（判据真空）。`,
+    )
+  }
   assert.ok(
-    body.includes('MASK_VOLATILE_WORKLOG'),
-    '03 用例的 mask 必须包含 MASK_VOLATILE_WORKLOG —— 否则 git 派生清单会进基线，每次改代码都红',
+    body.includes('page.route'),
+    '03 用例必须用 page.route 固定数据 —— 否则只能靠遮罩消抖，滚动区进不了判据',
+  )
+  // 滚动区不得再进 mask
+  assert.ok(
+    !body.includes('\'.wl-scroll\''),
+    '03 用例不得再遮 .wl-scroll —— 整片遮罩会让滚动区内所有 UI 改动对视觉回归不可见（判据真空）',
+  )
+  // 等固定数据行渲染出来，防截到 loading 骨架（骨架退场前截到也算「UI 无回归」的假绿）
+  assert.ok(
+    body.includes('wl-item-head'),
+    '03 用例必须等 .wl-item-head 出现再截图 —— 否则可能截到 loading 骨架，UI 改动不触发差异',
   )
 })
 
@@ -138,6 +166,34 @@ test('spec 引用的视图选择器与源码对齐（双向）', () => {
   for (const label of SPEC_LABELS) {
     assert.ok(SPEC_SRC.includes(label), `visual.spec.ts 已不再引用 aria-label ${label}，请同步本守卫`)
     assert.ok(new RegExp(`["']${escapeRe(label)}["']`).test(CLIENT_SRC), `aria-label "${label}" 在源码中不存在 ⇒ 侧栏 tab 定位会失败`)
+  }
+})
+
+test('MASK_SELECTORS 不得含滚动容器类名（§15 禁止整片遮罩）', () => {
+  const hit = MASK_SELECTORS.map(s => s.replace(/^\./, '')).filter(s => SCROLL_CONTAINER_TOKENS.includes(s))
+  assert.equal(hit.length, 0, `MASK_SELECTORS 含滚动容器类名 ⇒ 整片遮罩使该区域所有 UI 改动对视觉回归不可见（判据真空）：${hit.join(', ')}`)
+})
+
+test('spec 内任何 mask 字面量都不得含滚动容器类名（防绕过 MASK_SELECTORS）', () => {
+  const lines = SPEC_SRC.split(String.fromCharCode(10))
+  const offenders: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) continue
+    for (const t of SCROLL_CONTAINER_TOKENS) {
+      const q = String.fromCharCode(39)
+      const d = String.fromCharCode(34)
+      if (line.includes(`${q}.${t}${q}`) || line.includes(`${d}.${t}${d}`)) {
+        offenders.push(`L${i + 1}: .${t}`)
+      }
+    }
+  }
+  assert.equal(offenders.length, 0, `visual.spec.ts 的 mask 出现滚动容器类名 ⇒ 判据真空：${offenders.join(', ')}（改用 page.route() mock 固定数据）`)
+})
+
+test('滚动容器清单与源码双向对齐（防清单锈蚀）', () => {
+  for (const t of SCROLL_CONTAINER_TOKENS) {
+    assert.ok(hasClassToken(CLIENT_SRC, t), `滚动容器 ${t} 在源码中不存在 ⇒ 清单锈蚀；改类名 / overflow 时须同步本清单`)
   }
 })
 

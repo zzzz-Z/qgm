@@ -27,7 +27,11 @@ test('G1: 循环引擎在 executeItemInner 阶段必须 sendFill 回传结果', 
   assert.ok(m[0].includes('stageRoundOutcome(inst.id.value, bashOutcome'), 'bash 分支未交出结果：结果回传未由循环引擎承接')
   const flush = src.match(/function flushRoundOutcome[\s\S]*?\n {2}\}/)
   assert.ok(flush, '找不到 flushRoundOutcome 出站口')
-  assert.ok(flush[0].includes('transport.sendFill'), '出站口内无 sendFill：结果回传未由循环引擎承接')
+  // [loop-lessons-refresh-v1] 出站经 fillWithLessons（先按本轮错误检索 lessons 再发）。
+  // 判据拆两段：① 出站口调用 fillWithLessons；② fillWithLessons 内真的有 sendFill。
+  assert.ok(flush[0].includes('fillWithLessons(transport, outcomes'), '出站口未走 fillWithLessons：结果回传未由循环引擎承接')
+  const fillSrc = readSrc('packages/client/composables/ai/auto-loop/loop-lessons-fill.ts')
+  assert.ok(fillSrc.includes('transport.sendFill'), 'fillWithLessons 内无 sendFill：结果回传未由循环引擎承接')
 })
 
 test('G2: exec-flow 里 softPause 必须被 isLoopActive 守卫', () => {

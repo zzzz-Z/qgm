@@ -37,7 +37,7 @@
 - `verify-contract v1`（`post-run/run-compliance.ts` 仅采集不闸门，观测期）→ 未运行：不采集，DONE 行为不变
 - `ai-guard-tokenize v2`（`post-run/ai-guard.ts`，词法剥离后匹配黑名单）→ 未运行：覆写含原生 API 字样的配置时须自行断词拼接或分轮拆分，规避朴素匹配误伤
 
-**提示词侧规则**（宿主不感知，无降级路径）：`runtime-vs-source-v2`（§5 与 §13）、`same-round-read v1`、`instance-ownership v1`（§1，含文件级）、`metaerror-fuse v1`（§8）
+**提示词侧规则**（宿主不感知，无降级路径）：`runtime-vs-source-v2`（§5 与 §13）、`same-round-read v1`、`instance-ownership v1`（§1，含文件级）、`metaerror-fuse v1`（§8）、`functional-regression v1`（§14）、`visual-regression v1`（§15）、`lessons-ondemand v1`（§16）
 
 > 宿主另跑以下机制，**与模型行为无关**：loop 硬上限、看板桶 GC、lesson 采集、锚点对账（不符即 `session:start` exit 2）、拒绝熔断。**无需感知，不得据此推断任何宿主行为。**
 
@@ -242,3 +242,51 @@
 - **runtime-vs-source-v2**：判生效唯二判据：①进程启动时间（`pm2 describe` 的 uptime/created at）vs 产物 mtime（进程早于产物 = 未生效）；②打活端点看行为（404 = 未注册进进程，405 = 方法不匹配，200 = 生效）。禁止用「exit 0」「构建成功」「我已重启」作为证据。
 - **无证据的时序承诺禁止写出**：「最后一次」「此后全自动」「不会再需要你」等断言必须在写出的同一轮有实测支撑（时间戳比对或活端点探针）；没有证据就改写为「需要宿主侧执行 X，之后机制才能生效」，不许诺未验证的未来状态。反复请求人类同一动作前，先回答「上一次为什么没生效」——答不出就停下读盘。
 - **细粒度陷阱已下沉**：`.ai-runner/lessons.md` 收录 patchFile 锚点/重复注入三坑、429 时 `MISSING_DESC` 误导文案、产物核对须搜语义片段（打包器剔注释、引号转写）、`getMainText()` vs `extractReplyMd()` 陷阱、熔断期重试读回全文等。动手前先查台账，别靠记忆重建。
+
+---
+
+## §14 功能回归测试（functional-regression-v1）
+
+> 回归 = 改完之后，原来好的东西还得好。三层闸门各管一段，**跑错层等于没跑**：单测管逻辑、契约用例管接口、e2e 管真实装配。
+
+- **L1 差值基线（快闸门）**：`pnpm check-regression`（`bin/check-regression.cjs check`）——跑 `pnpm typecheck` + vitest（json reporter）+ eslint，与 `.ai-runner/baseline.json` 比**差值**；`dTsc`/`dTest`/`dLint` 任一 > 0 即 exit 1。判据是「不比基线更差」，不是「当前全绿」——**无基线文件 exit 2、vitest 报告解析不出（-1）直接阻断**，都不许当成通过。`init` 只在基线缺失或**统计口径变更**（如新增一套 tsc）时由宿主侧重建，**禁止为消红而 `init`**。
+- **L2 全量闸门（交付前）**：`pnpm verify`（anchors → docs → crossfile → 4 套 tsc → lint → vitest）。四套类型检查缺一不可——只跑 `tsc` 只覆盖 `packages/core/src`，前端与测试的类型错误会静默绕过（这正是该闸门曾形同虚设的成因）。宿主侧跑全量 vitest 若撞上批量删除保护（报错栈出现 `node-safe-delete-shim`，表现为「单跑绿、合跑红」），加 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 重跑：那是环境垫片误报，不是你引入的回归。
+- **L3 契约 / e2e（真实装配）**：`pnpm test:e2e`（Playwright，`baseURL=http://localhost:5174/__ai/`，webServer 自动起 `pnpm dev:web`，`reuseExistingServer: true`）。改路由、状态码、NDJSON 帧结构、请求体契约时，**补一条 e2e 契约用例**（范式见 `e2e/baseline-diff.spec.ts`：先造真实 `runId`，再断言响应结构与错误码），不要只用单测把 transport mock 掉。
+- **改哪层跑哪层**：逻辑/类型改动 → L1 + 受影响包单测；新增导出/改签名 → L2 并 grep 调用方（§9）；改路由/契约/装配 → L1 + L3；改 UI → L1 + L2 + §15。
+- **判据必须承重（§12 硬规则 3 的实例化）**：新增或改动功能，要留下一条「该功能坏掉就会变红」的判据。三种典型真空：只测机制不测调用点、命中另一条路径、判据恒真恒假。自测方法 = **变异验证**：把被测条件改恒真（或把功能刻意改坏），测试应变红；不红就是没测到，等于没验。
+- **命令名先与 `package.json` 对账**：文档与回执里写的脚本名必须真实存在（`web:dev` 从未存在、只因复用已运行实例而长期未暴露，是这类的前车之鉴）。
+- **不得谎报**：e2e 与基线重建属宿主侧动作（见 §15），没跑就写「待宿主侧执行 + 命令」，不许写「已跑通」。
+
+---
+
+## §15 视觉回归测试（visual-regression-v1）
+
+- **基线资产**：`packages/client/e2e/visual.spec.ts-snapshots/`（6 视图 × 2 主题 = 12 张 PNG）。**基线 PNG 是判据资产，不是构建产物**：改样式后它变红是**预期行为**，先判断差异是不是你要的改动，再谈更新。
+- **重建唯一入口**：`pnpm test:e2e --update-snapshots`，由宿主/复核方执行。AI 侧 bash 通道 120s 硬超时 < Playwright 单用例 180s 预算 ⇒ **e2e 不在轮内自跑**；只能声明命令、预期与影响面，禁止在 DONE 写「已跑视觉回归」除非贴得出原始输出。
+- **三条不变式（visual-invariant-v1，破任一即判据真空）**：
+  1. 主题在 `goto` **之前**经 `addInitScript` 写入 `localStorage.__ai_theme`，让应用自带主题启动；goto 之后再改 `data-theme` 是绕过应用手改 DOM，测不到主题接线（旧基线 dark/light 逐像素相同的成因）。
+  2. 每张截图前断言 `html[data-theme]` 等于目标主题——主题链路坏掉会让 12 张图静默退化成 6 张，而用例全绿。
+  3. 遮罩选择器必须逐条在源码中真实存在（**剥掉 `<style>` 与 CSS 后仍存在**；CSS 规则残留不算），由 `packages/client/tests/visual-spec-guard.node-test.ts` 双向守卫。
+- **定位规则**：视图一律用 `aria-label` 定位，禁止 `.nth(i)`——`nth(0)` 常常就是默认 tab，会让「首屏」与「文件树」逐像素相同，号称 N 视图实际只覆盖 N−1 个。
+- **三种消红方式一律禁止**：① 见红就 `--update-snapshots`（等于把回归写进基线）；② 加宽遮罩 / 遮掉整片滚动区（该区域任何 UI 改动从此不进判据）；③ 只更新 dark 或只更新一个视图（必须同批两主题全量，并逐张说明为什么变）。
+- **合法更新路径**：先看 `.ai-runner/tmp/e2e-output/` 下的 diff / actual 图 → 确认差异范围 ≈ 预期改动范围 → 重建 → 在 DONE 记录「基线更新：视图 / 主题 / 变更原因 / 审查者」。说不清差异来源就别更新，按 §12 P0 处理。
+- **跨轮次元素级基线**：`pnpm baseline`（`scripts/screenshot-baseline.cjs save|check|list|rm`）对单个选择器做跨轮像素对比，`check` 退出 1 = major 差异；与全页 Playwright 基线互补，适合「只想钉住某个组件」的场景。
+- **dev 与 prod 的差异（承接 §13）**：e2e 打的是 5174 的 dev（直读源码，dev 免 build）；prod 形态（5175）必须先 `pnpm build` 再由宿主侧重启才看得见——别拿 dev 截图承诺 prod 表现。
+- **平台约束**：`snapshotPathTemplate` 已去掉平台段，但这**不等于**跨平台通用——字体与抗锯齿不同，多平台须各自提交基线。
+
+---
+
+## §16 遇问题查知识库（lessons-ondemand-v1）
+
+> 知识库 = `.ai-runner/lessons.md`（项目踩坑台账，append-only）+ `.ai-runner/skills/**`（技能库）。本仓已把「预加载」与「按需检索」两路接通，两条都要用。
+
+- **首问已预加载**：会话首问 / 循环首轮按 goal（任务目标）经 BM25 检索注入 lessons + skills top-3（`session-prompt.ts` 的 `buildNewSessionPrompt` / `buildLoopInitialPrompt`）。这是主机制，无需手动作。
+- **沙箱内按需检索**：`await __AI__.lessons.match(query, limit)` —— query 用**错误关键词或任务描述**，返回 `{ ok, query, matches: [{ title, body, state, score, matched }] }`。命中条目逐字返回，`state` 取值：`verified`（可当铁律）/ `rejected`（正文描述是错的，**不要照做**）/ `stale`（机制已改，**已不适用**）/ `pending`（未复核，可参考勿当铁律）。失败返回 `{ ok: false, error, matches: [] }`，不抛。
+- **循环轮末自动重检索**：每轮回传前按**本轮 stderr/desc** 自动再检索一次并注入（`loop-lessons-fill.ts` 的 `fillWithLessons`）。中途遇到全新类型错误时不必手动作——只要不是首轮，本机制会带进来。
+- **触发时机（何时该主动查）**：① 遇到「像是踩过的坑」的报错（锚点失配、产物未更新、429、熔断、截断等本仓特有陷阱）；② 触及 `patchFile` / `gitSnapshot` / `visual.spec.ts` / `SYSTEM.md` 等高频踩坑点；③ 首轮注入的条目与当前错误不相关时。
+- **禁止只靠记忆重建**：`.ai-runner/lessons.md` 收录大量本仓特化陷阱（patchFile 锚点三坑、`getMainText()` vs `extractReplyMd()`、runtime-vs-source、产物核对须搜语义片段等）。**动手前先查台账**——记忆会漂移，台账不会。
+- **状态行语义（不看会误读）**：条目标题后首个非空行是状态行。`[VERIFIED]` 已亲跑确证 ⇒ 可当铁律；`[REJECTED]` 已被实测推翻 ⇒ **正文描述是错的**；`[STALE]` 曾为真但机制已改 ⇒ **现在不适用**；`（待复核）`/无状态行 ⇒ 尚未复核，可参考勿当铁律。
+- **写侧**：DONE 正文含 `## 踩坑记录` 段会自动采集入库（按标题去重）；手工补记 `pnpm lessons:add "<title>" <body-file>`（`-` 从 stdin 读）。入库条目**缺省即待复核**，只有复核方亲跑证据后才标 `[VERIFIED]`/`[REJECTED]`/`[STALE]` —— **写作方不得自标**。
+- **技能侧顺序仍是本地优先**（承接 §11）：`POST /__ai/skills/match` 或列目录 → 本地无命中才检索远端。`__AI__.lessons.match` 只管 lessons，技能走 §11 的协议。
+
+> **CHANGE-IMPACT**：改 lessons 检索链路（`load-lessons.ts` / `lessons/retriever.ts` / `helpers.cjs` 的 `lessons.match`）后须 `pnpm build` —— 沙箱运行时读 `apps/standalone/dist/helpers.cjs`，不读 src。这是 §13 `runtime-vs-source-v2` 的一个具体实例。

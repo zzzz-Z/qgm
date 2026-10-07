@@ -1,69 +1,68 @@
 // @vitest-environment happy-dom
-// [wiki-panel-v1] 段二判据：离线态必须渲染「离线」，不得渲染成空列表。
-// [WHY] 空列表会让用户误判为「知识库里没有」，与「没启动」不可分——本项目一贯要求的可判据降级。
+// [kb-panel-v2] 三源知识库面板判据：lessons/docs 走本地端点（开箱即用），wiki 需外部 token。
+// [WHY] v1 只接 wiki（恒 degraded），真正可用的 /lessons/match 未接——本文件守护 v2 的源切换与降级语义。
 import { afterEach, expect, test, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import KnowledgePanel from '../components/panels/KnowledgePanel.vue'
 
 const originalFetch = globalThis.fetch
+interface Call { url: string, method: string, body: string }
+let calls: Call[] = []
 
-function mockFetch(handler: (url: string) => unknown) {
-  globalThis.fetch = vi.fn(async (url: string) => ({
-    ok: true,
-    json: async () => handler(String(url)),
-  })) as unknown as typeof fetch
+function mockFetch(handler: (url: string, method: string, body: string) => unknown) {
+  calls = []
+  globalThis.fetch = vi.fn(async (url: string, init?: { method?: string, body?: string }) => {
+    const method = String(init?.method || 'GET')
+    const body = String(init?.body || '')
+    calls.push({ url: String(url), method, body })
+    return { ok: true, json: async () => handler(String(url), method, body) }
+  }) as unknown as typeof fetch
 }
 
-afterEach(() => {
-  globalThis.fetch = originalFetch
-  vi.restoreAllMocks()
-})
+afterEach(() => { globalThis.fetch = originalFetch; vi.restoreAllMocks() })
 
-test('在线：health ok ⇒ 渲染「在线」', async () => {
-  mockFetch(() => ({ ok: true, degraded: false }))
+test('默认源 lessons：检索走 POST /lessons/match 且 scope=lessons', async () => {
+  mockFetch(() => ({ ok: true, matches: [{ title: '条目A', body: '正文A', state: 'verified' }] }))
   const w = mount(KnowledgePanel)
+  await w.find('.kb-input').setValue('沙箱')
+  await w.find('.kb-btn').trigger('click')
   await flushPromises()
-  expect(w.find('.kb-status').text()).toContain('在线')
+  const call = calls.find(c => c.url.includes('/lessons/match'))
+  expect(call, '必须调 /lessons/match').toBeTruthy()
+  expect(call!.body).toContain('"scope":"lessons"')
+  expect(w.find('.kb-hit-title').text()).toContain('条目A')
   w.unmount()
 })
 
-test('离线：health degraded ⇒ 渲染「离线」而非空列表（变异：渲染空列表必红）', async () => {
+test('切到 docs 源：scope=docs', async () => {
+  mockFetch(() => ({ ok: true, matches: [{ title: 'DESIGN.md › 布局', src: 'docs/DESIGN.md' }] }))
+  const w = mount(KnowledgePanel)
+  await w.findAll('.kb-src')[1].trigger('click')
+  await w.find('.kb-input').setValue('布局')
+  await w.find('.kb-btn').trigger('click')
+  await flushPromises()
+  const call = calls.find(c => c.url.includes('/lessons/match'))
+  expect(call!.body).toContain('"scope":"docs"')
+  expect(w.find('.kb-path').text()).toContain('docs/DESIGN.md')
+  w.unmount()
+})
+
+test('切到 wiki 源：degraded ⇒ 渲染「离线」而非空命中', async () => {
   mockFetch(() => ({ ok: false, degraded: true, reason: 'LLM_WIKI_TOKEN 未配置' }))
   const w = mount(KnowledgePanel)
-  await flushPromises()
-  const txt = w.find('.kb-status').text()
-  expect(txt).toContain('离线')
-  expect(txt).toContain('LLM_WIKI_TOKEN 未配置')
-  expect(w.find('.kb-hits').exists()).toBe(false)
-  w.unmount()
-})
-
-test('检索降级：search 返回 degraded ⇒ 状态转离线，不显示空命中', async () => {
-  mockFetch((url) => {
-    if (url.includes('/health')) return { ok: true, degraded: false }
-    return { ok: false, degraded: true, reason: 'TimeoutError' }
-  })
-  const w = mount(KnowledgePanel)
-  await flushPromises()
-  await w.find('.kb-input').setValue('foo')
-  await w.find('.kb-btn').trigger('click')
+  await w.findAll('.kb-src')[2].trigger('click')
   await flushPromises()
   expect(w.find('.kb-status').text()).toContain('离线')
-  expect(w.find('.kb-empty').exists()).toBe(false)
   w.unmount()
 })
 
-test('命中：search 返回 results ⇒ 渲染路径与片段', async () => {
-  mockFetch((url) => {
-    if (url.includes('/health')) return { ok: true, degraded: false }
-    return { ok: true, degraded: false, results: [{ path: 'a/b.md', snippet: '片段X' }] }
-  })
+test('本地源空命中：显示「无命中」而非离线', async () => {
+  mockFetch(() => ({ ok: true, matches: [] }))
   const w = mount(KnowledgePanel)
-  await flushPromises()
-  await w.find('.kb-input').setValue('kw')
+  await w.find('.kb-input').setValue('zzz')
   await w.find('.kb-btn').trigger('click')
   await flushPromises()
-  expect(w.find('.kb-path').text()).toContain('a/b.md')
-  expect(w.find('.kb-snippet').text()).toContain('片段X')
+  expect(w.find('.kb-empty').text()).toContain('无命中')
+  expect(w.find('.kb-offline').exists()).toBe(false)
   w.unmount()
 })

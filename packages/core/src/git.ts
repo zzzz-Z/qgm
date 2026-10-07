@@ -186,8 +186,16 @@ async function gitArchiveBranch(
   const rt = await run('git', ['read-tree', parent], 30_000, env)
   if (rt.code !== 0) return { ok: false, reason: `read-tree 失败: ${rt.stderr}` }
 
-  // `:(exclude).ai-runner` 同 gitSnapshot：--path . 存档时不得把运行态/临时索引本身卷进 commit
-  const add = await run('git', ['add', '-A', '--', ...paths, ':(exclude).ai-runner'], 30_000, env)
+  // [archive-exclude-conditional-v1] 只在整树存档（paths 含 .）时叠加 exclude。
+  // [WHY] 具体文件列表若自身落在 .ai-runner/ 下（如 .ai-runner/lessons.md 是 .gitignore 白名单），
+  //   再叠加 :(exclude).ai-runner 会让 pathspec 有效集为空，git 报 did not match any files。
+  // [CONSTRAINT] 判定用 paths 中是否有 .ai-runner 前缀项；整树 . 场景仍走 exclude。
+  // [CHANGE-IMPACT] 允许 .ai-runner/lessons.md 等白名单文件进 ai-archive；运行态由调用方过滤。
+  const hasRunnerPath = paths.some(p => p === '.ai-runner' || p.startsWith('.ai-runner/'))
+  const addArgs = hasRunnerPath
+    ? ['add', '-A', '--', ...paths]
+    : ['add', '-A', '--', ...paths, ':(exclude).ai-runner']
+  const add = await run('git', addArgs, 30_000, env)
   if (add.code !== 0) return { ok: false, reason: `git add 失败: ${add.stderr}` }
 
   const wt = await run('git', ['write-tree'], 30_000, env)

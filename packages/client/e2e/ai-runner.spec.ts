@@ -18,9 +18,9 @@ test.describe('AI Runner', () => {
     await expect(page.locator('.cm-content')).toBeVisible({ timeout: 10_000 })
   })
 
-  test('侧栏 tab 可切换（树/变更/任务）', async ({ page }) => {
+  test('侧栏 tab 可切换（树/变更/任务/知识库）', async ({ page }) => {
     const tabs = page.locator('.side-tab')
-    await expect(tabs).toHaveCount(3)
+    await expect(tabs).toHaveCount(4)
     await tabs.nth(0).click()
     await expect(page.locator('.tree .tree-head')).toBeVisible({ timeout: 5000 })
   })

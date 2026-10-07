@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.6.1
+// @version      1.6.2
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -330,6 +330,25 @@
       if (state === 'single' || state === 'double' || state === 'template' || state === 'block-comment') return true
       return stack.length > 0
     }
+    // [script-content-gate-v1] 脚本完整性门：剔除 shebang / 注释 / 空白后必须还有可执行内容。
+    // [WHY] 括号闭合门对「只有头部注释」的文本天然为 false（注释里不含括号），流式中途任一停顿
+    //   都会让半成品头部被判为完整脚本推出去 → 前端执行两次（2026-10-07 22:18:14 实测）。
+    // [CONSTRAINT] 判据与 packages/client/composables/runner/inbox-parse.ts 的 normalizeForHash 同构；
+    //   与 headless-inject.ts 的同名函数逐字同构，改一处必须同步另一处。
+    function hasExecutableContent(src) {
+      const stripped = String(src || '')
+        .split('\n')
+        .map(l => l.trim())
+        .filter((l) => {
+          if (!l) return false
+          if (l.startsWith('#!')) return false
+          if (l.startsWith('//')) return false
+          if (l.startsWith('#')) return false
+          return true
+        })
+        .join('')
+      return stripped.length > 0
+    }
     /** 正文长度变了 ⇒ 回复仍在增长，继续等；连续 3 次等长 ⇒ 判定为「上游真截断」并放行 */
     function stillStreamingReply() {
       const body = String((document.body && document.body.textContent) || '')
@@ -377,6 +396,11 @@
       //   脚本头契约（shebang / @desc）已由上方 _marked 兜底成 js，故删除该豁免不损失合法脚本。
       // [CONSTRAINT] 与 packages/core/src/headless/headless-inject.ts 的 extractLatestScript 逐字同构
       if (lang !== 'js' && lang !== 'bash') continue
+      // [script-content-gate-v1] 非注释内容非空门：只有头部注释的残缺块不算完整脚本
+      // [WHY] 22:18:14 实测：AI 流式中途只吐出 #! + @desc + @why + @plan 的头部，
+      //   括号闭合门对纯注释天然为 false ⇒ 被判「完整」推送 → 前端跑一次空脚本，
+      //   完整块到达后再跑一次 → 用户看到同 desc 执行两次（间隔 1.8s）。
+      if (!hasExecutableContent(text)) continue
       // [script-closure-gate-v1] 未闭合 ⇒ 极可能仍在流式生成中途（或站点把回复切断了）：
       //   继续等下一帧；只有「正文长度连续 N 次不变」才判定为上游真截断并放行（约束见函数头）
       if (hasUnclosedStructureJs(text)) {

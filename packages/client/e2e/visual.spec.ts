@@ -41,18 +41,33 @@ const TAB_CHANGES = '变更列表'
 const TAB_WORKLOG = '工作日志'
 
 /**
- * [volatile-worklog-mask-v1] **只在 03 用**的额外遮罩：`.wl-scroll`（WorklogPane 的变更文件清单）。
- * [WHY] 实测（2026-10-05 第二轮）：03 工作日志的两条主题基线在重跑时**确定性**失败
- *   （6503 像素 / ratio 0.01，重试三次数字完全相同 ⇒ 不是抖动，是内容真变了）。
- *   根因：WorklogPane 是「VSCode 源码管理风格」面板，其文件清单来自 `/__ai/git/worklog`
- *   ⇒ **内容 = 当前 git 工作区状态**。基线拍摄时是 22 个变更，重跑时 27 个（本轮新增了
- *   `AGENTS.md` 改动等）⇒ 凡是会改 `git status` 的开发活动都会把这条基线打红，
- *   而且是**每次都红**——视觉回归就退化成「每次都要 --update-snapshots」的噪音源。
- * [CONSTRAINT] 只遮清单、**不遮整个窗格**：`.wl-commit`（提交框 / 生成按钮）是稳定 chrome，
- *   仍留在基线里，03 才有回归价值。由 visual-spec-guard 的对应用例守卫
- *   （含「03 用例体必须真的引用 MASK_VOLATILE_WORKLOG」，防有人改回只含 MASK_SELECTORS）。
+ * [worklog-fixture-v1] 03 用例的固定数据：拦截 /git/worklog、/git/diff、/git/head 返回确定内容。
+ * [WHY] 原做法是遮掉整片 `.wl-scroll`（内容 = 当前 git 工作区状态，实测 22 → 27 必红）；
+ *   但整片遮罩使「文件列表 / 分组头 / diff 展开区」的任何 UI 改动都不进判据 —— 视觉回归在该面板上真空。
+ *   改为 route mock 后内容确定 ⇒ 撤掉宽遮罩，整片滚动区真正进基线。
+ * [CONSTRAINT] 必须比 `03` 里点击 worklog tab **更早**注册：WorklogPane 是切 tab 才挂载，
+ *   挂载即 fetch，route 晚于挂载则拦不到。
  */
-const MASK_VOLATILE_WORKLOG = ['.wl-scroll']
+const WORKLOG_FIXTURE_FILES = [
+  { path: 'packages/core/src/git.ts', status: 'modified', added: 12, removed: 4 },
+  { path: 'packages/client/components/panels/WorklogPane.vue', status: 'modified', added: 30, removed: 8 },
+  { path: 'packages/client/components/panels/worklog-pane.scss', status: 'added', added: 60, removed: 0 },
+]
+const WORKLOG_FIXTURE_HISTORY = [
+  'ee7940a chore: 批量收口多工单改动',
+  '48bd81e 1',
+  '0782b78 chore(memory): 记录提交与未完成盘点',
+]
+const WORKLOG_FIXTURE_DIFF = [
+  'diff --git a/packages/core/src/git.ts b/packages/core/src/git.ts',
+  '--- a/packages/core/src/git.ts',
+  '+++ b/packages/core/src/git.ts',
+  '@@ -1,3 +1,4 @@',
+  ' export async function gitHead() {',
+  '-  return null',
+  '+  return run(\'git\', [\'rev-parse\', \'HEAD\'])',
+  ' }',
+].join('\n')
 
 for (const theme of ['dark', 'light'] as const) {
   test.describe(`视觉基线 · ${theme}`, () => {
@@ -86,11 +101,39 @@ for (const theme of ['dark', 'light'] as const) {
     })
 
     test(`03 工作日志 · ${theme}`, async ({ page }) => {
+      // [worklog-fixture-v1] 三个 git 端点全部 mock：内容确定化 ⇒ 滚动区可进基线（撤掉宽遮罩）
+      await page.route('**/__ai/git/worklog', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          since: 'HEAD',
+          until: '',
+          generatedAt: 0,
+          files: WORKLOG_FIXTURE_FILES,
+          history: WORKLOG_FIXTURE_HISTORY,
+          stat: '',
+          markdown: '',
+        }),
+      }))
+      await page.route('**/__ai/git/diff', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, diff: WORKLOG_FIXTURE_DIFF, filesCount: 3 }),
+      }))
+      await page.route('**/__ai/git/head', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, head: 'ee7940a8c0de' }),
+      }))
       await page.locator(`.side-tab[aria-label="${TAB_WORKLOG}"]`).click()
       await expect(page.locator('.side-worklog')).toBeVisible()
-      await page.waitForTimeout(500)
+      // 等骨架退场、固定数据行出现，否则截到 loading 态
+      await expect(page.locator('.wl-item-head').first()).toBeVisible({ timeout: 10_000 })
+      await page.waitForTimeout(300)
       await expect(page).toHaveScreenshot(`03-worklog-${theme}.png`, {
-        mask: [...MASK_SELECTORS, ...MASK_VOLATILE_WORKLOG].map(s => page.locator(s)),
+        mask: MASK_SELECTORS.map(s => page.locator(s)),
+        animations: 'disabled',
       })
     })
 

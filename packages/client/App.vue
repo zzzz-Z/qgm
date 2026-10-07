@@ -8,6 +8,7 @@ import { useAppStartup } from './composables/ui/useAppStartup'
 import { updateUserscript } from './composables/ui/useUserscriptUpdate'
 import ToastHost from './components/feedback/ToastHost.vue'
 import TooltipHost from './components/feedback/TooltipHost.vue'
+import KeyboardHelp from './components/feedback/KeyboardHelp.vue'
 // [app-storage-extracted-v1]
 import type { SessionEntry } from './composables/ui/useAppStorage'
 // [theme-binding-v1] theme 必须显式值导入：模板 @click 里有 `theme = theme === 'dark' ? ...` 赋值，
@@ -17,11 +18,11 @@ import type { SessionEntry } from './composables/ui/useAppStorage'
 import { effectiveSessionId, theme } from './composables/ui/useAppStorage'
 // [win-sid-namespace-v1] 站点窗口槽位 sid 共享命名 + 切换活跃槽位
 import { setActiveWinSid, winSidOf } from './composables/ai/useAiWindowTable'
+import { revealSideTab } from './composables/ui/useSidePaneTab'
 // [useSitesStore-import-v1] 统一 store 启动时迁移 + 切站点写 activeModelId
 // [workspace-guide-lazy-v1] 引导页仅 !hasWorkspace 时渲染（v-if 闸门），异步拆包不进首屏 chunk
 const WorkspaceGuide = defineAsyncComponent(() => import('./components/panels/WorkspaceGuide.vue'))
-// [wiki-panel-v1] 知识库只读面板（异步拆包，不进首屏 chunk）
-const KnowledgePanel = defineAsyncComponent(() => import('./components/panels/KnowledgePanel.vue'))
+// [kb-panel-side-v1] 知识库已迁入右侧栏 tab（ScriptPanel→SidePane），此处不再内联渲染
 // [app-storage-extracted-v1] SESSION_HISTORY_KEY 已抽至 useAppStorage
 /** mock 通道（?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
 const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
@@ -35,7 +36,6 @@ const hasWorkspace = ref(true)
 /** 键盘帮助面板开关 */
 const keyboardHelpOpen = ref(false)
 /** [wiki-panel-v1] 知识库面板开关 */
-const kbOpen = ref(false)
 /** 信息 */
 const absenceInfo = ref<{ daysAgo: number } | null>(null)
 /** URL 是否处于编辑态 */
@@ -421,9 +421,9 @@ function onLoginGui() {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
       </button>
       <button
-        v-tooltip="'知识库（LLM Wiki）只读检索'"
+        v-tooltip="'知识库：经验台账 / 项目文档 / 外部 Wiki 检索'"
         aria-label="知识库" class="kb-toggle"
-        @click="kbOpen = !kbOpen"
+        @click="revealSideTab('kb')"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
       </button>
@@ -436,12 +436,12 @@ function onLoginGui() {
     <div class="layout-main">
       <main class="main">
         <ScriptPanel />
-        <KnowledgePanel v-if="kbOpen" />
       </main>
     </div>
   </div>
   <ToastHost />
   <TooltipHost />
+  <KeyboardHelp v-if="keyboardHelpOpen" @close="keyboardHelpOpen = false" />
 </template>
 
 <style scoped lang="scss" src="./App.scss"></style>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { sidePaneRevealTick, sidePaneTab } from '../../composables/ui/useSidePaneTab'
 import FileTree from './FileTree.vue'
 import FileList from './FileList.vue'
 import type { ChangeEntry } from '../../types'
@@ -36,14 +37,17 @@ const model = defineModel<boolean>('sideDrawerOpen', { required: true })
 
 defineOptions({ name: 'SidePane' })
 
-const _tabAllowed = ['tree', 'changes', 'worklog'] as const
+const _tabAllowed = ['tree', 'changes', 'worklog', 'kb'] as const
 const WorklogPane = defineAsyncComponent(() => import('./WorklogPane.vue'))
+// [kb-panel-side-v1] 知识库面板：接入右侧栏第四 tab，懒加载（与 worklog 同范式）
+const KnowledgePanel = defineAsyncComponent(() => import('./KnowledgePanel.vue'))
 
 // [worklog-lazy-v1] WorklogPane（含 markdown-it 渲染链）仅首次切到 worklog tab 才加载
 // [WHY] worklogLoaded 闸门 v-if 保证 defineAsyncComponent 的 loader 到首切才触发；
 //       加载后 v-if 恒真、由 v-show 保活，保留结果/展开状态（不能只用 v-if，否则切走即丢状态）
 // [CHANGE-IMPACT] 首切 tab 多一次 chunk 请求；WorklogPane 自身 watch 改 immediate 以适配"挂载即激活"
 const worklogLoaded = shallowRef(false)
+const kbLoaded = shallowRef(false)
 
 // 折叠 + tab 选择持久化（PLAN 5.4）
 const fold = useFoldState('default', 'side-pane')
@@ -70,13 +74,23 @@ const collapsed = computed({
 
 watch(sideTab, (tab) => {
   if (tab === 'worklog') worklogLoaded.value = true
+  if (tab === 'kb') kbLoaded.value = true
 }, { immediate: true })
+// [side-pane-tab-v1] 外部请求（工具栏按钮）→ 切 tab + 展开；collapsed 由 revealTick watch 控制
+watch(sidePaneRevealTick, () => {
+  sideTab.value = sidePaneTab.value
+  if (collapsed.value)
+    collapsed.value = false
+})
 
 function selectTab(tab: (typeof sideTab)['value']): void {
   sideTab.value = tab
+  sidePaneTab.value = tab
   if (collapsed.value)
     collapsed.value = false
 }
+
+defineExpose({ selectTab })
 </script>
 
 <template>
@@ -94,6 +108,11 @@ function selectTab(tab: (typeof sideTab)['value']): void {
            [CHANGE-IMPACT] 内容由 WorklogPane.vue 提供；active 由 sideTab 派生，非活动时不发请求 -->
       <button v-tooltip="'工作日志'" aria-label="工作日志" :class="{ 'side-tab-active': sideTab === 'worklog' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('worklog')">
         <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M6 21V9a9 9 0 0 0 9 9" /></svg></span>
+      </button>
+
+      <!-- [kb-panel-side-v1] 知识库 tab：经验台账 / 项目文档 / 外部 Wiki 检索（懒加载，同 worklog 范式） -->
+      <button v-tooltip="'知识库'" aria-label="知识库" :class="{ 'side-tab-active': sideTab === 'kb' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('kb')">
+        <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg></span>
       </button>
 
       <!-- [fix-side-collapse] 收起/展开 -->
@@ -157,6 +176,10 @@ function selectTab(tab: (typeof sideTab)['value']): void {
     <!-- 工作日志面板：内部自行按需拉取 /__ai/git/worklog -->
     <div v-show="sideTab === 'worklog'" class="side-worklog flex flex-col flex-1 min-h-0 overflow-hidden">
       <WorklogPane v-if="worklogLoaded" :active="sideTab === 'worklog'" />
+    </div>
+    <!-- [kb-panel-side-v1] 知识库面板：首切才加载（v-if 闸门触发 loader），之后 v-show 保活 -->
+    <div v-show="sideTab === 'kb'" class="side-kb flex flex-col flex-1 min-h-0 overflow-y-auto">
+      <KnowledgePanel v-if="kbLoaded" />
     </div>
   </aside>
 </template>

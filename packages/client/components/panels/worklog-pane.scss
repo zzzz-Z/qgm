@@ -316,20 +316,22 @@
   color: var(--primary, #2563eb);
 }
 .wl-name {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text);
-  max-width: 60%;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .wl-dir {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 45%;
   color: var(--text-3);
   font-size: 11.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   margin-left: 4px;
+  text-align: right;
 }
 .wl-st {
   flex: 0 0 auto;
@@ -350,6 +352,27 @@
 }
 .wl-st.st-move {
   color: var(--primary, #2563eb);
+}
+
+/* [worklog-stat-v1] 每文件 +/- 与分组汇总：等宽数字防跳动，颜色同 diff 语义 */
+.wl-stat,
+.wl-group-stat {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 5px;
+  font:
+    400 11px/1 ui-monospace,
+    'SF Mono',
+    Menlo,
+    monospace;
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+}
+.wl-add {
+  color: var(--success, #3fb950);
+}
+.wl-del {
+  color: var(--danger, #f85149);
 }
 
 /* ── 展开区 diff ── */

@@ -172,6 +172,34 @@ for (const rel of SOURCES) {
   })
 }
 
+// ============ ①b 行为：内容门（非注释内容非空）============
+// [script-content-gate-v1] 2026-10-07 22:18:14 实测：AI 流式中途只吐出 #! + @desc + @why + @plan 的头部，
+//   括号闭合门对纯注释天然返回 false ⇒ 被判「完整」推送 → 前端跑一次空脚本，完整块到达后再跑一次。
+//   本段守卫「只有头部注释的残缺块不得被推送」。
+
+/** 只有头部注释的残缺块（AI 流式中途的中间态）：括号天然闭合，但无任何可执行语句 */
+const HEADER_ONLY = '#! /usr/bin/env node\n// @desc 读文件\n// @why 取证\n// @plan 逐步'
+
+for (const rel of SOURCES) {
+  test(`content-gate: ${rel} 只有头部注释的残缺块不得被推送`, () => {
+    const seen: string[] = []
+    const { doc } = makeDoc([makePre(HEADER_ONLY, 'js')], 'h'.repeat(12))
+    const pick = buildPicker(rel, seen, doc, {})
+    for (let i = 0; i < 5; i++) {
+      assert.equal(pick(), null, `第 ${i + 1} 次：只有头部注释（无可执行内容）不得被推送`)
+    }
+  })
+
+  test(`content-gate: ${rel} 正常脚本（注释 + 代码）不受内容门影响`, () => {
+    const seen: string[] = []
+    const { doc } = makeDoc([makePre(CLOSED, 'js')], 'h'.repeat(12))
+    const pick = buildPicker(rel, seen, doc, {})
+    const got = pick()
+    assert.ok(got, '含可执行语句的脚本必须放行（内容门不得误伤正常脚本）')
+    assert.equal(got.code, CLOSED)
+  })
+}
+
 // ============ ② 扫描器：两处内联副本逐字同构 + 与服务端判据语义一致 ============
 
 test('closure-gate: 两处内联 hasUnclosedStructureJs 逐字同构', () => {
@@ -260,6 +288,22 @@ test('closure-gate: 内置通道的轮次重置必须清掉门基线', () => {
     src.includes('window.__aiRunnerClosureGate = null'),
     'resetReplyDedupInPage 未清门 ⇒ 上一轮的长度基线会让新回复第一帧就被判「已静止」，未闭合块提前放行',
   )
+})
+
+test('content-gate: 两处内联 hasExecutableContent 逐字同构', () => {
+  const inner = SOURCES.map(rel => extractInner(read(rel), 'hasExecutableContent'))
+  assert.equal(inner[0], inner[1], '两个通道的内联内容门必须逐字相同（否则同一份回复走哪条通道结论不同）')
+})
+
+test('content-gate: 两处 extractLatestScript 都必须挂内容门', () => {
+  for (const rel of SOURCES) {
+    const src = read(rel)
+    assert.ok(src.includes('function hasExecutableContent('), `${rel} 缺少内容门扫描器 → 纯注释头会被当完整脚本推送（22:18:14 实测成因）`)
+    assert.ok(
+      src.includes('if (!hasExecutableContent(text)) continue'),
+      `${rel} 的取块循环里没有内容门调用点 → 扫描器写了也没用（判据必须落在调用点上）`,
+    )
+  }
 })
 
 test('closure-gate: 油猴通道 fill/rotate 开新一轮时必须清掉门基线', () => {

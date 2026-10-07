@@ -33,3 +33,24 @@ test('git.ts 与 git-archive.mjs 的存档分支名一致', () => {
   )
   assert.equal(coreBranch, scriptBranch, '两处存档分支名漂移：恢复文档（git checkout <分支> -- <path>）会指向不存在的分支')
 })
+
+// [archive-exclude-conditional-v1] 承重判据：paths 含 `.ai-runner/` 前缀项时不得叠加 `:(exclude).ai-runner`。
+// [WHY] 具体文件如 `.ai-runner/lessons.md`（.gitignore 白名单）被 exclude 后 pathspec 空集 ⇒ git 报
+//   `pathspec '.ai-runner/lessons.md' did not match any files` ⇒ 整条 archive 链路失败（用户可见 toast）。
+// [CONSTRAINT] 静态断言代码结构；变异方式=删掉 hasRunnerPath 判定 / 回退单行 add ⇒ 本用例必红。
+// [CHANGE-IMPACT] 改动 gitArchiveBranch 的 add 逻辑须同步本用例。
+test('gitArchiveBranch 必须按 paths 决定是否叠加 exclude（防 pathspec 空集）', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'packages/core/src/git.ts'), 'utf8')
+  const at = src.indexOf('async function gitArchiveBranch')
+  assert.notEqual(at, -1, '找不到 gitArchiveBranch')
+  const next = src.indexOf('export async function gitHead', at)
+  const body = src.slice(at, next === -1 ? src.length : next)
+  assert.ok(
+    body.includes('hasRunnerPath'),
+    'gitArchiveBranch 缺 hasRunnerPath 判定：paths 含 .ai-runner/ 项时 exclude 会让 pathspec 空集（用户可见 toast）',
+  )
+  assert.ok(
+    body.includes('[\'add\', \'-A\', \'--\', ...paths]') && body.includes('[\'add\', \'-A\', \'--\', ...paths, \':(exclude).ai-runner\']'),
+    'addArgs 双分支写法缺失：必须「有 .ai-runner 前缀项 → 不加 exclude；否则 → 加 exclude」',
+  )
+})

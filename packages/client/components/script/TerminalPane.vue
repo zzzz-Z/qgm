@@ -274,7 +274,8 @@ const timelineItems = computed(() => {
   return stabilizeCardRefs(out)
 })
 
-watch(() => props.aiWaiting, (v) => {
+// [deliver-window-v1] delivering 期同样算「等待」——扩展原 loading 时长，不新增文案。
+watch(() => props.aiWaiting || Boolean(props.delivering), (v) => {
   if (v) { waitElapsed.value = 0; resumeWaitTimer() }
   else { pauseWaitTimer(); waitElapsed.value = 0 }
 }, { immediate: true })
@@ -495,9 +496,9 @@ function normalizeAskOptions(raw: unknown): Array<{ id: string, label: string }>
       <!-- 等待 AI 回复指示条：收到首个回复后由 stopAiWaiting 关闭；置于消息流底部 -->
       <div v-if="props.aiWaiting || props.delivering" class="wait-banner" role="status" aria-live="polite">
         <span class="wait-spinner" aria-hidden="true" />
-        <span class="wait-text">{{ props.delivering ? '正在回传结果给 AI' : (waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中') }}</span>
+        <span class="wait-text">{{ waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中' }}</span>
         <span class="wait-dots" aria-hidden="true" />
-        <span v-if="!props.delivering && waitElapsed > 0" class="wait-elapsed" aria-hidden="true">{{ waitElapsed }}s</span>
+        <span v-if="waitElapsed > 0" class="wait-elapsed" aria-hidden="true">{{ waitElapsed }}s</span>
       </div>
     </div>
   </section>
