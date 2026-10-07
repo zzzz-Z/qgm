@@ -14,6 +14,8 @@ import RoundCard from './RoundCard.vue'
 // [timeline-denoise-v1] 长文本预览 / 原始输出尾部折叠（纯函数，见 utils/timeline-preview.ts）
 // [CONSTRAINT] 显式 import 而非依赖 auto-import：vitest 与 tsc 没有 auto-import 插件
 import { clampTextPreview, denoiseLog, tailTextPreview } from '../../utils/timeline-preview'
+// [strip-script-blocks-v1] 剥离误分类进 plain 的脚本围栏块（消除脚本正文渲染成文本卡的噪音）
+import { stripScriptBlocks } from '../../utils/strip-script-blocks'
 // [preview-ssot-v1] 预览阈值统一定义在 timeline-build（单一定义，防两处分叉）
 import { ASK_PREVIEW, DONE_PREVIEW, TAIL_KEEP_LINES, TAIL_MAX_CHARS, TEXT_PREVIEW } from '../../utils/timeline-build'
 
@@ -224,7 +226,10 @@ const timelineItems = computed(() => {
     // [CONSTRAINT] 只收 payload.text 非空的事件
     if (ev.kind === 'ai:plain' || ev.kind === 'ai:multi') {
       const tp = (ev.payload || {}) as Record<string, unknown>
-      const text = String(tp.text || '').trim()
+      const raw = String(tp.text || '').trim()
+      if (!raw) continue
+      // [strip-script-blocks-v1] 剥离误分类进 plain 的脚本围栏块；剥完为空则整卡跳过（纯脚本噪音）
+      const text = stripScriptBlocks(raw)
       if (!text) continue
       const pv = clampTextPreview(text, TEXT_PREVIEW.lines, TEXT_PREVIEW.chars)
       out.push({ type: 'text', key: `text-${ev.id}`, timeLabel: hmsLabel(ev.ts), text, ...pv })
