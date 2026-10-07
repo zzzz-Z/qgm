@@ -30,6 +30,23 @@ test.describe('strip-script-blocks 端到端', () => {
     expect(cardText).not.toContain('#!')
   })
 
+  // [no-fence-v1] 无围栏形态：默认 plain 载荷来自 headless-inject.ts:576 的 getMainText()
+  //   （DOM textContent —— 天然没有 ``` 围栏），故「脚本头行起剥到末尾」才是生产主路径。
+  test('无围栏 · 脚本头行起剥到末尾 ⇒ text 卡只留说明', async ({ page }) => {
+    await page.evaluate(() => {
+      const w = window as unknown as { __AI_EVENT_HOOKS__?: { emit: (k: string, s: string, o?: Record<string, unknown>) => void } }
+      const text = ['说明文字', '#! /usr/bin/env node', '// @desc x', 'console.log("RAW_NOISE_SHOULD_NOT_RENDER")'].join(String.fromCharCode(10))
+      w.__AI_EVENT_HOOKS__?.emit('ai:plain', 'probe-nofence', { payload: { text } })
+    })
+    await page.waitForTimeout(300)
+
+    const cardText = await page.locator('.text-card').first().textContent().catch(() => '') || ''
+    console.log('[e2e-no-fence] cardText=', JSON.stringify(cardText.slice(0, 300)))
+    expect(cardText).toContain('说明文字')
+    expect(cardText).not.toContain('RAW_NOISE_SHOULD_NOT_RENDER')
+    expect(cardText).not.toContain('#!')
+  })
+
   test('纯脚本 ai:plain 事件 ⇒ 不渲染 text 卡', async ({ page }) => {
     const before = await page.locator('.text-card').count()
     await page.evaluate(() => {
