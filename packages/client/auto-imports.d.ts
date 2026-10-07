@@ -344,6 +344,7 @@ declare global {
   const stopAndRollback: typeof import('./composables/ai/useAutoLoop').stopAndRollback
   const stopReason: typeof import('./composables/ai/auto-loop/state').stopReason
   const stopRequest: typeof import('./composables/ai/auto-loop/state').stopRequest
+  const stripScriptBlocks: typeof import('./utils/strip-script-blocks').stripScriptBlocks
   const subscribeTreeDrop: typeof import('./composables/ui/drag-bus').subscribeTreeDrop
   const syncRef: typeof import('@vueuse/core').syncRef
   const syncRefs: typeof import('@vueuse/core').syncRefs
@@ -1017,6 +1018,7 @@ declare module 'vue' {
     readonly stopAndRollback: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['stopAndRollback']>
     readonly stopReason: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['stopReason']>
     readonly stopRequest: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['stopRequest']>
+    readonly stripScriptBlocks: UnwrapRef<typeof import('./utils/strip-script-blocks')['stripScriptBlocks']>
     readonly subscribeTreeDrop: UnwrapRef<typeof import('./composables/ui/drag-bus')['subscribeTreeDrop']>
     readonly syncRef: UnwrapRef<typeof import('@vueuse/core')['syncRef']>
     readonly syncRefs: UnwrapRef<typeof import('@vueuse/core')['syncRefs']>
