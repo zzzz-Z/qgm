@@ -6,7 +6,6 @@
 import RoundDivider from './RoundDivider.vue'
 import TaskProgressPanel from './TaskProgressPanel.vue'
 // [panel-resize-scroll-v1] D4：面板尺寸变化时补偿 chat-list scrollTop，防贴底跳变
-import { computeCompensatedScrollTop } from '../../utils/panel-resize-scroll'
 // [sc-wire-v1] 脚本卡片抽为子组件
 import ScriptCard from './ScriptCard.vue'
 // [timeline-denoise-v1] 长文本卡片的展开/收起入口
@@ -14,7 +13,9 @@ import ScriptCard from './ScriptCard.vue'
 import RoundCard from './RoundCard.vue'
 // [timeline-denoise-v1] 长文本预览 / 原始输出尾部折叠（纯函数，见 utils/timeline-preview.ts）
 // [CONSTRAINT] 显式 import 而非依赖 auto-import：vitest 与 tsc 没有 auto-import 插件
-import { clampTextPreview, tailTextPreview } from '../../utils/timeline-preview'
+import { clampTextPreview, denoiseLog, tailTextPreview } from '../../utils/timeline-preview'
+// [preview-ssot-v1] 预览阈值统一定义在 timeline-build（单一定义，防两处分叉）
+import { ASK_PREVIEW, DONE_PREVIEW, TAIL_KEEP_LINES, TAIL_MAX_CHARS, TEXT_PREVIEW } from '../../utils/timeline-build'
 
 // [timeline-denoise-v1] 长文本卡片共用的「预览 + 折叠」字段
 // [WHY] text / ask / done 三类卡片都要"超长才折叠"，字段同构可复用同一套折叠逻辑与样式
@@ -120,16 +121,6 @@ const PHASE_LABEL: Record<string, string> = {
   done: '已完成',
   error: '失败',
 }
-// [timeline-denoise-v1] 长文本折叠阈值：刻意宽松 —— 常规总结 / 短回复完全不折叠，
-//   只挡真正的"文字墙"（AI 长散文、含附件全文的用户 prompt、压缩 JSON）。
-// [CONSTRAINT] 三档差异体现「用户预期」：用户自己的提问只需扫一眼开头；
-//   AI 的中间回复稍放宽；任务总结是最终交付物，给到最宽阈值，避免误折真正要读的内容。
-const TEXT_PREVIEW = { lines: 12, chars: 800 }
-const ASK_PREVIEW = { lines: 6, chars: 400 }
-const DONE_PREVIEW = { lines: 30, chars: 3000 }
-// [timeline-denoise-v1] 脚本卡原始输出的保留策略（与 useRunner 的 slice(-400) 对齐）
-const TAIL_KEEP_LINES = 5
-const TAIL_MAX_CHARS = 400
 // 总结写入后自动滚到底部，确保用户第一眼看到
 // [CONSTRAINT] 需 nextTick 等 DOM 更新完成后再滚；仅当有新内容时触发（props.doneSummary 从空→非空 或 变内容）
 // [CHANGE-IMPACT] 若父组件清空 doneSummary（新一轮开始）不滚动；避免滚动位置抖动
@@ -250,8 +241,8 @@ const timelineItems = computed(() => {
     const timeLabel = hmsLabel(ev.ts)
     // [timeline-denoise-v1] 原始输出折叠：只留尾部若干行，省略量由卡片显式标注
     // [WHY] 原实现对 payload.stdoutTail 原样展示且无省略提示，安装/构建类输出会整段刷屏
-    const outTail = tailTextPreview(String(p.stdoutTail || ''), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
-    const errTail = tailTextPreview(String(p.stderrTail || ''), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
+    const outTail = tailTextPreview(denoiseLog(String(p.stdoutTail || '')), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
+    const errTail = tailTextPreview(denoiseLog(String(p.stderrTail || '')), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
     // [round-divider-v1] loopRound 变化时插一条轮次分隔（不改变原有卡片结构，纯视觉分组）
     const loopRoundNum = Number(p.loopRound || 0)
     if (loopRoundNum > 0 && loopRoundNum !== lastRound) {
@@ -392,18 +383,8 @@ function forceScrollToBottom(): void {
   atBottom.value = true
 }
 function onPanelResize(): void {
-  const host = panelHostRef.value
-  if (!host) return
-  const nextH = host.getBoundingClientRect().height
-  const delta = nextH - _lastPanelHeight
-  _lastPanelHeight = nextH
-  if (delta === 0) return
-  const el = chatListRef.value
-  if (!el) return
-  if (!atBottom.value) return
-  const target = computeCompensatedScrollTop(el.scrollTop, delta)
-  el.scrollTop = target
-  lastScrollTop = el.scrollTop
+  // [panel-overlay-v1] 面板已改浮层（绝对定位），不再侵占 chat-list 空间 ⇒
+  //   原高度补偿逻辑失去意义，整体停用（保留 ResizeObserver 挂钩以便回退）。
 }
 /**
  * 事件时刻 → HH:MM:SS 本地时间标签
@@ -466,11 +447,45 @@ function normalizeAskOptions(raw: unknown): Array<{ id: string, label: string }>
 
         <!-- 空态：无卡片 / 无输出 / 无总结 -->
         <div v-if="!running && !liveStdout && !liveStderr && timelineItems.length === 0" class="tree-empty">
+          <!-- [ui-empty-guide-v1] 三入口引导（WO-20261007-02 阶段 C1）：
+               原为空区一行「还没有执行记录」，新用户无从知道「运行什么、去哪写、循环是什么」。 -->
           <div class="empty-title">
             还没有执行记录
           </div>
-          <div class="empty-sub">
-            点击「运行」开始自动化循环
+          <div class="empty-steps">
+            <div class="empty-step">
+              <span class="empty-step-n" aria-hidden="true">1</span>
+              <div class="empty-step-body">
+                <div class="empty-step-t">
+                  写脚本
+                </div>
+                <div class="empty-step-d">
+                  在下方编辑器粘贴或让 AI 生成 cjs / bash 脚本
+                </div>
+              </div>
+            </div>
+            <div class="empty-step">
+              <span class="empty-step-n" aria-hidden="true">2</span>
+              <div class="empty-step-body">
+                <div class="empty-step-t">
+                  点运行
+                </div>
+                <div class="empty-step-d">
+                  执行结果与文件改动会出现在这条时间线里
+                </div>
+              </div>
+            </div>
+            <div class="empty-step">
+              <span class="empty-step-n" aria-hidden="true">3</span>
+              <div class="empty-step-body">
+                <div class="empty-step-t">
+                  审变更
+                </div>
+                <div class="empty-step-d">
+                  右侧面板看 diff，可回滚；或开启自动循环让 AI 连续跑
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

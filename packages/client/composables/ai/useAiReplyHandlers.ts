@@ -42,6 +42,13 @@ export interface AiReplyHandlersDeps {
   isMockMode?: () => boolean
 }
 
+// [refresh-no-autorun-v1] 页面加载时刻 + 冷静期：工作台刷新后 replay/rescan 会重发
+//   历史脚本（带不带 rescan 标记取决于油猴版本）。冷静期内一律不自动执行（仍回填编辑器），
+//   这是不依赖油猴重装的客户端独立防线。
+//   导出供测试注入时间（vi.setSystemTime 推进窗口）。
+export const PAGE_BOOT_TS = Date.now()
+export const REFRESH_GUARD_MS = 3000
+
 /** 组装 AI 回复消息处理族（onSessionIdMessage 及 7 个 handler） */
 export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   const { sessionHistory, saveHistoryScoped, addSessionToHistory, isMockMode } = deps
@@ -188,6 +195,12 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       if (item) {
         const lineCount = code.split('\n').length
         toast(`📥 脚本 · ${lang} · ${lineCount} 行${item.desc ? ` · ${item.desc}` : ''}`, 'info', TOAST_MEDIUM_SHORT)
+        // [rescan-no-autorun-v1] rescan 重扫只回填编辑器/面板，不进执行分流：
+        //   刷新后循环恒为 stopped，若照旧走 else 会无条件 runner.run(autoFeedback:true)
+        //   → 回传 → AI 生成新脚本 → 再执行，形成自增强环（工单 WO-20261006-03 段二）。
+        if (payload.rescan === true) return
+        // [refresh-no-autorun-v1] 页面刚加载（刷新）后冷静期内到达的脚本不执行
+        if (Date.now() - PAGE_BOOT_TS < REFRESH_GUARD_MS) return
         const runKey = takePendingAskKey() || uid('run')
         if (routedToLoop) {
           void autoLoop.onScriptArrival(item, sid).catch((e: unknown) => {
@@ -249,6 +262,9 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
           log.error?.(`[ai-runner] onScriptArrival 失败：${String(e)}`)
         })
       } else {
+        // [refresh-no-autorun-v1] 旧油猴路径同样受冷静期约束（其 payload 无 rescan 字段，
+        //   故只需时间窗判断）；防刷新后旧版脚本被无条件执行。
+        if (Date.now() - PAGE_BOOT_TS < REFRESH_GUARD_MS) return
         const runKey = uid('run')
         const delayMs = 3000 + Math.random() * 4000
         await promiseTimeout(delayMs)

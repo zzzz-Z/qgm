@@ -56,7 +56,7 @@ export function evaluateUserscriptInfo(info: UserscriptInfo | null): UserscriptD
   if (!info.serveAlive) {
     return {
       action: 'warn',
-      message: `分发端点未启动（127.0.0.1:${info.servePort ?? 5178}），请先启动它再更新：node .ai-runner/tmp/serve-userscript.mjs`,
+      message: `分发端点未启动（127.0.0.1:${info.servePort ?? 5178}），请先启动它再更新：pm2 start ecosystem.config.cjs --only ai-runner-userscript`,
     }
   }
   const url = info.updateUrl || ''

@@ -148,7 +148,12 @@ test('control-log: run.ts 的三个 400 分支各自留痕，且都在对应的�
 
 test('control-log: tasks.ts 的写路径必须留痕（含 degraded 与 warnings 透出）', () => {
   const src = read('packages/core/src/routes/tasks.ts')
-  assert.match(src, /writeChannelLog\('board', buildBoardEntry\(/, '看板写请求没有留痕 ⇒ 「AI 声称已 complete」无法证实/证伪')
+  // [board-reconcile-v1] 形态变更：留痕从 buildBoardEntry 直传改为「扩展对象」
+  //   （新增 clear/clearedUnclosed/unclosedKeys 三个字段，WO-20261007-01 段一/段二）。
+  //   守注意图（留痕必须存在且在 return 前）不变，故断言改为「调用了 writeChannelLog('board',」
+  //   + buildBoardEntry 仍被使用。
+  assert.match(src, /writeChannelLog\('board',/, '看板写请求没有留痕 ⇒ 「AI 声称已 complete」无法证实/证伪')
+  assert.match(src, /buildBoardEntry\(/, 'buildBoardEntry 未被使用 ⇒ 既有字段丢失')
   assert.ok(
     src.search(/writeChannelLog\('board'/) < src.indexOf('return c.json({\n    ...out.state'),
     '留痕必须在返回之前',

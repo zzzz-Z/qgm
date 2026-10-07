@@ -2,10 +2,44 @@
 // [ask-card-v1] 原 AskDialog.vue（@ask 弹窗）已删除：提问改为对话流内的可点选卡片，
 //   见 TerminalPane 的 .question-card 与 composables/ui/useAsk.ts
 
+import { nextTick, ref, watch } from 'vue'
+
 defineOptions({ name: 'ToastHost' })
+
+let _prevFocus: HTMLElement | null = null
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+// [modal-a11y-v1] 确认弹窗焦点管理（WO-20261007-02 阶段 A-2）：
+//   @keydown.esc 挂 mask 上时焦点须在 mask 内才触发 ⇒ 弹出时把焦点移入，关闭归还。
+const maskRef = ref<HTMLElement | null>(null)
 
 const { toasts, confirmState, dismissToast, resolveConfirm } = useToast()
 
+watch(confirmState, (v) => {
+  if (v) {
+    _prevFocus = document.activeElement as HTMLElement | null
+    document.addEventListener('keydown', onTrapKeydown, true)
+    void nextTick(() => maskRef.value?.focus())
+  } else {
+    document.removeEventListener('keydown', onTrapKeydown, true)
+    try { _prevFocus?.focus() } catch { /* 已卸载 */ }
+    _prevFocus = null
+  }
+})
+
+// [modal-trap-v1] Tab 焦点陷阱：弹窗内 Tab 循环，不逃到页面其他控件（WO-20261007-02 遗留1）。
+function onTrapKeydown(e: KeyboardEvent): void {
+  if (e.key !== 'Tab') return
+  const box = maskRef.value
+  if (!box) return
+  const nodes = Array.from(box.querySelectorAll<HTMLElement>(FOCUSABLE))
+  if (!nodes.length) { e.preventDefault(); return }
+  const first = nodes[0]
+  const last = nodes[nodes.length - 1]
+  const cur = document.activeElement as HTMLElement | null
+  if (e.shiftKey && (cur === first || !box.contains(cur))) { e.preventDefault(); last.focus() }
+  else if (!e.shiftKey && cur === last) { e.preventDefault(); first.focus() }
+}
 /**
  * 点击 toast 时立即关闭
  * [WHY] 长提示（8s）用户常常看够了想立即关掉；点击关闭比等待自然超时更友好
@@ -36,10 +70,12 @@ function onToastClick(t: { id: number }) {
     <Transition name="modal">
       <div
         v-if="confirmState"
+        ref="maskRef"
         class="modal-mask"
+        tabindex="-1"
         @click.self="resolveConfirm(false)"
       >
-        <div class="modal-card">
+        <div class="modal-card" role="dialog" aria-modal="true">
           <div class="modal-body">
             <div class="modal-icon" :class="{ danger: confirmState.danger }">
               {{ confirmState.icon }}

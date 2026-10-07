@@ -106,7 +106,7 @@ export function currentSiteUrl(): string {
  * 将完整 URL 折叠为便于展示的短串
  * [WHY] 侧栏空间有限，长 URL 无法完整显示；保留 host + 路径尾段即可辨识会话
  * [CONSTRAINT] 解析失败时原样返回，避免展示空白
- * @param u 完整 URL
+ * @param url 完整 URL
  */
 function display(url: string): string {
   try {

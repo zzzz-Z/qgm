@@ -9,7 +9,7 @@ import { afterEach, describe, it, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { sendFillToAsync } from '../composables/ai/useAiWindowSend.js'
-import { removeWindowBySid, setWindowEntry } from '../composables/ai/useAiWindowTable.js'
+import { isBlankRef, removeWindowBySid, setWindowEntry } from '../composables/ai/useAiWindowTable.js'
 
 interface AckFrame { type: string, ackId?: string, ok?: boolean }
 interface FillFrame extends AckFrame { prompt?: string, context?: string, images?: string[] }
@@ -140,6 +140,61 @@ describe('sendFillToAsync（WO-20261006-01 fill-ack 闭环，宿主侧动态补�
   })
 })
 
+describe('getWindowBySid 死窗口守卫（既有行为，防退化）', () => {
+  it('sendFillTo 遇 win.closed=true → 返回 false 且从表里移除', async () => {
+    stubHostWindow()
+    const { win, sent } = makeTarget()
+    ;(win as unknown as { closed: boolean }).closed = true
+    setWindowEntry('s1', { win, url: URL_OK })
+    const { sendFillTo } = await import('../composables/ai/useAiWindowSend.js')
+    const r = sendFillTo('s1', { prompt: 'p' })
+    assert.equal(r, false, 'closed 窗口必须显式返回 false')
+    assert.equal(sent.length, 0, 'postMessage 不得被调用（否则静默成功）')
+    const { getWindowBySid } = await import('../composables/ai/useAiWindowTable.js')
+    assert.equal(getWindowBySid('s1'), null, '引用应被清理')
+  })
+
+  it('sendFillToAsync 遇 win.closed=true → failed 且不挂监听', async () => {
+    stubHostWindow()
+    const { win } = makeTarget()
+    ;(win as unknown as { closed: boolean }).closed = true
+    setWindowEntry('s1', { win, url: URL_OK })
+    const r = await sendFillToAsync('s1', { prompt: 'p' })
+    assert.equal(r, 'failed')
+    assert.equal(listeners.size, 0, 'closed 应在挂监听之前返回')
+  })
+})
+describe('isBlankRef（win-recover-blank-guard-v1 纯函数判据）', () => {
+  it('同源 about:blank → true（open("", name) 新建的空白页，非真窗口）', () => {
+    const win = { location: { href: 'about:blank' } } as unknown as Window
+    assert.equal(isBlankRef(win), true)
+  })
+
+  it('跨域读 location.href 抛错 → false（抛错即真窗口）', () => {
+    const win = { get location(): never { throw new Error('cross-origin') } } as unknown as Window
+    assert.equal(isBlankRef(win), false)
+  })
+
+  it('真实站点页 → false', () => {
+    const win = { location: { href: 'https://site.example/chat' } } as unknown as Window
+    assert.equal(isBlankRef(win), false)
+  })
+
+  it('null → false', () => {
+    assert.equal(isBlankRef(null), false)
+  })
+})
+
+describe('copyAndFill 恢复分支接线（守 about:blank 盲区不回退）', () => {
+  it('恢复分支必须用 isBlankRef 判空白页：空白页 close、真窗口才写表', () => {
+    const src = readFileSync(new URL('../composables/ai/useAiWindow.ts', import.meta.url), 'utf8')
+    assert.ok(src.includes('isBlankRef(found)'), '恢复分支必须调 isBlankRef，不得退回内联 location 判据')
+    assert.ok(
+      /if \(isBlankRef\(found\)\) \{[\s\S]*?found\.close\(\)[\s\S]*?\} else \{[\s\S]*?setWindowEntry\(sid, \{ win: found/.test(src),
+      '空白页必须 close 回收；只有真窗口才 setWindowEntry（否则空白页引用入表 → fill 静默丢弃）',
+    )
+  })
+})
 describe('waitWindowReady 接线（结构性断言，与 fill-ack 闭环配套）', () => {
   it('就绪信号必须包含 ai-runner:fill-ack（否则 ACK 通道新窗后首轮不可达就绪）', () => {
     const src = readFileSync(new URL('../composables/ai/useAiWindow.ts', import.meta.url), 'utf8')

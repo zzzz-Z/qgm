@@ -28,6 +28,8 @@ const done = ref<TaskDoneItem[]>([])
 // [task-running-v1] 当前正在执行的任务文本
 const running = ref('')
 const items = ref<TaskItemRow[]>([])
+// [ui-loading-state-v1] 首轮 poll 是否已回（C4）
+const loaded = ref(false)
 // [taskboard-stale-v1] 连续拉取失败计数：有数据后连续失败 ≥3 次即提示「可能已过期」
 // [WHY] 旧实现 if(!ok) return + catch 静默 ⇒ 服务挂掉后面板展示陈旧数据且无任何提示
 const failStreak = ref(0)
@@ -104,6 +106,8 @@ const runningText = computed(() => String(view.value.running?.text || ''))
 // [taskboard-clear-v1] 手动清空：仅当无待办且无执行中时显示（防误删进行中的清单）
 // [WHY] 循环异常终止（崩溃/硬超时/熔断）不走收尾清空路径，failed/done 残留会一直挂着——用户需要手动出口
 const canClear = computed(() => total.value > 0 && !runningRow.value && pendingRows.value.length === 0)
+// [refresh-leftover-hint-v1] 刷新遗留提示：有待办且无执行中 ⇒ 大概率是刷新前遗留（循环已 stopped）
+const hasLeftover = computed(() => pendingRows.value.length > 0 && !runningRow.value)
 // [taskboard-failed-badge-v1] 头部失败计数徽章：不展开也能一眼看到有失败项
 const failedCount = computed(() => failedRows.value.length)
 
@@ -131,6 +135,9 @@ watch(() => runningText.value, async (v) => {
     item.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }
 })
+// [taskboard-sid-change-v1] sid 变化（切换会话 / 从 fallback 切到真值）立即刷新，
+//   不必等 2s 轮询周期；也是「面板状态长时间不更新」的第一道修复
+watch(effectiveSessionId, () => { if (_visible.value) void poll() })
 
 onMounted(() => {
   if (_visible.value) void poll()
@@ -223,6 +230,7 @@ async function poll() {
       : []
     // [taskboard-stale-v1] 成功即清零：陈旧提示只在「连续失败」后出现，单次抖动不误报
     failStreak.value = 0
+    loaded.value = true
   } catch { failStreak.value++ /* [taskboard-stale-v1] 超时/网络错误计入失败连击（旧实现静默） */ }
 }
 function onVis() {
@@ -257,6 +265,14 @@ function onVis() {
         {{ clearing ? '…' : '清空' }}
       </button>
     </button>
+    <!-- [refresh-leftover-hint-v1] 遗留任务提示：不自动续跑，等用户发送提问 -->
+    <div v-if="hasLeftover" class="tp-leftover" role="status">
+      检测到 {{ pendingRows.length }} 项未完成任务 · 发送提问后循环将继续处理（或点上方「清空」放弃）
+    </div>
+    <!-- [ui-loading-state-v1] 首轮 poll 未回：骨架提示（WO-20261007-02 阶段 C4） -->
+    <div v-if="!loaded" class="tp-loading" role="status">
+      加载任务看板…
+    </div>
     <div v-if="stale" class="tp-stale" role="status">
       数据可能已过期（连续 {{ failStreak }} 次拉取失败）
     </div>
@@ -323,16 +339,23 @@ function onVis() {
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   font-size: 12px;
+  /* [taskboard-width-fit-v1] 宽度按内容自适应（最长项决定），不撑满父容器；
+     max-width 防超长项溢出屏幕，超出时文字换行（tp-text 已设 break-word） */
+  width: fit-content;
+  min-width: 200px;
+  max-width: 100%;
+  align-self: flex-start;
 }
 .task-progress.collapsed {
   max-height: none;
 }
+/* [ui-codex-align-v1] 4px 网格：gap 6→8、padding 6/10→8/12 */
 .tp-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  padding: 6px 10px;
+  padding: 8px 12px;
   border: 0;
   background: transparent;
   color: var(--text-2);
@@ -352,7 +375,7 @@ function onVis() {
   font-weight: 600;
 }
 .tp-count {
-  padding: 1px 6px;
+  padding: 2px 8px;
   font:
     600 10.5px/1.4 ui-monospace,
     monospace;
@@ -364,15 +387,15 @@ function onVis() {
   flex: 1 1 auto;
   min-height: 0;
   margin: 0;
-  padding: 2px 10px 8px;
+  padding: 4px 12px 8px;
   list-style: none;
   overflow-y: auto;
 }
 .tp-item {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
-  padding: 2px 0;
+  gap: 8px;
+  padding: 4px 0;
   color: var(--text);
   line-height: 1.45;
 }
@@ -393,14 +416,15 @@ function onVis() {
   text-decoration-thickness: 1px;
 }
 .tp-item.done .tp-icon {
-  color: #22c55e;
+  /* [ui-color-token-v1] 裸色值 → 语义变量 */
+  color: var(--success);
 }
 /* [task-running-v1] 执行中：图标旋转 + 主题色高亮 + 微脉动背景 */
 .tp-item.running {
   background: rgb(88 166 255 / 8%);
   border-radius: 4px;
-  padding: 2px 6px;
-  margin: 0 -6px;
+  padding: 4px 8px;
+  margin: 0 -8px;
 }
 .tp-item.running .tp-icon {
   color: var(--primary, #58a6ff);
@@ -418,7 +442,7 @@ function onVis() {
 }
 /* [taskboard-ui-v2] 百分比徽章：monospace 数字，弱背景 */
 .tp-pct {
-  padding: 1px 6px;
+  padding: 2px 8px;
   font:
     600 10.5px/1.4 ui-monospace,
     monospace;
@@ -434,31 +458,46 @@ function onVis() {
   background: rgb(127 127 127 / 12%);
   overflow: hidden;
 }
+/* [ui-codex-align-v1] 去渐变：进度条用单一强调色（Codex 式「蓝色只给焦点」） */
 .tp-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #58a6ff, #3fb950);
+  background: var(--primary, #58a6ff);
   transition: width 0.3s ease;
 }
 /* [taskboard-ui-v2] 三段分组标签 */
 .tp-group-label {
-  padding: 6px 0 2px;
-  font-size: 10px;
+  padding: 8px 0 4px;
+  /* [ui-type-scale-v1] 辅助下限 11px（原 10px） */
+  font-size: var(--font-11);
   font-weight: 600;
   letter-spacing: 0.6px;
   color: var(--text-3);
   text-transform: uppercase;
 }
 /* [taskboard-stale-v1] 连续拉取失败提示：黄色弱底，不与错误态混淆 */
+/* [ui-loading-state-v1] 首轮 poll 骨架提示（C4） */
+.tp-loading {
+  padding: 8px 12px;
+  font-size: var(--font-11);
+  color: var(--text-3);
+}
 .tp-stale {
-  padding: 4px 10px;
+  padding: 4px 12px;
   font-size: 11px;
-  color: #d29922;
+  color: var(--warning);
   background: rgb(210 153 34 / 10%);
+  border-bottom: 1px solid var(--border);
+}
+.tp-leftover {
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--primary, #58a6ff);
+  background: rgb(88 166 255 / 10%);
   border-bottom: 1px solid var(--border);
 }
 /* [task-board-fail-v1] 失败项：✗ + 暗红，不加删除线（与已完成区分） */
 .tp-item.failed .tp-icon {
-  color: #f85149;
+  color: var(--danger);
 }
 .tp-item.failed .tp-text {
   color: var(--text-2);
@@ -467,24 +506,25 @@ function onVis() {
 .tp-item .tp-time {
   flex-shrink: 0;
   margin-left: 6px;
-  font-size: 10.5px;
+  /* [ui-type-scale-v1] 辅助下限 11px（原 10.5px） */
+  font-size: var(--font-11);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 /* [taskboard-ui-v2] 空态占位 */
 .tp-empty {
-  padding: 10px 12px;
+  padding: 8px 12px;
   font-size: 11.5px;
   color: var(--text-3);
   text-align: center;
 }
 /* [taskboard-failed-badge-v1] 头部失败计数：暗红徽章，不展开也能看到失败 */
 .tp-failed-badge {
-  padding: 1px 6px;
+  padding: 2px 8px;
   font:
     600 10.5px/1.4 ui-monospace,
     monospace;
-  color: #f85149;
+  color: var(--danger);
   background: rgb(248 81 73 / 12%);
   border-radius: 999px;
 }
@@ -492,7 +532,8 @@ function onVis() {
 .tp-clear {
   padding: 1px 8px;
   font: inherit;
-  font-size: 10.5px;
+  /* [ui-type-scale-v1] 辅助下限 11px（原 10.5px） */
+  font-size: var(--font-11);
   color: var(--text-3);
   background: transparent;
   border: 1px solid var(--border);
@@ -512,7 +553,8 @@ function onVis() {
   flex-shrink: 0;
   padding: 0 6px;
   font: inherit;
-  font-size: 10.5px;
+  /* [ui-type-scale-v1] 辅助下限 11px（原 10.5px） */
+  font-size: var(--font-11);
   color: var(--text-2);
   background: transparent;
   border: 1px solid var(--border);

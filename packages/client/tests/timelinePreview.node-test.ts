@@ -3,7 +3,7 @@
 //   上游已按字符截断）必须有断言守护，否则改动阈值时会静默改变用户可见信息量。
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { clampTextPreview, tailTextPreview } from '../../../packages/client/utils/timeline-preview'
+import { clampTextPreview, denoiseLog, tailTextPreview } from '../../../packages/client/utils/timeline-preview'
 
 /** 生成 n 行文本，每行 `L<i>` */
 function lines(n: number): string {
@@ -118,4 +118,44 @@ test('tailTextPreview: 单行输入即使触达字符上限也不丢行（否则
   assert.equal(r.text.length, 400)
   assert.equal(r.text, raw)
   assert.equal(r.hiddenLines, 0)
+})
+
+// ============ denoiseLog ============
+test('denoiseLog: 纯空行被过滤（含连续空行）', () => {
+  assert.equal(denoiseLog('a\n\n\nb'), 'a\nb')
+  assert.equal(denoiseLog(''), '')
+  assert.equal(denoiseLog('\n\n'), '')
+})
+
+test('denoiseLog: 纯分隔线被过滤', () => {
+  assert.equal(denoiseLog('a\n---\nb'), 'a\nb')
+  assert.equal(denoiseLog('a\n===\nb'), 'a\nb')
+  assert.equal(denoiseLog('a\n###\nb'), 'a\nb')
+  assert.equal(denoiseLog('a\n***\nb'), 'a\nb')
+  assert.equal(denoiseLog('a\n___\nb'), 'a\nb')
+})
+
+test('denoiseLog: 连续重复行第 3 次起丢弃（保留前 2 次）', () => {
+  const r = denoiseLog('x\nx\nx\nx')
+  assert.equal(r, 'x\nx')
+})
+
+test('denoiseLog: 进度回退符残留（回车覆盖后的纯空白）被过滤', () => {
+  const r = denoiseLog('a\n\r   \nb')
+  assert.equal(r, 'a\nb')
+})
+
+test('denoiseLog: 保留缩进与内容行（不误删）', () => {
+  const r = denoiseLog('  indented\npercent 50%\ncmd ok')
+  assert.equal(r, '  indented\npercent 50%\ncmd ok')
+})
+
+test('denoiseLog: ANSI 转义被剥离（SGR 颜色 + 光标控制）', () => {
+  const ESC = String.fromCharCode(27)
+  const colored = `${ESC}[32mOK${ESC}[0m`
+  assert.equal(denoiseLog(colored), 'OK')
+  const multiline = `a${ESC}[31m` + `\n` + `b${ESC}[0m`
+  assert.equal(denoiseLog(multiline), 'a\nb')
+  // 非 ANSI 的普通方括号不受影响
+  assert.equal(denoiseLog('[INFO] done'), '[INFO] done')
 })

@@ -188,3 +188,15 @@ export function targetOrigin(): string {
 export function winSidOf(modelId: string): string {
   return `win_${modelId}`
 }
+// [win-recover-blank-guard-v1] 判一个窗口引用是否是「open('', name) 新建的同源空白页」。
+//   WHY: 目标窗口不存在时 window.open('', name) 会**新建** about:blank 同源空白页，
+//     该引用 closed===false 且 location 可读（同源），极易被误当「找回的 AI 窗口」——
+//     postMessage(fill, 站点 origin) 帧会落到空白页被浏览器静默丢弃 → 日志假 ok:true、
+//     UI 假「已发送」、实际收不到脚本（2026-10-07 用户实测的「发不出去」根因）。
+//   [CONSTRAINT] 跨域读 location.href 会抛 DOMException = 真窗口，返回 false；
+//     只有能读到且恰为 about:blank 才判 true。
+//   [CHANGE-IMPACT] probeWindowBySid 与 copyAndFill 恢复分支共用此判据，改这里两处同步。
+export function isBlankRef(win: Window | null): boolean {
+  if (!win) return false
+  try { return win.location.href === 'about:blank' } catch { return false }
+}

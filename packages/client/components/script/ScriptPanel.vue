@@ -101,7 +101,7 @@ const { toast, confirmDialog } = useToast()
 // U.3: CodeMirror 全家桶懒加载——首建编辑器时才 await import，CM 打进独立 chunk
 
 // 已删 persistWarning：文件内无消费点
-const { script, lastRunCode, running, result, changes, rolling, busyAll, liveStdout, liveStderr, doneSummary, run, stop, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback, changeView, cumulativeLoading, cumulativeError, visibleChanges, setChangeView } = useRunner()
+const { script, lastRunCode, running, result, changes, rolling, busyAll, liveStdout, liveStderr, doneSummary, run, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback, changeView, cumulativeLoading, cumulativeError, visibleChanges, setChangeView } = useRunner()
 /**
  * [cumulative-baseline-v1] 视图切换的写入口必须收敛到 useRunner.setChangeView
  * [WHY] 若把 v-model 直接绑到 changeView，切换只改了值、不触发累积拉取——面板会停在上一次的
@@ -112,7 +112,7 @@ const changeViewProxy = computed<'round' | 'cumulative'>({
   set: (v) => { setChangeView(v) },
 })
 // 已删除 countdown（延迟机制移除）
-const { enabled: autoTakeoverEnabled, enable: enableAutoTakeover, disable: disableAutoTakeover, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
+const { enabled: autoTakeoverEnabled, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
 // ── 领域 composable ──
 const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
 const { events: busEvents } = useEventBus()
@@ -126,10 +126,6 @@ const {
   // [pause-resume-v1] 软暂停：不打断已发出的 fill，仅拦后续脚本与结果
   softPause,
   loopPaused,
-  // [pause-resume-v1] 从暂停态恢复到 waiting（替代旧 exitPauseToIdle）
-  resumeFromPause,
-  // 无活跃循环时复位 softPause 残留
-  clearSoftPause,
 } = useAutoLoop()
 // 运行计时器：组件级 scope，卸载自动清理（等价原 onBeforeUnmount clearInterval）
 const { pause: pauseElapsed, resume: resumeElapsed } = useIntervalFn(() => {
@@ -200,7 +196,7 @@ const {
   buildPromptWithAttachments,
 })
 
-const { copyOutput } = createExecFlow({
+const { copyOutput, feedbackMerge } = createExecFlow({
   running,
   result,
   changes,
@@ -215,6 +211,8 @@ const { copyOutput } = createExecFlow({
   softPause,
   isLoopActive,
 })
+// [auto-feedback-merge-v1] 组件卸载时撤合并窗：缓冲里的未发结果随面板销毁丢弃，
+//   防止卸载后迟到出站（flush 的 isActive 守卫只挡循环接管，挡不了组件已销毁）。
 
 // 分栏比例（终端占比）
 
@@ -289,7 +287,8 @@ watch(running, (v) => {
     // [CONSTRAINT] 只在循环内生效：非循环路径没有队列概念，行为保持原样
     const midBatch = isLoopActive.value && pendingScriptCount.value > 0
     if (result.value.dryRunFailed) {
-      statusText.value = '⚠ 预检失败 · 未落盘'
+      // [ui-icon-discipline-v1] chrome 层去 emoji：语义由 statusClass 承担（'err' 已上色）
+      statusText.value = '预检失败 · 未落盘'
       statusClass.value = 'err'
       toast(
         `预检未通过：脚本本想改 ${result.value.dryRunChangeCount ?? 0} 个文件，已丢弃，磁盘零改动；错误已入 prompt`,
@@ -305,7 +304,8 @@ watch(running, (v) => {
         void copyOutput(autoFeedbackRequested.value)
       }
     } else {
-      statusText.value = result.value.ok ? '✅ 成功' : '❌ 失败'
+      // [ui-icon-discipline-v1] 同上：成功/失败由 statusClass('ok'/'err') 上色表达
+      statusText.value = result.value.ok ? '成功' : '失败'
       statusClass.value = result.value.ok ? 'ok' : 'err'
       // autoAskOnResult: 失败或只读诊断（成功无改动、非循环）时延迟 3s 自动复制并发给 AI（主动停止除外）
       const isReadonlyProbe = isReadonlyResult(result.value, isLoopActive.value)
@@ -352,6 +352,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposeSideResize()
   // elapsedTimer 已由 useIntervalFn 内部在组件卸载时自动 pause，无需手动清理
+  // [auto-feedback-merge-v1] 撤合并窗：防组件销毁后缓冲迟到出站
+  feedbackMerge.cancel()
 
   unsubscribeTreeDrop?.()
   window.removeEventListener('keydown', onGlobalKey)
@@ -389,6 +391,20 @@ function onHtmlDrop(e: DragEvent) {
   <div ref="paneRef" class="bg-\[var\(--bg\)\] flex pane h-screen overflow-hidden" :class="{ 'is-resizing-side': resizingSide }">
     <!-- 左侧常驻：多 AI 窗口列表（展示 + 激活切换） -->
     <AiWindowList />
+    <!-- [ui-responsive-v1] 窄屏抽屉触发钮：≤1100px 显示（桌面端 scss 隐藏），
+         把右侧面板从文档流列变为可滑入浮层，修复窄屏主区被挤成细条（F1）。
+         此前 sideDrawerOpen 是**死状态**（声明后零写入）。 -->
+    <button
+      type="button"
+      class="side-drawer-trigger"
+      aria-label="打开右侧面板"
+      :aria-expanded="sideDrawerOpen"
+      @click="sideDrawerOpen = !sideDrawerOpen"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" />
+      </svg>
+    </button>
     <!-- 左侧主区域 -->
     <div
       ref="mainRef" class="flex flex-col pane-main flex-1 min-w-0 overflow-hidden" :class="{ 'is-success': fileSuccess }"

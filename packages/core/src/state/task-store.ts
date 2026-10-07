@@ -444,7 +444,11 @@ export function readTaskState(sid?: string): TaskState {
     })
   }
   merged.push(...items)
-  const proj = projectItems(merged, Date.now())
+  // [task-running-timeout-v1] 读路径也做自愈投影：面板优先消费 items，
+  //   若此处不回退过期 running，超时项会永久显示「执行中」——「状态一直不变」的根因。
+  const nowTs = Date.now()
+  const healed = merged.map(it => (isExpiredRunning(it, nowTs) ? { ...it, status: 'pending' as const, startedAt: undefined } : it))
+  const proj = projectItems(healed, nowTs)
   return {
     round: raw.round,
     status: raw.status,
@@ -452,7 +456,7 @@ export function readTaskState(sid?: string): TaskState {
     done: proj.done,
     running: proj.running,
     // [task-board-items-v1] 结构化任务（面板/沙箱消费；含 failed 态与各时刻）
-    items: merged,
+    items: healed,
     // [task-running-timeout-v1] 只读投影：超时回退的 running 项（落盘自愈发生在下一次写入）
     expiredRunning: proj.expired.length ? proj.expired : undefined,
     doneAt: raw.doneAt,
@@ -638,17 +642,24 @@ export function applyTaskMutation(cur: TaskState, body: TaskMutationBody): TaskS
 // [task-store-cas-v1] 跨进程（5175/5176 双实例共享同一 getRoot）并发写的护栏：
 //   读到的 version 与期望不符即拒绝落盘，由调用方重放 —— 旧实现是纯 last-writer-wins，会丢更新
 // [task-store-atomic-write-v1] 临时文件 + rename：写中断不会留下半截 JSON（读方 catch 后当 missing）
-export function commitTaskState(next: TaskState, sid?: string, expectedVersion?: number): { ok: boolean, version: number } {
+export function commitTaskState(next: TaskState, sid?: string, expectedVersion?: number): { ok: boolean, version: number, cleared?: { count: number, keys: string[] } } {
   fs.mkdirSync(path.dirname(statePath()), { recursive: true })
   const disk = readDiskJson()
   const prevVersion = Number(disk.version) || 0
   if (typeof expectedVersion === 'number' && prevVersion !== expectedVersion) return { ok: false, version: prevVersion }
   const prevBySid = (disk.tasksBySid && typeof disk.tasksBySid === 'object' ? disk.tasksBySid : {}) as Record<string, SidBucket>
   let nextBySid = prevBySid
+  // [board-reconcile-v1] 删桶时采样「本回合未收口数」，供 route 层留痕（WO-20261007-01 段一）
+  let cleared: { count: number, keys: string[] } | undefined
   if (sid) {
     const items = next.items || []
     // [tasks-by-sid-empty-v1] 清空时删桶：否则每会话一枚 key，state.json 无界增长
     if (items.length === 0) {
+      // [board-reconcile-v1] 采样点定案：与删桶同函数同请求 ⇒ 顺序天然正确，无需时序判据。
+      //   必须读 bucketItems（落盘主存储），不得读 readTaskState —— 后者合并 PLAN.md 派生项
+      //   （plan 项不在 sid 桶里）⇒「有 pending 未收口」恒真，判据当场废。
+      const unclosed = bucketItems(prevBySid[sid]).filter(it => it.status === 'pending' || it.status === 'running')
+      cleared = { count: unclosed.length, keys: unclosed.map(it => it.desc) }
       const { [sid]: _dropped, ...rest } = prevBySid
       nextBySid = rest
     } else {
@@ -673,7 +684,7 @@ export function commitTaskState(next: TaskState, sid?: string, expectedVersion?:
   fs.writeFileSync(tmp, JSON.stringify(merged, null, 2))
   fs.renameSync(tmp, statePath())
   _stateCache = null
-  return { ok: true, version: prevVersion + 1 }
+  return { ok: true, version: prevVersion + 1, cleared }
 }
 
 /** 兼容入口：无版本前置条件的提交（旧调用方） */
@@ -686,7 +697,7 @@ export function writeTaskState(next: TaskState, sid?: string): void {
  * [WHY] 单进程内「同步读-判-写」天然原子；跨进程靠 version 前置条件 + 重放（body 语义幂等）
  * [CONSTRAINT] 最多 maxAttempts 次；耗尽返回最后一次状态并带 degraded 标记，不抛异常
  */
-export function mutateTaskState(sid: string | undefined, body: TaskMutationBody, maxAttempts = 5): MutationOutcome & { attempts: number, degraded: boolean } {
+export function mutateTaskState(sid: string | undefined, body: TaskMutationBody, maxAttempts = 5): MutationOutcome & { attempts: number, degraded: boolean, cleared?: { count: number, keys: string[] } } {
   let last: TaskState | null = null
   let warnings: string[] = []
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -694,7 +705,7 @@ export function mutateTaskState(sid: string | undefined, body: TaskMutationBody,
     const cur = readTaskState(sid)
     const next = applyTaskMutation(cur, body)
     const res = commitTaskState(next, sid, expected)
-    if (res.ok) return { state: next, warnings: next.warnings || [], attempts: attempt, degraded: false }
+    if (res.ok) return { state: next, warnings: next.warnings || [], attempts: attempt, degraded: false, cleared: res.cleared }
     last = next
     warnings = [...(next.warnings || []), 'version-conflict-retry']
   }

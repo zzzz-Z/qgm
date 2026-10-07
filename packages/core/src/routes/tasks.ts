@@ -26,6 +26,9 @@ interface Body {
   items?: TaskItem[]
   // [tasks-by-sid-v1] 会话 id；存在则写入分桶
   sid?: string
+  // [board-reconcile-v1] 清桶来源（WO-20261007-01 段二）：服务端据此刻分样本，
+  //   否则 finish 与 init 两次清桶无法区分 ⇒ 分母被稀释约一半。
+  clear?: 'finish' | 'init' | 'unknown'
 }
 
 /** tasks 路由的 Hono 实例 */
@@ -68,7 +71,13 @@ tasksHono.post('/tasks', async (c) => {
   //   （start/complete/fail）根本没发出。但「AI 声称发过」与「请求真的到了服务端」此前无法区分——
   //   本日志给出判据：keys 是它提交的目标、hit/miss 由 warnings 显式点名、四态计数是落盘后的真实状态。
   // [CONSTRAINT] 只留痕，不改返回值（返回体被 helpers.cjs 的 __AI__.tasks._post 解析，形状锁死）
-  writeChannelLog('board', buildBoardEntry(body as Record<string, unknown>, out, sid))
+  // [board-reconcile-v1] 新增字段与既有 buildBoardEntry 并列，不改其形状（被 board-hit-rate 消费）。
+  writeChannelLog('board', {
+    ...buildBoardEntry(body as Record<string, unknown>, out, sid),
+    clear: body.clear || 'unknown',
+    clearedUnclosed: out.cleared?.count ?? null,
+    unclosedKeys: (out.cleared?.keys || []).map(k => String(k).slice(0, 120)),
+  })
   return c.json({
     ...out.state,
     warnings: out.warnings,

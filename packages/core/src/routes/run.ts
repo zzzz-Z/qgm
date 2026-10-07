@@ -154,6 +154,9 @@ runHono.post('/run', async (c) => {
     }
   }
 
+  // [script-timeout-relax-v1] 沙箱脚本执行上限：全量测试/构建类需 >60s
+  const SCRIPT_TIMEOUT_MS = 180_000
+
   const enc = new TextEncoder()
   const ac = new AbortController()
   try { c.req.raw.signal.addEventListener('abort', () => ac.abort()) } catch { /* ignore */ }
@@ -193,7 +196,9 @@ runHono.post('/run', async (c) => {
           markOk(pipeline, seg)
         }
         markRunning(pipeline, 'EXECUTE')
-        const result = await runScript(scriptPath, 60000, ac.signal, overlayPath, toolLogPath, (s: string, data: string) => {
+        // [script-timeout-relax-v1] 全量测试/构建耗时 >60s（selfcheck-l2 约 80s），
+        //   原 60s 硬编码会 SIGTERM 腰斩长任务 → 假「超时失败」。放宽到 180s 留余量。
+        const result = await runScript(scriptPath, SCRIPT_TIMEOUT_MS, ac.signal, overlayPath, toolLogPath, (s: string, data: string) => {
           writeFrame({ type: 'chunk', stream: s, data })
         }, sandbox, sessionId)
         const scriptOk = result.code === 0

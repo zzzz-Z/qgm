@@ -24,7 +24,6 @@ const WorkspaceGuide = defineAsyncComponent(() => import('./components/panels/Wo
 /** mock 通道（?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
 const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
 /** localStorage 键：上次访问时间 */
-const LS_LAST_VISIT = '__ai_last_visit'
 
 // [use-storage-v1] activeSessionId / sandboxMode / theme 均为 useAppStorage 的 useStorage 单例（跨标签页同步）
 // [use-storage-v1] transportKind 已迁移到 useAiTransport 的 useStorage 单例
@@ -51,10 +50,7 @@ const { url: siteUrl, setUrl: setSiteUrl, modelId } = useAiSite()
 const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
 
 const { toast } = useToast()
-const { run: runScript, running } = useRunner()
 /** 脚本收件箱：来自 AI 的脚本队列 */
-const scriptInbox = useScriptInbox()
-const { stopWaiting: stopAiWaiting } = useAiWaiting()
 
 // [use-ai-reply-handlers-v1] 消息处理簇已抽到 composable；本组件仅接线
 // [CONSTRAINT] 必须在 useEventListener(window, "message", ...) 之前；否则回调引用为 undefined
@@ -70,7 +66,7 @@ const {
   probeWorkspace,
   maybeScheduleReopen,
   subscribeHeadlessReply,
-  replayRecentMessages,
+  reconnectAfterRefresh,
   syncActiveSessionFromSite,
   migrateLastVisit,
 } = useAppStartup({ hasWorkspace, sessionHistory, onSessionIdMessage })
@@ -135,7 +131,7 @@ onMounted(async () => {
   // [fallback-sid-v1] 用 effectiveSessionId：无真实 AI 会话时退化为每 tab fallback，
   //   保证循环 sessionId 绑定非空 → tasks 写入正确桶 + finish 时能清空
   setActiveSessionIdGetter(() => effectiveSessionId.value)
-  await replayRecentMessages()
+  await reconnectAfterRefresh()
 })
 
 // [use-app-startup-wired-v1] 首帧同步 activeSessionId 与上次访问时间迁移均下沉到 useAppStartup

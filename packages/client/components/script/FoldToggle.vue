@@ -55,7 +55,8 @@ const emit = defineEmits<{ toggle: [] }>()
   outline-offset: 2px;
 }
 .fold-toggle-caret {
-  font-size: 9px;
+  /* [ui-type-scale-v1] 9px 低于下限，上调 11px */
+  font-size: var(--font-11);
   line-height: 1;
   transition: transform 0.15s ease;
 }

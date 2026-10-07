@@ -181,7 +181,8 @@ function dismiss(sid: string, label: string): void {
     600 10.5px/1.4 ui-monospace,
     monospace;
   color: var(--primary);
-  background: rgba(88, 166, 255, 0.12);
+  /* [ui-color-token-v1] 硬编码 primary → 语义变量 */
+  background: var(--primary-bg);
   border-radius: 999px;
 }
 
@@ -222,7 +223,8 @@ function dismiss(sid: string, label: string): void {
   position: relative;
 }
 .awl-item.active {
-  background: rgba(88, 166, 255, 0.12);
+  /* [ui-color-token-v1] 硬编码 primary → 语义变量 */
+  background: var(--primary-bg);
 }
 .awl-item.active::before {
   content: '';
@@ -247,7 +249,7 @@ function dismiss(sid: string, label: string): void {
 }
 .awl-item.active .awl-dot {
   background: var(--primary, #58a6ff);
-  box-shadow: 0 0 6px rgba(88, 166, 255, 0.6);
+  box-shadow: 0 0 6px var(--primary);
 }
 
 .awl-meta {
@@ -266,7 +268,8 @@ function dismiss(sid: string, label: string): void {
   text-overflow: ellipsis;
 }
 .awl-sub {
-  font-size: 10.5px;
+  /* [ui-type-scale-v1] 辅助下限 11px */
+  font-size: var(--font-11);
   color: var(--text-3);
   white-space: nowrap;
   overflow: hidden;

@@ -58,11 +58,17 @@ function toggle(): void { expanded.value = !expanded.value }
 
 <template>
   <div class="script-card" :class="card.phaseClass">
+    <!-- [ui-kbd-a11y-v1] 可点击头补键盘可达（WO-20261007-02 阶段 C5）：
+         role/tabindex 仅在 hasBody 时生效；Enter/Space 等价于点击。 -->
     <div
       class="script-card-head"
       :class="{ 'is-clickable': hasBody }"
+      :role="hasBody ? 'button' : undefined"
+      :tabindex="hasBody ? 0 : undefined"
       :aria-expanded="hasBody ? expanded : undefined"
       @click="hasBody ? toggle() : null"
+      @keydown.enter.prevent="hasBody ? toggle() : null"
+      @keydown.space.prevent="hasBody ? toggle() : null"
     >
       <!-- [sc-phase-style-v1] 阶段图标（4 态）；phase 类下沉到 span 以便色选择器命中 -->
       <span class="script-card-phase" :class="card.phaseClass" aria-hidden="true">
@@ -124,15 +130,15 @@ function toggle(): void { expanded.value = !expanded.value }
 .script-card:hover {
   background: rgba(127, 127, 127, 0.03);
 }
+/* [ui-codex-align-v1] 4px 网格：gap 6→8、margin 2→4；层级靠灰度不靠色块 */
 .script-card-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 2px;
-  font-size: 10.5px;
-  line-height: 1.2;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: var(--font-11);
+  line-height: 16px;
   color: var(--text-3, #8b949e);
-  letter-spacing: 0.2px;
 }
 .script-card-head.is-clickable {
   cursor: pointer;
@@ -147,7 +153,8 @@ function toggle(): void { expanded.value = !expanded.value }
 .script-card-head.is-clickable::after {
   content: '▸';
   margin-left: 4px;
-  font-size: 9px;
+  /* [ui-type-scale-v1] 9px 低于下限，上调 11px */
+  font-size: var(--font-11);
   color: var(--text-3, #8b949e);
   opacity: 0.6;
   transition: transform 0.15s ease;
@@ -161,7 +168,7 @@ function toggle(): void { expanded.value = !expanded.value }
   font-size: 11px;
   font-weight: 400;
   color: var(--text-3, #8b949e);
-  opacity: 0.62;
+  opacity: 0.55;
   font-variant-numeric: tabular-nums;
 }
 .script-card-desc {
@@ -176,14 +183,22 @@ function toggle(): void { expanded.value = !expanded.value }
   text-overflow: ellipsis;
 }
 /* [timeline-denoise-v1] 结果摘要徽标：desc 弹性占满后自然靠右，与时间标签成组 */
+/* [ui-codex-align-v1] 徽章降噪：色块→色点+文字；状态语义只由 6px 圆点承载 */
 .script-card-stat {
   flex: 0 0 auto;
-  padding: 0 6px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  font: 400 10px/16px var(--mono, ui-monospace, monospace);
-  letter-spacing: 0.2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 400 11px/16px var(--mono, ui-monospace, monospace);
   white-space: nowrap;
+}
+.script-card-stat::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentcolor;
+  flex: 0 0 auto;
 }
 .script-card-stat.stat-changed {
   color: var(--primary, #58a6ff);
@@ -205,11 +220,11 @@ function toggle(): void { expanded.value = !expanded.value }
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 4px 0 8px;
-  margin-bottom: 4px;
+  padding: 8px 0;
+  margin-bottom: 8px;
   border-bottom: 1px dashed var(--border, #30363d);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 20px;
   color: var(--text-3, #8b949e);
 }
 .why-label {
@@ -217,7 +232,8 @@ function toggle(): void { expanded.value = !expanded.value }
   border-radius: 3px;
   background: var(--surface-3, #161b22);
   font-family: var(--mono, ui-monospace, monospace);
-  font-size: 10px;
+  /* [ui-type-scale-v1] 代码下限 12px（原 10px） */
+  font-size: var(--font-12);
   font-weight: 400;
   letter-spacing: 0.5px;
   color: var(--text-3, #8b949e);

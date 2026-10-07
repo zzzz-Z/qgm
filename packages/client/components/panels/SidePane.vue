@@ -133,8 +133,13 @@ function selectTab(tab: (typeof sideTab)['value']): void {
         <span v-if="changeView === 'cumulative' && props.cumulativeLoading" class="seg-hint">加载中…</span>
       </div>
       <div v-if="!props.changes.length" class="side-empty text-[var(--text-3)] p-8 border border-[var(--border-2)] rounded-8 border-dashed bg-[var(--surface)] flex flex-col flex-1 gap-4 items-center justify-center">
-        <div class="side-empty-icon text-8">
-          📋
+        <!-- [ui-icon-discipline-v1] chrome 层去 emoji：单色 SVG（currentColor 继承父色） -->
+        <div class="side-empty-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="8" y="2" width="8" height="4" rx="1" />
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+            <path d="M9 12h6M9 16h4" />
+          </svg>
         </div>
         <div class="side-empty-text text-sm">
           {{ changeView === 'cumulative' ? (props.cumulativeError || '累积视图暂无变更（基准就绪后显示跨轮改动）') : '运行后显示变更' }}

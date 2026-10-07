@@ -32,7 +32,7 @@ export interface RunResult {
  */
 export async function runScript(
   scriptPath: string,
-  timeoutMs = 60_000,
+  timeoutMs = 180_000,
   signal?: AbortSignal,
   overlayPath?: string,
   toolLogPath?: string,

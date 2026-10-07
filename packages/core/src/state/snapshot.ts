@@ -22,7 +22,7 @@ export interface SnapshotData {
 // [send-trace-v1] `send` = **出站 fill** 的留痕（页面通道每次投递一条，见 routes/send-log.ts 的 WHY）：
 //   runner/reject 都是「脚本已到服务端」之后的事，而「应用往 AI 页面发了多少条提问」在服务端此前
 //   完全不可见 —— 频控阈值、同轮双发、多块放大都没法验收，只能靠 run 数间接推算。
-export type LogChannel = 'runner' | 'pipeline' | 'decisions' | 'reject' | 'board' | 'send'
+export type LogChannel = 'runner' | 'pipeline' | 'decisions' | 'reject' | 'board' | 'send' | 'wiki'
 // AIRUNNER-BATCH4-3A-INLINE-CONST
 // 从 src/config.ts 内联常量；strip-types 无法解析 .js 后缀 import（T6）。
 // 可变路径用 getter（config.setRoot 会写 AI_RUNNER_ROOT 到 env；避免 ESM 常量快照）。

@@ -167,6 +167,27 @@ for (const rel of SOURCES) {
   })
 }
 
+// ============ [fragment-guard-v1] 混合回复片段不推（WO-20261007-03 段一） ============
+
+for (const rel of SOURCES) {
+  test(`fragment-guard: ${rel} 有标记块时，无标记片段不推（用例 A）`, () => {
+    const seen: string[] = []
+    // 1 个标记块 + 2 个无标记片段（顺序：片段-标记-片段）
+    const pick = buildPicker(rel, seen, makeDoc([makePre(PLAIN_JS, 'js'), makePre(B1, 'js'), makePre('const c = 3', 'js')]))
+    const first = pick()
+    assert.equal(first && first.code, B1, '标记块应被选中')
+    seen.push((first as Item).hash)
+    assert.equal(pick(), null, '本回复已有标记块 ⇒ 无标记片段不得再推（旧兜底会推 → 400 MISSING_DESC）')
+  })
+
+  test(`fragment-guard: ${rel} 整条回复无标记块时仍兜底（用例 B）`, () => {
+    const seen: string[] = []
+    const pick = buildPicker(rel, seen, makeDoc([makePre(PLAIN_JS, 'js')]))
+    const got = pick()
+    assert.equal(got && got.code, PLAIN_JS, '无任何标记块 ⇒ 保持兜底（AI 漏写头的自纠回路，不得禁掉）')
+  })
+}
+
 // ============ 结构断言：不得退回「只取最后一块」 ============
 
 test('multi-script: 两处实现都不得保留 lastMarked || last 的旧语义', () => {
@@ -176,9 +197,19 @@ test('multi-script: 两处实现都不得保留 lastMarked || last 的旧语义'
       !src.includes('return lastMarked || last'),
       `${rel} 仍是「取最后一块」→ 一条回复里的前序脚本会被静默丢弃（本次修复的核心回归点）`,
     )
+    // [fragment-guard-v1] 语义已收紧：存在任意标记块时，无标记块视为片段不推（WO-20261007-03 段一）。
+    // 守意图：不得退回「无条件兜底 firstUnseen」——那会把说明性片段当脚本推。
     assert.ok(
-      src.includes('return firstUnseenMarked || firstUnseen'),
-      `${rel} 的取块语义应为「首个未见的标记块，兜底首个未见块」`,
+      src.includes('if (firstUnseenMarked) return firstUnseenMarked'),
+      `${rel} 缺少「标记块优先返回」分支`,
+    )
+    assert.ok(
+      src.includes('if (hasAnyMarked) return null'),
+      `${rel} 缺少「本回复已有标记块则不兜底片段」判据 → 说明性片段会被当脚本推（回归）`,
+    )
+    assert.ok(
+      src.includes('return firstUnseen'),
+      `${rel} 缺少「整条回复无标记块时保留兜底」分支（AI 漏写头的自纠回路）`,
     )
     assert.ok(
       src.includes('if (!firstUnseen) firstUnseen = item'),

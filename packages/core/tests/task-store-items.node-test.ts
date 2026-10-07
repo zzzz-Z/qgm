@@ -339,3 +339,49 @@ test('GC: 无 updatedAt（老桶）→ 保留，防误删', () => {
   assert.deepEqual(dropped, [])
   assert.deepEqual(Object.keys(kept), ['legacy-sid'])
 })
+
+// [taskboard-stale-running-heal-v1] 「状态一直不变」根因守卫：
+//   面板 view 优先消费 items；若 readTaskState 返回未愈合的 items，
+//   超过 RUNNING_TIMEOUT_MS 的 running 项会永久显示「执行中」。
+//   承重：把 healed 改回 merged ⇒ 本条变红。
+test('读路径愈合：过期 running 在 items 里回退为 pending', () => {
+  const stale = Date.now() - RUNNING_TIMEOUT_MS - 60_000
+  withTempRoot({
+    round: 1,
+    status: 'running',
+    version: 1,
+    tasksBySid: {
+      s1: {
+        items: [
+          { id: taskId('久挂任务'), desc: '久挂任务', status: 'running', createdAt: 1, startedAt: stale },
+        ],
+        updatedAt: Date.now(),
+      },
+    },
+  })
+  const st = readTaskState('s1')
+  const it = (st.items || []).find(x => x.desc === '久挂任务')
+  assert.ok(it, '找不到该 item')
+  assert.equal(it!.status, 'pending', '过期 running 未在 items 里愈合为 pending（面板会永显执行中）')
+  assert.equal(it!.startedAt, undefined, '愈合后应清 startedAt')
+})
+
+test('读路径愈合：未过期的 running 保持不变', () => {
+  const fresh = Date.now() - 1000
+  withTempRoot({
+    round: 1,
+    status: 'running',
+    version: 1,
+    tasksBySid: {
+      s1: {
+        items: [
+          { id: taskId('进行中'), desc: '进行中', status: 'running', createdAt: 1, startedAt: fresh },
+        ],
+        updatedAt: Date.now(),
+      },
+    },
+  })
+  const st = readTaskState('s1')
+  const it = (st.items || []).find(x => x.desc === '进行中')
+  assert.equal(it!.status, 'running', '未过期的 running 不应被回退')
+})

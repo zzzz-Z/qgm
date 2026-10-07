@@ -49,6 +49,10 @@ const running = ref(false)
 const result = useSessionStorage<RunResponse | null>(STORAGE_KEY_RESULT, null)
 // [selfcheck-observed-cmds-v1] 本轮循环所有 runId 累积（供 DONE 时自检读 toolLog 对账）
 export const runIds = ref<string[]>([])
+// [stdout-lag-attrib-v1] 跨轮滞后归因（WO-20261007-03 段五）：每次发送时刻按序累积。
+// [WHY] summary 帧带 runId（前缀 = 服务端执行开始时刻，见 run.ts 生成式 <ts>-<rand>）。
+// [CONSTRAINT] 依赖宿主与 5175 同机（Date.now 同源）；跨机部署改用 runId 到达序配对（退化路径）。
+export const sendTimestamps = ref<number[]>([])
 /**
  * 按 path 去重：同一文件只保留一条（后到的覆盖先到的）
  * [WHY] 变更列表按 path 唯一才与「撤回单文件」一一对应；三处调用点（初值 / summary 帧 / 累积）
@@ -231,9 +235,7 @@ function guessDesc(code: string): string {
  * [WHY] opts.script 允许临时脚本（AI 回填），否则跑编辑器内容；runKey 便于把同一轮事件聚到一张卡上
  * [CONSTRAINT] 空脚本或已有运行中直接返回；每轮清空 result/changes/liveStdout/liveStderr/doneSummary
  * [CHANGE-IMPACT] 会写 lastRunCode / running / result / changes，UI 状态依赖此路径；异常走 catch 置 error 帧
- * @param opts.script 覆盖编辑器内容的一次性脚本；缺省读 script.value
- * @param opts.runKey 事件聚合 key；缺省自动生成 `run-<ts>-<rand>`
- * @param opts.autoFeedback 置位后本轮结束自动回传结果（一次性）
+ * @param opts 选项对象；script 覆盖编辑器内容、runKey 聚合事件、autoFeedback 置位后本轮结束自动回传
  */
 async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boolean }): Promise<RunResponse | 'skipped' | null> {
   const code = (opts?.script ?? script.value).trim()
@@ -291,6 +293,12 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
 
   try {
     abortController = new AbortController()
+    // [stdout-lag-attrib-v1] 记录发送时刻（WO-20261007-03 段五补遗）：summary 帧带 runId，
+    //   其前缀即服务端执行开始时刻，零协议改动即可跨轮归因（原「需 NDJSON seq」判断已作废）。
+    //   下方 _elapsed < 1 的「异常早到」启发式保留（抓时钟回拨/乱序，属另一类异常）。
+    //   [CONSTRAINT] 依赖宿主与 5175 同机（Date.now 同源）；跨机部署改用 runId 到达序配对。
+    const _sendTs = Date.now()
+    sendTimestamps.value = [...sendTimestamps.value, _sendTs]
     const res = await fetch('/__ai/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -365,6 +373,18 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
     })()
     if (summary) {
       if (isStale()) return null
+      // [stdout-lag-attrib-v1] 回执异常早到告警（段五）：正常需一次网络往返，< 1ms 视为异常。
+      const _elapsed = Date.now() - _sendTs
+      if (_elapsed < 1) console.warn('[run] 回执早于/等于发送时刻（疑似时钟回拨或乱序信号）', { elapsed: _elapsed, runId: summary.runId })
+      // [stdout-lag-attrib-v1] 跨轮滞后归因：execStart（runId 前缀）落在更早的发送轮 ⇒ 本回执是上一轮的。
+      const _execStart = Number(String(summary.runId || '').split('-')[0]) || 0
+      const _sends = sendTimestamps.value
+      if (_execStart > 0 && _sends.length > 0) {
+        let _k = -1
+        for (let i = _sends.length - 1; i >= 0; i--) { if (_sends[i] <= _execStart) { _k = i; break } }
+        const _n = _sends.length - 1
+        if (_k >= 0 && _k < _n) console.warn(`[run] 回执滞后归因：本回执属第 ${_k} 轮脚本，当前已是第 ${_n} 轮`, { k: _k, n: _n, execStart: _execStart, sendTs: _sends[_n], runId: summary.runId })
+      }
       const s = summary
       const data: RunResponse = {
         runId: String(s.runId || ''),

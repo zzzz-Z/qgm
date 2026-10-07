@@ -72,7 +72,7 @@ export function getSearchFiles(): SearchFile[] {
  * [WHY] 内容缓存按 mtime 失效，文件被外部改动后能自动重读，无需显式失效接口
  * [CONSTRAINT] 缓存容量 SEARCH_CONTENT_CACHE_MAX，超限时按插入顺序淘汰最早项（非 LRU）
  * [CHANGE-IMPACT] 读取失败返回 null；调用方需区分"内容为空字符串"与"读取失败"
- * @param f 由 getSearchFiles 产出的元信息（含 abs 与 mtimeMs）
+ * @param file 由 getSearchFiles 产出的元信息（含 abs 与 mtimeMs）
  */
 export function readSearchContentCached(file: SearchFile): string | null {
   const hit = searchContentCache.get(file.abs)

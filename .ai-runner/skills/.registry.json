@@ -67,6 +67,11 @@
       "url": "https://github.com/obra/superpowers/blob/HEAD/skills/systematic-debugging/SKILL.md"
     },
     {
+      "name": "task-board-reconcile",
+      "source": "(unknown)",
+      "url": "(unknown)"
+    },
+    {
       "name": "tdd-red-green-refactor",
       "source": "addyosmani/agent-skills",
       "url": "https://github.com/addyosmani/agent-skills/blob/HEAD/skills/test-driven-development/SKILL.md"

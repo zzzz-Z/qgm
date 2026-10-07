@@ -80,6 +80,8 @@ export function recordSample(store: PerfStore, segment: string, durationMs: numb
  * 判断本次耗时是否相对基线显著变慢
  * [CONSTRAINT] 基线采样 < 3 时不判定（样本不足）；基线中位数为 0 时 ratio 置 0 而非除零
  * [CHANGE-IMPACT] slowFactor 决定敏感度，误调会引发大量误报
+ * @param store 性能存储（baselines / slowFactor）
+ * @param segment 阶段名
  * @param durationMs 待判定的耗时
  */
 export function checkSlow(store: PerfStore, segment: string, durationMs: number): SlowCheck {

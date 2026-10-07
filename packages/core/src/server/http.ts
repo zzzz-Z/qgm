@@ -21,7 +21,8 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
  * [CONSTRAINT] Content-Type 固定 application/json + charset=utf-8；响应体走 JSON.stringify，
  * 循环引用会抛错（调用方需自行保证 data 可序列化）
  * [CHANGE-IMPACT] guardRequest 的 403/415 拒绝路径依赖本函数，改 header 会破坏 CSRF 防护约定
- * @param data 任意可 JSON 序列化的值
+ * @param res HTTP 响应对象
+ * @param body 任意可 JSON 序列化的值
  * @param code HTTP 状态码，默认 200
  */
 export function sendJSON(res: ServerResponse, body: unknown, code = 200) {

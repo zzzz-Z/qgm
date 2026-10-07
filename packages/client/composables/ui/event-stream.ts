@@ -57,6 +57,7 @@ const pendingAskKey = ref('')
  * [CHANGE-IMPACT] updateKey 匹配不区分 kind（跨类型覆盖），是 run.ts / useRunner 的关键协作约定
  * @param kind 事件类型
  * @param summary 展示文案；updateKey 命中时覆盖旧 summary
+ * @param opts 附加选项（round / payload / updateKey）
  * @param opts.round 轮次编号（可选）；仅首次入队时写入
  * @param opts.payload 事件体（可选）；updateKey 命中时浅合并到旧 payload
  * @param opts.updateKey 稳定标识；相同 key 原地替换而非新增

@@ -10,7 +10,7 @@ const SRC = path.join(PKG_ROOT, 'src')
 const DIST = path.join(PKG_ROOT, 'dist')
 fs.mkdirSync(DIST, { recursive: true })
 
-const files = ['interceptor.cjs', 'helpers.cjs', 'logger.cjs']
+const files = ['interceptor.cjs', 'helpers.cjs', 'helpers-io.cjs', 'logger.cjs', 'repl-loop.cjs']
 let n = 0
 for (const f of files) {
   const s = path.join(SRC, f)

@@ -67,6 +67,18 @@ export function createStartFamily(deps: StartFamilyDeps) {
     inst.id.value = `${prefix}_${Date.now().toString(36)}`
     // [session-isolation-v1] 绑定当前活动会话 id；空串=未绑定（旧油猴不带 sessionId，getLoopBySessionId 会放行）
     inst.sessionId.value = getActiveSessionId()
+    // [tasks-reset-on-init-v1] 新循环启动即清同 sid 桶（WO-20261006-03 段一）：
+    //   finish 清桶覆盖不到刷新/崩溃/sid 空串，桶按 tab-sid 复用会把上一循环残留原样继承。
+    //   时序：必须在 sendFill 之前（mode:'set' 是覆盖语义，延迟会清掉 AI 刚 push 的任务）；
+    //   sid 空串跳过——与 finish 的 [taskboard-sid-guard-v1] 同语义，宁残留不误清。
+    const initSid = inst.sessionId.value
+    if (initSid) {
+      void fetch('/__ai/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'set', sid: initSid, todo: [], done: [], clear: 'init' }),
+      }).catch(() => { /* swallow: 清桶失败不阻断启动 */ })
+    }
     inst.goal.value = goal
     inst.round.value = 1
     inst.startCommit.value = head

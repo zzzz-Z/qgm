@@ -48,7 +48,9 @@ export const PHASE_LABEL: Record<string, string> = {
 }
 export const TEXT_PREVIEW = { lines: 12, chars: 800 }
 export const ASK_PREVIEW = { lines: 6, chars: 400 }
-export const DONE_PREVIEW = { lines: 30, chars: 3000 }
+// [done-preview-widen-v1] DONE 总结是最终交付物：实测 60-100 行（变更表 + 验证 + 踩坑 + 遗留），
+//   原 30 行阈值导致「总结面板显示不全」——用户看不到后半段。提到 80 行 + 8000 字符。
+export const DONE_PREVIEW = { lines: 80, chars: 8000 }
 export const TAIL_KEEP_LINES = 5
 export const TAIL_MAX_CHARS = 400
 export const PHASE_DONE_CLASS = 'phase-done'

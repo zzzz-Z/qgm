@@ -40,9 +40,9 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.ai-runner', 'covera
  *   且下一条断言要求「清单里的每条都必须确实越线」，混着放会直接红。
  *   仅剩 helpers.cjs（850 > 800）仍越线，ratchet 机制因此保持非真空。
  */
-const FROZEN: Record<string, number> = {
-  'packages/core/src/helpers.cjs': 850,
-}
+// [cohesion-over-budget-v1] helpers.cjs 已于 2026-10-07 拆分（helpers-io.cjs），实测 796 < 800。
+//   清单空置后，ratchet 非真空性由「新文件不得越线」断言继续保证（见下方）。
+const FROZEN: Record<string, number> = {}
 
 const EXEMPT = new Set(['packages/client/auto-imports.d.ts'])
 

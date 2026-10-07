@@ -29,6 +29,65 @@
     height: 100%;
     overflow: hidden;
     padding: 0;
+    /* [ui-responsive-v1] 抽屉定位锚点 */
+    position: relative;
+  }
+
+  /* [ui-responsive-v1] AI 站点列表收为图标条（250px → 48px），文字隐藏 */
+  .pane :deep(.ai-window-list) {
+    flex: 0 0 48px;
+    min-width: 48px;
+    max-width: 48px;
+  }
+  .pane :deep(.ai-window-list .awl-title),
+  .pane :deep(.ai-window-list .awl-count),
+  .pane :deep(.ai-window-list .awl-item-name) {
+    display: none;
+  }
+
+  /* [ui-responsive-v1] 右侧面板改浮层抽屉：默认滑出屏幕，sideDrawerOpen=true 时滑入。
+   * [WHY] 原为文档流内 320px 列，窄屏下把主区挤成细条（F1）。
+   * [CONSTRAINT] 滑入态由 SidePane 的 `translate-x-0!`（带 !important）覆盖下方默认位移。 */
+  .pane :deep(.pane-side) {
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100vh;
+    z-index: 40;
+    transform: translateX(100%);
+    transition: transform 0.2s ease;
+  }
+  .side-resize-handle {
+    display: none;
+  }
+}
+
+/* [ui-responsive-v1] 窄屏抽屉触发钮：桌面端隐藏，≤1100px 显示 */
+.side-drawer-trigger {
+  display: none;
+}
+@media (max-width: 1100px) {
+  .side-drawer-trigger {
+    display: inline-flex;
+    position: fixed;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 35;
+    width: 36px;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 20%);
+  }
+  .side-drawer-trigger:hover {
+    color: var(--text);
+    background: var(--surface-2);
   }
 }
 

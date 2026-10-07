@@ -74,8 +74,10 @@ function evict() {
  * [WHY] 传 key 时复用同一 toast 并续期，避免流式高频提示刷屏
  * [CONSTRAINT] key 复用仅更新前 3 字段（msg/type/icon），id 与占位顺序不变
  * [CHANGE-IMPACT] 修改自动关闭逻辑须同步改动 armTimer 内联路径与 dismissToast 手动路径
+ * @param msg 提示正文
+ * @param type 提示类型
  * @param duration 毫秒；传 0 或负数将被 setTimeout 立即调度
- * @param opts.key 稳定标识，相同 key 视为同一条
+ * @param opts 选项对象；key 相同时视为同一条
  */
 export function toast(msg: string, type: ToastType = 'info', duration = 3200, opts: { key?: string } = {}) {
   const key = opts.key
@@ -115,7 +117,8 @@ export function dismissToast(id: number) {
  * 打开确认弹窗并返回用户选择
  * [CONSTRAINT] 单例：已有弹窗时会先以 false 主动 resolve 旧 Promise，避免调用方 await 挂死
  * [CHANGE-IMPACT] resolve 引用被存进 confirmState，必须由 resolveConfirm 消费后再置 null
- * @param opts.type 'danger' 时渲染警告图标与红色按钮
+ * @param msg 弹窗正文
+ * @param opts 选项对象（opts.type 等）
  */
 export function confirmDialog(msg: string, opts: ConfirmOptions = {}): Promise<boolean> {
   return new Promise((resolve) => {

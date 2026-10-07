@@ -71,7 +71,6 @@ const {
   extractCommitLine,
   extractCommitMessage,
   generateCommitMsg,
-  generateLocalCommitMsg,
   cleanup: cleanupWorklogCommit,
 } = useWorklogCommit({
   result,

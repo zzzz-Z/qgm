@@ -130,11 +130,11 @@
     },
     {
       "file": "packages/client/composables/ui/useAppStartup.ts",
-      "contains": "ai-runner:request-replay"
+      "contains": "reconnectAfterRefresh"
     },
     {
       "file": "packages/client/composables/ui/useAppStartup.ts",
-      "contains": "ai-runner:request-rescan"
+      "contains": "clearInbox()"
     },
     {
       "file": "packages/core/src/helpers.cjs",

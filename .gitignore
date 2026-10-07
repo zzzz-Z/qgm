@@ -49,3 +49,7 @@ coverage/
 
 # 生成物报告（verify-contracts 每次运行重写）：不入版本库、也不纳入文档索引义务
 docs/plan/
+
+# [workbuddy-ignore-v1] .workbuddy/ 是宿主侧运行态（memory 台账），不由应用端管理；
+#   .gitignore = eslint ignores，缺此条会把 .workbuddy/memory/*.md 拉进 pnpm lint。
+.workbuddy/

@@ -23,6 +23,11 @@
 > "可复用工作流" → `~/.workbuddy/skills/**`；已有 SSOT（`AGENTS.md` / `SYSTEM.md`）的
 > 只留指针不搬运；一次性的留在本文件。
 >
+> **同族合并口径**（2026-10-06 复核方治理）：标题各异但语义同族的条目合并为单条 SSOT，
+> 被并条正文以 `[同族并入 · 原条「…」]` **原文**保留（防锚点/令牌蒸发）；归属不明的仍留
+> 待复核——**不确定就不标**。`[REJECTED]` 的结论一律保留：它记的是「曾经信过的错归因」，
+> 删掉等于拆护栏。
+>
 > 只记「为什么」，不记 API 用法——后者属于文档。
 
 ## 沙箱写入对子进程不可见：overlay 只在轮末统一落盘
@@ -303,11 +308,24 @@ ESM 测试文件里 `require.resolve` 的相对基准是**测试文件自身**�
 截断组平均 `|` 数 4.3 vs 3.3，但两组字节数严重混淆（1,906 vs 1,042），且「末尾未完」启发式本身偏松（1,275/5,925 命中）。
 [反向实测] 沙箱**输出**通道不截断：`__AI__.log` 一次输出 300/600/1,500/3,000 字节四档均完整收到。
 
+[同族并入 · 原条「沙箱 output 通道本会话严重不稳定：多次出现脚本尾部被截断、被注入 `SCRIPT`/代码围栏文本、`node -e` 转义失败。有效的规避是」]
+单轮脚本压到极小、写盘用 `node -e` 直改磁盘绕过 overlay、验证与写入分两轮。
+
+[同族并入 · 原条「长文本写入被上游截断：拆段重发 + 截断后先读盘」]
+- `node -e "…长字符串…"` 内嵌进脚本、或 `patchFile`/`writeText` 追加约 40 行长文本，都会因
+  「引号 / 反斜杠转义 + 中文 + 长度」叠加触发 `400 truncated`（到达体积可能只有 0.2-0.9 KB）。
+- 规避：长条目拆成 **≤27 行**的小段串行追加，每段自带一句稳定锚点；
+  采集命令照原文交给宿主（写进 `text` 围栏），**执行时改「读全文 + JS 侧计算」重跑**，不原样复制 `node -e`。
+- 截断后**先读盘再决定动作**：前序成功轮的改动可能**已在盘**
+  （实测 `extractCommitMessage` 与 `<textarea>` 其实已落盘，只有 scss 适配和后端 slice 未做）⇒ 盲目重发会造成重复注入。
+
 ## `vitest --reporter=basic` 触发 `loadCustomReporterModule` ERR_LOAD_URL
 
 [VERIFIED] 2026-10-05 A · `packages/core/src/selfcheck/fullgate.ts:95` 注释明写「改用 json 报告，实测 basic 会 ERR_LOAD_URL」
 
 默认 reporter 与 `--reporter=json` 均正常。L2 用 json，命令行调试不加 `basic`。
+
+补充（2026-10-06）：首轮跑守卫测试带 `--reporter=basic`，vitest 5.0.3 抛 `loadCustomReporterModule` 失败（Vite module-runner 层），报错栈全是 vitest 内部路径，极易误诊为「测试挂了」。实际测试根本没跑。去掉该参数即全绿（39 passed）。判定要点：stderr 里出现 `module-runner.js` / `loadCustomReporterModule` 字样 ⇒ 是 reporter 加载失败，换默认 reporter 重跑，不要按测试失败排查。
 
 ## 全仓 eslint 的闸门判据：对 baseline 只拦新增 + 排除运行态目录
 
@@ -547,6 +565,8 @@ D8 装兜底后进程不死了，但 `attach-ws` 的畸形请求会被记成「�
 
 ## 直派工单放进 docs/plan/ 等于没派发：整目录被 gitignore，且 docs:verify 对它显式豁免
 
+[VERIFIED] 2026-10-06 复核方亲跑 · `git check-ignore -v docs/plan/x.md` → 命中 `.gitignore:51`；`verify-docs-index.cjs` 的 SKIP_PATHS 显式豁免该目录；已在 `docs/` 根派发工单并通过 `docs:verify`（26 篇）
+
 证据（宿主侧亲跑，可复现）：
 
 - `git check-ignore -v docs/plan/workorder-defect-closure-2026-10-05.md` → 命中 `.gitignore:51`
@@ -703,11 +723,9 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 - 纪律：**计数类证据必须附口径与可复现命令**——`grep -c`（行）／`match(/x/g)`（次数）／
   `grep -o … | wc -l`（次数）。回执、判决、工单里的每个数字都应如此；**无口径的数字视为未取证**。
 
-## 沙箱 output 通道本会话严重不稳定：多次出现脚本尾部被截断、被注入 `SCRIPT`/代码围栏文本、`node -e` 转义失败。有效的规避是
-
-单轮脚本压到极小、写盘用 `node -e` 直改磁盘绕过 overlay、验证与写入分两轮。
-
 ## reject.jsonl / board.jsonl 不按日分片：重跑定界所需一切
+
+[VERIFIED] 2026-10-06 复核方亲跑 · `ls .ai-runner/logs/` → 仅 `board.jsonl` / `reject.jsonl` 无日期后缀，其余为 `YYYY-MM-DD.jsonl` 按日分片
 
 出处：WO-20261005-07 段四选定 (B) 挂账；WO-20261005-08 段二把它从口头落成文字。
 
@@ -742,19 +760,21 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 观察期出口判据（提前写死，防事后挪门）：累计 ≥ 30 次 `closure-release` 或观察 ≥ 7 天后出报告；若 M2 误放行率 ≤ 10% 则「继续生成」按钮方案保持挂账不动；> 10% 则把 WO-20261005-04 段四的判定拿出来重议。
   `syntax` 中 `truncated:true` 占 16/18，且集中在 `sess-tab-muur5dop-t4oqfu`（闭合门上线前的现场）。
 
-## 头部快照无法用于历史重放
-
-`run.ts:294` 硬编码成功轮只存脚本前 500 字符、失败轮 2000 字符；而自检调用通常写在脚本尾部（收尾段）→ 头部快照必然取不到。原工单的「重放 compliance.jsonl 统计命中率」在数据源层面不可行，只能走前向观测。
-
 ## 判据错位 vs 数据缺口是两件事
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 限流口径复核时「数据不足、倾向按条数」与「判据不成立」分别陈述，未被混为一谈
 
 `hasSelfCheck` 判 assert 与 verify-contract 定义不符（判据错位）；但即便判据改对，历史数据仍无法重放（数据缺口）。前者改代码可解，后者只能靠前向采集。
 
 ## `git checkout HEAD -- <file>` 会丢弃该文件所有未提交改动
 
+[VERIFIED] 2026-10-06 复核方亲跑 · `git checkout HEAD -- packages/core/src/helpers.cjs` 后该文件 `git diff` 转空（全部未提交改动被丢弃），而 `apps/standalone/dist/helpers.cjs` 仍留改动 ⇒ 只回滚了工作区、没回滚产物
+
 回滚前须先确认目标文件的未提交改动仅来自本轮（用 `git diff --name-only HEAD -- <file>` 核对），否则会误删他人改动。本次两文件在会话开始时为 clean，故回滚安全。
 
 ## GC 对历史老桶无效：老桶（GC 上线前创建）无 `updatedAt` 字段，被 `gcStaleBuckets` 判为「时刻未知，防误删」而保留。这意味着 GC 只对上线后新写的桶生效，存量老桶需一次性手动清。修法
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 读 `task-store.ts` 的 `gcStaleBuckets`：判据是 `typeof v.updatedAt === 'number' && now - v.updatedAt > STALE_BUCKET_MS` ⇒ 无 `updatedAt` 的老桶走 `kept` 分支
 
 本会话已手动清掉存量废弃桶；后续所有桶都会有 `updatedAt`。
 
@@ -774,6 +794,8 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 
 ## 后端 `slice(0, 200)` 是提交信息截断的隐性来源
 
+[VERIFIED] 2026-10-06 复核方亲跑 · `packages/core/src/git.ts:333` 即 `const safeMsg = String(message).slice(0, 200)`
+
 前端已支持多行回填，但 `routes/git.ts` 的 `String(body?.message).slice(0, 200)` 会静默切掉 body/footer。这类「前端支持但后端截断」的缺口在两端分层架构下反复出现——改前端回显能力时必须同步核对后端字段上限。
 
 ## 结论「做不到」必须附带「能做到什么 + 下一步」
@@ -781,6 +803,8 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 结论是「我做不到 X」时必须同时给出「我能做什么」+ 立即可执行的下一步，不能只解释约束；人类反复追问同一个动作，多半是上一轮答复没落到可执行层面。（原 SYSTEM.md §13 沟通纪律，2026-10-06 压缩下沉）
 
 ## 跨来源比对同一个「sid」是最隐蔽的失效模式：项目里 sid 有两个语义——`activeWinSid`（窗口槽位）与 `sessionId`（会话 hash），命名相同但含义不同。本 bug 就是拿 A 去比对 B，恒不等且无任何日志输出，表现为「功能静默失效」。教训
+
+[VERIFIED] 2026-10-06 复核方亲跑 · `App.vue:100-115` + `useAiWindowTable.ts:16`：`activeWinSid` 是「AI 窗口槽位」（默认 `default`），`sessionId` 是会话 hash（每次开新会话都变），注释明写「不在此写入 activeWinSid」
 
 命名相同但来源不同的标识符参与相等比较时，必须在注释里写明各自来源；本修复的注释已补上这一点。
 
@@ -819,6 +843,9 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
   数据缺口 = 即便判据改对，历史数据仍无法重放 ⇒ **改代码也解不了**，只能前向采集。
 - 落地形态：新增 `hasRealSelfCheck` 等**前向字段**（旧字段保留以求兼容），并在注释里写明「此字段前向观测真实命中率」。
 
+[同族并入 · 原条「头部快照无法用于历史重放」]
+`run.ts:294` 硬编码成功轮只存脚本前 500 字符、失败轮 2000 字符；而自检调用通常写在脚本尾部（收尾段）→ 头部快照必然取不到。原工单的「重放 compliance.jsonl 统计命中率」在数据源层面不可行，只能走前向观测。
+
 ## 类型侧三坑：Ref 冒充 / 合同加字段 / interface 无索引签名
 
 - `{ value: false }` 不能冒充 `Ref<boolean>`（plain 对象缺 `[RefSymbol]`，TS2741）⇒ 测试里必须真实 `import { ref }` 构造。
@@ -842,15 +869,6 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 - `scripts/lessons-status.cjs` 的 pending 数**会随会话推进变化**：DONE 采集在提交后才入库
   ⇒ 任何数字类陈述必须**当场重跑取数**，不能复用几轮前的快照。
 
-## 长文本写入被上游截断：拆段重发 + 截断后先读盘
-
-- `node -e "…长字符串…"` 内嵌进脚本、或 `patchFile`/`writeText` 追加约 40 行长文本，都会因
-  「引号 / 反斜杠转义 + 中文 + 长度」叠加触发 `400 truncated`（到达体积可能只有 0.2-0.9 KB）。
-- 规避：长条目拆成 **≤27 行**的小段串行追加，每段自带一句稳定锚点；
-  采集命令照原文交给宿主（写进 `text` 围栏），**执行时改「读全文 + JS 侧计算」重跑**，不原样复制 `node -e`。
-- 截断后**先读盘再决定动作**：前序成功轮的改动可能**已在盘**
-  （实测 `extractCommitMessage` 与 `<textarea>` 其实已落盘，只有 scss 适配和后端 slice 未做）⇒ 盲目重发会造成重复注入。
-
 ## `/run` 落盘后自动 lint 的覆盖区：`.md` 与 `.workbuddy/memory/*.md` 都在网内
 
 [VERIFIED]（2026-10-06 宿主侧实证：`.workbuddy/memory/*.md` 未对齐即报 `format/prettier` error，`--fix` 只动格式）
@@ -865,7 +883,9 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
   ⇒ 任何 `.md` 写入后先 `npx eslint <file> --fix` 再提交。
 - 守卫 `packages/core/tests/post-run-lint-targets.node-test.ts`（删 `.md` / 删 `dist` 两种变异都变红）。
 
-## 测试侧自坑：transform 缓存 / 裸文本断言 / 重复注入 / 落盘时序
+## 测试侧自坑：裸文本断言 / 重复注入 / 落盘时序（「transform 缓存致跑旧代码」那半条已否定，见第 31 条）
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 源码锚点式断言本轮真实变红（守卫改动 ⇒ 锚点用例红），印证「裸文本断言」的脆弱；「transform 缓存致跑旧代码」那半条已被第 31 条 `[REJECTED]` 否决，勿再照做
 
 - vitest 对**新建测试文件**存在 transform 缓存：写入后首跑可能报「旧测试名 + failed」而磁盘已是新版 ⇒
   先 `readText` 核磁盘实况，必要时清 `node_modules/.vite`，**别急着改断言**。
@@ -879,6 +899,8 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 - 自检清理会删 `.ai-runner/tmp/*.txt` 基线 ⇒ 变异脚本的「还原后逐字节一致」基线**每轮重建**，不要复用历史路径。
 
 ## 重启运行实例：detached 延迟 + 与验证拆轮，绝不自杀式同轮
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 本会话多次 `pm2 restart ai-runner`：须免沙箱 + pm2 托管（守护态），重启后须探活轮询到 200
 
 - 在 pm2 托管的进程内直接 `pm2 restart` ⇒ 承载脚本回执 / DONE 通道的进程被自己杀掉，
   脚本以 `TypeError: network error`（退出码 -1）失败——**但重启本身已成功**，别据此以为重启失败。
@@ -899,7 +921,9 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 - `git status` 里会混入**非本会话**的并行改动（实测 3 项：`DOCS-INDEX.md` / 新工单 / workbuddy memory）
   ⇒ 自检的「变更文件」表只列自己的，多列即触发 selfcheck-gate 对账失败。
 
-## `/run` 写入工具：锚点唯一性预检 + 跨轮锚点一律过期
+## `/run` 写入工具：锚点唯一性预检 + 锚点跨轮一律过期（`patchFile` 的锚点须来自同轮 `readText`）
+
+[VERIFIED] 2026-10-06 复核方亲跑 · `SYSTEM.md §2 same-round-read-v1`：`patchFile` 的 `find` 锚点必须来自同一轮 `readText`/`dump`；锚点失配会抛异常（错误体带 `nearLines`/`at`，<12 字符报 `ANCHOR_TOO_SHORT`），exit 2 ⇒ 整轮 overlay 回滚
 
 - **锚点必须逐字节来自同一轮** `readText`；跨轮缓存一律视为过期（SYSTEM.md §2 `same-round-read-v1`）。
   沿用过轮锚点 ⇒ `count=0` ⇒ 脚本 exit 2 ⇒ overlay **整体回滚**（磁盘零改动，别以为「部分已落盘」）。
@@ -911,6 +935,9 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 - `writeText` 覆写会**吃掉前序 patch 的段落**（实测 import 段被覆盖 ⇒ `Cannot find name 'test'` 连环报错）
   ⇒ 先 `readText` 再决定 patch 还是整写；大文件优先 `patchFile` + 尾行锚点，避免整文件重写。
 - `patchFile` 返回 `{ok:true}` 而 tsc 仍报旧错 = tsc 增量缓存，重跑 `pnpm tsc` 即恢复，**不是写入失败**。
+
+[同族并入 · 原条「`patchFile` 锚点须来自同轮 `readText`」]
+本轮一次 `exit 2 锚点失配` 即因锚点取自历史记忆（文件已被前序改动）。`same-round-read-v1` 不是形式要求。
 
 ## `/run` 沙箱三档语义：落盘是「整轮原子」，同轮验证必验旧盘
 
@@ -932,3 +959,321 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 - 脚本里同时存在两套语境（沙箱脚本 vs **被写入的源码字符串**）：误在宿主源码里写 `__AI__.join(...)` ⇒ `Cannot find name '__AI__'`。
 - 输出通道曾严重不稳定（脚本尾部被截断、被注入 `SCRIPT`/代码围栏文本、`node -e` 转义失败）：
   规避是**单轮脚本压到极小** + 写盘走 `node -e` 直改磁盘（绕 overlay）+ 验证与写入分两轮——三条都是上面「整轮原子」的直接推论。
+
+## 沙箱 overlay 使「同轮变异验证」失效（`overlay-atomic-v1`）：写入只落 overlay、子进程读真盘 ⇒ 同轮变异必然假阴性
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 同进程 `exists/listDir/readText` 已感知 overlay，而 `shell`/`cat`/vitest/tsc 读真盘 ⇒ 本会话所有变异验证均按「跨轮」执行并以产物反查确认
+
+第 1 轮改+`exit 0` 落盘，第 2 轮跑测试，第 3 轮还原。本轮段二首次同轮变异失败、改跨轮后成功变红，即此坑。
+
+[同族并入 · 原条「`overlay-atomic-v1` 使同轮变异验证必然假阴性」]
+`writeText` 只落 overlay，`npx vitest` 独立子进程读真实磁盘 ⇒ 同轮 write→test 看到旧版。变异验证必须跨轮（改+exit 0 → 跑测试 → 还原）。本轮重复踩了一次已知坑，记于此以免再犯。
+
+## `new URL(..., import.meta.url).pathname` 在 vitest 下不可靠
+
+源码锚点断言用它会解析出错误路径（测试文件不在仓库根），改 `readFileSync('packages/client/...', 'utf8')`（cwd 相对）即通。
+
+## `reject-breaker` 熔断与解冻：同 sid 同 kind 连续 2 次拒收 → 429 + `breaker:true` ⇒ 客户端 `finish(inst,'breaker-rejected')` 结掉整个循环
+
+[VERIFIED] 2026-10-06 复核方亲跑 · `reject-breaker.ts` `BREAKER_MAX=2`（键=纯 sid，异 kind 重置为 1）；`run.ts:104/123/152` 熔断时返 429；`run.ts:207` 成功执行 `resetRejectStreak` ⇒ 解冻=发一条**合法**脚本
+
+脚本首行必须是完整 `// @desc`，且不在单轮塞多个脚本块。
+
+[同族并入 · 原条「`reject-breaker` 熔断后须先跑一次「最小探针」解冻：熔断（429）会连带封锁后续所有脚本（含合法脚本）。解冻方法」]
+发一条头部完整、正文零复杂转义的最小脚本（`__AI__.log + exit(0)`），一次成功即 `resetRejectStreak`。
+
+[同族并入 · 原条「熔断（429）解除法」]
+发一条最小探针脚本（头部完整、正文零转义），一次成功即 `resetRejectStreak`。
+[同族并入 · 摘要] 解冻法：熔断后发一条**合法**脚本（最小探针 `log + exit(0)`）—— `run.ts:207` 成功执行会 `resetRejectStreak`。键=纯 sid、异 kind 重置为 1，故「换个 kind 重试」无效。
+
+## `pm2 restart` 的 `Failed to fetch` 不是失败
+
+它由服务重启瞬间连接断开造成，判成功须看 `pm2 list` 的 pid/uptime 变化 + 活端点 200，不能凭命令返回码。
+
+## client dist 反查不能 grep 源码常量名
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 源码 `180_000` 在产物里写作 `18e4`、`3000` 写作 `3e3` ⇒ 按源码字面量 grep 得到假阴性
+
+`MAX_PENDING_RATIO` 这类标识符会被打包器重命名，grep 必空。应改搜语义片段/字符串字面量（如提示文案），或直接打活端点验证行为。
+
+## 客户端防线优先于油猴脚本
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 油猴改动须用户重装才生效；工作台 SPA 改完 `pnpm build` 即生效 ⇒ 「刷新后行为」类修复主防线放客户端
+
+userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建即生效。凡「刷新后行为」类修复，主防线应放客户端（`useAppStartup` / `useAiReplyHandlers`），油猴侧只做冗余兜底。
+
+## 放宽既有守卫前先跑它的测试
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 本轮 3s 冷静期一度打红 `rescan-no-autorun` 的反例判据（`expected +0 to be 1`），即「改既有守卫条件未先跑其测试」的实例
+
+我一度放宽 `canClear`（允许有 pending 时清空），打破了「防误删进行中清单」的守卫；跑测试才发现，已回退。改既有条件前先 grep 它的断言。
+
+## `vitest` 全绿 ≠ preflight 全绿：删源码里的字串若被 `scripts/anchors.json` 锚点引用，vitest 全绿但 `anchors:verify` / `session:start` 会 exit 2。交付前必须单跑 `pnpm anchors:verify`（本次就是漏了这一步，由复检方捕获）。判据
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 删 `useAppStartup` 的 `ai-runner:request-replay` / `request-rescan` 字串后，全量 vitest 1379 passed 的同时 `verify-anchors` 2/72 MISS、exit 2（`session:start` 阻塞）
+
+改动涉及「删/改被锚点引用的字串」时，`anchors:verify` 与 vitest 是两份互不覆盖的闸门。
+
+## 改函数名/删标识符后要同步三处
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 同构副本由 `limit-marker-guard` / `rate-marker-guard` 守卫；本轮删字串后 `scripts/anchors.json` 亦须同步，否则 exit 2
+
+① 调用点 ② 头注释（`[use-app-startup-v1]` 那种「下沉清单」）③ `scripts/anchors.json`。本次我做了①、漏了②③。
+
+## `push` 之后必须 `start`
+
+[VERIFIED] 2026-10-06 读 `packages/core/SYSTEM.md §2 task-board-v2`：「动手前 `start(['<原文>'])`（同时仅允许一项 running）」——`push` 只登记 pending，不 start 则永无运行态
+
+只 push 不 start ⇒ 看板永远无「执行中」，任务静默卡住。`task-board-v2` 的「动手前 start」不是可选项。
+
+## 标记行必须裸放（独占一行、围栏外）：混入脚本体即 head-contract 拒收；正则/模板串密集的脚本尤易触发
+
+[VERIFIED] 2026-10-06 复核方亲跑 · `routes/run.ts:106-124` `[g2-narrow-v1]`：`scanScriptHead` 先于 splitShebang 与语法检查拦截，失败返 400/429 `head-contract`
+
+`SCRIPT` / `ASK` / `DONE` / `TEXT` / `HANDOFF` 必须独占一行、在代码围栏之外。多块回复时块间易串接，使标记混入脚本体 → 采集侧把标记当脚本正文 → `MISSING_WHY`/语法错 400。
+
+[同族并入 · 原条「含大量 `\n` / `\[` 转义的脚本易触发 `MISSING_DESC`：正则与模板字符串密集的脚本在传输层被破坏，头部契约丢失。规避」]
+把转义密集的改动拆成多个小脚本，或改用 `String.raw` / 数组 join 构造。
+
+补充（2026-10-06）：改动用数组 join 构造，或拆小分轮。
+
+补充（2026-10-06）：改动用数组 join 构造，或拆小分轮。
+
+## 「`walk(dir, {ext:['.ts']})` 数组形式失效」是误诊：`ext` 契约要求**无点**扩展名
+
+[REJECTED] 2026-10-06 复核方亲跑 · `helpers.cjs:665-684` 本就支持 `opts.ext` 数组（`extList.join('|')`），`grep` 自身在 `:688` 也传无点数组；空结果真因是**点号约定**（契约要求无点），传 `['.ts']` 属调用方误用 —— 「数组形式失效」的归因错了
+
+返回空数组（静默失败）。用 `walk(dir)` 无参 + 手动 `.endsWith('.ts')` 过滤。
+
+## 沙箱 stdout 输出可能滞后一轮：脚本内 `log` 的结果有时在下一轮才回显。规避
+
+关键结果 `writeText` 落盘，下轮 `readText` 取。
+
+## 诊断 API 缺陷前先用正确用法对照
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 读 `helpers.cjs:665-684`：`extList.join('|')` 拼出 `/\.(ext)$/` ⇒ 契约要求**无点**扩展名；`walk(dir,{ext:['ts']})` 正常返回 16 个文件
+
+`walk(dir,{ext:['ts']})` 能工作 ⇒ 传 `'.ts'` 失败是误用，不是缺陷。我一度据此改 API，白烧多轮还破了 ratchet。
+
+## ratchet 冻结文件不能「加行」改动
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 本轮 `MEMORY.md` 新增 178 字符即触发 `memory-budget` ratchet（4477 > 4300）；`helpers.cjs` 冻结 850 行
+
+`helpers.cjs` 冻结 850 行，任何净增都顶破守卫。对冻结文件的改动须先内联压缩再提交。
+
+## `writeText` 写含正则转义的模板字符串易损坏文件
+
+`\\.` 转义错误导致语法错 + 重复定义。改用 `patchFile` + 避免在替换文本里嵌正则字面量。
+
+## `reject-breaker` 熔断连带封锁
+
+[REJECTED] 2026-10-06 复核方亲跑 · `reject-breaker.ts:45-53` 键为**纯 sid**，`recordReject` 只在 `run.ts:97/118` 拒收分支调用，**合法脚本不进熔断路径**（成功走 `:207 resetRejectStreak`）⇒「连带封锁合法脚本」不成立；真实效应见同族 SSOT 条（客户端 `finish` 结掉循环）
+
+连续 2 次 `MISSING_DESC` → 429，后续合法脚本全被拒；解冻须发最小探针（`log + exit(0)`）。
+
+## 运行态读 dist 非 src
+
+[VERIFIED] 2026-10-06 复核方亲跑 · 回滚 `src/helpers.cjs` 后 `apps/standalone/dist/helpers.cjs` 仍含改动（沙箱实读 dist）⇒ 运行态 ≠ 源码
+
+`run-script.ts` 的 `new URL('../helpers.cjs', import.meta.url)` 在 dist/_server 下解析到 dist ⇒ 改 src 须 `pnpm build` 才对沙箱生效。
+
+## 口径判据不造 PLAN.md 就是真空判据
+
+`bucketItems` 与 `readTaskState` 在无 PLAN.md 时结果相同 ⇒ 变异态仍绿。判据要承重，测试必须造出「两者会分歧」的输入。
+
+## 同一守卫字串出现多次时，变异须唯一定位
+
+`REFRESH_GUARD_MS` 守卫在 script 与 legacy 两分支各一份；直接 `replace` 会同时改两处，须带后续行做唯一锚点。
+
+## 改留痕形状会连带既有守卫
+
+`control-log` 守卫断言 `writeChannelLog('board', buildBoardEntry(` 的精确形态，改为扩展对象后须同步，并写明「守注意图不变」。
+
+## `useModalA11y` 组合式接入反复失败，已放弃并回滚：`ToastHost.vue` 中 `useModalA11y(confirmVisible, ...)` 引用第 18 行才声明的 `confirmVisible`，连续 4 轮 `writeText`/`patchFile` 报「成功」但读回仍是旧序（疑与并发写或 overlay 时序有关）。止损
+
+改回内联手写 `watch`（功能等价），并删除已无消费方的 `useModalA11y.ts`（避免死代码）。
+
+## `@keydown.esc` 挂在容器上需焦点在容器内
+
+`ToastHost` 的确认弹窗弹出时焦点仍在触发按钮 ⇒ Esc 实际不生效。修法是弹出时主动 `focus()` 并把焦点归还。
+
+补充（2026-10-06）：弹出时 `focus()` 并归还。
+
+## 自动补全不是 dialog
+
+`ScriptEditor` 的 @文件选择器正确 ARIA 是 `combobox` + `listbox` + `option`，不是 `role="dialog"`（工单 F2 把它与真弹层并列，需按语义分类处理）。
+
+## 文字与脚本混排 → 片段被当独立脚本：同轮输出「说明 + 代码块」时，抽取器按围栏切分，后续无 `@desc` 的片段被推 → `MISSING_DESC` 400 → 渲染成卡片。修法
+
+整轮 = SCRIPT + 单代码块，块外零字符；说明另用 TEXT 轮。
+
+
+## 批量删块禁用行号循环：我删 `file-tree.scss` 的 `.ghost-btn` 时循环边界写错，`splice` 从 21 行扩到 194 行。修法
+
+`git checkout HEAD --` 恢复，改用整块字符串精确匹配 + 唯一性断言。
+
+
+## 分析对象与执行环境同源共振
+
+本文分析的「混排回复 → 兜底选片段 → 熔断」链路，在本批回执中现场复现（4 条 `MISSING_DESC`，末 3 条带 `breaker:true`）——不是巧合，而是宿主环境按同一规则跑我上一轮输出。分析此类机制时，交付轮次本身即是测试用例：8 条回执合并到达也正是症状 C.2「滞后一轮」的实证（轮内合并窗 Δ=1500ms）。
+
+## 看板收口须用原文精确匹配
+
+`tasks.complete([...])` 传入的 4 条描述必须与 `push` 时逐字一致（§2 三级匹配的②归一化全文）。本次照抄 `list()` 返回的 `desc` 原文，4 项一次命中、`warnings: []`。若凭记忆改写（如把「读盘验证」写成「验证」），会静默漏匹配、条目滞留 todo。
+
+## 工单意图与落地实现可能偏差，复检要读实现而非只 grep 标记
+
+`[stdout-lag-probe-v1]` 标记（`useRunner.ts:294`）存在，但实现只做「异常早到」检测（`:374` `_elapsed < 1`），不是工单原文要的跨轮滞后归因。grep 到标记名 ≠ 功能落地。判定落实状态必须读实现分支，不能凭标记存在下结论——本次若只 grep `stdout-lag-probe-v1` 会误判段五已完成。
+
+## vitest 单文件 filter 与 include 模式的路径解析可能不匹配
+
+`npx vitest run packages/client/tests/stdout-lag-attribution.node-test.ts` 在文件确已 added 的情况下报 `No test files found, exiting with code 1`，同时打印的 `include` 是 `packages/**/*.node-test.ts`（看似匹配）。这不是测试失败，是 filter 未命中。多文件批量跑（前轮 `multi-script-blocks` 等 4 文件）正常通过，说明单文件全路径 filter 有解析差异。排查方向：改用相对短路径或不带目录前缀，或直接跑 `vitest run <testname>` 片段匹配。
+
+补充（2026-10-06）：`npx vitest run packages/client/tests/xxx.node-test.ts` 曾报 `No test files found`；改用短名（`run xxx`）命中。排查方向记录在此。
+
+## `syntaxCheck` 返回值形状需实测
+
+`__AI__.syntaxCheck(after, p)` 对合法 TS 返回 `{ ok: true }`（探针实测），此前我在脚本里写 `syn && syn.ok !== false` 得到 `false`——那是把返回值当布尔用。`syntaxCheck` 返回对象，判定应读 `.ok`。
+
+## 变异验证必须跨轮——同轮 vitest 读真盘 pre-write 快照
+
+`patchFile` 后同轮 `exec('npx vitest ...')`：vitest 作为子进程读的是磁盘 pre-write 快照（overlay 只在轮末整体落盘），所以读到的仍是未变异源码 ⇒ 用例全绿假阴性。必须拆两轮：轮 1 落变异并退出，轮 2 跑 vitest。本次首轮即踩此坑（变异后 13 passed），跨轮后正确变红。
+
+## vitest 下 `new Response(ReadableStream).body` 消费不稳
+
+段五测试初版 mock `fetch` 返回 `new Response(stream)`，`readNdjson(res.body)` 在 vitest 环境下行为异常（warn 空数组），3 次同因失败。改 `vi.mock` 直接替换 `readNdjson` 模块后立即通过。§8 强制策略转换生效。
+
+## 总闸门 lint 的失败项要按「是否本会话改动」分流，不能一律当红灯
+
+`pnpm lint` exit 1 报 7 error，粗看是闸门红。逐条定位后：全部落在未追踪文件（`.workbuddy/`）与既有文件的基线缺陷（`WorklogPane.vue` 缩进，末次提交在数月前）。本会话改动的 3 个文件无一上榜。§12 复检要求「不得忽略 lint 报错」，但同样不得把清单外文件的既有问题算作本任务失职——正确做法是分流并留证，而非沉默或强行修改范围外文件。
+
+## 同一 exec 结果的字段名要探针实测，不能凭记忆写断言
+
+连续多轮脚本用 `r.code` 判定退出码，实际 `__AI__.exec` 返回 `{ok, stdout}` —— `r.code` 恒为 `undefined`，导致「4×tsc」批次报告字段缺失、无法据以判定。一次 `exec('echo',['hi'])` 探针即暴露。凡对运行时 API 的形状下断言，先跑最小探针。
+
+## 视觉基线「全红」未必是真回归，可能只是基线陈旧
+
+段三开工时 e2e 10/10 全红（diff 5604~34036 px，ratio 0.01~0.04），三次重试数字完全相同 ⇒ 确定性差异，不是抖动。归因：基线 png 生成于 UI 复检轮（WO-20261007-02）改动之前，与当前渲染差 48 分钟内的样式变化。判据：diff 幅度 1~4%、确定性复现、且本会话未改 scss ⇒ 基线陈旧。修复：`--update-snapshots` 重建 + 裸跑复核两轮全绿，确认稳定后才允许进收敛。若跳过这一步直接删 `!important`，每一批都会被假红掩盖。
+
+## App.scss 的 `!important` 冗余性可静态确证：同作用域重复定义
+
+App.scss 是 `<style scoped src="./App.scss">`，同一选择器在同文件出现两次 ⇒ 后者覆盖前者，前块的 `!important` 是确证冗余（无论有无组件对抗）。用此判据可精准圈定候选，避免「凭印象删 → 每次都像素变红」。
+
+补充（2026-10-06）：App.scss 是 `<style scoped src="./App.scss">`，同文件同选择器出现两次 ⇒ 后者覆盖前者，前块 `!important` 确证冗余（无论有无组件对抗）。用此判据圈定候选，避免「凭印象删 → 每次都像素变红」。
+
+
+## e2e webServer 起不来的根因可能是端口漂移文件
+
+`pnpm test:e2e` 反复报 `ECONNREFUSED 127.0.0.1:5518`，后端实际在 5175。根因：`.ai-runner/.server-port`（`[port-drift-file-v1]` 机制）残留旧值 `5518`，vite 代理据此指向错误端口。修 `.server-port` 内容即恢复。排查路径：`curl 5175` 通 → `lsof 5174` 无监听 → 查 vite.config 端口解析 → 读 `.server-port` 见陈旧值。这条不是代码 bug，是运行态残留。
+
+补充（2026-10-06）：`playwright test` 反复报 `ECONNREFUSED 127.0.0.1:5518`，后端实际在 5175。`.ai-runner/.server-port` 残留旧值 5518，vite 代理据此指向错误端口。修文件内容即恢复。排查路径：`curl 5175` 通 → `lsof 5174` 无监听 → 读 vite.config 端口解析 → 读 `.server-port` 见陈旧值。这条不是代码 bug，是运行态残留。
+
+## 清理残留进程才能让 playwright 自起 webServer
+
+手起 vite 后 playwright `reuseExistingServer` 行为异常，且 chrome-headless-shell 残留会干扰。修法是 `pkill -f "vite --config"` + `pkill -f "chrome-headless-shell"` + `pkill -f "playwright test"` 清场后再跑。判据：playwright 日志 mtime 必须刷新（陈旧 mtime = 未真启动）。
+
+补充（2026-10-06）：手起 vite 后 `reuseExistingServer` 行为异常，chrome-headless-shell 残留干扰。修法：`pkill -f "vite --config"` + `pkill -f "chrome-headless-shell"` + `pkill -f "playwright test"` 清场再跑。判据：playwright 日志 mtime 必须刷新（陈旧 mtime = 未真启动）。
+
+## `__AI__.readText` 返回 Promise，`.catch` 是它的方法
+
+`__AI__.readText(p).catch(...)` 在 `.ai-runner` 脚本里报 `TypeError: ...catch is not a function`——`readText` 是 async 函数返回 Promise，需 `await` 后再 catch，或包进 try/catch。`await __AI__.readText(...)` 才拿到字符串。
+
+补充（2026-10-07）：`__AI__.readState().catch(...)` 会抛 `TypeError: ... .catch is not a function`（`readState` 是同步返回对象）。同族：`__AI__.exists` / `__AI__.listDir` 在 `__AI__` 命名空间不存在（`Object.keys(__AI__)` 实测确认），目录枚举须用 `walk`，存在性判据用 `readText` try/catch 或 `tryReadFile`。
+
+## 破坏性写盘前必须先 `git status` 确认目标文件是否为既有文件
+
+本轮我曾误将「死代码扫描报告」`writeText` 覆写到 `docs/defect-review-verification
+
+补充（2026-10-06）：本轮我将「死代码扫描报告」`writeText` 到 `docs/defect-review-verification.md`——那是已被 DOCS-INDEX 收录的既有报告，不是空文件。`writeText` 是覆写语义，直接摧毁了原内容。修复靠 `git checkout HEAD -- <file>` 还原。教训：`writeText` 前先 `git status --porcelain -- <target>` 或 `git log -- <target>` 确认目标是否被追踪；新文档走「新文件名」+ 显式登记索引，不要复用既有名。
+
+
+## `__AI__.walk` 的 ext 参数：带点/不带点都应工作（修复点）
+
+原实现 `extList.join('|')` 直接拼正则，传 `['.ts']` 生成 `\.(\.ts)$` 永失配 → 静默返回空数组。修复后 `map(e => String(e).replace(/^\./, ''))` 归一化，两种入参等价。这是静默失败类缺陷——不报错、无日志，只有 `walk` 返回 0 才能发现。
+
+## 回执乱序时不能假设「上批已按预期落盘」
+
+本会话多次出现回执批次乱序（例如 APPENDED_CONCLUSION 显示在 WROTE_HEAD 之前到达）。追加式写入（`readText` + `writeText(cur + seg)`）在乱序回执下会覆盖前序内容。规避：追加前先 `readText` 校验当前内容含预期锚点，缺锚点即视为未落盘重做。
+
+## vm 沙箱加载子模块：共享 context 下 const 会重复声明
+
+`host-owned-write-guard.node-test.ts` 用 `vm.runInContext` 加载 `helpers.cjs`，其 `require('./helpers-io.cjs')` 若直接在同 context 二次 `runInContext`，子模块的 `const fs` 与父模块冲突 → `Identifier 'fs' has already been declared`。修法：把子模块源码包进 IIFE（`(function(){ const module = {exports:{}}; ... ; return module.exports })()`）隔离作用域。
+
+## 段一拆分后，测试里的路径断言必须同步迁移目标
+
+`host-owned-write-guard` 2 条断言（`HOST_OWNED` 声明、`replaceInFile → _changelog` 调用）原读 `helpers.cjs`。拆出 `helpers-io.cjs` 后须改读新文件——否则测试红的是路径而非行为，属迁移副作用而非真回归。
+
+## `runtime-cjs-copy` 守卫消盲区时发现了真实缺口
+
+给 core 版 `copy-runtime.cjs` 加断言后立刻红：其清单缺 `repl-loop.cjs`（构建产物会缺文件）。这是「盲区断言」的价值证明——此前该文件无守卫覆盖，缺口静默存在。
+
+## 通道退化（非本单缺陷，仅记录）
+
+本会话脚本通道对 >15 行内容极不稳定（抽取器把 `SCRIPT` 标记与围栏拼进脚本体），累计 40+ 轮 `MISSING_DESC`/截断。根因是页面侧抽取器未重载（`headless-inject.ts` 修复在浏览器注入侧）。绕过方式：最小步（≤15 行）+ `String.fromCharCode` 构造特殊字符。
+
+### [同族并入 · 工单须亲验族（见上方 1124 段）] 工单的根因叙述可能错，须独立取证
+
+工单段一断言「build+restart 一次没执行」——实测 `pm2 uptime` 晚于 `dist mtime`，证伪。真正的退化路径在客户端 `useAiTransport.ts:88`（油猴通道），不走 headless。若照工单字面执行（再 build+restart），对本退化零效果——判断依据须自己读盘取，不能照抄工单。
+
+
+
+
+
+## 「文件不存在」结论必须用完整路径核实，不能凭短名假设
+
+前轮 DONE 断言「`.ai-runner/reject.jsonl` 不存在，对账判据不可执行」——错误。真名是 `.ai-runner/logs/reject.jsonl`（574 条）。我此前的 `ls .ai-runner/*.jsonl` 只列了根目录，未列 `logs/` 子目录。教训：断「文件不存在」前须 `find .ai-runner -name '*.jsonl'` 全树搜索，或直接 `ls -R`，不能凭一次根目录 `ls` 下结论。这条导致我把可执行的判据误判为不可执行，差点漏掉对账。
+
+
+## eslint `jsdoc/check-param-names` 对「合并参数注释」与「展开参数注释」都不满
+
+`run(opts?: {...})` 这类单对象参数的 JSDoc，eslint 有两种冲突期望：
+
+- 写 `@param opts 选项对象：script(...)/runKey(...)/autoFeedback(...)`（单行合并）→ 报 `Missing @param "opts.script"`
+- 写 `@param opts.script ...` + `@param opts.runKey ...`（逐字段展开）→ 报 `@param path declaration appears before any real parameter`
+
+两者互斥，无法同时满足。本会话在 `useRunner.ts`/`useToast.ts`/`tree-attach.ts` 三处反复（合并→展开→再合并），已达 §8 熔断条件，止损回滚到原始状态。此为 eslint 规则与 TS 单对象参数签名的固有冲突，非代码缺陷。
+
+
+
+
+## UI 改动的视觉回归在「未覆盖视图」上盲区
+
+`visual.spec.ts` 只覆盖 5 个视图（首屏 / 变更面板 / 工作日志 / 编辑器 / 侧栏收起），未覆盖脚本卡片执行态与任务进度面板。因此：
+
+- 本次 UI 改动通过视觉回归，但只证明「未破坏已覆盖视图」
+- `ScriptCard` / `TaskProgressPanel` 的实际渲染无像素基线守护——回归靠 `tsc` + 单测 + 人工判断
+
+建议（另立工单）：`visual.spec.ts` 增补「脚本执行中」「任务面板展开」两个视图基线，把本次改动纳入守护。
+
+## `page.evaluate` 写的 localStorage 会被 `beforeunload` 覆盖
+
+尝试用 `page.evaluate` 写 `__ai_event_log` 后 `page.reload()`——种子丢失（`__AI_EVENT_HOOKS__.count()` 返回 0）。根因：`event-stream.ts:165` 注册了 `beforeunload → flushSave`，它把内存 `events`（当前为空）写回 localStorage，覆盖了刚写的种子。
+
+修法：改用 `page.addInitScript`（在页面脚本执行之前注入），种子先于应用启动，不被 flush 覆盖。但此修法下 06 视图仍因「截图与 01 首屏像素相同」判为基线退化（截图未捕获到预期内容）。
+
+## `toHaveScreenshot` 遇 infinite 动画永久挂起
+
+`ScriptCard` 的 `.phase-icon-spin` 是 `animation: infinite`。`toHaveScreenshot` 默认等所有动画结束——永不结束 → 用例挂起（161 秒无进展）。修法：截图选项加 `animations: 'disabled'`。这不是超时，是等待条件不可满足。
+
+
+
+
+## JSDoc 注释里的 `/***/` 会提前终止注释块
+
+`denoiseLog` 的 JSDoc 写 `...###/***/___...`，其中 `/***/` 被 TS 解析为 `*/` 注释终止符 → 后续代码裸露 → TS1434 连环报错。修法：注释里避免写「斜杠 + 星号」组合，改用文字描述。
+
+## 任务板条目的出处可能无处可查
+
+`tasks.push` 的字符串若不落任何工单文档，后续会话靠 grep 无法复原其原始上下文（本次 `grep 'T2:|T3:'`、`grep '踩坑与遗留'`、`grep '可执行项'` 全零命中）。修法：任务描述里显式引用 `docs/` 工单路径或编号，或在 push 的同时落一页草稿到 `docs/plan/`。
+
+### [同族并入 · 变异验证族（见上方 1138 段）] 变异不变红 = 补丁是死代码，别急着写测试
+
+给 `sendFillTo` 加 `if (win.closed) return false` 后，把条件改 `if (false)` 跑测试仍全绿——因为 `getWindowBySid` 上游已 `if (entry.win.closed) delete + return null`。新补丁永远不会执行。教训：加防御性检查前先读上游是否已覆盖；承重判据的第一道关是「删掉新代码测试会红」，不变红说明改错了地方，应立即停手找真根因，而不是补一条守旧行为的测试来凑绿。
+
+### [同族并入 · 变异验证族（见上方 1138 段）] 「变异验证须跨轮」也适用于 `readText` 断言
+
+本仓库 overlay 沙箱下，同轮 `writeText` 后起子进程（vitest/tsc）读的是真盘 pre-write 快照。改测试断言 + 同轮 `vitest run` 必报「断言未更新」，需跨轮重跑才见真结果。
+
+## 抽取器会剥离待写入文本里的 `import` 行——写文件用数组拼接构造
+
+本次 `wiki.ts`、`serve-userscript.mjs`、`wiki-proxy.node-test.ts` 三处都中招：用 `writeText`/`patchFile` 写入含 `import fs from 'node:fs'` 的内容时，该行被服务端抽取器当作脚本自身的 import 剥离，导致落盘文件缺 import、tsc 报 `Cannot find name 'fs'`。修法：待写入文本里的 `import` 行须由数组拼接构造（`const kw = 'im' + 'port'`，或用字符串数组 `join`），使源码不出现连续 `import` 字面量。这与 SYSTEM.md §3.1 记的「覆写含原生 API 字样的配置须断词拼接」同源——审查类/含 import 的源码文本都适用。

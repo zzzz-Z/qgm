@@ -1,6 +1,10 @@
 'use strict'
 /* eslint-disable no-console -- __AI__ 的 ok/skip/warn/err/log 需直接输出 */
 const fs = require('node:fs')
+// [helpers-io-v1] 写盘+审计族迁出（WO-20261007-04 段一）；本文件保留复杂逻辑。
+const _io = require('./helpers-io.cjs')
+
+const { _changelog, safeReaddir } = _io
 // [tool-log-exec-v1] 记录 shell 命令到 toolLog，供自检命令对账（治造假）
 // [CONSTRAINT] 断词拼 fs 名避免 patchFile 内容触发原生扫描器；不改执行行为
 let _TOOL_FD = -1
@@ -26,19 +30,6 @@ const _useColor = Boolean(process.stdout && process.stdout.isTTY) && !process.en
 const _c = (_chalk && _useColor)
   ? _chalk
   : { green: s => s, yellow: s => s, red: s => s, cyan: s => s, gray: s => s, dim: s => s }
-
-function safeReaddir(p) {
-  const names = fs.readdirSync(p)
-  return names.map((n) => {
-    let st = null
-    try { st = fs.statSync(path.join(p, n)) } catch { /* ignore */ }
-    return {
-      name: n,
-      isDirectory() { return st ? st.isDirectory() : false },
-      isFile() { return st ? st.isFile() : false },
-    }
-  })
-}
 
 function globToRe(glob) {
   let re = ''
@@ -71,34 +62,8 @@ const _rcMem = {}
 //   故按 verify-contract-v1 先例走观测期，族谱：先记账，攒够样本再决定是否闸门。
 // CHANGE-IMPACT: changelog.jsonl 记录新增 hostOwned 键；消费方若做严格 schema 校验需容忍新键。
 // 已知缺口：bash(/exec) 通道的重定向写入不经本漏斗，需另立工单。
-const HOST_OWNED = new Set(['packages/core/SYSTEM.md'])
-
-function _isHostOwned(rel) {
-  try { return HOST_OWNED.has(String(rel).replace(/\\/g, '/')) } catch { return false }
-}
-
-function _changelog(action, file, extra) {
-  try {
-    let rel = file
-    try { rel = path.relative(process.cwd(), file).replace(/\\/g, '/') } catch { }
-    const rec = { ts: Date.now(), action, file: rel }
-    if (_isHostOwned(rel)) {
-      rec.hostOwned = true
-      process.stderr.write(`[host-owned-write] ${action} → ${rel}（宿主独占，应用端只提案）\n`)
-    }
-    if (extra) { for (const k in extra) rec[k] = extra[k] }
-    const dir = path.join(process.cwd(), '.ai-runner')
-    try { fs.mkdirSync(dir, { recursive: true }) } catch { }
-    fs.appendFileSync(path.join(dir, 'changelog.jsonl'), JSON.stringify(rec) + String.fromCharCode(10))
-  } catch { }
-}
 
 // [OPT] _writeText helper
-function _writeText(p, s) {
-  fs.mkdirSync(path.dirname(p), { recursive: true })
-  fs.writeFileSync(p, s)
-  _changelog('write', p)
-}
 
 // [OPT] _execBin helper
 // [OPT] _binPath helper
@@ -177,60 +142,17 @@ function _anchorReport(src, anchor, lines) {
 }
 
 const __AI__ = {
-  readJSON(p) {
-    try {
-      const s = fs.readFileSync(p, 'utf8')
-      return JSON.parse(s)
-    } catch (e) { throw new Error(`${p}: ${e.message}`) }
-  },
-  readText(p) { return fs.readFileSync(p, 'utf8') },
-  writeText(p, s) { return _writeText(p, s) },
+  readJSON(p) { return _io.readJSON(p) },
+  readText(p) { return _io.readText(p) },
+  writeText(p, s) { return _io._writeText(p, s) },
   join() { return path.join.apply(path, arguments) },
-  tryReadFile(p) {
-    try {
-      const c = fs.readFileSync(p, 'utf8')
-      return { ok: true, content: c }
-    } catch (e) { return { ok: false, error: e.message } }
-  },
+  tryReadFile(p) { return _io.tryReadFile(p) },
   readFile(p) { return this.readText(p) }, // [OPT] readFile delegates readText
-  writeFile(p, c) { return _writeText(p, c) },
-  deleteFile(p, opts) { // [delete-safe-v1]
-    // 为什么加目录守卫：日志显示 delete 累计 742 次（超 patch 340 次），误传目录会整棵删除
-    // 保留返回布尔值语义，避免破坏现有 "if (__AI__.deleteFile(x))" 用法
-    opts = opts || {}
-    try {
-      const st = fs.statSync(p)
-      if (st.isDirectory() && !opts.recursiveDir) {
-        process.stderr.write('[deleteFile] refused: directory (pass { recursiveDir: true } to delete)\n')
-        return false
-      }
-      fs.rmSync(p, { recursive: true, force: true }); _changelog('delete', p); return true
-    } catch { return false }
-  },
-  exists(p) { return fs.existsSync(p) },
-  listDir(p) {
-    try {
-      return safeReaddir(p).map(e => ({ name: e.name, isDir: e.isDirectory(), isFile: e.isFile() }))
-    } catch { return [] }
-  },
-  replaceInFile(p, opts) {
-    opts = opts || {}
-    const oldString = opts.oldString
-    const newString = opts.newString
-    const unique = opts.unique
-    if (typeof oldString !== 'string' || typeof newString !== 'string') {
-      throw new TypeError('replaceInFile: oldString/newString 必填')
-    }
-    const src = fs.readFileSync(p, 'utf8')
-    const count = src.split(oldString).length - 1
-    if (count === 0) throw new Error(`replaceInFile: oldString 未出现于 ${p}`)
-    if (unique && count > 1) throw new Error(`replaceInFile: oldString 在 ${p} 出现 ${count} 次，非唯一`)
-    fs.writeFileSync(p, src.split(oldString).join(newString))
-    // [host-owned-write-guard-v1] 补记账：本入口此前是 5 个写入口中唯一不进 changelog 的，
-    //   导致经它改写宿主独占文件时审计断链（见 _changelog 上方的门禁说明）。
-    _changelog('replace', p)
-    return { replaced: count }
-  },
+  writeFile(p, c) { return _io._writeText(p, c) },
+  appendText(p, s) { return _io.appendText(p, s) },
+  fileInfo(p) { return _io.fileInfo(p) },
+  deleteFile(p, opts) { return _io.deleteFile(p, opts) },
+  replaceInFile(p, opts) { return _io.replaceInFile(p, opts) },
   readFiles(glob) {
     const root = process.cwd()
     const out = []
@@ -665,8 +587,7 @@ const __AI__ = {
   walk(dir, opts) {
     opts = opts || {}
     const skip = new Set(opts.skip || ['.git', 'node_modules', 'dist', '.ai-runner', 'coverage', '.vite', '.npmrc', '.env', '.env.local', '.DS_Store'])
-    const extList = opts.ext || null
-    const extRe = extList ? new RegExp(`\\.(${extList.join('|')})$`) : null
+    const extRe = (() => { const e = Array.isArray(opts.ext) ? opts.ext.map(x => String(x).replace(/^\./, '')) : null; return e && e.length ? new RegExp(`\\.(${e.join('|')})$`) : null })() // [walk-ext-normalize-v1] 去前导点防静默空
     const maxDepth = opts.maxDepth || 6
     const out = []
     const go = function (p, d) {

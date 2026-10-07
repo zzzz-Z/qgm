@@ -28,6 +28,25 @@
   background: transparent;
   flex: 1 1 0;
   font-size: 12px;
+  /* [panel-overlay-v1] 浮层定位锚点：面板脱离文档流后不再压缩 chat-list */
+  position: relative;
+}
+
+/* [panel-overlay-v1] 任务看板改为浮层：绝对定位于时间线顶部，不占用下方空间。
+ * [WHY] 原为普通块，占据 chat-list 上方高度 ⇒ 消息区被压缩；浮层化后列表满高。
+ * [CONSTRAINT] 需 flow-timeline 有 position:relative 作包含块；无则不生效。
+ * [CHANGE-IMPACT] 不再侵占空间 ⇒ TerminalPane 的高度补偿逻辑失去意义（见 onPanelResize）。 */
+/* [panel-dock-right-v1] 靠右固定：居中悬浮会遮挡消息流中心；右上角常驻更贴近工具面板语义 */
+.panel-host {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 20;
+  width: fit-content;
+  max-width: min(420px, calc(100% - 24px));
+  border-radius: var(--radius-8);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
 }
 
 /* ── 消息流 ─────────────────────────────────────────── */
@@ -80,6 +99,46 @@
   color: var(--text-3);
   opacity: 1;
 }
+/* [ui-empty-guide-v1] 三入口引导（WO-20261007-02 阶段 C1）：
+   把 60% 空区换成可扫读的三步，替代单行「点击运行」。 */
+.empty-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  max-width: 420px;
+  text-align: left;
+}
+/* [ui-codex-align-v1] gap 10→8 对齐 4px 网格 */
+.empty-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.empty-step-n {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-11);
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-bg);
+}
+.empty-step-t {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.empty-step-d {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
 
 /* ── 卡片基础（script / text / done 共用去框） ──── */
 .script-card,
@@ -131,7 +190,8 @@
 }
 .question-state {
   margin-left: auto;
-  font-size: 10.5px;
+  /* [ui-type-scale-v1] 辅助文本下限 11px（原 10.5px） */
+  font-size: var(--font-11);
   color: var(--success, #3fb950);
 }
 .question-state.is-stale {
@@ -236,7 +296,8 @@
   content: '▸';
   flex: 0 0 auto;
   margin-left: 4px;
-  font-size: 9px;
+  /* [ui-type-scale-v1] 9px 低于下限，上调 11px */
+  font-size: var(--font-11);
   line-height: 1;
   color: var(--text-3);
   opacity: 0.6;
@@ -503,7 +564,7 @@
   align-self: center;
   margin: 0 auto 14px;
   padding: 7px 16px;
-  background: rgb(88 166 255 / 8%);
+  background: var(--primary-bg);
   border: 1px solid rgb(88 166 255 / 24%);
   border-radius: 999px;
   color: var(--primary, #58a6ff);
@@ -548,9 +609,9 @@
 }
 .wait-elapsed {
   margin-left: 4px;
-  padding: 1px 7px;
+  padding: 2px 8px;
   font:
-    600 10.5px/1.4 ui-monospace,
+    600 11px/1.4 ui-monospace,
     monospace;
   color: var(--primary, #58a6ff);
   background: rgb(88 166 255 / 10%);

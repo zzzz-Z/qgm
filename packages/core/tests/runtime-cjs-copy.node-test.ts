@@ -13,6 +13,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const SRC_DIR = path.join(ROOT, 'packages', 'core', 'src')
 const BUILD_ALL = path.join(ROOT, 'scripts', 'build-all.mjs')
 const COPY_RUNTIME = path.join(ROOT, 'scripts', 'copy-runtime.cjs')
+const COPY_RUNTIME_CORE = path.join(ROOT, 'packages', 'core', 'scripts', 'copy-runtime.cjs')
 
 /** 抽出文件里形如 ['a.cjs', 'b.cjs'] 的复制清单（含 .cjs 字面量的数组） */
 function readCopyList(file: string): Set<string> {
@@ -42,6 +43,7 @@ function referencedRuntimeCjs(): Set<string> {
 const REFERENCED = referencedRuntimeCjs()
 const BUILD_LIST = readCopyList(BUILD_ALL)
 const COPY_LIST = readCopyList(COPY_RUNTIME)
+const COPY_LIST_CORE = readCopyList(COPY_RUNTIME_CORE)
 
 test('源码确实引用了运行时 .cjs（防空转）', () => {
   assert.ok(REFERENCED.size >= 3, `expected >=3 referenced runtime cjs, got [${[...REFERENCED].join(', ')}]`)
@@ -62,6 +64,12 @@ test('build-all.mjs 复制清单覆盖全部被引用 .cjs', () => {
 test('copy-runtime.cjs 复制清单覆盖全部被引用 .cjs', () => {
   for (const n of REFERENCED) {
     assert.ok(COPY_LIST.has(n), `scripts/copy-runtime.cjs 缺 ${n} ⇒ dist/${n} 不会存在`)
+  }
+})
+
+test('core 版 copy-runtime.cjs 清单亦覆盖全部被引用 .cjs（消盲区）', () => {
+  for (const n of REFERENCED) {
+    assert.ok(COPY_LIST_CORE.has(n), `packages/core/scripts/copy-runtime.cjs 缺 ${n} ⇒ packages/core/dist/${n} 不会存在`)
   }
 })
 

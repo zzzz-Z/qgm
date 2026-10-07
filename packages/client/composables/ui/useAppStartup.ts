@@ -2,7 +2,7 @@
 // [WHY] App.vue 超 §4 组件 500 行红线；启动探测/切项目重开/无头 reply 订阅自成体系。
 // [CONSTRAINT] 只注入外部状态（hasWorkspace / sessionHistory / siteUrl 等）；其余走模块级 composable。
 // [CHANGE-IMPACT] App.vue 中 probeWorkspace / reopenAfterSwitchProject / maybeScheduleReopen /
-//                 subscribeHeadlessReply / replayRecentMessages + onUnmounted 全部下沉到本模块。
+//                 subscribeHeadlessReply / reconnectAfterRefresh + onUnmounted 全部下沉到本模块。
 
 import type { Ref } from 'vue'
 import { nextTick, onUnmounted } from 'vue'
@@ -11,6 +11,7 @@ import type { SessionEntry } from './useAppStorage'
 import { activeSessionId, loadActiveSessionIdBySite } from './useAppStorage'
 import { useToast } from './useToast'
 import { clearEvents } from './useEventStream'
+import { clearInbox } from '../runner/useScriptInbox'
 import { useSessionManager } from '../ai/useSessionManager'
 import { useAiWindow } from '../ai/useAiWindow'
 import { getTransport, transportKind } from '../ai/useAiTransport'
@@ -107,18 +108,20 @@ export function useAppStartup(deps: AppStartupDeps) {
     _offHeadlessState = null
   })
 
-  /** 刷新后向已开 AI 窗口请求重发最近消息（reply/summary/session-id），并恢复 headerUrl */
-  async function replayRecentMessages(): Promise<void> {
+  /**
+   * [refresh-reconnect-only-v1] 刷新后只重连油猴：**不发 request-replay / request-rescan**，
+   *  因而不会接收任何历史消息（不重放脚本、不重触发 DONE 重启、不重弹 ask/toast）。
+   *  同时清空噪音数据（时间线事件 + 脚本收件箱）；仅恢复 headerUrl。
+   *  用户手动发送提问才会重新开始；遗留任务由上层提示用户是否继续。
+   */
+  async function reconnectAfterRefresh(): Promise<void> {
     await nextTick()
     await promiseTimeout(800)
-    for (const w of aiWin.listWindows()) {
-      const target = aiWin.getWindowBySid(w.sid)
-      if (!target || target.closed) continue
-      try {
-        target.postMessage({ type: 'ai-runner:request-replay' }, '*')
-        target.postMessage({ type: 'ai-runner:request-rescan' }, '*')
-      } catch { /* ignore */ }
-    }
+    // [no-noise-v1] 清噪音：刷新后时间线与收件箱不应残留
+    try { clearEvents() } catch { /* 未就绪忽略 */ }
+    try { clearInbox() } catch { /* 未就绪忽略 */ }
+    // 仅确认窗口表连通，不发任何 postMessage（避免触发油猴重发历史消息）
+    void aiWin.listWindows()
     if (!activeSessionId.value) return
     const entry = sessionHistory.value.find(x => x.id === activeSessionId.value)
     if (entry && entry.url && siteUrl.value !== entry.url) setSiteUrl(entry.url)
@@ -141,5 +144,5 @@ export function useAppStartup(deps: AppStartupDeps) {
     lastVisit.value = Date.now()
   }
 
-  return { probeWorkspace, reopenAfterSwitchProject, maybeScheduleReopen, subscribeHeadlessReply, replayRecentMessages, syncActiveSessionFromSite, migrateLastVisit }
+  return { probeWorkspace, reopenAfterSwitchProject, maybeScheduleReopen, subscribeHeadlessReply, reconnectAfterRefresh, syncActiveSessionFromSite, migrateLastVisit }
 }

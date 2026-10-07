@@ -255,7 +255,8 @@
 .wl-group-count {
   margin-left: auto;
   padding: 1px 6px;
-  font-size: 10.5px;
+  /* [ui-type-scale-v1] 辅助下限 11px */
+  font-size: var(--font-11);
   font-weight: 600;
   color: var(--text-2);
   background: var(--surface-2, #21262d);
@@ -383,7 +384,7 @@
   display: inline-block;
   width: 100%;
   background: rgb(248 81 73 / 15%);
-  color: #f85149;
+  color: var(--danger);
 }
 .wl-diff :deep(.diff-hunk) {
   display: inline-block;
@@ -437,15 +438,6 @@
 }
 .skeleton-line.sk-w-85 {
   width: 85%;
-}
-@keyframes skeleton-pulse {
-  0%,
-  100% {
-    opacity: 0.55;
-  }
-  50% {
-    opacity: 0.9;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .skeleton-line {

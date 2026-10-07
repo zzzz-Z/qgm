@@ -13,7 +13,7 @@
 
 **证据**：`composables/ai/auto-loop/reply-handlers.ts:120` 与 `:203-205`
 
-```ts
+```text
 disarmTimer(inst) // 120：清掉 roundTimer + waitingTicker
 // …（中间略：:190-203 的分支判定与 settle 处理）
 // plain：不执行脚本，等下一轮
@@ -47,7 +47,7 @@ toast('AI 未输出 cjs/bash 代码块（纯文本回复），等待下一轮', 
 服务端把空 sid 归一化：`packages/core/src/server/attach-ws.ts:85,103` → `String(msg.sid || 'default')`。  
 而 `packages/core/src/headless/ai-headless.ts:190`：
 
-```ts
+```text
 function userDataDirFor(sid: string): string {
   return sid === 'default' ? baseUserDataDir : path.join(baseUserDataDir, sid) // ← 每个 sid 一个独立 profile
 }
@@ -68,7 +68,7 @@ function userDataDirFor(sid: string): string {
 
 **证据**：`components/diff/DiffViewer.vue:30, 61-71` vs `:353-359`
 
-```ts
+```text
 const ROW_HEIGHT = 22
 const spacerTop = computed(() => visibleRange.value.start * ROW_HEIGHT) // 69
 const spacerBottom = computed(() => Math.max(0, len - end) * ROW_HEIGHT) // 71

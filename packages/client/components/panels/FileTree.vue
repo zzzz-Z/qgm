@@ -51,7 +51,7 @@ const fold = useFoldState('default', 'filetree')
 const projectName = ref('工作区')
 
 // [ui-p1c-tree-expand-wire-v1] V4：展开态 + 持久化 + 懒加载触发统一由 composable 承载
-const { expanded, toggle, isOpen, rehydrate } = useTreeExpand(fold, loadChildren)
+const { toggle, isOpen, rehydrate } = useTreeExpand(fold, loadChildren)
 
 // [file-dialog] 双击文件弹窗查看详情 + 复制
 /** 双击文件后的查看弹窗状态；null 表示未打开 */

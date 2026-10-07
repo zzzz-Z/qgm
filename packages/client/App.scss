@@ -382,9 +382,9 @@
 }
 
 .hdr-right {
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .hdr button:not(.btn),
@@ -417,20 +417,20 @@
 }
 
 .ds-url {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  padding: 4px 12px !important;
-  background: var(--surface-2) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius-6) !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-6);
 
-  width: max-content !important;
-  min-width: 0 !important;
-  max-width: none !important;
-  flex: 0 0 auto !important;
-  transition: border-color 0.15s !important;
-  overflow: visible !important;
+  width: max-content;
+  min-width: 0;
+  max-width: none;
+  flex: 0 0 auto;
+  transition: border-color 0.15s;
+  overflow: visible;
 }
 
 .ds-url:hover,
@@ -439,32 +439,32 @@
 }
 
 .ds-value-static {
-  flex: 0 0 auto !important;
-  color: var(--text-2) !important;
-  font-size: 12px !important;
-  font-family: var(--mono, monospace) !important;
-  cursor: pointer !important;
+  flex: 0 0 auto;
+  color: var(--text-2);
+  font-size: 12px;
+  font-family: var(--mono, monospace);
+  cursor: pointer;
 
-  white-space: nowrap !important;
+  white-space: nowrap;
 
-  max-width: none !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .ds-input {
-  flex: 1 1 auto !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: transparent !important;
-  color: var(--text) !important;
-  font-size: 12px !important;
-  font-family: var(--mono, monospace) !important;
-  outline: 0 !important;
+  flex: 1 1 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-family: var(--mono, monospace);
+  outline: 0;
 
-  width: auto !important;
-  min-width: 0 !important;
-  max-width: none !important;
+  width: auto;
+  min-width: 0;
+  max-width: none;
 }
 
 .ask-count {
@@ -540,47 +540,47 @@
 }
 
 .tabs {
-  display: flex !important;
-  gap: 4px !important;
-  padding: 6px 16px !important;
-  background: var(--surface) !important;
-  border-bottom: 1px solid var(--border) !important;
-  flex-shrink: 0 !important;
+  display: flex;
+  gap: 4px;
+  padding: 6px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .theme-toggle {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 28px !important;
-  height: 28px !important;
-  padding: 0 !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 6px !important;
-  background: transparent !important;
-  color: var(--text-3) !important;
-  cursor: pointer !important;
-  transition: all 0.15s ease !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 .theme-toggle:hover {
-  color: var(--text) !important;
-  background: var(--surface-2) !important;
+  color: var(--text);
+  background: var(--surface-2);
 }
 
 .logo {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 24px !important;
-  height: 24px !important;
-  flex-shrink: 0 !important;
-  line-height: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  line-height: 0;
 }
 .logo svg {
-  display: block !important;
-  width: 20px !important;
-  height: 20px !important;
-  filter: drop-shadow(0 0 6px rgb(77 107 254 / 35%)) !important;
+  display: block;
+  width: 20px;
+  height: 20px;
+  filter: drop-shadow(0 0 6px rgb(77 107 254 / 35%));
 }
 
 .hdr {

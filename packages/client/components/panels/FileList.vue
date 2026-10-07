@@ -335,33 +335,11 @@ function splitPath(p: string) {
   border-right-color: transparent;
   animation: spin 0.7s linear infinite;
 }
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 [class*='file']:hover:not(.is-active) {
   background: var(--surface-2, #f9fafb);
 }
 
-.ghost-btn {
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-2);
-  border-radius: var(--radius-6);
-  padding: 4px 10px;
-  font-size: var(--font-12);
-  transition:
-    background 0.12s ease,
-    color 0.12s ease,
-    border-color 0.12s ease;
-}
-.ghost-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 6%);
-  color: var(--text);
-  border-color: rgb(255 255 255 / 8%);
-}
 .ghost-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;

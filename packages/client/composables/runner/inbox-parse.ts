@@ -31,6 +31,7 @@ export function normalizeForHash(code: string): string {
  * [WHY] 脚本头契约要求首部带这两条；解析失败时降级为空串不阻断
  * [CONSTRAINT] js/cjs 用 // 前缀、bash 用 # 前缀；desc / why 值截断至 200 字符
  * [CHANGE-IMPACT] 返回结构被 useRunner / run.ts 的 scriptDesc / scriptWhy 消费
+ * @param code 脚本源码
  * @param lang 目标语言，决定注释前缀
  */
 export function parseMeta(code: string, lang: 'js' | 'cjs' | 'bash'): { desc: string, why: string } {

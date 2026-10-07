@@ -20,7 +20,7 @@ async function loadAppendLessons() {
 
 /**
  * 追加一条踩坑记录；命中近重复时并入既有条目。
- * @returns {Promise<{added:number, mode:string}>}
+ * @returns {Promise<{added:number, mode:string}>} added=追加条数（0 表示并入既有），mode=写入方式
  */
 async function addLesson(title, body, rootDir) {
   const file = path.join(rootDir, '.ai-runner', 'lessons.md')

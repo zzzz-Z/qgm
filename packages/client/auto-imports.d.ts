@@ -9,7 +9,9 @@
 export {}
 declare global {
   const ACTIVE_SESSION_KEY: typeof import('./composables/ui/useAppStorage').ACTIVE_SESSION_KEY
+  const AUTO_FEEDBACK_MERGE_MS: typeof import('./composables/runner/feedback-merge').AUTO_FEEDBACK_MERGE_MS
   const DEFAULT_SITE_URL: typeof import('./composables/ai/useAiSite').DEFAULT_SITE_URL
+  const DONE_PREVIEW: typeof import('./utils/timeline-build').DONE_PREVIEW
   const EffectScope: typeof import('vue').EffectScope
   const KEY_BASH_POLICY: typeof import('./composables/ui/useAppStorage').KEY_BASH_POLICY
   const KEY_SANDBOX: typeof import('./composables/ui/useAppStorage').KEY_SANDBOX
@@ -24,10 +26,12 @@ declare global {
   const LS_CMD_HISTORY_KEY: typeof import('./utils/storage').LS_CMD_HISTORY_KEY
   const LS_SIDE_WIDTH_KEY: typeof import('./utils/storage').LS_SIDE_WIDTH_KEY
   const MODELS: typeof import('./composables/ai/useAiSite').MODELS
+  const PAGE_BOOT_TS: typeof import('./composables/ai/useAiReplyHandlers').PAGE_BOOT_TS
   const PHASE_DONE_CLASS: typeof import('./utils/timeline-build').PHASE_DONE_CLASS
   const PHASE_ERROR_CLASS: typeof import('./utils/timeline-build').PHASE_ERROR_CLASS
   const PHASE_LABEL: typeof import('./utils/timeline-build').PHASE_LABEL
   const PLAN_RESUME_MAX: typeof import('./composables/ai/auto-loop/state').PLAN_RESUME_MAX
+  const REFRESH_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').REFRESH_GUARD_MS
   const ROUND_MERGE_MS: typeof import('./composables/ai/auto-loop/pending-scripts').ROUND_MERGE_MS
   const SESSION_HISTORY_KEY: typeof import('./composables/ui/useAppStorage').SESSION_HISTORY_KEY
   const SUMMARY_INSTRUCTION: typeof import('./composables/ai/useAutoLoop').SUMMARY_INSTRUCTION
@@ -59,6 +63,7 @@ declare global {
   const buildLessonsBlock: typeof import('./composables/ai/load-lessons').buildLessonsBlock
   const buildLoopInitialPrompt: typeof import('./composables/ai/session-prompt').buildLoopInitialPrompt
   const buildLoopResultPrompt: typeof import('./composables/ai/auto-loop/loop-result-prompt').buildLoopResultPrompt
+  const buildMergedFeedbackText: typeof import('./composables/runner/feedback-merge').buildMergedFeedbackText
   const buildNewSessionPrompt: typeof import('./composables/ai/session-prompt').buildNewSessionPrompt
   const buildOneCard: typeof import('./utils/timeline-build').buildOneCard
   const buildPlanResumePrompt: typeof import('./composables/ai/auto-loop/loop-result-prompt').buildPlanResumePrompt
@@ -74,7 +79,6 @@ declare global {
   const clearProbeLog: typeof import('./composables/ui/render-probe').clearProbeLog
   const clearRulesCache: typeof import('./composables/ai/load-rules').clearRulesCache
   const clearScripts: typeof import('./composables/ai/auto-loop/pending-scripts').clearScripts
-  const clearSkillCache: typeof import('./composables/ai/skill-registry').clearSkillCache
   const clearSoftPause: typeof import('./composables/ai/useAutoLoop').clearSoftPause
   const computeCompensatedScrollTop: typeof import('./utils/panel-resize-scroll').computeCompensatedScrollTop
   const computed: typeof import('vue').computed
@@ -93,6 +97,7 @@ declare global {
   const createDecisionSubmitter: typeof import('./composables/ai/auto-loop/decision').createDecisionSubmitter
   const createDisposableDirective: typeof import('@vueuse/core').createDisposableDirective
   const createEventHook: typeof import('@vueuse/core').createEventHook
+  const createFeedbackMerge: typeof import('./composables/runner/feedback-merge').createFeedbackMerge
   const createGlobalState: typeof import('@vueuse/core').createGlobalState
   const createHeadlessTransport: typeof import('./composables/ai/useAiTransport').createHeadlessTransport
   const createInjectionState: typeof import('@vueuse/core').createInjectionState
@@ -117,6 +122,7 @@ declare global {
   const debouncedWatch: typeof import('@vueuse/core').debouncedWatch
   const defineAsyncComponent: typeof import('vue').defineAsyncComponent
   const defineComponent: typeof import('vue').defineComponent
+  const denoiseLog: typeof import('./utils/timeline-preview').denoiseLog
   const detectLang: typeof import('./utils/scriptMeta').detectLang
   const disarmTimer: typeof import('./composables/ai/useAutoLoop').disarmTimer
   const dismissToast: typeof import('./composables/ui/useToast').dismissToast
@@ -159,6 +165,7 @@ declare global {
   const inject: typeof import('vue').inject
   const injectLocal: typeof import('@vueuse/core').injectLocal
   const isActiveState: typeof import('./composables/ai/auto-loop/transitions').isActiveState
+  const isBlankRef: typeof import('./composables/ai/useAiWindowTable').isBlankRef
   const isDefined: typeof import('@vueuse/core').isDefined
   const isHeadless: typeof import('./composables/ai/useAiWindowSend').isHeadless
   const isInstActive: typeof import('./composables/ai/useAutoLoop').isInstActive
@@ -175,7 +182,6 @@ declare global {
   const killCurrent: typeof import('./composables/ai/useAutoLoop').killCurrent
   const lastExec: typeof import('./composables/ai/auto-loop/state').lastExec
   const lastHash: typeof import('./composables/ai/auto-loop/state').lastHash
-  const listSkills: typeof import('./composables/ai/skill-registry').listSkills
   const listWindows: typeof import('./composables/ai/useAiWindowTable').listWindows
   const loadActiveSessionId: typeof import('./composables/ui/useAppStorage').loadActiveSessionId
   const loadActiveSessionIdBySite: typeof import('./composables/ui/useAppStorage').loadActiveSessionIdBySite
@@ -298,6 +304,7 @@ declare global {
   const sendRotateTo: typeof import('./composables/ai/useAiWindowSend').sendRotateTo
   const sendStop: typeof import('./composables/ai/useAiWindowSend').sendStop
   const sendStopTo: typeof import('./composables/ai/useAiWindowSend').sendStopTo
+  const sendTimestamps: typeof import('./composables/runner/useRunner').sendTimestamps
   const setActiveLoopSessionId: typeof import('./composables/ai/useAutoLoop').setActiveLoopSessionId
   const setActiveModelId: typeof import('./composables/ui/useSitesStore').setActiveModelId
   const setActiveSessionIdGetter: typeof import('./composables/ai/useAutoLoop').setActiveSessionIdGetter
@@ -601,6 +608,9 @@ declare global {
   export type { Message } from './composables/ai/useSessionManager'
   import('./composables/ai/useSessionManager')
   // @ts-ignore
+  export type { FeedbackItem, FeedbackMergeOpts, FeedbackMerge } from './composables/runner/feedback-merge'
+  import('./composables/runner/feedback-merge')
+  // @ts-ignore
   export type { InboxItem } from './composables/runner/useScriptInbox'
   import('./composables/runner/useScriptInbox')
   // @ts-ignore
@@ -656,7 +666,9 @@ declare module 'vue' {
   interface GlobalComponents {}
   interface ComponentCustomProperties {
     readonly ACTIVE_SESSION_KEY: UnwrapRef<typeof import('./composables/ui/useAppStorage')['ACTIVE_SESSION_KEY']>
+    readonly AUTO_FEEDBACK_MERGE_MS: UnwrapRef<typeof import('./composables/runner/feedback-merge')['AUTO_FEEDBACK_MERGE_MS']>
     readonly DEFAULT_SITE_URL: UnwrapRef<typeof import('./composables/ai/useAiSite')['DEFAULT_SITE_URL']>
+    readonly DONE_PREVIEW: UnwrapRef<typeof import('./utils/timeline-build')['DONE_PREVIEW']>
     readonly EffectScope: UnwrapRef<typeof import('vue')['EffectScope']>
     readonly KEY_BASH_POLICY: UnwrapRef<typeof import('./composables/ui/useAppStorage')['KEY_BASH_POLICY']>
     readonly KEY_SANDBOX: UnwrapRef<typeof import('./composables/ui/useAppStorage')['KEY_SANDBOX']>
@@ -671,10 +683,12 @@ declare module 'vue' {
     readonly LS_CMD_HISTORY_KEY: UnwrapRef<typeof import('./utils/storage')['LS_CMD_HISTORY_KEY']>
     readonly LS_SIDE_WIDTH_KEY: UnwrapRef<typeof import('./utils/storage')['LS_SIDE_WIDTH_KEY']>
     readonly MODELS: UnwrapRef<typeof import('./composables/ai/useAiSite')['MODELS']>
+    readonly PAGE_BOOT_TS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['PAGE_BOOT_TS']>
     readonly PHASE_DONE_CLASS: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_DONE_CLASS']>
     readonly PHASE_ERROR_CLASS: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_ERROR_CLASS']>
     readonly PHASE_LABEL: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_LABEL']>
     readonly PLAN_RESUME_MAX: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['PLAN_RESUME_MAX']>
+    readonly REFRESH_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['REFRESH_GUARD_MS']>
     readonly ROUND_MERGE_MS: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['ROUND_MERGE_MS']>
     readonly SESSION_HISTORY_KEY: UnwrapRef<typeof import('./composables/ui/useAppStorage')['SESSION_HISTORY_KEY']>
     readonly SUMMARY_INSTRUCTION: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['SUMMARY_INSTRUCTION']>
@@ -706,6 +720,7 @@ declare module 'vue' {
     readonly buildLessonsBlock: UnwrapRef<typeof import('./composables/ai/load-lessons')['buildLessonsBlock']>
     readonly buildLoopInitialPrompt: UnwrapRef<typeof import('./composables/ai/session-prompt')['buildLoopInitialPrompt']>
     readonly buildLoopResultPrompt: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-result-prompt')['buildLoopResultPrompt']>
+    readonly buildMergedFeedbackText: UnwrapRef<typeof import('./composables/runner/feedback-merge')['buildMergedFeedbackText']>
     readonly buildNewSessionPrompt: UnwrapRef<typeof import('./composables/ai/session-prompt')['buildNewSessionPrompt']>
     readonly buildOneCard: UnwrapRef<typeof import('./utils/timeline-build')['buildOneCard']>
     readonly buildPlanResumePrompt: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-result-prompt')['buildPlanResumePrompt']>
@@ -739,6 +754,7 @@ declare module 'vue' {
     readonly createDecisionSubmitter: UnwrapRef<typeof import('./composables/ai/auto-loop/decision')['createDecisionSubmitter']>
     readonly createDisposableDirective: UnwrapRef<typeof import('@vueuse/core')['createDisposableDirective']>
     readonly createEventHook: UnwrapRef<typeof import('@vueuse/core')['createEventHook']>
+    readonly createFeedbackMerge: UnwrapRef<typeof import('./composables/runner/feedback-merge')['createFeedbackMerge']>
     readonly createGlobalState: UnwrapRef<typeof import('@vueuse/core')['createGlobalState']>
     readonly createHeadlessTransport: UnwrapRef<typeof import('./composables/ai/useAiTransport')['createHeadlessTransport']>
     readonly createInjectionState: UnwrapRef<typeof import('@vueuse/core')['createInjectionState']>
@@ -763,6 +779,7 @@ declare module 'vue' {
     readonly debouncedWatch: UnwrapRef<typeof import('@vueuse/core')['debouncedWatch']>
     readonly defineAsyncComponent: UnwrapRef<typeof import('vue')['defineAsyncComponent']>
     readonly defineComponent: UnwrapRef<typeof import('vue')['defineComponent']>
+    readonly denoiseLog: UnwrapRef<typeof import('./utils/timeline-preview')['denoiseLog']>
     readonly detectLang: UnwrapRef<typeof import('./utils/scriptMeta')['detectLang']>
     readonly disarmTimer: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['disarmTimer']>
     readonly dismissToast: UnwrapRef<typeof import('./composables/ui/useToast')['dismissToast']>
@@ -805,6 +822,7 @@ declare module 'vue' {
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
     readonly injectLocal: UnwrapRef<typeof import('@vueuse/core')['injectLocal']>
     readonly isActiveState: UnwrapRef<typeof import('./composables/ai/auto-loop/transitions')['isActiveState']>
+    readonly isBlankRef: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['isBlankRef']>
     readonly isDefined: UnwrapRef<typeof import('@vueuse/core')['isDefined']>
     readonly isHeadless: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['isHeadless']>
     readonly isInstActive: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['isInstActive']>
@@ -943,6 +961,7 @@ declare module 'vue' {
     readonly sendRotateTo: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['sendRotateTo']>
     readonly sendStop: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['sendStop']>
     readonly sendStopTo: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['sendStopTo']>
+    readonly sendTimestamps: UnwrapRef<typeof import('./composables/runner/useRunner')['sendTimestamps']>
     readonly setActiveLoopSessionId: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['setActiveLoopSessionId']>
     readonly setActiveModelId: UnwrapRef<typeof import('./composables/ui/useSitesStore')['setActiveModelId']>
     readonly setActiveSessionIdGetter: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['setActiveSessionIdGetter']>

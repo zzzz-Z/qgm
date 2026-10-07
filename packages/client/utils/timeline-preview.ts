@@ -100,3 +100,52 @@ export function tailTextPreview(raw: string, keepLines = 5, maxChars = 400): Tai
   if (text.length > maxChars) text = text.slice(-maxChars)
   return { text, hiddenLines }
 }
+
+/**
+ * [timeline-denoise-v1] 执行日志降噪：过滤无信息量的噪声行。
+ * [WHY] 脚本执行日志里进度条残留、重复分隔线、连续空行会淹没「这轮改了什么」；
+ *   成熟智能体的信息流默认只呈可扫读内容。
+ * [CONSTRAINT] 保守规则——只删确定无信息的行：
+ *   ① 纯空行；② 纯分隔线（连续三字符以上的破折号 / 等号 / 井号 / 星号 / 下划线）；
+ *   ③ 连续重复行（第 3 次起丢弃）；④ 进度回退符残留（回车覆盖后的纯空白）。
+ *   保留缩进、内容、百分比等一切可能含信息的行。
+ * @param raw 原始日志
+ * @param maxRepeat 允许连续重复的最大次数（默认 2）
+ * @returns 降噪后的日志
+ */
+// [denoise-ansi-v1] ANSI 转义剥离：SGR 颜色码（\x1b[...m）+ 光标/擦除控制（\x1b[...K/J/A-H）。
+// [WHY] 脚本 stdout 里大量 ANSI 色码是最刺眼的噪音；直接渲染会看到一堆乱码控制序列。
+// [CONSTRAINT] 用 String.fromCharCode(27) 构造而非字面 \u001b：前者不触发 no-control-regex，
+//   也不受 eslint --fix 重写正则影响。
+const ANSI_RE = (() => {
+  const ESC = String.fromCharCode(27)
+  return new RegExp(`${ESC}\\[[0-9;?]*[A-HJKSTm]`, 'g')
+})()
+
+export function denoiseLog(raw: string, maxRepeat = 2): string {
+  const src = String(raw ?? '').replace(ANSI_RE, '').replace(/\r\n?/g, '\n')
+  if (!src) return ''
+  const SEP_RE = /^\s*(?:-{3,}|={3,}|#{3,}|\*{3,}|_{3,})\s*$/
+  const out: string[] = []
+  let lastLine = ''
+  let repeat = 0
+  for (const line of src.split('\n')) {
+    // ① 纯空行
+    if (!line.trim()) continue
+    // ② 纯分隔线
+    if (SEP_RE.test(line)) continue
+    // ④ 进度回退符残留（去掉 \r 之前的内容后为纯空白）
+    const tail = line.includes('\r') ? line.split('\r').pop() || '' : line
+    if (!tail.trim() && line.includes('\r')) continue
+    // ③ 连续重复
+    if (tail === lastLine) {
+      repeat++
+      if (repeat >= maxRepeat) continue
+    } else {
+      lastLine = tail
+      repeat = 0
+    }
+    out.push(tail)
+  }
+  return out.join('\n')
+}

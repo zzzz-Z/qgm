@@ -9,6 +9,7 @@ import {
   getActiveWin,
   getActiveWinSid,
   getWindowBySid,
+  isBlankRef,
   listWindows,
   markWindowOpened,
   removeWindowBySid,
@@ -208,9 +209,18 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
   try {
     const found = window.open('', name)
     if (found && !found.closed && found !== window && found.location !== null) {
-      setWindowEntry(sid, { win: found, url: url.value })
-      setActiveWinSid(sid)
-      win = found
+      // [win-recover-blank-guard-v1] open('', name) 在目标窗口不存在时会**新建**一个同源
+      //   about:blank 空白页：该引用 closed===false 且 location 可读（同源），旧逻辑
+      //   会把它当「已找回的 AI 窗口」写进表。后果：postMessage(fill, 站点 origin) 帧
+      //   落到空白页被浏览器静默丢弃 → 日志假 ok:true、UI 假「已发送」、实际收不到脚本。
+      //   这与 probeWindowBySid 的同款识别一致：同源 about:blank = 新开空白页，非真窗口。
+      if (isBlankRef(found)) {
+        try { found.close() } catch { /* 用户已关闭，忽略 */ }
+      } else {
+        setWindowEntry(sid, { win: found, url: url.value })
+        setActiveWinSid(sid)
+        win = found
+      }
     }
   } catch { /* cross-origin 抛错视为找回失败 */ }
 
@@ -349,6 +359,7 @@ export {
   getActiveWin,
   getActiveWinSid,
   getWindowBySid,
+  isBlankRef,
   listWindows,
   removeWindowBySid,
   sendFill,

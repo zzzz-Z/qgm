@@ -81,7 +81,9 @@ it('端点未起：warn（不是 error），文案含端口与可复制的启动
   const d = evaluateUserscriptInfo(info({ serveAlive: false }))
   assert.equal(d.action, 'warn', '端点没起是「先启动它」这一可执行动作，不是故障')
   assert.match(d.message, /5178/)
-  assert.match(d.message, /serve-userscript\.mjs/)
+  // [serve-userscript-pm2-v1] 启动命令已从「node .ai-runner/tmp/serve-userscript.mjs」改为
+  //   pm2 托管：端点脚本迁到 scripts/（持久目录）并由 ecosystem.config.cjs 常驻。
+  assert.match(d.message, /pm2 start ecosystem\.config\.cjs --only ai-runner-userscript/)
   assert.equal(d.url, undefined)
 })
 

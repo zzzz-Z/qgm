@@ -2,6 +2,9 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
+  // [e2e-output-dir-v1] 产物统一落仓库根 .ai-runner/tmp（WO-20261007-03 段二）：
+  //   相对路径产物会落到 packages/client/ 污染包目录（实测 2026-10-07 出现 packages/client/.ai-runner/）。
+  outputDir: '../../.ai-runner/tmp/e2e-output',
   // [e2e-timeout-v1] 180s：beforeAll 钩子**同样**受本项封顶（实测：30s 下钩子内睡 45s 直接失败），
   //   而 headless-ws.spec.ts 的 beforeAll 要等 air-server 冷启动 —— 源码比 dist 新时它会先跑一次全量构建。
   // [CONSTRAINT] spec 内的自设预算必须小于本值，好让失败信息是「服务未就绪」而不是笼统的 hook timeout。

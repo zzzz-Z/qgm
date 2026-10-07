@@ -56,14 +56,10 @@ const {
   pickerIndex,
   pickerPos,
   pickerAnchor,
-  pickerX,
-  pickerY,
   pickerRef,
   pickerInputRef,
-  pickerFiles,
   pickerStyle,
   pickerFiltered,
-  pickerLoadFiles,
   pickerOpenAt,
   pickerClose,
   pickerMove,
@@ -371,12 +367,15 @@ defineExpose({ insertText })
         <div v-if="pickerOpen" ref="pickerRef" class="file-picker" :style="pickerStyle">
           <input
             ref="pickerInputRef" v-model="pickerQuery" class="fp-input" placeholder="搜索文件，Enter 选择，Esc 取消"
+            role="combobox" aria-autocomplete="list" :aria-expanded="true"
+            aria-controls="file-picker-listbox" :aria-activedescendant="`fp-opt-${pickerIndex}`"
             @keydown.down.prevent="pickerMove(1)" @keydown.up.prevent="pickerMove(-1)"
             @keydown.enter.prevent="pickerConfirm" @keydown.esc.prevent="pickerClose"
           >
-          <div class="fp-list">
+          <div id="file-picker-listbox" class="fp-list" role="listbox">
             <div
-              v-for="(f, i) in pickerFiltered" :key="f" class="fp-item" :class="{ active: i === pickerIndex }"
+              v-for="(f, i) in pickerFiltered" :id="`fp-opt-${i}`" :key="f" class="fp-item"
+              :class="{ active: i === pickerIndex }" role="option" :aria-selected="i === pickerIndex"
               @mousedown.prevent="pickerPick(f)"
             >
               {{ f }}

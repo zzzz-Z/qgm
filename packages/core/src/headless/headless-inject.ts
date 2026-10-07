@@ -318,6 +318,9 @@ export function detectReplyInPage() {
     const seenHashes = dedup.seenHashes
     let firstUnseen = null
     let firstUnseenMarked = null
+    // [fragment-guard-v1] 本回复内是否存在任意标记块（含已被 seen 记过的）——
+    //   存在则无标记块一律视为说明性片段，不再兜底推送。
+    let hasAnyMarked = false
     for (const pre of pres) {
       // [code-text-clean-v1] 优先从 <pre><code> 取文本，避开代码块头的语言标签与「复制/下载」按钮文字
       // [WHY] pre.textContent 会把头部按钮文字并入首行，污染后 #! 锚点失配、语言判定失败导致整块跳过
@@ -358,15 +361,20 @@ export function detectReplyInPage() {
       if (_cached && _cached.len === text.length) { _h = _cached.hash }
       else { _h = hash32(text); dedup._preCache.set(pre, { len: text.length, hash: _h }) }
       const item = { lang, code: text, hash: _h }
-      // [multi-script-v1] 已推送过的块不再参与选取，否则「首个未见」会永远卡在同一块上
-      if (seenHashes.includes(_h)) continue
-      if (!firstUnseen) firstUnseen = item
+      // [fragment-guard-v1] marked 须在 seen 跳过**之前**计算：
+      //   已推送过的标记块也要计入 hasAnyMarked（否则第二次 pick 会误判「本回复无标记块」而兜底推片段）。
       const marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
         || /^\s*\/\/\s*@desc\b/m.test(text)
         || /^\s*#\s*@desc\b/m.test(text)
+      if (marked) hasAnyMarked = true
+      // [multi-script-v1] 已推送过的块不再参与选取，否则「首个未见」会永远卡在同一块上
+      if (seenHashes.includes(_h)) continue
+      if (!firstUnseen) firstUnseen = item
       if (marked && !firstUnseenMarked) firstUnseenMarked = item
     }
-    return firstUnseenMarked || firstUnseen
+    if (firstUnseenMarked) return firstUnseenMarked
+    if (hasAnyMarked) return null
+    return firstUnseen
   }
 
   // 取当前页面主文本（AI 回复区）

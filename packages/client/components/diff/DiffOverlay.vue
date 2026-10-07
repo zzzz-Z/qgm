@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import DiffViewer from './DiffViewer.vue'
 
 /** 组件接收的 props 定义 */
@@ -13,21 +14,49 @@ const emit = defineEmits<{ close: [] }>()
 
 defineOptions({ name: 'DiffOverlay' })
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+// [modal-trap-v1] 焦点陷阱 + 初始聚焦（WO-20261007-02 遗留1）
+const boxRef = ref<HTMLElement | null>(null)
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  void nextTick(() => {
+    const box = boxRef.value
+    const first = box?.querySelector<HTMLElement>(FOCUSABLE)
+    ;(first || box)?.focus?.()
+  })
+})
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
-// [diff-overlay-esc-v1] 报告 §2.22：aria-label 承诺 Esc 关窗，但原实现无任何 keydown 处理
+// [diff-overlay-esc-v1] Esc 关窗；[modal-trap-v1] Tab 在弹窗内循环
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape') {
     e.preventDefault()
     emit('close')
+    return
   }
+  if (e.key !== 'Tab') return
+  const box = boxRef.value
+  if (!box) return
+  const nodes = Array.from(box.querySelectorAll<HTMLElement>(FOCUSABLE))
+  if (!nodes.length) { e.preventDefault(); return }
+  const first = nodes[0]
+  const last = nodes[nodes.length - 1]
+  const cur = document.activeElement as HTMLElement | null
+  if (e.shiftKey && (cur === first || !box.contains(cur))) { e.preventDefault(); last.focus() }
+  else if (!e.shiftKey && cur === last) { e.preventDefault(); first.focus() }
 }
 </script>
 
 <template>
   <div
+    ref="boxRef"
     class="diff-overlay"
+    tabindex="-1"
+    role="dialog"
+    aria-modal="true"
+    :aria-label="`${props.fileName} 的 diff 预览`"
     @click.self="emit('close')"
   >
     <div class="diff-overlay-panel">

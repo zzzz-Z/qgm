@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..', '..')
 const HELPERS = path.join(ROOT, 'packages', 'core', 'src', 'helpers.cjs')
+const HELPERS_IO = path.join(ROOT, 'packages', 'core', 'src', 'helpers-io.cjs')
 const NL = String.fromCharCode(10)
 
 const EXPECTED_HOST_OWNED = ['packages/core/SYSTEM.md']
@@ -55,6 +56,11 @@ function loadSandbox() {
       if (m === 'node:fs') return fakeFs
       if (m === 'node:path') return path
       if (m === 'node:child_process') return { execFileSync: () => '' }
+      if (m === './helpers-io.cjs') {
+        const src = fs.readFileSync(path.join(ROOT, 'packages', 'core', 'src', 'helpers-io.cjs'), 'utf8')
+        const wrapped = `;(function(){ const module = { exports: {} };${src}; return module.exports })()`
+        return vm.runInContext(wrapped, sandbox, { filename: 'helpers-io.cjs' })
+      }
       throw new Error(`unexpected require: ${m}`)
     },
   }
@@ -71,7 +77,7 @@ afterAll(() => { expect(fs.readFileSync(path.join(ROOT, 'packages/core/SYSTEM.md
 
 describe('宿主独占写入门禁', () => {
   it('HOST_OWNED 恰为预期集合（新增须同步测试，防静默扩表）', () => {
-    const src = fs.readFileSync(HELPERS, 'utf8')
+    const src = fs.readFileSync(HELPERS_IO, 'utf8')
     const m = src.match(/const HOST_OWNED = new Set\(\[([^\]]*)\]\)/)
     expect(m, '未找到 HOST_OWNED 声明').not.toBeNull()
     const keys = (m as RegExpMatchArray)[1]
@@ -101,8 +107,8 @@ describe('宿主独占写入门禁', () => {
   })
 
   it('replaceInFile 也经漏斗（此前 5 个写入口中唯一不记账的）', () => {
-    const src = fs.readFileSync(HELPERS, 'utf8')
-    const body = src.slice(src.indexOf('replaceInFile(p, opts)'), src.indexOf('readFiles(glob)'))
+    const src = fs.readFileSync(HELPERS_IO, 'utf8')
+    const body = src.slice(src.indexOf('replaceInFile(p, opts)'), src.indexOf('module.exports'))
     expect(body, `replaceInFile 未调用 _changelog${NL}${body.slice(0, 400)}`).toContain('_changelog(\'replace\', p)')
   })
 })

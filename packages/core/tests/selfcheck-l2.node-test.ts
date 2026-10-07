@@ -140,7 +140,7 @@ test('G12: artifactCandidates 映射 core / client / apps，非源码为空', ()
   assert.equal(mapToArtifact('docs/x.md'), null)
 })
 test('G12: probeOne 映射不到 → skipped ok', () => {
-  const it = probeOne('docs/plan/workorder-selfcheck-phase2-L2.md')
+  const it = probeOne('docs/example.md')
   assert.equal(it.ok, true)
   assert.ok(it.details?.some(d => d.includes('[skipped]')))
 })

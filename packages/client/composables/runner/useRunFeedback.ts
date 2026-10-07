@@ -33,7 +33,7 @@ export function shouldIncludeChanges(
  * [WHY] UI 据此走"只读展示"分支，不显示回滚 / 保存按钮
  * [CONSTRAINT] 五个条件任一不满足即 false：无结果 / 非 ok / runId 空 / 有变更 / 循环活动中
  * [CHANGE-IMPACT] 决定 UI 按钮可见性；改动条件会影响用户可执行的操作集
- * @param r 最近一次运行结果；null 表示无结果
+ * @param result 最近一次运行结果；null 表示无结果
  * @param isLoopActive 当前是否处于循环运行中
  */
 export function isReadonlyResult(result: RunResponse | null, isLoopActive: boolean): boolean {

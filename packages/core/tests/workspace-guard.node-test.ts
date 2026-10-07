@@ -52,10 +52,16 @@ it('铁律 2: packages/* 里禁止 listen / createServer / import vite / @hono/n
     ['import \'@hono/node-server\'', /from\s+['"]@hono\/node-server['"]/],
   ]
   const violators: string[] = []
+  // [workspace-guard-v5] 测试文件对 listen/createServer 豁免：本地 stub server（127.0.0.1:0 随机端口）
+  //   是验证工具，不构成「宿主服务入口回流 core」（铁律 2 初衷是防生产代码变宿主）。
+  //   import vite / @hono/node-server 即使测试里也禁止，故不豁免。
+  const STUB_EXEMPT = new Set(['listen(', 'createServer'])
   for (const f of walk(path.join(ROOT, 'packages'))) {
     if (BUILD_CONFIG_EXEMPT.test(rel(f))) continue
+    const isTest = /(?:^|\/)tests\/|\.node-test\.ts$/.test(rel(f))
     const txt = fs.readFileSync(f, 'utf8')
     for (const [name, re] of patterns) {
+      if (isTest && STUB_EXEMPT.has(name)) continue
       if (re.test(txt)) violators.push(`${rel(f)}: ${name}`)
     }
   }

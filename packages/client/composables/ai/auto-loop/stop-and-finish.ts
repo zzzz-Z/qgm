@@ -130,7 +130,8 @@ export function createStopAndFinish(deps: StopAndFinishDeps) {
       void fetch('/__ai/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'set', sid: inst.sessionId.value, todo: [], done: [] }),
+        // [board-reconcile-v1] clear 来源标记：服务端据此刻分 finish/init 样本（WO-20261007-01 段二）
+        body: JSON.stringify({ mode: 'set', sid: inst.sessionId.value, todo: [], done: [], clear: 'finish' }),
       }).catch(() => {})
     }
     // [auto-idle-after-finish-v1] 整轮结束自动回初始态：按钮切「发送」

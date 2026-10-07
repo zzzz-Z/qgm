@@ -61,6 +61,8 @@ export async function startHandoff(): Promise<void> {
  * AI 返回总结后触发：把摘要发给新会话创建流程
  * [CONSTRAINT] 只处理 state='handoff' 的循环；text 为空时用 localFallbackSummary 兜底
  * [CHANGE-IMPACT] 会 disarm 当前超时定时器，并 arm 新的（等待 new-session-created）
+ * @param text AI 返回的总结文本
+ * @param sessionId 会话 id
  * @param degraded 服务端标记的降级摘要；当前仅形参保留（trace-removed 后无消费方）
  */
 export async function onSummary(text: string, sessionId: string, degraded: boolean): Promise<void> {
@@ -118,6 +120,7 @@ function localFallbackSummary(inst: LoopInstance): string {
  * 启动交接超时定时器（默认 30s）
  * [CONSTRAINT] 会先 disarm 现有定时器，保证同一时刻最多一个挂起
  * [CHANGE-IMPACT] 超时未收到对端回调 → handoffFail；对端回调必须先 handoffDisarm 再 arm
+ * @param inst 循环实例
  * @param msg 超时时展示给用户的错误原因
  */
 function handoffArm(inst: LoopInstance, msg: string) {

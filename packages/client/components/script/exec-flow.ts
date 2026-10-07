@@ -2,6 +2,8 @@
 import { TOAST_MEDIUM } from '../../utils/toast-durations'
 import type { Ref } from 'vue'
 import type { ChangeType } from '../../types'
+// [auto-feedback-merge-v1] 非循环自动回传合并窗（显式 import，勿依赖 auto-import：vitest 裸跑）
+import { createFeedbackMerge } from '../../composables/runner/feedback-merge'
 
 /** 执行结果（ScriptPanel 用到的子集） */
 export interface ExecResult {
@@ -30,6 +32,8 @@ export interface ExecFlowDeps {
   softPause: () => void
   // [loop-no-pause-v1] R1：循环活动时禁止 softPause，需注入循环状态
   isLoopActive: Ref<boolean>
+  /** [auto-feedback-merge-v1] 合并窗时长覆盖（测试注入小值；缺省 3000ms） */
+  autoFeedbackMergeMs?: number
 }
 
 /**
@@ -37,12 +41,34 @@ export interface ExecFlowDeps {
  * @param deps - 依赖面
  */
 export function createExecFlow(deps: ExecFlowDeps) {
-  const { running, result, changes, liveStdout, liveStderr, copied, runningCommand, pushCmdHistory, buildAiPrompt, confirmDialog, startAiWaiting, softPause, isLoopActive } = deps
+  const { running, result, changes, liveStdout, liveStderr, copied, runningCommand, pushCmdHistory, buildAiPrompt, confirmDialog, startAiWaiting, softPause, isLoopActive, autoFeedbackMergeMs } = deps
   const { toast } = useToast()
   const execPolicyOverride = ref<string | null>(null)
   const lastAutoAskedRunId = ref('')
   // [copyout-timer-v1] copied 提示的 timer 句柄；连续回传时先清旧的
   let copiedTimer: ReturnType<typeof setTimeout> | null = null
+
+  // [auto-feedback-merge-v1] 非循环自动回传出站口：不再逐次 copyAndFill，静默 Δ 后合成一条。
+  //   循环活动时 isActive 返回 false ⇒ 到点丢弃整个缓冲且不重排（回传权归循环引擎，
+  //   与 ScriptPanel 的 [loop-feedback-authority-v2] 同语义）。
+  const feedbackMerge = createFeedbackMerge(async (items, mergedText) => {
+    const r = await copyAndFill(mergedText)
+    // [send-fail-no-pause-v1] 仅发送成功时暂停；[loop-no-pause-v1] R1：循环活动时不得 softPause
+    if (r !== 'failed' && !isLoopActive.value) softPause()
+    if (r === 'failed') {
+      toast('发送失败，已复制到剪贴板', 'warn', TOAST_MEDIUM)
+      return
+    }
+    const okN = items.filter(i => i.ok).length
+    emit('ai:feedback', `📤 回传 AI：${items.length} 条执行结果（成功 ${okN} · 失败 ${items.length - okN}）`, { payload: { prompt: mergedText.slice(0, 8000), changes: items.flatMap(i => i.changes), exit: items[items.length - 1]?.exit ?? -1, ok: items.some(i => i.ok), merged: items.length } })
+    copied.value = true
+    startAiWaiting()
+    if (copiedTimer) clearTimeout(copiedTimer)
+    copiedTimer = setTimeout(() => { copied.value = false; copiedTimer = null }, 2000)
+  }, {
+    delayMs: autoFeedbackMergeMs,
+    isActive: () => !isLoopActive.value,
+  })
 
   /** 用户批准黑名单命令后以 always 策略重跑（递归调用 execCmd） */
   async function execCmdInternal(cmd: string, policy: string, cmdText: string): Promise<void> {
@@ -123,7 +149,12 @@ export function createExecFlow(deps: ExecFlowDeps) {
     }
   }
 
-  /** 把本次执行结果作为 prompt 回传 AI（去重、暂停） */
+  /**
+   * 把本次执行结果作为 prompt 回传 AI（去重、合并窗、暂停）
+   * [auto-feedback-merge-v1] 出站不再在此处直接发生：构造好的 prompt 入合并窗，
+   *   静默 Δ 后由 flush 统一 copyAndFill（单条文案逐字等价，多条合成一条带统计头部）。
+   *   去重（lastAutoAskedRunId）仍在入窗前判——重复结果不入窗。
+   */
   async function copyOutput(force = false): Promise<void> {
     if (!result.value) return
     try {
@@ -132,23 +163,14 @@ export function createExecFlow(deps: ExecFlowDeps) {
       lastAutoAskedRunId.value = runKey
       const text = await buildAiPrompt()
       if (!text) return
-      const r = await copyAndFill(text)
-      // [send-fail-no-pause-v1] 原顺序 `if (r) softPause()` 在 'failed' 判定之前，
-      // 'failed' 是真值 → 发送失败仍先暂停循环（报告 §2.10）。改为仅成功时暂停。
-      // [loop-no-pause-v1] R1：循环活动时不得 softPause ——
-      //   回传权已归循环引擎（executeItemInner），ScriptPanel 侧不再置暂停
-      if (r !== 'failed' && !isLoopActive.value) softPause()
-      if (r === 'failed') {
-        toast('发送失败，已复制到剪贴板', 'warn', TOAST_MEDIUM)
-        return
-      }
-      emit('ai:feedback', `📤 回传 AI：${changes.value.length} 文件 · exit ${result.value?.code ?? -1}`, { payload: { prompt: text.slice(0, 8000), changes: changes.value.map(c => ({ path: c.path, type: c.type })), exit: result.value?.code ?? -1, ok: result.value?.ok ?? false } })
-      copied.value = true
-      startAiWaiting()
-      if (copiedTimer) clearTimeout(copiedTimer)
-      copiedTimer = setTimeout(() => { copied.value = false; copiedTimer = null }, 2000)
+      feedbackMerge.stage({
+        text,
+        ok: result.value.ok,
+        exit: result.value.code,
+        changes: changes.value.map(c => ({ path: c.path, type: c.type })),
+      })
     } catch (e) { log.error(e) }
   }
 
-  return { execCmdInternal, execCmd, copyOutput }
+  return { execCmdInternal, execCmd, copyOutput, feedbackMerge }
 }

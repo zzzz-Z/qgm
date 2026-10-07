@@ -56,6 +56,8 @@ export function createPipeline(): Pipeline {
  * 将某阶段置为 running 并记录起始时间
  * [CONSTRAINT] 会清空 error 字段，使重复运行不复用上次失败信息
  * [CHANGE-IMPACT] 变更返回 pipeline 的引用语义（当前原地改）会影响调用方是否需重新赋值
+ * @param pipeline 流水线对象（原地改并返回）
+ * @param segment 阶段名
  * @param now 时间戳，默认 Date.now()；测试时可注入固定值
  */
 export function markRunning(pipeline: Pipeline, segment: SegmentName, now: number = Date.now()): Pipeline {
@@ -68,6 +70,8 @@ export function markRunning(pipeline: Pipeline, segment: SegmentName, now: numbe
  * 将某阶段置为 ok 并计算 durationMs
  * [CONSTRAINT] 若阶段未曾 running（无 startedAt），用 now 兜底使 durationMs = 0；避免 NaN
  * [CHANGE-IMPACT] durationMs 被 run.ts 用于慢阶段识别与前端展示
+ * @param pipeline 流水线对象（原地改并返回）
+ * @param segment 阶段名
  * @param now 结束时间戳；测试时可注入固定值
  */
 export function markOk(pipeline: Pipeline, segment: SegmentName, now: number = Date.now()): Pipeline {
@@ -81,6 +85,8 @@ export function markOk(pipeline: Pipeline, segment: SegmentName, now: number = D
  * 将某阶段置为 failed 并记录错误与耗时
  * [CONSTRAINT] error 会原样写入并落到 .ai-runner/changelog；调用方需截断超长堆栈避免污染日志
  * [CHANGE-IMPACT] hasFailed / run.ts 的失败诊断依赖此状态值
+ * @param pipeline 流水线对象（原地改并返回）
+ * @param segment 阶段名
  * @param error 失败原因（建议单行化，避免换行破坏 NDJSON）
  * @param now 结束时间戳；测试时可注入固定值
  */

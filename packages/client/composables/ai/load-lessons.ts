@@ -63,14 +63,27 @@ export async function buildLessonsBlock(): Promise<string> {
   const entries = splitEntries(stripPreface(md))
   if (!entries.length) return ''
 
-  // 从最新（文件尾）往前累计；至少保留 1 条，避免预算过小时注入空块
+  // [lessons-window-hygiene-v1] 从最新（文件尾）往前累计，但**待复核条目占比封顶**：
+  //   台账 append-only ⇒ 新采集（缺省待复核）必堆尾部，纯从尾截会让 AI 读到 100% 未验证内容。
+  //   封顶后仍保留时间顺序（unshift），只是跳过会超配额的 pending 条目、继续往前找已复核的。
+  //   [CONSTRAINT] 窗口只剩 1 条时豁免（nextTotal>1 才判）——否则全新库会一条都注不进。
+  const MAX_PENDING_RATIO = 0.4
+  const isPendingEntry = (e: string): boolean => {
+    const first = e.split('\n').slice(1).find(l => l.trim() !== '') || ''
+    return !/^\[(?:VERIFIED|REJECTED|STALE)\]/i.test(first.trim())
+  }
   const picked: string[] = []
   let used = 0
+  let pendingN = 0
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i]
     if (picked.length && used + e.length > LESSONS_BUDGET) break
+    const isP = isPendingEntry(e)
+    const nextTotal = picked.length + 1
+    if (isP && nextTotal > 1 && (pendingN + 1) / nextTotal > MAX_PENDING_RATIO) continue
     picked.unshift(e)
     used += e.length + 2
+    if (isP) pendingN++
   }
   const truncated = picked.length < entries.length
 

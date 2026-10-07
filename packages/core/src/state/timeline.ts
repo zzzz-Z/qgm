@@ -46,6 +46,9 @@ interface IndexEntry {
  * [CONSTRAINT] 目录布局 .ai-runner/runs/{sessionId}/{runId} 与 run.ts 的 runDir 保持兼容；
  * 修改此布局会破坏历史快照读取
  * [CHANGE-IMPACT] 被 writeRoundSnapshot / readRoundSnapshot / listRounds 共享
+ * @param root 仓库根目录
+ * @param sessionId 会话 id
+ * @param runId 运行 id
  * @param round 轮次编号；listRounds 传 0 只用 dir 字段
  */
 export function resolvePaths(root: string, sessionId: string, runId: string, round: number): TimelinePaths {

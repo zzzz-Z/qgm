@@ -26,7 +26,7 @@ function tag(prefix, str) {
  * [WHY] 前端 vite proxy 与后端 listen 需用同一端口；探活后再交给两侧
  * [CONSTRAINT] 用 net.createServer 而非 fetch：探活不求对端响应，只看 bind 是否成功
  * @param {number} port 待检测端口
- * @returns {Promise<boolean>}
+ * @returns {Promise<boolean>} 端口空闲返回 true；被占用或绑定失败返回 false
  */
 function isPortFree(port) {
   return new Promise((resolve) => {

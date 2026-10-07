@@ -262,7 +262,8 @@ function onScroll(e: Event) {
   color: var(--text, #1f2d3d);
 }
 .diff-badge {
-  font-size: 10px;
+  /* [ui-type-scale-v1] 辅助下限 11px（原 10px） */
+  font-size: var(--font-11);
   padding: 2px 6px;
   border-radius: var(--radius-4);
   font-weight: 700;

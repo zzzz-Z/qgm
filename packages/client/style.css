@@ -328,3 +328,40 @@ button:focus-visible:where([class*='chip']) {
     scroll-behavior: auto !important;
   }
 }
+
+/* [ui-primitive-v1] 通用幽灵按钮：原为 FileList/file-tree 两份逐字重复的 scoped 副本 */
+.ghost-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  border-radius: var(--radius-6);
+  padding: 4px 10px;
+  font-size: var(--font-12);
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.ghost-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text);
+  border-color: rgb(255 255 255 / 8%);
+}
+
+/* [ui-primitive-v1] 全局旋转动画：原在 FileList/file-tree 各有一份逐字副本 */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* [ui-primitive-v1] 全局骨架脉动：原在 file-tree/worklog-pane 各一份逐字副本 */
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}

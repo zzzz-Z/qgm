@@ -21,6 +21,8 @@ import { selfcheckHono } from './selfcheck.js'
 import { restartHono } from './restart.js'
 // [send-trace-v1] 出站 fill 留痕入口（页面通道每次投递上报一条 ⇒ logs/send.jsonl）
 import { sendLogHono } from './send-log.js'
+// [wiki-proxy-v1] LLM Wiki 知识库代理（工作台「知识库」面板消费）
+import { wikiHono } from './wiki.js'
 
 /** 所有子路由 Hono 应用实例列表 */
 export const HONO_SUB_APPS = [
@@ -44,6 +46,7 @@ export const HONO_SUB_APPS = [
   selfcheckHono,
   restartHono,
   sendLogHono,
+  wikiHono,
 ]
 
 // 已迁移到 Hono 的路径前缀——dispatchHono 只对这些前缀做 bridge
@@ -72,4 +75,6 @@ export const HONO_PREFIXES = [
   '/selfcheck',
   '/restart',
   '/send-log',
+  // [wiki-proxy-v1] 与工作区无关，故在 server/handle.ts 的 WORKSPACE_EXEMPT_PREFIXES 中豁免
+  '/wiki',
 ]

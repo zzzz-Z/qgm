@@ -143,6 +143,15 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 - **`scripts/anchors.json` 的 `file` 必须是相对仓库根的完整路径**：校验器只做
   `path.join(ROOT, file)`，没有 base 解析。写成 `client/App.vue` 这类短路径会直接 MISS
   （历史上曾一次 44 条同时失败）。新增锚点前先跑 `pnpm session:start` 确认全绿。
+  **反向同样会 MISS**：删除/改名「被锚点引用的字串」同样红，而**全量 vitest 不覆盖锚点**
+  （`anchors:verify` 是独立闸门）⇒ 交付前单跑 `pnpm anchors:verify` 或 `pnpm session:start`；
+  vitest 全绿 ≠ preflight 全绿（实测 2026-10-06：删 `useAppStartup.ts` 的 `ai-runner:request-replay`
+  后仍报 1380 passed，但锚点 2 条 MISS）。
+- **pm2 重启归宿主侧独占，用户显式授权时应用端可代执行**（`instance-ownership-v1` 的边界）：
+  默认只有宿主侧对 5175 实例做启动/重启/kill/端口操作（杀了会自动复活并造成端口漂移）。
+  **用户显式授权**时应用端可代执行 `pm2 restart`，但须满足两条：
+  ① 授权来源可指（用户原话或工单明文），② 当轮回执如实记录（执行时刻 + 授权来源）。
+  构建（`pnpm build`）始终允许；重启不自行发起，未获授权时只写「产物已更新，请宿主侧重启」。
 - 不执行 `rm -rf` / `sudo` / `git reset --hard` / `git push -f` 等破坏性命令。
 - 禁止 `as any` / `as unknown as`（除非注释写明理由）。
 - 不手工编辑自动生成的文件（`auto-imports.d.ts` 等）。
@@ -170,6 +179,11 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   的 `SKIP_PATHS` 又显式豁免它 —— 放在那里的工单既不进 git 变更、也不进索引，应用端开箱看不到
   （2026-10-05 实测，该目录已积压 4 份 workorder）。草稿可留 `docs/plan/`，**派发前移到 `docs/`**；
   移入后 `pnpm docs:verify` 会双向守（实测把索引里的工单名改掉 → 报「悬空链接 + 未收录」exit 2）。
+
+- **`pnpm test:e2e` 报 `ECONNREFUSED 127.0.0.1:<端口>` 时先读 `.ai-runner/.server-port`**（`[port-drift-file-v1]`）：
+  该文件会被历史运行残留旧端口值，vite 代理据此指向错误端口。后端实际端口看 `pm2 jlist` 或 `curl 5175`。
+- **代执行 `pm2 restart` 的当轮脚本会返回 `Failed to fetch` 属预期**（实例重启导致 HTTP 通道瞬断）；
+  下一轮探活（`curl 5175`）即恢复，重试须**跨轮**，不得在原轮判定为失败。
 
 ## 详见
 

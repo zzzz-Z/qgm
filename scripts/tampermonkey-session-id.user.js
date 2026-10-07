@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.5.0
+// @version      1.6.0
 // @description  回传会话 ID/用量/AI 回复到工作台；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -348,6 +348,8 @@
     //   这边用闭包内的 seenHashes Set，故去重写法不同）；两处不得只改一处。
     let firstUnseen = null
     let firstUnseenMarked = null
+    // [fragment-guard-v1] 同 headless-inject.ts：本回复内存在任意标记块时，无标记块视为片段不推。
+    let hasAnyMarked = false
     for (const pre of pres) {
       // [code-text-clean-v1] 优先从 <pre><code> 取文本，避开代码块头的语言标签与「复制/下载」按钮文字
       // [WHY] pre.textContent 会把头部按钮文字并入首行，污染后 #! 锚点失配、语言判定失败导致整块跳过
@@ -379,15 +381,20 @@
         if (stillStreamingReply()) continue
       }
       const item = { lang, code: text, hash: hash32(text) }
-      // [multi-script-v1] 已推送过的块不再参与选取，否则「首个未见」会永远卡在同一块上
-      if (seenHashes.has(item.hash)) continue
-      if (!firstUnseen) firstUnseen = item
+      // [fragment-guard-v1] marked 须在 seen 跳过**之前**计算：
+      //   已推送过的标记块也要计入 hasAnyMarked（否则第二次 pick 会误判「本回复无标记块」而兜底推片段）。
       const marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
         || /^\s*\/\/\s*@desc\b/m.test(text)
         || /^\s*#\s*@desc\b/m.test(text)
+      if (marked) hasAnyMarked = true
+      // [multi-script-v1] 已推送过的块不再参与选取，否则「首个未见」会永远卡在同一块上
+      if (seenHashes.has(item.hash)) continue
+      if (!firstUnseen) firstUnseen = item
       if (marked && !firstUnseenMarked) firstUnseenMarked = item
     }
-    return firstUnseenMarked || firstUnseen
+    if (firstUnseenMarked) return firstUnseenMarked
+    if (hasAnyMarked) return null
+    return firstUnseen
   }
 
   // [multi-script-v1] 是否还有「尚未推送」的合格块；决定推送后要不要再跑一次分类
@@ -643,10 +650,7 @@
 
       // [reply-mark-v1] 标记行优先：首行是 `ASK` / `DONE` / `HANDOFF` / `TEXT` 的回复不走脚本分类
       //   （否则带示例代码块的 DONE 总结会被当脚本重新执行）；与 headless-inject.ts 同构
-      const marks = (() => {
-        try { return scanReplyMarks(extractReplyMd(latestAssistantRoot() || document)) }
-        catch { return { script: -1, ask: -1, done: -1, handoff: -1, text: -1 } }
-      })()
+      const marks = scanReplyMarks(extractReplyMd(latestAssistantRoot() || document))
       const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0
       // [md-fence-fallback-v1] DOM 提取失败时兜底 Markdown 围栏提取
       const s = markedNonScript ? null : (extractLatestScript() || extractScriptFromMarkdown())
@@ -1037,7 +1041,10 @@
       try {
         for (const m of _msgBuf) {
           if (m && (m.type === 'ai-runner:reply' || m.type === 'ai-runner:session-id')) {
-            if (window.opener && !window.opener.closed) window.opener.postMessage(m, '*')
+            // [replay-no-autorun-v1] 重放的是历史消息，须打 rescan 标记：
+            //   否则工作台把它当「新脚本」走自动执行，刷新即重跑残留脚本。
+            const mm = m.type === 'ai-runner:reply' ? Object.assign({}, m, { rescan: true }) : m
+            if (window.opener && !window.opener.closed) window.opener.postMessage(mm, '*')
           }
         }
       } catch { /* ignore */ }
