@@ -68,8 +68,8 @@ export function detectReplyInPage() {
   }
 
   // [dedup-baseline-v1] 基线守卫：reset 后未新增 assistant 消息节点前，不做任何回复分类
-  // [WHY] fill 点发送后旧回复仍挂在页尾（@ask 场景最后一条 assistant 消息就是旧问题），
-  //       清空式 dedup 重置会让首轮 poll 把旧 @ask 当新回复重推 → 弹窗死循环，且挤掉真正的新回复
+  // [WHY] fill 点发送后旧回复仍挂在页尾（ASK 场景最后一条 assistant 消息就是旧问题），
+  //       清空式 dedup 重置会让首轮 poll 把旧 ASK 当新回复重推 → 弹窗死循环，且挤掉真正的新回复
   // [CONSTRAINT] DeepSeek 每轮回复新增独立消息节点，blocks.length 增长即新回复到达；
   //              _baselineBlocks 仅由 resetReplyDedupInPage 写入，未 reset 时 undefined 不拦截
   const _baseBlocks = document.querySelectorAll('.ds-assistant-message-main-content')
@@ -114,17 +114,19 @@ export function detectReplyInPage() {
     }
   }
 
-  // [limit-detect-v2] 会话长度上限感知：触顶后继续在本会话提问不可能有产出，与「已停止」同构——
+  // [limit-detect-v3] 会话长度上限感知：触顶后继续在本会话提问不可能有产出，与「已停止」同构——
   // 无 DONE 无完整脚本、plain 被 hasJsFence 拦 → 前端无感知干等超时。
   // [WHY] DeepSeek 实际文案是「达到对话长度上限，请开启新对话」——动词在前的语序；
   //       v1 只写了「对话…已达上限」的名词在前形式 → 真实提示完全漏匹配（线上表现为仍在干等）。
-  //       故补「动词+名词+上限」「名词+动词+上限」「名词+超限」三序，并要求末段「上限」后可接「请开启新对话」。
-  // [CONSTRAINT] 基线去重仍保留：只在「计数增长」时推送，排除历史消息里的旧标记；
-  //              末段分支要求紧跟「开启/新建新对话」，故侧栏常驻的「开启新对话」按钮不会被误计。
+  //       v3 追加收紧：v2 允许**裸标记**命中，但本探针扫的是**整页** textContent，
+  //       实测两类假命中（页面根本没有 banner 却弹 toast）：① 正文自指「会话长度达到上限」
+  //       （工作台自身的任务文案作为 AI 回复落进会话 DOM）；② 正文与侧栏常驻按钮「开启新对话」
+  //       在 textContent 里相接（v2 的「请」是 `请?` 可缺省）。故中文触顶**必须自带动作子句**才算数。
+  // [CONSTRAINT] 基线去重仍保留：只在「计数增长」时推送，排除历史消息里的旧标记。
   // [CONSTRAINT] 正则须与 headless-inject-simple.ts 基线、油猴 countLimitMarkers 三处严格同构，改一处必同步
   if (!dedup._limitReported) {
     const limitText = (document.body && document.body.textContent) || ''
-    const limitMessages = limitText.match(/(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长)[，,：:]?\s*请?(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length/gi) || []
+    const limitMessages = limitText.match(/(?:(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长))(?:[，,：:]\s*请?|请)(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length/gi) || []
     const limitBaseline = typeof dedup._limitBaseline === 'number' ? dedup._limitBaseline : 0
     // [limit-detect-v2] 存量兜底：会话此前已触顶时提示常驻（fill 时即可见），计数不再增长；
     // 此时若本轮又无新增 assistant 块（重发同样拿不到产出），一并判定触顶，免去干等超时
@@ -219,7 +221,7 @@ export function detectReplyInPage() {
   //   现统一为「首个非空行 = 独占一行的标记行，第二行起才是载荷」，标记行优先于 DOM 结构判定。
   // [marker-naming-v1] 标记取纯大写英文单词（无 `@` / `#` 前缀）：`@` 会被当 mention、
   //   `#` 与 Markdown 标题同形（elToMd 把 <h1> 还原成 `# xxx`），纯大写单词无此耦合。
-  //   过渡别名：`@ask`（旧 SYSTEM.md 注入的会话）与 `# 任务`（旧 SUMMARY_INSTRUCTION）仍接受
+  //   [alias-removed-v1] 2026-10-07：过渡别名已全部移除，五类标记只有纯大写单词一种形态
   // [CONSTRAINT] 只认首个非空行：正文里引用 `DONE`、贴含 `ASK` 的示例都不会误触发（无需围栏排除）
   // [CONSTRAINT] 本函数经 page.evaluate 序列化执行，禁止引用外部闭包变量；
   //   内部不得出现 TS 类型注解（守卫测试 reply-mark-parity 要抠出花括号内部直接执行）；
@@ -234,9 +236,9 @@ export function detectReplyInPage() {
     if (head < 0) return out
     const line = lines[head].trim()
     if (/^SCRIPT$/.test(line)) out.script = head + 1
-    else if (/^(?:ASK|@ask)$/i.test(line)) out.ask = head + 1
+    else if (/^ASK$/.test(line)) out.ask = head + 1
     else if (/^DONE$/.test(line)) out.done = head + 1
-    else if (/^(?:HANDOFF|#\s*任务)$/.test(line)) out.handoff = head + 1
+    else if (/^HANDOFF$/.test(line)) out.handoff = head + 1
     else if (/^TEXT$/.test(line)) out.text = head + 1
     return out
   }
@@ -470,7 +472,7 @@ export function detectReplyInPage() {
   }
 
   // [reply-mark-v1] 标记行优先：先算首行标记，再决定是否走 DOM 结构判定
-  // [WHY] 带 `@ask` / `DONE` / `# 任务` 标记的回复若含代码块，旧逻辑会被 script 分支抢走
+  // [WHY] 带 `ASK` / `DONE` / `HANDOFF` 标记的回复若含代码块，旧逻辑会被 script 分支抢走
   //   （script 判定排在 done / plain 之前）→ `DONE` 总结里的示例代码块会被当脚本重新执行
   // [CONSTRAINT] extractReplyMd 是 DOM→Markdown 反推（保留换行），getMainText 的 textContent 无换行、
   //   无法用于「首行」判定，故标记扫描一律基于前者

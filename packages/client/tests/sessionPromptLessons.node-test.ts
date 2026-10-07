@@ -10,6 +10,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildLoopInitialPrompt, buildNewSessionPrompt } from '../composables/ai/session-prompt.js'
 import { clearRulesCache } from '../composables/ai/load-rules.js'
+import { LESSONS_BUDGET } from '../composables/ai/load-lessons.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
@@ -25,7 +26,7 @@ function jsonRes(data: unknown): Response {
  * [CONSTRAINT] 必须同时覆盖 load-rules 的 files/read(AGENTS.md) 与 load-lessons 的 files/read(lessons.md)，
  *              否则两者会拿到同一份内容，测试变成假通过
  */
-function makeFetch(opts: { lessons?: string | null, throwAll?: boolean } = {}) {
+function makeFetch(opts: { lessons?: string | null, throwAll?: boolean, matches?: Array<{ title: string, body: string, state: string, score: number, matched: string[] }>, matchThrows?: boolean, matchStatus?: number } = {}) {
   return async (url: string, init?: { body?: string }): Promise<Response> => {
     if (opts.throwAll) throw new Error('network down')
     const u = String(url)
@@ -39,6 +40,11 @@ function makeFetch(opts: { lessons?: string | null, throwAll?: boolean } = {}) {
       return jsonRes({ files: [{ path: 'AGENTS.md', content: 'AGENTS-OK' }] })
     }
     if (u.includes('/__ai/skills/match')) return jsonRes({ ok: true, matches: [] })
+    if (u.includes('/__ai/lessons/match')) {
+      if (opts.matchThrows) throw new Error('lessons/match down')
+      if (opts.matchStatus) return new Response('{}', { status: opts.matchStatus })
+      return jsonRes({ ok: true, query: '', matches: opts.matches ?? [] })
+    }
     throw new Error(`unexpected url: ${u}`)
   }
 }
@@ -57,18 +63,32 @@ it('buildLoopInitialPrompt：注入 lessons 块并剥掉维护者引言', async 
 
 it('buildNewSessionPrompt：同样注入 lessons（与循环首轮对齐）', async () => {
   vi.stubGlobal('fetch', makeFetch())
-  const p = await buildNewSessionPrompt('上一轮做了 Y', '把 X 做完')
+  const p = await buildNewSessionPrompt('把 X 做完')
   assert.ok(p.includes(LESSONS_MARK), '新会话首问必须带 lessons —— 漏接即本断言失败')
   assert.ok(p.includes('坑A'), 'lessons 正文必须进入 prompt')
-  assert.ok(p.includes('上一轮做了 Y'), '会话总结正文不得被挤掉')
+  assert.ok(p.includes('把 X 做完'), '目标正文不得被挤掉')
+})
+
+// [no-handoff-summary-v1] 承重判据：新会话首问**不得**再拼接「上一轮会话总结」。
+// [WHY] 旧实现 `head + '# 上一轮会话总结' + summary` 把由 DOM 反推的交接正文搬进新会话；
+//   一旦提取走到整页兜底（replyRoot=document）且走 textContent（无换行），新会话首问就会
+//   出现一坨由侧栏会话标题 / 问候语 / 输入区按钮文案黏成的垃圾（实测 2026-10-07）。
+//   本用例把「不搬运」钉死：谁把该段加回来，这里立刻红。
+it('[no-handoff-summary-v1] buildNewSessionPrompt：不搬运上一轮总结，改带目标段', async () => {
+  vi.stubGlobal('fetch', makeFetch())
+  const p = await buildNewSessionPrompt('把 X 做完')
+  assert.ok(!p.includes('上一轮会话总结'), '交接正文不得再拼进新会话首问')
+  assert.ok(p.includes('# 目标'), '应以「# 目标」段替代')
+  assert.ok(p.includes('SYSTEM-OK'), '规则注入必须保留（自动循环靠它拿协议）')
+  assert.ok(p.includes(LESSONS_MARK), 'lessons 注入必须保留')
 })
 
 it('网络全挂：两个入口都降级但保留业务正文，不抛错', async () => {
   vi.stubGlobal('fetch', makeFetch({ throwAll: true }))
   const a = await buildLoopInitialPrompt('目标Z')
   assert.equal(a, '目标Z')
-  const b = await buildNewSessionPrompt('总结Z', '目标Z')
-  assert.equal(b, '总结Z')
+  const b = await buildNewSessionPrompt('目标Z')
+  assert.equal(b, '目标Z')
 })
 
 it('lessons 读不到：注入块为空，其余内容不受影响', async () => {
@@ -171,4 +191,29 @@ it('注入窗口内待复核占比 ≤ 60%：全局达标不等于 AI 看到的�
     `注入窗口内待复核 ${pending.length}/${entries.length} = ${(ratio * 100).toFixed(0)}%，超 ${WINDOW_PENDING_MAX * 100}%。`
     + ` AI 只读窗口 ⇒ 积压必须清到窗口以外才有意义。窗口内首条待复核：${pending[0]?.split('\n')[0] || '(无)'}`,
   )
+})
+
+// ── 判据②：命中再多，注入块条目部分也不得越 LESSONS_BUDGET 预算 ──────────────
+it('检索命中超预算：条目部分仍 ≤ LESSONS_BUDGET（变异：去掉封顶必红）', async () => {
+  const big = (t: string) => ({ title: t, body: `${'x'.repeat(5000)}`, state: 'pending', score: 9, matched: [] })
+  vi.stubGlobal('fetch', makeFetch({ matches: [big('坑一'), big('坑二'), big('坑三')] }))
+  const p = await buildLoopInitialPrompt('目标B')
+  const entries = injectedEntries(p)
+  assert.ok(entries.length >= 1, '检索命中却零注入：判据可能被真空满足')
+  const used = entries.reduce((n, e) => n + e.length, 0)
+  assert.ok(used <= LESSONS_BUDGET, `条目部分 ${used} 字符 > 预算 ${LESSONS_BUDGET}：封顶失效`)
+})
+
+// ── 判据④：检索端点不可用 ⇒ 回退尾截断（块非空，等于旧行为），不空注入、不抛 ──
+it('检索端点 500：回退尾截断，块非空（变异：删回退分支必红）', async () => {
+  vi.stubGlobal('fetch', makeFetch({ matchStatus: 500 }))
+  const p = await buildLoopInitialPrompt('目标R')
+  assert.ok(p.includes(LESSONS_MARK), '检索失败后未回退尾截断：块为空 = 丢掉了既往踩坑')
+  assert.ok(p.includes('坑A'), '回退路径必须真的注入条目，而非空壳')
+})
+
+it('检索请求抛错：同样回退尾截断，不抛到调用方', async () => {
+  vi.stubGlobal('fetch', makeFetch({ matchThrows: true }))
+  const p = await buildLoopInitialPrompt('目标S')
+  assert.ok(p.includes('坑A'), '抛错路径也必须回退，不得让异常穿出')
 })

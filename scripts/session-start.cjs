@@ -174,6 +174,21 @@ if (fs.existsSync(skillsDir)) {
 } else { warn('no skills dir - see AGENTS.md 找技能必须先按技术栈搜')
 }
 
+head('8.5 .ai-runner 垃圾')
+// [clean-hint-v1] 一次性产物（test-* 夹具 / 陈旧 log / 死 pid / 探测残留）会持续累积
+//   （2026-10-07 实测达 175 目录 / ~330MB）。此处只跑 dry-run 提示，不自动删——
+//   删除是破坏性动作，须人工确认。清理入口：pnpm clean:ai-runner --apply。
+// CONSTRAINT: 只读不 block——垃圾不挡开发；跑不起来也只 warn。
+try {
+  const out = execFileSync('node', ['scripts/clean-ai-runner.mjs'], { cwd: ROOT, encoding: 'utf8' })
+  const m = out.match(/待清理共 (\d+) 项/)
+  const n = m ? Number(m[1]) : 0
+  if (n > 0) {
+    warn(`${n} 项待清理 —— 跑 pnpm clean:ai-runner --apply（dry-run 见 pnpm clean:ai-runner）`)
+    out.trim().split(NL).slice(0, 4).forEach((l) => { if (l.trim()) console.log(`      ${l.trim()}`) })
+  } else { ok('无待清理项') }
+} catch (e) { warn(`clean dry-run 失败: ${String(e.message || e).slice(0, 80)}`) }
+
 head('9. conclusion')
 if (block) { err('blocked - fix first'); process.exit(2) }
 ok('preflight passed')

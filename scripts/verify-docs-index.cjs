@@ -4,50 +4,15 @@
 //   索引腐化没有代价时必然腐化，故把它变成可执行断言。
 // @plan: verify-docs-index
 // [docs-index-contract-v1] 双向校验：dangling link（索引 → 磁盘）与 unlisted doc（磁盘 → 索引）都要报
+// [docs-scan-shared-v1] 扫描范围/跳过表/链接抽取统一走 scripts/lib/docs-scan.cjs（同源口径，见 WO-20261007-10 段二）。
 'use strict'
 const fs = require('node:fs')
 const path = require('node:path')
+const { collectDocs, extractLinks } = require('./lib/docs-scan.cjs')
 
 const ROOT = path.resolve(__dirname, '..')
 const INDEX = path.join(ROOT, 'docs', 'DOCS-INDEX.md')
-// 非项目文档：运行态 / 依赖 / 产物 / 会话工作记忆
-const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.ai-runner', '.workbuddy', '.trae', '.vscode', 'coverage'])
-// [docs-index-testartifacts-v1] Playwright 生成物：error-context.md 等只在用例失败时写出，
-// 属运行态而非项目文档；不排除则「跑一次红 e2e → docs:verify 恒 exit 2」（2026-10-05 实测）。
-SKIP_DIRS.add('test-results')
-SKIP_DIRS.add('playwright-report')
-// [docs-index-generated-v1] 生成物文档目录（相对根）：docs/plan/** 由 verify-contracts.cjs 每次运行时写出，
-// 不属人工维护文档 → 不纳入索引义务，否则「跑完 verify:contracts 再跑 docs:verify」必 exit 2。
-// SKIP_DIRS 只按目录名匹配，表达不了这种具体路径，故单列前缀表。
-const SKIP_PATHS = [path.join('docs', 'plan')]
 const NL = String.fromCharCode(10)
-
-/** 收集仓库内所有项目 md（相对仓库根） */
-function collectDocs(dir, out = []) {
-  if (!fs.existsSync(dir)) return out
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (SKIP_DIRS.has(e.name)) continue
-    const p = path.join(dir, e.name)
-    const rel = path.relative(ROOT, p)
-    if (SKIP_PATHS.some(pre => rel === pre || rel.startsWith(pre + path.sep))) continue
-    if (e.isDirectory()) collectDocs(p, out)
-    else if (path.extname(p) === '.md') out.push(rel)
-  }
-  return out
-}
-
-/** 抽出索引里所有本地 md 链接（跳过 http/https/mailto/纯锚点） */
-function extractLinks(text) {
-  const out = []
-  const re = /\]\(([^)\s]+)\)/g
-  let m
-  while ((m = re.exec(text)) !== null) {
-    const target = m[1]
-    if (/^(?:https?:|mailto:|#)/.test(target)) continue
-    out.push(target.split('#')[0])
-  }
-  return out
-}
 
 function main() {
   if (!fs.existsSync(INDEX)) {

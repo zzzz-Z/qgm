@@ -20,6 +20,7 @@ import {
   enqueueScript,
   peekRoundOutcomes,
   ROUND_MERGE_MS,
+  roundMergePending,
   shiftScript,
   stageRoundOutcome,
 } from '../composables/ai/auto-loop/pending-scripts'
@@ -190,6 +191,21 @@ test('失败分桶：真实拒收样本各归其桶；成功块不分桶', () =>
     '执行失败',
     '普通执行失败应有兜底桶，不能落空',
   )
+})
+
+// [deliver-window-v1] 回传窗必须**可观测**：脚本跑完到真正 sendFill 之间这 ROUND_MERGE_MS，
+//   此前没有任何响应式信号 ⇒ 界面显示「成功」而结果尚未出站。UI 靠本计数把这段也算「执行中」。
+test('roundMergePending：入窗=1、到点出站=0、撤窗=0', () => {
+  const flush = (): boolean => true
+  assert.equal(roundMergePending.value, 0, '起手不得有残留计数')
+  stageRoundOutcome(L, outcome('块'), flush)
+  assert.equal(roundMergePending.value, 1, '结果入窗后 UI 必须能感知，否则那 1.5s 是「已成功但什么都没发生」')
+  vi.advanceTimersByTime(ROUND_MERGE_MS + 1)
+  assert.equal(roundMergePending.value, 0, '出站后计数不归零 ⇒ spinner 永不停止')
+  stageRoundOutcome(L, outcome('块2'), flush)
+  assert.equal(roundMergePending.value, 1)
+  cancelRoundMerge(L)
+  assert.equal(roundMergePending.value, 0, '撤窗后计数不归零 ⇒ 用户停止后 spinner 仍转')
 })
 
 // ============ 接线结构断言（行为测不到的那一段）============

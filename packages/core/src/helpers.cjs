@@ -748,6 +748,8 @@ const __AI__ = {
           running: typeof (j && j.running) === 'string' ? j.running : '',
           // [task-running-timeout-v1] 超时被回退的 running 项（需重新 start 或结束该项）
           expiredRunning: Array.isArray(j && j.expiredRunning) ? j.expiredRunning : [],
+          // [failed-separated-v1] failed 项单独成组，不计入 todo
+          failed: Array.isArray(j && j.failed) ? j.failed : [],
           planPending: Number(j && j.planPending) || 0,
         }
       }).catch(e => ({ ok: false, error: String((e && e.message) || e) }))

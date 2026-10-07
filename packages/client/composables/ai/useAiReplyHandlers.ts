@@ -21,6 +21,7 @@ import { activeSessionId } from '../ui/useAppStorage'
 import { emit as emitBus, takePendingAskKey } from '../ui/useEventStream'
 import { askUser } from '../ui/useAsk'
 import { parseAsk } from '../../utils/ask-parser'
+import { formatLimitToast } from '../../utils/limit-notice'
 import { scanReplyMarks } from '../../utils/reply-mark'
 import { uid } from '../../utils/id'
 import { promiseTimeout } from '@vueuse/core'
@@ -114,8 +115,12 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
 
     // [limit-detect-v1] AI 会话达到长度上限：有活跃循环时走 onNonScriptReply 触发自动轮转
     // （总结 → 新会话 → 续跑）；无循环时提示手动开新会话
+    // [limit-toast-quote-v1] 附带页面侧命中原文：正则扫的是整页 textContent，
+    //   侧栏常驻「开启新对话」按钮与正文拼接会造成假命中（页面无 banner 也弹）⇒
+    //   不回显命中串就无法定位误报源。组装逻辑见 utils/limit-notice.ts（裸测 limit-notice.node-test.ts）
     if (kind === 'limit') {
-      toast('AI 会话已达长度上限', 'warn', TOAST_LONGEST)
+      toast(formatLimitToast(payload.text), 'warn', TOAST_LONGEST)
+
       if (routedToLoop) {
         void autoLoop.onNonScriptReply({ kind: 'limit', text: String(payload.text || '') }, sid)
       } else {
@@ -124,7 +129,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       return
     }
 
-    // [ask-any-kind-v1] 提问卡优先：任意 kind 只要含 @ask 就触发
+    // [ask-any-kind-v1] 提问卡优先：任意 kind 只要含 ASK 就触发
     // [ask-card-v1] 呈现方式已由弹窗改为对话流内卡片（TerminalPane）；此处仍是 await 回答后回填
     if (typeof payload.text === 'string' && payload.text) {
       const _ask = parseAsk(payload.text)

@@ -34,6 +34,8 @@ export interface ExecFlowDeps {
   isLoopActive: Ref<boolean>
   /** [auto-feedback-merge-v1] 合并窗时长覆盖（测试注入小值；缺省 3000ms） */
   autoFeedbackMergeMs?: number
+  /** [deliver-window-v1] 合并窗开关回调：true=结果在窗内等待出站，UI 据此保持「执行中」 */
+  onFeedbackPending?: (pending: boolean) => void
 }
 
 /**
@@ -41,7 +43,7 @@ export interface ExecFlowDeps {
  * @param deps - 依赖面
  */
 export function createExecFlow(deps: ExecFlowDeps) {
-  const { running, result, changes, liveStdout, liveStderr, copied, runningCommand, pushCmdHistory, buildAiPrompt, confirmDialog, startAiWaiting, softPause, isLoopActive, autoFeedbackMergeMs } = deps
+  const { running, result, changes, liveStdout, liveStderr, copied, runningCommand, pushCmdHistory, buildAiPrompt, confirmDialog, startAiWaiting, softPause, isLoopActive, autoFeedbackMergeMs, onFeedbackPending } = deps
   const { toast } = useToast()
   const execPolicyOverride = ref<string | null>(null)
   const lastAutoAskedRunId = ref('')
@@ -68,6 +70,7 @@ export function createExecFlow(deps: ExecFlowDeps) {
   }, {
     delayMs: autoFeedbackMergeMs,
     isActive: () => !isLoopActive.value,
+    onPendingChange: onFeedbackPending,
   })
 
   /** 用户批准黑名单命令后以 always 策略重跑（递归调用 execCmd） */

@@ -56,11 +56,8 @@ test('parseAsk: 标记不在首行不识别（首行必须是标记行）', () =
   assert.equal(parseAsk(['先说理一句。', 'ASK', '问题在下面'].join('\n')), null)
 })
 
-test('parseAsk: 过渡别名 @ask 仍被接受（旧 SYSTEM.md 注入的会话）', () => {
-  const r = parseAsk(['@ask', '旧会话仍会这样写'].join('\n'))
-  assert.ok(r)
-  assert.equal(r.question, '旧会话仍会这样写')
-  assert.deepEqual(r.options, [])
+test('parseAsk: 旧别名 @ask 已移除（[alias-removed-v1]），不命中', () => {
+  assert.equal(parseAsk(['@ask', '旧会话仍会这样写'].join('\n')), null)
 })
 
 test('parseAsk: 别名 @asks 不误匹配（整行精确，非前缀）', () => {

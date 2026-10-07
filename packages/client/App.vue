@@ -20,6 +20,8 @@ import { setActiveWinSid, winSidOf } from './composables/ai/useAiWindowTable'
 // [useSitesStore-import-v1] 统一 store 启动时迁移 + 切站点写 activeModelId
 // [workspace-guide-lazy-v1] 引导页仅 !hasWorkspace 时渲染（v-if 闸门），异步拆包不进首屏 chunk
 const WorkspaceGuide = defineAsyncComponent(() => import('./components/panels/WorkspaceGuide.vue'))
+// [wiki-panel-v1] 知识库只读面板（异步拆包，不进首屏 chunk）
+const KnowledgePanel = defineAsyncComponent(() => import('./components/panels/KnowledgePanel.vue'))
 // [app-storage-extracted-v1] SESSION_HISTORY_KEY 已抽至 useAppStorage
 /** mock 通道（?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
 const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
@@ -32,6 +34,8 @@ const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.lo
 const hasWorkspace = ref(true)
 /** 键盘帮助面板开关 */
 const keyboardHelpOpen = ref(false)
+/** [wiki-panel-v1] 知识库面板开关 */
+const kbOpen = ref(false)
 /** 信息 */
 const absenceInfo = ref<{ daysAgo: number } | null>(null)
 /** URL 是否处于编辑态 */
@@ -416,6 +420,13 @@ function onLoginGui() {
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
       </button>
+      <button
+        v-tooltip="'知识库（LLM Wiki）只读检索'"
+        aria-label="知识库" class="kb-toggle"
+        @click="kbOpen = !kbOpen"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
+      </button>
     </div>
   </header>
 
@@ -425,6 +436,7 @@ function onLoginGui() {
     <div class="layout-main">
       <main class="main">
         <ScriptPanel />
+        <KnowledgePanel v-if="kbOpen" />
       </main>
     </div>
   </div>

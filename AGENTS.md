@@ -68,7 +68,7 @@ docs/              USAGE.md / DOCS-INDEX.md
 | `LOOP_HARD_MAX_MS`     | `30 min`   | `finish(inst, 'hard-timeout')` |
 
 因此「跑够 N 轮会自动停」**只在 N ≥ 50 时成立**，不要假设循环永不终止。
-终止路径共五条：`DONE` / `@ask` / 熔断冻结 / `hard-rounds`（50 轮）/ `hard-timeout`（30 分钟）。
+终止路径共五条：`DONE` / `ASK` / 熔断冻结 / `hard-rounds`（50 轮）/ `hard-timeout`（30 分钟）。
 
 ## 常用命令
 
@@ -126,18 +126,14 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   `format/prettier` error、exit 1。**跨区搬运后必须补 `npx eslint <file> --fix`。**
 - **`eslint --fix` 会重写正则**（`regexp/no-useless-non-capturing-group` 删冗余非捕获组），
   fix 之后必须重跑上述三处一致性对比再提交。
-- **审查类文档里的「节选」「伪代码」必须用 `text` 语言标注围栏**：`docs/**` 的 md 经 markdown
-  处理器会把标为 `ts` 的代码块当**真实可解析的 TS** 送去解析，节选片段（`{ ... }` 省略号、
-  顶层裸对象字面量）会直接报 parsing error 把 `pnpm lint` / `pnpm verify` 卡红。
-  `eslint.config.ts` 的 `[review-doc-exempt-v1]` 只关掉 `no-unused-vars`，**管不了解析错误**；
-  它现在按大小写三态匹配（`REVIEW`/`Review`/`review`），所以 `defect-review.md` 这类命名能拿到豁免。
-  只有能独立编译的示例才写 `ts`。
-- **审查类文档别用 markdown 表格，用列表**：`docs/**/*.md` 同样过 `format/prettier`，
-  而 prettier 要求表格每列按显示宽度补齐 ⇒ 手写的 `| a | b |` 几乎必然报
-  `Replace … format/prettier`（实测单篇 13 个 error，直接把 `pnpm lint` / `pnpm verify` 卡红）。
-  这条在本仓库**反复复发**：2026-10-05 两小时内出现两次，写入方都是并行运行的另一个 AI
-  ——`eslint.config.ts` 只豁免了审查类文档的 `no-unused-vars`，**不豁免** `format/prettier`。
-  交付 md 前先跑 `npx eslint <file> --fix`；要矩阵式对比就用「每项一行 + `：`」的列表。
+- **审查类文档的两条硬约束 + 一条收尾动作**：这类文档同样过 `format/prettier` 与 TS 解析，
+  但 `eslint.config.ts` 的 `[review-doc-exempt-v1]` **只关 `no-unused-vars`**，管不了另两类。
+  适用面是 `eslint.config.ts` 里的**两条** glob（大小写三态各写一遍，因 minimatch 大小写敏感）：
+  `docs/**/*{REVIEW,Review,review}*.md` 与 `docs/**/*{AUDIT,Audit,audit}*.md`。
+  - **节选/伪代码必须用 `text` 围栏**：标 `ts` 的块会被当**真实可解析的 TS** 解析，`{ ... }` 省略号、顶层裸对象字面量直接报 parsing error 卡红 `pnpm lint`/`pnpm verify`。只有能独立编译的示例才写 `ts`。
+  - **别用 markdown 表格，用列表**：prettier 要求每列按显示宽度补齐 ⇒ 手写 `| a | b |` 几乎必然报 `Replace … format/prettier`（实测单篇 13 error）。要矩阵对比用「每项一行 + `：`」。
+  - **交付前必跑 `npx eslint <file> --fix`**（本仓库反复复发：2026-10-05 两小时内两次，写入方都是并行 AI）。
+
 - **模板里不要对 auto-import 符号赋值**：会生成 `__unimport_xxx`，
   dev 不报错但 build 阶段抛 `Cannot assign to this expression`。需要可变就显式 import。
 - **`scripts/anchors.json` 的 `file` 必须是相对仓库根的完整路径**：校验器只做
@@ -184,6 +180,13 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   该文件会被历史运行残留旧端口值，vite 代理据此指向错误端口。后端实际端口看 `pm2 jlist` 或 `curl 5175`。
 - **代执行 `pm2 restart` 的当轮脚本会返回 `Failed to fetch` 属预期**（实例重启导致 HTTP 通道瞬断）；
   下一轮探活（`curl 5175`）即恢复，重试须**跨轮**，不得在原轮判定为失败。
+
+- **提优化建议 / 改 SSOT 前先读裁决单**（`[read-verdict-first-v1]`）：本仓库反复出现
+  「陈旧上下文产出」——同一批建议被以不同形式重提，且不引用已有的裁决单（实测：同一批
+  SYSTEM.md 建议在 13:xx 与 15:xx 各提一次，全文未引用 `workorder-app-system-md-review-verdict`）。
+  提建议前必做两步：① `git diff -w`（本工作区写 md 会被格式化器重排整份 diff，不加 `-w`
+  无法看清真实改动）；② 读 `docs/workorder-app-*-verdict-*.md` / `-plan-*.md` 里已裁决/已驳回
+  的项，不重提、不改已驳回方案。
 
 ## 详见
 

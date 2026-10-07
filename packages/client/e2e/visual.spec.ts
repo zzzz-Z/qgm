@@ -111,5 +111,47 @@ for (const theme of ['dark', 'light'] as const) {
         mask: MASK_SELECTORS.map(s => page.locator(s)),
       })
     })
+
+    test(`06 脚本执行区 · ${theme}`, async ({ page }) => {
+      // [script-card-baseline-v1] 06 视图：seed 一条 run:start 事件让 ScriptCard 真实挂载。
+      // [WHY] 前三轮尝试（localStorage seed / DEV 桥 / addInitScript+reload）全失败，根因是
+      //   「组件不在默认渲染路径」。本用例改为 seed event-stream（TerminalPane 的 timelineItems 数据源），
+      //   使 .script-card 由真实数据驱动挂载 —— 走真实渲染路径，非绕过。
+      // [CONSTRAINT] 必须在 goto 之后再次 addInitScript + reload：beforeEach 已 goto，注入晚于首帧。
+      //   addInitScript 在每次导航前执行，故 reload 后 loadEvents() 能读到 seed。
+      await page.addInitScript(() => {
+        try {
+          const ev = {
+            id: 1,
+            ts: 1700000000000,
+            kind: 'run:start',
+            round: 1,
+            summary: '执行脚本',
+            payload: {
+              desc: '示例脚本：生成产物',
+              why: '像素基线守护用例',
+              lang: 'js',
+              phase: 'done',
+              exit: 0,
+              changeCount: 2,
+              updateKey: 'baseline-card-1',
+            },
+          }
+          localStorage.setItem('__ai_event_log', JSON.stringify([ev]))
+        } catch { /* ignore */ }
+      })
+      await page.reload()
+      await settle(page)
+      await expect(page.locator('.script-card').first()).toBeVisible({ timeout: 10_000 })
+      // [script-card-viewport-v1] 卡片可能在滚动区下方 —— 不滚到视口，截图捕获不到它，
+      //   样式变异就不会让基线变红（判据真空）。scrollIntoViewIfNeeded 后卡片进入视口。
+      await page.locator('.script-card').first().scrollIntoViewIfNeeded()
+      await page.waitForTimeout(300)
+      await expect(page).toHaveScreenshot(`06-script-${theme}.png`, {
+        mask: MASK_SELECTORS.map(s => page.locator(s)),
+        // [anim-v1] .phase-icon-spin 是 infinite 动画，默认等动画结束会永久挂起
+        animations: 'disabled',
+      })
+    })
   })
 }

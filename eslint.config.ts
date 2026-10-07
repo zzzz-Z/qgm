@@ -25,6 +25,11 @@ const config: Promise<Linter.Config[]> = antfu({
     'ts/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
     'unused-imports/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
     'no-console': 'warn',
+    // [jsdoc-destructured-v1] 单对象参数（opts/deps）的子字段不强制单列 @param。
+    // [WHY] checkDestructured 默认 true 时要求 @param opts.script 逐子字段列出，
+    //   合并写 @param opts 又会漏报；两者都不满足规则 → 固有冲突（WO-06 段二认定）。
+    // [CONSTRAINT] 只关子字段展开要求，参数本身缺失仍会报。
+    'jsdoc/check-param-names': ['warn', { checkDestructured: false }],
     'vue/no-v-text-v-html-on-component': 'off',
     'perfectionist/sort-imports': 'off',
     'vue/comma-dangle': 'off',
@@ -82,6 +87,21 @@ const config: Promise<Linter.Config[]> = antfu({
     'unused-imports/no-unused-vars': 'off',
     'ts/no-unused-vars': 'off',
   },
+}).append({
+  // [no-console-test-exempt-v1] 测试/探针里的 console 是诊断输出（用例失败时排障用），
+  //   不是生产代码的副作用；glob 覆盖 *.node-test.ts 与 e2e 探针。
+  files: ['**/*.node-test.ts', 'packages/**/e2e/**'],
+  rules: { 'no-console': 'off' },
+}).append({
+  // [no-console-logger-exempt-v1] log.ts 是全客户端唯一 console 出口（日志封装器本身），
+  //   它不 console 谁 console；豁免其 no-console。
+  files: ['packages/client/utils/log.ts'],
+  rules: { 'no-console': 'off' },
+}).append({
+  // [no-console-headless-exempt-v1] headless 是浏览器自动化引擎，其引擎选择（cloak/playwright）、
+  //   SSE 字节数等诊断输出是运维可见的固有手段，非生产副作用；它们没有可用的 logger（logger.cjs 是沙箱脚本专用）。
+  files: ['packages/core/src/headless/**'],
+  rules: { 'no-console': 'off' },
 })
 
 export default config

@@ -190,7 +190,7 @@
     },
     {
       "file": "packages/core/tests/limit-marker-guard.node-test.ts",
-      "contains": "[limit-detect-v2] 三处同构守卫"
+      "contains": "[limit-detect-v3] 三处同构守卫"
     },
     {
       "file": "packages/client/composables/ai/useSessionManager.ts",

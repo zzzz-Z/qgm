@@ -96,7 +96,7 @@ export function createTampermonkeyTransport(): AiTransport {
   return {
     kind: 'tampermonkey',
     sendFill(sid, payload) {
-      // [manual-fill-bypass-paused-v1] 不在传输层拦截 paused：自动续推（PLAN/@ask/multi/startLoop）
+      // [manual-fill-bypass-paused-v1] 不在传输层拦截 paused：自动续推（PLAN/ASK/multi/startLoop）
       // 各调用点已自行检查 loopPaused；此处再拦会误杀「用户在输入框主动发送」——
       // 而 loopPaused 持久化在 sessionStorage，异常循环残留 true 后刷新不清，手动消息全部静默丢失
       return callDs('sendFill', payload)

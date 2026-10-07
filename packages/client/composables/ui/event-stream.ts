@@ -7,7 +7,7 @@ const IS_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).e
 /**
  * 事件类型枚举（ai: = AI 回包；run: = 运行阶段；loop: = 循环状态；rules: = 规则变化）
  * [ask-vs-question] `ai:ask` = 用户发出的提问/回答（badge「你」）；
- *   `ai:question` = AI 的 @ask 提问卡（可点选，见 useAsk）
+ *   `ai:question` = AI 的 ASK 提问卡（可点选，见 useAsk）
  */
 export type EventKind
   = | 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary'

@@ -2,8 +2,8 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.6.0
-// @description  回传会话 ID/用量/AI 回复到工作台；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
+// @version      1.6.1
+// @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -186,16 +186,18 @@
   function syncStopMarkerBaseline() {
     stopMarkerBaseline = countStopMarkers()
   }
-  // [limit-detect-v2] 会话长度上限基线：与 headless 侧 detectReplyInPage 正则严格同构（改一处必须三处同步）。
+  // [limit-detect-v3] 会话长度上限基线：与 headless 侧 detectReplyInPage 正则严格同构（改一处必须三处同步）。
   // 正则须覆盖「达到对话长度上限」（动词在前，DeepSeek 实际文案）与「对话长度已达上限」（名词在前）两种语序；
-  // 末段要求「上限」后紧跟「请开启新对话」，故侧栏常驻的「开启新对话」按钮不会误计。
+  // v3 起要求「上限」后必须自带动作子句（[，,：:]请? 或 请 + 开启/新建…新对话）：
+  // 本函数扫的是整页 textContent，正文自指「会话长度达到上限」与侧栏常驻按钮「开启新对话」的拼接
+  // 都会造成假命中（2026-10-07 实测：页面无 banner 却弹 toast）。
   let limitMarkerBaseline = 0
   let limitMarkerText = ''
   let assistantRootBaseline = 0
   function countLimitMarkers() {
     try {
       const t = (document.body && document.body.textContent) || ''
-      const m = t.match(/(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长)[，,：:]?\s*请?(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length/gi) || []
+      const m = t.match(/(?:(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长))(?:[，,：:]\s*请?|请)(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length/gi) || []
       if (m.length) limitMarkerText = m[m.length - 1]
       return m.length
     } catch { return 0 }
@@ -445,7 +447,7 @@
   // [fix-undef] 从页面取最新一条回复的纯文本（排除 pre 代码块，用于 handoff 总结判定）
   function extractLatestReplyText() {
     // [ask-full-text-v1] 返回最后一条 assistant 容器的完整 Markdown（含段落换行）
-    // [WHY] 原实现只取全局最后一个叶子节点 → 多段回复被截成末段，@ask 前缀丢失
+    // [WHY] 原实现只取全局最后一个叶子节点 → 多段回复被截成末段，标记行前缀丢失
     // [CONSTRAINT] 复用 extractReplyMd（DOM→Markdown 反推）；容器缺失时回退 document
     try {
       const _root = latestAssistantRoot() || document
@@ -522,9 +524,9 @@
     if (head < 0) return out
     const line = lines[head].trim()
     if (/^SCRIPT$/.test(line)) out.script = head + 1
-    else if (/^(?:ASK|@ask)$/i.test(line)) out.ask = head + 1
+    else if (/^ASK$/.test(line)) out.ask = head + 1
     else if (/^DONE$/.test(line)) out.done = head + 1
-    else if (/^(?:HANDOFF|#\s*任务)$/.test(line)) out.handoff = head + 1
+    else if (/^HANDOFF$/.test(line)) out.handoff = head + 1
     else if (/^TEXT$/.test(line)) out.text = head + 1
     return out
   }

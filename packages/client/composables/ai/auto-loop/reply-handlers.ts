@@ -295,7 +295,7 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     }
     // plain：不执行脚本，等下一轮
     toast('AI 未输出 cjs/bash 代码块（纯文本回复），等待下一轮', 'warn', TOAST_DEFAULT)
-    // [plain-rearm-v1] 与 done/multi/@ask 分支一致：重新 arm 90s/180s 等待超时与 ticker，
+    // [plain-rearm-v1] 与 done/multi/ASK 分支一致：重新 arm 90s/180s 等待超时与 ticker，
     // 否则本分支 disarmTimer 后 roundTimer 永远为 null，超时熔断失效、UI 卡 waiting（报告 §1.1）
     enterWaiting(inst)
   }

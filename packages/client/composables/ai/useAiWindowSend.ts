@@ -29,7 +29,12 @@ export interface FillPayload {
 /** rotate 消息载荷：切换会话/话题的指令 */
 export interface RotatePayload { instruction: string }
 
-/** new-session 消息载荷：开启新会话时携带的上下文总结 */
+/**
+ * new-session 消息载荷：开启新会话时携带的**首问正文**
+ * [no-handoff-summary-v1] 字段名沿用 `summary`（协议兼容），但内容不再是「上一轮总结」：
+ *   由 session-prompt.buildNewSessionPrompt 拼成「规则/技能/lessons + 目标」。
+ *   当前油猴端已不消费该字段（只切会话），headless 端同理。
+ */
 export interface NewSessionPayload { summary: string }
 
 /** Transport 模块（已静态化；保留 Promise 形态兼容既有 await loadTransport() 调用点） */
@@ -197,7 +202,9 @@ export function sendRotate(payload: RotatePayload): boolean {
 
 /**
  * 通知指定槽位开启新会话
- * [CONSTRAINT] summary 由 session-prompt.buildNewSessionPrompt 拼好（SYSTEM.md + AGENTS.md + 总结），油猴侧不应再拼接
+ * [CONSTRAINT] summary 由 session-prompt.buildNewSessionPrompt 拼好（SYSTEM.md + AGENTS.md + 技能 + lessons + 目标），
+ *              油猴侧不应再拼接
+ * [no-handoff-summary-v1] 载荷里已不含「上一轮总结」；油猴端当前不消费该字段（只切会话）
  */
 export function sendNewSessionTo(sid: string, payload: NewSessionPayload): boolean {
   const win = getWindowBySid(sid)

@@ -127,7 +127,11 @@ test('wiring: 循环终止或暂停时必须清空队列', () => {
 
 test('wiring: 队列未清空时 ScriptPanel 不得中途回传结果', () => {
   const src = read(PANEL_SRC)
-  assert.ok(src.includes('import { pendingScriptCount }'), 'ScriptPanel 未接入 pendingScriptCount')
+  // [deliver-window-v1] 断言「导入了 pendingScriptCount」而非整行：同句还可能并列导入其他符号
+  assert.ok(
+    /import \{[^}]*\bpendingScriptCount\b[^}]*\} from '\.\.\/\.\.\/composables\/ai\/auto-loop\/pending-scripts'/.test(src),
+    'ScriptPanel 未接入 pendingScriptCount',
+  )
   assert.ok(
     src.includes('const midBatch = isLoopActive.value && pendingScriptCount.value > 0'),
     '缺少 midBatch 判据 → 批量脚本执行到一半就把中间结果塞给 AI，与排队块互相踩踏',
@@ -177,4 +181,19 @@ test('wiring: 循环活动时 ScriptPanel 不得回传（回传权归循环引�
     src.includes('shouldAutoAsk && !midBatch && !isLoopActive.value &&'),
     'ScriptPanel 在循环活动时仍会回传 → 与循环引擎同轮双发（一次执行 = 两次提问）',
   )
+})
+
+// ============ 执行状态条接线（status-bar-v1）============
+
+test('wiring: ScriptPanel 必须渲染 statusText 族（防只写不读的死状态）', () => {
+  const src = read(PANEL_SRC)
+  // template 内必须出现这四个符号的渲染（此前全仓只有赋值、零渲染出口）
+  const tplStart = src.indexOf('<template>')
+  // 根模板末尾用 lastIndexOf：文件内有多个 slot template，首个 </template> 是 slot 的闭合
+  const tplEnd = src.lastIndexOf('</template>')
+  const tpl = src.slice(tplStart, tplEnd)
+  for (const sym of ['statusText', 'statusClass', 'runningElapsed', 'lastDuration']) {
+    assert.ok(tpl.includes(sym), `status-bar: template 未渲染 ${sym}（只写不读的死状态回归）`)
+  }
+  assert.ok(src.includes('status-bar'), '缺少 status-bar 容器标记')
 })

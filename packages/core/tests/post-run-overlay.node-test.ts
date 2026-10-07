@@ -1,18 +1,28 @@
 // AIRUNNER-BATCH24-3-WEB-SERVER: server 侧测试（原 test/post-run-overlay.node-test.ts）
 // AIRUNNER-BATCH23-MOVE-TO-ROOT-TEST: 从 client/test/post-run-overlay.node-test.ts 迁至 test/post-run-overlay.node-test.ts
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/post-run/overlay.node-test.ts 迁至 client/test/post-run-overlay.node-test.ts
-import { test } from 'vitest'
+import { afterEach, beforeEach, test } from 'vitest'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { applyOverlay, readOverlayChanges } from '../../../packages/core/src/post-run/overlay.js'
 
-// AIRUNNER-BATCH10-9-INLINE-ROOT-TEST
-// AIRUNNER-BATCH10-9-TEST-FIX: 临时目录放在项目内（applyOverlay 过滤项目外路径）
+// [test-tmpdir-v1] 夹具不再落 .ai-runner（中断/超时会残留累积）。
+// applyOverlay/readOverlayChanges 以 getRoot() 为基准过滤越界路径，故用 AI_RUNNER_ROOT
+// 把 getRoot() 指向临时目录（getRoot 每次调用现读 env，见 overlay.ts:18）。
+let ROOT = ''
+beforeEach(() => {
+  ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'test-overlay-'))
+  process.env.AI_RUNNER_ROOT = ROOT
+})
+afterEach(() => {
+  delete process.env.AI_RUNNER_ROOT
+  if (ROOT) fs.rmSync(ROOT, { recursive: true, force: true })
+})
+
 function tmpDir(): string {
-  const d = path.join(process.cwd(), '.ai-runner', `test-overlay-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
-  fs.mkdirSync(d, { recursive: true })
-  return d
+  return fs.mkdtempSync(path.join(ROOT, 'inner-'))
 }
 
 function writeOverlay(dir: string, payload: unknown): string {
@@ -95,7 +105,7 @@ test('readOverlayChanges: 不存在 → []', () => {
 test('readOverlayChanges: write → added（before 无）', () => {
   const d = tmpDir()
   try {
-    const target = path.join(process.cwd(), 'src', 'tmp-file-x.ts')
+    const target = path.join(ROOT, 'src', 'tmp-file-x.ts')
     const payload = { [target]: { op: 'write', data: 'aGk=' } }
     const ovp = writeOverlay(d, payload)
     const r = readOverlayChanges(ovp, new Map())
@@ -108,7 +118,7 @@ test('readOverlayChanges: write → added（before 无）', () => {
 test('readOverlayChanges: write → modified（before 有）', () => {
   const d = tmpDir()
   try {
-    const target = path.join(process.cwd(), 'src', 'tmp-file-y.ts')
+    const target = path.join(ROOT, 'src', 'tmp-file-y.ts')
     const payload = { [target]: { op: 'write', data: 'aGk=' } }
     const ovp = writeOverlay(d, payload)
     const before = new Map([['src/tmp-file-y.ts', 'old']])
@@ -121,7 +131,7 @@ test('readOverlayChanges: write → modified（before 有）', () => {
 test('readOverlayChanges: delete → deleted', () => {
   const d = tmpDir()
   try {
-    const target = path.join(process.cwd(), 'src', 'tmp-file-z.ts')
+    const target = path.join(ROOT, 'src', 'tmp-file-z.ts')
     const payload = { [target]: { op: 'delete', data: null } }
     const r = readOverlayChanges(writeOverlay(d, payload), new Map())
     assert.equal(r.length, 1)
@@ -148,7 +158,7 @@ test('readOverlayChanges: 坏 JSON → []', () => {
 })
 
 test('applyOverlay: 白名单文件（.ai-runner/<tmp>/state.json）正常落盘', () => {
-  const subdir = path.join(process.cwd(), '.ai-runner', `test-overlay-keep-${Date.now()}`)
+  const subdir = path.join(ROOT, 'keep')
   const target = path.join(subdir, 'state.json')
   try { fs.unlinkSync(target) } catch { /* 不存在 */ }
   const d = tmpDir()
@@ -161,7 +171,7 @@ test('applyOverlay: 白名单文件（.ai-runner/<tmp>/state.json）正常落盘
 })
 
 test('readOverlayChanges: 白名单文件正常出现在变更报告', () => {
-  const subdir = path.join(process.cwd(), '.ai-runner', `test-overlay-report-${Date.now()}`)
+  const subdir = path.join(ROOT, 'report')
   const target = path.join(subdir, 'changelog.jsonl')
   const d = tmpDir()
   try {

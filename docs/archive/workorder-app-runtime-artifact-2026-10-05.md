@@ -19,7 +19,7 @@ apps/standalone/dist/_server/index.js             nearFresh 3 | stopPoll 3 | rep
 
 （同一份源码连续两次构建的产物 sha256 **逐字节一致** ⇒ 重建是确定的，你可以放心用哈希对账。）
 
-上一轮的判决与逐条取证见 [`docs/review-verdict-2026-10-05.md`](./review-verdict-2026-10-05.md) 的
+上一轮的判决与逐条取证见 [`docs/review-verdict-2026-10-05.md`](../review-verdict-2026-10-05.md) 的
 「第二轮判决 · 针对 WO-20261005-04 的回执」。
 
 ---

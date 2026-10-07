@@ -48,6 +48,25 @@ test('合并窗：窗内 3 条 stage ⇒ 恰 1 次 flush，且是合并文案', 
   assert.ok(flushed[0]!.text.includes('本批共 3 次'))
 })
 
+// [deliver-window-v1] 静默窗必须**可观测**：非循环路径这段（默认 3s）此前 UI 完全看不到 ——
+//   running 已落 false、startAiWaiting 又被挪到 flush 时点，界面就是「显示成功 → 几秒空白」。
+test('onPendingChange / isPending：入窗=true、到点=false、cancel=false', async () => {
+  const marks: boolean[] = []
+  const m = createFeedbackMerge(() => {}, { delayMs: 30, onPendingChange: v => marks.push(v) })
+  assert.equal(m.isPending(), false, '起手不得为 pending')
+  m.stage(item('a'))
+  assert.equal(m.isPending(), true, '入窗后必须置 pending：UI 靠它把这段也算「执行中」')
+  await sleep(60)
+  assert.equal(m.isPending(), false, '出站后 pending 不复位 ⇒ spinner 永不停止')
+  assert.deepEqual(marks, [true, false], `回调序列应为 [true,false]，实际 ${JSON.stringify(marks)}`)
+
+  const m2 = createFeedbackMerge(() => {}, { delayMs: 30 })
+  m2.stage(item('b'))
+  assert.equal(m2.isPending(), true)
+  m2.cancel()
+  assert.equal(m2.isPending(), false, 'cancel 后 pending 不复位 ⇒ 用户急停后 spinner 仍转')
+})
+
 test('窗口顺延：每条 stage 重置静默窗（判据与观测同构，非瞬时快照）', async () => {
   const flushed: number[] = []
   const m = createFeedbackMerge(items => flushed.push(items.length), { delayMs: 50 })

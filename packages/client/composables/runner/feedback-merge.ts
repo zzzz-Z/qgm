@@ -44,6 +44,13 @@ export interface FeedbackMergeOpts {
   delayMs?: number
   /** 到点时校验；返回 false ⇒ 丢弃整个缓冲且不重排（循环已激活：回传权归循环引擎） */
   isActive?: () => boolean
+  /**
+   * [deliver-window-v1] 窗「开→关」的回调（true=有结果在窗内等待出站）。
+   * [WHY] 本模块刻意零 vue 依赖（vitest 裸跑），不能用 ref 暴露状态；用回调把状态交给上层。
+   * [WHY] 这段静默窗此前完全不可见：running 已 false、startAiWaiting 又被挪到 flush 时点，
+   *   结果就是「脚本显示成功、接下来几秒什么都没有」——用户以为是卡住或漏发。
+   */
+  onPendingChange?: (pending: boolean) => void
 }
 
 export interface FeedbackMerge {
@@ -51,6 +58,8 @@ export interface FeedbackMerge {
   /** 清空缓冲并撤窗（调用方卸载 / 用户急停时用） */
   cancel: () => void
   pendingCount: () => number
+  /** [deliver-window-v1] 窗内是否有待出站结果（与 onPendingChange 同值，供测试断言） */
+  isPending: () => boolean
 }
 
 /**
@@ -64,10 +73,20 @@ export function createFeedbackMerge(
   const delayMs = opts.delayMs ?? AUTO_FEEDBACK_MERGE_MS
   let buf: FeedbackItem[] = []
   let timer: ReturnType<typeof setTimeout> | null = null
+  let pending = false
+  /** [deliver-window-v1] 单一写入口；回调异常不得影响回传窗本身 */
+  function setPending(v: boolean): void {
+    if (pending === v) return
+    pending = v
+    try {
+      opts.onPendingChange?.(v)
+    } catch { /* UI 回调不影响出站 */ }
+  }
   function doFlush(): void {
     timer = null
     const items = buf
     buf = []
+    setPending(false)
     if (!items.length) return
     if (opts.isActive && !opts.isActive()) return
     try {
@@ -80,12 +99,15 @@ export function createFeedbackMerge(
       buf.push(item)
       if (timer) clearTimeout(timer)
       timer = setTimeout(doFlush, delayMs)
+      setPending(true)
     },
     cancel(): void {
       if (timer) clearTimeout(timer)
       timer = null
       buf = []
+      setPending(false)
     },
     pendingCount: () => buf.length,
+    isPending: () => pending,
   }
 }

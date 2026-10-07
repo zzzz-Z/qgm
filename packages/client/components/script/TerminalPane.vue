@@ -72,7 +72,7 @@ interface AskItem extends PreviewFields {
 // [round-divider-v1] 轮次分隔条：loopRound 变化时插入，视觉上呈现 TRAE 式「轮次分组」
 // [CONSTRAINT] 依赖 payload.loopRound（由 App.vue ...currentLoopContext() 注入）；手动模式无 loopRound → 不插条
 interface DividerItem { type: 'round-divider', key: string, roundLabel: string, timeLabel: string }
-// [ask-card-v1] AI 提问卡：@ask 不再弹窗，改为对话流里一张可点选/可打字的卡片
+// [ask-card-v1] AI 提问卡：ASK 不再弹窗，改为对话流里一张可点选/可打字的卡片
 // [CONSTRAINT] askId 与 useAsk.askState.id 比对判断「是否仍可交互」——
 //   历史遗留或已被新提问取代的卡片只读展示，防止误点后无人接收回答
 interface QuestionItem extends PreviewFields {
@@ -112,6 +112,9 @@ const props = defineProps<{
   doneSummary?: string
   // 等待 AI 回复中；由 ScriptPanel 透传 useAiWaiting().waiting
   aiWaiting?: boolean
+  // [deliver-window-v1] 结果已产出但回传窗未收口（脚本跑完 → 真正发出去之间那几秒）。
+  //   此前这段完全不可见：界面显示「成功」却什么都没发生，用户以为卡住或漏发。
+  delivering?: boolean
 }>()
 
 /** 阶段中文标签表；未命中回退为原值 */
@@ -164,7 +167,7 @@ const timelineItems = computed(() => {
   // [round-divider-v1] 追踪上一张脚本卡的轮次；跨轮时插入分隔条（初始 0 表示尚未出现任何轮次）
   let lastRound = 0
   for (const ev of busEvents.value) {
-    // [ask-card-v1] AI 提问卡：@ask 解析结果，渲染为对话流内可点选/可打字的卡片（替代旧弹窗）
+    // [ask-card-v1] AI 提问卡：ASK 解析结果，渲染为对话流内可点选/可打字的卡片（替代旧弹窗）
     // [CONSTRAINT] 正文与选项皆空才跳过；只要有一项就渲染（纯选项问题也合法）
     // [CHANGE-IMPACT] 依赖 useAsk.askUser emit 的 payload 契约（askId/question/options/answered/answer）
     if (ev.kind === 'ai:question') {
@@ -490,11 +493,11 @@ function normalizeAskOptions(raw: unknown): Array<{ id: string, label: string }>
         </div>
       </div>
       <!-- 等待 AI 回复指示条：收到首个回复后由 stopAiWaiting 关闭；置于消息流底部 -->
-      <div v-if="props.aiWaiting" class="wait-banner" role="status" aria-live="polite">
+      <div v-if="props.aiWaiting || props.delivering" class="wait-banner" role="status" aria-live="polite">
         <span class="wait-spinner" aria-hidden="true" />
-        <span class="wait-text">{{ waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中' }}</span>
+        <span class="wait-text">{{ props.delivering ? '正在回传结果给 AI' : (waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中') }}</span>
         <span class="wait-dots" aria-hidden="true" />
-        <span v-if="waitElapsed > 0" class="wait-elapsed" aria-hidden="true">{{ waitElapsed }}s</span>
+        <span v-if="!props.delivering && waitElapsed > 0" class="wait-elapsed" aria-hidden="true">{{ waitElapsed }}s</span>
       </div>
     </div>
   </section>

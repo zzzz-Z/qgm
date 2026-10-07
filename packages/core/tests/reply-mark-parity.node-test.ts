@@ -167,19 +167,19 @@ const CASES: Case[] = [
     md: 'text\n\n正文若干。',
     expect: NONE,
   },
-  // ── 过渡别名：旧 SYSTEM.md / 旧 SUMMARY_INSTRUCTION 下发的会话仍会写这两种 ──
+  // ── 别名已移除（[alias-removed-v1] 2026-10-07）：旧写法不再命中 ──
   {
-    name: '过渡别名 `@ask` 仍命中',
+    name: '旧别名 `@ask` 已移除，不命中',
     md: '@ask\n请确认要用哪个方案？',
-    expect: only('ask', 1),
+    expect: NONE,
   },
   {
-    name: '过渡别名 `# 任务` 仍命中',
+    name: '旧别名 `# 任务` 已移除，不命中',
     md: '# 任务\n\n# 已完成\n- 若干',
-    expect: only('handoff', 1),
+    expect: NONE,
   },
   {
-    name: '别名同样要求独占一行',
+    name: '旧别名 @ask 后跟正文也不命中',
     md: '@ask 请确认要用哪个方案？',
     expect: NONE,
   },
@@ -211,7 +211,7 @@ test('reply-mark: 三处实现都锚定首个非空行，且五类标记齐全',
   for (const rel of SOURCES) {
     const inner = extractInner(read(rel), 'scanReplyMarks')
     assert.ok(/lines\[head\]\.trim\(\)/.test(inner), `${rel} 未锚定首个非空行（应取 lines[head].trim()）`)
-    for (const literal of ['/^SCRIPT$/', '/^DONE$/', '(?:ASK|@ask)', '(?:HANDOFF|#\\s*任务)', '/^TEXT$/']) {
+    for (const literal of ['/^SCRIPT$/', '/^ASK$/', '/^DONE$/', '/^HANDOFF$/', '/^TEXT$/']) {
       assert.ok(inner.includes(literal), `${rel} 的 scanReplyMarks 缺少标记判据 ${literal}`)
     }
     // [CONSTRAINT] 断言完整字面量而非变量名：变异验证发现只查「变量还在」时，删掉判据那一行守卫仍全绿

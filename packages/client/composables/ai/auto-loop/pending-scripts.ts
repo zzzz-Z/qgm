@@ -16,6 +16,15 @@ const queues = new Map<string, InboxItem[]>()
 /** 待执行脚本总数（跨实例求和）。UI 据此判断「这批还没跑完」，抑制中途回传。 */
 export const pendingScriptCount = ref(0)
 
+/**
+ * [deliver-window-v1] 轮内合并窗进行中的实例数（跨实例求和）。
+ * [WHY] 脚本执行完到真正 sendFill 之间还有 ROUND_MERGE_MS 的静默窗，此前**零响应式信号** ⇒
+ *   UI 已把状态翻成「成功」而结果尚未出站，用户既看不到进度也不知道还在等什么。
+ *   UI 据此把这段也算「执行中」（计时不停、spinner 不灭）。
+ * [CONSTRAINT] 只由下方 syncMergePending 单点写入，与 pendingScriptCount 同构，避免多处自增漂移。
+ */
+export const roundMergePending = ref(0)
+
 /** 依据各队列长度重算总计数（唯一写入口，避免多处自增导致漂移） */
 function syncCount(): void {
   let n = 0
@@ -93,6 +102,11 @@ interface MergeSlot {
 
 const merges = new Map<string, MergeSlot>()
 
+/** [deliver-window-v1] 依据合并槽个数重算「回传窗进行中」计数（唯一写入口） */
+function syncMergePending(): void {
+  roundMergePending.value = merges.size
+}
+
 /** 到点：队列空则交给 flush 出站，否则原地等待（由待执行块的完成事件重新计时） */
 function fireRoundMerge(loopId: string): void {
   const slot = merges.get(loopId)
@@ -102,6 +116,7 @@ function fireRoundMerge(loopId: string): void {
   const outcomes = slot.outcomes.splice(0, slot.outcomes.length)
   const flush = slot.flush
   merges.delete(loopId)
+  syncMergePending()
   if (!flush || outcomes.length === 0) return
   // 返回值语义：true=已出站；false=守卫拒绝（暂停/失活）→ 丢弃，不重排定时器（防迟到出站）
   flush(outcomes)
@@ -124,6 +139,7 @@ export function stageRoundOutcome(
   if (slot.timer) clearTimeout(slot.timer)
   slot.timer = setTimeout(() => { fireRoundMerge(loopId) }, ROUND_MERGE_MS)
   merges.set(loopId, slot)
+  syncMergePending()
 }
 
 /** 取消并丢弃某实例的合并窗（循环终止 / 暂停 / 队列清空时调用） */
@@ -132,6 +148,7 @@ export function cancelRoundMerge(loopId: string): void {
   if (!slot) return
   if (slot.timer) clearTimeout(slot.timer)
   merges.delete(loopId)
+  syncMergePending()
 }
 
 /** 测试/诊断用：本实例尚未出站的块结果 */

@@ -5,14 +5,14 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import { detectPackageManager } from '../../../packages/core/src/process/proc.js'
 
 // AIRUNNER-BATCH13-1-DETECT-PM
 
+// [test-tmpdir-v1] 夹具不再落 .ai-runner（会累积成灾；本测试不依赖 getRoot）
 function tmpDir(): string {
-  const d = path.join(process.cwd(), '.ai-runner', `test-pm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
-  fs.mkdirSync(d, { recursive: true })
-  return d
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'test-pm-'))
 }
 
 function withEnv(key: string, val: string | undefined, fn: () => void): void {

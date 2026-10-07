@@ -17,6 +17,7 @@ declare global {
   const KEY_SANDBOX: typeof import('./composables/ui/useAppStorage').KEY_SANDBOX
   const KEY_THEME: typeof import('./composables/ui/useAppStorage').KEY_THEME
   const LESSONS_BUDGET: typeof import('./composables/ai/load-lessons').LESSONS_BUDGET
+  const LIMIT_TOAST_GENERIC: typeof import('./utils/limit-notice').LIMIT_TOAST_GENERIC
   const LOOP_HARD_MAX_MS: typeof import('./composables/ai/loopLogic').LOOP_HARD_MAX_MS
   const LOOP_HARD_MAX_ROUNDS: typeof import('./composables/ai/loopLogic').LOOP_HARD_MAX_ROUNDS
   const LOOP_MAX_ROUNDS: typeof import('./composables/ai/loopLogic').LOOP_MAX_ROUNDS
@@ -143,6 +144,7 @@ declare global {
   const fileToneStyle: typeof import('./utils/format').fileToneStyle
   const fmtSize: typeof import('./utils/format').fmtSize
   const fnv1a8: typeof import('./utils/hash').fnv1a8
+  const formatLimitToast: typeof import('./utils/limit-notice').formatLimitToast
   const getActiveModelId: typeof import('./composables/ui/useSitesStore').getActiveModelId
   const getActiveWin: typeof import('./composables/ai/useAiWindowTable').getActiveWin
   const getActiveWinSid: typeof import('./composables/ai/useAiWindowTable').getActiveWinSid
@@ -212,6 +214,7 @@ declare global {
   const nextTick: typeof import('vue').nextTick
   const normalizeAskOptions: typeof import('./utils/timeline-build').normalizeAskOptions
   const normalizeForHash: typeof import('./composables/runner/inbox-parse').normalizeForHash
+  const normalizeLimitHit: typeof import('./utils/limit-notice').normalizeLimitHit
   const onActivated: typeof import('vue').onActivated
   const onBeforeMount: typeof import('vue').onBeforeMount
   const onBeforeUnmount: typeof import('vue').onBeforeUnmount
@@ -284,6 +287,7 @@ declare global {
   const restore: typeof import('./composables/ai/auto-loop/persist').restore
   const resumeFromPause: typeof import('./composables/ai/useAutoLoop').resumeFromPause
   const resumeLoop: typeof import('./composables/ai/useAutoLoop').resumeLoop
+  const roundMergePending: typeof import('./composables/ai/auto-loop/pending-scripts').roundMergePending
   const roundTimeoutMs: typeof import('./composables/ai/auto-loop/state').roundTimeoutMs
   const runBash: typeof import('./composables/ai/auto-loop/run-bash').runBash
   const runHook: typeof import('./composables/ai/auto-loop/hooks').runHook
@@ -674,6 +678,7 @@ declare module 'vue' {
     readonly KEY_SANDBOX: UnwrapRef<typeof import('./composables/ui/useAppStorage')['KEY_SANDBOX']>
     readonly KEY_THEME: UnwrapRef<typeof import('./composables/ui/useAppStorage')['KEY_THEME']>
     readonly LESSONS_BUDGET: UnwrapRef<typeof import('./composables/ai/load-lessons')['LESSONS_BUDGET']>
+    readonly LIMIT_TOAST_GENERIC: UnwrapRef<typeof import('./utils/limit-notice')['LIMIT_TOAST_GENERIC']>
     readonly LOOP_HARD_MAX_MS: UnwrapRef<typeof import('./composables/ai/loopLogic')['LOOP_HARD_MAX_MS']>
     readonly LOOP_HARD_MAX_ROUNDS: UnwrapRef<typeof import('./composables/ai/loopLogic')['LOOP_HARD_MAX_ROUNDS']>
     readonly LOOP_MAX_ROUNDS: UnwrapRef<typeof import('./composables/ai/loopLogic')['LOOP_MAX_ROUNDS']>
@@ -800,6 +805,7 @@ declare module 'vue' {
     readonly fileToneStyle: UnwrapRef<typeof import('./utils/format')['fileToneStyle']>
     readonly fmtSize: UnwrapRef<typeof import('./utils/format')['fmtSize']>
     readonly fnv1a8: UnwrapRef<typeof import('./utils/hash')['fnv1a8']>
+    readonly formatLimitToast: UnwrapRef<typeof import('./utils/limit-notice')['formatLimitToast']>
     readonly getActiveModelId: UnwrapRef<typeof import('./composables/ui/useSitesStore')['getActiveModelId']>
     readonly getActiveWin: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['getActiveWin']>
     readonly getActiveWinSid: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['getActiveWinSid']>
@@ -869,6 +875,7 @@ declare module 'vue' {
     readonly nextTick: UnwrapRef<typeof import('vue')['nextTick']>
     readonly normalizeAskOptions: UnwrapRef<typeof import('./utils/timeline-build')['normalizeAskOptions']>
     readonly normalizeForHash: UnwrapRef<typeof import('./composables/runner/inbox-parse')['normalizeForHash']>
+    readonly normalizeLimitHit: UnwrapRef<typeof import('./utils/limit-notice')['normalizeLimitHit']>
     readonly onActivated: UnwrapRef<typeof import('vue')['onActivated']>
     readonly onBeforeMount: UnwrapRef<typeof import('vue')['onBeforeMount']>
     readonly onBeforeUnmount: UnwrapRef<typeof import('vue')['onBeforeUnmount']>
@@ -941,6 +948,7 @@ declare module 'vue' {
     readonly restore: UnwrapRef<typeof import('./composables/ai/auto-loop/persist')['restore']>
     readonly resumeFromPause: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['resumeFromPause']>
     readonly resumeLoop: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['resumeLoop']>
+    readonly roundMergePending: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['roundMergePending']>
     readonly roundTimeoutMs: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['roundTimeoutMs']>
     readonly runBash: UnwrapRef<typeof import('./composables/ai/auto-loop/run-bash')['runBash']>
     readonly runHook: UnwrapRef<typeof import('./composables/ai/auto-loop/hooks')['runHook']>

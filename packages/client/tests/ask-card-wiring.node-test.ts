@@ -1,4 +1,4 @@
-// @desc @ask 提问卡接线验证（源码级）：弹窗改对话流卡片后的四端契约
+// @desc ASK 提问卡接线验证（源码级）：弹窗改对话流卡片后的四端契约
 // @why 这是一次跨文件改造（parser → 事件流 → UI → 挂载点），行为级测试需 mock DOM/transport；
 //      用源码扫描锁定四端符号，防重构时只删改其中一端（与 ask-wiring.node-test.ts 同思路）
 import { test } from 'vitest'

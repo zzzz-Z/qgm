@@ -159,3 +159,12 @@ test('denoiseLog: ANSI 转义被剥离（SGR 颜色 + 光标控制）', () => {
   // 非 ANSI 的普通方括号不受影响
   assert.equal(denoiseLog('[INFO] done'), '[INFO] done')
 })
+
+test('denoiseLog: 剥离行首 [AI] 前缀，保留内容', () => {
+  assert.equal(denoiseLog('[AI] patched: true'), 'patched: true')
+  assert.equal(denoiseLog('[AI] 剩余 @ask: 1'), '剩余 @ask: 1')
+  // 纯 [AI] 行剥离后为空 → 丢弃
+  assert.equal(denoiseLog('a\n[AI]\nb'), 'a\nb')
+  // 非行首的 [AI] 不动
+  assert.equal(denoiseLog('x [AI] y'), 'x [AI] y')
+})

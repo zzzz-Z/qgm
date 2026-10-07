@@ -1,13 +1,13 @@
-// @desc 解析 AI 回复中的 @ask 块：提取问题正文 + 快捷选项
+// @desc 解析 AI 回复中的 ASK 块：提取问题正文 + 快捷选项
 // @why 支持「AI 提问 → 对话流卡片 → 用户回答 → 下一轮 prompt」的交互；
 //       选项沿用 Markdown 列表语法，AI 无需学新语法；纯函数便于 vitest node 直测
 // @change-impact 输出结构被 TerminalPane 的提问卡与 useAsk.askUser 共用；字段变更须同步两端
 
 import { scanReplyMarks } from './reply-mark'
 
-/** @ask 块的结构化载荷 */
+/** ASK 块的结构化载荷 */
 export interface AskPayload {
-  /** 问题正文（Markdown 原文，已去 @ask 前缀），卡片内用 renderMarkdown 渲染 */
+  /** 问题正文（Markdown 原文，已去 ASK 标记行），卡片内用 renderMarkdown 渲染 */
   question: string
   /** 快捷选项；空数组表示卡片仅提供自由文本输入 */
   options: Array<{ id: string, label: string }>
@@ -58,8 +58,8 @@ function collectOptions(lines: string[]): Array<{ id: string, label: string }> {
 }
 
 /**
- * 从 AI 回复原文提取 @ask 载荷
- * [WHY] 返回 null 表示非 @ask，调用方继续走原有分支（plain / done / multi）
+ * 从 AI 回复原文提取 ASK 载荷
+ * [WHY] 返回 null 表示非 ASK，调用方继续走原有分支（plain / done / multi）
  * [CONSTRAINT] 只处理首个 ASK 块；标记必须**独占一行**且落在首个非空行
  *   （`ASK 问题` 这类同行写法不识别），正文从第二行起
  *
@@ -70,18 +70,18 @@ function collectOptions(lines: string[]): Array<{ id: string, label: string }> {
  *   三档 · 其余一律不给选项 → 正文列表原样留在 question 里，
  *          最坏后果是少几个按钮（用户仍可自由输入），而不是让用户点错选项。
  *
- * @param text AI 回复原文；空串/非 @ask 返回 null
+ * @param text AI 回复原文；空串/非 ASK 返回 null
  */
 export function parseAsk(text: string): AskPayload | null {
   const raw = String(text ?? '')
   // [reply-mark-v1] 标记判定统一走 scanReplyMarks：只看首个非空行的独占标记行
-  //   （`ASK`，或过渡别名 `@ask`）。与浏览器侧 headless-inject 的门槛共用同一套判据，
+  //   （只认 `ASK`；旧别名 `@ask` 已移除，见 [alias-removed-v1]）。与浏览器侧 headless-inject 的门槛共用同一套判据，
   //   不再存在「一边认一边不认」的窗口。
   const scan = scanReplyMarks(raw)
   if (scan.ask <= 0) return null
 
   // [reply-mark-v1] 标记行独占一行 → 问题正文 = 标记行之后的**所有行**
-  //   （旧协议允许 `@ask 问题` 同行，需额外剥离该行前缀；现在那一行只剩标记本身）
+  //   （旧协议允许标记与问题同行，需额外剥离该行前缀；现在那一行只剩标记本身）
   const body = raw.split(/\r?\n/).slice(scan.ask).join('\n').trim()
   if (!body) return { question: '', options: [] }
 

@@ -15,7 +15,7 @@ import { createSideResize } from './side-resize'
 // exec 全流程已抽到 exec-flow.ts
 import { createExecFlow } from './exec-flow'
 // [multi-script-v1] 同一条回复还有排队脚本时抑制中途回传（见 pending-scripts.ts 的 CONSTRAINT）
-import { pendingScriptCount } from '../../composables/ai/auto-loop/pending-scripts'
+import { pendingScriptCount, roundMergePending } from '../../composables/ai/auto-loop/pending-scripts'
 // 组件内定时器统一走 vueuse：随组件卸载自动清理，省去手动 clear
 // [script-panel-utils-v2-extracted]
 import TerminalPane from './TerminalPane.vue'
@@ -93,6 +93,11 @@ const attachedFiles = ref<AttachedFile[]>([])
 const statusText = ref('')
 /** 状态样式类（ok/err） */
 const statusClass = ref('')
+/**
+ * [deliver-window-v1] 非循环自动回传合并窗内是否还有待出站结果。
+ * [WHY] 由 exec-flow 的 feedbackMerge 经 onFeedbackPending 回调驱动（feedback-merge 刻意零 vue 依赖）。
+ */
+const feedbackPending = ref(false)
 
 /** 当前时间戳（用于刷新相对时间显示） */
 
@@ -112,7 +117,7 @@ const changeViewProxy = computed<'round' | 'cumulative'>({
   set: (v) => { setChangeView(v) },
 })
 // 已删除 countdown（延迟机制移除）
-const { enabled: autoTakeoverEnabled, scheduleAutoRun, cancelAutoRun } = useAutoTakeover()
+const { enabled: autoTakeoverEnabled, scheduleAutoRun } = useAutoTakeover()
 // ── 领域 composable ──
 const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
 const { events: busEvents } = useEventBus()
@@ -127,6 +132,16 @@ const {
   softPause,
   loopPaused,
 } = useAutoLoop()
+/**
+ * [deliver-window-v1] 「脚本已跑完、结果还没发出去」的回传窗是否开著。
+ * [WHY] 两条路径各有一段静默窗：循环路径 ROUND_MERGE_MS(1500ms)、非循环自动回传
+ *   AUTO_FEEDBACK_MERGE_MS(3000ms)。这两段此前**零可视化**——running 已 false、
+ *   startAiWaiting 又被挪到 flush 时点，界面上就是「显示成功 → 几秒空白 → 突然发出去」。
+ * [CONSTRAINT] 只读派生，不反写两个窗；计时与 spinner 都按「含回传窗」口径走。
+ */
+const delivering = computed(() => roundMergePending.value > 0 || feedbackPending.value)
+/** 含回传窗的忙碌口径：脚本执行中 + 结果等待出站 */
+const busyOrDelivering = computed(() => running.value || delivering.value)
 // 运行计时器：组件级 scope，卸载自动清理（等价原 onBeforeUnmount clearInterval）
 const { pause: pauseElapsed, resume: resumeElapsed } = useIntervalFn(() => {
   const s = (performance.now() - runStartAt) / 1000
@@ -210,6 +225,8 @@ const { copyOutput, feedbackMerge } = createExecFlow({
   startAiWaiting,
   softPause,
   isLoopActive,
+  // [deliver-window-v1] 回传窗开关 → 面板的 delivering 状态
+  onFeedbackPending: (v) => { feedbackPending.value = v },
 })
 // [auto-feedback-merge-v1] 组件卸载时撤合并窗：缓冲里的未发结果随面板销毁丢弃，
 //   防止卸载后迟到出站（flush 的 isActive 守卫只挡循环接管，挡不了组件已销毁）。
@@ -267,6 +284,66 @@ watch(previewFile, (v) => {
     ? Math.max(sideWidthBase.value, SIDE_WIDTH_DIFF)
     : sideWidthBase.value
 })
+/**
+ * 脚本跑完的结果分支：成功/失败文案 + 自动回传判定。
+ * [deliver-window-v1] 计时收口**不在这里**（见下方 watch(busyOrDelivering)）：
+ *   脚本跑完 ≠ 本轮结束，回传窗那几秒同样算「执行中」。
+ */
+function handleRunResult(): void {
+  const r = result.value
+  if (!r) return
+  // [multi-script-v1] 同一条 AI 回复还有排队脚本未跑完 → 本轮不做中途回传
+  // [WHY] 批量脚本执行到一半就把中间结果塞给 AI，会在 AI 侧开启新一轮回复，
+  //   与仍在排队/执行中的块互相踩踏；等队列清空后由最后一块统一回传。
+  // [CONSTRAINT] 只在循环内生效：非循环路径没有队列概念，行为保持原样
+  const midBatch = isLoopActive.value && pendingScriptCount.value > 0
+  if (r.dryRunFailed) {
+    // [ui-icon-discipline-v1] chrome 层去 emoji：语义由 statusClass 承担（'err' 已上色）
+    statusText.value = '预检失败 · 未落盘'
+    statusClass.value = 'err'
+    toast(
+      `预检未通过：脚本本想改 ${r.dryRunChangeCount ?? 0} 个文件，已丢弃，磁盘零改动；错误已入 prompt`,
+      'warn',
+      5000,
+    )
+    if (midBatch || isLoopActive.value) {
+      // 队列未清空 / 循环活动：回传权归循环引擎（reply-handlers 的 executeItemInner），
+      // 此处不得再发一次，否则同一次执行会出现「循环引擎 + ScriptPanel」双发
+    } else if (autoTakeoverEnabled.value) {
+      scheduleAutoRun(() => { void copyOutput(autoFeedbackRequested.value) })
+    } else {
+      void copyOutput(autoFeedbackRequested.value)
+    }
+    return
+  }
+  // [ui-icon-discipline-v1] 同上：成功/失败由 statusClass('ok'/'err') 上色表达
+  statusText.value = r.ok ? '成功' : '失败'
+  statusClass.value = r.ok ? 'ok' : 'err'
+  // autoAskOnResult: 失败或只读诊断（成功无改动、非循环）时延迟 3s 自动复制并发给 AI（主动停止除外）
+  const isReadonlyProbe = isReadonlyResult(r, isLoopActive.value)
+  const forceFeedback = autoFeedbackRequested.value
+  const shouldAutoAsk
+    = forceFeedback
+      || autoTakeoverEnabled.value
+      || !r.ok
+      || isReadonlyProbe
+      || r.tsc?.ok === false
+      || r.lint?.ok === false
+      || r.test?.ok === false
+  // [loop-feedback-authority-v2] 循环活动时回传权归循环引擎，ScriptPanel 一律不再发：
+  //   本块执行完时循环引擎也会发（且已按队列是否清空合并成一次），两处都发即为同轮双发。
+  if (shouldAutoAsk && !midBatch && !isLoopActive.value && r.error !== '已取消') {
+    if (forceFeedback) clearAutoFeedback()
+    if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput(forceFeedback) })
+    else void copyOutput(forceFeedback)
+  }
+  // 清空编辑区模式：脚本快照从 lastRunScript 取（script 已清空）
+  const scriptSnapshot = lastRunCode.value || lastRunScript.value || script.value
+  // 把跑过的脚本记为「已消费」，让后续 AI 回填能直接覆盖（不误伤手动编辑）
+  setLastAutoFilled(scriptSnapshot)
+  // 已删 desc/why/lang/hash 块：grep 证实在文件内无第二消费点
+}
+
 watch(running, (v) => {
   if (v) {
     runStartAt = performance.now()
@@ -276,62 +353,25 @@ watch(running, (v) => {
     runningElapsed.value = '0.0s'
     // resume 等价 setInterval 启动；重复 resume 幂等（内部判断 isActive）
     resumeElapsed()
-  } else if (result.value) {
-    pauseElapsed()
-    runningElapsed.value = ''
-    const ms = performance.now() - runStartAt
-    lastDuration.value = ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`
-    // [multi-script-v1] 同一条 AI 回复还有排队脚本未跑完 → 本轮不做中途回传
-    // [WHY] 批量脚本执行到一半就把中间结果塞给 AI，会在 AI 侧开启新一轮回复，
-    //   与仍在排队/执行中的块互相踩踏；等队列清空后由最后一块统一回传。
-    // [CONSTRAINT] 只在循环内生效：非循环路径没有队列概念，行为保持原样
-    const midBatch = isLoopActive.value && pendingScriptCount.value > 0
-    if (result.value.dryRunFailed) {
-      // [ui-icon-discipline-v1] chrome 层去 emoji：语义由 statusClass 承担（'err' 已上色）
-      statusText.value = '预检失败 · 未落盘'
-      statusClass.value = 'err'
-      toast(
-        `预检未通过：脚本本想改 ${result.value.dryRunChangeCount ?? 0} 个文件，已丢弃，磁盘零改动；错误已入 prompt`,
-        'warn',
-        5000,
-      )
-      if (midBatch || isLoopActive.value) {
-        // 队列未清空 / 循环活动：回传权归循环引擎（reply-handlers 的 executeItemInner），
-        // 此处不得再发一次，否则同一次执行会出现「循环引擎 + ScriptPanel」双发
-      } else if (autoTakeoverEnabled.value) {
-        scheduleAutoRun(() => { void copyOutput(autoFeedbackRequested.value) })
-      } else {
-        void copyOutput(autoFeedbackRequested.value)
-      }
-    } else {
-      // [ui-icon-discipline-v1] 同上：成功/失败由 statusClass('ok'/'err') 上色表达
-      statusText.value = result.value.ok ? '成功' : '失败'
-      statusClass.value = result.value.ok ? 'ok' : 'err'
-      // autoAskOnResult: 失败或只读诊断（成功无改动、非循环）时延迟 3s 自动复制并发给 AI（主动停止除外）
-      const isReadonlyProbe = isReadonlyResult(result.value, isLoopActive.value)
-      const forceFeedback = autoFeedbackRequested.value
-      const shouldAutoAsk
-        = forceFeedback
-          || autoTakeoverEnabled.value
-          || !result.value.ok
-          || isReadonlyProbe
-          || result.value.tsc?.ok === false
-          || result.value.lint?.ok === false
-          || result.value.test?.ok === false
-      // [loop-feedback-authority-v2] 循环活动时回传权归循环引擎，ScriptPanel 一律不再发：
-      //   本块执行完时循环引擎也会发（且已按队列是否清空合并成一次），两处都发即为同轮双发。
-      if (shouldAutoAsk && !midBatch && !isLoopActive.value && result.value.error !== '已取消') {
-        if (forceFeedback) clearAutoFeedback()
-        if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput(forceFeedback) })
-        else void copyOutput(forceFeedback)
-      }
-      // 清空编辑区模式：脚本快照从 lastRunScript 取（script 已清空）
-      const scriptSnapshot = lastRunCode.value || lastRunScript.value || script.value
-      // 把跑过的脚本记为「已消费」，让后续 AI 回填能直接覆盖（不误伤手动编辑）
-      setLastAutoFilled(scriptSnapshot)
-      // 已删 desc/why/lang/hash 块：grep 证实在文件内无第二消费点
-    }
+    return
   }
+  handleRunResult()
+})
+
+/**
+ * [deliver-window-v1] 计时收口：脚本执行完 **且** 回传窗已收口 才算本轮跑完。
+ * [WHY] 循环路径有 ROUND_MERGE_MS(1500ms)、非循环自动回传有 AUTO_FEEDBACK_MERGE_MS(3000ms)
+ *   两段静默窗；此前计时在 running 落 false 的那一刻就停，界面显示「成功」而结果还没发出去。
+ * [CONSTRAINT] runStartAt 归零后才允许重算，避免「从未起跑」时把 0 当起点算出巨大耗时。
+ */
+watch(busyOrDelivering, (v) => {
+  if (v) return
+  pauseElapsed()
+  runningElapsed.value = ''
+  if (!runStartAt) return
+  const ms = performance.now() - runStartAt
+  lastDuration.value = ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`
+  runStartAt = 0
 })
 
 onMounted(() => {
@@ -417,6 +457,7 @@ function onHtmlDrop(e: DragEvent) {
         :live-stderr="liveStderr"
         :done-summary="doneSummary"
         :ai-waiting="aiWaiting"
+        :delivering="delivering"
       />
       <!-- 编辑器 (下方) -->
       <ScriptEditor
@@ -439,6 +480,7 @@ function onHtmlDrop(e: DragEvent) {
             :script="script"
             :attached-files-count="attachedFiles.length"
             :ai-waiting="aiWaiting"
+            :delivering="delivering"
             @clear-all="clearAll"
             @pause-all="pauseAll"
             @toggle-auto-takeover="toggleAutoTakeover"
@@ -448,6 +490,17 @@ function onHtmlDrop(e: DragEvent) {
           <ScriptAttachBar :files="attachedFiles" @remove="removeAttach" />
         </template>
       </ScriptEditor>
+
+      <!-- [status-bar-v1] 执行状态条：接入此前零渲染出口的 statusText/statusClass/runningElapsed/lastDuration -->
+      <div
+        v-if="statusText || runningElapsed || lastDuration"
+        class="status-bar text-11px px-12px py-4px flex gap-8px items-center"
+        :class="statusClass === 'err' ? 'text-red-400' : statusClass === 'ok' ? 'text-green-400' : 'text-[var(--text-3)]'"
+      >
+        <span v-if="statusText">{{ statusText }}</span>
+        <span v-if="runningElapsed" class="font-mono">{{ runningElapsed }}</span>
+        <span v-else-if="lastDuration" class="font-mono opacity-70">耗时 {{ lastDuration }}</span>
+      </div>
 
       <div v-if="fileSuccess" class="overlay success">
         <div class="overlay-card success">

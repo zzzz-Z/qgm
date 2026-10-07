@@ -5,13 +5,14 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import { loadHooksConfig, parseHooksConfig } from '../../../packages/core/src/utils/hooks-config.js'
 
 // AIRUNNER-BATCH11-1-HOOKS-CONFIG-TEST
 
+// [test-tmpdir-v1] 夹具不再落 .ai-runner（会累积成灾；本测试不依赖 getRoot）
 function tmpFile(content: string): string {
-  const dir = path.join(process.cwd(), '.ai-runner', `test-hookcfg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
-  fs.mkdirSync(dir, { recursive: true })
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-hookcfg-'))
   const p = path.join(dir, 'hooks.json')
   fs.writeFileSync(p, content)
   return p

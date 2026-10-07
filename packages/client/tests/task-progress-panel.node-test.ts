@@ -6,8 +6,13 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import TaskProgressPanel from '../components/script/TaskProgressPanel.vue'
 
-const { sidRef } = vi.hoisted(() => ({ sidRef: { value: 'test-sid' } }))
+// [taskboard-loop-badge-v1] kindRef 形状对齐真实 RuntimeState：state.value 是 { kind, ... } 对象（非裸字符串）
+const { sidRef, kindRef } = vi.hoisted(() => ({ sidRef: { value: 'test-sid' }, kindRef: { value: { kind: 'idle' } } }))
 vi.mock('../composables/ui/useAppStorage', () => ({ activeSessionId: sidRef, effectiveSessionId: sidRef }))
+// [taskboard-loop-badge-v1] mock 循环状态单一真相源：真实 useRuntime 会碰 transport，且测试需可控 kind
+vi.mock('../composables/ai/useRuntime', () => ({
+  useRuntime: () => ({ state: kindRef }),
+}))
 
 const originalFetch = globalThis.fetch
 
@@ -195,12 +200,89 @@ test('clear: 全部完成无待办 → 头部出现清空按钮，点击发 set 
   w.unmount()
 })
 
-test('clear: 有待办或执行中时不显示清空按钮（防误删进行中的清单）', async () => {
-  mockTasks({ items: [{ id: 'p', desc: '待办任务', status: 'pending' }, { id: 'd', desc: '完成的任务', status: 'done' }] })
+// [leftover-clear-fix-v1] 原判据「有待办就不显示清空」与 leftover 提示互斥：
+//   提示叫用户「点上方清空」，但按钮恰好要求无待办 ⇒ 永远不渲染（死引导）。
+//   新语义：只要有「执行中」项就不显示（防误删进行中的清单）；待办而无执行中 = 循环未跑，可清。
+test('clear: 遗留待办（无执行中）→ 显示清空按钮，点击发 set 空清单', async () => {
+  const posts = mockBoard(
+    { items: [{ id: 'p', desc: '待办任务', status: 'pending' }, { id: 'd', desc: '完成的任务', status: 'done' }] },
+    { items: [] },
+  )
+  const w = mount(TaskProgressPanel)
+  await flushPromises()
+  const btn = w.find('.tp-clear')
+  expect(btn.exists()).toBe(true)
+  await btn.trigger('click')
+  await flushPromises()
+  expect(posts.length).toBe(1)
+  expect(posts[0].mode).toBe('set')
+  expect(posts[0].sid).toBe('test-sid')
+  expect(posts[0].todo).toEqual([])
+  w.unmount()
+})
+
+test('clear: 有执行中任务时不显示清空按钮（防误删进行中的清单）', async () => {
+  mockTasks({ items: [{ id: 'r', desc: '执行中任务', status: 'running' }, { id: 'p', desc: '待办任务', status: 'pending' }] })
   const w = mount(TaskProgressPanel)
   await flushPromises()
   expect(w.find('.tp-clear').exists()).toBe(false)
   w.unmount()
+})
+
+// ---------- [taskboard-loop-badge-v1] 循环运行状态徽章 ----------
+
+test('loopBadge: 头部显示循环状态徽章，文案随 kind 变化', async () => {
+  mockTasks({ items: [{ id: 'a', desc: '任务A', status: 'pending' }] })
+  kindRef.value = { kind: 'running' }
+  let w = mount(TaskProgressPanel)
+  await flushPromises()
+  expect(w.find('.tp-loop').text()).toBe('运行中')
+  expect(w.find('.tp-loop').classes()).toContain('loop-running')
+  w.unmount()
+
+  kindRef.value = { kind: 'idle' }
+  w = mount(TaskProgressPanel)
+  await flushPromises()
+  expect(w.find('.tp-loop').text()).toBe('未运行')
+  expect(w.find('.tp-loop').classes()).toContain('loop-stopped')
+  w.unmount()
+})
+
+// [loop-badge-coverage-v1] 承重判据：LoopState 13 态若有任一缺映射，就会回落 idle「未运行」——
+//   最刺眼的是 executing（脚本真的在跑）也显示「未运行」。
+test('loopBadge: 13 个 LoopState 各有专属文案，非 idle 态不得回落「未运行」', async () => {
+  mockTasks({ items: [{ id: 'a', desc: '任务A', status: 'pending' }] })
+  const kinds = ['running', 'preparing', 'parsing', 'executing', 'feedback', 'waiting', 'waiting-input', 'handoff', 'paused', 'budget-limited', 'stopped', 'interrupted', 'idle']
+  const seen = new Set<string>()
+  for (const k of kinds) {
+    kindRef.value = { kind: k }
+    const w = mount(TaskProgressPanel)
+    await flushPromises()
+    const text = w.find('.tp-loop').text()
+    expect(text, `kind=${k} 缺映射 ⇒ 回落「未运行」`).not.toBe('')
+    if (k !== 'idle') expect(text, `kind=${k} 不得回落 idle 文案`).not.toBe('未运行')
+    seen.add(text)
+    w.unmount()
+  }
+  expect(seen.size, `文案重复，状态之间无法区分：${[...seen].join(' / ')}`).toBe(kinds.length)
+  kindRef.value = { kind: 'idle' }
+})
+
+test('loopBadge: leftover 提示按循环状态分叉文案', async () => {
+  mockTasks({ items: [{ id: 'p', desc: '待办任务', status: 'pending' }] })
+  kindRef.value = { kind: 'idle' }
+  let w = mount(TaskProgressPanel)
+  await flushPromises()
+  expect(w.find('.tp-leftover').exists()).toBe(true)
+  expect(w.find('.tp-leftover').text()).toContain('循环未运行')
+  w.unmount()
+
+  kindRef.value = { kind: 'running' }
+  w = mount(TaskProgressPanel)
+  await flushPromises()
+  expect(w.find('.tp-leftover').text()).toContain('循环运行中')
+  w.unmount()
+  kindRef.value = { kind: 'idle' }
 })
 
 test('retry: 失败行有重试按钮，点击发 push 重新登记原文，行回待办态', async () => {

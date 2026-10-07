@@ -141,10 +141,10 @@ test('spec 引用的视图选择器与源码对齐（双向）', () => {
   }
 })
 
-test('视觉基线：10 张、且逐张互不相同（防基线退化）', () => {
+test('视觉基线：12 张、且逐张互不相同（防基线退化）', () => {
   assert.ok(fs.existsSync(SNAP_DIR), `基线目录不存在：${SNAP_DIR}（先跑 pnpm test:e2e --update-snapshots）`)
   const pngs = fs.readdirSync(SNAP_DIR).filter(n => n.endsWith('.png')).sort()
-  assert.equal(pngs.length, 10, `基线数量应为 10（5 视图 × 2 主题），实际 ${pngs.length}：${pngs.join(', ')}`)
+  assert.equal(pngs.length, 12, `基线数量应为 12（6 视图 × 2 主题），实际 ${pngs.length}：${pngs.join(', ')}`)
   const byHash = new Map<string, string[]>()
   for (const n of pngs) {
     const h = crypto.createHash('sha256').update(fs.readFileSync(path.join(SNAP_DIR, n))).digest('hex').slice(0, 16)

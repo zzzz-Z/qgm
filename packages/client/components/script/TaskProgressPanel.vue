@@ -3,6 +3,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { effectiveSessionId } from '../../composables/ui/useAppStorage'
+// [taskboard-loop-badge-v1] 循环运行状态徽章：单一真相源 useRuntime（kind: idle/running/waiting/paused/stopped）
+import { useRuntime } from '../../composables/ai/useRuntime'
 // [task-progress-panel-v1] 任务完成详情面板（替代原进度条）
 // [WHY] 原「已完成 N/M 步」只反映脚本卡数量，看不出还剩哪些任务；用户需要任务级视图。
 // [CONSTRAINT] 数据源 /__ai/tasks 的 todo(string[]) + done(TaskDoneItem[])；轮询 2s 仅前台。
@@ -21,6 +23,26 @@ let _autoCollapseTimer: ReturnType<typeof setTimeout> | null = null
 // [taskboard-hide-delay-v2] 全完成隐藏延迟：原 3s 太快，用户扫一眼未尽就消失；
 // 延长到 30s 给足「看完成项划线 + 百分比」的时间。
 const AUTO_HIDE_DELAY_MS = 30_000
+// [loop-badge-coverage-v1] LoopState 共 13 态，原表只映射 5 态 ⇒ 其余 8 态全部回落到 idle「未运行」。
+//   实测最刺眼的两条：脚本真的在跑（executing）和会话轮转中（handoff）都显示「未运行」。
+const LOOP_BADGE: Record<string, { text: string, cls: string }> = {
+  'running': { text: '运行中', cls: 'loop-running' },
+  'preparing': { text: '准备中', cls: 'loop-running' },
+  'parsing': { text: '解析脚本', cls: 'loop-running' },
+  'executing': { text: '执行中', cls: 'loop-running' },
+  'feedback': { text: '回传中', cls: 'loop-running' },
+  'waiting': { text: '等待回复', cls: 'loop-running' },
+  'waiting-input': { text: '等你回答', cls: 'loop-running' },
+  'handoff': { text: '会话轮转中', cls: 'loop-running' },
+  'paused': { text: '已暂停', cls: 'loop-paused' },
+  'budget-limited': { text: '预算受限', cls: 'loop-paused' },
+  'stopped': { text: '已停止', cls: 'loop-stopped' },
+  'interrupted': { text: '已中断', cls: 'loop-stopped' },
+  'idle': { text: '未运行', cls: 'loop-stopped' },
+}
+// [loop-badge-coverage-v1] 与 transitions.ts 的 ACTIVE 对齐（去掉 paused / budget-limited：
+//   两者都是「卡住等用户」而非「在推进」，遗留提示条不该说「循环运行中」）
+const LOOP_PROGRESSING = new Set(['running', 'preparing', 'waiting', 'parsing', 'executing', 'feedback', 'handoff', 'waiting-input'])
 
 const _visible = ref(typeof document !== 'undefined' ? document.visibilityState === 'visible' : true)
 const todo = ref<string[]>([])
@@ -47,6 +69,8 @@ const retrying = ref('')
 // [hmr-safe-poll-v1] useIntervalFn 随组件作用域自动清理，避免 HMR 替换 setup 时旧 timer 残留
 // [initial-poll-v1] immediate 只启动定时器、不立即调回调；首次拉取靠 onMounted 手动触发
 useIntervalFn(() => { if (_visible.value) void poll() }, 2000)
+// [taskboard-loop-badge-v1] 循环运行状态徽章：头部常显，让「9 项待办挂着但循环死活未知」一眼可判
+const { state: runtimeState } = useRuntime()
 
 const rows = computed<TaskRow[]>(() => {
   const runText = String(running.value || '').trim()
@@ -103,11 +127,18 @@ const failedRows = computed(() => view.value.failed)
 const doneRows = computed(() => view.value.done)
 // [task-running-v1] 滚动定位用：执行中项文本（items / 旧视图两条路径统一）
 const runningText = computed(() => String(view.value.running?.text || ''))
-// [taskboard-clear-v1] 手动清空：仅当无待办且无执行中时显示（防误删进行中的清单）
+// [taskboard-clear-v1] 手动清空：仅当无「执行中」任务时显示（防误删进行中的清单）
 // [WHY] 循环异常终止（崩溃/硬超时/熔断）不走收尾清空路径，failed/done 残留会一直挂着——用户需要手动出口
-const canClear = computed(() => total.value > 0 && !runningRow.value && pendingRows.value.length === 0)
+// [leftover-clear-fix-v1] 原判据还要求 pendingRows.length === 0，与 hasLeftover 提示互斥：
+//   提示条「检测到 N 项未完成任务…点上方『清空』放弃」恰恰在有待办且无执行中时出现，
+//   此时 canClear 恒为 false ⇒ 按钮永远不渲染，提示成为死引导。
+//   清空的真实风险是有执行中项；待办而无执行中 = 循环未在跑（遗留/已停），清空正是提示自己引导的动作。
+const canClear = computed(() => total.value > 0 && !runningRow.value)
 // [refresh-leftover-hint-v1] 刷新遗留提示：有待办且无执行中 ⇒ 大概率是刷新前遗留（循环已 stopped）
 const hasLeftover = computed(() => pendingRows.value.length > 0 && !runningRow.value)
+const loopBadge = computed(() => LOOP_BADGE[String(runtimeState.value.kind)] || LOOP_BADGE.idle)
+// [taskboard-loop-badge-v1] 循环是否在跑（running/waiting）：leftover 文案分叉用（模板对普通对象不自动解包，统一走 computed）
+const isLoopActive = computed(() => LOOP_PROGRESSING.has(String(runtimeState.value.kind)))
 // [taskboard-failed-badge-v1] 头部失败计数徽章：不展开也能一眼看到有失败项
 const failedCount = computed(() => failedRows.value.length)
 
@@ -251,6 +282,8 @@ function onVis() {
     >
       <span class="tp-caret" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
       <span class="tp-title">任务完成详情</span>
+      <!-- [taskboard-loop-badge-v1] 循环运行状态徽章（idle/running/waiting/paused/stopped） -->
+      <span class="tp-loop" :class="loopBadge.cls">{{ loopBadge.text }}</span>
       <span v-if="failedCount > 0" class="tp-failed-badge">{{ failedCount }} 失败</span>
       <span v-if="total > 0" class="tp-pct">{{ progressPercent }}%</span>
       <span class="tp-count">{{ doneCount }}/{{ total }}</span>
@@ -265,9 +298,15 @@ function onVis() {
         {{ clearing ? '…' : '清空' }}
       </button>
     </button>
-    <!-- [refresh-leftover-hint-v1] 遗留任务提示：不自动续跑，等用户发送提问 -->
+    <!-- [refresh-leftover-hint-v1] 遗留任务提示：不自动续跑，等用户发送提问；
+         [leftover-clear-fix-v1] 文案按循环实际状态分叉（原文案在循环已死时仍说「将继续处理」） -->
     <div v-if="hasLeftover" class="tp-leftover" role="status">
-      检测到 {{ pendingRows.length }} 项未完成任务 · 发送提问后循环将继续处理（或点上方「清空」放弃）
+      <template v-if="isLoopActive">
+        检测到 {{ pendingRows.length }} 项未完成任务 · 循环运行中，发送提问后将继续处理（或点上方「清空」放弃）
+      </template>
+      <template v-else>
+        检测到 {{ pendingRows.length }} 项未完成任务 · 循环{{ loopBadge.text }}，发送提问后将继续处理（或点上方「清空」放弃）
+      </template>
     </div>
     <!-- [ui-loading-state-v1] 首轮 poll 未回：骨架提示（WO-20261007-02 阶段 C4） -->
     <div v-if="!loaded" class="tp-loading" role="status">
@@ -527,6 +566,26 @@ function onVis() {
   color: var(--danger);
   background: rgb(248 81 73 / 12%);
   border-radius: 999px;
+}
+/* [taskboard-loop-badge-v1] 循环运行状态徽章：活动态绿、暂停橙、停止/未运行灰 */
+.tp-loop {
+  padding: 2px 8px;
+  font:
+    600 10.5px/1.4 ui-monospace,
+    monospace;
+  border-radius: 999px;
+}
+.tp-loop.loop-running {
+  color: var(--success);
+  background: rgb(63 185 80 / 12%);
+}
+.tp-loop.loop-paused {
+  color: var(--warning, #d29922);
+  background: rgb(210 153 34 / 12%);
+}
+.tp-loop.loop-stopped {
+  color: var(--text-3);
+  background: rgb(127 127 127 / 10%);
 }
 /* [taskboard-clear-v1] 清空按钮：ghost 风格，hover 加深；仅收尾态出现 */
 .tp-clear {

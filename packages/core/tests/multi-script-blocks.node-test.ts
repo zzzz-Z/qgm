@@ -233,4 +233,10 @@ test('multi-script: 油猴通道推送后必须主动再跑一次分类', () => 
     '推完一块后未唤醒分类 → DOM 已静止，observer 不再触发，后续块永久滞留',
   )
   assert.ok(src.includes('const s = markedNonScript ? null : (extractLatestScript'), '脚本分类仍须让位于首行标记')
+  // [fragment-guard-text-v1] WO-20261007-06 段〇：TEXT 标记的回复，其代码块不得进 script 分支。
+  // 只断言「存在 markedNonScript」不够——若 marks.text 从该表达式里漏掉，TEXT 回复的代码块仍会被推。
+  assert.ok(
+    /const markedNonScript = [^\n]*marks\.text\s*>\s*0/.test(src),
+    'markedNonScript 未含 marks.text ⇒ TEXT 回复里的代码引用会被当脚本推（WO-06 段〇 P0 回归）',
+  )
 })

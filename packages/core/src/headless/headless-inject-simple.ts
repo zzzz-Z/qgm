@@ -132,8 +132,8 @@ export function resetReplyDedupInPage() {
   const sig = (h >>> 0).toString(16).padStart(8, '0')
   const busyMessages = ((document.body && document.body.textContent) || '').match(/server busy, please try again later\.?|(?:服务器|服务)繁忙[^\n。！!]*[。！!]?/gi) || []
   const stoppedMessages = ((document.body && document.body.textContent) || '').match(/当前问题已停止|已停止生成|已停止回答/g) || []
-  // [limit-detect-v2] 会话长度上限基线：与 headless-inject detectReplyInPage 的正则严格同构（改一处必须同步两处）
-  const limitMessages = ((document.body && document.body.textContent) || '').match(/(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长)[，,：:]?\s*请?(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length/gi) || []
+  // [limit-detect-v3] 会话长度上限基线：与 headless-inject detectReplyInPage 的正则严格同构（改一处必须同步两处）
+  const limitMessages = ((document.body && document.body.textContent) || '').match(/(?:(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长))(?:[，,：:]\s*请?|请)(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length/gi) || []
   const baselineBlocks = document.querySelectorAll('.ds-assistant-message-main-content').length
   // [rate-retry-v1] 频控基线：与 headless-inject detectReplyInPage、本文件 verifyFillSentInPage 三处内联同构（守卫测试 rate-marker-guard）
   const rateMessages = ((document.body && document.body.textContent) || '').match(/(?:消息|发送|操作|请求|访问)过于频繁|过于频繁[，,\s]*请稍后重试|please\s+slow\s+down|too\s+many\s+requests|rate\s+limit/gi) || []

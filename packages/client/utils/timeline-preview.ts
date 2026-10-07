@@ -107,7 +107,8 @@ export function tailTextPreview(raw: string, keepLines = 5, maxChars = 400): Tai
  *   成熟智能体的信息流默认只呈可扫读内容。
  * [CONSTRAINT] 保守规则——只删确定无信息的行：
  *   ① 纯空行；② 纯分隔线（连续三字符以上的破折号 / 等号 / 井号 / 星号 / 下划线）；
- *   ③ 连续重复行（第 3 次起丢弃）；④ 进度回退符残留（回车覆盖后的纯空白）。
+ *   ③ 连续重复行（第 3 次起丢弃）；④ 进度回退符残留（回车覆盖后的纯空白）；
+ *   ⑤ 剥离行首 `[AI] ` 前缀（runner 内部日志标记，对用户无信息量；只剥前缀不丢内容）。
  *   保留缩进、内容、百分比等一切可能含信息的行。
  * @param raw 原始日志
  * @param maxRepeat 允许连续重复的最大次数（默认 2）
@@ -126,17 +127,22 @@ export function denoiseLog(raw: string, maxRepeat = 2): string {
   const src = String(raw ?? '').replace(ANSI_RE, '').replace(/\r\n?/g, '\n')
   if (!src) return ''
   const SEP_RE = /^\s*(?:-{3,}|={3,}|#{3,}|\*{3,}|_{3,})\s*$/
+  // [denoise-ai-prefix-v1] __AI__.log 输出带 [AI] 前缀（runner 内部标记），剥离后保留内容
+  const AI_PREFIX_RE = /^\[AI\]\s?/
   const out: string[] = []
   let lastLine = ''
   let repeat = 0
   for (const line of src.split('\n')) {
     // ① 纯空行
     if (!line.trim()) continue
+    // ⑤ 剥离 [AI] 前缀（保留内容；纯 [AI] 行剥离后为空 → 按空行丢）
+    const stripped = line.replace(AI_PREFIX_RE, '')
+    if (!stripped.trim()) continue
     // ② 纯分隔线
-    if (SEP_RE.test(line)) continue
+    if (SEP_RE.test(stripped)) continue
     // ④ 进度回退符残留（去掉 \r 之前的内容后为纯空白）
-    const tail = line.includes('\r') ? line.split('\r').pop() || '' : line
-    if (!tail.trim() && line.includes('\r')) continue
+    const tail = stripped.includes('\r') ? stripped.split('\r').pop() || '' : stripped
+    if (!tail.trim() && stripped.includes('\r')) continue
     // ③ 连续重复
     if (tail === lastLine) {
       repeat++

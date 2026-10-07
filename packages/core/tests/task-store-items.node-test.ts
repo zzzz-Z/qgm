@@ -157,6 +157,17 @@ test('G4: fail 未命中 → 告警且原状态不变', () => {
   assert.ok((next.warnings || []).length > 0)
 })
 
+// [failed-separated-v1] P0-1b 承重判据：fail 只标状态不移除（task-store:616），
+//   若 projectItems 不把 failed 从 todo 排除，则该失败项会永久留在 todo ⇒
+//   DONE 触发「无遗留 @todo」永不成立（§1D 环式死锁第五条链路）。
+test('G4b: fail 后该项不计入 todo，单独进 failed 组', () => {
+  const cur = makeState({ items: [item('坏掉的任务', 'running', { startedAt: Date.now() }), item('好的任务')] })
+  const next = applyTaskMutation(cur, { mode: 'fail', fail: ['坏掉的任务'] })
+  assert.ok(!next.todo.includes('坏掉的任务'), 'failed 项不得留在 todo（否则 DONE 无出口）')
+  assert.ok((next.failed || []).includes('坏掉的任务'), 'failed 项须单独成组')
+  assert.ok(next.todo.includes('好的任务'), 'pending 项仍在 todo')
+})
+
 // ---------- G5 deps 告警 ----------
 
 test('G5: 依赖未完成 → complete 仍然移除但带 deps 告警', () => {

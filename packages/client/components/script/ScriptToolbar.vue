@@ -10,6 +10,9 @@ defineProps<{
   attachedFilesCount: number
   // 等待 AI 回复中：主按钮显示 spinner，视觉反馈与顶部 banner 呼应
   aiWaiting: boolean
+  // [deliver-window-v1] 回传窗未收口（结果已产出但还没发出去）：同样转 spinner，
+  //   否则「脚本成功 → 几秒空白 → 突然发出去」这段在按钮上完全看不出来
+  delivering?: boolean
 }>()
 /** 派发 */
 const emit = defineEmits<{
@@ -42,8 +45,8 @@ const emit = defineEmits<{
       v-tooltip="loopPaused ? '恢复：继续等待 AI 回包' : '暂停：不取 AI 脚本、不接收工作台结果'"
       :aria-label="loopPaused ? '恢复循环' : '暂停循环'"
       class="primary-btn stop head-run"
-      :class="{ 'is-waiting': aiWaiting }"
-      :aria-busy="aiWaiting"
+      :class="{ 'is-waiting': aiWaiting || delivering }"
+      :aria-busy="aiWaiting || delivering"
       @click="emit('pauseAll')"
     >
       <svg
@@ -62,8 +65,8 @@ const emit = defineEmits<{
       v-tooltip="'开始：执行当前脚本，随后自动把结果发 AI 并执行下一轮'"
       aria-label="开始循环"
       class="primary-btn takeover head-run"
-      :class="{ 'is-waiting': aiWaiting }"
-      :aria-busy="aiWaiting"
+      :class="{ 'is-waiting': aiWaiting || delivering }"
+      :aria-busy="aiWaiting || delivering"
       data-mark=""
       @click="emit('toggleAutoTakeover')"
     >

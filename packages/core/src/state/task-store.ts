@@ -102,6 +102,8 @@ export interface TaskState {
   items?: TaskItem[]
   // [task-running-timeout-v1] 本次读取中因超时被回退的 running 项（只读投影，不落盘）
   expiredRunning?: string[]
+  // [failed-separated-v1] failed 项单独成组（不再混入 todo；task-store.ts:616 的 fail 只标状态不移除）
+  failed?: string[]
   // [task-board-warnings-v1] 非阻断告警（未命中 / 依赖未完成 / 版本冲突重试），供调用方提示
   warnings?: string[]
   updatedAt?: string
@@ -356,9 +358,12 @@ export function projectItems(items: TaskItem[], now: number): {
   done: TaskDoneItem[]
   running: string
   expired: string[]
+  // [failed-separated-v1] failed 项单独成组，不再混入 todo
+  failed: string[]
 } {
   const todo: string[] = []
   const expired: string[] = []
+  const failed: string[] = []
   const doneRaw: Array<{ it: TaskItem, idx: number }> = []
   let running = ''
   items.forEach((it, idx) => {
@@ -369,6 +374,9 @@ export function projectItems(items: TaskItem[], now: number): {
       return
     }
     if (it.status === 'done') { doneRaw.push({ it, idx })
+    }
+    else if (it.status === 'failed') {
+      failed.push(it.desc)
     }
     else {
       if (it.status === 'running' && !running) running = it.desc
@@ -381,7 +389,7 @@ export function projectItems(items: TaskItem[], now: number): {
     .slice()
     .sort((a, b) => ((Number(a.it.doneAt) || 0) - (Number(b.it.doneAt) || 0)) || (a.idx - b.idx))
     .map(({ it }) => ({ item: it.desc, at: Number(it.doneAt) || 0, round: it.round }))
-  return { todo, done, running, expired }
+  return { todo, done, running, expired, failed }
 }
 
 // [task-board-match-v1] 三级匹配：① id 精确 ② 归一化全文相等 ③ 唯一子串包含兜底
@@ -459,6 +467,8 @@ export function readTaskState(sid?: string): TaskState {
     items: healed,
     // [task-running-timeout-v1] 只读投影：超时回退的 running 项（落盘自愈发生在下一次写入）
     expiredRunning: proj.expired.length ? proj.expired : undefined,
+    // [failed-separated-v1] failed 项单独成组，不计入 todo
+    failed: proj.failed.length ? proj.failed : undefined,
     doneAt: raw.doneAt,
     planPending: plan.filter(p => !p.done).length,
     // [tasks-field-passthrough-v1] 透传结构化字段，供前端渲染总进度/当前项
@@ -529,6 +539,7 @@ function withProjection(cur: TaskState, items: TaskItem[], warnings: string[] = 
     done: proj.done,
     running: proj.running,
     expiredRunning: expired.length ? expired : undefined,
+    failed: proj.failed.length ? proj.failed : undefined,
     warnings: warnings.length ? warnings : undefined,
   }
 }
