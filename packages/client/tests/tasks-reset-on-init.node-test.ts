@@ -6,6 +6,8 @@ import { beforeEach, test, vi } from 'vitest'
 import { computed, ref } from 'vue'
 
 import { createStartFamily } from '../composables/ai/auto-loop/start-family.js'
+// [plain-streak-v1] P2-4 守卫：initLoop 后 _plainStreak 应被清空
+import { _plainStreak } from '../composables/ai/auto-loop/reply-handlers.js'
 
 const winRef = vi.hoisted(() => ({ win: null as unknown }))
 vi.mock('../composables/ai/useAiWindow', () => ({ getActiveWin: () => winRef.win }))
@@ -80,6 +82,14 @@ test('承重：清桶必须在 bindKeyboard 之前发起（覆盖语义不得晚
   assert.ok(iTasks >= 0, '未发出清桶')
   assert.ok(iBind >= 0, 'bindKeyboard 未调用')
   assert.ok(iTasks < iBind, '清桶应早于 bindKeyboard')
+})
+
+test('P2-4 承重：initLoop 后 _plainStreak 计数被清空', async () => {
+  _plainStreak.set('stale-loop-id', 5)
+  assert.equal(_plainStreak.size, 1, '前置：预置计数')
+  const { family, inst } = makeFamily('s1')
+  await family.initLoop(inst, 'loop', 'g')
+  assert.equal(_plainStreak.size, 0, 'initLoop 后计数须清空（删 clear() 本测应变红）')
 })
 
 test('sid 空串 ⇒ 跳过清桶（与 finish 的 sid-guard 同语义）', async () => {

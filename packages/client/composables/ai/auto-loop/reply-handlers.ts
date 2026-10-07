@@ -9,7 +9,7 @@ import { setLoopState } from './transitions.js'
 //   都只是为了不顶破「单文件 import ≤ 8」。上限放宽到 20 后回归直读直写，types.ts 的再导出已删
 import { clearScripts, enqueueScript, shiftScript, stageRoundOutcome } from './pending-scripts.js'
 // [loop-feedback-authority-v1] R1：循环引擎自行回传结果，不再依赖 ScriptPanel watch
-import { buildPlanResumePrompt, buildSelfcheckFailPrompt } from './loop-result-prompt.js'
+import { buildPlainResumePrompt, buildPlanResumePrompt, buildSelfcheckFailPrompt } from './loop-result-prompt.js'
 import { fillWithLessons } from './loop-lessons-fill.js'
 
 // [ask-dialog-v1] 交互提问通道；解析放 utils，提问状态走单例 composable
@@ -33,6 +33,25 @@ type Transport = ReturnType<typeof getTransport>
 // [selfcheck-gate-v1] 期一自检熔断：同一循环连续 2 次 BeforeDone reject → finish
 export const _selfcheckFailCount = new Map<string, number>()
 const SELFCHECK_MAX_FAILS = 2
+
+// [plain-streak-v1] P0：连续 plain 计数（模块级，照 _selfcheckFailCount 先例）
+// [WHY] 现状（1 次 plain → 干等 90s/180s → finish(round-timeout) 终止整个循环）太严；
+//   P0 给 AI 一次自我纠正机会：第 1 次催促续跑，第 PLAIN_STREAK_MAX 次仍无脚本才终止。
+// [CONSTRAINT] 不 round+1（避免绕开 after-round.ts 的 hard-rounds 硬闸），另受 30 分钟时间闸约束；
+//   收到 script 并成功推进后清零（见 executeItem 入口）
+export const _plainStreak = new Map<string, number>()
+export const PLAIN_STREAK_MAX = 2
+
+// [frozen-broadcast-exempt-v1] P0.1（H1-A）：识别 §8 冻结播报，豁免 plainStreak 计数与熔断
+// [WHY] SYSTEM.md §8 metaerror-fuse-v1 要求冻结后「继续服务其他 @todo」；
+//   若冻结播报被当普通 plain 计数，第 2 条冻结播报就会终止整个循环，与 §8 冲突。
+// [CONSTRAINT] 指纹取 §8 固定文案「已冻结」；做成纯函数便于单测与改版同步（改一处即可）。
+//   R2 §4：命中则跳过计数与熔断，但**仍续跑**（不续跑则退回 90s 干等这个原病；
+//   无限风险由 LOOP_HARD_MAX_MS = 30 分钟硬闸兜底）。
+// @param text AI 回复正文
+export function isFrozenBroadcast(text: string): boolean {
+  return /已冻结/.test(String(text || ''))
+}
 
 /** 回复处理三入口依赖面 */
 interface ReplyHandlersDeps {
@@ -294,10 +313,33 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       enterWaiting(inst)
       return
     }
-    // plain：不执行脚本，等下一轮
-    toast('AI 未输出 cjs/bash 代码块（纯文本回复），等待下一轮', 'warn', TOAST_DEFAULT)
+    // plain：不执行脚本。第 1 次自动要求续跑；连续 PLAIN_STREAK_MAX 次则熔断终止
+    // [plain-streak-v1] P0：把「1 次 plain → 90s 超时终止」改为「一次自我纠正机会」
+    // [H2][non-script-reentry-v1] 同步占位：防同轮第 2 条 plain 被受理（否则 N 在单轮内被吃满）
+    // [transitions-v1] FEEDBACK 事件：waiting → feedback
+    setLoopState(inst, 'FEEDBACK')
+    const _isFrozen = isFrozenBroadcast(String(reply.text || ''))
+    // [frozen-broadcast-exempt-v1] 冻结播报（§8）：不计数、不熔断，但仍续跑
+    const _pStreak = _isFrozen ? 0 : (_plainStreak.get(inst.id.value) || 0) + 1
+    if (!_isFrozen && _pStreak >= PLAIN_STREAK_MAX) {
+      _plainStreak.delete(inst.id.value)
+      toast(`AI 连续 ${_pStreak} 次未输出脚本，终止循环`, 'warn', TOAST_LONG)
+      await finish(inst, 'no-script-reply', `AI 连续 ${_pStreak} 次纯文本回复，未推进任何脚本`)
+      return
+    }
+    // [H3] sendFill 失败不计数：先尝试发送，失败即走 window-lost（照 multi 分支范式）
+    const _okPlain = loopPaused.value ? false : transport.sendFill('', { prompt: buildPlainResumePrompt() })
+    if (!_okPlain) {
+      await finish(inst, 'window-lost', 'plain 续跑时 AI 窗口已关闭或发送失败')
+      return
+    }
+    // [frozen-broadcast-exempt-v1] 冻结播报不写入计数（豁免熔断；仍走续跑）
+    if (!_isFrozen) _plainStreak.set(inst.id.value, _pStreak)
+    ackFill(inst, 'plain 续跑')
+    bindKeyboard()
+    toast('AI 未输出脚本，已自动要求继续', 'warn', TOAST_DEFAULT)
     // [plain-rearm-v1] 与 done/multi/ASK 分支一致：重新 arm 90s/180s 等待超时与 ticker，
-    // 否则本分支 disarmTimer 后 roundTimer 永远为 null，超时熔断失效、UI 卡 waiting（报告 §1.1）
+    //   否则本分支 disarmTimer 后 roundTimer 永远为 null，超时熔断失效、UI 卡 waiting（报告 §1.1）
     enterWaiting(inst)
   }
 
@@ -308,6 +350,8 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
    * [CONSTRAINT] 递归深度 = 队列长度（同一条回复的脚本块数，量级个位数），无需改为循环
    */
   async function executeItem(inst: LoopInstance, inboxItem: InboxItem): Promise<void> {
+    // [plain-streak-v1] 有脚本推进 ⇒ 清零连续 plain 计数（第 1 次续跑后 AI 若正常干活则重置）
+    _plainStreak.delete(inst.id.value)
     try {
       await executeItemInner(inst, inboxItem)
     } finally {

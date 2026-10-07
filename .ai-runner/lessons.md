@@ -1468,3 +1468,65 @@ pm2 restart 使承载会话的进程瞬断，HTTP 通道中断。这是预期现
 ## `writeFile`/`patchFile` 同轮写入 overlay，`vitest` 子进程读真磁盘看不见
 
 变异验证必须在同进程 vm 里做，不能靠子进程跑测试。
+
+## 变异验证暴露判据不承重：P2 原本用 `for (let i = 0; i < PLAIN_STREAK_MAX; i++)`——常量改成 99 时循环也跟着 99 次，测试恒真（变异下仍绿）。改为硬编码 `i < 2` 后，变异下 P2 变红。教训
+
+判据引用了被测常量本身就是真空判据。
+
+## `patchFile` 用行号切片代替手写锚点
+
+手写含 `§` 与全角标点的锚点反复 `count=0`；改用 `L.slice(i, i+5).join('\n')` 从磁盘取真实行后一次通过。
+
+补充（2026-10-07）：`})` 这类短锚点在文件里出现 9 次；改用「相邻两行」构造唯一锚点后才成功。
+
+## 撤 probe 时误删 `beforeEach(() => {` 头
+
+`patchFile` 替换范围需精确到整段；残留半句导致 `PARSE_ERROR at 70:1`。
+
+## vitest 模块缓存
+
+常量恢复后 P2 仍红，加 `--no-cache` 重跑才转绿。改常量后验证需清缓存。
+
+## `_plainStreak.clear()` 优于 `delete(newId)`
+
+`initLoop` 每次生成新 id（`${prefix}_${Date.now().toString(36)}`），`delete(新id)` 是 no-op。复检建议的核心是「消除 loopId 复用 / Map 无上限增长」，正确做法是 `clear()` 全清。
+
+## 复检建议 2 是好的加固
+
+原 P2 只断言 `finish` 存在，未验证「熔断分支 return 在 sendFill 之前」这条控制流顺序——加断言后即便未来有人把 `sendFill` 移到熔断判断之前，测试会红。
+
+## vitest 报的测试数与文件内 `test()` 数量不符（缓存）：P5 写入后 `vitest run` 仍报 4 passed，而文件内确有 5 个 `test()`。加 `--no-cache` 后正常报 5 passed。此前 P4 也遇过同类现象。修法
+
+改动测试文件后一律用 `--no-cache` 复跑，不采信首次结果。
+
+## `rm -rf node_modules/.vite` 被安全拦截（`SECURITY_BLOCKED: rm-recursive-force`）
+
+清缓存改用 `--no-cache` 参数即可，无需删目录。
+
+## 产物核验要选对文件
+
+`apps/standalone/dist/helpers.cjs` 是 core 运行时（不含前端逻辑）；本次改动全在前端（`packages/client/`），须核验 `packages/client/dist/assets/index-*.js`。首轮核验搜错文件导致全部 `false`，误以为构建没进去。
+
+## `grep` 的 `path` 参数在某些调用下未生效
+
+首次 `grep('已冻结', { ext:['js'], path:'packages/client/dist' })` 返回的是 `scripts/` 目录的命中。改用 `walk` 列文件 + `readText` 定向读主 chunk 后成功。
+
+## 重启当轮脚本必返回 `network error`（AGENTS.md 已记）
+
+须跨轮探活，不在当轮判失败。
+
+## `?? 0` 掩盖了「写入 0」与「未写入」的差异：P5 原本断言 `_plainStreak.get('loop-plain') ?? 0 === 0`，当第三层守卫失效、代码走到 `_plainStreak.set(id, 0)` 时，`get` 返回 `0`，`?? 0` 仍得 `0`，断言不红——弱断言没锁住该守卫。改 `has(id) === false` 后，只要写了键（哪怕值是 0）就变红。修法
+
+判「键是否存在」用 `has()`，不用 `get() ?? 默认值`。
+
+## P4/P3 同类残留弱断言无需改
+
+`_plainStreak.get('loop-plain') ?? 0 === 0` 在 P3（第 98 行）与 P4（第 114 行）各有一处，但它们的语义是「计数归零 / 未写入」——用 `?? 0` 可接受，因为这两处没有「写入 0」这个中间态（P3 走 `delete`，P4 走未 set）。只有 P5 的写入守卫会产生 `set(id, 0)`，故只改 P5。
+
+## 压缩器重命名符号 ⇒ 按符号名 grep 产物必然假阴性
+
+`isFrozenBroadcast` 被压成 `Wa`，只能按正则字面量 `已冻结` 取证。产物核验要搜语义字面量，不搜函数名。
+
+## 变异验证的「备份→改→还原」会刷新源码 mtime
+
+`reply-handlers.ts` 内容字节完全一致（diff 未变、661 全绿），但 mtime 被刷到 `00:46:16`，晚于产物 `00:34:36`。项目里「源码 mtime > 产物 mtime ⇒ 产物过期」这条判法在此会误报——后来人别据此重跑构建。

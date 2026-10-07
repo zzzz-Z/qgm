@@ -3,6 +3,8 @@ import { TOAST_VERY_LONG } from '../../../utils/toast-durations'
 import type { ComputedRef, Ref } from 'vue'
 import type { LoopInstance } from './types.js'
 import { setLoopState } from './transitions.js'
+// [plain-streak-v1] P0：新循环启动即清空连续 plain 计数（复检建议 1）
+import { _plainStreak } from './reply-handlers.js'
 import { toast } from '../../ui/useToast'
 import { getActiveWin } from '../useAiWindow'
 import { buildLoopInitialPrompt } from '../session-prompt.js'
@@ -65,6 +67,8 @@ export function createStartFamily(deps: StartFamilyDeps) {
       head = d.head || ''
     } catch { /* swallow: git 不可用/非仓库，head 保持空串（无回滚基线） */ }
     inst.id.value = `${prefix}_${Date.now().toString(36)}`
+    // [plain-streak-v1] 复检建议 1：新循环开始清空旧计数，消除 loopId 复用 / Map 无限增长风险
+    _plainStreak.clear()
     // [session-isolation-v1] 绑定当前活动会话 id；空串=未绑定（旧油猴不带 sessionId，getLoopBySessionId 会放行）
     inst.sessionId.value = getActiveSessionId()
     // [tasks-reset-on-init-v1] 新循环启动即清同 sid 桶（WO-20261006-03 段一）：

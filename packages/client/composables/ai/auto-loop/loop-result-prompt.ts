@@ -95,6 +95,15 @@ export function buildSelfcheckFailPrompt(reason: string): string {
   return `【自检未通过】请修复以下判据后重新回复 DONE：\n${body}`
 }
 
+/**
+ * 组装 plain 续跑 prompt：AI 未输出脚本时的自动催促（P0 [plain-streak-v1]）
+ * [WHY] AI 回纯文本（TEXT / 裸文本）时，工作台发此 prompt 要求直接输出脚本；
+ *   与循环回传的 SCRIPT 提醒（下一个回答必须以 SCRIPT 开头）语义一致
+ */
+export function buildPlainResumePrompt(): string {
+  return '【继续】上一个回答没有输出可执行脚本。请直接输出一个 SCRIPT 脚本，不要输出任何文本总结。'
+}
+
 /** 组装 PLAN 续跑 prompt：必须携带具体剩余项（AI 页面上下文里没有本地 PLAN.md） */
 export function buildPlanResumePrompt(items: string[]): string {
   const lines = items.map((d, i) => `${i + 1}. ${d}`).join('\n')

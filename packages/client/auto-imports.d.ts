@@ -31,6 +31,7 @@ declare global {
   const PHASE_DONE_CLASS: typeof import('./utils/timeline-build').PHASE_DONE_CLASS
   const PHASE_ERROR_CLASS: typeof import('./utils/timeline-build').PHASE_ERROR_CLASS
   const PHASE_LABEL: typeof import('./utils/timeline-build').PHASE_LABEL
+  const PLAIN_STREAK_MAX: typeof import('./composables/ai/auto-loop/reply-handlers').PLAIN_STREAK_MAX
   const PLAN_RESUME_MAX: typeof import('./composables/ai/auto-loop/state').PLAN_RESUME_MAX
   const REFRESH_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').REFRESH_GUARD_MS
   const ROUND_MERGE_MS: typeof import('./composables/ai/auto-loop/pending-scripts').ROUND_MERGE_MS
@@ -48,6 +49,7 @@ declare global {
   const TOAST_SHORT_MEDIUM: typeof import('./utils/toast-durations').TOAST_SHORT_MEDIUM
   const TOAST_VERY_LONG: typeof import('./utils/toast-durations').TOAST_VERY_LONG
   const TRANSITIONS: typeof import('./composables/ai/auto-loop/transitions').TRANSITIONS
+  const _plainStreak: typeof import('./composables/ai/auto-loop/reply-handlers')._plainStreak
   const _selfcheckFailCount: typeof import('./composables/ai/auto-loop/reply-handlers')._selfcheckFailCount
   const activeLoop: typeof import('./composables/ai/useAutoLoop').activeLoop
   const activeSessionId: typeof import('./composables/ui/useAppStorage').activeSessionId
@@ -68,6 +70,7 @@ declare global {
   const buildMergedFeedbackText: typeof import('./composables/runner/feedback-merge').buildMergedFeedbackText
   const buildNewSessionPrompt: typeof import('./composables/ai/session-prompt').buildNewSessionPrompt
   const buildOneCard: typeof import('./utils/timeline-build').buildOneCard
+  const buildPlainResumePrompt: typeof import('./composables/ai/auto-loop/loop-result-prompt').buildPlainResumePrompt
   const buildPlanResumePrompt: typeof import('./composables/ai/auto-loop/loop-result-prompt').buildPlanResumePrompt
   const buildRetryPrompt: typeof import('./composables/ai/loopLogic').buildRetryPrompt
   const buildRoundBatchPrompt: typeof import('./composables/ai/auto-loop/loop-result-prompt').buildRoundBatchPrompt
@@ -171,6 +174,7 @@ declare global {
   const isActiveState: typeof import('./composables/ai/auto-loop/transitions').isActiveState
   const isBlankRef: typeof import('./composables/ai/useAiWindowTable').isBlankRef
   const isDefined: typeof import('@vueuse/core').isDefined
+  const isFrozenBroadcast: typeof import('./composables/ai/auto-loop/reply-handlers').isFrozenBroadcast
   const isHeadless: typeof import('./composables/ai/useAiWindowSend').isHeadless
   const isInstActive: typeof import('./composables/ai/useAutoLoop').isInstActive
   const isLoopActive: typeof import('./composables/ai/useAutoLoop').isLoopActive
@@ -700,6 +704,7 @@ declare module 'vue' {
     readonly PHASE_DONE_CLASS: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_DONE_CLASS']>
     readonly PHASE_ERROR_CLASS: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_ERROR_CLASS']>
     readonly PHASE_LABEL: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_LABEL']>
+    readonly PLAIN_STREAK_MAX: UnwrapRef<typeof import('./composables/ai/auto-loop/reply-handlers')['PLAIN_STREAK_MAX']>
     readonly PLAN_RESUME_MAX: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['PLAN_RESUME_MAX']>
     readonly REFRESH_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['REFRESH_GUARD_MS']>
     readonly ROUND_MERGE_MS: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['ROUND_MERGE_MS']>
@@ -717,6 +722,7 @@ declare module 'vue' {
     readonly TOAST_SHORT_MEDIUM: UnwrapRef<typeof import('./utils/toast-durations')['TOAST_SHORT_MEDIUM']>
     readonly TOAST_VERY_LONG: UnwrapRef<typeof import('./utils/toast-durations')['TOAST_VERY_LONG']>
     readonly TRANSITIONS: UnwrapRef<typeof import('./composables/ai/auto-loop/transitions')['TRANSITIONS']>
+    readonly _plainStreak: UnwrapRef<typeof import('./composables/ai/auto-loop/reply-handlers')['_plainStreak']>
     readonly _selfcheckFailCount: UnwrapRef<typeof import('./composables/ai/auto-loop/reply-handlers')['_selfcheckFailCount']>
     readonly activeLoop: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['activeLoop']>
     readonly activeSessionId: UnwrapRef<typeof import('./composables/ui/useAppStorage')['activeSessionId']>
@@ -737,6 +743,7 @@ declare module 'vue' {
     readonly buildMergedFeedbackText: UnwrapRef<typeof import('./composables/runner/feedback-merge')['buildMergedFeedbackText']>
     readonly buildNewSessionPrompt: UnwrapRef<typeof import('./composables/ai/session-prompt')['buildNewSessionPrompt']>
     readonly buildOneCard: UnwrapRef<typeof import('./utils/timeline-build')['buildOneCard']>
+    readonly buildPlainResumePrompt: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-result-prompt')['buildPlainResumePrompt']>
     readonly buildPlanResumePrompt: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-result-prompt')['buildPlanResumePrompt']>
     readonly buildRetryPrompt: UnwrapRef<typeof import('./composables/ai/loopLogic')['buildRetryPrompt']>
     readonly buildRoundBatchPrompt: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-result-prompt')['buildRoundBatchPrompt']>
@@ -840,6 +847,7 @@ declare module 'vue' {
     readonly isActiveState: UnwrapRef<typeof import('./composables/ai/auto-loop/transitions')['isActiveState']>
     readonly isBlankRef: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['isBlankRef']>
     readonly isDefined: UnwrapRef<typeof import('@vueuse/core')['isDefined']>
+    readonly isFrozenBroadcast: UnwrapRef<typeof import('./composables/ai/auto-loop/reply-handlers')['isFrozenBroadcast']>
     readonly isHeadless: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['isHeadless']>
     readonly isInstActive: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['isInstActive']>
     readonly isLoopActive: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['isLoopActive']>
