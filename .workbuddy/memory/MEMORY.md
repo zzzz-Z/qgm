@@ -48,6 +48,11 @@
 - Docker：`COPY . .` 在 install/build 之后；三个 cache mount 不可删；回滚 `pre/<runId>` 须回收。
 - 入库边界：`.ai-runner/lessons.md`、`skills/**` 入库，运行态不入库；`.gitignore` = `.ai-runner/*` + 两条 `!`；根 `tmp/` 用 `/tmp/`；`ci.yml` 的「入库 + 先 `pnpm build`」前置要留。
 - **异步批量到达不许用瞬时快照判据**：生产者未全到位时快照恒真（页面逐块推送、块间 80ms）⇒ 正解=**轮内合并窗**（`pending-scripts.ts` `[round-merge-v1]`，Δ=1500ms）：队列非空不收口 / 守卫在**发出前**再判 / 拒绝即丢弃不重排。
+- **e2e 能在宿主侧跑**：应用端常说「60s 硬超时跑不动完整 e2e」——那是它通道的边界不是项目约束。
+  宿主侧 `env -i … playwright test e2e/<单 spec>` **7–13s 完成**（webServer 复用）；
+  **两个 spec 一起跑会撞外层 120s 被 SIGTERM（exit 137）⇒ 一次只跑一个**。
+- 产物取证按**正则/字符串字面量** grep（`@desc`、`已冻结` 这类），符号名会被压缩器重命名
+  （`isFrozenBroadcast`→`Wa`）⇒ 按符号名搜必假阴性；最强判据是 `curl` 活端点 JS 与磁盘产物**逐字节相等**。
 - 切链量化**必须按 sid 分组**（`reject.jsonl` 有 `sid`、`runner.jsonl` **没有**）：混切会串出假链。
 - §4 红线（体积/import）已放宽：**按职责拆不按行数**。
 - **复核回执的数字口径坑（防误判，别当造假）**：`readText().length` = 字符数（UTF-16），`wc -c` = 字节数（中英混排约 1.54 B/字符，6432 字符 ≈ 9888 字节属自洽）；`wc -l` 数换行符，末行无换行 ⇒ 比编辑器行数少 1。回执须写清单位。

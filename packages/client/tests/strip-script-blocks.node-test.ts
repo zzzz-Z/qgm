@@ -61,6 +61,46 @@ test('S9: 无围栏 · 普通文本无脚本头 ⇒ 原样保留', () => {
   assert.equal(stripScriptBlocks(t), t.trim())
 })
 
+// [noise-fenced-v1] 围栏行被站点按钮文字污染（截图实证：js复制下载+反引号）
+test('S10: 围栏行被污染仍能剥离', () => {
+  const F = String.fromCharCode(96).repeat(3)
+  const t = ['说明', `js复制下载${F}`, '#! /usr/bin/env node', 'console.log("X")', F, '后记'].join('\n')
+  const out = stripScriptBlocks(t)
+  assert.ok(out.includes('说明'), '前置文本保留')
+  assert.ok(!out.includes('console.log'), '脚本正文被剥离')
+  assert.ok(!out.includes('js复制下载'), '污染行被剥离')
+})
+
+// [real-sample-v1] 截图实证的真实形态：围栏行 = 站点按钮文字 + 反引号
+test('S11: 真实样本（js复制下载 + 反引号 起始，干净反引号 结尾）', () => {
+  const F = String.fromCharCode(96).repeat(3)
+  const NL = String.fromCharCode(10)
+  const lines = [
+    '收到——B 没修好。我上轮的 e2e 是「注入理想样本」，真实路径我没复现。',
+    '',
+    `最可能的根因：真实文本里没有围栏（extractReplyMd 从 DOM 反推时 <pre> 可能不还原成 ${F}），`,
+    '而我的 stripScriptBlocks 依赖围栏。先读盘验证。',
+    '',
+    `js复制下载${F}`,
+    '// @desc 读 extractReplyMd',
+    '// @why 若真实文本无围栏',
+    '// @mode: diff',
+    '',
+    '(async () => {',
+    '  const r = __AI__.tryReadFile(\'x\')',
+    '})()',
+    F,
+    '',
+    '后记：以上。',
+  ].join(NL)
+  const out = stripScriptBlocks(lines)
+  assert.ok(out.includes('收到——'), '前置说明保留')
+  assert.ok(out.includes('后记'), '后记保留（在围栏块之后）')
+  assert.ok(!out.includes('__AI__.tryReadFile'), '脚本正文被剥离')
+  assert.ok(!out.includes('js复制下载'), '污染围栏行被剥离')
+  assert.ok(!out.includes('// @desc'), '脚本头注释被剥离')
+})
+
 test('S6: 空输入 ⇒ 空串（不抛）', () => {
   assert.equal(stripScriptBlocks(''), '')
   assert.equal(stripScriptBlocks('   '), '')

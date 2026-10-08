@@ -20,7 +20,7 @@ function looksLikeScript(blockLines: readonly string[]): boolean {
 }
 
 /** 围栏行判据：以三个反引号开头（允许前导空白） */
-const FENCE_RE = /^\s*```/
+const FENCE_RE = /^\s*```|```\s*$/
 /** 围栏闭合判据：整行仅三个反引号与空白 */
 const FENCE_CLOSE_RE = /^\s*```\s*$/
 
