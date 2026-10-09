@@ -134,8 +134,10 @@ defineExpose({ selectTab })
     <div v-show="sideTab === 'tree'" class="side-tree text-sm flex flex-col flex-1 min-h-0 overflow-hidden">
       <FileTree root draggable />
     </div>
-    <div v-show="sideTab === 'changes'" class="side-changes p-4 flex flex-col flex-1 gap-3 min-h-0 overflow-hidden">
+    <div v-show="sideTab === 'changes'" class="side-changes p-3 flex flex-col flex-1 gap-3 min-h-0 overflow-hidden">
       <!-- [cumulative-baseline-v1] 视图切换常驻在列表之外：列表为空时也必须能切回「本轮」 -->
+      <!-- [seg-control-v1] 两个独立描边按钮 → 单轨道分段控件：视觉上「二选一」一目了然，
+           旧写法两个平级方框看不出互斥关系，且与面板里其他按钮（撤回/确认）同形，层级混淆。 -->
       <div class="view-seg" role="group" aria-label="变更视图">
         <button
           v-tooltip="'只看最近一次运行的改动'" class="seg-btn" :class="{ active: changeView === 'round' }"
@@ -149,7 +151,9 @@ defineExpose({ selectTab })
         >
           累积
         </button>
-        <span v-if="changeView === 'cumulative' && props.cumulativeLoading" class="seg-hint">加载中…</span>
+        <span v-if="changeView === 'cumulative' && props.cumulativeLoading" class="seg-hint">
+          <span class="seg-spinner" aria-hidden="true" />加载中
+        </span>
       </div>
       <div v-if="!props.changes.length" class="side-empty text-[var(--text-3)] p-8 border border-[var(--border-2)] rounded-8 border-dashed bg-[var(--surface)] flex flex-col flex-1 gap-4 items-center justify-center">
         <!-- [ui-icon-discipline-v1] chrome 层去 emoji：单色 SVG（currentColor 继承父色） -->
@@ -257,37 +261,56 @@ defineExpose({ selectTab })
 }
 
 /* [cumulative-baseline-v1] 变更视图切换：常驻在列表上方，列表为空时也可用 */
+/* [seg-control-v1] 单轨道分段控件：轨道 = surface-2 底 + 1px 边框，激活块 = 主色淡底 + 内阴影，
+   与面板整体（surface）形成「凹槽 + 凸起选中块」的层级，不再像两个互相独立的按钮。 */
 .view-seg {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+  align-self: flex-start;
   flex: 0 0 auto;
+  padding: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
 }
 .seg-btn {
-  padding: 3px 10px;
-  font-size: 12px;
-  line-height: 18px;
+  padding: 3px 12px;
+  font-size: var(--font-12);
+  line-height: 16px;
   color: var(--text-3);
   background: transparent;
-  border: 1px solid var(--border-2);
-  border-radius: 6px;
+  border: 0;
+  border-radius: var(--radius-6);
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background 0.12s,
-    color 0.12s,
-    border-color 0.12s;
+    color 0.12s;
 }
 .seg-btn:hover {
   color: var(--text);
-  border-color: var(--text-3);
 }
 .seg-btn.active {
   color: var(--primary);
-  background: var(--surface-2);
-  border-color: var(--primary);
+  background: var(--primary-bg);
+  box-shadow: var(--shadow-sm);
 }
 .seg-hint {
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px 0 4px;
+  font-size: var(--font-11);
   color: var(--text-3);
+  white-space: nowrap;
+}
+.seg-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--radius-full);
+  animation: spin 0.7s linear infinite;
 }
 </style>

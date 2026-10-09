@@ -14,7 +14,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..', '..')
 const HELPERS = path.join(ROOT, 'packages', 'core', 'src', 'helpers.cjs')
-const HELPERS_IO = path.join(ROOT, 'packages', 'core', 'src', 'helpers-io.cjs')
+// [helpers-index-v1] HOST_OWNED 与 _changelog 现活在 helpers/io.cjs（旧的 helpers-io.cjs 只剩转发壳）。
+const HELPERS_IO = path.join(ROOT, 'packages', 'core', 'src', 'helpers', 'io.cjs')
 const NL = String.fromCharCode(10)
 
 const EXPECTED_HOST_OWNED = ['packages/core/SYSTEM.md']
@@ -24,6 +25,8 @@ interface Rec { p: string, s: string }
 /** 在 vm 里加载 helpers.cjs，fs 全部换成记录型假实现；返回被记录的写入与 stderr 输出。 */
 function loadSandbox() {
   const written: Rec[] = []
+  // [helpers-index-v1] require 的解析基准目录：随加载者变化，模拟 Node 的模块相对解析。
+  let currentDir = path.join(ROOT, 'packages', 'core', 'src')
   const appended: string[] = []
   const stderr: string[] = []
   const noop = () => undefined
@@ -56,16 +59,28 @@ function loadSandbox() {
       if (m === 'node:fs') return fakeFs
       if (m === 'node:path') return path
       if (m === 'node:child_process') return { execFileSync: () => '' }
-      if (m === './helpers-io.cjs') {
-        const src = fs.readFileSync(path.join(ROOT, 'packages', 'core', 'src', 'helpers-io.cjs'), 'utf8')
+      // [helpers-index-v1] 支持 helpers/ 目录结构：任意相对 .cjs 都按同一包装加载。
+      //   helpers.cjs → ./helpers/index.cjs → ./io.cjs / ./shell.cjs / ./util.cjs 等。
+      if (typeof m === 'string' && m.startsWith('./')) {
+        // [helpers-index-v1] 相对加载者目录解析，模拟 Node 模块解析语义。
+        //   helpers.cjs → ./helpers/index.cjs → ./io.cjs → helpers/io.cjs。
+        const base = path.resolve(currentDir, m)
+        const src = fs.readFileSync(base, 'utf8')
         const wrapped = `;(function(){ const module = { exports: {} };${src}; return module.exports })()`
-        return vm.runInContext(wrapped, sandbox, { filename: 'helpers-io.cjs' })
+        const prevDir = currentDir
+        currentDir = path.dirname(base)
+        try { return vm.runInContext(wrapped, sandbox, { filename: base }) }
+        finally { currentDir = prevDir }
       }
       throw new Error(`unexpected require: ${m}`)
     },
   }
   vm.createContext(sandbox)
-  vm.runInContext(fs.readFileSync(HELPERS, 'utf8'), sandbox, { filename: HELPERS })
+  // [helpers-index-v1] 顶层也走 module 壳：helpers.cjs 末尾 `module.exports = require(...)` 需要 module 存在。
+  currentDir = path.dirname(HELPERS)
+  const topSrc = fs.readFileSync(HELPERS, 'utf8')
+  const topWrapped = `;(function(){ const module = { exports: {} };${topSrc}; return module.exports })()`
+  vm.runInContext(topWrapped, sandbox, { filename: HELPERS })
   const ai = (sandbox.global as Record<string, unknown>).__AI__ as Record<string, (...a: unknown[]) => unknown>
   return { ai, written, appended, stderr }
 }

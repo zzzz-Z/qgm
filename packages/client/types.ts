@@ -39,6 +39,10 @@ export interface SmokePageResult {
   url: string
   ok: boolean
   errors: string[]
+  /** 目标标签（host / app:proj-a / app:port-8091），多目标时区分来源 */
+  tag?: string
+  /** 目标来源 */
+  source?: 'host' | 'env' | 'portscan' | 'config'
 }
 /** smoke结果（接口） */
 export interface SmokeResult {

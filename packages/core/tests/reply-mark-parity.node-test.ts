@@ -240,7 +240,10 @@ test('reply-mark: 浏览器侧 plain 门槛必须复用首行标记扫描', () =
 
 test('reply-mark: script 分类必须让位于标记行', () => {
   const src = read(BROWSER_SRC)
-  assert.ok(src.includes('markedNonScript ? null : extractLatestScript'), '带 ASK / DONE / HANDOFF 标记的回复不得再走 script 分支（否则 DONE 总结里的示例代码块会被重新执行）')
+  // [stopped-no-autorun-v1] 停止后不得再推脚本（否则残余块会走「循环外自动执行」旁路），
+  //   与「标记让位」共用同一处三元表达式；两条语义必须**同时**在位
+  assert.ok(/markedNonScript \|\| stoppedThisRound \? null : extractLatestScript/.test(src), '带 ASK / DONE / HANDOFF 标记的回复不得再走 script 分支（否则 DONE 总结里的示例代码块会被重新执行）')
+  assert.ok(src.includes('const stoppedThisRound = Boolean(dedup._stoppedReported)'), 'stoppedThisRound 必须派生自 _stoppedReported（否则该分支恒假，旁路灯仍亮）')
   // [text-mark-v1] TEXT 同理：纯文本里贴一段示例代码不得被当脚本执行
   assert.ok(src.includes('marks.handoff > 0 || marks.text > 0'), 'markedNonScript 应纳入 marks.text（否则带代码块的 TEXT 回复会被当脚本）')
   assert.ok(src.includes('extractLatestScript()'), '声明 SCRIPT 不再放宽语言过滤（白名单恒为 js/bash）')
@@ -278,10 +281,12 @@ test('reply-mark: findNewDone 不得退回自写的首行 DONE 判据', () => {
 test('reply-mark: 油猴通道同样不得自写判据', () => {
   const src = read(TAMPERMONKEY_SRC)
   assert.ok(src.includes('scanReplyMarks(summary).done'), '油猴 findNewDone 应使用统一扫描')
+  // [stopped-no-autorun-v1] 同上：停止轮不再推脚本，与标记让位共用一处三元表达式
   assert.ok(
-    src.includes('markedNonScript ? null : (extractLatestScript'),
-    '油猴通道的脚本分类应让位于首行标记',
+    /markedNonScript \|\| stopPosted\) \? null : \(extractLatestScript/.test(src),
+    '油猴通道的脚本分类应让位于首行标记，且 stopped 后须停推脚本',
   )
+  assert.ok(src.includes('let stopPosted = false'), '油猴缺 stopPosted 标志（停止轮无法拦住残余脚本）')
   assert.ok(
     !src.includes('/^\\s*DONE\\s*$/.test(firstLine)'),
     '油猴通道保留自写的「首行严格 DONE」判据 → 走该通道时行为与主链路分叉',
@@ -293,4 +298,25 @@ test('reply-mark: 前端 parseAsk 必须复用同一套扫描', () => {
   assert.ok(src.includes('scanReplyMarks(raw)'), 'parseAsk 应基于 scanReplyMarks 定位标记行')
   assert.ok(!src.includes('ASK_HEAD_RE'), '旧的 ASK_HEAD_RE（m flag、任意行）应已移除')
   assert.ok(src.includes('.slice(scan.ask)'), '正文应从标记行的下一行起（slice(scan.ask)）')
+})
+
+// [no-root-no-reply-v1] 页面无 assistant 容器（新会话首轮「已思考/搜索」期）时禁止整页兜底提取。
+// [WHY] 2026-10-08 18:53 截图实测：新窗口首问，DeepSeek 思考面板流式期间尚无
+//   .ds-assistant-message-main-content，「|| document / : document」兜底把侧栏历史会话标题
+//   （未知标签递归 inner() 拼成连体乱文）+ 用户首条消息卡（SYSTEM.md）反推成「回复」，
+//   思考面板每稳定一拍 bodySignature 变一次 → plain 分支连推数张噪音文本卡。
+//   [CONSTRAINT] 本断言针对两个采集通道的**兜底字面量**；bodySignature 里的
+//   「容器文本缺失退回整页签名」是另一码事（只作变化信号、不外发正文），不在禁止之列。
+test('reply-mark: 无 assistant 容器时禁止整页兜底提取（两通道同构守卫）', () => {
+  for (const rel of [BROWSER_SRC, TAMPERMONKEY_SRC]) {
+    const src = read(rel)
+    assert.ok(
+      !src.includes('latestAssistantRoot() || document'),
+      `${rel} 仍把「无 assistant 容器」兜底成整页 document（新会话思考期噪音根因，2026-10-08）`,
+    )
+    assert.ok(
+      !src.includes('blocks.length > 0 ? blocks[blocks.length - 1] : document'),
+      `${rel} 仍把「无 assistant 容器」兜底成整页 document（新会话思考期噪音根因，2026-10-08）`,
+    )
+  }
 })

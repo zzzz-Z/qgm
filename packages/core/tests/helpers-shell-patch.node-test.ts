@@ -19,7 +19,7 @@ const HELPERS = path.join(ROOT, 'packages', 'core', 'src', 'helpers.cjs')
 interface ShellResult { ok: boolean, error?: string, code?: number, hit?: string, hint?: string }
 interface PatchResult { ok: boolean, replaced?: number, skipped?: boolean }
 interface AiApi {
-  shell: (cmd: string | string[], opts?: Record<string, unknown>) => ShellResult
+  shell: (cmd: string | string[], opts?: Record<string, unknown>) => Promise<ShellResult>
   _shellBlacklist: (parts: string[], flat: string) => string | null
   patchFile: (file: string, anchor: string, replacement: string, opts?: { marker?: string, unique?: boolean }) => PatchResult
 }
@@ -105,32 +105,32 @@ describe('_shellBlacklist: rm 递归强删', () => {
 })
 
 describe('shell(): 元字符教学', () => {
-  it('字符串命令含管道 → 明确拒绝并给出用法，而不是静默跑错', () => {
-    const r = AI.shell('ls | grep x')
+  it('字符串命令含管道 → 明确拒绝并给出用法，而不是静默跑错', async () => {
+    const r = await AI.shell('ls | grep x')
     expect(r.ok).toBe(false)
     expect(r.error).toBe('SHELL_METACHAR_UNSUPPORTED')
     expect(r.code).toBe(2)
     expect(String(r.hint)).toContain('sh')
   })
 
-  it('重定向 / 变量 / 引号同样被识别', () => {
-    expect(AI.shell('echo hi > out.txt').error).toBe('SHELL_METACHAR_UNSUPPORTED')
-    expect(AI.shell('echo $HOME').error).toBe('SHELL_METACHAR_UNSUPPORTED')
-    expect(AI.shell('node -e "console.log(1)"').error).toBe('SHELL_METACHAR_UNSUPPORTED')
+  it('重定向 / 变量 / 引号同样被识别', async () => {
+    expect((await AI.shell('echo hi > out.txt')).error).toBe('SHELL_METACHAR_UNSUPPORTED')
+    expect((await AI.shell('echo $HOME')).error).toBe('SHELL_METACHAR_UNSUPPORTED')
+    expect((await AI.shell('node -e "console.log(1)"')).error).toBe('SHELL_METACHAR_UNSUPPORTED')
   })
 
-  it('数组形态不做元字符拒绝（token 是调用方显式给出的）', () => {
-    const r = AI.shell(['printf', '%s', '|'])
+  it('数组形态不做元字符拒绝（token 是调用方显式给出的）', async () => {
+    const r = await AI.shell(['printf', '%s', '|'])
     expect(r.error).not.toBe('SHELL_METACHAR_UNSUPPORTED')
   })
 
-  it('无元字符的字符串命令正常执行', () => {
-    const r = AI.shell('printf ok')
+  it('无元字符的字符串命令正常执行', async () => {
+    const r = await AI.shell('printf ok')
     expect(r.ok).toBe(true)
   })
 
-  it('黑名单优先于元字符教学（危险命令报 SECURITY_BLOCKED 而非用法提示）', () => {
-    const r = AI.shell('bash -c "rm -rf /tmp/x"')
+  it('黑名单优先于元字符教学（危险命令报 SECURITY_BLOCKED 而非用法提示）', async () => {
+    const r = await AI.shell('bash -c "rm -rf /tmp/x"')
     expect(r.error).toBe('SECURITY_BLOCKED')
     expect(r.hit).toBe('rm-recursive-force')
   })

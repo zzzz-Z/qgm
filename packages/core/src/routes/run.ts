@@ -8,6 +8,7 @@ import {
   computeClaimMismatch,
   computeCompliance,
   diffMeta,
+  discoverTargets,
   ensureDirs,
   extractErrorFiles,
   fingerprintErrors,
@@ -25,14 +26,14 @@ import {
   pickTscTargets,
   readOverlayChanges,
   readToolLogWithRetry,
+
   recordReject,
 
   resetRejectStreak,
-
   runDir,
   runEslint,
   runScript,
-  runSmoke,
+  runSmokeTargets,
   runTests,
   runTsc,
   saveIndex,
@@ -279,7 +280,9 @@ runHono.post('/run', async (c) => {
         }
         let smoke: SmokeResult | null = null
         if (body?.smoke === true && scriptOk && changes.length > 0) {
-          smoke = await runSmoke(`${proto}://${host}`)
+          // [discover-targets-v1] 不再只验宿主自身：自动发现业务 app（端口探测 + 配置标注 + env 覆盖）
+          const targets = await discoverTargets({ hostUrl: `${proto}://${host}` })
+          smoke = await runSmokeTargets(targets)
         }
         try {
           const stPath = path.join(getRoot(), '.ai-runner/state.json')

@@ -53,19 +53,19 @@
       "contains": "fingerprints?: Array<"
     },
     {
-      "file": "packages/core/src/helpers.cjs",
+      "file": "packages/core/src/helpers/search.cjs",
       "contains": "readIfChanged(file)"
     },
     {
-      "file": "packages/core/src/helpers.cjs",
+      "file": "packages/core/src/helpers/search.cjs",
       "contains": "fileSig(file)"
     },
     {
-      "file": "packages/core/src/helpers.cjs",
+      "file": "packages/core/src/helpers/search.cjs",
       "contains": "clearReadCache()"
     },
     {
-      "file": "packages/core/src/helpers.cjs",
+      "file": "packages/core/src/helpers/search.cjs",
       "contains": "const _rcMem = {}"
     },
     {
@@ -137,11 +137,11 @@
       "contains": "clearInbox()"
     },
     {
-      "file": "packages/core/src/helpers.cjs",
+      "file": "packages/core/src/helpers/index.cjs",
       "contains": "require('chalk')"
     },
     {
-      "file": "packages/core/src/helpers.cjs",
+      "file": "packages/core/src/helpers/patch.cjs",
       "contains": "_changelog('patch-skip', file)"
     },
     {

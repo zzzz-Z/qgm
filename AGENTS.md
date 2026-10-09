@@ -46,6 +46,8 @@ docs/              USAGE.md / DOCS-INDEX.md
 
 ## monorepo 结构铁律
 
+> **通用「依赖方向」原则**（`packages/*` 之间无编译期依赖等）见 `packages/core/SYSTEM.md` §4；本节只列本项目特化禁令与守卫文件。
+
 由 `packages/core/tests/workspace-guard.node-test.ts` 强制，违反即测试失败：
 
 1. `packages/*` 不得依赖 `apps/*`
@@ -53,14 +55,14 @@ docs/              USAGE.md / DOCS-INDEX.md
 3. `packages/client` 不得 import `packages/core`
 
 `vite.config.ts` / `uno.config.ts` 属构建配置，豁免第 2 条。
-宿主专属入口（`server/core.ts`、`server/ws-server.ts` 等）必须留在 `apps/`，不得回流 `core`。
+宿主专属入口（`apps/standalone/src/server.ts` 等，含 `listen` / `createServer` 的装配代码）必须留在 `apps/`，不得回流 `packages/core`。
 
 ## 自动循环没有轮次上限（软上限；保留 50 轮硬上限）
 
 `packages/client/composables/ai/loopLogic.ts` 的 `[drop-round-limit]`：
 **单轮软上限已取消**，`LOOP_MAX_ROUNDS = Infinity` 表示无上限（保留常量名只为兼容引用）。
 
-但**硬上限仍在**，由 `packages/client/composables/ai/auto-loop/after-round.ts` 强制执行：
+但**硬上限仍在**：常量定义在 `packages/client/composables/ai/loopLogic.ts`（与 `LOOP_MAX_ROUNDS` 同处），由 `packages/client/composables/ai/auto-loop/after-round.ts` 消费并触发 `finish()`：
 
 | 常量                   | 值         | 触发                           |
 | :--------------------- | :--------- | :----------------------------- |
@@ -69,6 +71,8 @@ docs/              USAGE.md / DOCS-INDEX.md
 
 因此「跑够 N 轮会自动停」**只在 N ≥ 50 时成立**，不要假设循环永不终止。
 终止路径共五条：`DONE` / `ASK` / 熔断冻结 / `hard-rounds`（50 轮）/ `hard-timeout`（30 分钟）。
+
+> **状态机定义**（各状态的触发条件与输出格式）见 `packages/core/SYSTEM.md` §1；**熔断处置**见 §8。本节只列本项目的具体上限值。
 
 ## 常用命令
 
@@ -86,7 +90,7 @@ pnpm handoff:gen         # 从 .ai-runner/ 生成会话交接 SESSION-HANDOFF.md
 dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` / `AIR_SERVER_PORT`，
 启动前会探活并 kill 占用进程）；`pnpm start` 与容器是 standalone 一体形态，只用 5175。
 
-`pnpm verify` 顺序展开：`tsc` → `tsc:apps` → `tsc:client` → `test:tsc` → `lint` → `test:unit`。
+`pnpm verify` 顺序展开（实际定义以 `package.json` 为准）：`anchors:verify` → `docs:verify` → `crossfile:verify` → `typecheck`（展开为 `tsc` → `tsc:apps` → `tsc:client` → `test:tsc`）→ `lint` → `test:unit`。
 
 **四套类型检查缺一不可**，别只跑 `tsc`：
 
@@ -98,6 +102,40 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 | `pnpm test:tsc`   | 各包 `tests/**`                                 |
 
 `git status` 不得包含 `.ai-runner/` 运行态文件。
+
+## 测试与验证（项目命令与资产）
+
+> 通用纪律（「跑错层等于没跑」「判据必须承重」「三种消红方式禁止」）见 `packages/core/SYSTEM.md` §14–§16；本节只列本项目的命令、路径与资产。
+
+### 三层回归闸门
+
+- **L1 差值基线（快闸门）**：`pnpm check-regression`（`bin/check-regression.cjs check`）—— 跑 `pnpm typecheck` + vitest（json reporter）+ eslint，与 `.ai-runner/baseline.json` 比**差值**；`dTsc`/`dTest`/`dLint` 任一 > 0 即 exit 1。判据是「不比基线更差」，不是「当前全绿」——**无基线文件 exit 2、vitest 报告解析不出（-1）直接阻断**，都不许当成通过。`init` 只在基线缺失或**统计口径变更**（如新增一套 tsc）时由宿主侧重建，**禁止为消红而 `init`**。
+- **L2 全量闸门（交付前）**：`pnpm verify`（展开顺序见「常用命令」）。四套 tsc 缺一不可——只跑 `pnpm tsc` 只覆盖 `packages/core/src`，前端与测试的类型错误会静默绕过。
+- **L3 契约 / e2e（真实装配）**：`pnpm test:e2e`（Playwright，`baseURL=http://localhost:5174/__ai/`，webServer 自动起 `pnpm dev:web`，`reuseExistingServer: true`）。改路由、状态码、NDJSON 帧结构、请求体契约时，**补一条 e2e 契约用例**（范式见 `e2e/baseline-diff.spec.ts`：先造真实 `runId`，再断言响应结构与错误码），不要只用单测把 transport mock 掉。
+- **改哪层跑哪层**：逻辑/类型改动 → L1 + 受影响包单测；新增导出/改签名 → L2 并 grep 调用方；改路由/契约/装配 → L1 + L3；改 UI → L1 + L2 + 视觉回归（见下节）。
+- **命令名先与 `package.json` 对账**：文档与回执里写的脚本名必须真实存在（`web:dev` 从未存在、只因复用已运行实例而长期未暴露，是这类的前车之鉴）。
+- **批量删除保护是环境垫片误报**：宿主侧跑全量 vitest 若撞上（报错栈出现 `node-safe-delete-shim`，表现为「单跑绿、合跑红」），加 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 重跑，不是你引入的回归。
+
+### 验证目标绑定（verify-target-binding-v1）
+
+> 根因、DONE 契约与能力否定侦测见 `packages/core/SYSTEM.md` §13；本节只列本项目的命令、测试与文件。
+
+- **问题**：原冒烟/自检只探 AI Runner 自己的 `/__ai/`（5175），业务 dev server（如外部项目的 8091）从未被验——即「验证错目标」那次 bug；宿主自检也只认磁盘产物、不探活端口（「磁盘 ≠ 运行实例」孪生缺口）。两条都属「用断言代替取证」。
+- **自动发现**：DONE 时 `discoverTargets()` 自动发现目标——宿主 `[host]` + 端口探测（排除 5175–5185）+ 配置标注（`app:<project>`）+ `APP_DEV_URL` 覆盖；**谁在跑验谁，多项目天然覆盖**。
+- **DONE 验证段契约**：每条 ✓ 带真实 URL + HTTP 状态码，宿主与 app 分两行；混写 / 只验宿主即违规（示例见 SYSTEM.md §13）。
+- **selfcheck `L0-smoke-app` 闸门**（fail-open）：发现 app 目标而 DONE 未引用 → 标 `degraded`（可见、不拒收）。
+- **承重测试**：`packages/core/tests/discover-targets.node-test.ts`（7 用例：env 解析 / 配置端口 / 端口探测 / 自动发现 / 漏验判定 / 宿主始终在列 / 排除宿主区间），改此机制必跑。
+- **相关文件**：`packages/core/src/headless/discover-targets.ts`、`packages/core/src/headless/smoke.ts`、`packages/core/src/routes/run.ts`、`packages/core/src/routes/selfcheck.ts`、`packages/core/src/post-run/run-compliance.ts`、`bin/run-all.cjs`。
+
+### 视觉回归资产
+
+- **基线资产**：`packages/client/e2e/visual.spec.ts-snapshots/`（6 视图 × 2 主题 = 12 张 PNG）。**基线 PNG 是判据资产，不是构建产物**。
+- **重建唯一入口**：`pnpm test:e2e --update-snapshots`，由宿主/复核方执行。AI 侧 bash 通道 120s 硬超时 < Playwright 单用例 180s 预算 ⇒ **e2e 不在轮内自跑**；只能声明命令、预期与影响面，禁止在 DONE 写「已跑视觉回归」除非贴得出原始输出。
+- **合法更新路径**：先看 `.ai-runner/tmp/e2e-output/` 下的 diff / actual 图 → 确认差异范围 ≈ 预期改动范围 → 重建 → 在 DONE 记录「基线更新：视图 / 主题 / 变更原因 / 审查者」。
+- **跨轮次元素级基线**：`pnpm baseline`（`scripts/screenshot-baseline.cjs save|check|list|rm`）对单个选择器做跨轮像素对比；与全页 Playwright 基线互补，适合「只想钉住某个组件」的场景。
+- **dev 与 prod 的差异**：e2e 打的是 5174 的 dev（直读源码，dev 免 build）；prod 形态（5175）必须先 `pnpm build` 再由宿主侧重启才看得见——别拿 dev 截图承诺 prod 表现。
+- **平台约束**：`snapshotPathTemplate` 已去掉平台段，但这**不等于**跨平台通用——字体与抗锯齿不同，多平台须各自提交基线。
+- **遮罩选择器守卫**：由 `packages/client/tests/visual-spec-guard.node-test.ts` 双向守卫（剥掉 `<style>` 与 CSS 后仍须真实存在）。
 
 ## 本项目独有约束
 
@@ -116,9 +154,9 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 - **内联常量必须同构**：headless 注入函数经 `page.evaluate` 序列化后在浏览器执行，
   不能引用模块级常量，所以同一份正则刻意多写一份。改一处必须全处同步：
   - 会话触顶正则 3 处：`headless-inject.ts`（探测）、`headless-inject-simple.ts`（fill/rotate 记基线）、
-    `scripts/tampermonkey-session-id.user.js`（`countLimitMarkers`），由 `limit-marker-guard` 守卫；
+    `scripts/tampermonkey-session-id.user.js`（`countLimitMarkers`），由 `packages/core/tests/limit-marker-guard.node-test.ts` 守卫；
   - 发送频控正则 3 处：`headless-inject.ts`（回复探测）、`headless-inject-simple.ts`
-    （`verifyFillSentInPage` 拒收判定 + `resetReplyDedupInPage` 基线），由 `rate-marker-guard` 守卫。
+    （`verifyFillSentInPage` 拒收判定 + `resetReplyDedupInPage` 基线），由 `packages/core/tests/rate-marker-guard.node-test.ts` 守卫。
 - **`.gitignore` 就是 eslint 的忽略清单**：`@antfu/eslint-config` 默认把 `.gitignore` 读进 `ignores`
   （`eslint.config.ts` 里的显式 `ignores` 只是其中一层）⇒ 把一个文件从 gitignore 覆盖区**移出**，
   等于同时把它拉进 `pnpm lint`。2026-10-05 对照实测：同一份未对齐表格的 md，放 `docs/plan/`

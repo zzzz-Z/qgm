@@ -27,6 +27,18 @@ for (const f of ['interceptor.cjs', 'helpers.cjs', 'logger.cjs']) {
   if (fs.existsSync(src)) { fs.copyFileSync(src, dst); console.log(`  copied ${f}`) }
   else { console.log(`  skip (missing) ${f}`) }
 }
+// [helpers-index-v1] helpers/ 子目录随包发布：index.cjs require ./io.cjs 等同级子文件，
+//   [CONSTRAINT] 保持目录层级不变；漏拷子目录 = 运行时 MODULE_NOT_FOUND
+const helpersSrc = path.join(runtimeDir, 'helpers')
+const helpersDst = path.join(DIST_ROOT, 'helpers')
+if (fs.existsSync(helpersSrc)) {
+  fs.mkdirSync(helpersDst, { recursive: true })
+  for (const f of fs.readdirSync(helpersSrc)) {
+    if (!f.endsWith('.cjs')) continue
+    fs.copyFileSync(path.join(helpersSrc, f), path.join(helpersDst, f))
+    console.log(`  copied helpers/${f}`)
+  }
+}
 
 // [preset-rules-move-v1] /__ai/preset/system 从 dist/SYSTEM.md 读取；缺则 404
 //   WHY: preset.ts 用 import.meta.url 回溯 SYSTEM.md，发布产物需显式复制

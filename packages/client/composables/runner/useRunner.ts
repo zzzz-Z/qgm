@@ -83,6 +83,99 @@ export const doneSummary = ref('')
 
 /** 实时 stderr 缓冲区（流式累积，刷新会清空） */
 const liveStderr = ref('')
+
+// ── [bg-stream-v1] 后台长任务日志的流式显示 ──
+// [WHY] `shell(cmd,{background:true})` 是**即发即返**的：脚本本轮立刻结束，而任务还在后台跑，
+//   其输出被重定向到 .ai-runner/tmp/<id>.log，**不经过 /run 的 chunk 帧**；发出任务的那一轮
+//   /run 一结束，推送通道随之关闭 ⇒ 跨轮没有任何服务端推流路径，前端此刻一片空白。
+//   补齐办法：startBackground 会向 stdout 打一行 `BG_ID=<id>`（走前台 chunk，实时上屏），
+//   前端拿到 id 后自行按字节偏移轮询 /__ai/shell-log ⇒ 秒级流式、**不占 AI 轮次、不受 180s 限制**。
+/** 后台任务累积输出（按 id 分桶；跨轮保留，避免新一轮清空把长任务进度抹掉） */
+const bgLogs = ref<Record<string, string>>({})
+/** 正在轮询的后台任务；from = 下次请求要带的字节偏移 */
+const bgWatchers = new Map<string, { from: number, timer: ReturnType<typeof setTimeout> | null, done: boolean, fails: number }>()
+/** 已收口的后台任务（收口后不再向新一轮注入其输出） */
+const bgDone = new Set<string>()
+/** 未以换行收尾的残留文本（chunk 可能把 `BG_ID=sh-x` 与它的换行切开） */
+let bgCarry = ''
+/** 后台日志轮询间隔 */
+const BG_POLL_MS = 1000
+
+/**
+ * 从一段新增 stdout 中识别完整行的 BG_ID 标记
+ * [CONSTRAINT] 只处理「已以换行收尾」的部分，残留留在 bgCarry 等下一块拼接；
+ *   残留无上限会让长输出白占内存 ⇒ 超 4KB 仅保留尾部 1KB（标记行远短于此）
+ */
+function scanBgIds(chunkText: string): string[] {
+  const buf = bgCarry + chunkText
+  const idx = buf.lastIndexOf('\n')
+  if (idx < 0) {
+    bgCarry = buf.length > 4096 ? buf.slice(-1024) : buf
+    return []
+  }
+  const complete = buf.slice(0, idx + 1)
+  bgCarry = buf.slice(idx + 1)
+  const ids: string[] = []
+  const re = /(?:^|\n)BG_ID=(sh-[\w-]+)/g
+  let m = re.exec(complete)
+  while (m !== null) { ids.push(m[1]); m = re.exec(complete) }
+  return ids
+}
+
+/**
+ * 拉一次增量并追加进 liveStdout；返回 true 表示任务已收口（可停止轮询）
+ * [CONSTRAINT] 网络失败返回 false 继续重试（任务可能只是还没产出，不能因一次失败就放弃显示）
+ */
+async function pollBgOnce(id: string): Promise<boolean> {
+  const w = bgWatchers.get(id)
+  if (!w) return true
+  let data: { ok?: boolean, text?: string, next?: number, done?: boolean } = {}
+  try {
+    const res = await fetch(`/__ai/shell-log?id=${encodeURIComponent(id)}&from=${w.from}`)
+    if (!res.ok) { w.fails += 1; return false }
+    data = (await res.json()) as typeof data
+  } catch {
+    w.fails += 1
+    return false
+  }
+  if (!data.ok) { w.fails += 1; return false }
+  w.fails = 0
+  const text = String(data.text || '')
+  w.from = Number(data.next) || w.from
+  if (text) {
+    bgLogs.value = { ...bgLogs.value, [id]: (bgLogs.value[id] || '') + text }
+    liveStdout.value += text
+  }
+  return data.done === true
+}
+
+/** 起一个后台任务的轮询（同 id 幂等）；收口或停止后自行退出循环 */
+function startBgWatch(id: string): void {
+  if (bgWatchers.has(id) || bgDone.has(id)) return
+  const w = { from: 0, timer: null as ReturnType<typeof setTimeout> | null, done: false, fails: 0 }
+  bgWatchers.set(id, w)
+  const tick = async () => {
+    if (!bgWatchers.has(id)) return
+    const done = await pollBgOnce(id)
+    // [bg-stream-v1] 连续失败上限：任务被清理 / 服务不可达时不再无限重试（否则留一个永不退出的定时器）
+    if (done || !bgWatchers.has(id) || w.fails >= 10) {
+      bgWatchers.delete(id)
+      bgDone.add(id)
+      return
+    }
+    w.timer = setTimeout(() => { void tick() }, BG_POLL_MS)
+  }
+  void tick()
+}
+
+/** 停止全部后台轮询（用户中止运行时调用；后台任务本身不受影响，仍会在服务端跑完） */
+function stopBgWatchers(): void {
+  for (const w of bgWatchers.values()) {
+    if (w.timer) clearTimeout(w.timer)
+  }
+  bgWatchers.clear()
+}
+
 /** 冒烟测试开关；持久化到 sessionStorage */
 const smokeEnabled = useSessionStorage<boolean>(STORAGE_KEY_SMOKE, true)
 /** 基线 runId（用于对比 diff）；持久化到 sessionStorage */
@@ -255,6 +348,9 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   liveStdout.value = ''
   liveStderr.value = ''
   doneSummary.value = '' // [done-summary-channel-v1] 新一轮清空上轮总结
+  // [bg-stream-v1] 新一轮的清空**不能**抹掉仍在跑的后台任务进度（它是跨轮的）⇒ 重新注入未完成任务的累积输出
+  const pendingBg = Object.keys(bgLogs.value).filter(id => !bgDone.has(id))
+  if (pendingBg.length) liveStdout.value = pendingBg.map(id => bgLogs.value[id] || '').join('')
 
   // [desc-colon-opt-v1] 脚本头契约规定 `// @desc <做什么>`（无冒号）；兼容历史 `@desc:` 写法
   // [WHY] 原正则强制冒号，AI 按脚本头契约输出无冒号时匹配失败 → 卡片永远显示 fallback
@@ -357,8 +453,14 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         // summary 帧必须 push，否则 frames[last] 拿不到 summary
         frames.push(frame)
       } else if (frame.type === 'chunk') {
-        if (frame.stream === 'stdout') liveStdout.value += String(frame.data || '')
-        else if (frame.stream === 'stderr') liveStderr.value += String(frame.data || '')
+        if (frame.stream === 'stdout') {
+          const data = String(frame.data || '')
+          liveStdout.value += data
+          // [bg-stream-v1] 后台任务 id 标记走前台 stdout，随 chunk 实时到达 ⇒ 立刻起轮询
+          for (const id of scanBgIds(data)) startBgWatch(id)
+        } else if (frame.stream === 'stderr') {
+          liveStderr.value += String(frame.data || '')
+        }
         flushChunk()
       }
     }, abortController.signal)
@@ -589,6 +691,9 @@ export function useRunner() {
     liveStdout,
     liveStderr,
     doneSummary,
+    // [bg-stream-v1] 后台长任务：bgLogs 按 id 分桶的累积输出；stopBgTracking 停止轮询（任务本身仍在服务端跑）
+    bgLogs,
+    stopBgTracking: stopBgWatchers,
     pipelineFromServer: () => result.value?.pipeline,
     autoFeedbackRequested,
     clearAutoFeedback: () => { autoFeedbackRequested.value = false },

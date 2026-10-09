@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.6.2
+// @version      1.6.5
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -171,12 +171,24 @@
     return (h >>> 0).toString(16).padStart(8, '0')
   }
 
+  // [script-fence-gate-v1] 与 headless-inject.ts detectReplyInPage 同构（守卫测试 script-fence-gate）
+  // 返回 'report' | 'suppress' | 'none'；纯函数、无 DOM/闭包依赖
+  function decideScriptFence(scriptMarkPositive, seenHashesLen, alreadyReported) {
+    if (!scriptMarkPositive) return 'none'
+    if (seenHashesLen > 0) return 'none'
+    if (alreadyReported) return 'suppress'
+    return 'report'
+  }
   const seenHashes = new Set()
   const seenDoneMarkers = new Set()
   let lastBodySig = ''
+  let _scriptFenceReported = false
   // [stopped-detect-v1] 「已停止」标记基线：fill/rotate 开新一轮时记录当前出现次数，
   // classifyAndPost 仅在计数增长时推送一次 kind:'stopped'（与 headless 侧 detectReplyInPage 同构）
   let stopMarkerBaseline = 0
+  // [stopped-plain-noise-v1] 本轮是否已推过 stopped：置位后 plain 分支不再补发半截回复
+  // （与 headless-inject.ts 的 dedup._stoppedReported 同义；随 fill/rotate 轮次重置）
+  let stopPosted = false
   function countStopMarkers() {
     try {
       const t = (document.body && document.body.textContent) || ''
@@ -360,7 +372,16 @@
       gate.ticks++
       return gate.ticks < 3
     }
-    const pres = document.querySelectorAll('pre')
+    // [no-root-no-reply-v1] 只扫「最后一条 assistant 消息」容器内的 <pre>；容器不存在
+    //   （新会话首轮「已思考/搜索」阶段）不得退回整页 —— 否则用户首条消息（如 SYSTEM.md 卡）
+    //   里的代码块会被当脚本候选（2026-10-08 截图噪音同根因）。
+    //   [CONSTRAINT] 与 headless-inject.ts 的 extractLatestScript 语义同构（那边直接查
+    //   .ds-assistant-message-main-content，这边复用站点无关的 latestAssistantRoot）；
+    //   两处由 script-closure-gate / multi-script-blocks 用假 DOM 对拍锁死。
+    //   [parity-test] 假 DOM 同时实现 document 直查 pre 与容器查 pre 两条路径，本改动后
+    //   依赖 latestAssistantRoot，由两个测试文件的 buildPicker deps 注入。
+    const _scriptRoot = latestAssistantRoot()
+    const pres = _scriptRoot ? _scriptRoot.querySelectorAll('pre') : []
     // [multi-script-v1] 一条回复可携带多个脚本：本函数只放行**首个尚未推送**的合格块，
     //   调用方推送后清空并再跑一次分类，逐块送出（前端串行执行）。
     // [WHY] 旧实现 `lastMarked || last` 只取最后一块，前面的块被静默丢弃；
@@ -439,7 +460,9 @@
   // CHANGE-IMPACT: 与 extractLatestScript 互补，先 DOM 后 Markdown，不重复发送（hash 去重）
   function extractScriptFromMarkdown() {
     try {
-      const root = latestAssistantRoot() || document
+      // [no-root-no-reply-v1] 容器缺失 ⇒ 无 Markdown 可提，整页反推会把侧栏/用户消息扫进来
+      const root = latestAssistantRoot()
+      if (!root) return null
       const md = extractReplyMd(root)
       // 匹配 ```lang\n...``` 或 ```\n...```（无语言标签）
       const fenceRe = /```(\w*)\n([\s\S]*?)```/g
@@ -474,7 +497,12 @@
     // [WHY] 原实现只取全局最后一个叶子节点 → 多段回复被截成末段，标记行前缀丢失
     // [CONSTRAINT] 复用 extractReplyMd（DOM→Markdown 反推）；容器缺失时回退 document
     try {
-      const _root = latestAssistantRoot() || document
+      // [no-root-no-reply-v1] 容器缺失返回空串，不再整页反推：
+      //   新会话首轮「已思考/搜索」阶段无 assistant 容器，整页 elToMd 会把侧栏历史会话标题
+      //   （未知标签递归 inner() 拼成连体乱文）+ 用户首条消息卡（SYSTEM.md）拼成「回复」
+      //   （2026-10-08 18:53 截图两张噪音卡的正文形态）。
+      const _root = latestAssistantRoot()
+      if (!_root) return ''
       return extractReplyMd(_root)
     } catch { return '' }
   }
@@ -556,7 +584,9 @@
   }
 
   function findNewDone() {
-    const _root = latestAssistantRoot() || document
+    // [no-root-no-reply-v1] 容器缺失 ⇒ 无 DONE 可言；整页反推会把用户首条消息（含 SYSTEM.md 卡）扫进来
+    const _root = latestAssistantRoot()
+    if (!_root) return null
     // [done-md-reconstruct-v1] 用 DOM→Markdown 反推替代 textContent（保留换行与结构）
     const summary = extractReplyMd(_root)
 
@@ -606,6 +636,8 @@
   let observerDebounce = null
   // [script-closure-gate-v1] 未闭合块被延迟时的单飞复查定时器（见 classifyAndPost）
   let closureRetryTimer = null
+  // [generating-gate-v2] 生成期自巡检单飞定时器；声明在 closureRetryTimer 之后，避免 no-use-before-define
+  let genRetryTimer = null
   function classifyAndPost() {
     try {
       if (!window.opener || window.opener.closed) return
@@ -631,6 +663,7 @@
       const stopCount = countStopMarkers()
       if (stopCount > stopMarkerBaseline) {
         stopMarkerBaseline = stopCount
+        stopPosted = true
         lastBodySig = bodySignature()
         post({
           type: 'ai-runner:reply',
@@ -662,7 +695,17 @@
       }
 
       // [generating-gate-v1] 流式输出未完，script/plain 一律等生成结束后再发
-      if (isGenerating()) return
+      // [generating-gate-v2] 但「生成结束」本身常是非 DOM 事件（停止按钮变灰/消失、生成光标移除），
+      //   若无 childList/characterData 变更，原裸 return 会让通道陷入零定时器状态 → 回传卡死，
+      //   必须用户滚动/点击制造 DOM 变更才会被唤醒。故排单飞自检：每次到点若仍在生成则再挂一个，
+      //   生成一旦结束 → 下次到点放行 classifyAndPost 后自然停挂。seenHashes/lastBodySig 保证不重复推送。
+      //   [parity] headless-inject.ts startReplyPoll 以 800ms 轮询天然无此症，本补丁仅对齐回传及时性。
+      if (isGenerating()) {
+        if (!genRetryTimer) {
+          genRetryTimer = setTimeout(() => { genRetryTimer = null; classifyAndPost() }, 600)
+        }
+        return
+      }
 
       // [script-closure-gate-v1] 结构未闭合的块被延迟 ⇒ 主动排一次复查。
       // [WHY] 本通道只由 MutationObserver（350ms 防抖）唤醒，延迟后若 DOM 不再变动就再也没人叫它，
@@ -676,10 +719,21 @@
 
       // [reply-mark-v1] 标记行优先：首行是 `ASK` / `DONE` / `HANDOFF` / `TEXT` 的回复不走脚本分类
       //   （否则带示例代码块的 DONE 总结会被当脚本重新执行）；与 headless-inject.ts 同构
-      const marks = scanReplyMarks(extractReplyMd(latestAssistantRoot() || document))
+      // [no-root-no-reply-v1] 容器缺失 ⇒ 无标记可扫（整页反推会把侧栏标题/用户消息卡混进首行判据）
+      const _replyRoot = latestAssistantRoot()
+      const marks = scanReplyMarks(_replyRoot ? extractReplyMd(_replyRoot) : '')
+      // [stopped-no-autorun-v1] 本轮已推过 stopped ⇒ 剩余脚本块**不再推送**（仅上面的 plain 抑制不够）。
+      // [WHY] 前端收到 stopped 会 finish 整个循环（存档 + 清看板 + LoopStop）。此后被中止的那条回复里
+      //   若还留着结构闭合的代码块，script 分支仍会把它推出去；循环此时已非活动 ⇒ 前端走
+      //   `autoTakeover.scheduleAutoRun`（无条件立即执行）⇒ 形成「循环外自动执行」旁路：
+      //   不在任何轮次记账、不进本轮 commit、无自检闸门、无预算反馈（WO-20261005 段三判定为缺陷）。
+      //   停止往往来自平台中断/内容截断，残余块大概率是半截代码，执行它不可控。
+      // [CONSTRAINT] 与本函数的 plain 抑制同生命周期：stopPosted 随 fill/rotate 重置
+      //   （见 [stopped-plain-noise-v1]），新一轮正常脚本不受影响。
+      // [parity] headless-inject.ts detectReplyInPage 的 script 分支有同构守卫（dedup._stoppedReported）
       const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0
       // [md-fence-fallback-v1] DOM 提取失败时兜底 Markdown 围栏提取
-      const s = markedNonScript ? null : (extractLatestScript() || extractScriptFromMarkdown())
+      const s = (markedNonScript || stopPosted) ? null : (extractLatestScript() || extractScriptFromMarkdown())
       if (s && !seenHashes.has(s.hash)) {
         seenHashes.add(s.hash)
         post({
@@ -702,6 +756,41 @@
       const sig = bodySignature()
       if (sig !== lastBodySig) {
         lastBodySig = sig
+        // [no-root-no-reply-v1] 页面还没有 assistant 回复容器 ⇒ 此时 bodySignature 的变化来自
+        //   「已思考」面板/搜索卡片的流式抖动，而 extractLatestReplyText 会整页反推
+        //   ⇒ 新会话首轮思考期间，思考面板每稳定一拍就推一张「侧栏标题连体 + SYSTEM.md 卡」
+        //   的噪音文本卡（2026-10-08 18:53:19 / 18:53:21 两张卡实测）。
+        //   直接不回传：等真实回复容器挂载后 sig 再变化，自然重新进入本分支。
+        if (!_replyRoot) return
+        // [stopped-plain-noise-v1] 本轮已推过 stopped ⇒ 之后的 plain 必为「已停止」半截回复的补发，跳过。
+        // [WHY] stopped 分支只推一次（计数基线已更新），而停止横幅插入/操作按钮态变化仍会驱动
+        //   MutationObserver → bodySignature 变化 → plain 分支把这条半截回复的 DOM→Markdown
+        //   反推全文（含流水式长段总结 + 残缺列表）整卡补发 ⇒ 前端时间线多出一张巨大 AI 文本卡
+        //   （2026-10-08 截图实测）。[script-plain-noise-v1] 的 marks.script 守卫拦不住它：
+        //   半截回复首行是普通文本，不是标记行。
+        // [CONSTRAINT] 轮次语义：stopPosted 随 fill/rotate 重置（与 syncStopMarkerBaseline 同点），
+        //   新一轮的真实 plain 回复不受影响。
+        // [parity] headless-inject.ts detectReplyInPage 的 plain 分支有同构守卫（dedup._stoppedReported）
+        if (stopPosted) return
+        // [script-plain-noise-v1] 首行 = SCRIPT 且本会话已成功推过脚本 ⇒ 此处 post plain 必为噪音，跳过。
+        // [WHY] 按输出契约，`SCRIPT` 首行的回复「第二行起是脚本代码块、代码块外零字符溢出」，没有可供展示的正文。
+        //   脚本块早已各自经上面的 script 分支推送；此后的 DOM 抖动（流式光标移除 / 操作条·复制按钮晚挂载 /
+        //   代码高亮重渲染）会让 bodySignature 变化，plain 分支就把整条回复的 DOM→Markdown 反推全文
+        //   （N 个裸 `SCRIPT` 标记行 + 已推送过的围栏）再补发一次 ⇒ 前端多出一张正文只有「SCRIPT」的文本卡。
+        //   抖动几次就补发几条 —— 截图里的两张噪音卡 = 两次波动。
+        // [CONSTRAINT] 要求 seenHashes.size > 0（脚本确实推出去过）才跳过：脚本从未推成功时
+        //   保留旧的 plain 行为，避免「AI 说了话但应用端毫无反应」的静默失败变得不可观测。
+        // [parity] headless-inject.ts 的 detectReplyInPage 有同构守卫
+        if (marks.script > 0 && seenHashes.size > 0) return
+        // [script-fence-gate-v1] 同构守卫（[parity] headless-inject.ts detectReplyInPage）
+        // classifyAndPost 开头已 isGenerating() return ⇒ 进入此处即生成结束，不会流式中途误报
+        const _fence = decideScriptFence(marks.script > 0, seenHashes.size, _scriptFenceReported)
+        if (_fence === 'report') {
+          _scriptFenceReported = true
+          post({ type: 'ai-runner:reply', kind: 'error', site: location.origin, sessionId: extractSidFromHash(), text: 'SCRIPT 载荷不是有效的 js/cjs 代码块：必须用 ```js 围栏包裹代码，且脚本头用 // @desc / // @why（参考 packages/core/SYSTEM.md §1 状态 A）。' })
+          return
+        }
+        if (_fence === 'suppress') return
         // [ask-text-v1] 补 text：前端 parseAsk 依赖此字段识别交互提问
         // [text-mark-v1] TEXT 标记：剥掉标记行只留正文（extractLatestReplyText 含「TEXT」首行）
         // [CONSTRAINT] extractLatestReplyText 返回最后 assistant 容器文本；缺失时前端退化为纯提示
@@ -731,7 +820,11 @@
   function resumeReplyObserver() {
     if (_replyObserving) return
     try {
-      replyObserver.observe(document.body, { childList: true, subtree: true, characterData: true })
+      // [wake-attrs-v1] 追加 attributes 监听：使「停止生成」按钮的态变（class/disabled/aria-label/data-state）
+      //   也能唤醒 classifyAndPost，作为「生成结束」的兜底唤醒源（与 [generating-gate-v2] 互补）。
+      //   [WHY] 仅 childList/characterData 时，按钮消失/置灰这类纯属性变更无法触发 observer，
+      //   若又逢 DOM 静止就只剩用户滚动才能唤醒（2026-10-09 实测：回传延迟 54~65s，滚动后秒推）。
+      replyObserver.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class', 'disabled', 'aria-label', 'data-state'] })
       _replyObserving = true
     } catch { /* body 未就绪，下次 fill/rotate 再试 */ }
   }
@@ -993,10 +1086,13 @@
     if (d.type === 'ai-runner:fill') {
       resumeReplyObserver() // [stop-v2] stop 后首次 fill 恢复回复监听
       syncStopMarkerBaseline() // [stopped-detect-v1] 开新一轮：以当前「已停止」计数为新基线
+      stopPosted = false // [stopped-plain-noise-v1] 开新一轮：解除 plain 补发抑制
+      _scriptFenceReported = false // [script-fence-gate-v1] 开新一轮：重置 fence 报错去重
       syncLimitMarkerBaseline() // [limit-detect-v1] 开新一轮：以当前「上限」计数为新基线
       // [script-closure-gate-v1] 结构闭合门随轮次重置：上一轮遗留的门会拿旧长度当基线，
       //   让新回复第一帧就被判定为「已静止」→ 未闭合块提前放行（门本身见 headless-inject.ts）
       window.__aiRunnerClosureGate = null
+      if (genRetryTimer) { clearTimeout(genRetryTimer); genRetryTimer = null } // [generating-gate-v2] 开新一轮清自检
       if (d.msgId && _seenInbound.has(d.msgId)) { ackFill(false, 'dedup-skip', d.ackId); return }
       if (d.msgId) { _seenInbound.add(d.msgId); if (_seenInbound.size > 200) _seenInbound.delete(_seenInbound.values().next().value) }
       const prompt = String(d.prompt || '')
@@ -1034,10 +1130,13 @@
     if (d.type === 'ai-runner:rotate') {
       resumeReplyObserver() // [stop-v2] stop 后首次 rotate 恢复回复监听
       syncStopMarkerBaseline() // [stopped-detect-v1] 开新一轮：以当前「已停止」计数为新基线
+      stopPosted = false // [stopped-plain-noise-v1] 开新一轮：解除 plain 补发抑制
+      _scriptFenceReported = false // [script-fence-gate-v1] 开新一轮：重置 fence 报错去重
       syncLimitMarkerBaseline() // [limit-detect-v1] 开新一轮：以当前「上限」计数为新基线
       // [script-closure-gate-v1] 结构闭合门随轮次重置：上一轮遗留的门会拿旧长度当基线，
       //   让新回复第一帧就被判定为「已静止」→ 未闭合块提前放行（门本身见 headless-inject.ts）
       window.__aiRunnerClosureGate = null
+      if (genRetryTimer) { clearTimeout(genRetryTimer); genRetryTimer = null } // [generating-gate-v2] 开新一轮清自检
       if (d.msgId && _seenInbound.has(d.msgId)) return
       if (d.msgId) { _seenInbound.add(d.msgId); if (_seenInbound.size > 200) _seenInbound.delete(_seenInbound.values().next().value) }
       const instruction = String(d.instruction || '')
@@ -1118,6 +1217,8 @@
       _msgBuf.length = 0
       _pending.length = 0
       if (observerDebounce) { clearTimeout(observerDebounce); observerDebounce = null }
+      if (closureRetryTimer) { clearTimeout(closureRetryTimer); closureRetryTimer = null }
+      if (genRetryTimer) { clearTimeout(genRetryTimer); genRetryTimer = null } // [generating-gate-v2] 防跨轮泄漏
       try { replyObserver.disconnect() } catch { /* ignore */ }
       _replyObserving = false
     }

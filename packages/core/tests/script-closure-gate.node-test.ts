@@ -102,6 +102,7 @@ function buildPicker(rel: string, seen: string[], doc: unknown, win: Record<stri
   var guessLangFromContent = deps.guessLangFromContent
   var hash32 = deps.hash32
   var codeTextOf = deps.codeTextOf
+  var latestAssistantRoot = deps.latestAssistantRoot
   function extractLatestScript() { ${inner} }
   return extractLatestScript()
 }`
@@ -116,6 +117,12 @@ function buildPicker(rel: string, seen: string[], doc: unknown, win: Record<stri
     guessLangFromContent: () => null,
     hash32: (s: string) => s,
     codeTextOf: (el: { textContent?: string }) => String((el && el.textContent) || '').replace(/^\n+|\n+$/g, ''),
+    // [no-root-no-reply-v1] 两处 extractLatestScript 现经容器取 <pre>（headless 直接查选择器、
+    //   油猴走 latestAssistantRoot）；假 DOM 已实现 .ds-assistant-message-main-content 路径
+    latestAssistantRoot: () => {
+      const els = (doc as { querySelectorAll: (sel: string) => unknown[] }).querySelectorAll('.ds-assistant-message-main-content')
+      return els.length > 0 ? els[els.length - 1] : null
+    },
   }
   return () => call(deps)
 }

@@ -27,6 +27,17 @@ const summary = computed(() => {
   return s
 })
 /**
+ * [filelist-head-v1] 类型明细的展示顺序与徽标字母：与列表行的 letter 完全同源
+ * [WHY] 旧实现的摘要是「色点 + 数字」，颜色是唯一线索 —— 色弱用户与首次使用者读不出
+ *   「•2」是修改还是新增；字母与行内徽标同形后，摘要与列表自解释且互相对照。
+ * [CONSTRAINT] 字母必须与 metaOf 的 label 一致，否则摘要与行内会互相矛盾
+ */
+const summaryItems = computed(() => [
+  { key: 'modified' as ChangeType, letter: 'M', label: '修改', n: summary.value.modified },
+  { key: 'added' as ChangeType, letter: 'A', label: '新增', n: summary.value.added },
+  { key: 'deleted' as ChangeType, letter: 'D', label: '删除', n: summary.value.deleted },
+].filter(i => i.n > 0))
+/**
  * [cumulative-baseline-v1] 撤回全部按钮的提示：累积视图下逐条按归属轮还原，措辞必须与实现一致
  * [WHY] 否则用户以为「撤的是最后一轮」，实际撤的是整个会话累计——文案与行为不符是误导
  */
@@ -81,33 +92,38 @@ function splitPath(p: string) {
 
 <template>
   <section class="changes">
+    <!-- [filelist-head-v1] 头部改为**上下两行**：上行信息（标题 + 总数 + 类型明细），下行动作（两个等宽按钮）。
+         [WHY] 旧实现是「单行 justify-between」，而侧栏默认只有 320px、减去内边距≈288px：
+         标题 + 4 个徽标 + 两个文字按钮的**最小内容宽**约 300px ⇒ flex 把每个字都挤成一行，
+         实测标题被劈成 3 行、按钮各 84px 高并溢出 40px 的固定高度头部，压住第一条文件行。
+         两行布局把「最窄可用宽度」降到动作行的 2×约 70px，任何侧栏宽度下都不再折字。 -->
     <header class="changes-bar">
       <div class="summary">
-        <span class="summary-title">{{ view === 'cumulative' ? '累积变更' : '变更' }}</span>
-        <span class="summary-count">{{ changes.length }}</span>
+        <span class="summary-title">{{ view === 'cumulative' ? '累积变更' : '本轮变更' }}</span>
+        <span v-tooltip="`共 ${changes.length} 个文件`" class="summary-count">{{ changes.length }}</span>
         <span class="summary-dots">
-          <span v-if="summary.modified" v-tooltip="`修改 ${summary.modified}`" class="s-pill modified">
-            <span class="s-dot" />{{ summary.modified }}
-          </span>
-          <span v-if="summary.added" v-tooltip="`新增 ${summary.added}`" class="s-pill added">
-            <span class="s-dot" />{{ summary.added }}
-          </span>
-          <span v-if="summary.deleted" v-tooltip="`删除 ${summary.deleted}`" class="s-pill deleted">
-            <span class="s-dot" />{{ summary.deleted }}
+          <span v-for="it in summaryItems" :key="it.key" v-tooltip="`${it.label} ${it.n}`" class="s-pill" :class="it.key">
+            <b class="s-key">{{ it.letter }}</b>{{ it.n }}
           </span>
         </span>
       </div>
       <div class="bar-actions">
-        <button v-tooltip="rollbackAllTitle" class="ghost-btn" :disabled="busyAll" @click="emit('rollbackAll')">
-          {{ busyAll ? '处理中…' : '撤回全部' }}
+        <button v-tooltip="rollbackAllTitle" class="act-btn ghost-btn" :disabled="busyAll" @click="emit('rollbackAll')">
+          <svg class="act-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" />
+          </svg>
+          <span>{{ busyAll ? '处理中…' : '撤回全部' }}</span>
         </button>
         <button
           v-tooltip="busyAll ? '处理中…' : '确认所有改动并删除本次快照（之后无法撤回）'"
-          class="save-btn"
+          class="act-btn save-btn"
           :disabled="busyAll"
           @click="emit('save')"
         >
-          {{ busyAll ? '处理中…' : '确认改动' }}
+          <svg class="act-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+          <span>{{ busyAll ? '处理中…' : '确认改动' }}</span>
         </button>
       </div>
     </header>
@@ -128,7 +144,9 @@ function splitPath(p: string) {
           @click.stop="emit('rollback', c.path)"
         >
           <span v-if="rolling[c.path]" class="spinner-mini" />
-          <span v-else class="undo-icon">↺</span>
+          <svg v-else class="undo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" />
+          </svg>
         </button>
       </div>
     </div>
@@ -137,6 +155,9 @@ function splitPath(p: string) {
 
 <style scoped lang="scss">
 .changes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-8);
@@ -144,49 +165,58 @@ function splitPath(p: string) {
   overflow: hidden;
 }
 
+/* [filelist-head-v1] 去掉写死的 40px 高度：两行头部是内容撑开，固定高会让动作行溢出压住列表 */
 .changes-bar {
-  @apply flex items-center justify-between gap-3;
-  height: 40px;
-  padding: 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
 .summary {
-  @apply flex items-center gap-2.5;
-  font-size: 13px;
+  @apply flex items-center gap-1.5;
+  min-width: 0;
+  overflow: hidden;
 }
 .summary-title {
+  font-size: var(--font-12);
   font-weight: 600;
   color: var(--text);
+  white-space: nowrap;
 }
 .summary-count {
   @apply inline-flex items-center justify-center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 7px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
   background: var(--primary-bg);
   color: var(--primary);
-  border-radius: var(--radius-10);
-  font-size: 11px;
+  border-radius: var(--radius-4);
+  font-size: var(--font-11);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 .summary-dots {
-  @apply flex gap-1.5;
+  @apply flex items-center gap-1;
+  overflow: hidden;
 }
 .s-pill {
-  @apply inline-flex items-center gap-1;
-  padding: 2px 8px;
-  border-radius: var(--radius-10);
-  font-size: 11px;
+  @apply inline-flex items-center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 6px 0 5px;
+  border-radius: var(--radius-4);
+  font-size: var(--font-11);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.s-pill .s-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-full);
-  background: currentColor;
+.s-pill .s-key {
+  font-family: var(--mono);
+  font-size: var(--font-10);
+  font-weight: 700;
+  opacity: 0.9;
 }
 .s-pill.modified {
   color: var(--primary);
@@ -201,31 +231,62 @@ function splitPath(p: string) {
   background: var(--danger-bg);
 }
 
+/* 动作行：两个按钮等宽平分，文字永不断行 */
 .bar-actions {
   @apply flex gap-1.5;
 }
+.act-btn {
+  flex: 1 1 0;
+  @apply inline-flex items-center justify-center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-6);
+  font-size: var(--font-12);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+.act-btn .act-icon {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+}
+.act-btn:focus-visible {
+  outline: 0;
+  box-shadow: var(--shadow-focus);
+}
+.act-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 /* [filelist-btnprimary-cleanup-v1] 删除模板零引用的 .btn-primary 选择器 */
-.save-btn {
-  padding: 4px 12px;
+/* 次要动作（撤回全部）：描边幽灵按钮，hover 才染危险色 —— 破坏性动作不该常驻高饱和 */
+.bar-actions .ghost-btn {
   background: transparent;
-  color: var(--primary);
+  color: var(--text-2);
+  border: 1px solid var(--border-2);
+}
+.bar-actions .ghost-btn:hover:not(:disabled) {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+/* 主动作（确认改动）：实心主色，与「撤回全部」形成主次对比（旧实现两者都是描边，无主次） */
+.bar-actions .save-btn {
+  background: var(--primary);
+  color: #fff;
   border: 1px solid var(--primary);
-  border-radius: var(--radius-4);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: 0.12s;
-  box-shadow: none;
 }
-.save-btn:hover:not(:disabled) {
-  background: var(--primary-bg);
-  color: var(--primary-hover);
+.bar-actions .save-btn:hover:not(:disabled) {
+  background: var(--primary-hover);
   border-color: var(--primary-hover);
-}
-.save-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
 }
 
 .file-list {
@@ -245,7 +306,7 @@ function splitPath(p: string) {
 
 .file-row {
   @apply flex items-center gap-2.5;
-  padding: 6px 12px;
+  padding: 7px 10px;
   font: 12px/1.5 var(--mono);
   border-bottom: 1px solid var(--border);
   transition: background 0.1s;
@@ -255,6 +316,12 @@ function splitPath(p: string) {
 }
 .file-row:hover {
   background: var(--surface-2);
+}
+/* [filelist-active-v1] 预览中的文件此前**没有任何视觉标记**（is-active 只在模板里挂类、无样式），
+   点击行之后用户看不出「现在预览的是哪一条」。左缘主色条 + 淡底，与行内 hover 区分开。 */
+.file-row.is-active {
+  background: var(--primary-bg);
+  box-shadow: inset 2px 0 0 var(--primary);
 }
 .file-row:hover .undo-btn {
   opacity: 1;
@@ -297,34 +364,36 @@ function splitPath(p: string) {
   font-weight: 500;
 }
 
+/* [filelist-undo-affordance-v1] 撤回按钮改为**常驻低透明**：旧实现 opacity:0 只在 hover 显现，
+   触屏与键盘用户根本发现不了有这个操作（hover 才会出现 = 等于没有）。 */
 .undo-btn {
   flex-shrink: 0;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   @apply flex items-center justify-center;
   border: 0;
   border-radius: var(--radius-4);
   background: transparent;
-  color: var(--text-3);
+  color: var(--text-4);
   cursor: pointer;
-  opacity: 0;
+  opacity: 0.55;
   transition:
     opacity 0.12s,
     background 0.12s,
     color 0.12s;
 }
 .undo-btn:hover:not(:disabled) {
-  background: rgb(224 108 117 / 14%);
+  background: var(--danger-bg);
   color: var(--danger);
 }
 .undo-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.28;
   cursor: not-allowed;
 }
 
 .undo-icon {
-  font-size: 14px;
-  line-height: 1;
+  width: 12px;
+  height: 12px;
 }
 
 .spinner-mini {
@@ -334,10 +403,6 @@ function splitPath(p: string) {
   border: 2px solid currentColor;
   border-right-color: transparent;
   animation: spin 0.7s linear infinite;
-}
-
-[class*='file']:hover:not(.is-active) {
-  background: var(--surface-2, #f9fafb);
 }
 
 .ghost-btn:disabled {

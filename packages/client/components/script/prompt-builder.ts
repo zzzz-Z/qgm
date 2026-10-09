@@ -33,7 +33,7 @@ export interface PromptResult {
    * [budget-feedback-v1] 正常执行轮也有值（服务端每轮下发），供 appendBudgetNotice 做每轮配额反馈
    */
   scriptSize?: { lines: number, bytes: number, overBudget: boolean, maxLines: number, maxBytes: number }
-  smoke?: { ran: boolean, ok: boolean, error?: string, pages: Array<{ ok: boolean, url: string, errors: string[] }> } | null
+  smoke?: { ran: boolean, ok: boolean, error?: string, pages: Array<{ ok: boolean, url: string, errors: string[], tag?: string }> } | null
   tsc?: { ok: boolean, stdout?: string, stderr?: string } | null
   lint?: { ran: boolean, ok: boolean, stdout?: string, stderr?: string } | null
   test?: { ran: boolean, ok: boolean, stdout?: string, stderr?: string, reason?: 'no-test-targets' } | null
@@ -208,7 +208,8 @@ export function appendSmokeReport(p: string[], r: PromptResult | null): void {
     p.push(`启动失败: ${r.smoke.error}`)
   } else {
     for (const pg of r.smoke.pages) {
-      p.push(`${pg.ok ? '✓' : '✗'} ${pg.url}`)
+      const tag = pg.tag && pg.tag !== 'host' ? `[${pg.tag}] ` : ''
+      p.push(`${pg.ok ? '✓' : '✗'} ${tag}${pg.url}`)
       for (const e of pg.errors) p.push(`  ${e}`)
     }
   }

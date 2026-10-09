@@ -29,7 +29,14 @@ type RoundCardData = DoneCard | TextCard | AskCard | QuestionCard
 
 const props = defineProps<{ card: RoundCardData }>()
 
-const expanded = ref(false)
+// [ask-full-v1] 提问类卡片（AI 的 ASK 卡 / 用户提问卡）默认展开全文，对标宿主智能体的提问呈现：
+//   提问与上下文必须完整可读才能回答/决策；原 [timeline-denoise-v1] 的预览+折叠保留为
+//   手动「收起」（文字墙风险交还给用户自控），阈值计算不动（truncated/hiddenLines 仍驱动 toggle）。
+// [CONSTRAINT] 仅改默认值：truncated=false 时 toggle 不渲染，expanded 取值无副作用；
+//   卡片 key 含事件 id ⇒ 同一实例的 card.type 不会变化，setup 期读一次安全。
+const expanded = ref(
+  (props.card.type === 'question' || props.card.type === 'ask') && props.card.truncated,
+)
 const askDraft = ref('')
 
 const { askState, resolveAsk } = useAsk()

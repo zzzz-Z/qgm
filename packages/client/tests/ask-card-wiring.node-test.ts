@@ -52,3 +52,14 @@ test('样式：提问卡样式已就位', () => {
   assert.ok(scss.includes('.question-opt'), '缺 .question-opt')
   assert.ok(scss.includes('.question-input'), '缺 .question-input')
 })
+
+// [ask-full-v1] 提问类卡片默认展开全文（对标宿主智能体的提问呈现）：
+//   折叠态只给 6 行 / 400 字符预览会导致「二、现状」类长方案被拦腰截断，用户无法在卡内读完再决策。
+//   预览+折叠机制保留，但提问类（question / ask）初始态改为展开；text / done 中间过程卡不受影响。
+test('提问类卡片默认展开全文：expanded 初始值 = 提问类型 && truncated', () => {
+  const rc = read('packages/client/components/script/RoundCard.vue')
+  assert.ok(
+    /const expanded = ref\(\s*\(props\.card\.type === 'question' \|\| props\.card\.type === 'ask'\)\s*&& props\.card\.truncated,?\s*\)/.test(rc),
+    'RoundCard 的 expanded 应初始化为「(question || ask) && truncated」——摘掉任一类型或改回 ref(false) 即红',
+  )
+})

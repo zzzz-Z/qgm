@@ -153,7 +153,7 @@ if (fs.existsSync(skillsDir)) {
   // CONSTRAINT: 内联的是约束摘要，技术栈列表随依赖变化，此处不重复维护
   console.log('      MUST_READ 找技能（本地优先，不可跳层）:')
   console.log('        ① 先本地: GET /__ai/skills + POST /__ai/skills/match —— 命中即用，不联网')
-  console.log('        ② 本地无命中才去联网找候选（栈专属 query 优先，P0 在前，禁止 P2 冒充 P0）')
+  console.log('        ② 本地无命中 → 用 ASK 问用户是否去 GitHub 检索；用户同意才联网（栈专属 query 优先，P0 在前，禁止 P2 冒充 P0）')
   console.log('        ③ 安装: POST /__ai/skills/install（服务端强制 已装→本地库→联网；沙箱内 curl 批量下载必撞 60s 超时）')
   console.log('      完整协议: .ai-runner/skills/skill-discovery/SKILL.md')
   // [skill-registry-v2] registry 只是「来源标注」，**不是**「已装清单」——已装清单的唯一事实

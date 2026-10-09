@@ -5,6 +5,18 @@
 //   判据是「脚本头契约特征」：shebang / // @desc / # @desc —— 普通代码示例无这些特征，保留。
 // [CHANGE-IMPACT] 结果为空串时调用方应跳过渲染（纯脚本噪音，无剩余内容）。
 
+// [strip-mark-lines-v1] 裸标记行判据：整行 trim 后恰为五类回复标记之一（SCRIPT/ASK/DONE/HANDOFF/TEXT）。
+// [WHY] AI 输出「`SCRIPT` 首行 + N 个脚本围栏块」时，脚本块已各自经 script 通道推送过；
+//   此后 DOM 的任何抖动（流式光标移除 / 操作条与复制按钮晚挂载 / 代码高亮重渲染）都会让
+//   bodySignature 变化 → 分类器把整条回复的 DOM→Markdown 反推全文再补发一条 plain，
+//   其内容 = 若干个裸 `SCRIPT` 标记行 + 已推送过的围栏块。
+//   围栏块被下面剥掉，但**裸标记行既不是围栏、也不是脚本头行**（不是 shebang / @desc）⇒ 原样存活
+//   ⇒ 剥完为 "SCRIPT\n\nSCRIPT"（非空）⇒ 前端照渲染 ⇒ 正文只有「SCRIPT」的噪音卡。
+// [CONSTRAINT] 只认「整行恰为该词」：散文里出现该单词、或行内引用（「写一行 DONE 即可」）都不剥。
+//   标记清单与 utils/reply-mark.ts 同源；漂移由 strip-script-blocks.node-test.ts 的 T3 钉住
+//   （该用例从 reply-mark.ts 源码抠出标记词逐个对拍，将来加标记而此处漏加会立刻变红）。
+const REPLY_MARK_LINE_RE = /^(?:SCRIPT|ASK|DONE|HANDOFF|TEXT)$/
+
 /** 脚本头行判据：shebang 或脚本头注释（与 reply-mark 契约特征一致） */
 function isScriptHeaderLine(line: string): boolean {
   const t = line.trim()
@@ -38,6 +50,11 @@ export function stripScriptBlocks(text: string): string {
   let i = 0
   while (i < lines.length) {
     const line = lines[i]
+    // [strip-mark-lines-v1] 形态 ⓪：裸标记行 —— 标记不是内容，永远不进文本卡
+    if (REPLY_MARK_LINE_RE.test(line.trim())) {
+      i += 1
+      continue
+    }
     // 形态 ①：围栏块
     if (FENCE_RE.test(line)) {
       let j = i + 1

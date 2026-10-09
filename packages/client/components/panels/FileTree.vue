@@ -9,6 +9,7 @@ import type { FileNode } from '../../types'
 import { TOAST_MEDIUM } from '../../utils/toast-durations'
 // [ui-p1c-tree-expand-wire-v1] V4：展开态抽到同目录 composable（显式 import 兜住 vitest 无 auto-import）
 import { useTreeExpand } from './use-tree-expand'
+import { isMarkdownPath, renderFileContent } from '../../composables/useFileContentHtml'
 
 defineOptions({ name: 'FileTree' })
 
@@ -83,25 +84,11 @@ const rootNode = computed(() => {
   } as FileNode
 })
 
-// 是否为 Markdown 文件：仅按扩展名判定（.md / .markdown）
-// [CONSTRAINT] 大小写不敏感；URL 参数无扩展名时不走 md 分支
-const isMarkdown = computed(() => /\.(?:md|markdown)$/i.test(fileDialog.value?.path || ''))
+// [ft-hljs] 渲染分流复用 useFileContentHtml 的单点实现，避免与变更预览各写一份
+const isMarkdown = computed(() => isMarkdownPath(fileDialog.value?.path || ''))
 
-// [ft-hljs] 弹窗内容渲染：.md 走 renderMarkdown，其余走 hljs 高亮（与 DiffViewer 同款）
-// [WHY] markdown 的 heading/list/表格/链接需要标签级样式；hljs 只做源码词法着色
-// [CONSTRAINT] html:false 由 useMarkdown 内部保证，不透传原始 HTML
-const fileDialogHtml = computed(() => {
-  const c = fileDialog.value?.content || ''
-  if (!c) return ''
-  if (isMarkdown.value) {
-    try { return renderMarkdown(c) } catch { /* md 渲染异常回退到源码高亮 */ }
-  }
-  try {
-    return highlightToHtml(c)
-  } catch {
-    return c.replace(/[&<>]/g, m => (m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;'))
-  }
-})
+/** 渲染后的 HTML；.md 走 markdown，其余走 hljs 高亮 */
+const fileDialogHtml = computed(() => renderFileContent(fileDialog.value?.content || '', fileDialog.value?.path || ''))
 
 if (props.root) {
   onMounted(async () => {

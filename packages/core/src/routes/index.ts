@@ -23,6 +23,8 @@ import { restartHono } from './restart.js'
 import { sendLogHono } from './send-log.js'
 // [wiki-proxy-v1] LLM Wiki 知识库代理（工作台「知识库」面板消费）
 import { wikiHono } from './wiki.js'
+// [bg-stream-v1] 后台长任务日志增量读取（前端流式显示）
+import { shellLogHono } from './shell-log.js'
 
 /** 所有子路由 Hono 应用实例列表 */
 export const HONO_SUB_APPS = [
@@ -47,6 +49,7 @@ export const HONO_SUB_APPS = [
   restartHono,
   sendLogHono,
   wikiHono,
+  shellLogHono,
 ]
 
 // 已迁移到 Hono 的路径前缀——dispatchHono 只对这些前缀做 bridge
@@ -77,4 +80,7 @@ export const HONO_PREFIXES = [
   '/send-log',
   // [wiki-proxy-v1] 与工作区无关，故在 server/handle.ts 的 WORKSPACE_EXEMPT_PREFIXES 中豁免
   '/wiki',
+  // [bg-stream-v1] 后台任务日志轮询。**刻意不进** WORKSPACE_EXEMPT_PREFIXES：
+  //   日志文件就在工作区的 .ai-runner/tmp 下，无工作区时本就无任务可查（豁免反而会让 getRoot() 落到旧 cwd）
+  '/shell-log',
 ]

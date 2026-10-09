@@ -6,6 +6,7 @@
 import type { RoundOutcome } from './types.js'
 import { buildRoundBatchPrompt } from './loop-result-prompt.js'
 import { buildLessonsBlock } from '../load-lessons.js'
+import { fetchBoardMirror } from '../board-mirror.js'
 import type { getTransport } from '../useAiTransport.js'
 
 type Transport = ReturnType<typeof getTransport>
@@ -41,6 +42,13 @@ export async function fillWithLessons(
     const block = await buildLessonsBlock(buildLessonsQuery(outcomes))
     if (block) prompt = `${base}${String.fromCharCode(10, 10)}${block}`
   } catch { /* 检索失败 → 原 prompt 原样发出 */ }
+  // [board-mirror-v1] 看板状态常驻上下文：每轮回传都把未完成任务（带 id）递到 AI 面前。
+  // [WHY] 看板与脚本执行零联动，AI 不记账就永远不动（实测 21 个脚本成功、看板 0/7 冻结）。
+  // [CONSTRAINT] 与 lessons 同纪律：抓取失败即原样发出，绝不阻断回传。
+  try {
+    const board = await fetchBoardMirror()
+    if (board) prompt = `${prompt}${String.fromCharCode(10, 10)}${board}`
+  } catch { /* 看板不可用时原 prompt 原样发出 */ }
   try {
     if (!isAborted()) transport.sendFill('', { prompt })
   } catch { /* 出站异常不逃逸（void 调用方） */ }

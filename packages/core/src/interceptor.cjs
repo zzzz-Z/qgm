@@ -610,3 +610,51 @@ process.on('SIGINT', () => { dump(); process.exit(130) })
 // [WHY] 原 dump 只由进程退出事件触发；REPL 进程不退，须由 repl-loop 每帧末主动调用。
 // [CONSTRAINT] 仅暴露函数引用，不改既有退出触发语义。
 globalThis.__AI_FLUSH_OVERLAY = dump
+
+// [overlay-apply-now-v1] 显式落盘：把本轮 overlay 立即写进真盘（子进程校验的前置条件）
+// [WHY] shell/exec 起的是**真子进程**，读真盘；而 read-only 沙箱下 writeText 只进 overlay，
+//   要等轮末 exit 0 才由服务端 applyOverlay 落盘 ⇒ 本轮新建/改过的文件子进程通通看不见
+//   （实测 `node --check <本轮写的临时文件>` 报 MODULE_NOT_FOUND）。唯一绕法是「先 exit 0 再开一轮验」，
+//   代价是整轮重跑；这里是同一轮内的显式出口（语义等同人工 Ctrl+S）。
+// [CONSTRAINT] ① 只落 overlay 里已有的条目，且规则与服务端 applyOverlay 对齐：
+//       限项目根内 + 根级 .ai-* 重定向到 .ai-runner/probe/（越界写不落盘，不产生新的越界口子）；
+//   ② 用 orig.* 直写（本文件的 fs 已被替换成 overlay 版）；
+//   ③ 落盘后本轮若再失败**不再回滚** —— 这是显式调用的代价，SYSTEM.md 必须写明；
+//   ④ 不改 dump / 退出语义：落盘后仍照常 dump，轮末 applyOverlay 幂等。
+const PROBE_ROOT_RE = /^\.ai-(?!runner[/\\]).+/
+function applyNow() {
+  const root = process.cwd()
+  let applied = 0
+  const failed = []
+  for (const [abs, v] of overlay) {
+    let rel = ''
+    try { rel = path.relative(root, abs).replace(/\\/g, '/') } catch { continue }
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue
+    const dstRel = PROBE_ROOT_RE.test(rel) ? `.ai-runner/probe/${rel}` : rel
+    const dst = path.join(root, dstRel)
+    try {
+      if (v.op === 'delete') {
+        if (orig.existsSync(dst)) {
+          if (v.dir || orig.statSync(dst).isDirectory()) orig.rmSync(dst, { recursive: true, force: true })
+          else orig.unlinkSync(dst)
+        }
+      } else if (v.op === 'write' && v.data) {
+        orig.mkdirSync(path.dirname(dst), { recursive: true })
+        // [real-write-via-fd-v1] 真盘写入必须走 openSync/writeSync/closeSync 三件套，
+        //   不能用 orig.writeFileSync —— Node 的 writeFileSync 内部就是 openSync + writeSync + closeSync，
+        //   而本文件的 openSync 已被替换成「假 fd（内存 buffer）」⇒ 连 orig 引用写出去的内容也会落进内存，
+        //   表现为「applyNow 报 applied:N 但真盘没有文件」（端到端取证实测，单测在裸 node 下永不复现）。
+        const fd = orig.openSync(dst, 'w')
+        try { orig.writeSync(fd, v.data) } finally { orig.closeSync(fd) }
+      } else {
+        continue
+      }
+      applied++
+    } catch (e) {
+      failed.push(`${dstRel}: ${String(e)}`)
+    }
+  }
+  dump()
+  return { ok: failed.length === 0, applied, failed }
+}
+globalThis.__AI_APPLY_OVERLAY = applyNow

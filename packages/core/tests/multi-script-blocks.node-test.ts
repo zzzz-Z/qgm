@@ -102,6 +102,7 @@ function buildPicker(rel: string, seen: string[], doc: unknown): () => Item | nu
   var guessLangFromContent = deps.guessLangFromContent
   var hash32 = deps.hash32
   var codeTextOf = deps.codeTextOf
+  var latestAssistantRoot = deps.latestAssistantRoot
   function extractLatestScript() { ${inner} }
   return extractLatestScript()
 }`
@@ -117,6 +118,12 @@ function buildPicker(rel: string, seen: string[], doc: unknown): () => Item | nu
     guessLangFromContent: () => null,
     hash32: (s: string) => s,
     codeTextOf: (el: { textContent?: string }) => String((el && el.textContent) || '').replace(/^\n+|\n+$/g, ''),
+    // [no-root-no-reply-v1] 油猴侧 extractLatestScript 经 latestAssistantRoot() 取容器
+    //   （假 DOM 已实现 .ds-assistant-message-main-content 路径，两条取值路径都能命中）
+    latestAssistantRoot: () => {
+      const els = (doc as { querySelectorAll: (sel: string) => unknown[] }).querySelectorAll('.ds-assistant-message-main-content')
+      return els.length > 0 ? els[els.length - 1] : null
+    },
   }
   return () => call(deps)
 }
@@ -168,6 +175,22 @@ for (const rel of SOURCES) {
 }
 
 // ============ [fragment-guard-v1] 混合回复片段不推（WO-20261007-03 段一） ============
+
+// ============ [no-root-no-reply-v1] 无 assistant 容器时不得扫整页 ============
+// [WHY] 新会话首轮「已思考/搜索」阶段页面上还没有 .ds-assistant-message-main-content，
+//   旧实现（headless 兜底 document / 油猴直接扫 document.querySelectorAll('pre')）会把
+//   用户首条消息里的代码块当脚本候选。判据承重：旧实现下本用例会返回 B1（红）。
+
+for (const rel of SOURCES) {
+  test(`no-root: ${rel} 无 assistant 容器时不把整页 pre 当脚本候选`, () => {
+    // 假 DOM：有 <pre>，但**没有** .ds-assistant-message-main-content 容器
+    const noRootDoc = {
+      querySelectorAll: (sel: string) => (sel === 'pre' ? [makePre(B1, 'js')] : []),
+    }
+    const pick = buildPicker(rel, [], noRootDoc)
+    assert.equal(pick(), null, '容器缺失时 extractLatestScript 必须返回 null，不得退回整页扫描')
+  })
+}
 
 for (const rel of SOURCES) {
   test(`fragment-guard: ${rel} 有标记块时，无标记片段不推（用例 A）`, () => {
@@ -232,7 +255,12 @@ test('multi-script: 油猴通道推送后必须主动再跑一次分类', () => 
     src.includes('if (hasMoreUnseenBlocks()) setTimeout(classifyAndPost, 80)'),
     '推完一块后未唤醒分类 → DOM 已静止，observer 不再触发，后续块永久滞留',
   )
-  assert.ok(src.includes('const s = markedNonScript ? null : (extractLatestScript'), '脚本分类仍须让位于首行标记')
+  // [stopped-no-autorun-v1] 停止轮同样不得再推脚本（残余块会落到「循环外自动执行」旁路）：
+  //   判据与「标记让位」共用同一处三元表达式，两条语义必须**同时**在位
+  assert.ok(
+    /const s = \(markedNonScript \|\| stopPosted\) \? null : \(extractLatestScript/.test(src),
+    '脚本分类仍须让位于首行标记，且停止轮须停推脚本',
+  )
   // [fragment-guard-text-v1] WO-20261007-06 段〇：TEXT 标记的回复，其代码块不得进 script 分支。
   // 只断言「存在 markedNonScript」不够——若 marks.text 从该表达式里漏掉，TEXT 回复的代码块仍会被推。
   assert.ok(

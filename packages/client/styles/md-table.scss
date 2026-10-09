@@ -1,0 +1,51 @@
+// [md-table-shared-v1] markdown 表格样式的唯一来源（此前在 terminal-pane.scss / file-tree.scss /
+//   FileContentOverlay.vue 各抄一份，已漂移：done-summary-body 缺 th 背景、ft-md 与 fco-md 的字号/
+//   字重各不相同，且三处都没有横向滚动容器 ⇒ 宽表被压成竖排单字）。
+// [WHY] AI 复盘/对比类回答高度依赖表格；列被挤压后「轮次」会竖排、「r104」会断成两行，等于信息不可读。
+// [CALLER] 三处消费方：@include md-table('.done-summary-body') / ('.ft-md') / ('.fco-md')
+// [CONSTRAINT] ① 选择器前缀由调用方传入，内部一律 :deep()——内容走 v-html，不带 scoped 属性；
+//   ② 不写死颜色，一律走 CSS 变量（fco-md 在亮色面板、其余在暗色，同一变量族已适配）；
+//   ③ 不要在这里写 margin，表格外边距由 .md-table-wrap 承担。
+@mixin md-table($root) {
+  // 横向滚动壳：表格按内容自然宽度排布，超宽时滚动而不是压缩列宽
+  #{$root} :deep(.md-table-wrap) {
+    margin: 10px 0 14px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+  #{$root} :deep(.md-table-wrap > table) {
+    width: 100%;
+    min-width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    table-layout: auto;
+  }
+  #{$root} :deep(th),
+  #{$root} :deep(td) {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border, #30363d);
+    text-align: left;
+    vertical-align: top;
+    /* [md-table-wrap-v1] 不再继承父级 word-break:break-word——那会把中文逐字断行（截图里
+       「轮次」竖排、「r104」断成 r10/4）。改为 normal + break-word：正常语义处断行，
+       仅当单个超长串（URL / 哈希）无处可断时才溢出断开，且不压缩列的 min-content。 */
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+  // 表头与首列不折行：短标签被竖排是「没显示全」最刺眼的一种形态
+  #{$root} :deep(thead) {
+    display: table-header-group;
+  }
+  #{$root} :deep(th) {
+    font-weight: 400;
+    white-space: nowrap;
+    color: var(--text-2, #c9d1d9);
+    background: transparent;
+  }
+  #{$root} :deep(td:first-child) {
+    white-space: nowrap;
+  }
+  #{$root} :deep(td) {
+    color: var(--text, #e6edf3);
+  }
+}

@@ -50,6 +50,33 @@ export interface AiReplyHandlersDeps {
 export const PAGE_BOOT_TS = Date.now()
 export const REFRESH_GUARD_MS = 3000
 
+// [stopped-plain-noise-v1] stopped 之后短窗口内到达的 plain 视为「已停止」半截回复的补发，整条丢弃。
+// [WHY] 采集侧守卫（油猴 stopPosted / headless _stoppedReported）之外的第二道防线：
+//   浏览器侧油猴需手动「检查更新」，旧版仍会把停止横幅/DOM 抖动触发的半截回复全文补发成 plain
+//   ⇒ 时间线多出一张巨大 AI 文本卡（2026-10-08 截图实测）。通道入口按「同 sid 刚推过 stopped」兜底。
+// [CONSTRAINT] 只拦 plain（半截回复没有脚本也没有 DONE）；窗口 10s —— 循环已随 stopped 终止，
+//   正常新一轮回复必须先经 fill/rotate 重开，到达时间必然超出窗口；模块级 Map 与 PAGE_BOOT_TS 同先例。
+export const STOPPED_PLAIN_GUARD_MS = 10_000
+/** [stopped-no-autorun-v1] 与 plain 抑制共用的停止后窗口（导出供测试推进时间） */
+export const STOPPED_GUARD_MS = STOPPED_PLAIN_GUARD_MS
+const stoppedAtBySid = new Map<string, number>()
+
+/**
+ * [stopped-no-autorun-v1] 该 sid 是否处于「刚收到 stopped」窗口内
+ * [WHY] 工单 WO-20261005 段三判定为缺陷：stopped ⇒ finish 后循环已终止（存档 + 清看板 + LoopStop），
+ *   而页面上被中止的那条回复里若还留着完整代码块，脚本仍会被推出并被自动接管入口
+ *   **立即执行**（那个调度函数就是无条件 `fn()`，不看 enabled 开关）
+ *   ⇒ 形成「循环外自动执行」旁路：不在任何轮次记账、不进本轮 commit、无自检闸门、无预算反馈，
+ *   且与刚弹给用户的「AI 网页已停止生成，本轮不再等待」语义自相矛盾。
+ * [CONSTRAINT] 三个买入点共用同一判据：plain（半截文本补发）/ script / legacy script。
+ *   只拦「停止后的残余产物」：新一轮经 fill/rotate 重开后的真实回复不在窗口内。
+ * [WARNING] 锚点测试用 indexOf 定位该调度调用点 ⇒ 本文件注释**一律不得**逐字写出「对象.成员」全名。
+ */
+function inStoppedWindow(sid: string): boolean {
+  const t = stoppedAtBySid.get(sid)
+  return t !== undefined && Date.now() - t < STOPPED_PLAIN_GUARD_MS
+}
+
 /** 组装 AI 回复消息处理族（onSessionIdMessage 及 7 个 handler） */
 export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   const { sessionHistory, saveHistoryScoped, addSessionToHistory, isMockMode } = deps
@@ -106,6 +133,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     }
 
     if (kind === 'stopped') {
+      stoppedAtBySid.set(sid, Date.now()) // [stopped-plain-noise-v1] 记录时刻，窗口内 plain 一律丢弃
       toast('AI 网页已停止生成，本轮不再等待', 'warn', TOAST_LONG)
       if (routedToLoop) {
         void autoLoop.onNonScriptReply({ kind: 'stopped', text: String(payload.text || '') }, sid)
@@ -206,6 +234,14 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
         if (payload.rescan === true) return
         // [refresh-no-autorun-v1] 页面刚加载（刷新）后冷静期内到达的脚本不执行
         if (Date.now() - PAGE_BOOT_TS < REFRESH_GUARD_MS) return
+        // [stopped-no-autorun-v1] 循环已随之终止 ⇒ 本轮的残余脚本只回填编辑器，不自动执行。
+        //   [WHY] 否则走 else 分支的 scheduleAutoRun（无条件立即 fn()）执行后再回传 AI，
+        //   形成没有任何记账/自检/预算反馈的「循环外自动执行」旁路（WO-20261005 段三）。
+        //   [CHANGE-IMPACT] 已回填完毕（push 已发生）；用户确认无误后可手动点运行，路径不丢。
+        if (inStoppedWindow(sid)) {
+          toast('AI 网页已停止生成：脚本仅回填编辑器，未自动执行（确认无误请手动运行）', 'warn', TOAST_LONG)
+          return
+        }
         const runKey = takePendingAskKey() || uid('run')
         if (routedToLoop) {
           void autoLoop.onScriptArrival(item, sid).catch((e: unknown) => {
@@ -234,6 +270,11 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     }
 
     const text = payload.text !== undefined ? String(payload.text) : ''
+    // [stopped-plain-noise-v1] 第二道防线：stopped 后窗口内的 plain = 半截回复补发，丢弃不渲染。
+    // [CHANGE-IMPACT] 在 ASK 解析之后（半截回复不含完整 ASK）；done/multi 不受影响
+    if (kind === 'plain') {
+      if (inStoppedWindow(sid)) return
+    }
     if (kind === 'plain' || kind === 'multi' || (kind === 'done' && text.trim() && text.trim() !== 'DONE')) {
       emitBus((`ai:${kind}`) as EventKindStr, `AI 回复 · ${kind}`, { payload: { kind, text, count: Number(payload.count) || 0 } })
     } else if (kind === 'done') {
@@ -273,6 +314,12 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
         const runKey = uid('run')
         const delayMs = 3000 + Math.random() * 4000
         await promiseTimeout(delayMs)
+        // [stopped-no-autorun-v1] 窗口判据放在 await **之后**：本路径固有 3-7s 延迟，
+        //   stopped 完全可能在等待期间到达并让循环 finish；若只在 await 前判，残余脚本照样被跑。
+        if (inStoppedWindow(sid)) {
+          toast('AI 网页已停止生成：脚本仅回填编辑器，未自动执行（确认无误请手动运行）', 'warn', TOAST_LONG)
+          return
+        }
         void runner.run({ script: code, runKey, autoFeedback: true })
       }
     }

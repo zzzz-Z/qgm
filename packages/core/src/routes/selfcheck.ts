@@ -17,6 +17,8 @@ import { loadBaseline, runRegression } from '../selfcheck/regression.js'
 import { runFullGate } from '../selfcheck/fullgate.js'
 import { appendLedger, lastL2Record } from '../selfcheck/ledger.js'
 import { getRoot } from '../config.js'
+import { discoverTargets } from '../headless/discover-targets.js'
+import { computeSmokeReportCompliance } from '../post-run/run-compliance.js'
 
 /** selfcheck 路由的 Hono 实例 */
 export const selfcheckHono = new Hono()
@@ -106,6 +108,29 @@ selfcheckHono.post('/selfcheck', async (c) => {
   // —— L1 回归核验：仅当改动触碰 packages/* 或 apps/* 才真跑 ——
   const l1Items = await runRegression(actualChanges, loadBaseline())
   items.push(...l1Items)
+
+  // —— L0 业务 app 验证段合规：DONE 是否引用了自动发现的业务 app 目标 ——
+  // [discover-targets-v1] 取代「只验宿主 5175」的旧盲区；fail-open（漏验只降级不拒收）。
+  try {
+    const appTargets = await discoverTargets({})
+    const smokeC = computeSmokeReportCompliance(doneText, appTargets)
+    if (smokeC) {
+      if (smokeC.missing.length) {
+        items.push({
+          id: 'L0-smoke-app',
+          level: 'L0',
+          ok: true,
+          actual: `发现 ${appTargets.length} 个业务 app 目标，DONE 未引用 ${smokeC.missing.length} 个`,
+          expected: 'DONE 验证段须引用各业务 app 目标（tag 或 host:port）',
+          details: [`[warn] 漏验业务 app: ${smokeC.missing.map(m => `${m.tag} ${m.url}`).join(' / ')}`],
+        })
+      } else {
+        items.push({ id: 'L0-smoke-app', level: 'L0', ok: true, actual: `DONE 已引用全部 ${appTargets.length} 个业务 app 目标`, expected: '通过', details: ['[info] 业务 app 验证段齐备'] })
+      }
+    }
+  } catch {
+    // 发现过程异常不阻断：保持 fail-open
+  }
 
   // —— L2 终验轮：final=true → 全量；已有 L2 记录则**只重验上次失败项**（增量） ——
   // [selfcheck-l2-incremental-v2] 原实现 `hasL2Record` 为真就整段跳过 → 修完重交什么都不验，

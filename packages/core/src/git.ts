@@ -191,10 +191,14 @@ async function gitArchiveBranch(
   //   再叠加 :(exclude).ai-runner 会让 pathspec 有效集为空，git 报 did not match any files。
   // [CONSTRAINT] 判定用 paths 中是否有 .ai-runner 前缀项；整树 . 场景仍走 exclude。
   // [CHANGE-IMPACT] 允许 .ai-runner/lessons.md 等白名单文件进 ai-archive；运行态由调用方过滤。
+  // [archive-force-add-v1] paths 来自 git status --porcelain，天然不含被忽略的未跟踪文件；
+  // 但存在「已跟踪却在 .gitignore 覆盖区」的文件（如 .workbuddy/memory/MEMORY.md），
+  // git add 会以 "paths are ignored" 拒绝 → 整次存档失败。传 -f 只对显式列出的路径生效，
+  // 不会把 dist/ / node_modules/ 之类卷进来。
   const hasRunnerPath = paths.some(p => p === '.ai-runner' || p.startsWith('.ai-runner/'))
   const addArgs = hasRunnerPath
-    ? ['add', '-A', '--', ...paths]
-    : ['add', '-A', '--', ...paths, ':(exclude).ai-runner']
+    ? ['add', '-A', '-f', '--', ...paths]
+    : ['add', '-A', '-f', '--', ...paths, ':(exclude).ai-runner']
   const add = await run('git', addArgs, 30_000, env)
   if (add.code !== 0) return { ok: false, reason: `git add 失败: ${add.stderr}` }
 
@@ -305,11 +309,12 @@ export async function gitPreExecCheck(): Promise<GitPreExecResult> {
   if (status.code !== 0) {
     return { ok: false, reason: `git status 失败: ${status.stderr}` }
   }
+  // [porcelain-slice-v1] 固定列宽切 3 字符（XY + 空格）：先 trim 会吃掉第一列状态位，
+  // 再把状态字符当路径前缀切掉，路径首字符被吞（实测 'ai-runner/lessons.md' did not match）
   const files = status.stdout
     .split('\n')
-    .map(l => l.trim())
-    .filter(Boolean)
-    .map(l => l.replace(/^.{3}/, '').trim())
+    .filter(l => l.trim())
+    .map(l => l.slice(3).trim())
     .filter(Boolean)
   if (files.length === 0) {
     const head = await gitHead()
@@ -331,14 +336,15 @@ export async function gitCommitAll(message: string): Promise<{ ok: boolean, comm
   if (!status.stdout.trim()) return { ok: true, empty: true }
 
   // [ai-archive-v1] 方案 C：循环结束的自动提交也落 ai-archive，主分支保持用户可审阅状态
+  // [porcelain-slice-v1] 同 gitPreExecCheck：不 trim 再切，避免路径首字符被吞
   const paths = status.stdout
     .split('\n')
-    .map(l => l.trim())
-    .filter(Boolean)
-    .map(l => l.replace(/^.{3}/, '').trim())
+    .filter(l => l.trim())
+    .map(l => l.slice(3).trim())
     .filter(Boolean)
   if (paths.length === 0) return { ok: true, empty: true }
-  const safeMsg = String(message).slice(0, 200)
+  // [commit-message-multiline-v1] 与 routes/git.ts 的 2000 上限对齐：多行 body/footer 在此截断会静默丢信息
+  const safeMsg = String(message).slice(0, 2000)
   const archived = await gitArchiveBranch(paths, safeMsg)
   if (!archived.ok) return { ok: false, reason: `存档到 ${ARCHIVE_BRANCH} 失败: ${archived.reason}` }
   if (!archived.changed) return { ok: true, empty: true }

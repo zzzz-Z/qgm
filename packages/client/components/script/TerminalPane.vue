@@ -147,6 +147,7 @@ const _seenScriptKeys = new Set<string>()
 // [CHANGE-IMPACT] 不改变 force-scroll-on-script-start-v1 语义（该逻辑仍独立）
 let _lastPanelHeight = 0
 let _panelRo: ResizeObserver | null = null
+let _innerRo: ResizeObserver | null = null
 
 // 等待时长本地计时：aiWaiting 为 true 时启动，false 时停止并归零
 // [WHY] 用本地 interval 而非改 useAiWaiting 契约（避免污染其他消费方）；仅用于展示层
@@ -158,6 +159,8 @@ const chatListRef = ref<HTMLElement | null>(null)
 // [panel-resize-scroll-v1] TaskProgressPanel 宿主容器：监听其尺寸变化补偿滚动
 const panelHostRef = ref<HTMLElement | null>(null)
 const atBottom = ref(true)
+// [chat-autofollow-v1] 内容 wrapper：观察内容高度变化，贴底时自动跟随（见 template 内注释）
+const chatInnerRef = ref<HTMLElement | null>(null)
 
 const { events: busEvents } = useEventBus()
 const { pause: pauseWaitTimer, resume: resumeWaitTimer } = useIntervalFn(() => {
@@ -326,10 +329,19 @@ onMounted(async () => {
     _panelRo = new ResizeObserver(onPanelResize)
     _panelRo.observe(panelHostRef.value)
   }
+  // [chat-autofollow-v1] 观察内容 wrapper 高度：任何内容增高（phase 更新 / 折叠区渲染 /
+  //   文本卡到达 / 字体加载）在贴底态都自动跟随；用户上翻（atBottom=false）不拽回。
+  //   [WHY] watch(timelineItems) 只认「新 script 卡 key」，覆盖不了同卡长高与文本卡到达。
+  //   [CONSTRAINT] 回调只做贴底赋值，不改 atBottom（@scroll→updateAtBottom 独占该职责）⇒ 无反馈环。
+  if (typeof ResizeObserver !== 'undefined' && chatInnerRef.value) {
+    _innerRo = new ResizeObserver(() => scrollToBottomIfAtBottom())
+    _innerRo.observe(chatInnerRef.value)
+  }
 })
 onBeforeUnmount(() => {
   // [panel-resize-scroll-v1] 卸载时断开 ResizeObserver，防内存泄漏
   if (_panelRo) { _panelRo.disconnect(); _panelRo = null }
+  if (_innerRo) { _innerRo.disconnect(); _innerRo = null }
 })
 
 // [ui-p2c-stable-ref-fix-v1] 判别联合转 Record 需走 unknown 两步（TS2352）
@@ -434,71 +446,79 @@ function normalizeAskOptions(raw: unknown): Array<{ id: string, label: string }>
         <TaskProgressPanel />
       </div>
       <div ref="chatListRef" class="chat-list" @scroll="updateAtBottom">
-        <!-- 每轮脚本 desc：Markdown 渲染；来源 busEvents（已持久化到 localStorage） -->
-        <template v-for="card in timelineItems" :key="card.key">
-          <!-- [rd-tpl-v1] 已抽为子组件 -->
-          <RoundDivider
-            v-if="card.type === 'round-divider'"
-            :round-label="card.roundLabel"
-            :time-label="card.timeLabel"
-          />
-          <ScriptCard
-            v-else-if="card.type === 'script'"
-            :key="card.key"
-            :card="card"
-          />
-          <RoundCard
-            v-else
-            :key="card.key"
-            :card="card"
-          />
-        </template>
+        <!-- [chat-autofollow-v1] 内容 wrapper：ResizeObserver 观察其高度变化，贴底时自动跟随滚动。
+             [WHY] 原 watch 只认「新 script 卡 key」：同卡 phase 更新（running→done）、输出折叠区渲染、
+             文本卡到达等都会让内容长高但无人滚动 ⇒ 最新一条被顶出视野（用户实测截图）。
+             [CONSTRAINT] 只在 atBottom（贴底/未上翻）时跟随，用户上翻查看历史不被拽回。 -->
+        <div ref="chatInnerRef" class="chat-list-inner">
+          <!-- 每轮脚本 desc：Markdown 渲染；来源 busEvents（已持久化到 localStorage） -->
+          <template v-for="card in timelineItems" :key="card.key">
+            <!-- [rd-tpl-v1] 已抽为子组件 -->
+            <RoundDivider
+              v-if="card.type === 'round-divider'"
+              :round-label="card.roundLabel"
+              :time-label="card.timeLabel"
+            />
+            <ScriptCard
+              v-else-if="card.type === 'script'"
+              :key="card.key"
+              :card="card"
+            />
+            <RoundCard
+              v-else
+              :key="card.key"
+              :card="card"
+            />
+          </template>
 
-        <!-- 空态：无卡片 / 无输出 / 无总结 -->
-        <div v-if="!running && !liveStdout && !liveStderr && timelineItems.length === 0" class="tree-empty">
-          <!-- [ui-empty-guide-v1] 三入口引导（WO-20261007-02 阶段 C1）：
+          <!-- 空态：无卡片 / 无输出 / 无总结 -->
+          <div v-if="!running && !liveStdout && !liveStderr && timelineItems.length === 0" class="tree-empty">
+            <!-- [ui-empty-guide-v1] 三入口引导（WO-20261007-02 阶段 C1）：
                原为空区一行「还没有执行记录」，新用户无从知道「运行什么、去哪写、循环是什么」。 -->
-          <div class="empty-title">
-            还没有执行记录
-          </div>
-          <div class="empty-steps">
-            <div class="empty-step">
-              <span class="empty-step-n" aria-hidden="true">1</span>
-              <div class="empty-step-body">
-                <div class="empty-step-t">
-                  写脚本
-                </div>
-                <div class="empty-step-d">
-                  在下方编辑器粘贴或让 AI 生成 cjs / bash 脚本
+            <div class="empty-title">
+              还没有执行记录
+            </div>
+            <div class="empty-steps">
+              <div class="empty-step">
+                <span class="empty-step-n" aria-hidden="true">1</span>
+                <div class="empty-step-body">
+                  <div class="empty-step-t">
+                    写脚本
+                  </div>
+                  <div class="empty-step-d">
+                    在下方编辑器粘贴或让 AI 生成 cjs / bash 脚本
+                  </div>
                 </div>
               </div>
-            </div>
-            <div class="empty-step">
-              <span class="empty-step-n" aria-hidden="true">2</span>
-              <div class="empty-step-body">
-                <div class="empty-step-t">
-                  点运行
-                </div>
-                <div class="empty-step-d">
-                  执行结果与文件改动会出现在这条时间线里
+              <div class="empty-step">
+                <span class="empty-step-n" aria-hidden="true">2</span>
+                <div class="empty-step-body">
+                  <div class="empty-step-t">
+                    点运行
+                  </div>
+                  <div class="empty-step-d">
+                    执行结果与文件改动会出现在这条时间线里
+                  </div>
                 </div>
               </div>
-            </div>
-            <div class="empty-step">
-              <span class="empty-step-n" aria-hidden="true">3</span>
-              <div class="empty-step-body">
-                <div class="empty-step-t">
-                  审变更
-                </div>
-                <div class="empty-step-d">
-                  右侧面板看 diff，可回滚；或开启自动循环让 AI 连续跑
+              <div class="empty-step">
+                <span class="empty-step-n" aria-hidden="true">3</span>
+                <div class="empty-step-body">
+                  <div class="empty-step-t">
+                    审变更
+                  </div>
+                  <div class="empty-step-d">
+                    右侧面板看 diff，可回滚；或开启自动循环让 AI 连续跑
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-      <!-- 等待 AI 回复指示条：收到首个回复后由 stopAiWaiting 关闭；置于消息流底部 -->
+      <!-- 等待 AI 回复指示条：收到首个回复后由 stopAiWaiting 关闭。
+           [wait-banner-overlay-v1] 已浮层化（absolute 悬浮于时间线底部安全带内），
+           出现/消失不再把 chat-list 压矮 ⇒ 最新一条不再被顶出视野（用户实测截图）。 -->
       <div v-if="props.aiWaiting || props.delivering" class="wait-banner" role="status" aria-live="polite">
         <span class="wait-spinner" aria-hidden="true" />
         <span class="wait-text">{{ waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中' }}</span>

@@ -327,6 +327,10 @@ ESM 测试文件里 `require.resolve` 的相对基准是**测试文件自身**�
 
 补充（2026-10-06）：首轮跑守卫测试带 `--reporter=basic`，vitest 5.0.3 抛 `loadCustomReporterModule` 失败（Vite module-runner 层），报错栈全是 vitest 内部路径，极易误诊为「测试挂了」。实际测试根本没跑。去掉该参数即全绿（39 passed）。判定要点：stderr 里出现 `module-runner.js` / `loadCustomReporterModule` 字样 ⇒ 是 reporter 加载失败，换默认 reporter 重跑，不要按测试失败排查。
 
+补充（2026-10-08）：报 `Failed to load custom Reporter from basic`，exit 1，但错误信息藏在报错栈里、不在 stdout 摘要中，容易误判成测试失败。改用默认 reporter 即可。
+
+补充（2026-10-09）：报 `Failed to load custom Reporter from basic` 且 exit 1，但错误藏在报错栈里、不在 stdout 摘要中，容易误判成测试失败。改用默认 reporter。
+
 ## 全仓 eslint 的闸门判据：对 baseline 只拦新增 + 排除运行态目录
 
 [VERIFIED] 2026-10-05 A · `fullgate.ts` 的 `lintErrorsReal` 实测参数含 `--ignore-pattern .workbuddy/** --ignore-pattern .ai-runner/**`；且现为 `eslint .`（全仓）+ baseline 判据，不再接受变更集路径
@@ -1351,9 +1355,17 @@ TEXT 短路已在两处代码实现，但测试只断言字符串存在。存在
 
 这是 `AGENTS.md` 自己列的硬要求，我上轮漏了。锚点是否命中不能靠运气。
 
+补充（2026-10-08）：本仓 `scripts/anchors.json` 会引用源码中的字串，删改「被锚点引用的字串」会让校验变红，而全量 vitest 不覆盖锚点（AGENTS.md 明示）。改注释的同一轮里顺带跑一次 `pnpm anchors:verify`，比事后排查便宜得多。
+
+补充（2026-10-08）：本仓 `scripts/anchors.json` 会引用源码中的字串，删改「被锚点引用的字串」会让校验变红，而全量 vitest 不覆盖锚点。
+
 ## `pm2 restart` 报 `network error` 后，下一次探活返回 200 不等于「新代码已生效」
 
 本轮实测，上一轮的两次 restart 都没真正重启进程（`pm_uptime` 停在更早的时刻），但 `curl /__ai/` 一直返回 200——端点活着 ≠ 跑新代码。判定生效只能用 `pm_uptime`（`pm2 jlist`）与产物 mtime 比时序（§13 `runtime-vs-source-v2`）。之前台账里「下一轮探活即恢复」的表述不充分，已被本次实测证伪。
+
+补充（2026-10-08）：重启导致 HTTP 通道瞬断，脚本以 `-1` 收场（stderr: `请求异常：TypeError: network error`）。这是预期行为，须跨轮探活：下一轮 `curl` 返回 200 即恢复。判生效仍需「进程启动时间 vs 产物 mtime」比对，不能只看 curl 200。
+
+补充（2026-10-09）：实例重启导致 HTTP 通道瞬断，属预期。重试必须跨轮，本轮不得判定为失败。
 
 ## `indexOf('</template>')` 会命中 slot 的闭合
 
@@ -1556,3 +1568,289 @@ pm2 restart 使承载会话的进程瞬断，HTTP 通道中断。这是预期现
 ## 产物核验要搜「本函数独有」特征
 
 首轮搜 `@desc` / 反引号，命中的是 `useRunner` / `normalizeTables` 的编译产物（假阳性）。改为搜 `looksLikeScript` 的三判据组合 + `FENCE_CLOSE_RE` 正则 + 空白压缩组合才定位到 `stripScriptBlocks`。
+
+## 站点代码块按钮文字污染围栏行：DeepSeek 的 `<pre>` 内含「`js` `复制` `下载`」按钮，`extractReplyMd` 的 `textContent` 把按钮文字一起抓进围栏行 ⇒ 真实形态是 `js复制下载``` `（````` 在行尾）。判据必须容错
+
+`FENCE_RE` 同时匹配行首与行尾。
+
+## 构造样本 ≠ 真实样本：我首轮 e2e 用「理想围栏」````js` 通过，但真实站点的围栏被污染 → 线上失效。教训`
+
+UI 剥离类改动必须以真实站点 DOM 反推的文本为测试样本，不能只构造理想形态。
+
+## `__AI__` 无 `exists` / `listDir`
+
+实际可用键只有 63 个，含 `tryReadFile` / `readFiles` / `walk`，无 `exists`。按 §3.2 速查表写代码前应先 `Object.keys(__AI__)` 实测一次。
+
+## `syntaxCheck` 会把含 `<template>` 字面量的 .cjs 误判为 Vue SFC
+
+拆分 search.cjs 时因源码含 `'<template>'` 字符串而被拒，改用 `node --check <file>` 才是 cjs 语法的准据。
+
+## overlay 沙箱内自跑 lint/测试会读到磁盘旧态
+
+脚本内 `npx eslint` 读的是磁盘，而本轮的 `patchFile` 只在 overlay —— 会出现「patch 已成功但 lint 仍报旧错」。判定前须先 `exit 0` 落盘，或改用 `readText`（overlay 感知）自证。
+
+## `helpers.cjs` 转发壳破坏 vm 沙箱测试
+
+`host-owned-write-guard` 用 `vm.runInContext` 加载，缺 `module` 且 require 白名单是硬编码旧路径。拆分后须给沙箱加 module 壳，并把 require 解析改成「相对加载者目录」而非「相对 src/」。
+
+## `copy-runtime` 清单有四处而非两处
+
+`scripts/`、`packages/core/scripts/`、`apps/standalone/scripts/build.mjs`、`scripts/build-all.mjs` 各持一份硬编码清单，漏一处即产生某条发布路径的 dist 缺文件。
+
+## anchors.json 重写会触发 290 条 `jsonc/indent`
+
+该文件要求 4 空格缩进，用 `JSON.stringify(_, null, 2)` 覆写后必须补 `npx eslint <file> --fix`。
+
+## `packages/core/dist/helpers/` 与 `apps/standalone/dist/helpers/` 是两条独立产物路径
+
+`pnpm build` 只走 `build:tsc`（→ `packages/core/scripts/copy-runtime.cjs`）+ `scripts/build-all.mjs`。两个脚本各自拷贝一次，core/dist 与 apps/dist 互不影响。验收时必须两边都查。
+
+补充（2026-10-08）：`pnpm build` 走根 `scripts/copy-runtime.cjs` → 根 `dist/`；`packages/core/scripts/copy-runtime.cjs` 要单独跑才更新 `packages/core/dist/`；`apps/standalone/scripts/build.mjs` 更新 `apps/standalone/dist/`。三处必须各自核验。
+
+## `lessons`/`tasks` 迁出时不能照搬 `__AI__.tasks.xxx` 自引用
+
+原内联写法里 `_post` 调 `__AI__.tasks._url()`、`push` 调 `__AI__.tasks._post(...)`。迁到独立模块后 `__AI__` 尚未装配完（或在模块顶层不可见），必须改成模块内本地函数直接互调。
+
+## `overlay-flush-and-lang-check.node-test.ts` 的接线锚点会因拆分变红
+
+该测试断言 `index.cjs` 内含 `flush() {` 与 `globalThis.__AI_APPLY_OVERLAY`。把 flush 实现迁到 `helpers/misc.cjs` 后，`index.cjs` 只剩薄壳 `flush() { return miscApi.flush() }`，断言必须同步改指新文件——任何按「实现行锚点」写的测试都会在拆分时变红，拆分时要 grep 全仓测试找这类锚点。
+
+## `const X = null` 声明 + 后续装配赋值 = `no-const-assign`
+
+门面文件里族实例若先声明后装配，必须用 `let`；用 `const` 会 ESLint 报错。重写门面时一次写对。
+
+补充（2026-10-08）：门面文件里先声明后装配的族实例必须用 `let`；用 `const` 会在赋值处报错。
+
+## `fs` 从 index.cjs 中删除后正则误配
+
+`/\bfs\b/` 会命中 `./fs.cjs` 路径字符串，判断「require 是否仍被使用」必须用 `fs.xxx()` 调用点匹配，不能只看单词边界。
+
+补充（2026-10-08）：判断 require 是否仍被使用时，`/\bfs\b/` 会命中 `./fs.cjs` 路径字符串；必须用 `fs.xxx(` 调用点匹配。
+
+## 分段 `appendText` 拼接极易造成结构错乱：改造长文件（search.cjs 196 行、shell.cjs 326 行）时若反复「先写头部、再 append 中段、再 append 尾段」，容易出现重复定义、`return` 越界、闭包断裂等连锁损坏；本次 search.cjs 因此被连续损坏 3 轮。推荐做法
+
+整文件 ≤150 行时一次 `writeText`；超过 150 行时先写头部+前若干函数，之后每轮只 append 一个完整函数（带闭合），避免跨轮拼接同一函数体。
+
+补充（2026-10-08）：整文件 ≤150 行时一次 `writeText`；>150 行时每轮只 append 一个完整函数（含闭合），不跨轮拼接同一函数体。
+
+## `patchFile` 用 `*/` 之类的短通用串做锚点是灾难
+
+曾用 ` */` 作锚点，21 处匹配导致函数头被批量误吞，把 shell.cjs 整个 `runForeground` 签名删掉。锚点必须是本轮 readText 拿到的唯一多行文本，且长度 ≥12 字符。
+
+补充（2026-10-08）：用 ` */` 作锚点曾一次命中 21 处、把 `runForeground` 函数头整个替换掉。锚点必须是同一轮 `readText` 拿到的唯一多行文本（≥12 字符）。
+
+## 错误 patch 后最优恢复路径是 `cp` 备份而非逐行修
+
+`apps/standalone/dist/helpers/*.cjs` 是上一次构建的完整快照，用它覆盖回 src 可一步回到基线。但前提是构建后的 dist 与源码一致（本次 dist 是改造前的旧拷贝，恰好匹配）。
+
+## `eslint` 子进程读磁盘、不读 overlay
+
+`patchFile` 成功后立刻跑 `npx eslint` 会看到旧错误，必须先 `await __AI__.flush()` 落盘再验。这条已在 SYSTEM.md §3.2 有记载，但实操中极易忽略。
+
+补充（2026-10-08）：`patchFile` 成功后立即跑这些命令会看到旧错误，必须先 `await __AI__.flush()`（或退出本轮）再验。
+
+
+## `dist/` 是上次构建的完整快照，可作恢复基线
+
+`apps/standalone/dist/helpers/*.cjs` 在源码被 patchFile 破坏时，用 `cp` 覆盖回 src 是一步回退的最快路径（前提是构建后未再改源码）。
+
+## `SYSTEM.md` 是 host-owned（§1 `instance-ownership-v1` 文件级）
+
+任何写入都触发 `[host-owned-write]` stderr 告警。用户显式授权（原话「采纳」）后可代执行，但须在同一轮 DONE 如实记录「授权来源 + 执行时刻」。本次已记录。
+
+## T7 守卫采用「arity 对账」而非「白名单」：白名单方案要求先完成 SYSTEM.md 瘦身才能通过（会连锁触发多轮 patch），且新增 API 就要维护清单。arity 对账方案无需维护清单——教学层写 `name(args)` 时，`countTopArgs` 顶层逗号数与门面 `fn.length` 不一致就红。反例承重
+
+`shell(cmd)` 写 1 参 vs 真实 2 参 ⇒ 红（实测修复路径）。
+
+## 长段落文本替换易触发输出通道截断
+
+一次 `patchFile` 替换 20 行（含长中文段落）会被服务端在解析阶段截断（HTTP 400 `Invalid or unexpected token`），必须拆为「标题 + 引言 + 基础 + 易错项」小步替换。原计划一次性替换 §3.2 全段被截断，改为「先替换标题行+空行+读写行」才成功。
+
+## `ai-guard.ts` 的注释块与 `AI_JSDOC` 常量极易混淆
+
+注释块（L37–49）里写「历史三处漂移」含 `patchFile(p, { find, replace })` 字样，是备忘不是实际注入。`grep 'patchFile(p, { find, replace })'` 会同时命中该备忘 + 测试文件的两处备忘 + 测试的变异说明——判运行时注入内容必须调 `injectAiJsdoc()`，不能靠 grep 源码文本。
+
+## SSOT 声明的自我矛盾
+
+`AGENTS.md` 明写「不重述执行规则，唯一来源是 SYSTEM.md」，但实际内容里「monorepo 结构铁律」「自动循环没有轮次上限」两节正在重述 SYSTEM.md 内容，且措辞更详细。声明 SSOT 与实际内容违反声明共存是文档治理的隐性风险——守卫只看字面（`system-contract` 断言 §1/§8/§12 未回退），不看「是否违反职责边界」。
+
+## 「搬出」不等于「整节搬」
+
+本节分析的关键判据是同一节内可能混有通用规则与项目事实。§14/§15/§16 三节各含「通用原则」与「项目命令」两部分，整节搬会把通用规则也搬走（违反 SYSTEM.md 是执行规则 SSOT 的定位），只搬项目事实才能同时满足两份 SSOT。
+
+## 「收敛重叠」不等于「删掉一边」
+
+分析发现两处「反向重叠」中，`§4 依赖方向 ↔ AGENTS.md monorepo 铁律` 才是真重叠（同一原则两处写，措辞不同），处理方式是SYSTEM.md 保留通用原则 + AGENTS.md 保留项目特化清单 + 双向加指针；而 `§0.1 宿主机制 ↔ AGENTS.md 自动循环` 并不重叠（前者是「与模型行为无关，无需感知」的态度约束，后者是常量与终止路径的事实清单），不做改动。判据是「两边讲的是不是同一件事」，不是「标题看起来像不像」。
+
+## `scripts/anchors.json` 引用的锚点串在改 SSOT 时是硬约束：`SYSTEM.md §11` 的「获取顺序
+
+本地优先，不可跳层」被 anchors.json 内容锚引用，改文时必须逐字保留该短语，否则 `pnpm anchors:verify` 会红——本次瘦身时通过「保留原句 + 只删后半段的具体端点」实现。
+
+## 长段落 `patchFile` 替换会撞输出通道截断：一次替换 §14（14 行含长中文段）与 §16（15 行）都被 HTTP 400 `Invalid or unexpected token` 拦下。分步策略
+
+先替换标题+引言+首条，再逐条追加；或每节独立成轮。
+
+## 优化前后应确认「项目事实」的落点
+
+把 §14/§15/§16 的项目事实搬到 AGENTS.md 后，AGENTS.md 从 196 行 → 233 行（+37 行），SYSTEM.md 从 302 → 288 行（−14 行）。收益不是「体积减少」，而是「职责单一」——此后改动只要认准「是通用规则 → SYSTEM.md，是项目事实 → AGENTS.md」，不再两头改、两头漂。
+
+## 同一 `patchFile` 被重放不会报错，会静默产生重复
+
+§4 末句逐字重复两遍是「同 patch 应用两次」的典型症状——`patchFile` 的 find 只匹配第一处，replace 后若同轮再跑一次会再替一次（或锚点唯一性被破坏后第二遍匹配到替换后的新文本）。改 SSOT 后应 `grep -c` 关键新措辞确认只出现 1 次。
+
+## 覆写到「文件末尾」的 patch 极易吞掉后续段落
+
+§16 瘦身时用 `lines.slice(s16)` 取到文件末尾作为 oldBlock，把紧随其后的 CHANGE-IMPACT 段一并替换掉了。正确做法是锚定「到下一个 `## §N` 或文件末尾的最后一个独立段落」，而不是「到 EOF」。
+
+## patch 锚点范围含分隔符 `---` 会顺手删掉它
+
+§11/§13/§14/§15 之间的 `---` 缺失成因是 oldBlock 从标题行取到下一节标题行，中间的 `---` 被吞。取块时应显式保留节间的 `---`。
+
+## `###` 与 `##` 的差异是机器可检的
+
+全仓所有节都是 `## §N`，§6 变成 `### §6` 后，任何按 `^## §` 抽章节的脚本（如 `module-size-ratchet` 的 `[ssot-parity-v1]`、`system-contract` 的 `slice()`）都会漏掉 §6。改标题层级属契约级改动，须先 grep 谁在按 `## §` 解析。
+
+## 计数推断 ≠ 校验器判据
+
+上轮用「docs/*.md 37 份 vs DOCS-INDEX 9 条链接」推断「索引覆盖率低」，实跑 `pnpm docs:verify` 却 exit 0。真因是 `scripts/lib/docs-scan.cjs` 的 `SKIP_DIRS` / `SKIP_PATHS` 跳过运行态与 `docs/plan/**`，且索引用根级 + docs/ 表格两段渲染而非逐文件链接。判据必须承重——计数差是信号，只有跑校验器才是证据（§12 硬规则 3）。
+
+## `grep` 命中注释 ≠ 命中定义
+
+查 `LOOP_HARD_MAX_ROUNDS` 时首个命中落在 `auto-imports.d.ts`（生成物转发）与注释文字里，必须再加 `\\s*=` 才锁定真定义行。
+
+## `shell` 子进程看不到 overlay
+
+`pnpm docs:verify` 读的是真盘，本轮 `patchFile` 后紧接跑它前，已在轮末隐式 `flush`（overlay-atomic-v1 由宿主控制），未显式调用——若后续需要在同一轮内先改盘再跑校验器，必须先 `await __AI__.flush()`。
+
+## 计数推断 ≠ 校验器判据：用「docs/*.md 37 份 vs DOCS-INDEX 9 条链接」推断索引覆盖率不足，实跑 `pnpm docs:verify` 却 exit 0——`scripts/lib/docs-scan.cjs` 的 `SKIP_DIRS` / `SKIP_PATHS` 跳过运行态与 `docs/plan/**`，且索引用表格而非逐文件链接渲染。判据必须承重
+
+计数差只是信号，跑校验器才是证据（§12 硬规则 3）。
+
+## 文档里的路径引用要探活，不能只看简写
+
+`server/core.ts` / `server/ws-server.ts` 看似合理，实际 `apps/standalone/src/` 下只有 `server.ts`——这类「历史目录结构残留」是 markdown 声明最常见的漂移点。探活时须对短路径加常见前缀组合（`apps/*/src/`、`packages/*/src/`）逐一试，不能只 `exists(原文)`。
+
+## 并行回执会让同一段落被注入两次，须自行收敛
+
+本轮 system prompt 明确「并行执行的回执会交错」。实际上第一次 patch（用户授权 A 后）成功写入；服务端后续又回传了一次同样 `ANCHOR_COUNT: 1 / AFTER_HAS_FG: true` 的成功回执（源自并行的同一条脚本重放）。结果 §3.2 出现 L144、L145 两份完全相同的段。patch 写入后必须读盘核对唯一性（`(txt.match(/段名/g) || []).length`），不能只看 `patchFile` 返回 ok。
+
+## `[host-owned-write]` stderr 告警在观察期不阻断，但必须留授权证据
+
+写入 `packages/core/SYSTEM.md` 会触发 `[host-owned-write] patch -> packages/core/SYSTEM.md` 告警。按 `instance-ownership-v1` 的文件级同权，SSOT 默认归宿主独占；用户显式授权（原话「A」）时可以写，但回执须记录授权来源 + 时刻（本轮已在脚本 stdout 打出 `AUTH_SOURCE`/`AUTH_TS`，并在 DONE 首句标明）。
+
+## 索引错位易误判「哪一行是重复」
+
+`lines[k]` 是 0-based、打印时又写成 `(k+1)|`，再叠加 `L144_LEN` 用的是 `lines[144].length`——两套编号一起看会误判哪一行是重复。收敛重复段的稳妥做法是按内容 filter 掉所有匹配段名且非首条的行，而不是按单个索引删。
+
+## `pnpm build` 会被并行的同一条脚本重放，产生多个重复后台任务
+
+本会话同一脚本被服务端并行执行 4 次，启动 4 个 build 后台进程（`sh-muzez1g2` / `sh-muzez2ao` / `sh-muzez37d` / `sh-muzez47b`）。不 kill 冗余会同时写同一产物路径（overlay 与 copy-runtime 都会互相干扰）。发现重复后，用 `shellStatus(id)` 逐一确认 `running:true`，对非保留的 3 个调 `killShell(id)`，只留最后一个观察到底。多个并发 build 同时 `copy-runtime` 时产出的 `exit=129`（SIGKILL）是互杀的后果，不是构建失败。
+
+## 时间戳比 curl 200 更可靠
+
+`curl` 返回 200 只说明服务在线；进程重启前后都会返回 200。`runtime-vs-source-v2` 判据①（进程 `pm_uptime` 晚于产物 `mtime`）才是「新代码已加载」的确证——本例 `1791456574 > 1791456562`，成立。
+
+## GitHub 匿名 API 配额 10 次搜索/h、60 次核心/h，且按 IP 计
+
+本轮连发 2 批共 15 次请求即触发 `API rate limit exceeded`。批量探测仓库目录前应先算配额，或分轮串行、复用结果，避免后半批全数空转。
+
+## 泛搜栈专属 query 噪声极高
+
+用 `vue3 claude agent skill` 直接搜 repositories，返回的多是「用 Vue 写的项目」而非「Vue 技能的仓库」——搜索命中仓库的 `description` 字段而非内容。要精准定位技能聚合仓，应直查已知仓库的 `contents/skills` 目录，而非泛搜。
+
+## 技能仓库目录名不得凭印象构造
+
+`vue-router`/`turborepo`/`slidev`/`tsdown` 四个名字全部 404，根因是把「生态里存在这个包」误当成「仓库里有这个技能目录」。正确做法是先用 GitHub API `GET /repos/<owner>/<repo>/contents/<dir>` 枚举真实目录，再逐个安装——服务端联网不受 `/run` 沙盒 60s 超时约束，可放心枚举。
+
+## `skills/match` 命中 ≠ 已安装
+
+`query=vue-router` 返回的是 `vue(8.174)` 等模糊匹配，属于读侧检索语义，不代表仓库存在同名技能目录；判「仓库是否有该技能」须走 contents 枚举，不能用 match。
+
+## 预览改造不要整组件替换，要按职责切：FileTree 的弹窗除了渲染还有「复制到剪贴板」「HTTP 错误码展示」两处能力，换成统一浮层会静默丢功能。正确做法是只抽「内容→HTML」这一层（`useFileContentHtml`），弹窗外壳各留各的。判据
+
+替换前先列该组件除渲染外的行为清单。
+
+## `writeText` 的返回值不能直接 `JSON.stringify`
+
+首轮把 `w` 当对象序列化，实际返回 `undefined`，触发 `Cannot read properties of undefined (reading 'slice')`，整轮 overlay 回滚、磁盘零改动。改用「写后回读 + 断言语义片段」验证落盘更可靠。
+
+## `getChangeType` 在改造后成为死代码：内容预览不需要 `change-type`，但解构仍在，lint 只报 warning 不报 error，容易漏。判据
+
+改造消费方后，`grep` 一次被删能力的函数名，确认无调用点即删函数与解构。
+
+## 「git 变动的文件」≠「轮次变更列表」：这个仓库有两套变更 UI —— `ScriptPanel` 右侧的轮次变更列表（`/__ai/files/read` + `/before`，按 runId 组织）与 `SidePane` 工作日志 tab 里的 WorklogPane（`/__ai/git/worklog` + `/git/diff`，VSCode 源码管理风格）。用户口中的「git 变动的文件」指后者。判据
+
+先问「这个列表的数据来自哪个端点」——`git/*` 是后者，`files/*` 是前者；不要凭「变更列表」这个词就动手。
+
+## 删掉 UI 行为后必须清整条数据链：WorklogPane 移除 diff 展开后，`/__ai/git/diff` 请求、`splitDiffByPath`、`fileDiffHtml`、`_diffHtmlCache`、`fileMap`、`diffHighlight` 全部失去消费方，但 `tsc` 与 `lint` 都不会报错（它们只是没被调用）。判据
+
+改造消费方后，用 `grep` 逐个搜索被删能力涉及的所有标识符，而不是只看改动点附近。
+
+## 产物核验不能搜函数名
+
+打包器会压缩重命名标识符，搜 `openPreview` 在产物里恒为 false；要搜语义片段（`/__ai/files/read`、`fco-mask`、`diff-hunk`）才判得准。
+
+## 「过期注释」的判据是「描述与磁盘现状矛盾」，不是关键词命中
+
+关键词搜 `DiffOverlay` 会同时命中三类——已经无消费方的孤儿组件自身、以它为参照系的活注释、以及引用它的历史说明。只有逐条读盘比对现状才能分辨，凭关键词批量替换会把正确注释一起改坏。
+
+补充（2026-10-08）：搜 `DiffOverlay` 会同时命中三类——已无消费方的孤儿组件自身、以它为参照系的活注释、引用它的历史说明。只有逐条读盘比对才能分辨，凭关键词批量替换会把正确注释一起改坏。
+
+## 删 UI 行为后死样式不会被任何工具报出：`tsc` 看类型、`eslint` 看规则、`vitest` 看断言，三者都不检查「CSS 选择器是否有 DOM 消费方」。判据
+
+删掉模板中的 class 后，用 `grep` 该 class 名扫一遍源码，命中只剩 `.scss` 自身即为死样式。产物核验时对比 CSS 文件字节数变化可作二次确认。
+
+补充（2026-10-08）：删掉模板中的 class 后 `grep` 该 class 名，命中只剩 `.scss` 自身即为死样式；产物核验时对比 CSS 字节数变化可二次确认。
+
+
+## `lint` 读真盘，看不见本轮 overlay 写入（overlay-blind-v1 的具体表现）：删掉 `.wl-diff` 死样式后，同一轮 `lint` 仍报「378:1 Delete ⏎」，重跑依旧。根因是 `writeText`/`patchFile` 只进 overlay，而 `lint` 起真子进程读真盘。加一行 `await __AI__.flush()` 后 lint 立刻 `ok=true`。判据
+
+任何「本轮写 + 本轮验」的组合，验之前必须先 flush。
+
+## `eslint --format compact` 已从 core ESLint 移除
+
+报 `The compact formatter is no longer part of core ESLint` 且 exit 2。改用 `--format json -o <file>` 写文件再读，比直接读 stdout 更稳（大输出不会与进度信息混在一起）。
+
+## `git status --porcelain` 的解析不能先 `trim()`
+
+格式是固定列宽 `XY␣路径`，未暂存修改的行首列是空格。`trim()` 会把它吃掉，再按 3 字符切就多切掉路径首字符。正确写法是先判空再 `slice(3)`。这个 bug 只在「路径以 `.` 开头且状态行首列是空格」时才暴露——本次恰好是 `.ai-runner/lessons.md`，而 `.` 被吞后变成合法但不存在的 `ai-runner/lessons.md`，报错信息具有误导性。
+
+## 路由层与实现层的同一语义参数要对齐：`routes/git.ts` 把 message 放宽到 2000，`git.ts` 里却仍砍到 200。两层各自合理，合起来就是静默丢数据。判据
+
+改一层的上限时，用 `grep` 搜同一参数名或同一 `slice(0, N)`，确认没有第二处。
+
+## 写测试文件后同轮 `lint` 会报 `No files matching the pattern`
+
+`writeText` 只进 overlay，而 `lint` 起真子进程读真盘。加 `await __AI__.flush()` 后立即正常。
+
+## `git add` 会被「已跟踪但在 .gitignore 覆盖区」的文件卡住：`.workbuddy/memory/MEMORY.md` 已被跟踪，但 `.workbuddy/` 在 `.gitignore` 里（该条目的本意是阻止 eslint 扫描），于是 `git add -A -- <该路径>` 报 `The following paths are ignored`。修复用 `-f`：它只对命令行显式列出的路径生效，不会把 `dist/`、`node_modules/` 之类未被列出的忽略内容卷进来。判据
+
+`git add -n -f -- <path>` 能过、不带 `-f` 报 ignored，即属此类。
+
+## 路由层与实现层的同一语义参数要对齐
+
+`routes/git.ts` 把 message 放宽到 2000，`git.ts` 里却仍砍到 200 —— 两层各自合理，合起来就是静默丢数据。改一层的上限时，用 `grep` 搜同一参数名或同一 `slice(0, N)` 确认没有第二处。
+
+## `--fix` 会顺手改别的文件
+
+定点 `eslint --fix` 本只想消 `discover-targets` 的 sort-named-imports，结果连带把 `script-fence-gate.node-test.ts` 的 `antfu/curly` 一起改了。修完必须复跑判据确认没改坏 —— 本次 16 passed 复核无碍。
+
+## 首轮 `pnpm lint` 报 1 error 是聚合脚本的口径问题
+
+整仓 `eslint packages apps scripts bin` 报 0 error，而 `pnpm lint` 报 1；逐文件 `--fix` 后消失。定位阶段别只信聚合退出码，要看过滤后的 error 行。
+
+## `pnpm lint` 聚合退出码与定点检查口径不一致
+
+整仓 `eslint packages apps scripts bin` 报 0 error，而 `pnpm lint` 首轮报 1 error；逐文件 `--fix` 后消失。定位阶段别只信聚合退出码。
+
+## 根目录新增 `.md` 会撞 `docs:verify`
+
+`docs-scan.cjs` 的 `collectDocs` 从 root 递归、只跳过 `node_modules/dist/.git/.ai-runner/.workbuddy/...` 与 `docs/plan`，根目录文件同样纳入 ⇒ 新文档必须登记 `docs/DOCS-INDEX.md`。
+
+## DONE 措辞须区分「新增」与「顺手改」
+
+本轮曾写 `script-fence-gate.node-test.ts` 是 `--fix` 顺带修 `antfu/curly`，实为未跟踪新增文件被格式化，措辞偏差。下回写 DONE 时，`??` 与 `M` 两类须分开表述。
+
+## 工作树多会话并行产物不可并入同包交付
+
+本工单 11 个文件之外另有约 50 个改动属其他会话半成品；复盘/提交前须按 `git status` 逐项归属，避免把并行产出误算作本工单产出（本次由复核方指出）。

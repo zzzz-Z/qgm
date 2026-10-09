@@ -228,11 +228,9 @@ const emit = defineEmits<{
 .primary-btn.run:hover:not(:disabled) {
   filter: brightness(1.05);
 }
-.primary-btn.stop {
-  background: rgb(242 90 90 / 12%);
-  color: rgb(236 19 19);
-  border-color: transparent;
-}
+/* [stop-btn-color-v1] 停止态唯一配色 = 上方 .tpl-bar button.primary-btn.stop（#f0abfc 粉紫描边）。
+   曾有一条低优先级的 .primary-btn.stop { color: rgb(236 19 19) } 真红规则与此矛盾（复制粘贴残留），
+   仅靠优先级被压制；按钮一旦移出 .tpl-bar 就会变真红 ⇒ 已删除，防止双源分叉。 */
 .primary-btn .ico {
   font-size: var(--font-10);
   line-height: 1;

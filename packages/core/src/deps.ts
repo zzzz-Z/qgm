@@ -8,8 +8,11 @@ export { type Change, getRoot, SCRIPTS_DIR } from './config.js'
 // Git
 export { gitCommitAfter, gitSnapshot } from './git.js'
 
+// 验证目标自动发现（宿主 + 业务 app 多目标）
+export { discoverTargets, type VerifyTarget } from './headless/discover-targets.js'
+
 // 冒烟测试
-export { runSmoke, type SmokeResult } from './headless/smoke.js'
+export { runSmoke, runSmokeTargets, type SmokeResult } from './headless/smoke.js'
 
 // [hclc-fix] run.ts 直 import ai-guard.js 使该文件唯一 import 达 9（>8 阻断）；
 // scanScriptHead 上提至 barrel，令所有 route 层调用方统一从 deps 入口引入

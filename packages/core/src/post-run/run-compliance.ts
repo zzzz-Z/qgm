@@ -1,5 +1,6 @@
 // [run-helpers] /run 路由用到的纯计算逻辑（无副作用、无 IO）
 import type { ClaimMismatch } from './types.js'
+import type { VerifyTarget } from '../headless/discover-targets.js'
 
 /** 规则遵守度静态特征（供 compliance 报告） */
 
@@ -31,7 +32,9 @@ export function computeCompliance(effectiveScript: string, desc: string): Compli
     hasDesc: desc.length > 0,
     hasSelfCheck: /__AI__\.assert|\.assert\(|process\.exit\(1\)/.test(effectiveScript),
     // [real-selfcheck-observe-v1] 兼容 __AI__.syntaxCheck(...) 与解构后裸调用（含空行前后缀不误判）
-    hasRealSelfCheck: /__AI__\.(?:syntaxCheck|typeCheck)\b|(?:^|[^\w.])syntaxCheck\(|(?:^|[^\w.])typeCheck\(/.test(effectiveScript),
+    // [verify-lang-matrix-v1] lint 计入自检：TS/Vue/ESM 场景下项目内 eslint 才是有效校验手段，
+    //   只认 syntaxCheck/typeCheck 会把「正确地用了 lint」判成没自检，逼 AI 去调能力外的 syntaxCheck。
+    hasRealSelfCheck: /__AI__\.(?:syntaxCheck|typeCheck|lint)\b|(?:^|[^\w.])(?:syntaxCheck|typeCheck|lint)\(/.test(effectiveScript),
     isDecision: /__AI__\.exitNeedInput|__AI_RUNNER_DECISION__/.test(effectiveScript),
   }
 }
@@ -45,4 +48,22 @@ export function computeClaimMismatch(claimed: string[] | null, actual: { path: s
   const missing = claimed.filter(p => !actualSet.has(p))
   const extra = actualPaths.filter(p => !claimedSet.has(p))
   return { claimed, actual: actualPaths, missing, extra }
+}
+
+/**
+ * 冒烟报告合规：DONE 文本是否引用了自动发现的业务 app 目标。
+ * [WHY] 原 bug：agent 只验宿主 5175/__ai/，把「宿主健康」当「业务 app 已验证」写进 DONE。
+ *   这里把自动发现到的 app 目标拉出来，若 DONE 一个都没提到 → 视为漏验（降级可见，不拒收）。
+ * [CONSTRAINT] fail-open：只打 [warn] 计入 degraded，绝不把正常 DONE 判 fail（否则熔断）。
+ *   宿主目标（source='host'）不查——它本就由宿主巡检覆盖。
+ * @returns null 无 app 目标可查；否则 { ok:true, missing: 未被引用的目标 }
+ */
+export function computeSmokeReportCompliance(doneText: string, targets: VerifyTarget[]): { ok: true, missing: VerifyTarget[] } | null {
+  const appTargets = targets.filter(t => t.source !== 'host')
+  if (appTargets.length === 0) return null
+  const missing = appTargets.filter((t) => {
+    const port = t.url.replace(/^https?:\/\/127\.0\.0\.1:/, '').replace(/\/$/, '')
+    return !doneText.includes(t.tag) && !doneText.includes(port) && !doneText.includes(t.url)
+  })
+  return { ok: true, missing }
 }

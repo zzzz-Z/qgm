@@ -23,7 +23,7 @@ import { onSummary, startHandoff } from './handoff.js'
 import type { toast } from '../../ui/useToast.js'
 import type { getTransport } from '../useAiTransport.js'
 import type { runHook } from './hooks.js'
-import type { runBash } from './run-bash.js'
+// [js-only-channel-v1] runBash 依赖已移除：AI 侧 bash 分支不再执行（见 executeItemInner 的 BASH_CHANNEL_REMOVED）
 import type { useRunner } from '../../runner/useRunner'
 import type { persist } from './persist.js'
 
@@ -69,7 +69,6 @@ interface ReplyHandlersDeps {
   disarmTimer: (inst: LoopInstance) => void
   bindKeyboard: () => void
   runHook: typeof runHook
-  runBash: typeof runBash
   useRunner: typeof useRunner
   persist: typeof persist
   isStrictDone: (text: string) => boolean
@@ -99,7 +98,6 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
     disarmTimer,
     bindKeyboard,
     runHook,
-    runBash,
     useRunner,
     persist,
     isStrictDone,
@@ -426,33 +424,32 @@ export function createReplyHandlers(deps: ReplyHandlersDeps) {
       return
     }
 
-    // bash：走 /exec（NDJSON 流）
-    const exec = await runBash(inboxItem.code)
-    if (inst.stopRequest.value === 'kill' || inst.stopRequest.value === 'rollback') {
-      await handleStopAfterRound(inst)
-      return
-    }
-    if (exec.blacklistHit) {
-      await finish(inst, 'bash-blacklist', `命中 bash 黑名单：${exec.blacklistHit}`)
-      return
-    }
-    if (exec.dirty) {
-      await finish(inst, 'dirty-workspace', `工作区不干净（${exec.dirtyFiles.length} 个未提交文件），bash 已拒绝执行`)
-      return
-    }
-    inst.lastExec.value = { lang: 'bash', exit: exec.code, changes: 0, durationMs: Date.now() - startedAt }
+    // [js-only-channel-v1] bash 接收通道已下线：**不执行**，只回一条教学式结果让 AI 自己改用 js。
+    //   WHY ① `/exec` 是裸 spawn（exec.ts runProcess(shell:true)）：没有 /run 的虚拟 fs 与 read-only
+    //       overlay，写操作直接落真盘、无回滚层；② 服务端 BASH_TIMEOUT_MS=120s 硬杀与客户端
+    //       LOOP_ROUND_TIMEOUT_BASH_MS=180s 轮次预算错配，长任务必被腰斩且 AI 会误判成「命令写错」去重试；
+    //       ③ git 写保护两层不一致（服务端只拦 push -f/reset --hard，客户端 GIT_WRITE_RE 只在自动循环路径补拦）。
+    //   [CONSTRAINT] 统一收口到 /run + __AI__.shell：沙箱 + 黑名单 + 后台长任务（{background:true}）全都在。
+    //   [CHANGE-IMPACT] 原先「bash 代码块直执行」变为「拒收 + 教学」；不 finish（不终止循环），
+    //       结果照常入合并窗回传，AI 下一轮即可自行改写为 js。手动 `!` 命令行通道（exec-flow）不受影响。
+    const hint = 'BASH_CHANNEL_REMOVED: bash 代码块已不执行，请改用 js 代码块：'
+      + '① 普通命令 await __AI__.shell(["pnpm","install"])（数组形态，不做 shell 解析）；'
+      + '② 需要管道/重定向语义 await __AI__.shell(["sh","-c","ls | grep x"])；'
+      + '③ 超过 180s 的长任务 await __AI__.shell(cmd,{background:true}) 起后台，'
+      + '后续轮次用 __AI__.shellStatus(id) / __AI__.readShell(id,{from}) 轮询收口。'
+    inst.lastExec.value = { lang: 'js', exit: 2, changes: 0, durationMs: Date.now() - startedAt }
     const bashOutcome: RoundOutcome = {
-      lang: 'bash',
+      lang: 'js',
       desc: inboxItem.desc,
-      exit: exec.code,
-      ok: exec.code === 0,
-      stdout: exec.stdout,
-      stderr: exec.stderr,
+      exit: 2,
+      ok: false,
+      stdout: '',
+      stderr: hint,
       changeCount: 0,
       changedFiles: [],
     }
     await afterRound(inst, bashOutcome)
-    // [round-merge-v1] bash 分支同 cjs：R1 回传权归循环引擎，但同样入合并窗
+    // [round-merge-v1] 与 cjs 分支同构：回传权归循环引擎，同样入合并窗
     stageRoundOutcome(inst.id.value, bashOutcome, outcomes => flushRoundOutcome(inst, outcomes))
   }
 

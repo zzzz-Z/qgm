@@ -1,11 +1,13 @@
-// [preview-manager-v1] 从 ScriptPanel.vue 抽出：变更预览 / 撤回 / 变更类型查询
+// [preview-manager-v1] 从 ScriptPanel.vue 抽出：变更预览（文件内容） / 撤回
+// [preview-content-v1] 预览从「行级 diff」改为「文件内容」：只拉目标文件的当前内容；
+//   deleted 文件读不到当前内容，回退到该变更归属轮的 before 快照（归属轮取不到时再退本轮 runId）。
 import type { Ref } from 'vue'
 
 /** 变更条目最小形状（只声明本模块用到的字段） */
 interface ChangeLite {
   path: string
   type: string
-  /** [cumulative-baseline-v1] 归属轮；累积视图下「改动前」内容要按它取，而非本轮 */
+  /** 归属轮；累积视图下 deleted 文件的 before 内容要按它取，而非本轮 */
   runId?: string
 }
 
@@ -20,8 +22,10 @@ export interface PreviewManagerDeps {
   changes: Ref<ChangeLite[]>
   result: Ref<ResultLite | null>
   previewFile: Ref<string | null>
-  previewBefore: Ref<string | null>
-  previewAfter: Ref<string>
+  /** 已加载的文件内容；空串表示尚未加载或文件为空 */
+  previewContent: Ref<string>
+  /** 内容拉取中；模板据此显示占位而非把空内容当「文件为空」 */
+  previewLoading: Ref<boolean>
   rollback: (file: string) => Promise<RollbackResult | null | undefined>
   rollbackAll: () => Promise<unknown>
 }
@@ -31,47 +35,46 @@ export interface PreviewManagerDeps {
  * @param deps - 依赖面
  */
 export function createPreviewManager(deps: PreviewManagerDeps) {
-  const { changes, result, previewFile, previewBefore, previewAfter, rollback, rollbackAll } = deps
+  const { changes, result, previewFile, previewContent, previewLoading, rollback, rollbackAll } = deps
   const { toast } = useToast()
-  // [preview-seq-v1] 请求序号：快速切 A/B 时旧响应会覆盖新内容；关闭后再返回会复活弹窗（报告 §2.8）
+  // [preview-seq-v1] 请求序号：快速切 A/B 时旧响应会覆盖新内容；关闭后再返回会复活弹窗
   let previewSeq = 0
 
-  /** 从变更列表中查某文件的类型，缺省 modified */
-  function getChangeType(p: string): 'modified' | 'added' | 'deleted' {
-    const c = changes.value.find(x => x.path === p)
-    return (c ? c.type : 'modified') as 'modified' | 'added' | 'deleted'
-  }
-
-  /** 切换 diff 预览：同文件再点关闭；否则读 after / before 并写入 */
+  /** 切换内容预览：同文件再点关闭；否则拉取内容并写入 */
   async function onPreviewFile(p: string): Promise<void> {
-    if (previewFile.value === p && previewBefore.value !== null) {
+    if (previewFile.value === p) {
       previewFile.value = null
-      // [preview-clear-v1] 关闭时清 before/after，防下次点新文件先用旧文件内容渲染（报告 §2.8）
-      previewBefore.value = null
-      previewAfter.value = ''
+      // [preview-clear-v1] 关闭时清内容，防下次点新文件先用旧文件内容渲染
+      previewContent.value = ''
       return
     }
     const seq = ++previewSeq
     previewFile.value = p
+    previewContent.value = ''
+    previewLoading.value = true
     try {
-      const resAfter = await fetch('/__ai/files/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths: [p] }) })
-      const dataAfter = await resAfter.json()
-      if (seq !== previewSeq) return
-      previewAfter.value = dataAfter.files?.[0]?.content || ''
-      // [cumulative-baseline-v1] 「改动前」要按条目的**归属轮**取：累积视图里该文件的上一次改动
-      //   可能发生在几轮前，用本轮 runId 会拿到本轮开始时（已被改过）的内容，diff 直接变空。
-      //   归属轮运行前的内容 == 会话基准态，正是累积 diff 期望的左值。
-      const beforeRunId = changes.value.find(x => x.path === p)?.runId || result.value?.runId
-      if (!beforeRunId) { previewBefore.value = ''; return }
-      const resBefore = await fetch('/__ai/files/before', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: beforeRunId, file: p }) })
-      const dataBefore = await resBefore.json()
-      if (seq !== previewSeq) return
-      previewBefore.value = dataBefore.content ?? ''
+      const change = changes.value.find(x => x.path === p)
+      if (change?.type === 'deleted') {
+        // [preview-content-v1] 已删除的文件没有当前内容，用归属轮的改动前快照
+        const beforeRunId = change.runId || result.value?.runId
+        if (!beforeRunId) return
+        const res = await fetch('/__ai/files/before', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: beforeRunId, file: p }) })
+        const data = await res.json()
+        if (seq !== previewSeq) return
+        previewContent.value = data.content ?? ''
+      } else {
+        const res = await fetch('/__ai/files/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths: [p] }) })
+        const data = await res.json()
+        if (seq !== previewSeq) return
+        previewContent.value = data.files?.[0]?.content || ''
+      }
     } catch (e) {
       if (seq === previewSeq) {
-        log.error('Diff load failed', e)
-        previewBefore.value = ''
+        log.error('Content load failed', e)
+        previewContent.value = ''
       }
+    } finally {
+      if (seq === previewSeq) previewLoading.value = false
     }
   }
 
@@ -96,5 +99,5 @@ export function createPreviewManager(deps: PreviewManagerDeps) {
     previewFile.value = null
   }
 
-  return { getChangeType, onPreviewFile, onRollback, onRollbackAll }
+  return { onPreviewFile, onRollback, onRollbackAll }
 }

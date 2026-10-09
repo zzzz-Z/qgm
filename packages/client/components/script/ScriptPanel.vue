@@ -29,14 +29,14 @@ import AiWindowList from '../panels/AiWindowList.vue'
 
 defineOptions({ name: 'ScriptPanel' })
 
-// [diff-lazy-v1] DiffOverlay（含 DiffViewer/hljs 高亮链）仅预览文件时才异步加载
-const DiffOverlay = defineAsyncComponent(() => import('../diff/DiffOverlay.vue'))
+// [content-preview-lazy-v1] FileContentOverlay（含 hljs 高亮链）仅预览文件时才异步加载
+const FileContentOverlay = defineAsyncComponent(() => import('../diff/FileContentOverlay.vue'))
 /** 活动的 */
 /** 键 */
 const SIDE_WIDTH_KEY = LS_SIDE_WIDTH_KEY
 /** 侧栏默认宽度（像素） */
 const SIDE_WIDTH_DEFAULT = 320
-/** 差异 */
+/** 内容预览打开时的侧栏加宽值（像素） */
 const SIDE_WIDTH_DIFF = 560
 let runStartAt = 0
 /** 编辑器 */
@@ -54,7 +54,7 @@ const copied = ref(false)
 const fileSuccess = ref(false)
 /** 主区 DOM 引用 */
 const mainRef = ref<HTMLElement | null>(null)
-// ── 右侧面板 / 运行时长 / Diff 预览 / 列表 ref ──
+// ── 右侧面板 / 运行时长 / 内容预览 / 列表 ref ──
 
 /** 面板引用 */
 const paneRef = ref<HTMLElement | null>(null)
@@ -74,12 +74,12 @@ const runningCommand = ref('')
 const sideTab = ref<'tree' | 'changes'>('tree')
 /** 窄屏抽屉开合 */
 const sideDrawerOpen = ref(false)
-/** Diff 预览文件 */
+/** 预览中的文件路径 */
 const previewFile = ref<string | null>(null)
-/** 差异预览：变更前内容 */
-const previewBefore = ref<string | null>(null)
-/** 差异预览：变更后内容 */
-const previewAfter = ref<string>('')
+/** 预览文件的内容 */
+const previewContent = ref<string>('')
+/** 内容拉取中 */
+const previewLoading = ref(false)
 /** 树展开的 stream id 集合 */
 const treeExpanded = ref<Set<number>>(new Set())
 // ── 附件 / 命令历史 / 滚动 ref ──
@@ -164,15 +164,15 @@ const { removeAttach, clearAll, onEditorPaste, onDesktopDrop } = createAttachMan
 const { registerTreeDrop, buildPromptWithAttachments } = createTreeAttach({ attachedFiles })
 /** V12 显式通道取消订阅句柄；onMounted 赋值、onBeforeUnmount 释放 */
 let unsubscribeTreeDrop: (() => void) | undefined
-// 预览/撤回（previewFile/Before/After 由本组件持有）
+// 预览/撤回（previewFile/previewContent/previewLoading 由本组件持有）
 // [cumulative-baseline-v1] 这里传 visibleChanges（随视图切换）而非 changes：
-//   getChangeType 与「改动前」内容的取用都必须跟面板显示的是同一套口径
-const { getChangeType, onPreviewFile, onRollback, onRollbackAll } = createPreviewManager({
+//   面板显示的是哪套变更集，预览取内容就必须跟同一套口径（含 deleted 的归属轮 runId）
+const { onPreviewFile, onRollback, onRollbackAll } = createPreviewManager({
   changes: visibleChanges,
   result,
   previewFile,
-  previewBefore,
-  previewAfter,
+  previewContent,
+  previewLoading,
   rollback,
   rollbackAll,
 })
@@ -264,8 +264,7 @@ watch(
   (len, prevLen) => {
     if (len === 0) {
       previewFile.value = null
-      previewBefore.value = null
-      previewAfter.value = ''
+      previewContent.value = ''
     }
     if (len > 0 && (!prevLen || prevLen === 0)) {
       sideTab.value = 'changes'
@@ -540,12 +539,11 @@ function onHtmlDrop(e: DragEvent) {
       @preview="onPreviewFile"
     />
 
-    <DiffOverlay
-      v-if="visibleChanges.length && previewFile && previewBefore !== null"
+    <FileContentOverlay
+      v-if="previewFile"
       :file-name="previewFile"
-      :before="previewBefore"
-      :after="previewAfter"
-      :change-type="getChangeType(previewFile)"
+      :content="previewContent"
+      :loading="previewLoading"
       @close="previewFile = null"
     />
   </div>

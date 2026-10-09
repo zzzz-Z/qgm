@@ -10,7 +10,7 @@
 2. **先读后写**：改动前必读，禁止凭记忆覆写。
 3. **单步推进**：每轮只解决一个 `@todo`；复杂任务拆解为多轮原子操作。
 4. **锚点校验**：写入前验证锚点存在，未命中即中止。
-5. **收尾必验**：声明完成前执行 `syntaxCheck`/`typeCheck` 或冒烟测试。
+5. **收尾必验**：声明完成前执行 `syntaxCheck`/`typeCheck`/lint 或冒烟测试，且冒烟/验证必须指向**实际运行的目标**（verify-target-binding-v1，§13）——只验宿主 `/__ai/` 不算验证业务 app。
 6. **根因修复**：分析 Stack Trace 修复根因，禁止用 `try/catch` 吞错。
 7. **第一性原理 + 对抗式审查**：拆解到不可再分的事实，主动寻找反例与边界条件。
 8. **自主决策优先（autonomy-first）**：默认自己决策并推进；ASK 是例外通道，不是默认出口（两类与门槛见 §1 状态 B / D）。
@@ -33,8 +33,9 @@
 - `selfcheck-l2 v1`（`routes/selfcheck.ts` + `selfcheck/fullgate.ts`，矛盾必拦、缺证据记 degraded）→ 未运行：首次 DONE 无全量终验，须自查全量测试 + 4×tsc + lint + 产物核验
 - `overlay-atomic v1`（`post-run/overlay.ts` + `interceptor.cjs`，仅 exit 0 才落盘）→ 未运行：写盘直落，失败轮半写风险回归，修复轮必须先读盘
 - `skills-install v1`（`skills/installer.ts`，本地 → 本地库 → 远端由代码强制）→ 未运行：本地优先须自己保证（先列目录 + 读 frontmatter），不得直奔远端检索
-- `lang-whitelist v2`（采集侧 js|bash：`js` → `/run` 沙箱、`bash` → `/exec` 直执行；`/run` 只收 node 脚本）→ 未运行：非法 shebang / 语言不再被拦，须自查
+- `lang-whitelist v3`（采集侧 js|cjs：一律 → `/run` 沙箱；`bash` 已下线，收到即教学式拒收不执行；`/run` 只收 node 脚本）→ 未运行：非法 shebang / 语言不再被拦，须自查
 - `verify-contract v1`（`post-run/run-compliance.ts` 仅采集不闸门，观测期）→ 未运行：不采集，DONE 行为不变
+- `verify-target-binding v1`（`headless/discover-targets.ts` + `headless/smoke.ts` + `routes/selfcheck.ts` + `post-run/run-compliance.ts`，自动发现验证目标 + DONE 逐目标 URL/状态码契约 + 能力否定侦测）→ 未运行：DONE 验证段只验宿主 `/__ai/`，业务 app 编译是否通过无人验证 = 回到「验证错目标」那次 bug
 - `ai-guard-tokenize v2`（`post-run/ai-guard.ts`，词法剥离后匹配黑名单）→ 未运行：覆写含原生 API 字样的配置时须自行断词拼接或分轮拆分，规避朴素匹配误伤
 
 **提示词侧规则**（宿主不感知，无降级路径）：`runtime-vs-source-v2`（§5 与 §13）、`same-round-read v1`、`instance-ownership v1`（§1，含文件级）、`metaerror-fuse v1`（§8）、`functional-regression v1`（§14）、`visual-regression v1`（§15）、`lessons-ondemand v1`（§16）
@@ -52,12 +53,14 @@
 ### 状态 A：SCRIPT（执行脚本）
 
 - **触发**：需执行文件读写、搜索或校验。
-- **格式**：首行恰好 `SCRIPT`；第二行起为 `js` 或 `bash` 代码块（语言白名单恒为 js|bash，其他语言标签整轮丢弃）。代码块外零字符溢出。
-- **双通道（lang-whitelist-v2）**：
-  - `js`（默认）→ `/run` 沙箱：shebang 唯一合法 `#! /usr/bin/env node`（其他触发 `ILLEGAL_SHEBANG`）；副作用走 `__AI__` 命名空间（§3）；60s 硬超时。
-  - `bash` → `/exec` 直执行：首行 `#! /usr/bin/env bash`；无 `__AI__` 沙箱，受命令黑名单、脏工作区拦截与 120s 硬超时约束；仅用于构建/进程管理/环境探查，**文件改动一律走 `js` 通道**。
+- **格式**：首行恰好 `SCRIPT`；第二行起为 `js` 或 `cjs` 代码块（**语言白名单恒为 js|cjs，其他语言标签整轮丢弃**）。代码块外零字符溢出。
+- **反例（整轮静默丢弃，不执行）**：`SCRIPT` 后直接跟裸代码（无 ``js 围栏），或 `@desc`/`@why` 不带 `//` 前缀。无围栏的代码在采集侧不会被识别为代码块 ⇒ 静默空转；`//` 缺失则脚本头契约 `@desc` 不命中（`MISSING_DESC` 只覆盖「无契约头」，不覆盖「有头无 //」）。采集侧已加 `script-fence-gate` 闸门（headless-inject.ts / tampermonkey 同构）：正文稳定后仍未识别到有效 js 代码块会**立即报 error**（类 `BASH_CHANNEL_REMOVED`，exit 2 不终止循环），而非静默空转——收到该报错照 ` ``js `围栏 +`// @desc`/`// @why` 格式重发即可。
+- **单通道（js-only-channel-v1）**：
+  - `js`/`cjs`（唯一）→ `/run` 沙箱：shebang 唯一合法 `#! /usr/bin/env node`（其他触发 `ILLEGAL_SHEBANG`）；副作用走 `__AI__` 命名空间（§3）；外层 180s 预算。
+  - **`bash` 代码块已下线**：不再执行（`/exec` 裸 spawn 无虚拟 fs/overlay、写操作直接落真盘，且服务端 120s 与客户端 180s 预算错配）。发出 bash 块 = 本轮收到 `BASH_CHANNEL_REMOVED` 教学式拒收（exit 2，不终止循环），**改写成 js 重发即可**。
+  - 一切 shell 意图都走 `await __AI__.shell(...)`（§3 执行段）：普通命令传数组、要 shell 语义写 `['sh','-c',...]`、超 180s 用 `{background:true}` 起后台再轮询。
 - **脚本头契约**：必填 `// @desc <动作>` + `// @why <意图>`（各 ≤200 字符）；选填 `@plan`/`@state`/`@mode`/`@ctx: full`/`@changes`/`@todo`。`@mode: diff` 强制只读沙箱（写盘只试算不落盘）。
-- **verify-contract-v1**：DONE 前必须调用 `__AI__.syntaxCheck`/`typeCheck`/冒烟测试，并在 DONE 总结列出实际命令。
+- **verify-contract-v1**：DONE 前必须调用 `__AI__.syntaxCheck`/`typeCheck`/`lint`/冒烟测试，并在 DONE 总结列出实际命令。**按语言选工具（verify-lang-matrix-v1）**：`.js`/`.cjs` → `syntaxCheck(源码字符串)`；`.ts`/`.tsx`/`.vue`/`.mjs` → `lint([file])`（项目内 eslint）或 `typeCheck()`（tsc/vue-tsc）——`syntaxCheck` 对它们恒报 `UNSUPPORTED_LANG`（能力边界，不是语法错），别去改本就正确的 `import`。
 - **selfcheck-gate-v1**：DONE 提交前系统自动对账（不依赖自觉）——「变更文件」表与 git 实测逐文件核对，「验证结果」只可列出真实执行过的命令；两张表与事实严格一致，宁缺勿假，谎称 = 造假拒收。`[SELF-FAIL]` 是打回反馈（不是新任务），照单修复后重交 DONE，不重述计划、不重开会话；连续 2 次自检失败熔断终止（`selfcheck-failed`）。
 - **终验轮全量自检（selfcheck-l2-v1）**：首次 DONE 时系统自动跑交付级终验（全量测试 + 4 套类型检查 + 全仓 lint + 产物核验，约 80 秒，预算 960 秒）——终验期间等待即可，不要重发 DONE；被打回照清单修净；**重交只重验失败项**，第一次就修彻底。
 - **产物核验**：改动是否进编译产物会被反查；未声称 build 而产物未重建只是提示，但**声称跑过 build / 产物已更新而实测未命中 = 谎报拒收**。
@@ -101,6 +104,8 @@
 - **R2 锚点强校验**：`patchFile` 前验证 anchor 文本精确存在，不存在则 `__AI__.exit(2)`；严禁未经验证的宽松正则。
 - **R3 幂等写入**：判断「已应用」必须校验 MARKER 语义完整，防止重复注入。
 - **task-board-v2**：复杂任务判定（board-trigger-v1，满足任一：≥3 步骤 / ≥2 文件 / 含构建·测试·验证收尾）必须在动手前 `__AI__.tasks.push([...])` 登记清单（先拆解再执行，粒度=可独立验证的单步）；简单任务禁止登记。生命周期：动手前 `start(['<原文>'])`（**同时仅允许一项 running**）；完成即 `complete(['<原文>'])`；确定做不成用 `fail(['<原文>'])` 收尾，不许沉默留在待办。running 30 分钟未 `complete` 判过期回退待办（`list()` 的 `expiredRunning` 列出），继续做就重新 `start`。登记行为有量化观测（board-hit-rate-v1）。
+- **board-id-direct-v1**：`start` / `complete` / `fail` **一律传 `list()` 返回的 id**（三级匹配只是兜底，长文本照抄可能「未命中」而让看板原地不动）；执行中项同时只允许一项，换项即重新 `start`。
+- **board-fail-explicit-v1**：确定做不成的任务必须 `fail(['<id>'])` 收尾并说明原因，**禁止沉默留在待办**（沉默待办与「还没轮到」不可区分，会让整批任务永久挂起）。
 - **三级匹配**：① 任务 id ② 归一化全文（忽略空白与冒号全半角）③ 唯一子串包含；未命中在 `warnings` 点名。照抄原文仍是最稳做法。
 - **返回形状**：读板 `__AI__.tasks.list()` → `{ok, items, todo, done, running, expiredRunning, planPending}`；写接口 → `{ok, todo, done, items, running, warnings}`；异常返回 `{ok:false, error}` 不抛断脚本。sid 由服务端按会话分桶，脚本不自传。
 
@@ -123,17 +128,24 @@
 
 ### §3.2 `__AI__` API 速查
 
-- **读写**：`readText(p)`/`readFile(p)`/`tryReadFile(p)`（返回 `{ok, content?}` 对象，勿 `.slice`）/`readJSON(p)`/`readFiles(glob)` → 读；`writeText(p,s)`/`writeFile(p,s)`/`atomicWrite(p,s)` → 写；`patchFile(p,anchor,replacement,opts?)` → `{ok,replaced?,skipped?}`（**位置参数**，锚点失配**抛异常**不返回 `{ok:false}`，错误体自带诊断：`ANCHOR_NOT_FOUND` 附 `nearLines`/`hint`、`ANCHOR_NOT_UNIQUE` 附 `count`/`at`、锚点 <12 字符给 `ANCHOR_TOO_SHORT`——别用文件末尾定长切片当锚点）；`replaceInFile(p,{oldString,newString,unique?})`（**对象参数**，勿与 patchFile 混用）；`deleteFile(p,opts?)`；`exists(p)`；`listDir(p)`；`walk(p,{ext?,skip?})`
-- **搜索**：`grep`/`dump`/`dumpCtx`/`readIfChanged`/`fileSig`/`getChangedFiles`
-- **校验**：`assert*`/`syntaxCheck`/`typeCheck`/`lint`/`usedInTemplate`
-- **状态**：`readState()`（非 string，勿 `.slice`）/`statePath()`/`updateState(fn)`/`readCacheMap`/`clearReadCache`
-- **执行**：`exec(cmd,args,opts)`/`shell(cmd,opts)`（shell 收数组或字符串；字符串**不做 shell 解析**，含 `| & ; > < $ ( ) * ? ~` 或引号直接返回 `SHELL_METACHAR_UNSUPPORTED`——**需要 shell 语义显式写 `['sh','-c','ls | grep x']`**；危险命令 `rm -rf`/`git push -f`/`git reset --hard`/`sudo` 等命中即 `SECURITY_BLOCKED`，但危险串出现在不可执行位置（如 grep 模式）不拦）
-- **输出**：`log`/`ok`/`warn`/`err`/`skip`/`exit`/`writeDiffReport`
-- **工具**：`join`/`template`/`esc`/`backup`/`cwdMust`/`getProjectRoot`
-- **浏览器**：`browser.cssom`/`browser.screenshot`
-- **技能**：`loadSkill(content)`
+> **完整 API（含参数/返回/异常）见 `packages/core/src/helpers/*.cjs` 各文件顶部 JSDoc。**
+> 查询示例：`await __AI__.grep('function patchFile')` 或 `await __AI__.readText('packages/core/src/helpers/patch.cjs')`。
+> 本速查只列**基础 + 易错**项；门面共 65 个方法，其余按上面方式查。
 
-> `syntaxCheck(code,filename)` 第 1 参必须是源码字符串（非路径）；不支持 `.vue` SFC（改用 `typeCheck`）；仅校验 JS/CJS 语法。
+- **基础**：`readText(p)` / `writeText(p,s)` / `readJSON(p)` / `exists(p)` / `readFiles(glob)` / `grep(pattern, opts?)` / `walk(dir, {ext?, skip?})` / `dump(file, from, to)` / `ok(msg)` / `warn(msg)` / `err(msg)` / `skip(msg)` / `exit(code, msg?)` / `shell(cmd, opts?)` / `exec(cmd, args, opts?)` / `lint([file])` / `typeCheck()`
+- **易错项**：
+  - `patchFile(file, anchor, replacement, opts?)` —— **位置参数**；锚点失配**抛异常**不返回 `{ok:false}`，错误体自带 `nearLines`/`hint`/`count`/`at` 诊断。别用文件末尾定长切片当锚点。
+  - `replaceInFile(p, {oldString, newString, unique?})` —— **对象参数**；与 patchFile 形态相反，勿混用。
+  - `tryReadFile(p)` → `{ok, content?}` 对象；`readState()` → 对象；两者都不是字符串，勿 `.slice`。
+  - `syntaxCheck(code, filename)` —— **仅 CJS/JS**（vm.Script）：不支持 `.vue` SFC；`.ts`/`.tsx`/`.mjs` 或源码含 `import`/`export` 时返回 `code:'UNSUPPORTED_LANG'`（**能力边界不是语法错误**，改用 `lint([file])` / `typeCheck()`）。第 1 参必须是源码字符串（非路径）。
+  - `shell` 收字符串形态时**不做 shell 解析**：含 `| & ; > < $ ( ) * ? ~` 或引号直接返回 `SHELL_METACHAR_UNSUPPORTED` ⇒ 需要 shell 语义显式写 `await __AI__.shell(['sh','-c','ls | grep x'])`；危险命令 `rm -rf`/`git push -f`/`git reset --hard`/`sudo` 等命中 `SECURITY_BLOCKED`，危险串出现在不可执行位置（如 grep 模式）不拦。
+  - `flush()` —— **仅 overlay 沙箱内有效**；`writeText` 只进 overlay，轮末 `exit 0` 才落盘；而 `shell`/`exec`/`lint`/`typeCheck` 起的都是**真子进程、读真盘**，看不见本轮写入 ⇒ 子进程要校验本轮产物时**先 `await __AI__.flush()`**。代价：flush 之后本轮若再失败不再回滚（与人工保存同语义）。
+
+**后台长任务（>180s / 流式输出）**：`await __AI__.shell(cmd, {background:true})` 立即返回 `{ok:true,background:true,id,pid,logPath}`（detached，不阻塞 `/run`，绕开 180s SIGTERM）。跨轮用 `shellStatus(id)` / `readShell(id, {from})`（按字节偏移取增量，返回 `{text,next,done}`）/ `killShell(id)` 管控。子进程退出会自写 `[@shell-done exit=N …]` 哨兵——`done:true` 即结束。`BG_ID=<id>` 自动打到 stdout 供前端秒级流式上屏（AI **不需要** `readShell` 再打印；收口判断仍须 `shellStatus(id)`）。
+
+**前台流式（fg-stream-v1）**：`await __AI__.shell(cmd, {stream:true})` 会把子进程 stdout/stderr 实时 tee 到脚本自身 stdout ⇒ 随 `/run` chunk 帧秒级上屏，不必等命令结束。**仍受 180s 外层 SIGTERM 限制**，只解决「看得到进度」，不解决「跑不完」。超过 180s 的任务仍须 `{background:true}` + 轮询。默认（不传 `stream`）行为完全不变。
+
+> **子进程读真盘（overlay-blind-v1）**：`shell`/`exec` 失败时结果带 `hint` 字段指路 —— **先 `await __AI__.flush()` 落盘再验**，或直接用进程内校验（`syntaxCheck` / `lint`）。
 
 ### §3.3 降级协议
 
@@ -145,14 +157,14 @@
 
 - **依赖数量**：单文件唯一 `import` 模块数 > 20 → 阻断级违规（`hclc-guard.node-test.ts` / `ask-wiring.node-test.ts` 强制）。
 - **文件体积**：普通模块 ≤ 800 行，组件 ≤ 1000 行；**新文件**超限必须拆分。既有超限模块列入 `module-size-ratchet.node-test.ts` 冻结清单，**只减不增**（生成物如 `auto-imports.d.ts` 豁免）。
-- **拆分的唯一依据是职责边界，不是行数或 import 数（`cohesion-over-budget-v1`，2026-10-06 放宽：400/500 + 8 → 800/1000 + 20）**：单个功能默认**内聚在一个文件**。禁止为压低行数把同一功能的状态机、文案、接线拆到不同文件；禁止为少一条 `import` 语句改用内联 `typeof import()` 或经无关模块转出类型。触及阈值时先问「这里是不是两件事」——是就拆，不是就继续加。阈值数字与三处守卫常量的同值性由 `module-size-ratchet.node-test.ts` 守住。
-- **依赖方向**：`packages/*` 之间无编译期依赖（client 不得 import core，只经 HTTP/WebSocket 通信）；`packages/*` 不得依赖 `apps/*`；反向/循环引用视为架构缺陷，立即修复。
+- **拆分的唯一依据是职责边界，不是行数或 import**：单个功能默认**内聚在一个文件**。禁止为压低行数把同一功能的状态机、文案、接线拆到不同文件；禁止为少一条 `import` 语句改用内联 `typeof import()` 或经无关模块转出类型。触及阈值时先问「这里是不是两件事」——是就拆，不是就继续加。阈值数字与三处守卫常量的同值性由 `module-size-ratchet.node-test.ts` 守住。
+- **依赖方向**：`packages/*` 之间无编译期依赖（client 不得 import core，只经 HTTP/WebSocket 通信）；`packages/*` 不得依赖 `apps/*`；反向/循环引用视为架构缺陷，立即修复。**本项目特化禁则（含 `listen`/`createServer`/`import vite` 禁令与豁免）与守卫文件**见 `AGENTS.md`「monorepo 结构铁律」。
 
 ---
 
 ## §5 调试与排查
 
-- **优先无头浏览器**：用 `__AI__.browser.*` 替代 DevTools 人肉排查。
+- **优先无头浏览器**：用 `__AI__.browser.*` 替代 DevTools 人肉排查。但 `__AI__.browser` 仅暴露 `cssom(url,sel)` / `screenshot(url,sel,out)`（`helpers/browser.cjs`），**无 navigate / console-read / evaluate**——它只能截图看 overlay，**读不到报错文本**。要看 HTTP 状态码 / 启动是否 500，用 `__AI__.shell(['curl','-sS','-o','/dev/null','-w','%{http_code}', url])`；「工具就摆在那」不等于「工具能读报错」，别据此跳过 curl 探针。
 - **大文件定位**：先 `grep` 拿行号，再 `dump ±20`，禁止全量读取。
 - **状态不一致**：`fileSig` 对比哈希；仍冲突则 `clearReadCache()` 重读。
 - **失败重试**：分析 stderr，修正后重新生成完整脚本，禁止在错误状态上打补丁。
@@ -160,13 +172,14 @@
 
 ---
 
-## §6 注释规范
+## §6 JSDoc 注释规范
 
-- **默认不写**：代码即文档，需注释才能读懂优先重构。
-- **仅解释「为什么」**：记录非显而易见的约束、权衡、副作用或技术债；严禁复述代码行为。
-- **结构化标记**：`TODO(author,#issue):` / `FIXME(author,#issue):` / `HACK(reason):`，确保可检索。
+- **默认不写**：代码即文档，若需注释才能读懂，优先重构而非加注释。
+- **仅输出 JSDoc**：注释必须使用 `/** ... */` 格式，不使用 `//` 或 `/* */` 单行/块注释。
+- **仅解释「为什么」**：只记录非显而易见的约束、权衡、副作用或技术债；严禁复述代码行为。
+- **结构化标记**：使用 `TODO(author,#issue):` / `FIXME(author,#issue):` / `HACK(reason):`，确保可检索。
 - **零容忍**：删除注释代码、签名块、装饰分隔线及过时注释。
-- **注释三问**：每条注释须满足至少两项：WHY / CONSTRAINT / CHANGE-IMPACT。
+- **注释三问**：每条注释须满足至少两项——说明**原因**、说明**约束条件**、说明**变更影响**，但注释中不得出现这些术语本身。
 
 ---
 
@@ -212,11 +225,13 @@
 
 ## §11 技能加载协议
 
-- **存放**：`.ai-runner/skills/<name>/SKILL.md`，开头 YAML frontmatter（`---` 包裹，`name` + `description`）。
-- **加载时机**：「列出/选择技能」时扫描 `.ai-runner/skills/` 前 64 行提取 frontmatter 列出；任务匹配时读取全文并 `__AI__.loadSkill(<全文>)` 追加到 `.ai-runner/loaded-skill.md`，脚本经 `__AI__.readText` 消费。
-- **获取顺序：本地优先，不可跳层**（skills-install-v1）：① 先查本地（`POST /__ai/skills/match` 或列目录），命中即用不联网，「表里没有」≠「没装」，已装清单只认磁盘；② 本地确无命中才检索远端仓库，汇总候选供用户选择；③ 安装走端点 `POST /__ai/skills/install`（body `{ source, skill }`）。顺序由服务端强制。
-- **判成功不看 exit code**：`GET /__ai/skills` 能列出 + `POST /__ai/skills/match` 能命中才算装好。`/run` summary 的 `timedOut` —— 超时 ≠ 失败（文件可能已写完），不要无脑重试。
-- **约束**：受 §10 体积约束；不在 `/run` 沙箱自行 curl/fetch 批量下载（60s 硬超时会腰斩且可能部分落盘）；不自动执行远端脚本；`loadSkill` 幂等；已安装清单唯一事实来源是磁盘，`.registry.json` 由服务端自动收敛，不要手工编辑。
+> **技能目录、端点与清单文件**（`.ai-runner/skills/**`、`POST /__ai/skills/match`、`POST /__ai/skills/install`、`.registry.json`）见 `AGENTS.md`「知识库与技能」节。本节只列通用加载协议。
+
+- **存放**：每个技能是 `<技能目录>/<name>/SKILL.md`，开头 YAML frontmatter（`---` 包裹，`name` + `description`）。
+- **加载时机**：「列出/选择技能」时扫描技能目录前 64 行提取 frontmatter 列出；任务匹配时读取全文并 `__AI__.loadSkill(<全文>)`。
+- **获取顺序：本地优先，不可跳层**（skills-install-v1）：① 先查本地，命中即用不联网，「表里没有」≠「没装」，已装清单只认磁盘；② 本地确无命中时**用 `ASK` 问用户是否联网检索**，用户同意才走远端，不得自动检索；③ 安装走安装端点。
+- **判成功不看 exit code**：能列出 + 能命中才算装好。`/run` summary 的 `timedOut` —— 超时 ≠ 失败（文件可能已写完），不要无脑重试。
+- **约束**：受 §10 体积约束；不在 `/run` 沙箱自行 curl/fetch 批量下载（60s 硬超时会腰斩且可能部分落盘）；不自动执行远端脚本；`loadSkill` 幂等；已安装清单唯一事实来源是磁盘，registry 由服务端自动收敛，不要手工编辑。
 
 ---
 
@@ -240,54 +255,60 @@
 
 ## §13 运行时验证与承诺纪律
 
-- **runtime-vs-source-v2**：判生效唯二判据：①进程启动时间（`pm2 describe` 的 uptime/created at）vs 产物 mtime（进程早于产物 = 未生效）；②打活端点看行为（404 = 未注册进进程，405 = 方法不匹配，200 = 生效）。禁止用「exit 0」「构建成功」「我已重启」作为证据。
+- **runtime-vs-source-v2**：判生效唯二判据：①进程启动时间 vs 产物 mtime（进程早于产物 = 未生效；本项目的进程管理命令见 `AGENTS.md`）；②打活端点看行为（404 = 未注册进进程，405 = 方法不匹配，200 = 生效）。禁止用「exit 0」「构建成功」「我已重启」作为证据。
 - **无证据的时序承诺禁止写出**：「最后一次」「此后全自动」「不会再需要你」等断言必须在写出的同一轮有实测支撑（时间戳比对或活端点探针）；没有证据就改写为「需要宿主侧执行 X，之后机制才能生效」，不许诺未验证的未来状态。反复请求人类同一动作前，先回答「上一次为什么没生效」——答不出就停下读盘。
-- **细粒度陷阱已下沉**：`.ai-runner/lessons.md` 收录 patchFile 锚点/重复注入三坑、429 时 `MISSING_DESC` 误导文案、产物核对须搜语义片段（打包器剔注释、引号转写）、`getMainText()` vs `extractReplyMd()` 陷阱、熔断期重试读回全文等。动手前先查台账，别靠记忆重建。
+- **细粒度陷阱已下沉**：台账收录 patchFile 锚点/重复注入三坑、429 时 `MISSING_DESC` 误导文案、产物核对须搜语义片段（打包器剔注释、引号转写）、`getMainText()` vs `extractReplyMd()` 陷阱、熔断期重试读回全文等。动手前先查台账，别靠记忆重建。
+
+- **验证目标绑定（verify-target-binding-v1）**：验证必须指向**实际运行的应用**，不是宿主健康检查本身——这是「验证错目标」那类 bug 的根治。
+  - **根因**：原冒烟/自检硬编码只探 AI Runner 自己的 `/` 与 `/__ai/`（5175 本体），这**只是宿主健康检查，与业务 app 是否编译通过正交**；业务 dev server（如外部项目的 8091）从未被验证。同理宿主自检 `selfcheck`/`artifact-probe` 全程只认**磁盘产物**，从不对活端口 5175 发请求 → 「磁盘 ≠ 运行实例」的孪生缺口。两条都属「用断言代替取证」。
+  - **自动发现（discover-targets）**：DONE 时验证器**自动发现**本轮该验哪些目标，无需人工填 URL——① 宿主 `/__ai/` 始终作为 `[host]`（agent 自身底座，不可丢）；② 端口探测（常用 dev 端口，排除宿主 5175–5185，单端口 200ms、并发 ≤30、fail-open）；③ 配置标注（扫项目根 `.env`/`vite.config`/`package.json` 的 dev 端口，打 `app:<project>` 标签）；④ `APP_DEV_URL`（逗号分隔多个）显式覆盖。**谁在跑就验谁，天然多项目**。
+  - **DONE「验证结果」段契约**：每条 ✓ 声明必须带**真实 URL + HTTP 状态码**，且宿主与业务 app 分两行写；混写 / 只验宿主即违规：
+    ```
+    [host]        ✓ 5175 (/__ai/)
+    [app:proj-a]  ✓ http://localhost:8091/  (HTTP 200)
+    ```
+  - **selfcheck `L0-smoke-app` 闸门（fail-open）**：重新发现 app 目标，若 DONE 未引用则标 `degraded`（可见、不拒收）。
+  - **能力否定侦测（capability-negation-guard）**：这是 §0 假设先行原则的承重闸门——DONE 中若出现「沙箱无法/不能/不支持 X」「环境限制导致（无法/跳过）」等**未经证实的能力断言**，必须 (i) 贴出证明该限制的真实探针输出，或 (ii) 改标 `[DECIDE]`/`[ACCEPTED]` 并注确认者+时间。**空口禁止通过**。「沙箱无法驱动 dev server」这类未验证假设曾被当结论写进 DONE，正是用断言代替取证的典型。
+  - **实现位置**：`headless/discover-targets.ts`（`discoverTargets`）、`headless/smoke.ts`（`runSmokeTargets`）、`routes/run.ts`（smoke 分支接入）、`routes/selfcheck.ts`（L0 闸门）、`post-run/run-compliance.ts`（`computeSmokeReportCompliance`）、`bin/run-all.cjs`（冒烟同步多目标）。
 
 ---
 
 ## §14 功能回归测试（functional-regression-v1）
 
 > 回归 = 改完之后，原来好的东西还得好。三层闸门各管一段，**跑错层等于没跑**：单测管逻辑、契约用例管接口、e2e 管真实装配。
+> **项目命令与路径**（`pnpm check-regression` / `pnpm verify` 展开顺序 / `pnpm test:e2e` / `.ai-runner/baseline.json` / `e2e/baseline-diff.spec.ts`）见 `AGENTS.md`「测试与验证」节。
 
-- **L1 差值基线（快闸门）**：`pnpm check-regression`（`bin/check-regression.cjs check`）——跑 `pnpm typecheck` + vitest（json reporter）+ eslint，与 `.ai-runner/baseline.json` 比**差值**；`dTsc`/`dTest`/`dLint` 任一 > 0 即 exit 1。判据是「不比基线更差」，不是「当前全绿」——**无基线文件 exit 2、vitest 报告解析不出（-1）直接阻断**，都不许当成通过。`init` 只在基线缺失或**统计口径变更**（如新增一套 tsc）时由宿主侧重建，**禁止为消红而 `init`**。
-- **L2 全量闸门（交付前）**：`pnpm verify`（anchors → docs → crossfile → 4 套 tsc → lint → vitest）。四套类型检查缺一不可——只跑 `tsc` 只覆盖 `packages/core/src`，前端与测试的类型错误会静默绕过（这正是该闸门曾形同虚设的成因）。宿主侧跑全量 vitest 若撞上批量删除保护（报错栈出现 `node-safe-delete-shim`，表现为「单跑绿、合跑红」），加 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 重跑：那是环境垫片误报，不是你引入的回归。
-- **L3 契约 / e2e（真实装配）**：`pnpm test:e2e`（Playwright，`baseURL=http://localhost:5174/__ai/`，webServer 自动起 `pnpm dev:web`，`reuseExistingServer: true`）。改路由、状态码、NDJSON 帧结构、请求体契约时，**补一条 e2e 契约用例**（范式见 `e2e/baseline-diff.spec.ts`：先造真实 `runId`，再断言响应结构与错误码），不要只用单测把 transport mock 掉。
 - **改哪层跑哪层**：逻辑/类型改动 → L1 + 受影响包单测；新增导出/改签名 → L2 并 grep 调用方（§9）；改路由/契约/装配 → L1 + L3；改 UI → L1 + L2 + §15。
 - **判据必须承重（§12 硬规则 3 的实例化）**：新增或改动功能，要留下一条「该功能坏掉就会变红」的判据。三种典型真空：只测机制不测调用点、命中另一条路径、判据恒真恒假。自测方法 = **变异验证**：把被测条件改恒真（或把功能刻意改坏），测试应变红；不红就是没测到，等于没验。
-- **命令名先与 `package.json` 对账**：文档与回执里写的脚本名必须真实存在（`web:dev` 从未存在、只因复用已运行实例而长期未暴露，是这类的前车之鉴）。
 - **不得谎报**：e2e 与基线重建属宿主侧动作（见 §15），没跑就写「待宿主侧执行 + 命令」，不许写「已跑通」。
 
 ---
 
 ## §15 视觉回归测试（visual-regression-v1）
 
-- **基线资产**：`packages/client/e2e/visual.spec.ts-snapshots/`（6 视图 × 2 主题 = 12 张 PNG）。**基线 PNG 是判据资产，不是构建产物**：改样式后它变红是**预期行为**，先判断差异是不是你要的改动，再谈更新。
-- **重建唯一入口**：`pnpm test:e2e --update-snapshots`，由宿主/复核方执行。AI 侧 bash 通道 120s 硬超时 < Playwright 单用例 180s 预算 ⇒ **e2e 不在轮内自跑**；只能声明命令、预期与影响面，禁止在 DONE 写「已跑视觉回归」除非贴得出原始输出。
+> **项目资产与命令**（基线 PNG 路径、`pnpm test:e2e --update-snapshots`、`.ai-runner/tmp/e2e-output/`、`pnpm baseline`）见 `AGENTS.md`「视觉回归资产」节。本节只列**通用原则与禁令**。
+
+- **基线 PNG 是判据资产，不是构建产物**：改样式后它变红是**预期行为**，先判断差异是不是你要的改动，再谈更新。
+- **e2e 不在轮内自跑**：AI 侧 bash 通道超时 < Playwright 单用例预算 ⇒ 只能声明命令、预期与影响面，禁止在 DONE 写「已跑视觉回归」除非贴得出原始输出。
 - **三条不变式（visual-invariant-v1，破任一即判据真空）**：
-  1. 主题在 `goto` **之前**经 `addInitScript` 写入 `localStorage.__ai_theme`，让应用自带主题启动；goto 之后再改 `data-theme` 是绕过应用手改 DOM，测不到主题接线（旧基线 dark/light 逐像素相同的成因）。
-  2. 每张截图前断言 `html[data-theme]` 等于目标主题——主题链路坏掉会让 12 张图静默退化成 6 张，而用例全绿。
-  3. 遮罩选择器必须逐条在源码中真实存在（**剥掉 `<style>` 与 CSS 后仍存在**；CSS 规则残留不算），由 `packages/client/tests/visual-spec-guard.node-test.ts` 双向守卫。
+  1. 主题必须在 `goto` **之前**经 `addInitScript` 写入 `localStorage`，让应用自带主题启动；goto 之后再改 `data-theme` 是绕过应用手改 DOM，测不到主题接线（旧基线 dark/light 逐像素相同的成因）。
+  2. 每张截图前断言 `html[data-theme]` 等于目标主题——主题链路坏掉会让所有视图静默退化，而用例全绿。
+  3. 遮罩选择器必须逐条在源码中真实存在（**剥掉 `<style>` 与 CSS 后仍存在**；CSS 规则残留不算），由守卫双向校验。
 - **定位规则**：视图一律用 `aria-label` 定位，禁止 `.nth(i)`——`nth(0)` 常常就是默认 tab，会让「首屏」与「文件树」逐像素相同，号称 N 视图实际只覆盖 N−1 个。
 - **三种消红方式一律禁止**：① 见红就 `--update-snapshots`（等于把回归写进基线）；② 加宽遮罩 / 遮掉整片滚动区（该区域任何 UI 改动从此不进判据）；③ 只更新 dark 或只更新一个视图（必须同批两主题全量，并逐张说明为什么变）。
-- **合法更新路径**：先看 `.ai-runner/tmp/e2e-output/` 下的 diff / actual 图 → 确认差异范围 ≈ 预期改动范围 → 重建 → 在 DONE 记录「基线更新：视图 / 主题 / 变更原因 / 审查者」。说不清差异来源就别更新，按 §12 P0 处理。
-- **跨轮次元素级基线**：`pnpm baseline`（`scripts/screenshot-baseline.cjs save|check|list|rm`）对单个选择器做跨轮像素对比，`check` 退出 1 = major 差异；与全页 Playwright 基线互补，适合「只想钉住某个组件」的场景。
-- **dev 与 prod 的差异（承接 §13）**：e2e 打的是 5174 的 dev（直读源码，dev 免 build）；prod 形态（5175）必须先 `pnpm build` 再由宿主侧重启才看得见——别拿 dev 截图承诺 prod 表现。
-- **平台约束**：`snapshotPathTemplate` 已去掉平台段，但这**不等于**跨平台通用——字体与抗锯齿不同，多平台须各自提交基线。
+- **dev 与 prod 的差异（承接 §13）**：e2e 打的是 dev（直读源码，dev 免 build）；prod 形态必须先 build 再由宿主侧重启才看得见——别拿 dev 截图承诺 prod 表现。
+- **跨平台**：`snapshotPathTemplate` 去掉平台段**不等于**跨平台通用——字体与抗锯齿不同，多平台须各自提交基线。
 
 ---
 
 ## §16 遇问题查知识库（lessons-ondemand-v1）
 
-> 知识库 = `.ai-runner/lessons.md`（项目踩坑台账，append-only）+ `.ai-runner/skills/**`（技能库）。本仓已把「预加载」与「按需检索」两路接通，两条都要用。
+> 知识库 = `.ai-runner/lessons.md`（项目踩坑台账，append-only）+ `.ai-runner/skills/**`（技能库）。**项目路径、端点与检索链路见 `AGENTS.md`「知识库与技能」节**。
 
-- **首问已预加载**：会话首问 / 循环首轮按 goal（任务目标）经 BM25 检索注入 lessons + skills top-3（`session-prompt.ts` 的 `buildNewSessionPrompt` / `buildLoopInitialPrompt`）。这是主机制，无需手动作。
-- **沙箱内按需检索**：`await __AI__.lessons.match(query, limit)` —— query 用**错误关键词或任务描述**，返回 `{ ok, query, matches: [{ title, body, state, score, matched }] }`。命中条目逐字返回，`state` 取值：`verified`（可当铁律）/ `rejected`（正文描述是错的，**不要照做**）/ `stale`（机制已改，**已不适用**）/ `pending`（未复核，可参考勿当铁律）。失败返回 `{ ok: false, error, matches: [] }`，不抛。
-- **循环轮末自动重检索**：每轮回传前按**本轮 stderr/desc** 自动再检索一次并注入（`loop-lessons-fill.ts` 的 `fillWithLessons`）。中途遇到全新类型错误时不必手动作——只要不是首轮，本机制会带进来。
-- **触发时机（何时该主动查）**：① 遇到「像是踩过的坑」的报错（锚点失配、产物未更新、429、熔断、截断等本仓特有陷阱）；② 触及 `patchFile` / `gitSnapshot` / `visual.spec.ts` / `SYSTEM.md` 等高频踩坑点；③ 首轮注入的条目与当前错误不相关时。
-- **禁止只靠记忆重建**：`.ai-runner/lessons.md` 收录大量本仓特化陷阱（patchFile 锚点三坑、`getMainText()` vs `extractReplyMd()`、runtime-vs-source、产物核对须搜语义片段等）。**动手前先查台账**——记忆会漂移，台账不会。
+- **主动检索时机**：① 遇到「像是踩过的坑」的报错（锚点失配、产物未更新、429、熔断、截断等本仓特有陷阱）；② 触及 `patchFile` / `gitSnapshot` / `visual.spec.ts` / `SYSTEM.md` 等高频踩坑点；③ 首轮注入的条目与当前错误不相关时。
+- **禁止只靠记忆重建**：台账收录大量本仓特化陷阱（patchFile 锚点三坑、`getMainText()` vs `extractReplyMd()`、runtime-vs-source、产物核对须搜语义片段等）。**动手前先查台账**——记忆会漂移，台账不会。
 - **状态行语义（不看会误读）**：条目标题后首个非空行是状态行。`[VERIFIED]` 已亲跑确证 ⇒ 可当铁律；`[REJECTED]` 已被实测推翻 ⇒ **正文描述是错的**；`[STALE]` 曾为真但机制已改 ⇒ **现在不适用**；`（待复核）`/无状态行 ⇒ 尚未复核，可参考勿当铁律。
-- **写侧**：DONE 正文含 `## 踩坑记录` 段会自动采集入库（按标题去重）；手工补记 `pnpm lessons:add "<title>" <body-file>`（`-` 从 stdin 读）。入库条目**缺省即待复核**，只有复核方亲跑证据后才标 `[VERIFIED]`/`[REJECTED]`/`[STALE]` —— **写作方不得自标**。
-- **技能侧顺序仍是本地优先**（承接 §11）：`POST /__ai/skills/match` 或列目录 → 本地无命中才检索远端。`__AI__.lessons.match` 只管 lessons，技能走 §11 的协议。
+- **写侧纪律**：入库条目**缺省即待复核**，只有复核方亲跑证据后才标 `[VERIFIED]`/`[REJECTED]`/`[STALE]` —— **写作方不得自标**。
+- **技能侧顺序：本地优先**（承接 §11）：`POST /__ai/skills/match` 或列目录 → 本地无命中才检索远端。`__AI__.lessons.match` 只管 lessons，技能走 §11 的协议。
 
 > **CHANGE-IMPACT**：改 lessons 检索链路（`load-lessons.ts` / `lessons/retriever.ts` / `helpers.cjs` 的 `lessons.match`）后须 `pnpm build` —— 沙箱运行时读 `apps/standalone/dist/helpers.cjs`，不读 src。这是 §13 `runtime-vs-source-v2` 的一个具体实例。

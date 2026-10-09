@@ -1,5 +1,9 @@
 /* [terminal-style-extract-v1] 从 TerminalPane.vue 抽出，解除 500 行红线。 */
 
+// [md-table-shared-v1] markdown 表格样式单点源（此前此处、file-tree.scss、FileContentOverlay.vue
+//   各抄一份且已漂移）——表格挤成竖排单字时改这一处即可，三处消费方同步生效。
+@use '../../styles/md-table.scss' as mdtable;
+
 /* [font-weight-light-v1] 全文字重降一档：600→500、500→400，对齐 TRAE 视觉轻量化 */
 /* TerminalPane styles — 合并历史 7 层覆盖为单层
  * [WHY] 早期迭代逐层叠加 !important（同选择器 5+ 处定义），视觉溯源困难；本合并层按最终生效值统一
@@ -23,6 +27,8 @@
   @apply flex flex-col flex-nowrap items-stretch justify-start gap-0 overflow-hidden;
   padding: 0;
   min-height: 0;
+  /* [wait-banner-overlay-v1] 底部 50px 安全带：wait-banner 浮层化后悬浮于此带内
+   * （absolute bottom:12px + 自高约 32px < 50px），不遮挡 chat-list 内容 */
   padding-bottom: 50px;
   max-height: none;
   background: transparent;
@@ -73,6 +79,20 @@
   color: var(--text-2);
   /* 滚动条细淡（替代 4 条 ::-webkit-scrollbar 规则） */
   @apply scroll-thin;
+}
+
+/* [chat-autofollow-v1] 内容 wrapper：承接原 chat-list 的纵向 flex 语义，
+ * 供 ResizeObserver 观察内容总高（观察 chat-list 自身只会看到视口盒，看不到内容长高）。
+ * 树内 .tree-empty 的 flex:1 / margin:auto 相对它布局，语义与原先一致。 */
+.chat-list-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  gap: 6px;
 }
 
 /* ── 空态 ─────────────────────────────────────────── */
@@ -490,32 +510,6 @@
   font-weight: 400;
   color: var(--text, #e6edf3);
 }
-.done-summary-body :deep(table) {
-  width: 100%;
-  margin: 10px 0 14px;
-  border-collapse: collapse;
-  font-size: 13px;
-  table-layout: auto;
-}
-.done-summary-body :deep(thead) {
-  display: table-header-group;
-}
-.done-summary-body :deep(th),
-.done-summary-body :deep(td) {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border, #30363d);
-  text-align: left;
-  vertical-align: top;
-}
-.done-summary-body :deep(th) {
-  font-weight: 400;
-  color: var(--text-2, #c9d1d9);
-  background: transparent;
-  border-bottom: 1px solid var(--border, #30363d);
-}
-.done-summary-body :deep(td) {
-  color: var(--text, #e6edf3);
-}
 .done-summary-body :deep(ul),
 .done-summary-body :deep(ol) {
   margin: 6px 0 10px;
@@ -555,14 +549,26 @@
   font: 12px var(--mono, monospace);
   color: var(--text-2, #c9d1d9);
 }
+// [md-table-shared-v1] 表格（横向滚动壳 + 不逐字断行）由共享 mixin 提供
+@include mdtable.md-table('.done-summary-body');
 /* ── 等待 AI 回复指示条 ─────────────────────────── */
+/* [wait-banner-overlay-v1] 浮层化：absolute 悬浮于 .flow-timeline 底部安全带（padding-bottom:50px）内。
+ * [WHY] 原为文档流元素：出现时把 flex:1 的 chat-list 压矮 ~48px ⇒ 原本贴底的最新一条
+ *   被顶出视野（用户实测截图：脚本记录被「AI 思考中」半遮），消失时又跳回 ⇒ 抖动。
+ * [CONSTRAINT] 用 left/right + margin:auto 而非 translateX(-50%) 居中——
+ *   wait-fadein 动画的 transform 会覆盖 translateX，导致动画结束后水平位置跳变。 */
 .wait-banner {
+  position: absolute;
+  bottom: 12px;
+  left: 0;
+  right: 0;
+  z-index: 20;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  align-self: center;
-  margin: 0 auto 14px;
+  width: fit-content;
+  margin: 0 auto;
   padding: 7px 16px;
   background: var(--primary-bg);
   border: 1px solid rgb(88 166 255 / 24%);

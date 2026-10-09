@@ -28,6 +28,7 @@ import {
   appendTestReport,
   appendTscReport,
 } from './prompt-builder'
+import { fetchBoardMirror } from '../../composables/ai/board-mirror'
 import type { AttachedFile } from './attach-manager'
 import type { Change, RunResponse } from '../../types'
 import {
@@ -108,6 +109,12 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
     await appendBaselineChanges(p, r, errorLocs)
     appendClaimMismatch(p, r)
     appendRawOutputs(p, r)
+    // [board-mirror-v1] 看板状态常驻上下文：把未完成任务（带 id）+ start/complete/fail 规则递给 AI
+    // [CONSTRAINT] 抓取失败 / 无未完成任务 ⇒ 空串，不追加任何行（与 lessons 同纪律）
+    try {
+      const board = await fetchBoardMirror()
+      if (board) { p.push(''); p.push(board) }
+    } catch { /* 看板不可用时不影响结果回传 */ }
     p.push('')
     p.push('下一个回答必须以 SCRIPT 开头且只输出脚本，不要输出任何文本总结。')
     return p.join('\n')

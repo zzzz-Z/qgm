@@ -7,6 +7,11 @@
       "url": "https://github.com/antfu/skills/blob/HEAD/skills/antfu/SKILL.md"
     },
     {
+      "name": "antfu-create-pr",
+      "source": "antfu/skills",
+      "url": "https://github.com/antfu/skills/blob/HEAD/skills/antfu-create-pr/SKILL.md"
+    },
+    {
       "name": "browser-testing-with-devtools",
       "source": "addyosmani/agent-skills",
       "url": "https://github.com/addyosmani/agent-skills/blob/HEAD/skills/browser-testing-with-devtools/SKILL.md"
@@ -25,6 +30,21 @@
       "name": "hono",
       "source": "honojs/skills",
       "url": "https://github.com/honojs/skills/blob/HEAD/skills/hono/SKILL.md"
+    },
+    {
+      "name": "nitro",
+      "source": "antfu/skills",
+      "url": "https://github.com/antfu/skills/blob/HEAD/skills/nitro/SKILL.md"
+    },
+    {
+      "name": "nuxt",
+      "source": "antfu/skills",
+      "url": "https://github.com/antfu/skills/blob/HEAD/skills/nuxt/SKILL.md"
+    },
+    {
+      "name": "pinia",
+      "source": "antfu/skills",
+      "url": "https://github.com/antfu/skills/blob/HEAD/skills/pinia/SKILL.md"
     },
     {
       "name": "playwright",
@@ -105,6 +125,11 @@
       "name": "vite",
       "source": "antfu/skills",
       "url": "https://github.com/antfu/skills/blob/HEAD/skills/vite/SKILL.md"
+    },
+    {
+      "name": "vitepress",
+      "source": "antfu/skills",
+      "url": "https://github.com/antfu/skills/blob/HEAD/skills/vitepress/SKILL.md"
     },
     {
       "name": "vitest",

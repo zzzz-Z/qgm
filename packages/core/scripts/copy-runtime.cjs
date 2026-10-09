@@ -19,6 +19,18 @@ for (const f of files) {
   else { console.log(`skip (missing) ${f}`)
   }
 }
+// [helpers-index-v1] helpers/ 子目录随包发布：index.cjs require ./io.cjs 等同级子文件，
+//   [CONSTRAINT] 保持目录层级不变；漏拷子目录 = 运行时 MODULE_NOT_FOUND
+const helpersSrc = path.join(SRC, 'helpers')
+const helpersDst = path.join(DIST, 'helpers')
+if (fs.existsSync(helpersSrc)) {
+  fs.mkdirSync(helpersDst, { recursive: true })
+  for (const f of fs.readdirSync(helpersSrc)) {
+    if (!f.endsWith('.cjs')) continue
+    fs.copyFileSync(path.join(helpersSrc, f), path.join(helpersDst, f))
+    console.log(`copied helpers/${f}`); n++
+  }
+}
 
 // [preset-rules-move-v1] SYSTEM.md 从 src/rules/ 上移到包根；同步单文件到 dist/SYSTEM.md
 // WHY: /__ai/preset/system 依赖 dist/SYSTEM.md 存在；不复制则发布态 404

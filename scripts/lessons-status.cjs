@@ -115,4 +115,4 @@ if (has('--json')) {
 }
 
 // 缺省恒 0：待复核是待办而非错误。--strict 供闸门按需升级为阻塞信号。
-process.exit(has('--strict') && s.pending > 0 ? 3 : 0)
+process.exitCode = has('--strict') && s.pending > 0 ? 3 : 0

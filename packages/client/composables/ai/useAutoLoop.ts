@@ -19,8 +19,7 @@ import { runHook } from './auto-loop/hooks.js'
 // AIRUNNER-BATCH5-0A-TYPES-SPLIT
 import type { LoopInstance, LoopState } from './auto-loop/types.js'
 import { persist, restore } from './auto-loop/persist.js'
-// [run-bash-v1]
-import { runBash } from './auto-loop/run-bash.js'
+// [js-only-channel-v1] runBash 已下线（AI 侧 bash 分支改为教学式拒收），本文件不再装配
 import { createRoundGuards } from './auto-loop/round-guards.js'
 import { createWaiting } from './auto-loop/waiting.js'
 import { disarmTimer } from './auto-loop/timers.js'
@@ -202,7 +201,6 @@ const { onScriptArrival, onNonScriptReply } = createReplyHandlers({
   disarmTimer,
   bindKeyboard,
   runHook,
-  runBash,
   useRunner,
   persist,
   isStrictDone,

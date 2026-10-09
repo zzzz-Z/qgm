@@ -34,15 +34,41 @@ const FALLBACK_RE = /\/\/\s*(?:[\u26A0!]\s*)?__AI__\.\w+\s+not found/i
 /** 注入标识：命中后 injectAiJsdoc 幂等 */
 const INJECT_MARK = '[__AI__-injected-v1]'
 
-/** 注入到脚本顶部的 __AI__ API 速查 JSDoc */
+/**
+ * 注入到脚本顶部的 __AI__ API 最小清单（每轮强制注入）。
+ *
+ * [api-surface-parity-v1] 本块是**每轮强制注入**的教学层，错了会直接教坏 AI。
+ * 历史三处漂移（均已修，作为不再回退的锚点）：
+ *   ① `patchFile(p, { find, replace })` —— 谎报对象参数（真实是位置参数）；
+ *   ② `exists(p)` —— io.cjs 有实现但门面漏转发，照抄恒 TypeError；
+ *   ③ `listDir(p)` —— 全仓无任何实现（幻觉 API），列目录用 `walk(p, { ext?, skip? })`。
+ *
+ * [design-v1] 为何瘦身：教学层与源码签名**双写**是历史漂移的根源（改一处漏一处）。
+ * 本块只列**基础 + 易错**项；其余签名的唯一 SSOT 是 `packages/core/src/helpers/*.cjs`
+ * 各文件顶部 JSDoc。AI 需要查具体签名时，用 `__AI__.grep('function <name>')` 或
+ * `__AI__.readText('packages/core/src/helpers/<file>.cjs')` 读源码。
+ *
+ * [CONSTRAINT] 改本块前先实测：`require('./helpers.cjs')` 后读 `global.__AI__`，
+ * 用真实 arity / 存在性对账，勿凭印象。api-surface-parity 守卫断言本块提到的 API 都存在。
+ */
 const AI_JSDOC = [
   '/**',
-  ' * [__AI__ 运行时沙箱]',
+  ' * [__AI__ 运行时沙箱 · 基础 API]',
   ' * 禁用：node 原生 fs / path / child_process / os / process.exit',
-  ' * 可用：__AI__.readText(p) / writeText(p, s) / exists(p) / readJSON(p)',
-  ' *       __AI__.atomicWrite(p, s) / patchFile(p, { find, replace })',
-  ' *       __AI__.join(...parts) / cwdMust() / listDir(p)',
-  ' *       __AI__.ok(msg) / warn(msg) / err(msg) / skip(msg)',
+  ' * 完整 API（含参数/返回/异常）见 packages/core/src/helpers/*.cjs 各文件顶部 JSDoc',
+  ' * 查询示例：__AI__.grep(\'function patchFile\') 或 __AI__.readText(\'packages/core/src/helpers/patch.cjs\')',
+  ' *',
+  ' * 基础：readText(p) / writeText(p,s) / readJSON(p) / exists(p) / readFiles(glob)',
+  ' *       grep(pattern, opts?) / walk(dir, {ext?,skip?}) / dump(file, from, to)',
+  ' *       log / ok / warn / err / skip / exit(code, msg?)',
+  ' *       shell(cmd, opts?) ← 异步须 await；字符串不做 shell 解析',
+  ' *',
+  ' * 易错项（务必记住）：',
+  ' *   patchFile(file, anchor, replacement, opts?) ← 位置参数；失配抛异常，不返 {ok:false}',
+  ' *   replaceInFile(p, {oldString, newString}) ← 对象参数；与 patchFile 形态相反，勿混用',
+  ' *   tryReadFile(p) → {ok, content?} 对象；readState() → 对象；两者都不是字符串',
+  ' *   syntaxCheck(code, filename) ← 仅 CJS/JS；TS/ESM 返 UNSUPPORTED_LANG（能力边界非语法错）',
+  ' *   flush() ← 沙箱内子进程读真盘，写入后先 flush 再让子进程校验',
   ' */',
 ].join('\n')
 

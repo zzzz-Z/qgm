@@ -375,53 +375,6 @@
   color: var(--danger, #f85149);
 }
 
-/* ── 展开区 diff ── */
-.wl-diff {
-  padding: 4px 10px 10px;
-  border-top: 1px dashed var(--border);
-  background: var(--surface-2, #0d1117);
-  max-height: 420px;
-  overflow: auto;
-}
-.wl-diff :deep(.md-pre) {
-  margin: 6px 0;
-  padding: 8px 10px;
-  background: transparent;
-  border: 0;
-  font:
-    11.5px/1.55 ui-monospace,
-    'SF Mono',
-    Menlo,
-    monospace;
-  tab-size: 4;
-  white-space: pre;
-  overflow-x: auto;
-}
-.wl-diff :deep(.diff-add) {
-  display: inline-block;
-  width: 100%;
-  background: rgb(46 160 67 / 15%);
-  color: #3fb950;
-}
-.wl-diff :deep(.diff-del) {
-  display: inline-block;
-  width: 100%;
-  background: rgb(248 81 73 / 15%);
-  color: var(--danger);
-}
-.wl-diff :deep(.diff-hunk) {
-  display: inline-block;
-  width: 100%;
-  background: rgb(88 166 255 / 12%);
-  color: #58a6ff;
-}
-.wl-diff :deep(.diff-file) {
-  display: inline-block;
-  width: 100%;
-  color: var(--text);
-  font-weight: 700;
-}
-
 /* [ui-p2b-skeleton-v2] V6 骨架屏样式（与 file-tree 同族，本组件 scoped 独立副本）：
    [CONSTRAINT] WorklogPane 的 style 为 scoped，无法复用 file-tree.scss 内定义；
    改一处必须两处同步，否则视觉漂移。 */

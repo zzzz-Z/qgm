@@ -29,11 +29,23 @@ fs.mkdirSync(distRoot, { recursive: true })
 // session-manager.ts 用 new URL('../repl-loop.cjs', import.meta.url) 定位 REPL 子进程入口，
 // bundle 落在 dist/_server/index.js ⇒ 解析为 dist/repl-loop.cjs。缺它 → 子进程 Cannot find module → REPL_EXITED。
 // CHANGE-IMPACT: 删 repl-loop.cjs → /session 系列端点 create 成功但每帧 500 REPL_EXITED。
-for (const f of ['interceptor.cjs', 'helpers.cjs', 'helpers-io.cjs', 'logger.cjs', 'repl-loop.cjs']) {
+// [helpers-shell-v1] 与 copy-runtime.cjs 同一清单：helpers.cjs require 它，漏拷 → 轮内 exec/shell 全挂
+for (const f of ['interceptor.cjs', 'helpers.cjs', 'helpers-io.cjs', 'helpers-shell.cjs', 'logger.cjs', 'repl-loop.cjs']) {
   const src = path.join(ROOT, 'packages', 'core', 'src', f)
   const dst = path.join(distRoot, f)
   if (fs.existsSync(src)) { fs.copyFileSync(src, dst); console.log(`[build-all] copied ${f}`) }
   else { console.log(`[build-all] skip (missing) ${f}`) }
+}
+// [helpers-index-v1] helpers/ 子目录随包发布：index.cjs require ./io.cjs 等同级子文件
+const helpersSrc = path.join(ROOT, 'packages', 'core', 'src', 'helpers')
+const helpersDst = path.join(distRoot, 'helpers')
+if (fs.existsSync(helpersSrc)) {
+  fs.mkdirSync(helpersDst, { recursive: true })
+  for (const f of fs.readdirSync(helpersSrc)) {
+    if (!f.endsWith('.cjs')) continue
+    fs.copyFileSync(path.join(helpersSrc, f), path.join(helpersDst, f))
+    console.log(`[build-all] copied helpers/${f}`)
+  }
 }
 // [preset-rules-move-v1] /__ai/preset/system 从 SSR 产物同级的 dist/SYSTEM.md 读取；缺则 404
 // CHANGE-IMPACT: 删此段 → 发布态首问丢规则（只余工作区 AGENTS.md）

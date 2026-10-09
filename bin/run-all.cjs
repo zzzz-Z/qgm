@@ -58,24 +58,49 @@ function serverUp() {
     req.setTimeout(1500, () => { req.destroy(); resolve(false) })
   })
 }
+// [discover-targets-v1] 主机侧冒烟也自动发现业务 app：探活常用 dev 端口（排除宿主 5175-5185）。
+const COMMON_DEV_PORTS = [3000, 3001, 4000, 4200, 5000, 5173, 5174, 8000, 8080, 8081, 8090, 8091, 8888, 9000, 9001, 30000, 30001]
+function probePort(port) {
+  return new Promise((resolve) => {
+    const net = require('node:net')
+    const s = net.createConnection({ port, host: '127.0.0.1' }, () => { s.destroy(); resolve(true) })
+    s.setTimeout(150)
+    s.on('timeout', () => { s.destroy(); resolve(false) })
+    s.on('error', () => { s.destroy(); resolve(false) })
+  })
+}
+async function scanDevPorts() {
+  const open = []
+  for (let i = 0; i < COMMON_DEV_PORTS.length; i += 20) {
+    const batch = COMMON_DEV_PORTS.slice(i, i + 20)
+    const res = await Promise.all(batch.map(p => probePort(p)))
+    batch.forEach((p, idx) => { if (res[idx]) open.push(p) })
+  }
+  return open.filter(p => p < 5175 || p > 5185)
+}
 async function smokeCheck() {
   const { chromium } = require('playwright')
   const browser = await chromium.launch({ headless: true })
-  const paths = ['/', '/__ai/']
+  // 宿主自身（AI Runner）路径
+  const targets = [{ tag: 'host', url: `${BASE_URL}/` }, { tag: 'host', url: `${BASE_URL}/__ai/` }]
+  // 业务 app：自动发现的 dev 端口
+  let appPorts = []
+  try { appPorts = await scanDevPorts() } catch { /* 探测失败不阻断 */ }
+  for (const port of appPorts) targets.push({ tag: `app:${port}`, url: `http://127.0.0.1:${port}/` })
   let fail = 0
   try {
-    for (const p of paths) {
+    for (const t of targets) {
       const page = await browser.newPage()
       const errors = []
       page.on('pageerror', e => errors.push(`pageerror: ${e.message}`))
       page.on('console', (m) => { if (m.type() === 'error') errors.push(`console.error: ${m.text()}`) })
       page.on('response', (r) => { if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.url()}`) })
-      try { await page.goto(BASE_URL + p, { waitUntil: 'networkidle', timeout: 30000 }) }
+      try { await page.goto(t.url, { waitUntil: 'networkidle', timeout: 30000 }) }
       catch (e) { errors.push(`导航失败: ${String(e)}`) }
       await page.close()
-      if (errors.length) { err(`${p}: ${errors.join(' | ')}`); fail++ }
-      else { console.log(`  ${c(32, '✓')} ${p}`)
-      }
+      const prefix = t.tag === 'host' ? '' : `[${t.tag}] `
+      if (errors.length) { err(`${prefix}${t.url}: ${errors.join(' | ')}`); fail++ }
+      else { console.log(`  ${c(32, '✓')} ${prefix}${t.url}`) }
     }
   } finally {
     try { await browser.close() } catch { /* swallow: close 失败不覆盖主流程结果 */ }

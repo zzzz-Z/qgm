@@ -10,6 +10,7 @@ export {}
 declare global {
   const ACTIVE_SESSION_KEY: typeof import('./composables/ui/useAppStorage').ACTIVE_SESSION_KEY
   const AUTO_FEEDBACK_MERGE_MS: typeof import('./composables/runner/feedback-merge').AUTO_FEEDBACK_MERGE_MS
+  const BOARD_STALE_ROUNDS: typeof import('./composables/ai/board-mirror').BOARD_STALE_ROUNDS
   const DEFAULT_SITE_URL: typeof import('./composables/ai/useAiSite').DEFAULT_SITE_URL
   const DONE_PREVIEW: typeof import('./utils/timeline-build').DONE_PREVIEW
   const EffectScope: typeof import('vue').EffectScope
@@ -36,6 +37,8 @@ declare global {
   const REFRESH_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').REFRESH_GUARD_MS
   const ROUND_MERGE_MS: typeof import('./composables/ai/auto-loop/pending-scripts').ROUND_MERGE_MS
   const SESSION_HISTORY_KEY: typeof import('./composables/ui/useAppStorage').SESSION_HISTORY_KEY
+  const STOPPED_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').STOPPED_GUARD_MS
+  const STOPPED_PLAIN_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').STOPPED_PLAIN_GUARD_MS
   const SUMMARY_INSTRUCTION: typeof import('./composables/ai/useAutoLoop').SUMMARY_INSTRUCTION
   const TAIL_MAX_CHARS: typeof import('./utils/timeline-build').TAIL_MAX_CHARS
   const TEXT_PREVIEW: typeof import('./utils/timeline-build').TEXT_PREVIEW
@@ -60,6 +63,7 @@ declare global {
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
   const bashPolicy: typeof import('./composables/ui/useAppStorage').bashPolicy
   const bindKeyboard: typeof import('./composables/ai/useAutoLoop').bindKeyboard
+  const boardStaleStreak: typeof import('./composables/ai/board-mirror').boardStaleStreak
   const buildCards: typeof import('./utils/timeline-build').buildCards
   const buildErrorContext: typeof import('./utils/contextBuilder').buildErrorContext
   const buildFullContext: typeof import('./utils/contextBuilder').buildFullContext
@@ -144,11 +148,13 @@ declare global {
   const exitPauseToIdle: typeof import('./composables/ai/useAutoLoop').exitPauseToIdle
   const extendRef: typeof import('@vueuse/core').extendRef
   const fallbackSessionId: typeof import('./composables/ui/useAppStorage').fallbackSessionId
+  const fetchBoardMirror: typeof import('./composables/ai/board-mirror').fetchBoardMirror
   const fileBadge: typeof import('./utils/format').fileBadge
   const fileToneStyle: typeof import('./utils/format').fileToneStyle
   const fillWithLessons: typeof import('./composables/ai/auto-loop/loop-lessons-fill').fillWithLessons
   const fmtSize: typeof import('./utils/format').fmtSize
   const fnv1a8: typeof import('./utils/hash').fnv1a8
+  const formatBoardMirror: typeof import('./composables/ai/board-mirror').formatBoardMirror
   const formatLimitToast: typeof import('./utils/limit-notice').formatLimitToast
   const getActiveModelId: typeof import('./composables/ui/useSitesStore').getActiveModelId
   const getActiveWin: typeof import('./composables/ai/useAiWindowTable').getActiveWin
@@ -178,6 +184,7 @@ declare global {
   const isHeadless: typeof import('./composables/ai/useAiWindowSend').isHeadless
   const isInstActive: typeof import('./composables/ai/useAutoLoop').isInstActive
   const isLoopActive: typeof import('./composables/ai/useAutoLoop').isLoopActive
+  const isMarkdownPath: typeof import('./composables/useFileContentHtml').isMarkdownPath
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
   const isReadonly: typeof import('vue').isReadonly
@@ -284,8 +291,10 @@ declare global {
   const refThrottled: typeof import('@vueuse/core').refThrottled
   const refWithControl: typeof import('@vueuse/core').refWithControl
   const removeWindowBySid: typeof import('./composables/ai/useAiWindowTable').removeWindowBySid
+  const renderFileContent: typeof import('./composables/useFileContentHtml').renderFileContent
   const renderMarkdown: typeof import('./composables/useMarkdown').renderMarkdown
   const requestPause: typeof import('./composables/ai/useAutoLoop').requestPause
+  const resetBoardMirror: typeof import('./composables/ai/board-mirror').resetBoardMirror
   const resolveAsk: typeof import('./composables/ui/useAsk').resolveAsk
   const resolveComponent: typeof import('vue').resolveComponent
   const resolveConfirm: typeof import('./composables/ui/useToast').resolveConfirm
@@ -296,7 +305,6 @@ declare global {
   const revealSideTab: typeof import('./composables/ui/useSidePaneTab').revealSideTab
   const roundMergePending: typeof import('./composables/ai/auto-loop/pending-scripts').roundMergePending
   const roundTimeoutMs: typeof import('./composables/ai/auto-loop/state').roundTimeoutMs
-  const runBash: typeof import('./composables/ai/auto-loop/run-bash').runBash
   const runHook: typeof import('./composables/ai/auto-loop/hooks').runHook
   const runIds: typeof import('./composables/runner/useRunner').runIds
   const sandboxMode: typeof import('./composables/ui/useAppStorage').sandboxMode
@@ -598,6 +606,9 @@ declare global {
   export type { LoopEvent } from './composables/ai/auto-loop/transitions'
   import('./composables/ai/auto-loop/transitions')
   // @ts-ignore
+  export type { BoardMirrorItem } from './composables/ai/board-mirror'
+  import('./composables/ai/board-mirror')
+  // @ts-ignore
   export type { SendTraceInput } from './composables/ai/send-trace'
   import('./composables/ai/send-trace')
   // @ts-ignore
@@ -684,6 +695,7 @@ declare module 'vue' {
   interface ComponentCustomProperties {
     readonly ACTIVE_SESSION_KEY: UnwrapRef<typeof import('./composables/ui/useAppStorage')['ACTIVE_SESSION_KEY']>
     readonly AUTO_FEEDBACK_MERGE_MS: UnwrapRef<typeof import('./composables/runner/feedback-merge')['AUTO_FEEDBACK_MERGE_MS']>
+    readonly BOARD_STALE_ROUNDS: UnwrapRef<typeof import('./composables/ai/board-mirror')['BOARD_STALE_ROUNDS']>
     readonly DEFAULT_SITE_URL: UnwrapRef<typeof import('./composables/ai/useAiSite')['DEFAULT_SITE_URL']>
     readonly DONE_PREVIEW: UnwrapRef<typeof import('./utils/timeline-build')['DONE_PREVIEW']>
     readonly EffectScope: UnwrapRef<typeof import('vue')['EffectScope']>
@@ -710,6 +722,8 @@ declare module 'vue' {
     readonly REFRESH_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['REFRESH_GUARD_MS']>
     readonly ROUND_MERGE_MS: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['ROUND_MERGE_MS']>
     readonly SESSION_HISTORY_KEY: UnwrapRef<typeof import('./composables/ui/useAppStorage')['SESSION_HISTORY_KEY']>
+    readonly STOPPED_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['STOPPED_GUARD_MS']>
+    readonly STOPPED_PLAIN_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['STOPPED_PLAIN_GUARD_MS']>
     readonly SUMMARY_INSTRUCTION: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['SUMMARY_INSTRUCTION']>
     readonly TAIL_MAX_CHARS: UnwrapRef<typeof import('./utils/timeline-build')['TAIL_MAX_CHARS']>
     readonly TEXT_PREVIEW: UnwrapRef<typeof import('./utils/timeline-build')['TEXT_PREVIEW']>
@@ -734,6 +748,7 @@ declare module 'vue' {
     readonly autoResetRef: UnwrapRef<typeof import('@vueuse/core')['autoResetRef']>
     readonly bashPolicy: UnwrapRef<typeof import('./composables/ui/useAppStorage')['bashPolicy']>
     readonly bindKeyboard: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['bindKeyboard']>
+    readonly boardStaleStreak: UnwrapRef<typeof import('./composables/ai/board-mirror')['boardStaleStreak']>
     readonly buildCards: UnwrapRef<typeof import('./utils/timeline-build')['buildCards']>
     readonly buildErrorContext: UnwrapRef<typeof import('./utils/contextBuilder')['buildErrorContext']>
     readonly buildFullContext: UnwrapRef<typeof import('./utils/contextBuilder')['buildFullContext']>
@@ -818,11 +833,13 @@ declare module 'vue' {
     readonly exitPauseToIdle: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['exitPauseToIdle']>
     readonly extendRef: UnwrapRef<typeof import('@vueuse/core')['extendRef']>
     readonly fallbackSessionId: UnwrapRef<typeof import('./composables/ui/useAppStorage')['fallbackSessionId']>
+    readonly fetchBoardMirror: UnwrapRef<typeof import('./composables/ai/board-mirror')['fetchBoardMirror']>
     readonly fileBadge: UnwrapRef<typeof import('./utils/format')['fileBadge']>
     readonly fileToneStyle: UnwrapRef<typeof import('./utils/format')['fileToneStyle']>
     readonly fillWithLessons: UnwrapRef<typeof import('./composables/ai/auto-loop/loop-lessons-fill')['fillWithLessons']>
     readonly fmtSize: UnwrapRef<typeof import('./utils/format')['fmtSize']>
     readonly fnv1a8: UnwrapRef<typeof import('./utils/hash')['fnv1a8']>
+    readonly formatBoardMirror: UnwrapRef<typeof import('./composables/ai/board-mirror')['formatBoardMirror']>
     readonly formatLimitToast: UnwrapRef<typeof import('./utils/limit-notice')['formatLimitToast']>
     readonly getActiveModelId: UnwrapRef<typeof import('./composables/ui/useSitesStore')['getActiveModelId']>
     readonly getActiveWin: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['getActiveWin']>
@@ -852,6 +869,7 @@ declare module 'vue' {
     readonly isHeadless: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['isHeadless']>
     readonly isInstActive: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['isInstActive']>
     readonly isLoopActive: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['isLoopActive']>
+    readonly isMarkdownPath: UnwrapRef<typeof import('./composables/useFileContentHtml')['isMarkdownPath']>
     readonly isProxy: UnwrapRef<typeof import('vue')['isProxy']>
     readonly isReactive: UnwrapRef<typeof import('vue')['isReactive']>
     readonly isReadonly: UnwrapRef<typeof import('vue')['isReadonly']>
@@ -958,8 +976,10 @@ declare module 'vue' {
     readonly refThrottled: UnwrapRef<typeof import('@vueuse/core')['refThrottled']>
     readonly refWithControl: UnwrapRef<typeof import('@vueuse/core')['refWithControl']>
     readonly removeWindowBySid: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['removeWindowBySid']>
+    readonly renderFileContent: UnwrapRef<typeof import('./composables/useFileContentHtml')['renderFileContent']>
     readonly renderMarkdown: UnwrapRef<typeof import('./composables/useMarkdown')['renderMarkdown']>
     readonly requestPause: UnwrapRef<typeof import('./composables/ai/useAutoLoop')['requestPause']>
+    readonly resetBoardMirror: UnwrapRef<typeof import('./composables/ai/board-mirror')['resetBoardMirror']>
     readonly resolveAsk: UnwrapRef<typeof import('./composables/ui/useAsk')['resolveAsk']>
     readonly resolveComponent: UnwrapRef<typeof import('vue')['resolveComponent']>
     readonly resolveConfirm: UnwrapRef<typeof import('./composables/ui/useToast')['resolveConfirm']>
@@ -970,7 +990,6 @@ declare module 'vue' {
     readonly revealSideTab: UnwrapRef<typeof import('./composables/ui/useSidePaneTab')['revealSideTab']>
     readonly roundMergePending: UnwrapRef<typeof import('./composables/ai/auto-loop/pending-scripts')['roundMergePending']>
     readonly roundTimeoutMs: UnwrapRef<typeof import('./composables/ai/auto-loop/state')['roundTimeoutMs']>
-    readonly runBash: UnwrapRef<typeof import('./composables/ai/auto-loop/run-bash')['runBash']>
     readonly runHook: UnwrapRef<typeof import('./composables/ai/auto-loop/hooks')['runHook']>
     readonly runIds: UnwrapRef<typeof import('./composables/runner/useRunner')['runIds']>
     readonly sandboxMode: UnwrapRef<typeof import('./composables/ui/useAppStorage')['sandboxMode']>

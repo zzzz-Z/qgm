@@ -2,7 +2,8 @@
 import { useWorklogCommit } from './worklog-commit'
 import { useToast } from '../../composables/ui/useToast'
 import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
-// @desc VSCode 源码管理风格侧栏：提交框 + 变更文件列表 + 点击展开行级 diff
+
+// @desc VSCode 源码管理风格侧栏：提交框 + 变更文件列表 + 点击预览文件内容
 // @why 用户要求把工作日志从弹窗改为 SidePane tab，视觉参照 VSCode 源代码管理面板
 // @change-impact 依赖 /__ai/git/worklog 端点；父组件 SidePane 通过 v-show 切换本面板可见性
 // 用户要求生成按钮改为"发 git diff 给 AI → 拿回复"；需发送与收包 API
@@ -28,6 +29,8 @@ interface WorklogResult {
 
 const props = defineProps<{ active: boolean }>()
 
+/** [worklog-content-preview-v1] 内容预览浮层；仅打开预览时加载（含 hljs 高亮链） */
+const FileContentOverlay = defineAsyncComponent(() => import('../diff/FileContentOverlay.vue'))
 // [ui-p2b-skeleton-wire-v2] V6 加载骨架行数/宽度档位（同 FileTree，但样式独立 scoped）
 const SKELETON_ROWS = 4
 const SKELETON_WIDTHS = ['sk-w-70', 'sk-w-55', 'sk-w-85', 'sk-w-40']
@@ -41,19 +44,17 @@ let unsubscribeReply: (() => void) | null = null
 // [load-seq-guard-v1] 并发 load 序列号：watch / @click / generateCommitMsg 三处可触发，
 // 无守卫时旧响应会覆盖新结果（用户快速连点或 AI 生成期间手动刷新均会触发）
 let _loadSeq = 0
-/**
- * 渲染某文件的原始 diff 为高亮 HTML；单独包一层 pre 供展开区展示
- * [wdiff-cache-v1] 内容级缓存：同一 diff 文本只渲染一次 markdown-it；提交框输入触发重渲染时零开销
- * [CONSTRAINT] 缓存以 diff 文本为键，diff 变化自动失效；上限 200 条防长会话内存增长
- */
-const _diffHtmlCache = new Map<string, string>()
-const DIFF_CACHE_MAX = 200
+/** [preview-seq-guard-v1] 与 load 同源：快速切换文件时丢弃过期响应 */
+let _previewSeq = 0
 
 const loading = ref(false)
 const result = ref<WorklogResult | null>(null)
 const error = ref('')
 const commitMsg = ref('')
-const expanded = ref<Set<string>>(new Set())
+const previewPath = ref<string | null>(null)
+/** 预览文件内容；空串表示未加载/文件为空 */
+const previewContent = ref('')
+const previewLoading = ref(false)
 // [git-commit-real-v1] 真实提交：/git/commit-loop 落盘后刷新列表
 // [CONSTRAINT] committing 防重复点击；成功后清空消息框
 const committing = ref(false)
@@ -80,15 +81,10 @@ const {
   splitPath,
 })
 
-const fileMap = computed<Record<string, WorklogFileEntry>>(() => {
-  const m: Record<string, WorklogFileEntry> = {}
-  for (const f of result.value?.files || []) m[f.path] = f
-  return m
-})
 // [worklog-rows-v1] 预生成行数据：splitPath / statusLetter / statusClass 每行仅算一次，
 // 提交框每输入一字触发重渲染时不再重复调用（报告 §5.1.4）。
 // [worklog-rows-template-v1] 预生成行数据：保留 f 全部字段，附加派生的 name/dir/stCls/stLetter。
-// expanded 不预生成：它是响应式 Set，直接读 expanded.has(f.path) 保活。
+// [worklog-content-preview-v1] 行数据不再承载展开态：点击改为打开内容预览浮层。
 const rows = computed(() => (result.value?.files || []).map((f) => {
   const sp = splitPath(f.path)
   return {
@@ -139,27 +135,6 @@ onUnmounted(() => {
   cleanupWorklogCommit()
 })
 
-// [diff-highlight] 只对代码围栏内的 diff 文本做前缀着色，用 span 包裹，不引入新 HTML 源
-// [CONSTRAINT] markdown-it 已做 escape，因此 span 内只包含转义后的 & < >，无 XSS 风险
-// [CHANGE-IMPACT] 与 WorklogDialog 的 diffHighlight 语义一致；后续若抽公共 util 可合并
-function diffHighlight(html: string): string {
-  return html.replace(/<pre class="md-pre"><code>([\s\S]*?)<\/code><\/pre>/g, (_, body: string) => {
-    const lines = body.split('\n')
-    const out = lines.map((line) => {
-      if (/^@@/.test(line)) return `<span class="diff-hunk">${line}</span>`
-      if (/^\+\+\+/.test(line)) return `<span class="diff-file">${line}</span>`
-      if (/^---/.test(line)) return `<span class="diff-file">${line}</span>`
-      if (/^diff --git /.test(line)) return `<span class="diff-file">${line}</span>`
-      if (/^\+/.test(line)) return `<span class="diff-add">${line}</span>`
-      if (/^-/.test(line)) return `<span class="diff-del">${line}</span>`
-      return line
-    })
-    return `<pre class="md-pre"><code>${out.join('\n')}</code></pre>`
-  })
-}
-function renderDiff(md: string): string {
-  return diffHighlight(renderMarkdown(md))
-}
 /** 状态字母与颜色分类：M=modified A=added D=deleted R=renamed C=copied */
 function statusLetter(s: string): string {
   if (s === 'added') return 'A'
@@ -178,65 +153,46 @@ function splitPath(p: string): { dir: string, name: string } {
   const i = p.lastIndexOf('/')
   return i < 0 ? { dir: '', name: p } : { dir: p.slice(0, i + 1), name: p.slice(i + 1) }
 }
-function toggleFile(p: string): void {
-  const n = new Set(expanded.value)
-  if (n.has(p)) n.delete(p)
-  else n.add(p)
-  expanded.value = n
-}
 /**
- * 把 /git/diff 返回的原始 diff 文本按文件切分
- * [WHY] 后端 /git/diff 直出 unified diff 原文，前端按 ^diff --git 切块后与 worklog 的 files 列表对齐
- * [CONSTRAINT] 只做字符串切分与正则匹配，不依赖 markdown-it；重复文件路径后者覆盖前者
- * [CHANGE-IMPACT] 结果填充到 files[].diff，供 fileDiffHtml 渲染行级高亮
+ * 打开文件内容预览。
+ * [WHY] 取代原先的「点击展开行级 diff」：用户要的是看这个文件现在长什么样
+ * [CONSTRAINT] 已删除的文件读回空串，预览区显示为空（git 变更里 deleted 项无内容可看）
+ * @param p 文件相对路径
  */
-function splitDiffByPath(rawDiff: string): Record<string, string> {
-  const out: Record<string, string> = {}
-  if (!rawDiff) return out
-  const chunks = rawDiff.split(/^diff --git /m).slice(1)
-  for (const c of chunks) {
-    const body = `diff --git ${c}`
-    const m = body.match(/^\+\+\+ b\/(.+)$/m) || body.match(/^--- a\/(.+)$/m)
-    if (!m) continue
-    out[m[1].trim()] = body
+async function openPreview(p: string): Promise<void> {
+  const seq = ++_previewSeq
+  previewPath.value = p
+  previewContent.value = ''
+  previewLoading.value = true
+  try {
+    const r = await fetch('/__ai/files/read', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ paths: [p] }),
+    })
+    const j = await r.json().catch(() => ({})) as { files?: Array<{ path?: string, content?: string }> }
+    if (seq !== _previewSeq) return
+    const list = j.files || []
+    const hit = list.find(x => x.path === p) || list[0] || {}
+    previewContent.value = String(hit.content || '')
+  } catch {
+    if (seq === _previewSeq) previewContent.value = ''
+  } finally {
+    if (seq === _previewSeq) previewLoading.value = false
   }
-  return out
-}
-function fileDiffHtml(p: string): string {
-  const f = fileMap.value[p]
-  if (!f || !f.diff) return ''
-  const cached = _diffHtmlCache.get(f.diff)
-  if (cached !== undefined) return cached
-  const Q = String.fromCharCode(96)
-  const FENCE = Q + Q + Q
-  const md = `${FENCE}diff\n${f.diff}\n${FENCE}`
-  const html = renderDiff(md)
-  if (_diffHtmlCache.size >= DIFF_CACHE_MAX) {
-    const firstKey = _diffHtmlCache.keys().next().value
-    if (firstKey !== undefined) _diffHtmlCache.delete(firstKey)
-  }
-  _diffHtmlCache.set(f.diff, html)
-  return html
 }
 async function load(): Promise<void> {
   // [load-seq-guard-v1] 捕获本次请求序号；后续每个 await 后校验，过期即丢弃
   const mySeq = ++_loadSeq
-  // 并行请求 worklog 与原始 diff；后者填充 files[].diff
-  // [WHY] worklog 的 markdown 链路在某些环境看不到详细段；/git/diff 直出 unified diff 规避该问题
   loading.value = true
   error.value = ''
   try {
-    const [wlRes, diffRes, headRes] = await Promise.all([
+    const [wlRes, headRes] = await Promise.all([
       fetch('/__ai/git/worklog', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         // [worklog-history-v1] 打开提交历史：模板渲染 history 列表
         body: JSON.stringify({ includeHistory: true }),
-      }),
-      fetch('/__ai/git/diff', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
       }),
       fetch('/__ai/git/head', { cache: 'no-store' }),
     ])
@@ -248,17 +204,6 @@ async function load(): Promise<void> {
       result.value = null
       return
     }
-    // diff 端点独立消费；失败仅告警不阻断
-    try {
-      const dj = await diffRes.json().catch(() => ({})) as { ok?: boolean, diff?: string, reason?: string }
-      if (mySeq !== _loadSeq) return
-      if (dj && dj.ok && dj.diff) {
-        const byPath = splitDiffByPath(dj.diff)
-        for (const f of j.files || []) {
-          if (byPath[f.path]) f.diff = byPath[f.path]
-        }
-      }
-    } catch { /* ignore: diff 请求失败时仅保留 worklog 结果 */ }
     // head 独立消费；失败仅清空显示
     try {
       const hj = await headRes.json().catch(() => ({})) as { ok?: boolean, head?: string }
@@ -443,8 +388,8 @@ async function copyFullLog(): Promise<void> {
         </div>
         <ul class="wl-list" role="list">
           <li v-for="f in rows" :key="f.path" class="wl-item">
-            <div class="wl-item-head" role="button" :aria-label="`展开/折叠 ${f.path} 的 diff`" :aria-expanded="expanded.has(f.path)" tabindex="0" @click="toggleFile(f.path)" @keydown.enter.prevent="toggleFile(f.path)" @keydown.space.prevent="toggleFile(f.path)">
-              <span class="wl-chev" :class="{ open: expanded.has(f.path) }">
+            <div class="wl-item-head" role="button" :aria-label="`预览 ${f.path} 的内容`" tabindex="0" @click="openPreview(f.path)" @keydown.enter.prevent="openPreview(f.path)" @keydown.space.prevent="openPreview(f.path)">
+              <span class="wl-chev">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18" /></svg>
               </span>
               <span class="wl-doc" :class="f.stCls">
@@ -461,7 +406,7 @@ async function copyFullLog(): Promise<void> {
               </span>
               <span class="wl-st" :class="f.stCls">{{ f.stLetter }}</span>
             </div>
-            <div v-if="expanded.has(f.path)" class="wl-diff" v-html="fileDiffHtml(f.path)" />
+            <!-- [worklog-content-preview-v1] 行级 diff 展开已由内容预览浮层取代 -->
           </li>
         </ul>
       </template>
@@ -477,6 +422,14 @@ async function copyFullLog(): Promise<void> {
           </li>
         </ul>
       </div>
+
+      <FileContentOverlay
+        v-if="previewPath"
+        :file-name="previewPath"
+        :content="previewContent"
+        :loading="previewLoading"
+        @close="previewPath = null"
+      />
     </div>
   </div>
 </template>
