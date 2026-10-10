@@ -176,7 +176,7 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
 onMounted(() => {
   try {
     const t = getTransport()
-    unsubscribeReply = t.onReply((raw: unknown, sid: string) => {
+    unsubscribeReply = t.onReply((raw: unknown, _sid: string) => {
       // [gitmsg-window-v1] 闸门改为「时间窗」而不是「一次性 pending 标志」：
       //   超时只提示不关闸，AI 生成 msg 晚到时仍能被消费。10 分钟窗口兜底防永久挂着。
       const WINDOW_MS = 600_000
