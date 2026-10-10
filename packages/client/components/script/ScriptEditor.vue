@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useFilePicker } from './file-picker'
+import { SKILL_PICK_PREFIX, useFilePicker } from './file-picker'
 import type { Decoration, DecorationSet, EditorView, ViewUpdate } from '@codemirror/view'
 
 // CM 动态 import 聚合类型：从各包具名导出反推，杜绝 any
@@ -226,8 +226,10 @@ async function createEditor() {
           const after = text[to]
           if (after === undefined || after === ' ' || after === '\n' || after === '\t') {
             const path = match[0].slice(1)
-            const label = path.split('/').pop() || path
-            builder.add(from, to, m.Decoration.replace({ widget: new FileChipWidget(fileBadge(label), label, path) }))
+            const isSkill = path.startsWith(SKILL_PICK_PREFIX)
+            const label = isSkill ? path.slice(SKILL_PICK_PREFIX.length) : (path.split('/').pop() || path)
+            const badge = isSkill ? 'SKILL' : fileBadge(label)
+            builder.add(from, to, m.Decoration.replace({ widget: new FileChipWidget(badge, label, path) }))
           }
         }
         return builder.finish()
@@ -378,7 +380,7 @@ defineExpose({ insertText })
       <Teleport to="body">
         <div v-if="pickerOpen" ref="pickerRef" class="file-picker" :style="pickerStyle">
           <input
-            ref="pickerInputRef" v-model="pickerQuery" class="fp-input" placeholder="搜索文件，Enter 选择，Esc 取消"
+            ref="pickerInputRef" v-model="pickerQuery" class="fp-input" placeholder="搜索文件或技能，Enter 选择，Esc 取消"
             role="combobox" aria-autocomplete="list" :aria-expanded="true"
             aria-controls="file-picker-listbox" :aria-activedescendant="`fp-opt-${pickerIndex}`"
             @keydown.down.prevent="pickerMove(1)" @keydown.up.prevent="pickerMove(-1)"
@@ -386,14 +388,16 @@ defineExpose({ insertText })
           >
           <div id="file-picker-listbox" class="fp-list" role="listbox">
             <div
-              v-for="(f, i) in pickerFiltered" :id="`fp-opt-${i}`" :key="f" class="fp-item"
+              v-for="(it, i) in pickerFiltered" :id="`fp-opt-${i}`" :key="`${it.kind}:${it.value}`" class="fp-item"
               :class="{ active: i === pickerIndex }" role="option" :aria-selected="i === pickerIndex"
-              @mousedown.prevent="pickerPick(f)"
+              @mousedown.prevent="pickerPick(it)"
             >
-              {{ f }}
+              <span class="fp-item-kind" :class="`fp-kind-${it.kind}`">{{ it.kind === 'skill' ? '技能' : '文件' }}</span>
+              <span class="fp-item-label">{{ it.label }}</span>
+              <span v-if="it.hint" class="fp-item-hint">{{ it.hint }}</span>
             </div>
             <div v-if="!pickerFiltered.length" class="fp-empty">
-              无匹配文件
+              无匹配文件或技能
             </div>
           </div>
         </div>

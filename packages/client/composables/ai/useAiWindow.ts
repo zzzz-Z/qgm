@@ -338,7 +338,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     activeWinSid: getActiveWinSid(),
     winName: name,
     urlValue: url.value,
-    hint: '若 AI 窗口是手动打开的（非本工作台 openSite 开），请点工作台右上角「打开 AI 窗口」重建引用',
+    hint: '若 AI 窗口是手动打开的（非本工作台 openSite 开），请在左侧 AI 站点列表点击该站点重建引用',
   })
   return 'failed'
 }
@@ -415,6 +415,13 @@ export async function openAiSession(opts?: {
     // [ready-warn-v1] 接住就绪判定：未就绪仍继续（不阻断），但明确告警——帧大概率被丢弃
     const ready = await waitWindowReady(preSid)
     if (!ready) log.warn('[openAiSession] 新窗口 15s 内未就绪（可能被拦截/站点加载失败），规则可能未注入 sid=', preSid)
+  } else if (win === preWin) {
+    // [reuse-nav-ready-v1] 复用同名窗口时 window.open 带新 URL 会导航重载 → 油猴重注入；
+    //   旧逻辑只看 preWin 存在就跳过等待，fill 落在加载中页面被丢弃（用户报告「新会话未带 SYSTEM.md」）。
+    //   复用场景油猴重启比新开窗快，用 5s 短超时兜住；超时仍继续（不阻断），与 ready-warn-v1 语义一致。
+    //   win === preWin 是「复用」的可靠判据：openSite 内 window.open 命中同名活窗口时返回同一对象。
+    const ready = await waitWindowReady(preSid, 5000)
+    if (!ready) log.warn('[openAiSession] 复用窗口 5s 内未就绪（可能未触发导航 / 站点加载慢），规则可能未注入 sid=', preSid)
   }
   const fill = await copyAndFill(p, { forceRules: opts?.forceRules, skipRules: opts?.skipRules })
   return { win, fill }
