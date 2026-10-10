@@ -922,7 +922,23 @@
     } catch { /* body 未就绪，下次 fill/rotate 再试 */ }
   }
   resumeReplyObserver()
-
+  // [idle-wake-poll-v1] 空转唤醒兜底：MutationObserver 只在 DOM 变动时唤醒，
+  //   回复渲染完成后（流式光标移除 / 高亮完成 / 操作条挂载）DOM 静止 ⇒ 若脚本块因任何原因
+  //   尚未推送（闭合门延迟 / 生成中门 / 多块续推），observer 永不触发，块永久滞留
+  //   （2026-10-11 用户实测：滚动一下页面即收到 → 滚动引发的 DOM 变动唤醒）。
+  //   [WHY] headless 侧 startReplyPoll 是 800ms 轮询天然无此症；本补丁对齐该频率。
+  //   [CONSTRAINT] 后台标签页（document.hidden）不跑；无 assistant 容器不跑；observer 防抖在途时不跑
+  //     （避免与 350ms 防抖抢），三条件均不满足才调用 classifyAndPost。classifyAndPost 自身
+  //     以 seenHashes + lastBodySig 幂等，即便误唤醒也不会重复推送。
+  //   [CHANGE-IMPACT] 若去掉本段，油猴通道在 DOM 静止后完全依赖用户交互（滚动 / 点击）唤醒。
+  setInterval(() => {
+    try {
+      if (typeof document !== 'undefined' && document.hidden) return
+      if (observerDebounce) return
+      if (!latestAssistantRoot()) return
+      classifyAndPost()
+    } catch { /* swallow: 页面导航/关闭时忽略 */ }
+  }, 800)
   // ===== fill / rotate / new-session / stop =====
   // [stop-v3] 按钮未命中时以 Esc 键盘事件兜底（站点改文案/图标按钮漏配时仍有概率阻断）
   // [WHY] 纯文案匹配脆弱：DeepSeek/千问按钮改版即静默失效，AI 继续流式生成
