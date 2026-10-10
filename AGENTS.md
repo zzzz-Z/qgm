@@ -50,29 +50,26 @@ docs/              USAGE.md / DOCS-INDEX.md
 
 由 `packages/core/tests/workspace-guard.node-test.ts` 强制，违反即测试失败：
 
-1. `packages/*` 不得依赖 `apps/*`
-2. `packages/*` 里禁止 `listen` / `createServer` / `import vite` / `@hono/node-server`
-3. `packages/client` 不得 import `packages/core`
+- **本项目特化禁则**：`packages/*` 里禁止 `listen` / `createServer` / `import vite` / `@hono/node-server`。
+  - 豁免：`vite.config.ts` / `uno.config.ts` 属构建配置。
+  - 强制：宿主专属入口（`apps/standalone/src/server.ts` 等，含 `listen` / `createServer` 的装配代码）必须留在 `apps/`，不得回流 `packages/core`。
+- **依赖方向**（`packages/*` 不得依赖 `apps/*`、`packages/client` 不得 import `packages/core`）：同由该守卫强制，**原则见 `packages/core/SYSTEM.md` §4**（本节只列项目特化，不重述原则）。
 
-`vite.config.ts` / `uno.config.ts` 属构建配置，豁免第 2 条。
-宿主专属入口（`apps/standalone/src/server.ts` 等，含 `listen` / `createServer` 的装配代码）必须留在 `apps/`，不得回流 `packages/core`。
+## 自动循环子系统已退役（loop-consolidation P3e）
 
-## 自动循环没有轮次上限（软上限；保留 50 轮硬上限）
+`packages/client/composables/ai/auto-loop/` 目录与 `loopLogic.ts` **已整体删除**（含 LOOP_HARD_MAX_ROUNDS / LOOP_HARD_MAX_MS / PLAIN_STREAK_MAX 等常量，均为**历史名称、现已不存在**）。由 `packages/client/tests/loop-single-path.node-test.ts` 的 `PHASE_VALUE === 'B'` 判据承重——该文件断言 `auto-loop/` 目录不存在、`start-family.ts` 不存在，且全仓零 `startLoop` / `startTakeover` 调用点。
 
-`packages/client/composables/ai/loopLogic.ts` 的 `[drop-round-limit]`：
-**单轮软上限已取消**，`LOOP_MAX_ROUNDS = Infinity` 表示无上限（保留常量名只为兼容引用）。
+**当前形态（单路径）**：脚本到达 → `useAiReplyHandlers.ts` 分流 → `runner.run({ autoFeedback: true })`。**没有循环计数、没有硬轮上限、没有 `finish(inst, ...)` 终止**；一次脚本执行完即结束本轮，等待下一次 AI 回复。
 
-但**硬上限仍在**：常量定义在 `packages/client/composables/ai/loopLogic.ts`（与 `LOOP_MAX_ROUNDS` 同处），由 `packages/client/composables/ai/auto-loop/after-round.ts` 消费并触发 `finish()`：
+**仍生效的三条闸门**（详见 `SYSTEM.md` §0.1 与 §8）：
 
-| 常量                   | 值         | 触发                           |
-| :--------------------- | :--------- | :----------------------------- |
-| `LOOP_HARD_MAX_ROUNDS` | `50`（轮） | `finish(inst, 'hard-rounds')`  |
-| `LOOP_HARD_MAX_MS`     | `30 min`   | `finish(inst, 'hard-timeout')` |
+- `retained-done-gate v1`（`useAiReplyHandlers.ts`）：非循环路径 DONE 接入 `BeforeDoneFinal` 自检 + 看板清桶；reject 仅 toast 告警，不阻断。
+- `stopped-no-autorun-v1` / `refresh-no-autorun-v1` / `dedup`（同文件）：脚本到达时的四条旁路守卫——stopped 窗口内不自动执行、刷新冷静期内不自动执行、同 hash 去重不重复入队、rescan 标记不执行。
+- `loopPaused`（`useAiWaiting.ts`）：模块级暂停标志，非循环路径发送前检查。
 
-因此「跑够 N 轮会自动停」**只在 N ≥ 50 时成立**，不要假设循环永不终止。
-终止路径共五条：`DONE` / `ASK` / 熔断冻结 / `hard-rounds`（50 轮）/ `hard-timeout`（30 分钟）。
+**自动接管**仍存在（`useAutoTakeover.ts`），语义已收敛为「脚本到达即立即执行」，不再有 3-10s 随机延迟。
 
-> **状态机定义**（各状态的触发条件与输出格式）见 `packages/core/SYSTEM.md` §1；**熔断处置**见 §8。本节只列本项目的具体上限值。
+> **状态机定义**（各状态的触发条件与输出格式）见 `packages/core/SYSTEM.md` §1；**熔断处置**见 §8。终止路径现为三条：`DONE` / `ASK` / 熔断冻结（`metaerror-fuse-v1`）。
 
 ## 常用命令
 
@@ -137,6 +134,27 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 - **平台约束**：`snapshotPathTemplate` 已去掉平台段，但这**不等于**跨平台通用——字体与抗锯齿不同，多平台须各自提交基线。
 - **遮罩选择器守卫**：由 `packages/client/tests/visual-spec-guard.node-test.ts` 双向守卫（剥掉 `<style>` 与 CSS 后仍须真实存在）。
 
+## 知识库与技能
+
+> 通用加载协议（存放格式 / 加载时机 / 获取顺序 / 体积约束）见 `packages/core/SYSTEM.md` §11（技能）与 §16（知识库）。本节只列**项目路径、端点与检索链路**。
+
+### 技能库
+
+- **目录**：`.ai-runner/skills/<name>/SKILL.md`（frontmatter 含 `name` + `description`）。
+- **已装清单唯一事实来源是磁盘**：`GET /__ai/skills` 扫前 64 行返回元数据；`.registry.json` 只是来源标注（服务端 `reconcileRegistry` 自动收敛，不手工编辑）。
+- **检索**：`POST /__ai/skills/match`（BM25，按任务文本）。消费方 `skill-registry.ts`。
+- **入口**：输入框 `@` 选择器（`file-picker.ts`，`@skill/<name>`）；该串不自动展开正文，由 AI 按需 `loadSkill`。
+- **本仓库真实栈**：Vue 3 + TS + Vite + UnoCSS + Vitest + Hono + Playwright。找技能必须先用栈专属 query（如 `<依赖名> SKILL.md`），通用方法论 query 只可补足；完整协议见 `.ai-runner/skills/skill-discovery/SKILL.md`。
+
+### 知识库（lessons）
+
+- **台账**：`.ai-runner/lessons.md`（append-only）。
+- **采集**：DONE 正文含 `## 踩坑记录` / `### 踩坑记录` 段即自动追加（按标题去重）；实现 `packages/core/src/post-run/lesson-extract.ts`（接入 `attach-ws.ts` done 分支）。手工补记：`pnpm lessons:add "<title>" <body-file>`。
+- **状态标记**：入库缺省即「待复核」；标注 `[VERIFIED]`/`[REJECTED]`/`[STALE]` 时须附可核验证据（命令原文 / file:line / 探针输出）。
+- **查状态**：`node scripts/lessons-status.cjs [--pending|--json|--strict]`；`pnpm session:start` 第 4 步亦列出。
+- **检索**：`POST /__ai/lessons/match`（服务端 BM25）；客户端 `buildLessonsBlock(query?)`（失败回退尾截断）。
+- **完整语义**（三态定义 / 首行锚定 / 蒸馏去路）见 `.ai-runner/lessons.md` 头部。
+
 ## 本项目独有约束
 
 这几条都是踩过坑后固化的，SYSTEM.md 里没有：
@@ -181,41 +199,19 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   （`anchors:verify` 是独立闸门）⇒ 交付前单跑 `pnpm anchors:verify` 或 `pnpm session:start`；
   vitest 全绿 ≠ preflight 全绿（实测 2026-10-06：删 `useAppStartup.ts` 的 `ai-runner:request-replay`
   后仍报 1380 passed，但锚点 2 条 MISS）。
-- **pm2 重启归宿主侧独占，用户显式授权时应用端可代执行**（`instance-ownership-v1` 的边界）：
-  默认只有宿主侧对 5175 实例做启动/重启/kill/端口操作（杀了会自动复活并造成端口漂移）。
-  **用户显式授权**时应用端可代执行 `pm2 restart`，但须满足两条：
+- **pm2 重启的授权例外**（`instance-ownership-v1` 的边界；默认禁则见 `SYSTEM.md` §1）：
+  用户显式授权时应用端可代执行 `pm2 restart`，须满足两条 ——
   ① 授权来源可指（用户原话或工单明文），② 当轮回执如实记录（执行时刻 + 授权来源）。
-  构建（`pnpm build`）始终允许；重启不自行发起，未获授权时只写「产物已更新，请宿主侧重启」。
-- 不执行 `rm -rf` / `sudo` / `git reset --hard` / `git push -f` 等破坏性命令。
-- 禁止 `as any` / `as unknown as`（除非注释写明理由）。
-- 不手工编辑自动生成的文件（`auto-imports.d.ts` 等）。
-- 不提交 `.ai-runner/` 运行态与任何敏感文件。
-- **找技能必须先按技术栈搜，禁止一上来就用通用词**：本仓库真实栈是 Vue 3 + TS + Vite +
-  UnoCSS + Vitest + Hono + Playwright。检索时先用 `<依赖名> SKILL.md` 这类栈专属 query，
-  通用方法论 query 只能补足、不能替代。候选按 P0 栈专属 / P1 栈相邻 / P2 通用方法论分级，
-  输出时 P0 必须在最前；P0 为空必须显式报告并给出换仓库方案，禁止用 P2 冒充。
-  完整协议（技术栈快照步骤、消歧规则、验收清单）见 `.ai-runner/skills/skill-discovery/SKILL.md`。
-  2026-10 实测：只用「agent skills」检索，8 条结果全是语言无关方法论，Vue / Vite / Vitest /
-  UnoCSS 零命中；改用栈专属 query 后命中 `antfu/skills`（Vue 生态核心成员维护），一次补齐栈技能。
-- **DONE 总结里写「踩坑记录」段会被自动采集，但采集 ≠ 沉淀**：服务端收到 DONE 回复后，
-  若正文含 `## 踩坑记录` / `### 踩坑记录` 段落，自动解析并追加到 `.ai-runner/lessons.md`
-  （按标题去重）。两种条目格式：`### 子标题` + 正文，或 `- **标题**：正文`。
-  实现见 `packages/core/src/post-run/lesson-extract.ts`，接入点 `attach-ws.ts` 的 done 分支。
-  手工补记用 `pnpm lessons:add "<title>" <body-file>`（`-` 表示从 stdin 读）。
-  **入库条目缺省即「待复核」**——只有复核方亲跑证据后才在标题后的首个非空行标
-  `[VERIFIED]` / `[REJECTED]` / `[STALE]`，写作方不得自标（与 `[RESOLVED]` 同一逻辑）。
-  查待复核：`node scripts/lessons-status.cjs [--pending|--json|--strict]`，
-  `pnpm session:start` 第 4 步也会列出。`[VERIFIED]` 中「会出事的铁律」分流到
-  `.workbuddy/memory/MEMORY.md`、「可复用工作流」到技能库；已有 SSOT 的只留指针。
-  完整语义（三态定义 / 首行锚定 / 蒸馏去路）见 `.ai-runner/lessons.md` 头部。
+  未获授权时不自行发起，只写「产物已更新，请宿主侧重启」。
 - **派给应用端（工作台里的 AI）的工单必须落 `docs/` 根并登记 `docs/DOCS-INDEX.md`**：
   `docs/plan/**` 整目录被 `.gitignore` 忽略（`.gitignore:51`），且 `scripts/verify-docs-index.cjs`
   的 `SKIP_PATHS` 又显式豁免它 —— 放在那里的工单既不进 git 变更、也不进索引，应用端开箱看不到
   （2026-10-05 实测，该目录已积压 4 份 workorder）。草稿可留 `docs/plan/`，**派发前移到 `docs/`**；
   移入后 `pnpm docs:verify` 会双向守（实测把索引里的工单名改掉 → 报「悬空链接 + 未收录」exit 2）。
 - **新增 / 改名 `/__ai/*` HTTP 端点必须在本节登记**（`routes-registry-v1`）：SYSTEM.md §3.2 只教
-  `__AI__.*` 沙箱方法，而**`/__ai/*` 路由在 SYSTEM.md 里全无清单**（2026-10-09 实测：该文件内
-  grep `/__ai/`、`HTTP`、`端点` 三词全部为空）⇒ 新端点加完只有前端知道，工作台 AI 无从知晓。
+  `__AI__.*` 沙箱方法；**`/__ai/*` 路由没有跨文件的注册清单** —— SYSTEM.md 只在 §11/§16 顺带提及
+  本仓用到的少数端点（`/__ai/skills/match` 等），没有「端点 → 消费者 → 契约文件」的完整表
+  ⇒ 新端点加完只有前端知道，工作台 AI 无从知晓。
   约定：端点增删改时在本列表同步一行。
   - 已登记 **`POST /__ai/vcs/log`** —— **只读**、与 VCS 类型无关的入口：读提交历史 + 每次提交
     涉及的路径（现支持 SVN）。**非 svn 仓库返 200 + `ok:false`（那是正常探测结果，勿当故障）**；
@@ -223,6 +219,15 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
     为前提，非 git 下直接 400 ⇒ SVN 工作副本拿不到任何历史。字段与实现以
     `packages/core/src/vcs.ts` 为 SSOT（本表不重抄）；消费方 `WorklogPane.vue`；
     端口见 `.ai-runner/.server-port`（dev 侧走 5174 代理 `/__ai/*`）。
+  - 已登记 **`GET /__ai/skills`** —— **只读**，扫描 `.ai-runner/skills/*/SKILL.md` 的 frontmatter
+    （前 64 行）返回元数据列表 `{ok, skills:[{name, description, keywords?, path}], registry}`；
+    **磁盘是「已装清单」的唯一事实来源**，registry 只是来源标注（由 `reconcileRegistry` 在读路径上
+    收敛到磁盘，幂等、集合无变化时不落盘）。**目录缺失或读取失败一律返回空数组，不返回 4xx** ——
+    首问与 `@` 选择器都不应因技能目录异常而中断。字段与实现以 `packages/core/src/routes/skills.ts`
+    为 SSOT（本表不重抄）；消费方 `file-picker.ts`（`@` 选择器技能源）。
+  - 已登记 **`POST /__ai/skills/match`** —— **只读**，按任务文本做 BM25 检索，返回命中技能元数据 +
+    正文截断（`BODY_MAX_LINES`/`BODY_MAX_CHARS`/`TOTAL_MAX_CHARS` 三常量共同决定注入体积）。
+    消费方 `skill-registry.ts`；**自 `first-prompt-rules-v2` 起首问不再自动调用它**（见下条）。
 
 - **`pnpm test:e2e` 报 `ECONNREFUSED 127.0.0.1:<端口>` 时先读 `.ai-runner/.server-port`**（`[port-drift-file-v1]`）：
   该文件会被历史运行残留旧端口值，vite 代理据此指向错误端口。后端实际端口看 `pm2 jlist` 或 `curl 5175`。
