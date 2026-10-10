@@ -48,3 +48,52 @@ test('G4 §1 状态 B 不再把「缺凭据」与「歧义/需用户决策」并
   // 变异：回退该句 ⇒ 红（缺凭据是状态 D 认可的「沙箱物理不可为」，不得在 B 里被否定）
   assert.ok(!stateB.includes('「缺凭据」本身'), '状态 B 仍把缺凭据列为「本身不构成理由」，与状态 D 冲突')
 })
+
+test('G5 §1 状态 D 的 [DECIDE] 不再改写成 ASK（改指 fail 收尾 + 随 DONE 挂账）', () => {
+  // 变异 1：把旧句「需人类决策（改用 ASK）」加回去 ⇒ 红
+  // 变异 2：删掉「随 DONE 挂账」或「tasks.fail」任一 token ⇒ 红（只做删没做替）
+  // [CONSTRAINT] 判据落在 stateD 段（状态 D → 状态 E）；三个 token 缺一即红
+  assert.ok(!stateD.includes('改用 `ASK`'), '状态 D 又出现「改用 ASK」——与 §8 熔断处置（不上报 ASK）重新对立')
+  assert.ok(stateD.includes('[DECIDE]'), '状态 D 段缺 [DECIDE] token')
+  assert.ok(stateD.includes('tasks.fail'), '状态 D 段缺 tasks.fail（未写明做不成时先 fail 收尾）')
+  assert.ok(stateD.includes('随 DONE 挂账'), '状态 D 段缺「随 DONE 挂账」（只删旧句未补新出口）')
+})
+
+// ── [system-md-bearing-v1] G6：每章「承重：」标注 + 标注路径存在性 ──
+// [WHY] SYSTEM.md 反复出现「写了但没人执行」的落差（§0.1 自己的诚实传统 vs §10 预算无闸门，仅留痕）。
+//   本判据把「这条规则有没有机器承重」变成可机检项，让读者一眼看出、让改名当场变红。
+// [CONSTRAINT] 只解析 `- 承重：` 行（不扫全文），避免正文示例误报；只校验三种后缀。
+
+/** 按 `## §N` 切分；每段体 = 标题行到下一章标题（或文末） */
+function chapters(): Array<{ num: string, body: string }> {
+  const re = /^## (§[\d.]+)\s.*$/gm
+  const marks: Array<{ num: string, at: number }> = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(md)) !== null) marks.push({ num: m[1], at: m.index })
+  assert.ok(marks.length > 10, `SYSTEM.md 只切出 ${marks.length} 章，扫描器可能失效`)
+  return marks.map((x, i) => ({
+    num: x.num,
+    body: md.slice(x.at, i + 1 < marks.length ? marks[i + 1].at : md.length),
+  }))
+}
+
+test('G6-a 每个 §N 章必须含「- 承重：」标注（承重覆盖可机检）', () => {
+  // 变异：删掉任一章的标注行 ⇒ 红
+  const missing = chapters().filter(c => !/^- 承重：/m.test(c.body)).map(c => c.num)
+  assert.deepEqual(missing, [], `缺「- 承重：」标注的章：${missing.join(', ')}（每章须声明有无机器守卫）`)
+})
+
+test('G6-b 标注行里以行内代码写出的守卫路径必须在磁盘真实存在', () => {
+  // 变异：把路径写成 `packages/core/tests/not-exist.node-test.ts` ⇒ 红
+  // [CONSTRAINT] 只从标注行抽路径，不扫全文；只认 .node-test.ts / .cjs / .json
+  const re = /`([a-zA-Z][\w./-]*\.(?:node-test\.ts|cjs|json))`/g
+  const missing: string[] = []
+  for (const c of chapters()) {
+    const line = c.body.match(/^- 承重：.*$/m)
+    if (!line) continue
+    for (const p of line[0].matchAll(re)) {
+      if (!fs.existsSync(path.join(process.cwd(), p[1]))) missing.push(`${c.num} → ${p[1]}`)
+    }
+  }
+  assert.deepEqual(missing, [], `标注引用了不存在的守卫文件（改名后须同步）：\n${missing.join('\n')}`)
+})

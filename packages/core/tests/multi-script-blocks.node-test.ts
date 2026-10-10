@@ -268,3 +268,20 @@ test('multi-script: 油猴通道推送后必须主动再跑一次分类', () => 
     'markedNonScript 未含 marks.text ⇒ TEXT 回复里的代码引用会被当脚本推（WO-06 段〇 P0 回归）',
   )
 })
+
+// [idle-wake-poll-v1] 油猴通道必须有「不依赖 DOM 变动」的唤醒兜底。
+// [WHY] observer 只在 DOM 变动时触发；回复渲染完成后（流式光标移除 / 高亮完成 / 操作条挂载）
+//   DOM 静止 ⇒ 若脚本块因任何原因尚未推送（闭合门延迟 / 生成中门 / 多块续推），
+//   observer 永不触发，块永久滞留。2026-10-11 用户实测：滚动一下页面即收到（滚动引发的 DOM 变动唤醒）。
+//   headless 侧 startReplyPoll 是 800ms 轮询天然无此症。
+// [CONSTRAINT] 变异：删掉 setInterval 那一段 / 去掉 document.hidden 检查 / 去掉 latestAssistantRoot
+//   前置 / 去掉 observerDebounce 抢跑门 ⇒ 本用例必红（分别对应：兜底丢失 / 后台空转 / 无容器误跑 / 与防抖抢）。
+test('idle-wake-poll: 油猴通道必须有 DOM 静止后的轮询兜底（observer 之外的唤醒源）', () => {
+  const src = read(TAMPERMONKEY_SRC)
+  assert.ok(src.includes('[idle-wake-poll-v1]'), '缺少轮询兜底（DOM 静止后脚本块会永久滞留，只能靠用户滚动唤醒）')
+  assert.ok(/setInterval\(\(\) => \{[\s\S]{0,600}classifyAndPost\(\)/.test(src), 'setInterval 内必须调用 classifyAndPost')
+  assert.ok(src.includes('document.hidden'), '缺 document.hidden 检查 ⇒ 后台标签页会持续空转')
+  assert.ok(src.includes('if (!latestAssistantRoot()) return'), '缺容器前置检查 ⇒ 无 assistant 容器时误跑')
+  assert.ok(src.includes('if (observerDebounce) return'), '缺 observerDebounce 抢跑门 ⇒ 与 350ms 防抖互相干扰')
+  assert.ok(/\}, 800\)/.test(src), '轮询间隔须为 800（对齐 headless startReplyPoll）')
+})

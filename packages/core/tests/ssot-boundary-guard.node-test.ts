@@ -1,0 +1,75 @@
+// @desc SSOT 边界守卫：AGENTS.md 的具名常量引用必须在源码中真实存在
+// @why 2026-10-10：AGENTS.md「自动循环没有轮次上限」节声明 LOOP_HARD_MAX_ROUNDS = 50，
+//   而 auto-loop 子系统已删、该常量全仓零命中 => 悬空声明。AGENTS.md 自我声明
+//   「不重述执行规则、唯一来源是 SYSTEM.md」，但该声明无机器守卫；本文件只守**可机检的那一半**。
+// [判据] 扫描 AGENTS.md 中反引号包裹的 UPPER_SNAKE 常量名，逐个在源码中查字面量出现。
+//   找不到 => 红。变异：加回 LOOP_HARD_MAX_ROUNDS => 红。
+// [明确排除] 不守「是否违反职责边界」这类语义判断——那会退化成维护豁免白名单。
+import { test } from 'vitest'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+
+const ROOT = process.cwd()
+const agents = fs.readFileSync(path.join(ROOT, 'AGENTS.md'), 'utf8')
+
+/** 从 AGENTS.md 提取反引号包裹的 UPPER_SNAKE 常量名（至少一个下划线，避免捕获泛词） */
+function extractConstants(text: string): string[] {
+  const out = new Set<string>()
+  const re = /`([A-Z][A-Z0-9]*_[A-Z0-9_]+)`/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) out.add(m[1])
+  return [...out].sort()
+}
+
+/** 递归收集源码文件（排除文档 / dist / tests / node_modules / .ai-runner） */
+function walk(dir: string, out: string[] = []): string[] {
+  let entries: fs.Dirent[]
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return out }
+  for (const e of entries) {
+    if (['node_modules', 'dist', '.git', '.ai-runner', 'tests', 'coverage'].includes(e.name)) continue
+    const p = path.join(dir, e.name)
+    if (e.isDirectory()) { walk(p, out); continue }
+    if (!/\.(?:ts|vue|cjs|mjs|js|json)$/.test(e.name)) continue
+    out.push(p)
+  }
+  return out
+}
+
+const SOURCE_DIRS: string[] = ['packages', 'apps', 'scripts', 'bin']
+const sourceFiles: string[] = SOURCE_DIRS.flatMap((d: string) => walk(path.join(ROOT, d)))
+
+/** 源码中是否存在该常量的字面量（读一次全量缓存，避免逐常量重复 IO） */
+let cache: string | null = null
+function allSourceText(): string {
+  if (cache !== null) return cache
+  let joined = ''
+  for (const f of sourceFiles) {
+    try { joined += `${fs.readFileSync(f, 'utf8')}\n` } catch { /* 单文件失败不阻断 */ }
+  }
+  cache = joined
+  return cache
+}
+
+const declared = extractConstants(agents)
+
+test('G1 AGENTS.md 中至少声明了一个具名常量（防扫描器失效导致真空通过）', () => {
+  // 变异：改正则让它匹配不到任何常量 => 红（拒绝真空）
+  assert.ok(declared.length >= 1, `扫描器未命中任何常量：${JSON.stringify(declared)}`)
+})
+
+test('G2 AGENTS.md 引用的每个 UPPER_SNAKE 常量名必须在源码中真实存在', () => {
+  const haystack = allSourceText()
+  const missing = declared.filter((name: string) => !haystack.includes(name))
+  assert.deepEqual(missing, [], `AGENTS.md 引用了源码中不存在的常量（悬空声明）：${missing.join(', ')}`)
+})
+
+test('G3 反向指针：SYSTEM.md §14/§15/§16 头部必须保留「AGENTS.md」字样', () => {
+  const system = fs.readFileSync(path.join(ROOT, 'packages/core/SYSTEM.md'), 'utf8')
+  for (const anchor of ['## §14 ', '## §15 ', '## §16 ']) {
+    const at = system.indexOf(anchor)
+    assert.ok(at > -1, `SYSTEM.md 找不到 ${anchor}（标题被改名）`)
+    const head = system.slice(at, at + 600)
+    assert.ok(head.includes('AGENTS.md'), `${anchor} 头部未指向 AGENTS.md（反向指针丢失）`)
+  }
+})
