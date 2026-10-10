@@ -766,38 +766,3 @@
   font-size: 11px;
   color: var(--text-3);
 }
-
-/* [worklog-debug-v1] 临时诊断条：问题解决后移除 */
-.wl-debug {
-  margin: 4px 0;
-  padding: 6px 8px;
-  font-size: 11px;
-  background: rgb(255 200 0 / 10%);
-  border: 1px solid rgb(255 200 0 / 40%);
-  border-radius: 4px;
-  color: var(--text-2);
-}
-.wl-debug-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-.wl-debug-head button {
-  background: transparent;
-  border: 0;
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-}
-.wl-debug-body {
-  margin: 0;
-  padding: 0;
-  white-space: pre-wrap;
-  word-break: break-all;
-  font: 400 10px/1.4 var(--mono, monospace);
-  max-height: 200px;
-  overflow: auto;
-}

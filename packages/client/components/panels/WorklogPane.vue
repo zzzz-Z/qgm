@@ -101,11 +101,6 @@ const branchRef = ref('')
 const commitsOpen = ref(false)
 const commitsLoading = ref(false)
 const commitsData = ref<Array<{ sha: string, short: string, author: string, date: string, subject: string }>>([])
-// [worklog-debug-v1] 临时诊断：把 onReply 收到的 raw 结构可视化到 UI（用户无需开 console）
-const debugRaw = ref('')
-// [worklog-debug-v2] onMounted 订阅状态可视化（catch 里也写，判断是否订阅失败）
-const debugMountStatus = ref('(未挂载)')
-const debugVisible = ref(true)
 // [vcs-svn-log-v1] 版本控制类型：'git' 为乐观默认（git 用户不该看到模式切换的闪烁）；
 //   仅当 git 链路失败且 /vcs/log 报 vcs='svn' 时才翻成 'svn'
 const vcsMode = ref<'git' | 'svn'>('git')
@@ -163,7 +158,6 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
 onMounted(() => {
   try {
     const t = getTransport()
-    debugMountStatus.value = `transport kind=${t && t.kind ? t.kind : '?'} · 订阅中`
     unsubscribeReply = t.onReply((raw: unknown, sid: string) => {
       // [gitmsg-window-v1] 闸门改为「时间窗」而不是「一次性 pending 标志」：
       //   超时只提示不关闸，AI 生成 msg 晚到时仍能被消费。10 分钟窗口兜底防永久挂着。
@@ -177,32 +171,6 @@ onMounted(() => {
       const textFromText = replyShape && typeof replyShape.text === 'string' ? replyShape.text : ''
       const textFromItem = replyShape && replyShape.item && typeof replyShape.item.code === 'string' ? replyShape.item.code : ''
       const text = (textFromText || textFromItem).trim()
-      // [worklog-reply-diag-v2] 打印完整 raw 供诊断（展开 Object 可看全部字段）
-      console.warn('[worklog-onReply] raw=', raw)
-      // [worklog-debug-v1] 写入 UI 可见诊断条
-      try {
-        const shape = raw as { kind?: string, text?: string, item?: { code?: string } } | null
-        debugRaw.value = JSON.stringify({
-          at: new Date().toLocaleTimeString(),
-          inWindow,
-          elapsed,
-          kind: shape && shape.kind,
-          textLen: shape && shape.text ? String(shape.text).length : 0,
-          hasItem: Boolean(shape && shape.item),
-          itemCodeLen: shape && shape.item && shape.item.code ? String(shape.item.code).length : 0,
-          textHead: shape && shape.text ? String(shape.text).slice(0, 120) : '',
-        }, null, 2)
-      } catch { /* ignore */ }
-      console.warn('[worklog-onReply]', {
-        inWindow,
-        elapsed,
-        pending: pendingCommitRequest.value,
-        aiGen: aiGenerating.value,
-        sid,
-        kind: replyShape && replyShape.kind,
-        textLen: text.length,
-        hasItem: Boolean(replyShape && replyShape.item),
-      })
       // 闸门：不在窗口内直接忽略（不管 pending 标志，因为超时不清 pending 会让它常驻）
       if (!inWindow) return
       if (!text) return
@@ -212,17 +180,10 @@ onMounted(() => {
       // [gitmsg-sentinel-v1] indexOf 定位哨兵，不用正则（eslint 拦 super-linear-backtracking）
       const SENTINEL = 'GITMSG:'
       const sentinelIdx = text.indexOf(SENTINEL)
-      if (sentinelIdx < 0) {
-        console.warn('[worklog-onReply] skip: no GITMSG sentinel')
-        return
-      }
+      if (sentinelIdx < 0) return
       const afterSentinel = text.slice(sentinelIdx + SENTINEL.length).trim()
       const msg = extractCommitMessage(afterSentinel) || extractCommitLine(afterSentinel)
-      if (!msg) {
-        console.warn('[worklog-onReply] skip: extract returned empty')
-        return
-      }
-      console.warn('[worklog-onReply] CONSUME', { msgLen: msg.length, head: msg.slice(0, 60) })
+      if (!msg) return
       aiCommitMsg.value = msg
       commitMsg.value = msg
       aiGenerating.value = false
@@ -232,8 +193,7 @@ onMounted(() => {
       waitingSince.value = 0
       cleanupWorklogCommit()
     })
-    debugMountStatus.value = `transport kind=${t && t.kind ? t.kind : '?'} · 已订阅`
-  } catch (e) { debugMountStatus.value = `FAILED: ${String(e)}` }
+  } catch { /* transport 未就绪时静默；用户可手动编辑 */ }
 })
 onUnmounted(() => {
   if (unsubscribeReply) { try { unsubscribeReply() } catch { /* ignore */ } unsubscribeReply = null }
@@ -614,17 +574,6 @@ async function copyFullLog(): Promise<void> {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M6 9v6" /><path d="M18 6a3 3 0 1 1-3 3" /><path d="M15 9a9 9 0 0 1-9 9" /></svg>
         <span class="wl-head-branch">{{ branchRef || '(detached)' }}</span>
         <code v-if="headRef" class="wl-head-sha">{{ headRef }}</code>
-      </div>
-      <!-- [worklog-debug-v1] 临时诊断条：显示 onReply 收到的 raw 结构，问题解决后移除 -->
-      <div v-if="debugVisible" class="wl-debug">
-        <div class="wl-debug-head">
-          <span>onReply 诊断</span>
-          <button type="button" aria-label="关闭" @click="debugVisible = false">
-            ×
-          </button>
-        </div>
-        <pre class="wl-debug-body">[mount] {{ debugMountStatus }}
-[onReply] {{ debugRaw || '(尚未收到任何回包)' }}</pre>
       </div>
       <!-- [commit-toolbar-v1] 按钮排：提交 / 复制日志 / 生成 / 刷新，统一 30×30 方形，置于输入框上方 -->
       <div class="wl-commit-toolbar">
