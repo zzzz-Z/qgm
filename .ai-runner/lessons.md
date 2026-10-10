@@ -2800,3 +2800,19 @@ TypeScript 控制流分析把 `const` 字面量收窄为 `'A'`，于是 `if (PHA
 ## 看板 pending 里「无任务可推」时如何收敛
 
 无显式任务、看板空、工作区有大量未提交改动时，直接 ASK 会被 `autonomy-first-v1` 三问否决（能查证、能择优、能延后）。正确做法是先取证再问——本轮查了 `.ai-runner/state.json`（`todo` 空）、`docs/` 目录（40+ 历史工单）、`git status`（36 处改动）、`SESSION-HANDOFF.md`（过期）、`signals.md`，然后给出 A/B/C 三个可执行且有推荐顺序的选项，ASK 才成立。纯「请告诉我做什么」不构成合法 ASK。
+
+## `deleteFile` 走 overlay，`shell` 子进程读真盘看不见本轮删除
+
+上一轮我 `deleteFile` 79 个 backup 文件后立刻用 `shell(['sh','-c','find ... | wc -l'])` 复核——`find` 报 79，看起来"没删掉"。实为 `overlay-atomic-v1` 语义：`writeText`/`deleteFile` 只进 overlay，`shell`/`exec` 起的真子进程看不见，必须 `await __AI__.flush()` 后才一致。
+
+但本次更强的一个信号是：`__AI__.exists()` 是 overlay 视角——我 `deleteFile(one)` 后 `exists(one)` 返回 `false`（一致），而 `shell` 视角仍 `true`（未 flush）。两个视角各自自洽，判据要看你想验哪一层。
+
+复核心得：
+
+- 想验"我脚本里逻辑上删了" → `exists()` + overlay 视角
+- 想验"磁盘上真没了" → 先 `flush()` 再 shell 复核
+- 本轮两次 `shell` 复核间隔了一次 `flush()` 后，第二次 `find` 已是 0——印证了"flush 后才一致"
+
+## `eslint --format json` 的 stdout 会被大体积 JSON 淹没
+
+`npx eslint packages scripts bin apps --format json | head -c 30000` 直接 `JSON.parse` 必失败——`head -c` 截断后不是合法 JSON。正确做法是先 `> .ai-runner/tmp/eslint.json` 落盘，再 `readJSON` 读文件，用 `jq`/对象遍历筛 `severity===1`。这与 §10「避免内嵌大字符串」同源：大体积工具输出走文件不走内存截断。

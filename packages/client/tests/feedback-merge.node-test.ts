@@ -153,6 +153,21 @@ test('承重：ScriptPanel 卸载必须撤窗', () => {
 //   崩溃脚本的失败结果永不回传（与「出错必须回传、不许静默失败」原则相悖）。
 // CONSTRAINT: 顺序判据（`字面量 import`）而非行为判据——node 测试无 vite auto-import，行为不可测；
 //   但「是否写出显式 import」是承重的：删掉这行 import，本断言即红。
+// [feedback-no-rules-v1] 承重：执行结果回传**不得**携带 SYSTEM.md 规则头。
+// WHY: 回传非会话首问，规则头只应在 openAiSession(forceRules:true) 注入一次；
+//   原实现依赖 `${activeWinSid}:${sessionId}` 组合键去重兜底，resetSession / 窗口 sid 漂移
+//   即击穿（App.vue:onNewSession 注释已记录同类）⇒ 本会话实测两次注入间隔 18.6s。
+// CONSTRAINT: 顺序判据而非行为判据——node 测试无 vue 上下文，但「是否写出 skipRules: true」是承重的：
+//   删掉它，本断言即红。
+test('承重：exec-flow 回传 copyAndFill 必须传 skipRules: true（不重注入 SYSTEM.md）', () => {
+  const src = readSrc()
+  assert.match(
+    src,
+    /copyAndFill\([^)]*\{\s*skipRules:\s*true\s*\}\)/,
+    'exec-flow 回传未传 skipRules: true：组合键去重被击穿时会把 SYSTEM.md 规则头混进回传（token 浪费 + 上下文污染）',
+  )
+})
+
 test('承重：exec-flow 必须显式 import copyAndFill（门面被 auto-import 排除扫描）', () => {
   const src = readSrc()
   assert.ok(

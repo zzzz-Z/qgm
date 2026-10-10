@@ -57,7 +57,12 @@ export function createExecFlow(deps: ExecFlowDeps) {
   //   循环活动时 isActive 返回 false ⇒ 到点丢弃整个缓冲且不重排（回传权归循环引擎，
   //   与 ScriptPanel 的 [loop-feedback-authority-v2] 同语义）。
   const feedbackMerge = createFeedbackMerge(async (items, mergedText) => {
-    const r = await copyAndFill(mergedText)
+    // [feedback-no-rules-v1] 执行结果回传非会话首问：显式 skipRules 声明意图。
+    //   [WHY] 原依赖 `${activeWinSid}:${sessionId}` 组合键去重兜底；resetSession / 窗口 sid 漂移
+    //   都会击穿去重（App.vue:onNewSession 注释已记录同类场景），导致每次回传重注入 SYSTEM.md
+    //   （send.jsonl 实测：本会话两次注入间隔 18.6s，第二次即脚本回传）。
+    //   [CONSTRAINT] 首问注入归 openAiSession(forceRules:true) 一处，回传永不带规则。
+    const r = await copyAndFill(mergedText, { skipRules: true })
     // [loop-consolidation-P2] 摘除 isLoopActive 守卫（恒 false）；非循环路径恒可暂停
     if (r !== 'failed') softPause()
     if (r === 'failed') {
