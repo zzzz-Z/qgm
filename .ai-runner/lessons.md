@@ -2816,3 +2816,13 @@ TypeScript 控制流分析把 `const` 字面量收窄为 `'A'`，于是 `if (PHA
 ## `eslint --format json` 的 stdout 会被大体积 JSON 淹没
 
 `npx eslint packages scripts bin apps --format json | head -c 30000` 直接 `JSON.parse` 必失败——`head -c` 截断后不是合法 JSON。正确做法是先 `> .ai-runner/tmp/eslint.json` 落盘，再 `readJSON` 读文件，用 `jq`/对象遍历筛 `severity===1`。这与 §10「避免内嵌大字符串」同源：大体积工具输出走文件不走内存截断。
+
+## 同一段代码的第二个 `copyAndFill` 调用点容易被忽略
+
+排查「为何加载两次」时，第一直觉是去 `App.vue:170` / `useAppStartup.ts:66` 两处 `forceRules: true` 的调用点找，但它们都属会话首问，是正确的。真正的漏点是 `exec-flow.ts:60`——它在 `feedbackMerge` 的 flush 回调里，离首问路径很远，是 grep `copyAndFill` 才捞出来的。
+
+一般化：首问注入的日志（`[copyAndFill] rules injected key=`）只在注入时打，不注入时不打。所以「没有日志」不等于「没走这条路」——判「某次 send 是否注入了规则」的可靠手段是直接看 send.jsonl 的 promptHead 字节，不是看 console。
+
+## `skipRules` 的语义不只是「跳过规则」
+
+源码注释写的是「skipRules=true 用于纯聊天首问」，看起来像首问专用。但实际上 `skipRules` 是声明调用点不是「需要规则头」的语义——它同时决定了「是否写入 `_rulesInjectedSids`」（`:239` 注释：「skipRules 不写入 `_rulesInjectedSids`：后续 startLoop 首次调用仍会正常注入」）。所以对回传用 `skipRules: true` 是既不带规则头、也不污染首问去重状态的双重正确。只把它读成「首问开关」会错过这个适用场景。
