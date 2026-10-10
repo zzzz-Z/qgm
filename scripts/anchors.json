@@ -150,7 +150,7 @@
     },
     {
       "file": "AGENTS.md",
-      "contains": "自动循环没有轮次上限"
+      "contains": "自动循环子系统已退役"
     },
     {
       "file": "packages/core/tests/limit-marker-guard.node-test.ts",

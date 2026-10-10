@@ -78,7 +78,7 @@ if (fs.existsSync(lessonsPath)) {
     ls.items.slice(0, MAX_SHOW).forEach((it) => { console.log(`      [${it.status}] ${it.title}`) })
     if (ls.items.length > MAX_SHOW) console.log(`      ... 另有 ${ls.items.length - MAX_SHOW} 条`)
     if (ls.pending) {
-      warn(`${ls.pending} 条待复核 —— 复核与蒸馏归复核方：亲跑证据后标 [VERIFIED]/[REJECTED]/[STALE]`)
+      warn(`${ls.pending} 条待复核 —— 应用端 / 复核方均可标：亲跑证据后标 [VERIFIED]/[REJECTED]/[STALE]`)
     }
     // [lessons-hint-v1] 提供写入入口，避免踩坑记录长期停滞
     console.log(`      采集: DONE 总结写「## 踩坑记录」段自动入库; 手工: pnpm lessons:add "<title>" "<body>"`)
