@@ -6,6 +6,8 @@ import type { TreeDropDetail } from '../../composables/ui/drag-bus'
 import type { Ref } from 'vue'
 import { uid } from '../../utils/id'
 import type { AttachedFile } from './attach-manager'
+// [fence-safe-v1] 附件内容与「# 相关文件源码」属**同一类**注入（源码原样进 prompt）⇒ 必须同源处理
+import { pushFenced } from './prompt-builder'
 
 /**
  * 拉取文件夹内所有文件的路径（递归）
@@ -109,15 +111,24 @@ export function createTreeAttach(deps: { attachedFiles: Ref<AttachedFile[]> }) {
   /** 脚本 + 附件 → 拼装成最终脚本文本（bash 用 #、cjs 用 //） */
   async function buildPromptWithAttachments(scriptText: string, files: AttachedFile[]): Promise<string> {
     if (!files.length) return scriptText
+    // [fence-safe-v1] 附件正文一律**加围栏**（围栏长度按内容自适应）。
+    // WHY: 附件内容是源码原样，与 `# 相关文件源码` 是同一条通道——不围栏时它落进页面是**普通文本**，
+    //   页面内触顶探针扫得到其中的探针词表（例如用户拖进 `headless-inject*.ts` 自己那份源码）⇒
+    //   自指误报「已达长度上限」并掐掉一整轮。这是 Channel D 的**第二个发射点**：
+    //   只修 prompt-builder 那一处，等于「同一机制只堵了一个入口」（项目铁律：修被藏起来的机制先数入口）。
+    // CONSTRAINT: 附件正文与 `----- path -----` 分隔行逐字符不变（AI 侧靠它区分多文件），只加外壳。
     const parts: string[] = []
     for (const f of files) {
       if (f.kind === 'folder' && f.paths && f.paths.length) {
         parts.push(`═════ 附件目录 ${f.name} (${f.paths.length} 文件) ═════`)
         const contents = await fetchFolderContents(f.paths)
+        const body: string[] = []
         for (const cf of contents) {
-          parts.push(`----- ${cf.path} -----`)
-          for (const line of cf.content.split('\n')) parts.push(`${line}`)
+          body.push(`----- ${cf.path} -----`)
+          body.push(cf.content)
         }
+        // 空目录内容不产出空围栏块（与原先「什么都不 push」等价）
+        if (body.length) pushFenced(parts, body.join('\n'))
       } else if (f.kind === 'image') {
         parts.push(`═════ 附件图片 ${f.name} (${fmtSize(f.size)}) ═════`)
         // [image-channel-v2] 图片改走 FillPayload.images 独立通道，prompt 只留位置提示；
@@ -126,7 +137,7 @@ export function createTreeAttach(deps: { attachedFiles: Ref<AttachedFile[]> }) {
         parts.push(`[图片已作为多模态附件随本请求发送]`)
       } else {
         parts.push(`═════ 附件 ${f.name} (${fmtSize(f.size)}) ═════`)
-        for (const line of f.content.split('\n')) parts.push(`${line}`)
+        pushFenced(parts, f.content)
       }
     }
     parts.push('')

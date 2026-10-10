@@ -9,6 +9,8 @@ import { beforeEach, expect, test, vi } from 'vitest'
 import { ref } from 'vue'
 
 import { STOPPED_PLAIN_GUARD_MS, useAiReplyHandlers } from '../composables/ai/useAiReplyHandlers.js'
+// [stopped-vocab-guard-v1] 停机态整句一律不落源码（同 utils/stop-notice.ts 文件头 [CONSTRAINT]）
+import { STOPPED_HEAD } from '../utils/stop-notice.js'
 
 const h = vi.hoisted(() => ({
   emitCalls: [] as unknown[][],
@@ -45,7 +47,7 @@ function mkHandlers() {
 
 function fakeEvent() { return { origin: 'https://x', source: null } as unknown as MessageEvent }
 
-const STOPPED = { type: 'ai-runner:reply', kind: 'stopped', text: 'AI 网页已停止生成', sessionId: '' }
+const STOPPED = { type: 'ai-runner:reply', kind: 'stopped', text: STOPPED_HEAD, sessionId: '' }
 // 模拟「已停止」半截回复的补发 plain：长文本、无任何标记行（marks.script=0，上代守卫拦不住）
 function PARTIAL_PLAIN(sid: string) {
   return {

@@ -196,11 +196,31 @@ async function gitArchiveBranch(
   // git add 会以 "paths are ignored" 拒绝 → 整次存档失败。传 -f 只对显式列出的路径生效，
   // 不会把 dist/ / node_modules/ 之类卷进来。
   const hasRunnerPath = paths.some(p => p === '.ai-runner' || p.startsWith('.ai-runner/'))
-  const addArgs = hasRunnerPath
-    ? ['add', '-A', '-f', '--', ...paths]
-    : ['add', '-A', '-f', '--', ...paths, ':(exclude).ai-runner']
-  const add = await run('git', addArgs, 30_000, env)
-  if (add.code !== 0) return { ok: false, reason: `git add 失败: ${add.stderr}` }
+  // [archive-deleted-path-v1] 拆分 existing / missing 两路。
+  // [WHY] 工作区已不存在的路径（删除动作）不能走 git add —— git 会报
+  //   "pathspec '...' did not match any files" 整次存档失败。删除必须用 git rm --cached
+  //   从临时索引移除；--ignore-unmatch 保证「本就不在索引」的路径静默通过。
+  const existingPaths = paths.filter(p => fs.existsSync(path.join(ROOT, p)))
+  const missingPaths = paths.filter(p => !fs.existsSync(path.join(ROOT, p)))
+
+  if (existingPaths.length > 0) {
+    const addArgs = hasRunnerPath
+      ? ['add', '-A', '-f', '--', ...existingPaths]
+      : ['add', '-A', '-f', '--', ...existingPaths, ':(exclude).ai-runner']
+    const add = await run('git', addArgs, 30_000, env)
+    if (add.code !== 0) return { ok: false, reason: `git add 失败: ${add.stderr}` }
+  }
+  if (missingPaths.length > 0) {
+    const rm = await run(
+      'git',
+      ['rm', '--cached', '-q', '--ignore-unmatch', '--', ...missingPaths],
+      30_000,
+      env,
+    )
+    if (rm.code !== 0) {
+      return { ok: false, reason: `git rm --cached 失败: ${rm.stderr}` }
+    }
+  }
 
   const wt = await run('git', ['write-tree'], 30_000, env)
   if (wt.code !== 0) return { ok: false, reason: `write-tree 失败: ${wt.stderr}` }
@@ -369,3 +389,91 @@ export async function gitResetHard(ref: string): Promise<{ ok: boolean, reason?:
 
 export type { RawDiffResult, WorklogOptions, WorklogResult } from './git-worklog.js'
 export type { WorklogFileEntry } from './post-run/worklog-markdown.js'
+
+/**
+ * [git-stage-v1] 详细工作区状态：解析 \`git status --porcelain=v1 -z\` 的 XY 位。
+ * [WHY] VSCode 风格提交需要区分「已暂存」与「未暂存」两类；原先只调 --porcelain 无 XY 语义。
+ * [CONSTRAINT] -z 输出以 NUL 分隔，重命名条目的旧路径作为额外一段紧随其后（需吞掉）。
+ * @returns 每条含 path / status / staged(X≠空格) / unstaged(Y≠空格)
+ */
+export interface GitStatusFile {
+  path: string
+  status: string
+  staged: boolean
+  unstaged: boolean
+}
+
+export async function gitStatusDetailed(): Promise<{ ok: boolean, files: GitStatusFile[], reason?: string }> {
+  if (!(await gitAvailable())) return { ok: false, files: [], reason: '非 git 仓库' }
+  const r = await run('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
+  if (r.code !== 0) return { ok: false, files: [], reason: `git status 失败: ${r.stderr}` }
+  const parts = r.stdout.split('\u0000').filter(Boolean)
+  const files: GitStatusFile[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const entry = parts[i]
+    if (entry.length < 4) continue
+    const x = entry[0]
+    const y = entry[1]
+    const p = entry.slice(3)
+    // 重命名条目的新路径在 entry 里，旧路径作为下一段独立元素——跳过
+    const isRename = x === 'R' || y === 'R' || x === 'C' || y === 'C'
+    if (isRename && i + 1 < parts.length) i++
+    const flag = x !== ' ' ? x : y
+    const status = flag === 'A'
+      ? 'added'
+      : flag === 'D'
+        ? 'deleted'
+        : flag === 'R'
+          ? 'renamed'
+          : flag === 'C'
+            ? 'copied'
+            : flag === '?'
+              ? 'untracked'
+              : 'modified'
+    files.push({ path: p, status, staged: x !== ' ' && x !== '?', unstaged: y !== ' ' || x === '?' })
+  }
+  return { ok: true, files }
+}
+
+/**
+ * [git-stage-v1] 把指定路径加入暂存区（真实 git 索引操作）。
+ * [CONSTRAINT] 空数组直接成功（幂等）；不做 ai-archive 隔离，这是用户显式暂存。
+ */
+export async function gitStage(paths: string[]): Promise<{ ok: boolean, reason?: string }> {
+  if (!(await gitAvailable())) return { ok: false, reason: '非 git 仓库' }
+  if (paths.length === 0) return { ok: true }
+  const r = await run('git', ['add', '-A', '--', ...paths])
+  if (r.code !== 0) return { ok: false, reason: r.stderr.trim() || `git add 退出码 ${r.code}` }
+  return { ok: true }
+}
+
+/**
+ * [git-stage-v1] 把指定路径从暂存区撤下（保留工作区内容）。
+ * [WHY] git restore --staged 是 git 2.23+ 的推荐写法；旧版回落 git reset HEAD。
+ */
+export async function gitUnstage(paths: string[]): Promise<{ ok: boolean, reason?: string }> {
+  if (!(await gitAvailable())) return { ok: false, reason: '非 git 仓库' }
+  if (paths.length === 0) return { ok: true }
+  const r = await run('git', ['restore', '--staged', '--', ...paths])
+  if (r.code === 0) return { ok: true }
+  const r2 = await run('git', ['reset', '-q', 'HEAD', '--', ...paths])
+  if (r2.code !== 0) return { ok: false, reason: r.stderr.trim() || `git restore --staged 退出码 ${r.code}` }
+  return { ok: true }
+}
+
+/**
+ * [git-stage-v1] 提交当前暂存区到当前分支（真实 git commit，非 ai-archive）。
+ * [WHY] VSCode 语义：用户点了提交就前进当前分支，与 AI 自动存档（ai-archive）分属两条通道。
+ * [CONSTRAINT] 暂存区为空时返回 empty:true（不报错）；不触发 --no-verify（保留钩子）。
+ */
+export async function gitCommitStaged(message: string): Promise<{ ok: boolean, commit?: string, empty?: boolean, reason?: string }> {
+  if (!(await gitAvailable())) return { ok: false, reason: '非 git 仓库' }
+  const diff = await run('git', ['diff', '--cached', '--quiet'])
+  if (diff.code === 0) return { ok: true, empty: true }
+  const safeMsg = String(message).slice(0, 2000)
+  if (!safeMsg.trim()) return { ok: false, reason: '提交信息为空' }
+  const r = await run('git', ['commit', '-m', safeMsg], 60_000)
+  if (r.code !== 0) return { ok: false, reason: r.stderr.trim() || `git commit 退出码 ${r.code}` }
+  const head = await run('git', ['rev-parse', 'HEAD'])
+  return { ok: true, commit: head.stdout.trim().slice(0, 12) }
+}

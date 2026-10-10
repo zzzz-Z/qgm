@@ -48,6 +48,13 @@ interface VcsLogResult {
   reason?: string
   entries?: SvnLogEntry[]
 }
+// [git-stage-v1] /__ai/git/status 返回：XY 位区分已暂存/未暂存，供双栏展示
+interface GitStatusFile {
+  path: string
+  status: string
+  staged: boolean
+  unstaged: boolean
+}
 
 const props = defineProps<{ active: boolean }>()
 
@@ -77,6 +84,12 @@ const previewPath = ref<string | null>(null)
 /** 预览文件内容；空串表示未加载/文件为空 */
 const previewContent = ref('')
 const previewLoading = ref(false)
+// [worklog-diff-preview-v1] 变更列表点击走 diff 模式：拿 git 补丁渲染，不再回读文件内容
+const previewHunks = ref<string[]>([])
+/** 预览模式：有 diff 走 diff，否则退回 content（如新增/删除文件或 diff 缺失） */
+const previewMode = ref<'diff' | 'content'>('content')
+/** 变更类型：驱动 DiffViewer 的徽标 */
+const previewChangeType = ref<'added' | 'modified' | 'deleted'>('modified')
 // [git-commit-real-v1] 真实提交：/git/commit-loop 落盘后刷新列表
 // [CONSTRAINT] committing 防重复点击；成功后清空消息框
 const committing = ref(false)
@@ -89,6 +102,8 @@ const vcsMode = ref<'git' | 'svn'>('git')
 const svnEntries = ref<SvnLogEntry[]>([])
 /** 当前展开的 revision；null 表示全部收起 */
 const svnExpanded = ref<number | null>(null)
+// [git-stage-v1] 从 /__ai/git/status 拉到的 XY 状态；提交/暂存操作后刷新
+const stagingStatus = ref<GitStatusFile[]>([])
 
 const { toast } = useToast()
 // [use-worklog-commit-v1] commit msg 生成簇已抽到 useWorklogCommit
@@ -114,17 +129,17 @@ const {
 // 提交框每输入一字触发重渲染时不再重复调用（报告 §5.1.4）。
 // [worklog-rows-template-v1] 预生成行数据：保留 f 全部字段，附加派生的 name/dir/stCls/stLetter。
 // [worklog-content-preview-v1] 行数据不再承载展开态：点击改为打开内容预览浮层。
-const rows = computed(() => (result.value?.files || []).map((f) => {
-  const sp = splitPath(f.path)
-  return {
-    ...f,
-    name: sp.name,
-    dir: sp.dir,
-    stCls: statusClass(f.status),
-    stLetter: statusLetter(f.status),
-  }
-}))
-const changeCount = computed(() => result.value?.files?.length || 0)
+// [git-stage-v1] 统计映射：path -> {added, removed}，来自 worklog 的 numstat
+const statByPath = computed(() => {
+  const m = new Map<string, { added: number, removed: number }>()
+  for (const f of result.value?.files || []) m.set(f.path, { added: f.added || 0, removed: f.removed || 0 })
+  return m
+})
+/** 已暂存栏（提交源） */
+const stagedRows = computed(() => rowsFor(stagingStatus.value, true))
+/** 未暂存栏 */
+const unstagedRows = computed(() => rowsFor(stagingStatus.value, false))
+const changeCount = computed(() => stagedRows.value.length + unstagedRows.value.length)
 // [worklog-stat-v1] 汇总 +/-：分组头展示；数据源同 result.files，与每行数值一致
 const addTotal = computed(() => (result.value?.files || []).reduce((s, f) => s + (f.added || 0), 0))
 const delTotal = computed(() => (result.value?.files || []).reduce((s, f) => s + (f.removed || 0), 0))
@@ -164,6 +179,51 @@ onUnmounted(() => {
   cleanupWorklogCommit()
 })
 
+/**
+ * [git-stage-v1] 根据 XY 位把文件按所属栏补齐展示字段。
+ * [WHY] 一个文件可同时出现在两栏（MM 状态：部分改动已暂存、部分未暂存），与 VSCode 一致。
+ * @param files status 源
+ * @param wantStaged true=取已暂存栏，false=取未暂存栏
+ */
+function rowsFor(files: GitStatusFile[], wantStaged: boolean): Array<{
+  path: string
+  status: string
+  name: string
+  dir: string
+  stCls: string
+  stLetter: string
+  added: number
+  removed: number
+}> {
+  const stats = statByPath.value
+  const out: Array<{
+    path: string
+    status: string
+    name: string
+    dir: string
+    stCls: string
+    stLetter: string
+    added: number
+    removed: number
+  }> = []
+  for (const f of files) {
+    const inThis = wantStaged ? f.staged : f.unstaged
+    if (!inThis) continue
+    const sp = splitPath(f.path)
+    const st = stats.get(f.path)
+    out.push({
+      path: f.path,
+      status: f.status,
+      name: sp.name,
+      dir: sp.dir,
+      stCls: statusClass(f.status),
+      stLetter: statusLetter(f.status),
+      added: st?.added || 0,
+      removed: st?.removed || 0,
+    })
+  }
+  return out
+}
 /** 状态字母与颜色分类：M=modified A=added D=deleted R=renamed C=copied */
 function statusLetter(s: string): string {
   if (s === 'added') return 'A'
@@ -239,9 +299,41 @@ function splitPath(p: string): { dir: string, name: string } {
  * [CONSTRAINT] 已删除的文件读回空串，预览区显示为空（git 变更里 deleted 项无内容可看）
  * @param p 文件相对路径
  */
-async function openPreview(p: string): Promise<void> {
+/**
+ * 打开文件预览浮层（内容模式）。
+ * [WHY] 工作日志的变更列表点击即看「这个文件现在长什么样」；行级 diff 显示交由 preview 浮层内部模式切换。
+ * [CONSTRAINT] 传整个 file entry（含 path/diff/status），浮层需要 status 判新增/删除；此处保持向后兼容，
+ *   调用方传字符串也接受（视为仅路径、无 diff 数据）。
+ * @param file file entry 或文件路径字符串
+ */
+/**
+ * 打开文件预览浮层。
+ * [worklog-diff-preview-v1] 变更列表点击改为走 diff 模式：把 git 补丁丢给 @git-diff-view 渲染，
+ *   回答「这一轮到底改了什么」，而不是「改完后长什么样」。
+ * [CONSTRAINT] 补丁缺失时退回 content 模式（读当前内容），避免浮层空白。
+ * @param file file entry（含 path/status/diff）或路径字符串
+ */
+async function openPreview(file: { path: string, status?: string, diff?: string } | string): Promise<void> {
+  const p = typeof file === 'string' ? file : file.path
+  if (!p) return
+  const status = typeof file === 'object' && file.status ? file.status : 'modified'
+  const patch = typeof file === 'object' && typeof file.diff === 'string' ? file.diff : ''
   const seq = ++_previewSeq
   previewPath.value = p
+  previewChangeType.value = status === 'added' ? 'added' : status === 'deleted' ? 'deleted' : 'modified'
+
+  if (patch) {
+    previewMode.value = 'diff'
+    // [diff-hunks-format-v1] 实测：@git-diff-view 的 hunks 参数吃「完整 unified diff 字符串」数组，
+    //   只留 @@ 段会触发 "No hunks found"（拆段反而拿不到 split 结果）。单元素整段透传。
+    previewHunks.value = [patch]
+    previewContent.value = ''
+    previewLoading.value = false
+    return
+  }
+
+  previewMode.value = 'content'
+  previewHunks.value = []
   previewContent.value = ''
   previewLoading.value = true
   try {
@@ -261,13 +353,51 @@ async function openPreview(p: string): Promise<void> {
     if (seq === _previewSeq) previewLoading.value = false
   }
 }
+/**
+ * [git-stage-v1] 把路径加入暂存区（VSCode 未暂存栏的 + 动作）。
+ */
+async function stageFiles(paths: string[]): Promise<void> {
+  if (!paths.length) return
+  try {
+    const r = await fetch('/__ai/git/stage', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ paths }),
+    })
+    const j = await r.json().catch(() => ({})) as { ok?: boolean, reason?: string }
+    if (!r.ok || !j.ok) { toast(j.reason || `暂存失败（HTTP ${r.status}）`, 'error', TOAST_LONG); return }
+    await load()
+  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
+}
+/** [git-stage-v1] 从暂存区撤下（VSCode 已暂存栏的 - 动作，保留工作区内容）。 */
+async function unstageFiles(paths: string[]): Promise<void> {
+  if (!paths.length) return
+  try {
+    const r = await fetch('/__ai/git/unstage', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ paths }),
+    })
+    const j = await r.json().catch(() => ({})) as { ok?: boolean, reason?: string }
+    if (!r.ok || !j.ok) { toast(j.reason || `取消暂存失败（HTTP ${r.status}）`, 'error', TOAST_LONG); return }
+    await load()
+  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
+}
+/** [git-stage-v1] 全量暂存：把未暂存栏全部加入暂存区 */
+async function stageAll(): Promise<void> {
+  await stageFiles(unstagedRows.value.map(r => r.path))
+}
+/** [git-stage-v1] 全量取消暂存 */
+async function unstageAll(): Promise<void> {
+  await unstageFiles(stagedRows.value.map(r => r.path))
+}
 async function load(): Promise<void> {
   // [load-seq-guard-v1] 捕获本次请求序号；后续每个 await 后校验，过期即丢弃
   const mySeq = ++_loadSeq
   loading.value = true
   error.value = ''
   try {
-    const [wlRes, headRes] = await Promise.all([
+    const [wlRes, headRes, stRes] = await Promise.all([
       fetch('/__ai/git/worklog', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -275,6 +405,8 @@ async function load(): Promise<void> {
         body: JSON.stringify({ includeHistory: true }),
       }),
       fetch('/__ai/git/head', { cache: 'no-store' }),
+      // [git-stage-v1] 三请求并发：暂存区状态独立端点在 VSCode 语义下更清晰
+      fetch('/__ai/git/status', { cache: 'no-store' }),
     ])
     if (mySeq !== _loadSeq) return
     const j = await wlRes.json().catch(() => ({})) as WorklogResult
@@ -296,6 +428,12 @@ async function load(): Promise<void> {
     } catch { /* ignore */ }
     if (mySeq !== _loadSeq) return
     result.value = j
+    // [git-stage-v1] status 拉取失败只影响双栏显示，不阻断 worklog
+    try {
+      const sj = await stRes.json().catch(() => ({})) as { ok?: boolean, files?: GitStatusFile[] }
+      if (mySeq !== _loadSeq) return
+      stagingStatus.value = sj.ok && Array.isArray(sj.files) ? sj.files : []
+    } catch { /* ignore */ }
   } catch (e) {
     if (mySeq !== _loadSeq) return
     error.value = e instanceof Error ? e.message : String(e)
@@ -307,10 +445,15 @@ async function load(): Promise<void> {
 }
 /** 提交：调 /git/commit-loop 落盘，成功 toast + 刷新（原实现仅复制剪贴板） */
 async function doCommit(): Promise<void> {
-  if (!result.value || !commitMsg.value.trim() || committing.value) return
+  // [git-stage-v1] 提交前需有已暂存项；空暂存区给出明确提示（与 VSCode 一致）
+  if (!stagedRows.value.length) {
+    toast('暂存区为空，请先暂存要提交的文件', 'warn', TOAST_MEDIUM)
+    return
+  }
+  if (!commitMsg.value.trim() || committing.value) return
   committing.value = true
   try {
-    const r = await fetch('/__ai/git/commit-loop', {
+    const r = await fetch('/__ai/git/commit-staged', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: commitMsg.value.trim() }),
@@ -374,17 +517,33 @@ async function copyFullLog(): Promise<void> {
         <span class="wl-head-label">HEAD</span>
         <code class="wl-head-sha">{{ headRef }}</code>
       </div>
-      <div class="wl-commit-row">
-        <textarea
-          v-model="commitMsg"
-          class="wl-commit-input"
-          rows="3"
-          placeholder="消息（⌘Enter 提交）"
-          :disabled="loading"
-          @keydown.meta.enter.prevent="doCommit"
-          @keydown.ctrl.enter.prevent="doCommit"
-        />
-        <!-- 根据变更生成 commit message -->
+      <!-- [commit-toolbar-v1] 按钮排：提交 / 复制日志 / 生成 / 刷新，统一 30×30 方形，置于输入框上方 -->
+      <div class="wl-commit-toolbar">
+        <button
+          class="wl-commit-btn"
+          type="button"
+          :disabled="loading || !result || !commitMsg.trim()"
+          title="提交"
+          aria-label="提交"
+          @click="doCommit"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </button>
+        <button
+          class="wl-commit-more"
+          type="button"
+          :disabled="loading || !result || !result.markdown"
+          title="复制完整工作日志"
+          aria-label="复制完整工作日志"
+          @click="copyFullLog"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        </button>
         <button
           class="wl-commit-gen"
           type="button"
@@ -399,9 +558,6 @@ async function copyFullLog(): Promise<void> {
             <path d="m5.6 18.4 2.1-2.1" /><path d="m16.3 7.7 2.1-2.1" />
           </svg>
         </button>
-        <!-- [scope-refresh-moved] 刷新按钮从范围区迁至生成按钮旁；同时删除起点 ref 输入框
-             [WHY] 用户要求精简顶部区域，刷新入口与生成入口同排更符合 VSCode 习惯
-             [CHANGE-IMPACT] 复用 .wl-commit-refresh 样式；点击仍触发 load() 拉取最新 diff -->
         <button
           class="wl-commit-refresh"
           type="button"
@@ -414,6 +570,17 @@ async function copyFullLog(): Promise<void> {
             <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
           </svg>
         </button>
+      </div>
+      <div class="wl-commit-row">
+        <textarea
+          v-model="commitMsg"
+          class="wl-commit-input"
+          rows="3"
+          placeholder="消息（⌘Enter 提交）"
+          :disabled="loading"
+          @keydown.meta.enter.prevent="doCommit"
+          @keydown.ctrl.enter.prevent="doCommit"
+        />
       </div>
       <!-- 分体式：主区提交、窄区复制完整日志；分隔线用半透明白 -->
       <!-- AI 生成结果展示：生成中 / 成功 / 失败 -->
@@ -437,32 +604,6 @@ async function copyFullLog(): Promise<void> {
             填入
           </button>
         </div>
-      </div>
-      <div class="wl-commit-btn-row">
-        <button
-          class="wl-commit-btn"
-          type="button"
-          :disabled="loading || !result || !commitMsg.trim()"
-          @click="doCommit"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-          <span>提交</span>
-        </button>
-        <button
-          class="wl-commit-more"
-          type="button"
-          :disabled="loading || !result || !result.markdown"
-          title="复制完整工作日志"
-          aria-label="复制完整工作日志"
-          @click="copyFullLog"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-        </button>
       </div>
     </div>
 
@@ -520,38 +661,69 @@ async function copyFullLog(): Promise<void> {
         无变更
       </div>
       <template v-else>
-        <div class="wl-group">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
-          <span class="wl-group-title">更改</span>
-          <span v-if="addTotal || delTotal" class="wl-group-stat">
-            <span class="wl-add">+{{ addTotal }}</span>
-            <span class="wl-del">−{{ delTotal }}</span>
-          </span>
-          <span class="wl-group-count">{{ changeCount }}</span>
-        </div>
-        <ul class="wl-list" role="list">
-          <li v-for="f in rows" :key="f.path" class="wl-item">
-            <div class="wl-item-head" role="button" :aria-label="`预览 ${f.path} 的内容`" tabindex="0" @click="openPreview(f.path)" @keydown.enter.prevent="openPreview(f.path)" @keydown.space.prevent="openPreview(f.path)">
-              <span class="wl-chev">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18" /></svg>
-              </span>
-              <span class="wl-doc" :class="f.stCls">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
-              </span>
-              <span class="wl-name">{{ f.name }}</span>
-              <span class="wl-dir">{{ f.dir }}</span>
-              <span v-if="f.added || f.removed" class="wl-stat">
-                <span v-if="f.added" class="wl-add">+{{ f.added }}</span>
-                <span v-if="f.removed" class="wl-del">−{{ f.removed }}</span>
-              </span>
-              <span class="wl-st" :class="f.stCls">{{ f.stLetter }}</span>
-            </div>
-            <!-- [worklog-content-preview-v1] 行级 diff 展开已由内容预览浮层取代 -->
-          </li>
-        </ul>
+        <!-- [git-stage-v1] 已暂存栏（VSCode 源控面板分组） -->
+        <template v-if="stagedRows.length">
+          <div class="wl-group">
+            <span class="wl-group-title">已暂存</span>
+            <span class="wl-group-count">{{ stagedRows.length }}</span>
+            <button class="wl-group-action" type="button" title="全部取消暂存" aria-label="全部取消暂存" @click="unstageAll">
+              −
+            </button>
+          </div>
+          <ul class="wl-list" role="list">
+            <li v-for="f in stagedRows" :key="`s-${f.path}`" class="wl-item">
+              <div class="wl-item-head" role="button" :aria-label="`预览 ${f.path}`" tabindex="0" @click="openPreview(f)" @keydown.enter.prevent="openPreview(f)" @keydown.space.prevent="openPreview(f)">
+                <span class="wl-doc" :class="f.stCls">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                </span>
+                <span class="wl-name">{{ f.name }}</span>
+                <span class="wl-dir">{{ f.dir }}</span>
+                <span v-if="f.added || f.removed" class="wl-stat">
+                  <span v-if="f.added" class="wl-add">+{{ f.added }}</span>
+                  <span v-if="f.removed" class="wl-del">−{{ f.removed }}</span>
+                </span>
+                <span class="wl-st" :class="f.stCls">{{ f.stLetter }}</span>
+                <button class="wl-row-action" type="button" title="取消暂存" aria-label="取消暂存" @click.stop="unstageFiles([f.path])">
+                  −
+                </button>
+              </div>
+            </li>
+          </ul>
+        </template>
+
+        <!-- [git-stage-v1] 未暂存栏 -->
+        <template v-if="unstagedRows.length">
+          <div class="wl-group">
+            <span class="wl-group-title">更改</span>
+            <span v-if="addTotal || delTotal" class="wl-group-stat">
+              <span class="wl-add">+{{ addTotal }}</span>
+              <span class="wl-del">−{{ delTotal }}</span>
+            </span>
+            <span class="wl-group-count">{{ unstagedRows.length }}</span>
+            <button class="wl-group-action" type="button" title="全部暂存" aria-label="全部暂存" @click="stageAll">
+              +
+            </button>
+          </div>
+          <ul class="wl-list" role="list">
+            <li v-for="f in unstagedRows" :key="`u-${f.path}`" class="wl-item">
+              <div class="wl-item-head" role="button" :aria-label="`预览 ${f.path}`" tabindex="0" @click="openPreview(f)" @keydown.enter.prevent="openPreview(f)" @keydown.space.prevent="openPreview(f)">
+                <span class="wl-doc" :class="f.stCls">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                </span>
+                <span class="wl-name">{{ f.name }}</span>
+                <span class="wl-dir">{{ f.dir }}</span>
+                <span v-if="f.added || f.removed" class="wl-stat">
+                  <span v-if="f.added" class="wl-add">+{{ f.added }}</span>
+                  <span v-if="f.removed" class="wl-del">−{{ f.removed }}</span>
+                </span>
+                <span class="wl-st" :class="f.stCls">{{ f.stLetter }}</span>
+                <button class="wl-row-action" type="button" title="暂存" aria-label="暂存" @click.stop="stageFiles([f.path])">
+                  +
+                </button>
+              </div>
+            </li>
+          </ul>
+        </template>
       </template>
       <!-- [worklog-history-v1] 提交历史：最近若干条，来自 /git/worklog includeHistory -->
       <div v-if="result && result.history && result.history.length" class="wl-history">
@@ -569,8 +741,10 @@ async function copyFullLog(): Promise<void> {
       <FileContentOverlay
         v-if="previewPath"
         :file-name="previewPath"
-        mode="content"
+        :mode="previewMode"
         :content="previewContent"
+        :hunks="previewHunks"
+        :change-type="previewChangeType"
         :loading="previewLoading"
         @close="previewPath = null"
       />

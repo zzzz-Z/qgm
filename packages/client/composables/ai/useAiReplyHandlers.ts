@@ -23,6 +23,10 @@ import { emit as emitBus, takePendingAskKey } from '../ui/useEventStream'
 import { askUser } from '../ui/useAsk'
 import { parseAsk } from '../../utils/ask-parser'
 import { formatLimitToast } from '../../utils/limit-notice'
+import {
+  formatStopToast,
+  STOPPED_SCRIPT_HINT,
+} from '../../utils/stop-notice'
 import { scanReplyMarks } from '../../utils/reply-mark'
 import { uid } from '../../utils/id'
 import { promiseTimeout } from '@vueuse/core'
@@ -67,7 +71,7 @@ const stoppedAtBySid = new Map<string, number>()
  *   而页面上被中止的那条回复里若还留着完整代码块，脚本仍会被推出并被自动接管入口
  *   **立即执行**（那个调度函数就是无条件 `fn()`，不看 enabled 开关）
  *   ⇒ 形成「循环外自动执行」旁路：不在任何轮次记账、不进本轮 commit、无自检闸门、无预算反馈，
- *   且与刚弹给用户的「AI 网页已停止生成，本轮不再等待」语义自相矛盾。
+ *   且与刚弹给用户的「本轮不再等待」停止提示语义自相矛盾（文案本体见 utils/stop-notice.ts）。
  * [CONSTRAINT] 三个买入点共用同一判据：plain（半截文本补发）/ script / legacy script。
  *   只拦「停止后的残余产物」：新一轮经 fill/rotate 重开后的真实回复不在窗口内。
  * [WARNING] 锚点测试用 indexOf 定位该调度调用点 ⇒ 本文件注释**一律不得**逐字写出「对象.成员」全名。
@@ -133,7 +137,9 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
 
     if (kind === 'stopped') {
       stoppedAtBySid.set(sid, Date.now()) // [stopped-plain-noise-v1] 记录时刻，窗口内 plain 一律丢弃
-      toast('AI 网页已停止生成，本轮不再等待', 'warn', TOAST_LONG)
+      // [stopped-toast-quote-v1] 带上页面侧命中原文（口径同触顶的 formatLimitToast）：
+      //   停止词表与我们自己的 UI 文案同形 ⇒ 误报几乎必然发生，不带原文就永远无从定位是哪段文本命中。
+      toast(formatStopToast(payload.text), 'warn', TOAST_LONG)
       return
     }
 
@@ -215,21 +221,6 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       }
       const display = cleanSummary ? `[任务完成]\n\n${cleanSummary}` : '[任务完成] AI 回复 DONE'
       pushTerminalNotice(display, { divider: true })
-      // [auto-restart-v1] 任务完成后触发宿主侧重启（detached + 5s 延迟，不截断本回执）。
-      // [CONSTRAINT] 服务端 /restart 端点在收到请求后立刻返回 ok，实际重启在 5s 后由独立子进程执行；
-      //   .ai-runner/auto-restart.json 缺失或 enabled !== true 时服务端静默跳过。
-      // [CHANGE-IMPACT] 仅影响 prod（pm2 托管）；dev 双进程下该端点为 no-op。
-      // [auto-restart-notice-v1] 重启前弹窗：WS 断连前告知用户，避免「页面突然刷新」困惑
-      toast('服务将在 5 秒后自动重启以应用新产物，页面将短暂断开', 'info', TOAST_LONGEST)
-      // [restart-content-type-v1] 服务端有全局守卫只收 application/json（无该头的 POST 一律 415），
-      //   而本调用此前既无 body 也无 Content-Type ⇒ **DONE 后的自动重启恒失败且静默**（实测 415）。
-      //   [WHY] 重启失效会让「客户端产物已换、服务端进程仍跑旧代码」的状态长期存在，
-      //   表现为部分端点 404、行为与源码对不上（2026-10-10 上午的产物不同步即由此放大）。
-      void fetch('/__ai/restart', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}',
-      }).catch(() => { /* swallow: 重启请求失败不影响任务完成 */ })
       return
     }
 
@@ -283,7 +274,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
         //   [CHANGE-IMPACT] 已回填完毕（push 已发生）；用户确认无误后可手动点运行，路径不丢。
         if (inStoppedWindow(sid)) {
           reportArrival('stopped-window')
-          toast('AI 网页已停止生成：脚本仅回填编辑器，未自动执行（确认无误请手动运行）', 'warn', TOAST_LONG)
+          toast(STOPPED_SCRIPT_HINT, 'warn', TOAST_LONG)
           return
         }
         // [arrive-log-v1] 走到这里 = 已排入执行分流（下面的调度入口立即调用回调，无延迟、不过开关）
@@ -348,7 +339,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
         // [stopped-no-autorun-v1] 窗口判据放在 await **之后**：本路径固有 3-7s 延迟，
         //   stopped 完全可能在等待期间到达并让循环 finish；若只在 await 前判，残余脚本照样被跑。
         if (inStoppedWindow(sid)) {
-          toast('AI 网页已停止生成：脚本仅回填编辑器，未自动执行（确认无误请手动运行）', 'warn', TOAST_LONG)
+          toast(STOPPED_SCRIPT_HINT, 'warn', TOAST_LONG)
           return
         }
         void runner.run({ script: code, runKey, autoFeedback: true })

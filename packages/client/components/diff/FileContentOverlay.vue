@@ -34,6 +34,8 @@ const props = withDefaults(defineProps<{
   baselineMissing?: boolean
   /** [mode=content] 当前文件内容 */
   content?: string
+  /** [diff-hunks-v1] 直接传 git diff 片段数组（含 @@ 头）；有值时 DiffViewer 走 hunks 直传模式 */
+  hunks?: string[]
   /** 内容仍在加载：显示占位，而非把空内容当「文件为空」/「无变更」 */
   loading?: boolean
 }>(), {
@@ -44,6 +46,7 @@ const props = withDefaults(defineProps<{
   baselineMissing: false,
   content: '',
   loading: false,
+  hunks: () => [],
 })
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
@@ -116,6 +119,7 @@ function onKeydown(e: KeyboardEvent): void {
               :before="props.before"
               :after="props.after"
               :change-type="props.changeType"
+              :hunks="props.hunks"
             />
           </template>
         </template>

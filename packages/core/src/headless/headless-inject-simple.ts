@@ -130,13 +130,33 @@ export function resetReplyDedupInPage() {
   let h = 0x811C9DC5
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x1000193) >>> 0
   const sig = (h >>> 0).toString(16).padStart(8, '0')
-  const busyMessages = ((document.body && document.body.textContent) || '').match(/server busy, please try again later\.?|(?:服务器|服务)繁忙[^\n。！!]*[。！!]?/gi) || []
-  const stoppedMessages = ((document.body && document.body.textContent) || '').match(/当前问题已停止|已停止生成|已停止回答/g) || []
+  // [limit-scan-strip-v1] 触顶/停止/busy/频控四类标记基线只扫「正文」：剥掉代码块、输入框与可编辑区。
+  // [WHY] 工作台把脚本 stdout 用 ``` 围栏回填进会话（prompt-builder appendRawOutputs）⇒ 页面里落成
+  //   <pre><code>，而源码/文档里含探针自己的词表（就是下面这条触顶正则的 `maximum context length`）
+  //   ⇒ 整页 textContent 自指命中，误报「已达长度上限」并掐掉一整轮（2026-10-10 12:02 实测，
+  //   复现脚本 .ai-runner/tmp/limit-fp-repro.cjs：剥壳后 1 → 0，真 banner 仍为 1）。
+  // [CONSTRAINT] 实现体与 headless-inject.ts、scripts/tampermonkey-session-id.user.js 两处逐字符同构
+  //   （守卫测试 limit-marker-guard 的 body-text parity 用例）；本函数每轮只跑一次，无需缓存。
+  // [CONSTRAINT] 上面的 bodySignature 段（el.textContent）**不得**改走本函数：代码块属于回复正文。
+  function bodyText() {
+    const b = document.body
+    if (!b) return ''
+    const c = b.cloneNode(true)
+    const kill = c.querySelectorAll('pre,code,textarea,input,[contenteditable="true"],script,style')
+    for (let i = 0; i < kill.length; i++) kill[i].remove()
+    return c.textContent || ''
+  }
+  const scanText = bodyText()
+  const busyMessages = scanText.match(/server busy, please try again later\.?|(?:服务器|服务)繁忙[^\n。！!]*[。！!]?/gi) || []
+  const stoppedMessages = scanText.match(/当前问题已停止|已停止生成|已停止回答/g) || []
   // [limit-detect-v3] 会话长度上限基线：与 headless-inject detectReplyInPage 的正则严格同构（改一处必须同步两处）
-  const limitMessages = ((document.body && document.body.textContent) || '').match(/(?:(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长))(?:[，,：:]\s*请?|请)(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length/gi) || []
+  // [limit-en-branch-v1] 英文分支收紧：`maximum context length` 原先裸匹配，而 dump 进会话的源码行里
+  //   就有探针自己的词表 ⇒ 自指命中（12:02 实锤）。改为必须邻近 token 数（`(?:is|of)\s*\d+` 或
+  //   后随 `\d+\s*tokens`）；`context length (?:limit|exceeded|too long)` 保持原样（带 `(?:` 前缀无法自匹配）。
+  const limitMessages = scanText.match(/(?:(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长))(?:[，,：:]\s*请?|请)(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length (?:is|of)\s*\d+|maximum context length\s+\d+\s*tokens/gi) || []
   const baselineBlocks = document.querySelectorAll('.ds-assistant-message-main-content').length
   // [rate-retry-v1] 频控基线：与 headless-inject detectReplyInPage、本文件 verifyFillSentInPage 三处内联同构（守卫测试 rate-marker-guard）
-  const rateMessages = ((document.body && document.body.textContent) || '').match(/(?:消息|发送|操作|请求|访问)过于频繁|过于频繁[，,\s]*请稍后重试|please\s+slow\s+down|too\s+many\s+requests|rate\s+limit/gi) || []
+  const rateMessages = scanText.match(/(?:消息|发送|操作|请求|访问)过于频繁|过于频繁[，,\s]*请稍后重试|please\s+slow\s+down|too\s+many\s+requests|rate\s+limit/gi) || []
   window.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: sig, _pendingScriptHash: null, _plainSentInCycle: false, _stableCount: 0, _seenGrowth: false, _baselineBlocks: baselineBlocks, _busyErrorBaseline: busyMessages.length, _busyErrorReported: false, _scriptFenceReported: false, _stoppedBaseline: stoppedMessages.length, _stoppedReported: false, _limitBaseline: limitMessages.length, _limitReported: false, _rateBaseline: rateMessages.length, _rateReported: false }
   // [script-closure-gate-v1] 结构闭合门随轮次重置：上一轮遗留的门会拿旧长度当基线，
   //   让新回复第一帧就被判定为「已静止」→ 未闭合块提前放行（门本身见 headless-inject.ts）

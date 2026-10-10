@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.6.6
+// @version      1.7.2
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -186,13 +186,72 @@
   // [stopped-detect-v1] 「已停止」标记基线：fill/rotate 开新一轮时记录当前出现次数，
   // classifyAndPost 仅在计数增长时推送一次 kind:'stopped'（与 headless 侧 detectReplyInPage 同构）
   let stopMarkerBaseline = 0
+  // [stopped-toast-quote-v1] 「停止」分支的命中原文：与触顶的 limitMarkerText 同一范式。
+  // [WHY] 停机态（`当前问题已停止` / `已停止生成` / `已停止回答`）与我们自己的 UI 文案**同形**
+  //   ⇒ 自指误报几乎必然发生（2026-10-10 14:14 实测：页面一切正常却弹出停止提示）。
+  //   而此处原本上报写死文案 ⇒ 事后**永远无从得知**命中了哪一段文本，只能靠日志旁证。
+  //   带上命中原文后，下一次误报当场可自证（客户端回显见 utils/stop-notice.ts 的 formatStopToast）。
+  // [CONSTRAINT] 兜底值也必须**分段拼接**：整句字面量会成为探针源码的自命中（同上自指通道）。
+  const STOPPED_GENERIC = 'AI 网页' + '已停止' + '生成'
+  let stopMarkerText = ''
   // [stopped-plain-noise-v1] 本轮是否已推过 stopped：置位后 plain 分支不再补发半截回复
   // （与 headless-inject.ts 的 dedup._stoppedReported 同义；随 fill/rotate 轮次重置）
   let stopPosted = false
+  // [limit-posted-v1] 本轮是否已推过 limit：**存量兜底通道（limitStale）每轮恒真**，
+  //   而「更新 limitMarkerBaseline」压不住它 —— 该通道不依赖计数增长，基线更新前后恒真
+  //   ⇒ 每轮 classifyAndPost 都会再 post 一次 kind:'limit'（2026-10-10 15:07 用户实测：
+  //   toast 队列被 MAX_VISIBLE=3 打满，稳态交替 [warn,info,warn] / [info,warn,info]）。
+  // （与 headless-inject.ts 的 dedup._limitReported 同义；随 fill/rotate 轮次重置）
+  // [WHY] headless 侧早有该旗标（:172 守卫 / :180 置位），油猴侧从未同步 ——
+  //   这是 2026-10-10 同一天内第三次撞上「headless 有、油猴没有」（前两次：回传命中原文、冷启动基线）。
+  // [CONSTRAINT] **只压「存量兜底」通道**；「计数增长」通道自限、不 gate ——
+  //   否则一次误报就把本轮后续的**真**触顶信号一起挡死。
+  let limitPosted = false
+  // [stopped-detect-v3] 冷启动守卫：首个 fill/rotate 发生前，两个「本轮增量」探测器一律只记基线、不报。
+  // [WHY] DeepSeek 的「已停止」角标会**永久留在历史消息下方**；页面刷新会清空本脚本全部运行态
+  //   （基线归 0、stopPosted 归 false），而 replyObserver 在脚本注入即连接（见下方 resumeReplyObserver()
+  //   的顶层调用）⇒ 历史恢复把旧角标带回 DOM 的那一刻，classifyAndPost 就把「存量」当成「本轮新增」
+  //   ⇒ 误报 kind:'stopped'（2026-10-10 15:20 用户实测：刷新后立即弹「本轮不再等待」，页面命中原文）。
+  //   headless 侧同一缺陷已在 [stopped-detect-v2] 修复（detectReplyInPage 冷启动基线 = 当前存量），
+  //   油猴侧此前从未同步 —— 本守卫即补齐。
+  // [CONSTRAINT] 与 fill/rotate 的 syncStopMarkerBaseline/syncLimitMarkerBaseline 同口径：
+  //   基线只对「本轮新增」负责；首个 fill 之后本守卫永久失效。
+  let _roundBaselinesReady = false
+  // [limit-scan-strip-v1] 触顶/停止两类标记探针只扫「正文」：剥掉代码块、输入框与可编辑区。
+  // [WHY] 工作台把脚本 stdout 用 ``` 围栏回填进会话（prompt-builder appendRawOutputs）⇒ 页面里落成
+  //   <pre><code>，而源码/文档里含探针自己的词表（如 headless-inject-simple.ts 的
+  //   `maximum context length`）⇒ 整页 textContent 自指命中，误报「已达长度上限」并掐掉一整轮
+  //   （2026-10-10 12:02 实测；复现脚本 .ai-runner/tmp/limit-fp-repro.cjs：剥壳后 1 → 0）。
+  // [CONSTRAINT] 实现体与 packages/core/src/headless/headless-inject.ts、headless-inject-simple.ts
+  //   两处逐字符同构（守卫测试 limit-marker-guard 的 body-text parity 用例）。
+  // [CONSTRAINT] **篇幅/增长类**读取点（bodySignature / stillStreamingReply）不得改走本函数——
+  //   代码块属于回复正文，剥掉会让「正文是否仍在增长」的判据失真。
+  function bodyText() {
+    const b = document.body
+    if (!b) return ''
+    const c = b.cloneNode(true)
+    const kill = c.querySelectorAll('pre,code,textarea,input,[contenteditable="true"],script,style')
+    for (let i = 0; i < kill.length; i++) kill[i].remove()
+    return c.textContent || ''
+  }
+  // 两类探针共用一个剥壳快照：先用整页 raw 做失效判据（字符串比较，零额外节点分配），
+  // 仅在 raw 变化时剥壳一次 ⇒ 页面文本未变时零 clone（classifyAndPost 每 350ms 一跑，故必须共享）。
+  let _scanRaw = null
+  let _scanText = ''
+  function scanBodyText() {
+    const t = (document.body && document.body.textContent) || ''
+    if (t === _scanRaw) return _scanText
+    _scanRaw = t
+    _scanText = bodyText()
+    return _scanText
+  }
   function countStopMarkers() {
     try {
-      const t = (document.body && document.body.textContent) || ''
-      return (t.match(/当前问题已停止|已停止生成|已停止回答/g) || []).length
+      // 接收者刻意写成 scanBodyText() 直调（不经局部别名）：便于守卫按「调用点接收者」判定
+      const m = scanBodyText().match(/当前问题已停止|已停止生成|已停止回答/g) || []
+      // [stopped-toast-quote-v1] 记录命中原文供回传定位（同 limitMarkerText 做法）
+      if (m.length) stopMarkerText = m[m.length - 1]
+      return m.length
     } catch { return 0 }
   }
   function syncStopMarkerBaseline() {
@@ -201,15 +260,17 @@
   // [limit-detect-v3] 会话长度上限基线：与 headless 侧 detectReplyInPage 正则严格同构（改一处必须三处同步）。
   // 正则须覆盖「达到对话长度上限」（动词在前，DeepSeek 实际文案）与「对话长度已达上限」（名词在前）两种语序；
   // v3 起要求「上限」后必须自带动作子句（[，,：:]请? 或 请 + 开启/新建…新对话）：
-  // 本函数扫的是整页 textContent，正文自指「会话长度达到上限」与侧栏常驻按钮「开启新对话」的拼接
-  // 都会造成假命中（2026-10-07 实测：页面无 banner 却弹 toast）。
+  // 本函数扫的是**剥壳后的正文**（见上 [limit-scan-strip-v1]），正文自指「会话长度达到上限」与侧栏
+  // 常驻按钮「开启新对话」的拼接都会造成假命中（2026-10-07 实测：页面无 banner 却弹 toast）。
+  // [limit-en-branch-v1] 英文分支收紧（2026-10-10）：`maximum context length` 原先裸匹配，而 dump 进
+  //   会话的源码行里就有探针自己的词表 ⇒ 自指命中。改为必须邻近 token 数（`(?:is|of)\s*\d+` 或
+  //   后随 `\d+\s*tokens`）；`context length (?:limit|exceeded|too long)` 保持原样（带 `(?:` 前缀无法自匹配）。
   let limitMarkerBaseline = 0
   let limitMarkerText = ''
   let assistantRootBaseline = 0
   function countLimitMarkers() {
     try {
-      const t = (document.body && document.body.textContent) || ''
-      const m = t.match(/(?:(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长))(?:[，,：:]\s*请?|请)(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length/gi) || []
+      const m = scanBodyText().match(/(?:(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长))(?:[，,：:]\s*请?|请)(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length (?:is|of)\s*\d+|maximum context length\s+\d+\s*tokens/gi) || []
       if (m.length) limitMarkerText = m[m.length - 1]
       return m.length
     } catch { return 0 }
@@ -657,6 +718,14 @@
         return
       }
 
+      // [stopped-detect-v3] 冷启动守卫（说明见上方声明处）：尚无「本轮」⇒ 只把存量记为基线，不报。
+      //   不区分 stopped/limit 两个分支 —— 两者语义同为「相对本轮的增量」，fill 前都没有本轮。
+      if (!_roundBaselinesReady) {
+        stopMarkerBaseline = countStopMarkers()
+        limitMarkerBaseline = countLimitMarkers()
+        return
+      }
+
       // [stopped-detect-v1] 生成被中止感知（用户点停止/平台中断/内容截断）：
       // 残缺回复无 DONE 无完整脚本，按旧逻辑会被降级为 plain「等待下一轮」→ 前端无感知干等超时。
       // 标记计数较 fill/rotate 基线增长即推送 kind:'stopped'（更新基线保证只推一次），优先于 script/plain
@@ -670,7 +739,8 @@
           kind: 'stopped',
           site: location.origin,
           sessionId: extractSidFromHash(),
-          text: 'AI 网页已停止生成',
+          // [stopped-toast-quote-v1] 带命中原文（缺失时退回分段拼接的兜底串，不引入新的自命中）
+          text: stopMarkerText || STOPPED_GENERIC,
         })
         return
       }
@@ -679,9 +749,28 @@
       // 标记计数较 fill/rotate 基线增长即推送 kind:'limit'（更新基线保证只推一次），优先于 script/plain。
       // 存量兜底：fill 时页面已有触顶标记 → 本会话早已触顶；若此后未新增 AI 回复块（重发同样无产出）也推送。
       // 前端收到后触发自动轮转（总结 → 新会话 → 续跑）
+      // [limit-posted-v1] 两条触发通道**拆开**处理（旗标语义见上方声明处）：
+      //   通道一（计数增长）：基线更新后本轮自然不再成立 ⇒ 自限，**不 gate**；
+      //     但仍一并置位 —— 防本轮稍后「存量兜底」再补一枪（同一误报弹两次）。
+      //   通道二（存量兜底）：不依赖增长，基线更新压不住 ⇒ **必须 gate**。
+      //   [CONSTRAINT] 两者顺序不可换：增长是真信号，优先于存量推断。
       const limitCount = countLimitMarkers()
+      if (limitCount > limitMarkerBaseline) {
+        limitPosted = true
+        limitMarkerBaseline = limitCount
+        lastBodySig = bodySignature()
+        post({
+          type: 'ai-runner:reply',
+          kind: 'limit',
+          site: location.origin,
+          sessionId: extractSidFromHash(),
+          text: limitMarkerText || 'AI 会话已达长度上限',
+        })
+        return
+      }
       const limitStale = limitCount > 0 && assistantRootBaseline > 0 && countAssistantRoots() <= assistantRootBaseline
-      if (limitCount > limitMarkerBaseline || limitStale) {
+      if (!limitPosted && limitStale) {
+        limitPosted = true
         limitMarkerBaseline = limitCount
         lastBodySig = bodySignature()
         post({
@@ -888,8 +977,10 @@
     const allClickable = Array.from(document.querySelectorAll('button, div[role="button"]'))
     const byLabel = allClickable.find((b) => {
       if (b.disabled || b.getAttribute('aria-disabled') === 'true') return false
-      const lbl = [b.getAttribute('aria-label'), b.getAttribute('title'), b.textContent].filter(Boolean).join(' ')
-      return /发送消息|^发送$|send\s*message|^send$/i.test(lbl)
+      // [send-btn-widen-v1] 正则与 headless 侧 fillPromptInPage 对齐：
+      //   原 /^发送$/ 要求按钮纯文本等于「发送」，真站点按钮为图标 + 变体文案 ⇒ 三步全 miss 退化合成 Enter
+      const lbl = [b.getAttribute('aria-label'), b.getAttribute('title'), b.getAttribute('data-testid'), b.textContent].filter(Boolean).join(' ')
+      return /发送|send|submit/i.test(lbl)
     })
     if (byLabel) return byLabel
     if (input && input.form) {
@@ -1067,18 +1158,27 @@
     }
   }
 
-  function doSend(box) {
+  // [send-ack-after-verify-v1] onResult 在复核完成后回调，取代原先 doSend 一返回就 ack：
+  //   原实现 ackFill(true) 比 doSend 本身还早 300ms ⇒ 填字失败/按钮 miss/被频控都会回 ok:true
+  function doSend(box, onResult) {
     const btn = findSendButton(box)
     if (btn) {
       try { btn.click() } catch (e) { sendEnter(box) }
     } else {
       sendEnter(box)
     }
+    const done = (ok, reason) => { if (typeof onResult === 'function') onResult(ok, reason) }
     setTimeout(() => {
       const stillHas = (box.textContent || box.value || '').trim().length > 0
       if (stillHas) {
         console.warn('[ai-runner] 发送可能失败，补一次 Enter')
         sendEnter(box)
+        setTimeout(() => {
+          const stillHas2 = (box.textContent || box.value || '').trim().length > 0
+          done(!stillHas2, stillHas2 ? 'send-verify-failed' : '')
+        }, 400)
+      } else {
+        done(true, '')
       }
     }, 400)
   }
@@ -1090,7 +1190,9 @@
     if (d.type === 'ai-runner:fill') {
       resumeReplyObserver() // [stop-v2] stop 后首次 fill 恢复回复监听
       syncStopMarkerBaseline() // [stopped-detect-v1] 开新一轮：以当前「已停止」计数为新基线
+      _roundBaselinesReady = true // [stopped-detect-v3] 自此冷启动守卫永久失效（本轮语义成立）
       stopPosted = false // [stopped-plain-noise-v1] 开新一轮：解除 plain 补发抑制
+      limitPosted = false // [limit-posted-v1] 开新一轮：解除触顶推送锁定（本轮允许再报一次）
       _scriptFenceReported = false // [script-fence-gate-v1] 开新一轮：重置 fence 报错去重
       syncLimitMarkerBaseline() // [limit-detect-v1] 开新一轮：以当前「上限」计数为新基线
       // [script-closure-gate-v1] 结构闭合门随轮次重置：上一轮遗留的门会拿旧长度当基线，
@@ -1111,8 +1213,8 @@
       const imgs = Array.isArray(d.images) ? d.images : []
       if (imgs.length) pasteImages(box, imgs)
       fillInput(box, prompt)
-      setTimeout(doSend, 300, box)
-      ackFill(true, '', d.ackId)
+      // [send-ack-after-verify-v1] 复核完成后再 ack：工作台 sendFillToAsync 据此判定「已注入」
+      setTimeout(() => { doSend(box, (ok, reason) => ackFill(ok, reason, d.ackId)) }, 300)
       // [url-updated] 发送后轮询 URL 变化并回传（最多 8s）
       let urlTries = 0
       const urlPoll = setInterval(() => {
@@ -1134,7 +1236,9 @@
     if (d.type === 'ai-runner:rotate') {
       resumeReplyObserver() // [stop-v2] stop 后首次 rotate 恢复回复监听
       syncStopMarkerBaseline() // [stopped-detect-v1] 开新一轮：以当前「已停止」计数为新基线
+      _roundBaselinesReady = true // [stopped-detect-v3] 自此冷启动守卫永久失效（本轮语义成立）
       stopPosted = false // [stopped-plain-noise-v1] 开新一轮：解除 plain 补发抑制
+      limitPosted = false // [limit-posted-v1] 开新一轮：解除触顶推送锁定（本轮允许再报一次）
       _scriptFenceReported = false // [script-fence-gate-v1] 开新一轮：重置 fence 报错去重
       syncLimitMarkerBaseline() // [limit-detect-v1] 开新一轮：以当前「上限」计数为新基线
       // [script-closure-gate-v1] 结构闭合门随轮次重置：上一轮遗留的门会拿旧长度当基线，

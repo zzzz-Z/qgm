@@ -43,6 +43,35 @@ export interface PromptResult {
 /** 错误位置（来自 parseErrorLocations 的返回） */
 type ErrorLocs = ReturnType<typeof import('../../utils/contextBuilder').parseErrorLocations>
 
+/**
+ * [fence-safe-v1] 计算包裹 body 所需的反引号围栏：内容里最长反引号串长度 + 1（最少 3）
+ * [WHY] 固定三反引号围栏会被**内容自身**撑破：脚本 stdout / 源码 / tsc·eslint·test 输出里含
+ *   ``` 时围栏在内容中途提前闭合，后半段落成**普通文本**（不再是 `<pre><code>`）⇒ 页面内探针
+ *   扫到自己的工作语言（被 dump 的源码里就有探针自己的词表）⇒ 误报「AI 会话已达长度上限」
+ *   并掐掉一整轮（2026-10-10 12:02 实锤）。加长围栏后内容整体留在同一个代码块内。
+ * [CONSTRAINT] 内容里没有反引号时仍产出 ```（保持既有 prompt 形态，AI 侧无感）。
+ * [CONSTRAINT] 只加长围栏、不改内容——转义/替换内容会破坏 AI 要读的源码与行号契约。
+ */
+export function fenceFor(body: string): string {
+  let longest = 0
+  for (const run of String(body ?? '').match(/`+/g) || []) {
+    if (run.length > longest) longest = run.length
+  }
+  return '`'.repeat(Math.max(3, longest + 1))
+}
+
+/**
+ * [fence-safe-v1] 原地追加一个围栏块（围栏长度按内容自适应，见 `fenceFor`）
+ * [CONSTRAINT] 围栏行必须独占一行：push 进数组后由 `join('\n')` 保证，调用方不得把围栏与其它字符拼在一行
+ */
+export function pushFenced(p: string[], body: string): void {
+  const fence = fenceFor(body)
+  p.push(fence)
+  p.push(body)
+  p.push(fence)
+  p.push('')
+}
+
 /** 失败时把相关文件源码块追加到 prompt 数组（去重后取前 5 个路径） */
 export async function appendFailedSourceFiles(
   p: string[],
@@ -64,11 +93,14 @@ export async function appendFailedSourceFiles(
     const data = await res.json()
     if (data.files?.length) {
       p.push('# 相关文件源码（失败时自动附加，含报错涉及的文件）')
-      p.push(buildErrorContext(data.files, opts.errorLocs, {
+      // [fence-safe-v1] 本段原先**无围栏**（直接 push buildErrorContext 的 `<file path=…>` 块）⇒
+      //   落进会话是**普通文本**，页面内探针扫得到被 dump 的源码（其中就有探针自己的触顶词表）
+      //   ⇒ 自指误报（Channel D）。加围栏后整段落进 `<pre><code>`，探针剥壳即看不见。
+      // [CONSTRAINT] `<file path=…>` 与 `N| ` 行号逐字符不变——它们是 AI 侧解析契约，只加外壳不动内容。
+      pushFenced(p, buildErrorContext(data.files, opts.errorLocs, {
         stripComments: opts.stripComments,
         stripBlankLines: opts.stripBlankLines,
       }))
-      p.push('')
     }
   } catch (e) {
     p.push(`# ⚠️ 获取变更文件源码失败: ${String(e)}`)
@@ -179,10 +211,7 @@ export function appendFeedbackSummary(p: string[], r: PromptResult | null): void
 export function appendChangeList(p: string[], changes: PromptChange[]): void {
   if (!changes.length) return
   p.push('# 变更')
-  p.push('```')
-  changes.forEach(c => p.push(`${c.type} ${c.path}`))
-  p.push('```')
-  p.push('')
+  pushFenced(p, changes.map(c => `${c.type} ${c.path}`).join('\n'))
 }
 
 /** 追加预检失败块（dryRunFailed 时） */
@@ -221,10 +250,7 @@ export function appendTscReport(p: string[], r: PromptResult | null): void {
   if (!r?.tsc) return
   p.push('# 类型检查 (tsc)')
   p.push(r.tsc.ok ? '✓ 通过' : '✗ 存在类型错误')
-  p.push('```')
-  p.push((r.tsc.stdout || '') + (r.tsc.stderr ? `\n${r.tsc.stderr}` : ''))
-  p.push('```')
-  p.push('')
+  pushFenced(p, (r.tsc.stdout || '') + (r.tsc.stderr ? `\n${r.tsc.stderr}` : ''))
 }
 
 /** 追加 eslint 报告（lint.ran 且失败时） */
@@ -232,10 +258,7 @@ export function appendLintReport(p: string[], r: PromptResult | null): void {
   if (!r?.lint?.ran || r.lint.ok) return
   p.push('# 代码格式化 (eslint)')
   p.push('✗ 存在 lint 错误')
-  p.push('```')
-  p.push((r.lint.stdout || '') + (r.lint.stderr ? `\n${r.lint.stderr}` : ''))
-  p.push('```')
-  p.push('')
+  pushFenced(p, (r.lint.stdout || '') + (r.lint.stderr ? `\n${r.lint.stderr}` : ''))
 }
 
 /** 追加单元测试报告（test.ran 且失败时） */
@@ -243,10 +266,7 @@ export function appendTestReport(p: string[], r: PromptResult | null): void {
   if (!r?.test?.ran || r.test.ok) return
   p.push('# 单元测试')
   p.push('✗ 存在测试失败')
-  p.push('```')
-  p.push((r.test.stdout || '') + (r.test.stderr ? `\n${r.test.stderr}` : ''))
-  p.push('```')
-  p.push('')
+  pushFenced(p, (r.test.stdout || '') + (r.test.stderr ? `\n${r.test.stderr}` : ''))
 }
 
 /** 追加跨轮累积变更（baselineRunId 存在且与当前 runId 不同时） */
@@ -267,10 +287,9 @@ export async function appendBaselineChanges(
     const acc = data.changes || []
     if (acc.length && shouldIncludeChanges(acc, errorLocs)) {
       p.push(`# 跨轮累积变更（基准 ${baseline}）`)
-      p.push('```')
-      for (const c of acc) p.push(`${c.type} ${c.path}`)
-      p.push('```')
-      p.push('')
+      // [CONSTRAINT] 回调形参必须显式标注：acc 来自 res.json()（any），
+      //   `for...of` 时代隐式 any 不报，改 `.map()` 后会触发 TS7006（tsc:client / test:tsc 双红）
+      pushFenced(p, acc.map((c: PromptChange) => `${c.type} ${c.path}`).join('\n'))
     }
   } catch { /* ignore */ }
 }
@@ -293,8 +312,14 @@ export function appendClaimMismatch(p: string[], r: PromptResult | null): void {
 /** 追加 stderr / stdout 原始输出块 */
 export function appendRawOutputs(p: string[], r: PromptResult | null): void {
   if (!r) return
-  if (r.stderr) p.push('# 错误输出 (stderr)', '```', r.stderr, '```', '')
-  if (r.stdout) p.push('# Stdout', '```', r.stdout, '```', '')
+  if (r.stderr) {
+    p.push('# 错误输出 (stderr)')
+    pushFenced(p, r.stderr)
+  }
+  if (r.stdout) {
+    p.push('# Stdout')
+    pushFenced(p, r.stdout)
+  }
 }
 
 /**

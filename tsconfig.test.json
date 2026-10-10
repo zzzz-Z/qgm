@@ -23,7 +23,13 @@
     "packages/*/tests/**/*.ts",
     // [vue-shim-for-tests-v1] 测试 import .vue 时需 env.d.ts 的 declare module '*.vue'
     // 否则 test:tsc 报 TS2307（此处是 .vue 在 tests 中的首个消费点）
-    "packages/client/env.d.ts"
+    "packages/client/env.d.ts",
+    // [auto-imports-for-tests-v1] 测试现在会 import **客户端组件源码**（如 tree-attach.ts），
+    //   那些文件用的是 unplugin-auto-import 全局（fmtSize / useToast / readAsText …），
+    //   而本配置原先不含 auto-imports.d.ts ⇒ 报 TS2304 Cannot find name（实测：
+    //   promptBuilder.node-test.ts 首次 import tree-attach 即暴露 5 处）。
+    //   tsconfig.client.json 靠 `packages/client/**/*.d.ts` 覆盖，此处须显式补同一份声明。
+    "packages/client/auto-imports.d.ts"
   ],
   "exclude": [
     "node_modules",

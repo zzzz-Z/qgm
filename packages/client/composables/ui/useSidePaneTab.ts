@@ -8,7 +8,7 @@
 //   若要彻底移除，需连同 SidePane 的 revealTick watch 与 kb-sidepane-wiring 守卫一起改。
 import { ref } from 'vue'
 
-export type SidePaneTab = 'tree' | 'changes' | 'worklog' | 'kb'
+export type SidePaneTab = 'tree' | 'changes' | 'worklog' | 'kb' | 'terminal'
 
 /** 当前侧栏 tab（单例） */
 export const sidePaneTab = ref<SidePaneTab>('tree')

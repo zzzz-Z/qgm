@@ -50,14 +50,14 @@ describe('[P1a] 非循环路径 DONE 收尾夹具', () => {
     })
   })
 
-  it('DONE（非循环）走收尾：emitBus(ai:done) + lessons + notice + restart', async () => {
+  it('DONE（非循环）走收尾：emitBus(ai:done) + lessons + notice', async () => {
     const api = useAiReplyHandlers({ sessionHistory: ref([]), saveHistoryScoped: () => {}, addSessionToHistory: () => {}, isMockMode: () => true })
     api.handleAiReply({ type: 'ai-runner:reply', kind: 'done', text: 'DONE\n\n## 结论\n夹具冒烟' }, { origin: '', source: null } as unknown as MessageEvent)
     await new Promise(r => setTimeout(r, 80))
     assert.ok(h.emitBus.mock.calls.some((c: unknown[]) => c[0] === 'ai:done'), '应 emitBus(ai:done)')
     assert.ok(h.notice.mock.calls.length > 0, '应 pushTerminalNotice')
     assert.ok(h.calls.some(c => c.url.includes('/__ai/lessons')), '应 POST /__ai/lessons')
-    assert.ok(h.calls.some(c => c.url.includes('/__ai/restart')), '应 POST /__ai/restart')
+    assert.ok(!h.calls.some(c => c.url.includes('/__ai/restart')), 'DONE 不应再自动 POST /__ai/restart（改为用户主动重启）')
     assert.ok(h.runHook.mock.calls.some((c: unknown[]) => c[0] === 'BeforeDoneFinal'), 'P1b：应触发 BeforeDoneFinal hook')
   })
 

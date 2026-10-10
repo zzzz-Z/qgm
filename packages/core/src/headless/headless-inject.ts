@@ -38,6 +38,33 @@ export function detectReplyInPage() {
     w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '', _pendingScriptHash: null, _plainSentInCycle: false } // [fix-reply-dedup] [fix-plain-once]
   }
   const dedup = w.__aiRunnerDedup
+
+  // [limit-scan-strip-v1] 触顶/停止/busy/频控四类标记探针只扫「正文」：剥掉代码块、输入框与可编辑区。
+  // [WHY] 工作台把脚本 stdout 用 ``` 围栏回填进会话（prompt-builder appendRawOutputs）⇒ 页面里落成
+  //   <pre><code>，而源码/文档里含探针自己的词表（如本目录 headless-inject-simple.ts 的
+  //   `maximum context length`）⇒ 整页 textContent 自指命中，误报「已达长度上限」并掐掉一整轮
+  //   （2026-10-10 12:02 实测；复现脚本 .ai-runner/tmp/limit-fp-repro.cjs，剥壳后 1 → 0）。
+  // [CONSTRAINT] 实现体与 headless-inject-simple.ts、scripts/tampermonkey-session-id.user.js 两处
+  //   逐字符同构（守卫测试 limit-marker-guard 的 body-text parity 用例）。
+  // [CONSTRAINT] **篇幅/增长类**读取点（bodySignature / stillStreamingReply）不得改走本函数——
+  //   代码块属于回复正文，剥掉会让「正文是否仍在增长」的判据失真。
+  function bodyText() {
+    const b = document.body
+    if (!b) return ''
+    const c = b.cloneNode(true)
+    const kill = c.querySelectorAll('pre,code,textarea,input,[contenteditable="true"],script,style')
+    for (let i = 0; i < kill.length; i++) kill[i].remove()
+    return c.textContent || ''
+  }
+  // 四类探针共用一份剥壳快照：先用整页 raw 做失效判据（字符串比较，零额外节点分配），
+  // 仅在 raw 变化时剥壳一次 ⇒ 页面文本未变时零 clone（常态零额外开销）。
+  const scanRaw = (document.body && document.body.textContent) || ''
+  if (dedup._scanRaw !== scanRaw) {
+    dedup._scanRaw = scanRaw
+    dedup._scanText = bodyText()
+  }
+  const scanText = dedup._scanText
+
   // body version + hash 缓存，避免每次 poll 重算
   if (typeof dedup._bodyVersion !== 'number') dedup._bodyVersion = 0
   if (!dedup._sigCache) dedup._sigCache = { version: -1, sig: '' }
@@ -58,7 +85,8 @@ export function detectReplyInPage() {
   //   循环被判 ai-stopped 终止（表现为「探测一直已停止」，重进页面再犯）。与
   //   resetReplyDedupInPage 的 fill 时基线同一口径：基线只对「本轮新增」负责。
   if (typeof dedup._stoppedBaseline !== 'number') {
-    dedup._stoppedBaseline = (((document.body && document.body.textContent) || '').match(/当前问题已停止|已停止生成|已停止回答/g) || []).length
+    // [limit-scan-strip-v1] 与油猴 syncStopMarkerBaseline、resetReplyDedupInPage 同口径：基线取剥壳后计数
+    dedup._stoppedBaseline = (scanText.match(/当前问题已停止|已停止生成|已停止回答/g) || []).length
   }
   if (typeof dedup._limitBaseline !== 'number') dedup._limitBaseline = 0 // [limit-detect-v1]
   if (typeof dedup._rateBaseline !== 'number') dedup._rateBaseline = 0 // [rate-retry-v1]
@@ -87,8 +115,7 @@ export function detectReplyInPage() {
   const _baseBlocks = document.querySelectorAll('.ds-assistant-message-main-content')
 
   if (!dedup._busyErrorReported) {
-    const bodyText = (document.body && document.body.textContent) || ''
-    const busyMessages = bodyText.match(/server busy, please try again later\.?|(?:服务器|服务)繁忙[^\n。！!]*[。！!]?/gi) || []
+    const busyMessages = scanText.match(/server busy, please try again later\.?|(?:服务器|服务)繁忙[^\n。！!]*[。！!]?/gi) || []
     const busyBaseline = typeof dedup._busyErrorBaseline === 'number' ? dedup._busyErrorBaseline : 0
     if (busyMessages.length > busyBaseline) {
       dedup._busyErrorReported = true
@@ -102,8 +129,7 @@ export function detectReplyInPage() {
   //              正则与 headless-inject-simple.ts 的 verifyFillSentInPage / resetReplyDedupInPage 两处内联同构
   //              （守卫测试 rate-marker-guard.node-test.ts）
   if (!dedup._rateReported) {
-    const rateText = (document.body && document.body.textContent) || ''
-    const rateMessages = rateText.match(/(?:消息|发送|操作|请求|访问)过于频繁|过于频繁[，,\s]*请稍后重试|please\s+slow\s+down|too\s+many\s+requests|rate\s+limit/gi) || []
+    const rateMessages = scanText.match(/(?:消息|发送|操作|请求|访问)过于频繁|过于频繁[，,\s]*请稍后重试|please\s+slow\s+down|too\s+many\s+requests|rate\s+limit/gi) || []
     const rateBaseline = typeof dedup._rateBaseline === 'number' ? dedup._rateBaseline : 0
     if (rateMessages.length > rateBaseline) {
       dedup._rateReported = true
@@ -117,8 +143,7 @@ export function detectReplyInPage() {
   // [WHY] 独立于基线守卫：stop 标记可能出现在无新增 assistant 块的场景（生成刚开始就被停）
   // [CONSTRAINT] 按出现次数 + 基线去重：历史消息里的旧「已停止」标记不触发；本轮只推一次
   if (!dedup._stoppedReported) {
-    const stopText = (document.body && document.body.textContent) || ''
-    const stopMessages = stopText.match(/当前问题已停止|已停止生成|已停止回答/g) || []
+    const stopMessages = scanText.match(/当前问题已停止|已停止生成|已停止回答/g) || []
     const stopBaseline = typeof dedup._stoppedBaseline === 'number' ? dedup._stoppedBaseline : 0
     if (stopMessages.length > stopBaseline) {
       dedup._stoppedReported = true
@@ -128,7 +153,10 @@ export function detectReplyInPage() {
 
   // [limit-detect-v3] 会话长度上限感知：触顶后继续在本会话提问不可能有产出，与「已停止」同构——
   // 无 DONE 无完整脚本、plain 被 hasJsFence 拦 → 前端无感知干等超时。
-  // [WHY] DeepSeek 实际文案是「达到对话长度上限，请开启新对话」——动词在前的语序；
+  // [WHY] DeepSeek 实际文案是「达到对话长度上限」+「请开启新对话」——动词在前的语序；
+  // [CONSTRAINT] 引述真文案**必须分成两段引号**：连写成一行会被本探针自己的正则命中 ⇒ 该文件被
+  //   工作台 dump 进会话即自指误报（与 2026-10-10 那条同根因：探针扫到了自己的工作语言）。
+  //   守卫 `limit marker: 探针源码库零自命中` 会拦下任何此类回退。
   //       v1 只写了「对话…已达上限」的名词在前形式 → 真实提示完全漏匹配（线上表现为仍在干等）。
   //       v3 追加收紧：v2 允许**裸标记**命中，但本探针扫的是**整页** textContent，
   //       实测两类假命中（页面根本没有 banner 却弹 toast）：① 正文自指「会话长度达到上限」
@@ -136,9 +164,13 @@ export function detectReplyInPage() {
   //       在 textContent 里相接（v2 的「请」是 `请?` 可缺省）。故中文触顶**必须自带动作子句**才算数。
   // [CONSTRAINT] 基线去重仍保留：只在「计数增长」时推送，排除历史消息里的旧标记。
   // [CONSTRAINT] 正则须与 headless-inject-simple.ts 基线、油猴 countLimitMarkers 三处严格同构，改一处必同步
+  // [limit-en-branch-v1] 英文分支收紧：`maximum context length` 原先**裸匹配**（无任何上下文要求），
+  //   而「被工作台 dump 进会话的源码/文档行」里恰好有探针自己的这条词表 ⇒ 自指命中（2026-10-10 12:02 实锤）。
+  //   改为必须邻近 token 数：`(?:is|of)\s*\d+` 或后随 `\d+\s*tokens`；真实 API 错文
+  //   `maximum context length is <N> tokens` 形态仍命中（守卫正例；此处**不写真数字**，否则本行自命中）。
+  //   `context length (?:limit|exceeded|too long)` 保持原样：它带 `(?:` 前缀，源码文本无法自匹配。
   if (!dedup._limitReported) {
-    const limitText = (document.body && document.body.textContent) || ''
-    const limitMessages = limitText.match(/(?:(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长))(?:[，,：:]\s*请?|请)(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length/gi) || []
+    const limitMessages = scanText.match(/(?:(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长))(?:[，,：:]\s*请?|请)(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length (?:is|of)\s*\d+|maximum context length\s+\d+\s*tokens/gi) || []
     const limitBaseline = typeof dedup._limitBaseline === 'number' ? dedup._limitBaseline : 0
     // [limit-detect-v2] 存量兜底：会话此前已触顶时提示常驻（fill 时即可见），计数不再增长；
     // 此时若本轮又无新增 assistant 块（重发同样拿不到产出），一并判定触顶，免去干等超时

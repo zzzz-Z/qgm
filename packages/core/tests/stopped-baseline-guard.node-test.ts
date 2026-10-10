@@ -39,9 +39,11 @@ test('stopped marker: 冷启动基线初始化紧邻 _stoppedReported 守卫之�
     src.includes('[stopped-detect-v2] 冷启动基线 = 当前存量标记数'),
     '冷启动基线注释缺失：下次改动者不知道为什么基线不能硬编码 0',
   )
-  const coldIdx = src.indexOf('dedup._stoppedBaseline = (((document.body')
-  const detectIdx = src.indexOf('const stopMessages = stopText.match(/当前问题已停止')
-  assert.ok(coldIdx > 0, '冷启动基线初始化语句缺失')
+  // [CONSTRAINT] 锚点须随读取点同步：[limit-scan-strip-v1] 后两处一律改为读剥壳后的正文（scanText），
+  //   故锚点也顺带锁住「没有再退化回整页 raw 读取」这一性质。
+  const coldIdx = src.indexOf('dedup._stoppedBaseline = (scanText.match(/当前问题已停止')
+  const detectIdx = src.indexOf('const stopMessages = scanText.match(/当前问题已停止')
+  assert.ok(coldIdx > 0, '冷启动基线初始化语句缺失（或已退化回整页 raw 读取）')
   assert.ok(detectIdx > coldIdx, '主判定应在冷启动基线之后（否则初始化永远不会生效）')
   assert.ok(
     !src.includes('dedup._stoppedBaseline = 0'),

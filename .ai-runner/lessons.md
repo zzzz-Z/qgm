@@ -2491,3 +2491,63 @@ TypeScript 控制流分析把 `const` 字面量收窄为 `'A'`，于是 `if (PHA
 ## 生成物残留的 auto-import 引用会制造「全仓 grep 零命中但产物报错」的假象
 
 `auto-imports.d.ts` 是 `unplugin-auto-import` 的生成物，源模块删除后它不会立刻收敛（`useAutoLoop` 残留 27 行）。这让「源码 grep 零命中」与「运行时报 `ReferenceError`」同时成立——判据必须落在调用点源码（`App.vue:114`）而非符号定义，且须用独立 shell 通道交叉验证，避免单一 grep 工具路径漏扫造成误判。
+
+## `getChangedFiles()` 在跨轮场景返回空，与 git 实测不一致
+
+本轮修改后，下一轮 `__AI__.getChangedFiles()` 返回 `[]`，但 `git status --porcelain` 显示 ` M scripts/tampermonkey-session-id.user.js`。判断写入是否落盘时，`getChangedFiles()` 不可信，须以 `git status` / `git diff --stat` 为准。
+
+## `curl | head -12` 会截断 YAML block scalar
+
+`description: >-` / `|` 形态的 frontmatter 多行续行，用 `head -12` 只能拿到标记符本身，值丢失。改用 `sed -n '1,25p'` 或读完整块再解析。本次 `vue-style-guide` / `turborepo` 两项即因此重取（复检轮补全）。
+
+## GitHub tree API 一次拿全路径比逐目录探测省配额
+
+`repos/<owner>/<repo>/git/trees/HEAD?recursive=1` 返回全部路径，可在本地筛 `SKILL.md$`；比逐个 `contents` 探测省数十次请求。但注意 `PramodDutta/qaskills` 这类 453 项的巨型仓库——tree 一次返回即可，不必逐个 fetch frontmatter。
+
+## 正则里 `\|` 在 BSD grep 下不生效（旧坑复述）
+
+检索本仓代码时用 `__AI__.grep` 或 `grep -E`，避免 `\|` 交替语义丢失。
+
+## 越界修复的识别信号是「症状落在别的进程上」
+
+`[app:port-5000]` 失败来自 macOS AirPlay（`Server: AirTunes`），不是本仓产物。冒烟把它报成失败，本质是 discover-targets 的 TCP 探测能力边界，而非本仓缺陷——修它等于替系统进程改行为。遇到这类「冒烟红了但证据指向外部服务」的报错，应先确认目标身份再决定是否动手。
+
+## `replaceInFile` 删除到文件尾时 `unique: true` 依然必要
+
+删 §11 用的是 `t4.slice(idx4)` 这一整段作为 oldString，能精确匹配到，但如果文件里出现过同样文本会误删。删除类操作用唯一锚点比用行范围更稳。
+
+## `pnpm typecheck` 是四套 tsc 的组合入口
+
+单跑 `pnpm tsc` 只覆盖 `packages/core/src`，前端 `.vue`、apps、tests 三层都会静默绕过。日志里逐行可见展开顺序（`tsc -p tsconfig.json --noEmit` → `tsconfig.apps.json` → `vue-tsc -p tsconfig.client.json` → `vue-tsc -p tsconfig.test.json`）。
+
+## lint 的 39 条 warning 是存量、不是本轮引入
+
+全在 `packages/core/src/helpers/*.cjs` 的 `jsdoc/require-returns-description`，退出码 0，属于观察期存量，不应为了消 warning 去改这些文件。
+
+## 反向断言的承重只能靠变异验证
+
+`assert.ok(!calls.some(...))` 这种写法，如果被测函数根本没被调用、或者 url 匹配写错，它永远是绿的。实测把 POST 加回去它才转红，说明它真的在检查。
+
+## 「零引用死配置」识别法
+
+`grep` 全仓该文件名——如果只在注释里被提到、任何代码路径都不读它，那就是文档债而非功能开关。这里 `auto-restart.json` 被客户端注释描述为「enabled !== true 时服务端静默跳过」，但服务端 `routes/restart.ts` 从头到尾没碰过文件系统。注释声称的机制要在实现侧复核一遍，否则会误以为「关掉开关就能止血」，实际开关根本不存在。
+
+## 删功能后，注释是最后一块拼图
+
+代码行为改了，但 `[WHY]` 注释还写着旧意图（「用户要求任务完成后自动重启」）。这类注释比代码更危险——代码看得见行为，注释只给意图，读者会按注释去理解历史。删除功能时，注释必须与新行为一同更新，并留下变更原因（而不是只改描述）。
+
+## 写计划文件前必须先 `exists` 检查 + 用 `writeText` 创建
+
+本轮首两次 `replaceInFile` 均因文件不存在而 ENOENT（`readText` 直接抛，`replaceInFile` 底层的 `split` 找不到 oldString 也会抛）。文档不存在时不能走「read → 定位锚点 → replace」路径，须先 `writeText` 建文件再追加。
+
+## `readText` 对不存在文件不返回空串而是抛异常
+
+与 `tryReadFile` 行为不同（后者返回 `{ok:false}`）。写文件前的存在性检查必须用 `exists` 或 `tryReadFile`。
+
+## `@git-diff-view` 的 `hunks` 参数必须传完整 unified diff，不能只传 `@@` 段
+
+`DiffFile.createInstance({ hunks })` 内部对每个元素调用 `DiffParser.parse()`（GNU unified diff 解析器）。该解析器需要 `diff --git` / `index` / `---` / `+++` 文件头来建立上下文；只给 `@@` 段会触发 `No hunks found in the diff string` 警告且 `splitLineLength=0`，UI 表现为浮层只有表头、正文空白。
+
+正确用法：`hunks: [fullPatchString]`，即整段 git 输出作为单元素数组。README 里 `hunks: ["..."]` 的示例容易被误读为「每个 hunk 一段」。
+
+定位方法：写一个直跑 `@git-diff-view/core` 的 node 脚本，对 4 种构造方式（hunks-only / 空 content+hunks / 5 参构造 / 无 hunks）打印 `splitLineLength`，一次对照就能判定。

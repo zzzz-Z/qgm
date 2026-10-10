@@ -1,6 +1,6 @@
 // [arch-hono/git-v1] /git/* —— HEAD / commit-loop / reset
 import { Hono } from 'hono'
-import { gitCommitAll, gitHead, gitRawDiff, gitResetHard, gitWorklog } from '../git.js'
+import { gitCommitAll, gitCommitStaged, gitHead, gitRawDiff, gitResetHard, gitStage, gitStatusDetailed, gitUnstage, gitWorklog } from '../git.js'
 
 /** git 路由的 Hono 实例 */
 export const gitHono = new Hono()
@@ -8,6 +8,39 @@ export const gitHono = new Hono()
 gitHono.get('/git/head', async (c) => {
   const head = await gitHead()
   return c.json({ ok: Boolean(head), head: head || '' })
+})
+
+// [git-stage-v1] 详细状态：XY 位区分已暂存/未暂存，供 VSCode 风格双分组列表消费
+gitHono.get('/git/status', async (c) => {
+  const r = await gitStatusDetailed()
+  return c.json(r, r.ok ? 200 : 400)
+})
+
+// [git-stage-v1] 把指定路径加入暂存区（真实 git 索引操作）
+gitHono.post('/git/stage', async (c) => {
+  let body: { paths?: string[] } | null = null
+  try { body = await c.req.json() } catch { body = null }
+  const paths = Array.isArray(body?.paths) ? body.paths.filter(p => typeof p === 'string') : []
+  const r = await gitStage(paths)
+  return c.json(r, r.ok ? 200 : 400)
+})
+
+// [git-stage-v1] 从暂存区撤下（保留工作区内容）
+gitHono.post('/git/unstage', async (c) => {
+  let body: { paths?: string[] } | null = null
+  try { body = await c.req.json() } catch { body = null }
+  const paths = Array.isArray(body?.paths) ? body.paths.filter(p => typeof p === 'string') : []
+  const r = await gitUnstage(paths)
+  return c.json(r, r.ok ? 200 : 400)
+})
+
+// [git-stage-v1] 提交当前暂存区到当前分支（真实 git commit，不走 ai-archive）
+gitHono.post('/git/commit-staged', async (c) => {
+  let body: { message?: string } | null = null
+  try { body = await c.req.json() } catch { body = null }
+  const message = String(body?.message || '').slice(0, 2000)
+  const r = await gitCommitStaged(message)
+  return c.json(r, r.ok ? 200 : 400)
 })
 
 gitHono.post('/git/commit-loop', async (c) => {

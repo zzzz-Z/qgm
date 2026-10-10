@@ -37,10 +37,12 @@ const model = defineModel<boolean>('sideDrawerOpen', { required: true })
 
 defineOptions({ name: 'SidePane' })
 
-const _tabAllowed = ['tree', 'changes', 'worklog', 'kb'] as const
+const _tabAllowed = ['tree', 'changes', 'worklog', 'kb', 'terminal'] as const
 const WorklogPane = defineAsyncComponent(() => import('./WorklogPane.vue'))
 // [kb-panel-side-v1] 知识库面板：接入右侧栏第四 tab，懒加载（与 worklog 同范式）
 const KnowledgePanel = defineAsyncComponent(() => import('./KnowledgePanel.vue'))
+// [terminal-panel-v1] 终端面板：vue-web-terminal + /__ai/exec，懒加载同 worklog 范式
+const TerminalPanel = defineAsyncComponent(() => import('./TerminalPanel.vue'))
 
 // [worklog-lazy-v1] WorklogPane（含 markdown-it 渲染链）仅首次切到 worklog tab 才加载
 // [WHY] worklogLoaded 闸门 v-if 保证 defineAsyncComponent 的 loader 到首切才触发；
@@ -48,6 +50,7 @@ const KnowledgePanel = defineAsyncComponent(() => import('./KnowledgePanel.vue')
 // [CHANGE-IMPACT] 首切 tab 多一次 chunk 请求；WorklogPane 自身 watch 改 immediate 以适配"挂载即激活"
 const worklogLoaded = shallowRef(false)
 const kbLoaded = shallowRef(false)
+const terminalLoaded = shallowRef(false)
 
 // 折叠 + tab 选择持久化（PLAN 5.4）
 const fold = useFoldState('default', 'side-pane')
@@ -75,6 +78,7 @@ const collapsed = computed({
 watch(sideTab, (tab) => {
   if (tab === 'worklog') worklogLoaded.value = true
   if (tab === 'kb') kbLoaded.value = true
+  if (tab === 'terminal') terminalLoaded.value = true
 }, { immediate: true })
 // [side-pane-tab-v1] 外部请求（工具栏按钮）→ 切 tab + 展开；collapsed 由 revealTick watch 控制
 watch(sidePaneRevealTick, () => {
@@ -113,6 +117,11 @@ defineExpose({ selectTab })
       <!-- [kb-panel-side-v1] 知识库 tab：经验台账 / 项目文档 / 外部 Wiki 检索（懒加载，同 worklog 范式） -->
       <button v-tooltip="'知识库'" aria-label="知识库" :class="{ 'side-tab-active': sideTab === 'kb' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('kb')">
         <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg></span>
+      </button>
+
+      <!-- [terminal-panel-v1] 终端 tab：本地 shell，执行走 /__ai/exec（懒加载同 kb 范式） -->
+      <button v-tooltip="'终端'" aria-label="终端" :class="{ 'side-tab-active': sideTab === 'terminal' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('terminal')">
+        <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></svg></span>
       </button>
 
       <!-- [fix-side-collapse] 收起/展开 -->
@@ -184,6 +193,10 @@ defineExpose({ selectTab })
     <!-- [kb-panel-side-v1] 知识库面板：首切才加载（v-if 闸门触发 loader），之后 v-show 保活 -->
     <div v-show="sideTab === 'kb'" class="side-kb flex flex-col flex-1 min-h-0 overflow-y-auto">
       <KnowledgePanel v-if="kbLoaded" />
+    </div>
+    <!-- [terminal-panel-v1] 终端面板：首切才加载，之后 v-show 保活 -->
+    <div v-show="sideTab === 'terminal'" class="side-terminal flex flex-col flex-1 min-h-0 overflow-hidden">
+      <TerminalPanel v-if="terminalLoaded" />
     </div>
   </aside>
 </template>

@@ -1,207 +1,46 @@
 <script setup lang="ts">
-// [explicit-import-for-testability-v1] 显式 import 而非依赖 unplugin-auto-import：
-//   test:tsc（tsconfig.test.json）不含 auto-import 声明文件，测试一旦 import 本组件，
-//   靠全局标识符会在 test:tsc 里报一串 Cannot find name（AGENTS.md「auto-import 会掩盖导入错误」）。
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useResizeObserver } from '@vueuse/core'
-import { diffLines as diffLinesLib } from 'diff'
-import { DEFAULT_HIGHLIGHT_HEAD, DEFAULT_HIGHLIGHT_TAIL } from './DiffViewer.constants'
-import { escapeHtml, highlightToHtml } from '../../composables/useHljs'
+// [git-diff-view-v1] 用 @git-diff-view/vue 替换手写 diff 渲染（自研 427 行 → 薄封装）。
+// [WHY] 保留原 props 契约（before/after/fileName/changeType），调用方 FileContentOverlay
+//   与 DiffOverlay 的 import 与用法零改动。
+// [CONSTRAINT] 高亮、折叠、虚拟滚动、Split/Unified 切换交由库实现，不再维护自研版本。
+import { computed } from 'vue'
+import { DiffFile, DiffModeEnum, DiffView } from '@git-diff-view/vue'
+import '@git-diff-view/vue/styles/diff-view.css'
 
-interface DiffLine {
-  type: 'same' | 'add' | 'del'
-  text: string
-  oldLine?: number
-  newLine?: number
-}
-
-/** 组件接收的 props 定义 */
 const props = defineProps<{
   before: string
   after: string
   fileName: string
   changeType: 'added' | 'modified' | 'deleted'
+  /** [diff-hunks-v1] 直接传入 git diff 文本片段（hunks 数组）；有值时优先于 before/after */
+  hunks?: string[]
 }>()
 
-/** 超高亮时保留头部行数（常量来源见 DiffViewer.constants） */
-const HIGHLIGHT_HEAD = DEFAULT_HIGHLIGHT_HEAD
-/** 超高亮时保留尾部行数（常量来源见 DiffViewer.constants） */
-const HIGHLIGHT_TAIL = DEFAULT_HIGHLIGHT_TAIL
-/** 触发"只高亮头尾"策略的行数阈值；超过时中段用 escapeHtml 降级，避免大文件卡顿 */
-const HIGHLIGHT_THRESHOLD = 400
-/** 差异视图单行高度（像素） */
-const ROW_HEIGHT = 22
-/** 虚拟滚动的缓冲区行数（上下各预留） */
-const BUFFER = 20
-let idleHandle: number | ReturnType<typeof setTimeout> | null = null
-
-/** 变更前源码的 hljs 高亮 HTML 行；由 scheduleHighlight 异步填充 */
-const beforeLines = ref<string[]>([])
-/** 变更后源码的 hljs 高亮 HTML 行；由 scheduleHighlight 异步填充 */
-const afterLines = ref<string[]>([])
-/** diff 主体容器引用；虚拟滚动与视口高度测量均依赖此 ref */
-const diffBodyRef = ref<HTMLElement | null>(null)
-/** 当前滚动位置（像素）；由 onScroll 更新，visibleRange 计算依赖它 */
-const scrollTop = ref(0)
-/** 可视区域高度（像素） */
-const viewportHeight = ref(600)
-
-useResizeObserver(diffBodyRef, () => {
-  if (diffBodyRef.value) viewportHeight.value = diffBodyRef.value.clientHeight
+/** [git-diff-view-v1] 构造 DiffFile；hunks 优先，其次 before/after */
+const diffFile = computed(() => {
+  if (props.hunks && props.hunks.length) {
+    const f = DiffFile.createInstance({ hunks: props.hunks })
+    f.initTheme('dark')
+    f.init()
+    f.buildSplitDiffLines()
+    return f
+  }
+  const before = props.changeType === 'added' ? '' : props.before
+  const after = props.changeType === 'deleted' ? '' : props.after
+  const f = DiffFile.createInstance({
+    oldFile: { fileName: props.fileName, content: before },
+    newFile: { fileName: props.fileName, content: after },
+  })
+  f.initTheme('dark')
+  f.init()
+  f.buildSplitDiffLines()
+  return f
 })
-
-/** 差异行集合 */
-const diffLines = computed((): DiffLine[] => {
-  if (props.changeType === 'added') {
-    return props.after.split('\n').map((line, i) => ({ type: 'add' as const, text: line, newLine: i + 1 }))
-  }
-  if (props.changeType === 'deleted') {
-    return props.before.split('\n').map((line, i) => ({ type: 'del' as const, text: line, oldLine: i + 1 }))
-  }
-  return computeDiff(props.before.split('\n'), props.after.split('\n'))
-})
-/** 虚拟滚动当前可见的行号范围 */
-const visibleRange = computed(() => {
-  const start = Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - BUFFER)
-  const end = Math.min(diffLines.value.length, Math.ceil((scrollTop.value + viewportHeight.value) / ROW_HEIGHT) + BUFFER)
-  return { start, end }
-})
-/** 当前可视窗口内的差异行（虚拟滚动实际渲染集合） */
-const visibleLines = computed(() => diffLines.value.slice(visibleRange.value.start, visibleRange.value.end))
-/** 虚拟滚动顶部占位高度 */
-const spacerTop = computed(() => visibleRange.value.start * ROW_HEIGHT)
-/** 虚拟滚动底部占位高度 */
-const spacerBottom = computed(() => Math.max(0, diffLines.value.length - visibleRange.value.end) * ROW_HEIGHT)
-/** 统计信息 */
-const stats = computed(() => {
-  let add = 0
-  let del = 0
-  for (const l of diffLines.value) {
-    if (l.type === 'add') add++
-    else if (l.type === 'del') del++
-  }
-  return { add, del }
-})
-
-watch(() => [props.before, props.after] as const, scheduleHighlight, { immediate: true })
-
-// 用 vueuse useResizeObserver 替换手写 observer：
-// 内部自动 in-scope 清理（组件卸载时 disconnect），省掉 onBeforeUnmount 分支
-// [CONSTRAINT] target 传入 ref 对象本身（非 .value），vueuse 会 watch 引用变化后在 DOM 就绪时 observe
-onMounted(() => {
-  if (diffBodyRef.value) viewportHeight.value = diffBodyRef.value.clientHeight
-})
-onBeforeUnmount(() => {
-  clearIdle()
-})
-
-/**
- * 将源码文本按行做 hljs 高亮，返回高亮后的 HTML 行数组
- * [WHY] 行数超过 HIGHLIGHT_THRESHOLD 时只高亮头尾，中段用 escapeHtml 降级：hljs 对大文件代价高
- * [CONSTRAINT] 返回的每项为 HTML 片段，调用方需用 v-html 渲染；行数与原文一致（split 后）
- * [CHANGE-IMPACT] 头尾行为 HIGHLIGHT_HEAD / HIGHLIGHT_TAIL，改这两个常量会影响超高亮策略分界
- */
-function highlightToLines(text: string): string[] {
-  if (!text) return []
-  const lines = text.split('\n')
-  if (lines.length <= HIGHLIGHT_THRESHOLD) {
-    try { return highlightToHtml(text).split('\n') }
-    catch { return lines.map(escapeHtml) }
-  }
-  const headText = lines.slice(0, HIGHLIGHT_HEAD).join('\n')
-  const tailText = lines.slice(-HIGHLIGHT_TAIL).join('\n')
-  let headHtml: string[]
-  let tailHtml: string[]
-  try { headHtml = highlightToHtml(headText).split('\n') }
-  catch { headHtml = lines.slice(0, HIGHLIGHT_HEAD).map(escapeHtml) }
-  try { tailHtml = highlightToHtml(tailText).split('\n') }
-  catch { tailHtml = lines.slice(-HIGHLIGHT_TAIL).map(escapeHtml) }
-  const mid = lines.slice(HIGHLIGHT_HEAD, -HIGHLIGHT_TAIL).map(escapeHtml)
-  return [...headHtml, ...mid, ...tailHtml]
-}
-// LCS DP：O(N*M) 内存/时间。对齐质量远好于朴素滑动比较。
-// ponytail: N*M > 4M 走 fallback（全删全增），防大文件卡死。
-// 升级路径：换 Myers O((N+M)D)，但代码复杂 3 倍。
-
-/**
- * 对比前后两份源码文本，产出逐行 diff 结果
- * [WHY] 依赖 diff 库的 diffLines 算法；LCS DP 保对齐质量，大文件走全删全增降级
- * [CONSTRAINT] 输入必须为行数组（外部已 split）；返回按原文顺序排列，同一行的 old/new 行号可能不等
- * @param a 变更前文本行数组
- * @param b 变更后文本行数组
- */
-function computeDiff(a: string[], b: string[]): DiffLine[] {
-  // [diffviewer-lcs-guard-v1] 报告 §4：文件头注释声称 N*M > 4M 走 fallback，但实现直接调 diffLinesLib。
-  // 此处补齐：超阈值时按「全删 + 全增」输出，避免 LCS DP 在巨大文件上 O(N*M) 卡死主线程。
-  const LCS_CELL_LIMIT = 4_000_000
-  if (a.length * b.length > LCS_CELL_LIMIT) {
-    const fallback: DiffLine[] = []
-    for (let i = 0; i < a.length; i++) fallback.push({ type: 'del', text: a[i], oldLine: i + 1 })
-    for (let i = 0; i < b.length; i++) fallback.push({ type: 'add', text: b[i], newLine: i + 1 })
-    return fallback
-  }
-  const changes = diffLinesLib(a.join('\n'), b.join('\n'))
-  const out: DiffLine[] = []
-  let oldLine = 1
-  let newLine = 1
-  for (const ch of changes) {
-    const text = ch.value.endsWith('\n') ? ch.value.slice(0, -1) : ch.value
-    for (const line of text.split('\n')) {
-      if (ch.added) out.push({ type: 'add', text: line, newLine: newLine++ })
-      else if (ch.removed) out.push({ type: 'del', text: line, oldLine: oldLine++ })
-      else out.push({ type: 'same', text: line, oldLine: oldLine++, newLine: newLine++ })
-    }
-  }
-  return out
-}
-/**
- * 取消挂起的空闲回调
- * [CONSTRAINT] 幂等；requestIdleCallback 与 setTimeout 两条路径都正确清理（idleHandle 类型联合）
- * [WHY] 高亮是重活，用 requestIdleCallback 空闲时执行；快速切换文件时需取消上一轮避免覆盖
- */
-function clearIdle() {
-  if (idleHandle === null) return
-  if (typeof idleHandle === 'number' && typeof cancelIdleCallback === 'function') cancelIdleCallback(idleHandle)
-  else clearTimeout(idleHandle as ReturnType<typeof setTimeout>)
-  idleHandle = null
-}
-/**
- * 调度一次异步高亮（下一帧空闲或 0ms 延迟执行）
- * [WHY] 高亮耗时随文件增大而线性增长，放空闲时段可避免阻塞首次渲染
- * [CONSTRAINT] 重复调用会先取消上一轮（clearIdle），避免旧高亮结果覆盖新内容
- * [CHANGE-IMPACT] watch props.before/after 时以 immediate 触发一次，首屏渲染依赖此路径
- */
-function scheduleHighlight() {
-  clearIdle()
-  /** 空闲回调：读取最新 props 并刷新高亮结果；置 idleHandle 为 null 以标记"无挂起" */
-  const run = () => {
-    idleHandle = null
-    beforeLines.value = highlightToLines(props.before)
-    afterLines.value = highlightToLines(props.after)
-  }
-  if (typeof requestIdleCallback === 'function') idleHandle = requestIdleCallback(run)
-  else idleHandle = setTimeout(run, 0)
-}
-/**
- * 从预高亮结果中取某行的 HTML；未命中时回落 escapeHtml
- * [WHY] 高亮是异步的，diff 结构先产出时 beforeLines/afterLines 可能还未填充，故需兜底
- * [CONSTRAINT] 按行号索引（1-based 转 0-based）；超出数组边界或类型不匹配时回落到原始文本转义
- */
-function renderLine(line: DiffLine): string {
-  if (line.type === 'add' && line.newLine !== undefined) return afterLines.value[line.newLine - 1] ?? escapeHtml(line.text)
-  if (line.type === 'del' && line.oldLine !== undefined) return beforeLines.value[line.oldLine - 1] ?? escapeHtml(line.text)
-  if (line.type === 'same') return afterLines.value[(line.newLine ?? 1) - 1] ?? escapeHtml(line.text)
-  return escapeHtml(line.text)
-}
-/**
- * 记录滚动位置以驱动虚拟滚动
- * [CONSTRAINT] 事件绑定为 @scroll.passive，不可在内部 preventDefault（浏览器警告）
- * @param e 来自 diff-body 容器的 scroll 事件；e.target 即容器元素
- */
-function onScroll(e: Event) {
-  const el = e.target as HTMLElement
-  scrollTop.value = el.scrollTop
-}
+/** 变更统计：读库算好的行数，供 header 展示 */
+const stats = computed(() => ({
+  add: diffFile.value.additionLength ?? 0,
+  del: diffFile.value.deletionLength ?? 0,
+}))
 </script>
 
 <template>
@@ -214,24 +53,14 @@ function onScroll(e: Event) {
         <span v-if="stats.del" class="stat-del">-{{ stats.del }}</span>
       </span>
     </div>
-    <div ref="diffBodyRef" class="diff-body" @scroll.passive="onScroll">
-      <template v-if="diffLines.length">
-        <div :style="{ height: `${spacerTop}px` }" />
-        <div
-          v-for="(line, i) in visibleLines"
-          :key="visibleRange.start + i"
-          class="diff-line"
-          :class="line.type"
-        >
-          <span class="line-num new">{{ line.newLine ?? '' }}</span>
-          <span class="line-prefix">{{ line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ' }}</span>
-          <pre class="line-text" v-html="renderLine(line)" />
-        </div>
-        <div :style="{ height: `${spacerBottom}px` }" />
-      </template>
-      <div v-else class="diff-empty">
-        无内容变更
-      </div>
+    <div class="diff-body">
+      <DiffView
+        :diff-file="diffFile"
+        :diff-view-mode="DiffModeEnum.Split"
+        diff-view-theme="dark"
+        :diff-view-highlight="true"
+        :diff-view-font-size="12"
+      />
     </div>
   </div>
 </template>
@@ -242,7 +71,6 @@ function onScroll(e: Event) {
   border-radius: var(--radius, 8px);
   overflow: hidden;
   background: var(--surface);
-
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -252,14 +80,13 @@ function onScroll(e: Event) {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* [close-overlay-badge-fix] 右侧内边距可由宿主（覆盖式浮层）用变量抬高，给绝对定位的关闭按钮让位；
-     独立使用时变量未声明，退回 12px 与左侧对称 */
   padding: 8px var(--diff-header-pr, 12px) 8px 12px;
   background: var(--surface-2, #f6f8fa);
   border-bottom: 1px solid var(--border, #e5e7eb);
   font-size: 13px;
   font-weight: 600;
 }
+
 .diff-filename {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -269,158 +96,50 @@ function onScroll(e: Event) {
   font-weight: 500;
   color: var(--text, #1f2d3d);
 }
+
 .diff-badge {
-  /* [ui-type-scale-v1] 辅助下限 11px（原 10px） */
-  font-size: var(--font-11);
-  padding: 2px 6px;
-  border-radius: var(--radius-4);
+  font-size: 10px;
   font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
   text-transform: uppercase;
-  flex-shrink: 0;
 }
 .diff-badge.added {
-  background: var(--success-bg);
-  color: var(--success);
+  background: rgb(70 149 74 / 18%);
+  color: #46954a;
 }
 .diff-badge.modified {
-  background: var(--warning-bg);
-  color: var(--warning);
+  background: rgb(220 160 40 / 18%);
+  color: #dca028;
 }
 .diff-badge.deleted {
-  background: var(--danger-bg);
-  color: var(--danger);
+  background: rgb(229 83 75 / 18%);
+  color: #e5534b;
 }
 
 .diff-stats {
-  margin-left: auto;
-  display: flex;
-  gap: 8px;
+  display: inline-flex;
+  gap: 6px;
   font-family: var(--mono, monospace);
   font-size: 11px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
 }
 .stat-add {
-  color: var(--success);
+  color: #46954a;
 }
 .stat-del {
-  color: var(--danger);
+  color: #e5534b;
 }
 
 .diff-body {
-  flex: 1 1 auto;
-  min-height: 160px;
-  max-height: none;
-
-  overflow-x: auto; /* [diff-no-wrap-v1] 配合关折行：长行横向滚动 */
-  overflow-y: auto;
-  font: 12px/1.6 var(--mono, monospace);
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   background: var(--surface);
 }
-.diff-line {
-  display: flex;
-  min-height: 22px;
-  transition: background 0.08s;
-}
-.diff-line:hover {
-  background: var(--surface-2);
-  filter: brightness(0.98);
-}
 
-.line-num {
-  width: 56px;
-  flex-shrink: 0;
-  text-align: right;
-  padding: 0 10px;
-  color: var(--text-3);
-  user-select: none;
-  font-variant-numeric: tabular-nums;
-  background: var(--surface-2);
-  border-right: 1px solid var(--border);
-  font-size: 11.5px;
-  line-height: 22px;
-}
-
-.line-prefix {
-  width: 20px;
-  flex-shrink: 0;
-  text-align: center;
-  font-weight: 700;
-  user-select: none;
-  color: var(--text-3);
-  line-height: 22px;
-}
-
-.line-text {
-  margin: 0;
-  padding: 0 14px;
-
-  /* [diff-no-wrap-v1] 关折行：虚拟滚动用固定 ROW_HEIGHT=22 计算 spacerTop/Bottom，
-     原 white-space:pre-wrap 会让长行折为多行，spacer 与真实高度不自洽，
-     表现为中段空白 / 丢行 / 滚不到底（报告 §1.3）。横向滚动由父容器提供。 */
-  white-space: pre;
-  flex: 1;
-  min-width: 0;
-  color: var(--text, #1f2d3d);
-  line-height: 22px;
-}
-
-.diff-line.add {
-  background: rgb(16 185 129 / 20%);
-  border-left: 3px solid var(--success);
-}
-.diff-line.add:hover {
-  background: rgb(16 185 129 / 30%);
-}
-.diff-line.add .line-prefix {
-  color: var(--success);
-}
-.diff-line.add .line-num {
-  background: rgb(16 185 129 / 28%);
-}
-
-.diff-line.del {
-  background: rgb(239 68 68 / 20%);
-  border-left: 3px solid var(--danger);
-}
-.diff-line.del:hover {
-  background: rgb(239 68 68 / 30%);
-}
-.diff-line.del .line-prefix {
-  color: var(--danger);
-}
-.diff-line.del .line-num {
-  background: rgb(239 68 68 / 28%);
-}
-
-.diff-line.same {
-  border-left: 3px solid transparent;
-}
-.diff-body :deep(.hljs-keyword),
-.diff-body :deep(.hljs-literal) {
-  color: #569cd6;
-}
-.diff-body :deep(.hljs-string) {
-  color: #ce9178;
-}
-.diff-body :deep(.hljs-number) {
-  color: #b5cea8;
-}
-.diff-body :deep(.hljs-comment) {
-  color: #6a9955;
-  font-style: italic;
-}
-.diff-body :deep(.hljs-function),
-.diff-body :deep(.hljs-title) {
-  color: #dcdcaa;
-}
-.diff-body :deep(.hljs-variable),
-.diff-body :deep(.hljs-params),
-.diff-body :deep(.hljs-attr) {
-  color: #9cdcfe;
-}
-.diff-body :deep(.hljs-built_in),
-.diff-body :deep(.hljs-type) {
-  color: #4ec9b0;
+/* [git-diff-view-theme-v1] 库内部变量映射到项目深色主题 */
+.diff-body :deep(.diff-view) {
+  font-family: var(--mono, monospace);
+  background: var(--surface) !important;
 }
 </style>

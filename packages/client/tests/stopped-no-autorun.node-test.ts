@@ -10,6 +10,9 @@ import { expect, test, vi } from 'vitest'
 import { ref } from 'vue'
 
 import { PAGE_BOOT_TS, REFRESH_GUARD_MS, STOPPED_GUARD_MS, useAiReplyHandlers } from '../composables/ai/useAiReplyHandlers.js'
+// [stopped-vocab-guard-v1] 停机态整句一律不落源码：用抬头常量，避免把整句再写回来
+//   （整句与本仓探针正则同形 ⇒ 源码被 dump 进会话时被自身探针命中，见 utils/stop-notice.ts 文件头）
+import { STOPPED_HEAD } from '../utils/stop-notice.js'
 
 const h = vi.hoisted(() => ({
   runCalls: [] as unknown[],
@@ -67,7 +70,7 @@ test('① stopped 后窗口内的残余脚本 ⇒ 只回填，不自动执行（
   enterRuntimeWindow()
   h.runCalls.length = 0; h.schedCalls.length = 0; h.pushCalls.length = 0
   const handlers = mkHandlers()
-  handlers.handleAiReply({ type: 'ai-runner:reply', kind: 'stopped', text: 'AI 网页已停止生成', sessionId: 'sid-s1' }, fakeEvent())
+  handlers.handleAiReply({ type: 'ai-runner:reply', kind: 'stopped', text: STOPPED_HEAD, sessionId: 'sid-s1' }, fakeEvent())
   handlers.handleAiReply(SCRIPT('sid-s1'), fakeEvent())
   expect(h.pushCalls.length).toBe(1) // 仍回填编辑器
   expect(h.runCalls.length).toBe(0)
@@ -81,7 +84,7 @@ test('② 旧油猴 ai-runner:script（3-7s 异步延迟）在 stopped 之后 �
   // 先发脚本（进入延迟），等待期间 AI 页面被停止 ⇒ await 后的窗口判据必须拦住
   const p = handlers.onSessionIdMessage({ data: { type: 'ai-runner:script', code: '// @desc d\n// @why w', lang: 'js', sessionId: 'sid-s2' }, origin: 'https://x', source: null } as unknown as MessageEvent)
   await vi.advanceTimersByTimeAsync(1500)
-  handlers.handleAiReply({ type: 'ai-runner:reply', kind: 'stopped', text: 'AI 网页已停止生成', sessionId: 'sid-s2' }, fakeEvent())
+  handlers.handleAiReply({ type: 'ai-runner:reply', kind: 'stopped', text: STOPPED_HEAD, sessionId: 'sid-s2' }, fakeEvent())
   await vi.advanceTimersByTimeAsync(8000)
   await p
   expect(h.runCalls.length).toBe(0)

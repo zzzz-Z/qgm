@@ -29,7 +29,10 @@ declare global {
   const PHASE_LABEL: typeof import('./utils/timeline-build').PHASE_LABEL
   const REFRESH_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').REFRESH_GUARD_MS
   const STOPPED_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').STOPPED_GUARD_MS
+  const STOPPED_HEAD: typeof import('./utils/stop-notice').STOPPED_HEAD
   const STOPPED_PLAIN_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').STOPPED_PLAIN_GUARD_MS
+  const STOPPED_SCRIPT_HINT: typeof import('./utils/stop-notice').STOPPED_SCRIPT_HINT
+  const STOPPED_TOAST_GENERIC: typeof import('./utils/stop-notice').STOPPED_TOAST_GENERIC
   const TAIL_MAX_CHARS: typeof import('./utils/timeline-build').TAIL_MAX_CHARS
   const TEXT_PREVIEW: typeof import('./utils/timeline-build').TEXT_PREVIEW
   const TOAST_DEFAULT: typeof import('./utils/toast-durations').TOAST_DEFAULT
@@ -113,6 +116,7 @@ declare global {
   const fnv1a8: typeof import('./utils/hash').fnv1a8
   const formatBoardMirror: typeof import('./composables/ai/board-mirror').formatBoardMirror
   const formatLimitToast: typeof import('./utils/limit-notice').formatLimitToast
+  const formatStopToast: typeof import('./utils/stop-notice').formatStopToast
   const getActiveModelId: typeof import('./composables/ui/useSitesStore').getActiveModelId
   const getActiveWin: typeof import('./composables/ai/useAiWindow').getActiveWin
   const getActiveWinImpl: typeof import('./composables/ai/useAiWindowTable').getActiveWinImpl
@@ -169,6 +173,7 @@ declare global {
   const normalizeAskOptions: typeof import('./utils/timeline-build').normalizeAskOptions
   const normalizeForHash: typeof import('./composables/runner/inbox-parse').normalizeForHash
   const normalizeLimitHit: typeof import('./utils/limit-notice').normalizeLimitHit
+  const normalizeStopHit: typeof import('./utils/stop-notice').normalizeStopHit
   const onActivated: typeof import('vue').onActivated
   const onBeforeMount: typeof import('vue').onBeforeMount
   const onBeforeUnmount: typeof import('vue').onBeforeUnmount
@@ -630,7 +635,10 @@ declare module 'vue' {
     readonly PHASE_LABEL: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_LABEL']>
     readonly REFRESH_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['REFRESH_GUARD_MS']>
     readonly STOPPED_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['STOPPED_GUARD_MS']>
+    readonly STOPPED_HEAD: UnwrapRef<typeof import('./utils/stop-notice')['STOPPED_HEAD']>
     readonly STOPPED_PLAIN_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['STOPPED_PLAIN_GUARD_MS']>
+    readonly STOPPED_SCRIPT_HINT: UnwrapRef<typeof import('./utils/stop-notice')['STOPPED_SCRIPT_HINT']>
+    readonly STOPPED_TOAST_GENERIC: UnwrapRef<typeof import('./utils/stop-notice')['STOPPED_TOAST_GENERIC']>
     readonly TAIL_MAX_CHARS: UnwrapRef<typeof import('./utils/timeline-build')['TAIL_MAX_CHARS']>
     readonly TEXT_PREVIEW: UnwrapRef<typeof import('./utils/timeline-build')['TEXT_PREVIEW']>
     readonly TOAST_DEFAULT: UnwrapRef<typeof import('./utils/toast-durations')['TOAST_DEFAULT']>
@@ -714,6 +722,7 @@ declare module 'vue' {
     readonly fnv1a8: UnwrapRef<typeof import('./utils/hash')['fnv1a8']>
     readonly formatBoardMirror: UnwrapRef<typeof import('./composables/ai/board-mirror')['formatBoardMirror']>
     readonly formatLimitToast: UnwrapRef<typeof import('./utils/limit-notice')['formatLimitToast']>
+    readonly formatStopToast: UnwrapRef<typeof import('./utils/stop-notice')['formatStopToast']>
     readonly getActiveModelId: UnwrapRef<typeof import('./composables/ui/useSitesStore')['getActiveModelId']>
     readonly getActiveWin: UnwrapRef<typeof import('./composables/ai/useAiWindow')['getActiveWin']>
     readonly getActiveWinImpl: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['getActiveWinImpl']>
@@ -770,6 +779,7 @@ declare module 'vue' {
     readonly normalizeAskOptions: UnwrapRef<typeof import('./utils/timeline-build')['normalizeAskOptions']>
     readonly normalizeForHash: UnwrapRef<typeof import('./composables/runner/inbox-parse')['normalizeForHash']>
     readonly normalizeLimitHit: UnwrapRef<typeof import('./utils/limit-notice')['normalizeLimitHit']>
+    readonly normalizeStopHit: UnwrapRef<typeof import('./utils/stop-notice')['normalizeStopHit']>
     readonly onActivated: UnwrapRef<typeof import('vue')['onActivated']>
     readonly onBeforeMount: UnwrapRef<typeof import('vue')['onBeforeMount']>
     readonly onBeforeUnmount: UnwrapRef<typeof import('vue')['onBeforeUnmount']>
