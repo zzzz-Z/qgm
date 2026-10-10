@@ -21,6 +21,8 @@ import {
   DEFAULT_URL,
   defaultUserDataDir,
   LAUNCH_TIMEOUT_MS,
+  LOGIN_AUTOCLOSE_FALLBACK_MS,
+  LOGIN_GUI_MAX_MS,
   LOGIN_STABLE_MS,
 } from './headless-constants.js'
 import { createSlotQueue } from './headless-slot-queue.js'
@@ -210,28 +212,41 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     let done = false
     let candidatePath = ''
     let candidateSince = 0
+    const startedAt = Date.now()
     const timer = setInterval(() => {
       if (done) return
       page.evaluate(detectLoginStateInPage)
         .then((raw) => {
           // headless-inject 为 @ts-nocheck 文件，evaluate 返回值推断为 unknown，按返回结构收窄
           const st = raw as { path: string, hasInput: boolean, tokenState?: 'yes' | 'no' | 'unknown' } | null | undefined
+          const now = Date.now()
+          // 快速通道：探针拿到正面证据（tokenState === 'yes'），需 LOGIN_STABLE_MS 稳定窗口
           // [login-token-guard-v1] 必须拿到「确认已登录」的正面证据：仅凭 path 非 /sign_in + 有输入框，
           // 会把未登录时先渲染的聊天骨架（path=/）误判成登录成功 —— 实测 17s 即误报并自动关窗
-          if (!st || !st.hasInput || st.tokenState !== 'yes' || /sign_in|login/i.test(st.path)) {
-            candidatePath = ''
-            candidateSince = 0
+          if (st && st.hasInput && st.tokenState === 'yes' && !/sign_in|login/i.test(st.path)) {
+            if (candidatePath !== st.path) {
+              candidatePath = st.path
+              candidateSince = now
+              return
+            }
+            if (done || now - candidateSince < LOGIN_STABLE_MS) return
+            done = true
+            clearInterval(timer)
+            closeCtx().catch(() => { /* swallow: 进程退出竞态，close 事件兜底 */ })
             return
           }
-          if (candidatePath !== st.path) {
-            candidatePath = st.path
-            candidateSince = Date.now()
+          // [login-autoclose-timeout-v1] 时间兜底：探针读不到 userToken（unknown）时也主动关窗，
+          //   前提是「输入框可见 + 非 /sign_in + 已超过 LOGIN_AUTOCLOSE_FALLBACK_MS」。
+          //   [WHY] 用户实测：DeepSeek 已登录但探测判据不满足 → 有头窗口久开 → inflight 永久挂起。
+          //   [CONSTRAINT] tokenState === 'no' 时不走兜底——那是明确未登录的负证据。
+          if (st && st.hasInput && st.tokenState !== 'no' && !/sign_in|login/i.test(st.path) && now - startedAt >= LOGIN_AUTOCLOSE_FALLBACK_MS) {
+            done = true
+            clearInterval(timer)
+            closeCtx().catch(() => { /* swallow: 进程退出竞态，close 事件兜底 */ })
             return
           }
-          if (done || Date.now() - candidateSince < LOGIN_STABLE_MS) return
-          done = true
-          clearInterval(timer)
-          closeCtx().catch(() => { /* swallow: 进程退出竞态，close 事件兜底 */ })
+          candidatePath = ''
+          candidateSince = 0
         })
         .catch(() => { /* swallow: 页面跳转瞬间 evaluate 抛错，等下轮 */ })
     }, 2000)
@@ -264,8 +279,37 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       const stopAutoclose = startLoginAutoclose(page, () => ctxLocal.close())
       let autoClosed: boolean
       try {
-        // 阻塞直到窗口关闭（自动或手动），不设超时——误中断会丢登录进度
-        await new Promise<void>((resolve) => { ctxLocal.on('close', () => resolve()) })
+        // [login-gui-max-ms-v1] 阻塞直到窗口关闭，但加 LOGIN_GUI_MAX_MS 硬上限：
+        //   [WHY] 实测过用户手动关窗而 Playwright 未触发 ctx.close 事件（窗口 vs context 语义差异），
+        //   会让 inflight 永久挂起、之后所有 open() 都被 login-gui-guard 拦下。
+        //   [CONSTRAINT] 上限只兜底，正常流程仍由 close 事件 / autoclose 触发。
+        await new Promise<void>((resolve) => {
+          // [login-gui-max-ms-v1] 用外部变量持有 timer 句柄，onClose 只置标志 + resolve；
+          //   清理统一走 finally 的 clearTimeout，避免闭包引用在定义前。
+          let settled = false
+          const fire = (fromTimeout: boolean): void => {
+            if (settled) return
+            settled = true
+            if (fromTimeout) {
+              console.warn('[headless-login-gui] 超过 LOGIN_GUI_MAX_MS，强制关闭登录窗口')
+              void ctxLocal.close().catch(() => { /* swallow: 已关闭 */ })
+            }
+            resolve()
+          }
+          const maxTimer = setTimeout(fire, LOGIN_GUI_MAX_MS, true)
+          ctxLocal.on('close', () => fire(false))
+          // 通过 Promise 的 finally 挂清理钩子：resolve 后一定执行
+          void Promise.resolve().then(() => {
+            // noop：只是占位，真正清理在下方
+          })
+          // 用 settled 轮询清理 timer
+          const cleanupTimer = setInterval(() => {
+            if (settled) {
+              clearTimeout(maxTimer)
+              clearInterval(cleanupTimer)
+            }
+          }, 500)
+        })
       } finally {
         autoClosed = stopAutoclose()
       }

@@ -20,6 +20,13 @@ export function defaultUserDataDir(): string {
 export const LAUNCH_TIMEOUT_MS = 30_000
 /** 登录稳定期（毫秒） */
 export const LOGIN_STABLE_MS = 10_000
+// [login-autoclose-timeout-v1] 时间兜底：探针识别不出新存储格式（tokenState=unknown）时，
+//   有头窗口若已打开超过此值且页面有输入框 + 非 /sign_in 即视为用户已登录，主动关窗释放 profile。
+//   [WHY] 用户实际场景：DeepSeek 已登录但探测读不到 userToken，autoclose 判据不满足 → 窗口久开 → inflight 永久挂起。
+export const LOGIN_AUTOCLOSE_FALLBACK_MS = 90_000
+// [login-gui-max-ms-v1] doOpenLoginGui 等待 ctx.close 事件的硬上限：超过此时长强制 close，
+//   避免用户只关了浏览器窗口而 Playwright 仍认为 context 存在（close 事件未触发）导致永久阻塞。
+export const LOGIN_GUI_MAX_MS = 300_000
 
 /** 无头会话池的并发上限 */
 export const DEFAULT_POOL_LIMIT = 5
