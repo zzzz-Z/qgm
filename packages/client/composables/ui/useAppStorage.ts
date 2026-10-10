@@ -14,8 +14,6 @@ export interface SessionEntry {
   handedOff?: boolean
 }
 
-/** 会话历史在 localStorage 的键；App.vue 与 useSessionManager 共享此命名空间 */
-export const SESSION_HISTORY_KEY = '__ai_session_history'
 /** 当前活动会话 id 的存储键 */
 export const ACTIVE_SESSION_KEY = '__ai_active_session_id'
 /** 沙箱开关的存储键；useRunner 读取以决定是否隔离执行 */
@@ -52,6 +50,13 @@ export const theme = useStorage<'light' | 'dark'>(KEY_THEME, 'dark')
  * 当前活动会话 id 响应式单例
  * [use-storage-v1] 集中托管：原 App.vue ref + watch 落盘；loop/window 表同步副作用仍由 App.vue watch 保留
  * [CHANGE-IMPACT] 空串不再触发 removeItem（useStorage 写空串），读取语义等价（均为"未选择"）
+ */
+/**
+ * AI 站点侧真实会话 id（由 useAiReplyHandlers 从油猴回写；localStorage 按站点分桶）。
+ * [id-namespace-disambig-v1] 与 useSessionManager.sessionId 概念不同，勿混用：
+ *   - 本字段：对应 sessionHistory 里的条目，供任务面板/循环实例分桶（effectiveSessionId 消费）。
+ *   - sessionId：工作台自身上下文标识，用于规则注入去重键。
+ *   二者命名相似但职责独立（2026-10-09 复核澄清）。
  */
 export const activeSessionId = useStorage<string>(ACTIVE_SESSION_KEY, '')
 
@@ -97,19 +102,6 @@ function safeSet(key: string, raw: string): void {
     if (typeof localStorage === 'undefined') return
     localStorage.setItem(key, raw)
   } catch { /* ignore */ }
-}
-
-/** 读取会话历史；JSON 损坏或键缺失时返回空数组（调用方无需 try/catch） */
-export function loadHistory(): SessionEntry[] {
-  try {
-    const raw = safeGet(SESSION_HISTORY_KEY)
-    return raw ? JSON.parse(raw) as SessionEntry[] : []
-  } catch { return [] }
-}
-
-/** 序列化写入会话历史；写失败静默（下次 save 会整体覆盖） */
-export function saveHistory(entries: SessionEntry[]): void {
-  safeSet(SESSION_HISTORY_KEY, JSON.stringify(entries))
 }
 
 // [site-isolate-v1] 按站点分桶存储：会话历史 / 激活会话 id 各站点独立
@@ -172,11 +164,6 @@ export function saveActiveSessionIdBySite(modelId: string, id: string): void {
     updatedAt: Date.now(),
   })
   safeSet(ACTIVE_BY_SITE_PREFIX + modelId, id)
-}
-
-/** 读取当前活动会话 id；无值时返回空串（调用方据此判"未选择"） */
-export function loadActiveSessionId(): string {
-  return safeGet(ACTIVE_SESSION_KEY) || ''
 }
 
 /** 读取任意键的字符串值，缺失时返回 fallback */

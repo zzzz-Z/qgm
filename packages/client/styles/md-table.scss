@@ -3,6 +3,7 @@
 //   字重各不相同，且三处都没有横向滚动容器 ⇒ 宽表被压成竖排单字）。
 // [WHY] AI 复盘/对比类回答高度依赖表格；列被挤压后「轮次」会竖排、「r104」会断成两行，等于信息不可读。
 // [CALLER] 三处消费方：@include md-table('.done-summary-body') / ('.ft-md') / ('.fco-md')
+//   （'.fco-md' 只服务 FileContentOverlay 的 mode='content' 预览；mode='diff' 走 DiffViewer，不渲染表格）
 // [CONSTRAINT] ① 选择器前缀由调用方传入，内部一律 :deep()——内容走 v-html，不带 scoped 属性；
 //   ② 不写死颜色，一律走 CSS 变量（fco-md 在亮色面板、其余在暗色，同一变量族已适配）；
 //   ③ 不要在这里写 margin，表格外边距由 .md-table-wrap 承担。

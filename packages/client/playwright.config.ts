@@ -38,7 +38,9 @@ export default defineConfig({
     //   本文件在 packages/client/ ⇒ '..' = packages/，那里没有 dev:web 脚本。
     //   正解是回到仓库根（packages/client/../..）。
     cwd: '../..',
-    url: 'http://localhost:5174/__ai/',
+    // [e2e-webserver-url-v1] 探活前端根路径即可；/__ai/* 经 proxy 转发后端，
+    //   后端由具体 spec 的 beforeAll 独立拉起，webServer 探活不应依赖代理后端是否就绪
+    url: 'http://localhost:5174/',
     reuseExistingServer: true,
     timeout: 120_000,
   },

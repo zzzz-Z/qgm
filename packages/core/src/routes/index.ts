@@ -11,6 +11,8 @@ import { logsHono } from './logs.js'
 import { searchHono } from './search.js'
 import { runHono } from './run.js'
 import { gitHono } from './git.js'
+// [vcs-svn-log-v1] VCS 无关的只读入口（当前：SVN 提交历史）——非 git 仓库下 /git/* 整体不可用
+import { vcsHono } from './vcs.js'
 import { hooksHono } from './hooks.js'
 import { skillsHono } from './skills.js'
 import { lessonsHono } from './lessons.js'
@@ -40,6 +42,7 @@ export const HONO_SUB_APPS = [
   searchHono,
   runHono,
   gitHono,
+  vcsHono,
   hooksHono,
   skillsHono,
   lessonsHono,
@@ -61,6 +64,8 @@ export const HONO_PREFIXES = [
   '/rollback-all',
   '/save',
   '/git',
+  // [vcs-svn-log-v1] 与 /git 并列：只读历史读取，SVN 工作副本下由它接管（git 下返回 vcs='git' 让前端走原链路）
+  '/vcs',
   '/hooks',
   '/exec',
   '/tasks',

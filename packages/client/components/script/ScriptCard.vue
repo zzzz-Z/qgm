@@ -12,6 +12,8 @@ interface CardData {
   desc: string
   timeLabel: string
   why: string
+  // [script-card-reason-v1] 失败原因（payload.reason）；空串=无（成功态恒为空）
+  reason: string
   // [timeline-denoise-v1] 结果摘要：仅终态事件带值（运行中为 null / 0）
   exit: number | null
   changeCount: number
@@ -29,7 +31,9 @@ const expanded = ref(false)
 
 // [scriptcard-hasbody-computed-v1] 报告 §5.1.4：模板内 hasBody 出现 4 次，每渲染重算。
 // 改为 computed：仅当 card 引用变化时重算一次。
-const hasBody = computed(() => Boolean(props.card.stdoutText || props.card.stderrText || props.card.why))
+// [script-card-head-v2] why 已移出 hasBody —— 它现在常显在头部（见模板），不再需要展开。
+//   于是「▸ 折叠箭头」只在真有 stdout/stderr 的步骤上出现，不再几乎每行都长一个。
+const hasBody = computed(() => Boolean(props.card.stdoutText || props.card.stderrText))
 // [timeline-denoise-v1] 结果摘要只在终态出现，运行中 / 等待中不占位
 const isFinal = computed(() => props.card.phaseClass === 'phase-done' || props.card.phaseClass === 'phase-error')
 const isFailed = computed(() => props.card.phaseClass === 'phase-error')
@@ -96,16 +100,30 @@ function toggle(): void { expanded.value = !expanded.value }
           <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="2 2.5" />
         </svg>
       </span>
-      <span class="script-card-desc">{{ card.desc }}</span>
+      <!-- [script-card-head-v2] 文本区两行：① desc = 这一步做了什么；② why = 为什么做。
+           两者都常显（why 原先藏在展开区，等于要求用户逐行点开才懂意图）；
+           都是单行省略号 + 溢出才提示 ⇒ 头部高度可预期（≤3 行）且裁掉的全文随时可查。 -->
+      <span class="script-card-main">
+        <span v-overflow-tip="card.desc" class="script-card-desc">{{ card.desc }}</span>
+        <span v-if="card.why" class="script-card-why">
+          <span class="why-label">WHY</span>
+          <span v-overflow-tip="card.why" class="why-text">{{ card.why }}</span>
+        </span>
+        <!-- [script-card-reason-v1] 失败原因常显：useRunner 的 error 分支才下发。
+             放在头部而非展开区 —— 失败时「为什么失败」是最该一眼看到的信息，
+             藏进折叠区后用户得先点开才知道要不要点开（且无 stderr 的失败根本没有折叠区）。 -->
+        <span v-if="card.reason" class="script-card-reason">
+          <span class="reason-label">失败原因</span>
+          <span v-overflow-tip="card.reason" class="reason-text">{{ card.reason }}</span>
+        </span>
+      </span>
       <!-- [timeline-denoise-v1] 结果摘要：变更文件数 / 退出码，替代原先"只有一行 desc"的空信息位 -->
       <span v-if="resultLabel" class="script-card-stat" :class="resultClass">{{ resultLabel }}</span>
       <span class="script-card-time">{{ card.timeLabel }}</span>
     </div>
+    <!-- [script-card-head-v2] 展开区只剩原始输出（why 已上提到头部）：
+         有输出的步骤才配折叠箭头，不再是「几乎每行都能点开、点开只有一段复述」。 -->
     <div v-if="expanded && hasBody" class="script-card-tail">
-      <div v-if="card.why" class="why-block">
-        <span class="why-label">WHY</span>
-        <span class="why-text">{{ card.why }}</span>
-      </div>
       <!-- [timeline-denoise-v1] 省略提示置于保留内容之前：丢掉的正是更早的行 -->
       <div v-if="card.stdoutHidden > 0" class="tail-omitted">
         ⋯ 前 {{ card.stdoutHidden }} 行已省略
@@ -133,7 +151,10 @@ function toggle(): void { expanded.value = !expanded.value }
 /* [ui-codex-align-v1] 4px 网格：gap 6→8、margin 2→4；层级靠灰度不靠色块 */
 .script-card-head {
   display: flex;
-  align-items: center;
+  /* [script-card-head-v2] 由 center 改 flex-start：文本区变成 1–3 行的纵向块后，
+     居中会让 14px 状态图标浮在整个块的中腰、与「它描述的那一行」脱开。
+     顶部对齐后图标/徽章/时间都挂在第一行（desc）上，纵向扫读更稳。 */
+  align-items: flex-start;
   gap: 8px;
   margin-bottom: 4px;
   font-size: var(--font-11);
@@ -171,8 +192,20 @@ function toggle(): void { expanded.value = !expanded.value }
   opacity: 0.55;
   font-variant-numeric: tabular-nums;
 }
-.script-card-desc {
+/* [script-card-head-v2] 文本区（列方向）：① desc ② why ③ 失败原因，
+   整体吃掉 head 的剩余宽度（原 desc 的 flex:1 职责上移到这里）。 */
+.script-card-main {
   flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+/* [script-card-head-v2] desc 现在是列容器的第一行，必须显式 block + width:100% + min-width:0，
+   否则列容器下不会收缩，省略号（ellipsis）根本不会出现 —— 这是 flex 纵向布局的常见坑。 */
+.script-card-desc {
+  display: block;
+  width: 100%;
   min-width: 0;
   color: var(--text-2, #c9d1d9);
   font-size: 12.5px;
@@ -216,32 +249,44 @@ function toggle(): void { expanded.value = !expanded.value }
   border-color: rgb(127 127 127 / 14%);
   opacity: 0.75;
 }
-.why-block {
+/* [script-card-head-v2] why / 失败原因两行：常显的次要信息。
+   标签不占色块（每行都出现的带底色 pill 会形成视觉噪音），只用等宽小字 + 低对比做区分。 */
+.script-card-why,
+.script-card-reason {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 0;
-  margin-bottom: 8px;
-  border-bottom: 1px dashed var(--border, #30363d);
-  font-size: 12px;
-  line-height: 20px;
-  color: var(--text-3, #8b949e);
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  line-height: 1.35;
 }
-.why-label {
-  padding: 1px 6px;
-  border-radius: 3px;
-  background: var(--surface-3, #161b22);
+.why-label,
+.reason-label {
+  flex: 0 0 auto;
   font-family: var(--mono, ui-monospace, monospace);
-  /* [ui-type-scale-v1] 代码下限 12px（原 10px） */
-  font-size: var(--font-12);
+  /* [ui-type-scale-v1] 辅助下限 11px */
+  font-size: var(--font-11);
   font-weight: 400;
   letter-spacing: 0.5px;
   color: var(--text-3, #8b949e);
+  opacity: 0.7;
 }
-.why-text {
+.reason-label {
+  color: var(--danger, #f85149);
+  opacity: 0.9;
+}
+.why-text,
+.reason-text {
   flex: 1 1 auto;
   min-width: 0;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.why-text {
+  color: var(--text-3, #8b949e);
+}
+.reason-text {
+  color: var(--danger, #f85149);
 }
 .script-card-tail {
   margin-top: 8px;
@@ -279,6 +324,8 @@ function toggle(): void { expanded.value = !expanded.value }
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
+  /* [script-card-head-v2] 14px 图标在 17.6px 的 desc 行里光学居中（(17.6-14)/2 ≈ 1.8px） */
+  margin-top: 2px;
   color: var(--text-3, #8b949e);
 }
 .script-card-phase.phase-running {

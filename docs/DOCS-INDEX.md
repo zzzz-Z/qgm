@@ -71,6 +71,8 @@
 
 | `docs/workorder-app-taskboard-rescan-2026-10-06.md` | 合并直派工单（WO-20261006-03，**已实施并上线**：两段均于 21:23/21:30 落源码，宿主侧复检 + 构建重启，活实例已服务含 `rescan===!0` 与新 chunk 的产物）：任务看板跨循环残留（成因 D5+D4+D1，清桶前置到 initLoop `[tasks-reset-on-init-v1]`）+ 刷新重扫脚本被无条件自动执行（六环触发链，rescan 标记过滤 `[rescan-no-autorun-v1]`）+ 限流口径 P2。 |
 
+| `docs/workorder-app-system-md-board-semantics-2026-10-09.md` | SSOT 修订提案（WO-20261009-01，**待宿主侧采纳**）：SYSTEM.md §2 两处与实现不符——① `board-fail-explicit-v1` 未说明「评估完成、结论无需改动」应走 `complete`（本次看板挂 3 项假失败的成因）；②「返回形状」条缺 `failed` 与 `summary`（`failed` 是独立数组，不在 todo/done/running 中，漏读即误称「全部完成」）。代码侧已修（`helpers/tasks.cjs` + `G5b` 承重用例），SSOT 因归宿主独占故以工单提案。 |
+
 ## 归档
 
 > 被取代或已收口的旧文档移入 `docs/archive/` 而非删除，保留可查与 git 历史。

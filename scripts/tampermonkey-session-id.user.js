@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.6.5
+// @version      1.6.6
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -824,7 +824,11 @@
       //   也能唤醒 classifyAndPost，作为「生成结束」的兜底唤醒源（与 [generating-gate-v2] 互补）。
       //   [WHY] 仅 childList/characterData 时，按钮消失/置灰这类纯属性变更无法触发 observer，
       //   若又逢 DOM 静止就只剩用户滚动才能唤醒（2026-10-09 实测：回传延迟 54~65s，滚动后秒推）。
-      replyObserver.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class', 'disabled', 'aria-label', 'data-state'] })
+      // [wake-attrs-v2] 给 observer 加 attributes 监听，让「停止生成」按钮的态变也能唤醒回传。
+      //   attributeFilter 刻意不含 'class'：流式渲染/光标动画下 class 变更极高频，会制造 observer
+      //   回调风暴；停止生成按钮的态变通常走 disabled / aria-label / data-state，这三个足够覆盖，
+      //   且变更频次低，350ms 防抖 + 单飞即可挡住推送风暴（[generating-gate-v2] 单飞自检兜底）。
+      replyObserver.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['disabled', 'aria-label', 'data-state'] })
       _replyObserving = true
     } catch { /* body 未就绪，下次 fill/rotate 再试 */ }
   }

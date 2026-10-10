@@ -115,7 +115,7 @@ function splitPath(p: string) {
           <span>{{ busyAll ? '处理中…' : '撤回全部' }}</span>
         </button>
         <button
-          v-tooltip="busyAll ? '处理中…' : '确认所有改动并删除本次快照（之后无法撤回）'"
+          v-tooltip="busyAll ? '处理中…' : '确认改动：清空本面板并重置累积基准到下一轮（之后无法在面板内撤回；磁盘快照由 GC 自然回收）'"
           class="act-btn save-btn"
           :disabled="busyAll"
           @click="emit('save')"

@@ -240,3 +240,30 @@ filesHono.post('/diff-from-baseline', async (c) => {
     }),
   })
 })
+
+/**
+ * [round-changes-v1] 取「某一轮（缺省=最新一轮）」的权威改动列表
+ * [WHY] 本轮视图的数据源原本只有浏览器 summary 帧的 `changes` 一条路：只要那一帧没被前端接住
+ *   （刷新丢帧 / 多标签 / 执行方不是本页 useRunner），本轮就恒为空，而累积视图走独立的磁盘 diff
+ *   照常有数据 —— 用户看到的是「本轮永远空」这种无法自解释的现象。
+ *   服务端每轮的 run manifest（saveSnapshot 落盘）本就保存了该轮改动，是比 summary 更权威的源，
+ *   且它**不依赖累积基准**，不会把单点故障变成双点。
+ * [CONSTRAINT] 只读、不改状态；manifest 缺失 / 无历史运行时返回空列表（不报错），让调用方静默降级。
+ *   语义是「单轮」而非「累积」：取的是该 run 自己的 changes，与累积的「归属轮=最早触碰者」口径无关，
+ *   因此不是把本轮退化成累积的子集（[cumulative-baseline-v1] 区分保持不变）。
+ * [CHANGE-IMPACT] 新增端点；客户端本轮视图在 summary 为空时用它兜底
+ * @param body.runId 目标轮；缺省取 listRunTouches() 的末项（时间升序 ⇒ 最新一轮）
+ */
+filesHono.post('/run-changes', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { runId?: string } | null
+  let runId = String(body?.runId || '')
+  if (!runId) {
+    const all = listRunTouches()
+    const last = all[all.length - 1]
+    if (!last) return c.json({ ok: false, reason: '尚无历史运行记录', changes: [] })
+    runId = last.runId
+  }
+  const m = readManifest(runId)
+  if (!m) return c.json({ ok: false, runId, reason: '该轮无 manifest 记录（可能已被 GC）', changes: [] })
+  return c.json({ ok: true, runId, changes: m.changes.map(ch => ({ path: ch.path, type: ch.type })) })
+})

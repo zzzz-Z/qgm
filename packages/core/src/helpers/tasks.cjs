@@ -54,7 +54,10 @@ function _post(body) {
  *
  * [WHY] 旧实现只有写：AI 看不到自己的看板，只能盲写。
  * [CONSTRAINT] 失败返回 {ok:false, error}，不抛；items 为结构化任务（含 status/时刻）。
- * @returns {Promise<object>}
+ * [list-read-shape-v1] 返回值含 items / todo / done / running / failed / expiredRunning / summary。
+ *   **failed 与 expiredRunning 是独立数组，不在 todo/done/running 中**——只看后三者会漏掉失败项，
+ *   从而在 DONE 里误称「全部完成」。核查看板必须遍历 items、显式读 failed，或直接看 summary 计数。
+ * @returns {Promise<{ok, items, todo, done, running, expiredRunning, failed, planPending, summary, error?}>}
  */
 function list() {
   const url = _url()
@@ -65,15 +68,31 @@ function list() {
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
     const j = await res.json()
     const items = Array.isArray(j && j.items) ? j.items : []
+    const todo = Array.isArray(j && j.todo) ? j.todo : []
+    const done = Array.isArray(j && j.done) ? j.done : []
+    const running = typeof (j && j.running) === 'string' ? j.running : ''
+    const expiredRunning = Array.isArray(j && j.expiredRunning) ? j.expiredRunning : []
+    const failed = Array.isArray(j && j.failed) ? j.failed : []
+    const planPending = Number(j && j.planPending) || 0
     return {
       ok: true,
       items,
-      todo: Array.isArray(j && j.todo) ? j.todo : [],
-      done: Array.isArray(j && j.done) ? j.done : [],
-      running: typeof (j && j.running) === 'string' ? j.running : '',
-      expiredRunning: Array.isArray(j && j.expiredRunning) ? j.expiredRunning : [],
-      failed: Array.isArray(j && j.failed) ? j.failed : [],
-      planPending: Number(j && j.planPending) || 0,
+      todo,
+      done,
+      running,
+      expiredRunning,
+      failed,
+      planPending,
+      // [board-summary-v1] 汇总计数：即使只扫顶层也能立即感知失败/超时/待办项，防「漏读 failed 误称全部完成」
+      summary: {
+        total: items.length,
+        todo: todo.length,
+        running: running ? 1 : 0,
+        done: done.length,
+        failed: failed.length,
+        expiredRunning: expiredRunning.length,
+        planPending,
+      },
     }
   }).catch(e => ({ ok: false, error: String((e && e.message) || e) }))
 }
@@ -107,6 +126,9 @@ function start(items) {
 
 /**
  * [task-board-fail-v1] 标记某任务为「失败」（面板显示 ✗；不再只能靠沉默留在待办里）。
+ * [fail-semantics-v1] 仅用于「确定做不成」（遇不可逾越障碍 / 依赖永久缺失 / 需求取消）。
+ *   「评估已完成、结论是无需改动」属**完成**，必须用 complete()，不得用 fail()——
+ *   误用会让看板长期挂着假失败项，且与 DONE 里「全部完成」声明自相矛盾（2026-10-09 实测）。
  * @param {string[]} items
  * @returns {Promise<object>}
  */

@@ -1,30 +1,57 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import DiffViewer from './DiffViewer.vue'
 import { renderFileContent } from '../../composables/useFileContentHtml'
 
-/**
- * 文件内容预览浮层。
- * [WHY] 变更列表点开的是「改完长什么样」，不是行级差异；
- *   用 Teleport 挂到 body，避免被 .pane / .main 的 overflow:hidden 裁剪。
- * [CONSTRAINT] 焦点陷阱（Esc 关、Tab 内循环）是本仓浮层的统一判据，改这里需同步 FileTree 的弹窗。
- */
-const props = defineProps<{
-  fileName: string
-  content: string
-  /** 内容仍在加载：显示占位而非把空内容当「文件为空」 */
-  loading?: boolean
-}>()
 const emit = defineEmits<{ close: [] }>()
 
 defineOptions({ name: 'FileContentOverlay' })
 
+/**
+ * 文件浮层：两种渲染模式，共用外壳（Teleport 到 body / 焦点陷阱 / Esc 关闭 / 点遮罩关闭）。
+ *   mode='diff'    变更**前后行级 diff**（新增 / 删除 + 统计）。变更列表点开走这条。
+ *   mode='content' 只看**当前内容**（hljs / markdown）。工作日志点开走这条：git 变更列表的
+ *                  「变更前」在 git 对象里，拿不到内容副本，硬做 diff 只能给出错误结果。
+ *
+ * [preview-diff-v1] 2026-10-09 用户指定：变更预览弹窗内容展示 diff，新增、删除。
+ * [WHY] 变更列表要回答「这一轮到底改了什么」。只给改完后的完整内容，读的人得自己在脑子里做 diff；
+ *   整份文件只动两三行时尤其明显。行级 diff 直接把新增/删除标出来并给出 +N/−M 计数。
+ * [CONSTRAINT] diff 渲染复用 DiffViewer（与 WorklogPane 的行级 diff 同一实现），本组件不自己算 diff。
+ * [CONSTRAINT] 用 Teleport 挂到 body，避免被 .pane / .main 的 overflow:hidden 裁剪。
+ * [CONSTRAINT] 焦点陷阱（Esc 关、Tab 内循环）是本仓浮层的统一判据，改这里需同步 FileTree 的弹窗。
+ */
+const props = withDefaults(defineProps<{
+  fileName: string
+  /** 渲染模式：diff=变更前后差异；content=当前内容 */
+  mode?: 'diff' | 'content'
+  /** [mode=diff] 变更前内容（归属轮运行前快照） */
+  before?: string
+  /** [mode=diff] 变更后内容（当前磁盘内容） */
+  after?: string
+  /** [mode=diff] 变更类型：决定 diff 口径（新增/删除只看一侧）与徽标 */
+  changeType?: 'added' | 'modified' | 'deleted'
+  /** [mode=diff] 变更前快照缺失 ⇒ before===after，只有上下文行，须显式说明 */
+  baselineMissing?: boolean
+  /** [mode=content] 当前文件内容 */
+  content?: string
+  /** 内容仍在加载：显示占位，而非把空内容当「文件为空」/「无变更」 */
+  loading?: boolean
+}>(), {
+  mode: 'diff',
+  before: '',
+  after: '',
+  changeType: 'modified',
+  baselineMissing: false,
+  content: '',
+  loading: false,
+})
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 const boxRef = ref<HTMLElement | null>(null)
 
-/** 渲染后的 HTML；.md 走 markdown，其余走 hljs 高亮 */
-const html = computed(() => renderFileContent(props.content, props.fileName))
-/** markdown 需要普通块级排版（<pre> 会禁掉标题/列表样式），其余用 <pre> 保缩进 */
+/** [mode=content] 渲染后的 HTML；.md 走 markdown，其余走 hljs 高亮 */
+const html = computed(() => renderFileContent(props.content || '', props.fileName))
+/** [mode=content] markdown 需要普通块级排版（<pre> 会禁掉标题/列表样式），其余用 <pre> 保缩进 */
 const isMd = computed(() => /\.(?:md|markdown)$/i.test(props.fileName))
 
 onMounted(() => {
@@ -64,24 +91,48 @@ function onKeydown(e: KeyboardEvent): void {
       tabindex="-1"
       role="dialog"
       aria-modal="true"
-      :aria-label="`${props.fileName} 的内容预览`"
+      :aria-label="props.mode === 'diff' ? `${props.fileName} 的变更 diff` : `${props.fileName} 的内容预览`"
       @click.self="emit('close')"
       @keydown="onKeydown"
     >
       <div class="fco-card">
-        <div class="fco-head">
-          <span class="fco-path" :title="props.fileName">{{ props.fileName }}</span>
-          <button aria-label="关闭内容预览（Esc）" class="fco-btn" @click="emit('close')">
-            ×
-          </button>
-        </div>
-        <div class="fco-body">
+        <!-- [close-overlay-badge-fix] 关闭按钮绝对定位在卡片右上；表头右侧内边距由 CSS 变量穿透
+             （见 .fco-card 的 --diff-header-pr），否则按钮会压住表头的徽标 / 增删统计 / 文件名 -->
+        <button aria-label="关闭文件预览（Esc）" class="fco-btn" @click="emit('close')">
+          ×
+        </button>
+
+        <!-- diff 模式：表头由 DiffViewer 提供（文件名 + 变更徽标 + 增删统计） -->
+        <template v-if="props.mode === 'diff'">
           <div v-if="props.loading" class="fco-loading">
             加载中…
           </div>
-          <div v-else-if="isMd" class="fco-md" v-html="html" />
-          <pre v-else class="fco-pre" v-html="html" />
-        </div>
+          <template v-else>
+            <div v-if="props.baselineMissing" class="fco-note">
+              未找到变更前快照（该轮以 git 为回滚基准，或快照已被回收）——以下只显示变更后内容，无法标出新删
+            </div>
+            <DiffViewer
+              :file-name="props.fileName"
+              :before="props.before"
+              :after="props.after"
+              :change-type="props.changeType"
+            />
+          </template>
+        </template>
+
+        <!-- content 模式：只看当前内容 -->
+        <template v-else>
+          <div class="fco-head">
+            <span class="fco-path" :title="props.fileName">{{ props.fileName }}</span>
+          </div>
+          <div class="fco-body">
+            <div v-if="props.loading" class="fco-loading">
+              加载中…
+            </div>
+            <div v-else-if="isMd" class="fco-md" v-html="html" />
+            <pre v-else class="fco-pre" v-html="html" />
+          </div>
+        </template>
       </div>
     </div>
   </Teleport>
@@ -101,6 +152,7 @@ function onKeydown(e: KeyboardEvent): void {
   padding: 24px;
 }
 .fco-card {
+  position: relative;
   width: min(960px, 92vw);
   max-height: 84vh;
   display: flex;
@@ -110,12 +162,35 @@ function onKeydown(e: KeyboardEvent): void {
   border-radius: var(--radius-10);
   box-shadow: 0 12px 40px rgb(0 0 0 / 40%);
   overflow: hidden;
+
+  /* [close-overlay-badge-fix] 关闭按钮脱离文档流（absolute），不会被表头 padding 推走，
+     必须给表头预留右侧空间。作用域继承可穿透 scoped ⇒ DiffViewer 的 .diff-header 与
+     本组件的 .fco-head 都读这个变量，两种模式表头右内边距一致。
+     [CONSTRAINT] 40px = 按钮宽 24 + right 8 + 间隙 8；改按钮尺寸需同步此值 */
+  --diff-header-pr: 40px;
+}
+/* diff 视图撑满卡片：不再叠加嵌套边框，滚动交给 DiffViewer 内部的 .diff-body */
+.fco-card :deep(.diff-viewer) {
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+.fco-note {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  font-size: var(--font-12);
+  line-height: 1.5;
+  color: var(--warning);
+  background: var(--warning-bg);
+  border-bottom: 1px solid var(--border);
 }
 .fco-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  /* 右侧预留关闭按钮：与 .fco-card 的变量同源 */
+  padding: 8px var(--diff-header-pr, 12px) 8px 12px;
   border-bottom: 1px solid var(--border);
 }
 .fco-path {
@@ -127,6 +202,10 @@ function onKeydown(e: KeyboardEvent): void {
   text-overflow: ellipsis;
 }
 .fco-btn {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: var(--z-base);
   width: 24px;
   height: 24px;
   display: inline-flex;
@@ -135,7 +214,7 @@ function onKeydown(e: KeyboardEvent): void {
   padding: 0;
   border: 1px solid var(--border-2);
   border-radius: var(--radius-6);
-  background: transparent;
+  background: var(--surface);
   color: var(--text-2);
   font-size: 16px;
   line-height: 1;
@@ -156,7 +235,7 @@ function onKeydown(e: KeyboardEvent): void {
 .fco-loading {
   font-size: 13px;
   color: var(--text-3);
-  padding: 12px 0;
+  padding: 12px 14px;
 }
 .fco-pre {
   margin: 0;

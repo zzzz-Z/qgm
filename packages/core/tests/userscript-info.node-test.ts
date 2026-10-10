@@ -95,3 +95,20 @@ it('接线：无工作区时必须豁免 /userscript（装脚本与「选没选�
     '未豁免 → 无工作区时按钮返回 409 NO_WORKSPACE，提示风马牛不相及',
   )
 })
+
+it('油猴回传：observer 须开 attributes 监听，但 attributeFilter 不得含高频的 class', () => {
+  const src = read(USERSCRIPT_REL)
+  assert.match(src, /replyObserver\.observe\([\s\S]*?attributes:\s*true/, 'observer 必须开启 attributes 监听（wake-attrs-v2），否则「停止生成」按钮态变无法唤醒回传')
+  const m = src.match(/attributeFilter:\s*\[([^\]]*)\]/)
+  assert.ok(m, 'attributeFilter 必须显式声明')
+  const attrs = m![1].split(',').map(s => s.trim().replace(/['"]/g, ''))
+  assert.ok(!attrs.includes('class'), 'attributeFilter 不得含 class：流式渲染/动画下 class 变更极高频，会制造 observer 回调风暴')
+  assert.ok(attrs.includes('disabled') && attrs.includes('aria-label') && attrs.includes('data-state'), '停止生成按钮态变靠 disabled/aria-label/data-state 覆盖')
+})
+
+it('油猴回传：生成闸门不得退化为裸 return（须有单飞自巡检 genRetryTimer）', () => {
+  const src = read(USERSCRIPT_REL)
+  assert.match(src, /\[generating-gate-v2\]/, '生成闸门改造须带标记，便于守卫与历史对照')
+  assert.match(src, /genRetryTimer\s*=/, '生成中为 true 时必须挂单飞自巡检定时器')
+  assert.match(src, /if \(!genRetryTimer\)\s*\{\s*genRetryTimer = setTimeout/, '生成中须单飞（已挂则不再挂）地排一个自检定时器，否则「生成结束」非 DOM 事件无人唤醒')
+})

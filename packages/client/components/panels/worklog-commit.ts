@@ -8,7 +8,7 @@
 import { ref } from 'vue'
 import type { Ref } from 'vue'
 import { copyAndFill } from '../../composables/ai/useAiWindow'
-import { getActiveWinSid } from '../../composables/ai/useAiWindowTable'
+import { getActiveWinSidImpl as getActiveWinSid } from '../../composables/ai/useAiWindowTable'
 
 export interface WorklogFileEntry {
   path: string

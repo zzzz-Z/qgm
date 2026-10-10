@@ -1,6 +1,12 @@
 <script setup lang="ts">
+// [explicit-import-for-testability-v1] 显式 import 而非依赖 unplugin-auto-import：
+//   test:tsc（tsconfig.test.json）不含 auto-import 声明文件，测试一旦 import 本组件，
+//   靠全局标识符会在 test:tsc 里报一串 Cannot find name（AGENTS.md「auto-import 会掩盖导入错误」）。
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useResizeObserver } from '@vueuse/core'
 import { diffLines as diffLinesLib } from 'diff'
 import { DEFAULT_HIGHLIGHT_HEAD, DEFAULT_HIGHLIGHT_TAIL } from './DiffViewer.constants'
+import { escapeHtml, highlightToHtml } from '../../composables/useHljs'
 
 interface DiffLine {
   type: 'same' | 'add' | 'del'
@@ -246,7 +252,9 @@ function onScroll(e: Event) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  /* [close-overlay-badge-fix] 右侧内边距可由宿主（覆盖式浮层）用变量抬高，给绝对定位的关闭按钮让位；
+     独立使用时变量未声明，退回 12px 与左侧对称 */
+  padding: 8px var(--diff-header-pr, 12px) 8px 12px;
   background: var(--surface-2, #f6f8fa);
   border-bottom: 1px solid var(--border, #e5e7eb);
   font-size: 13px;

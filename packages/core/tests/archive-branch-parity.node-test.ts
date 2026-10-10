@@ -49,8 +49,14 @@ test('gitArchiveBranch 必须按 paths 决定是否叠加 exclude（防 pathspec
     body.includes('hasRunnerPath'),
     'gitArchiveBranch 缺 hasRunnerPath 判定：paths 含 .ai-runner/ 项时 exclude 会让 pathspec 空集（用户可见 toast）',
   )
+  // [archive-branch-parity-v2] 断言从「钉死字面量」放宽为「钉死两条分支并存」：
+  //   2026-10-09 实测该守卫因 [archive-force-add-v1] 给两条分支各加了 `-f` 而假红——
+  //   中间 flag 是可增的（`-f`/`--ignore-errors`…），但「一条带 exclude、一条不带」的结构不能变。
+  //   [CONSTRAINT] 两侧仍必须各出现一次：单行回退 / 删掉任一分支仍必红（变异已验证）。
+  const addBranches = body.match(/\[[^\]]*'add'[^\]]*\.\.\.paths[^\]]*\]/g) || []
   assert.ok(
-    body.includes('[\'add\', \'-A\', \'--\', ...paths]') && body.includes('[\'add\', \'-A\', \'--\', ...paths, \':(exclude).ai-runner\']'),
+    addBranches.some(a => !a.includes(':(exclude)'))
+    && addBranches.some(a => a.includes(':(exclude).ai-runner')),
     'addArgs 双分支写法缺失：必须「有 .ai-runner 前缀项 → 不加 exclude；否则 → 加 exclude」',
   )
 })

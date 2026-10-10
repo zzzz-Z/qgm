@@ -79,3 +79,83 @@ export const vTooltip: Directive<TooltipEl, string | undefined> = {
     detach(el)
   },
 }
+
+/* ============================================================================
+ * v-overflow-tip —— 只在内容被裁掉时才提示
+ * ========================================================================== */
+
+interface OverflowEl extends HTMLElement {
+  __ovText?: string
+  __ovOnEnter?: (e: MouseEvent) => void
+  __ovOnMove?: (e: MouseEvent) => void
+  __ovOnLeave?: () => void
+}
+
+/**
+ * 元素内容是否被水平裁掉
+ * [WHY] 抽成纯函数才能被单测直接断言边界（未上屏 / 恰好相等 / 差 1px）；
+ *   指令本体依赖真实布局，node 环境测不到，判据会退化成「有没有绑监听」这种不承重的形态。
+ * [CONSTRAINT] clientWidth === 0 视为「未参与布局」（display:none / 未上屏）⇒ 一律不提示，
+ *   否则隐藏元素会拿到 scrollWidth>0、clientWidth=0 而被判成溢出。
+ * [CHANGE-IMPACT] 容差 +1px：亚像素缩放下 scrollWidth/clientWidth 常差 1，不加会让
+ *   「其实没截断」的文本也弹提示。
+ */
+export function isOverflowing(el: { scrollWidth?: number, clientWidth?: number }): boolean {
+  const cw = Number(el.clientWidth ?? 0)
+  const sw = Number(el.scrollWidth ?? 0)
+  return cw > 0 && sw > cw + 1
+}
+
+/**
+ * 为元素注册「溢出才提示」的监听（幂等）
+ * [CONSTRAINT] 与 ensureHandlers 同构：用 __ovOnEnter 作已挂载标记，避免 updated 反复 addEventListener。
+ */
+function ensureOverflowHandlers(el: OverflowEl) {
+  if (el.__ovOnEnter) return
+  el.__ovOnEnter = (e: MouseEvent) => {
+    const text = el.__ovText || ''
+    // [overflow-tip-v1] 判定放在悬停**当下**现算：面板宽度会被侧栏拖拽 / 窗口缩放改变，
+    //   若在 mounted 时算一次并缓存结论，就会在宽度变化后给出过期判断（该弹的不弹 / 不该弹的乱弹）。
+    if (!text || !isOverflowing(el)) return
+    showTooltip(text, e.clientX, e.clientY)
+  }
+  el.__ovOnMove = (e: MouseEvent) => { moveTooltip(e.clientX, e.clientY) }
+  el.__ovOnLeave = () => { hideTooltip() }
+  el.addEventListener('mouseenter', el.__ovOnEnter)
+  el.addEventListener('mousemove', el.__ovOnMove)
+  el.addEventListener('mouseleave', el.__ovOnLeave)
+  el.addEventListener('mousedown', el.__ovOnLeave)
+}
+
+/** 与 ensureOverflowHandlers 严格配对；未调用会残留监听 */
+function detachOverflow(el: OverflowEl) {
+  if (!el.__ovOnEnter) return
+  el.removeEventListener('mouseenter', el.__ovOnEnter)
+  el.removeEventListener('mousemove', el.__ovOnMove!)
+  el.removeEventListener('mouseleave', el.__ovOnLeave!)
+  el.removeEventListener('mousedown', el.__ovOnLeave!)
+  el.__ovOnEnter = undefined
+  el.__ovOnMove = undefined
+  el.__ovOnLeave = undefined
+}
+
+/**
+ * 溢出才提示的 tooltip
+ * [WHY] desc / why 是 `white-space:nowrap + ellipsis` 的单行文本，被裁断后用户没有任何途径看到全文；
+ *   而现成的 v-tooltip 是**无条件**弹出——未截断时弹出与可见文本逐字相同的提示，纯属噪音。
+ * [CONSTRAINT] 与 vTooltip 复用同一全局 tooltip 单例（useTooltip），同一时刻全应用仍只有一个提示。
+ * [CHANGE-IMPACT] 不要在此处调用 syncA11yLabel：它会写 title 属性，那会让浏览器再弹一个原生
+ *   tooltip，与自定义 tooltip 同时出现（双重提示）。
+ */
+export const vOverflowTip: Directive<OverflowEl, string | undefined> = {
+  mounted(el, binding) {
+    el.__ovText = String(binding.value ?? '')
+    ensureOverflowHandlers(el)
+  },
+  updated(el, binding) {
+    el.__ovText = String(binding.value ?? '')
+  },
+  beforeUnmount(el) {
+    detachOverflow(el)
+  },
+}

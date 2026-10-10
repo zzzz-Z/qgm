@@ -16,7 +16,13 @@ const _clipboard = useClipboard()
 /** 存储键 */
 const STORAGE_KEY = 'ai_runner_session_ctx'
 
-/** 会话标识；模块级单例，多组件共享 */
+/**
+ * 工作台侧会话上下文标识（形如 sess_xxx；sessionStorage 持久化，随标签页失效）。
+ * [id-namespace-disambig-v1] 与 useAppStorage.activeSessionId 是**两个不同的概念**，勿混用：
+ *   - 本字段：工作台自身会话上下文，用于规则注入去重键（useAiWindow 的 `${sid}:${sessionId}`）。
+ *   - activeSessionId：AI 站点回写的真实会话 id（localStorage 按站点分桶），对应 sessionHistory 条目。
+ *   二者命名相似但职责独立，历史上曾被误认为「同一概念两个实体」（2026-10-09 复核澄清）。
+ */
 const sessionId = ref<string>(generateId())
 /** 会话 URL；初值取 window.location.href，刷新后由 restoreFromStorage 覆写 */
 const sessionUrl = ref<string>(typeof window !== 'undefined' ? window.location.href : '')

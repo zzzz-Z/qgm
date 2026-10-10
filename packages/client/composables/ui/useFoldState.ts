@@ -1,5 +1,8 @@
 // [use-fold-state-v1] PLAN 5.4 折叠状态持久化（localStorage，key = sessionId:filePath）
 import type { Ref } from 'vue'
+// [explicit-imports-v1] useLocalStorage 原靠 auto-import：本模块被 tests/aiwin-collapse.node-test.ts
+//   间接 import 后，tsconfig.test.json（无 unplugin-auto-import）报 `Cannot find name` ⇒ 改显式导入。
+import { useLocalStorage } from '@vueuse/core'
 
 /** 折叠状态（接口） */
 export interface FoldState {

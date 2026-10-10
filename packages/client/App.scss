@@ -143,26 +143,26 @@
   background: var(--primary-bg);
 }
 
-// [userscript-update-v1] 安装 / 更新油猴脚本入口：与 .theme-toggle 同尺寸，避免 header 高度抖动
+// [userscript-update-v1] 安装 / 更新油猴脚本入口
+// [hdr-transport-group-v1] 2026-10-09：该按钮已并入 .transport-switch 分段控件，
+//   此处只保留按钮自身的基态；描边 / 背景 / 圆角一律由分组控件统一提供，
+//   否则会出现「控件里再套一个控件」的双层描边。守卫见 tests/userscriptUpdate.node-test.ts。
 .userscript-toggle {
-  width: 26px;
-  height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-6);
-  background: var(--surface);
-  color: var(--text-2);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-3);
   cursor: pointer;
   transition: 0.15s;
 }
 
 .userscript-toggle:hover {
-  color: var(--primary);
-  border-color: var(--primary);
-  background: var(--primary-bg);
+  color: var(--text);
+  background: var(--surface-2);
 }
 
 .layout-row {
@@ -268,43 +268,74 @@
   padding: 0;
 }
 
+// [hdr-transport-group-v1] 传输链路控组合一（2026-10-09）：
+//   把「油猴 / 无头」选择 + 无头引导登录 + 更新油猴脚本 收进同一个分段控件，共享一条外描边，
+//   内部用 1px 分隔线分栏，高度对齐 header 其余图标按钮（28px）。
 .transport-switch {
   display: inline-flex;
-  align-items: center;
-  gap: 0;
+  align-items: stretch;
+  height: 28px;
   margin-left: 4px;
-}
-.transport-switch select {
-  appearance: none;
-  -webkit-appearance: none;
-  background-color: var(--surface-2);
-  color: var(--text-2);
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-6);
-  padding: 4px 22px 4px 10px;
+  background: var(--surface-2);
+  overflow: hidden;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+}
+.transport-switch:hover {
+  border-color: var(--border-2);
+}
+.transport-switch:focus-within {
+  border-color: var(--primary);
+}
+.transport-switch .transport-select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 100%;
+  padding: 0 22px 0 25px;
+  border: 0;
+  background-color: transparent;
+  color: var(--text-2);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1;
   cursor: pointer;
   outline: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 6px center;
-  transition:
-    background-color 0.15s,
-    border-color 0.15s,
-    color 0.15s;
+
+  // 左侧链路图标 + 右侧下拉指示，一次背景声明放两张图
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M9 2v6'/><path d='M15 2v6'/><path d='M6 8h12v3a6 6 0 0 1-12 0z'/><path d='M12 17v5'/></svg>");
+  background-repeat: no-repeat, no-repeat;
+  background-position:
+    right 6px center,
+    left 8px center;
+  background-size:
+    10px 10px,
+    12px 12px;
+  transition: color 0.15s;
 }
-.transport-switch select:hover {
-  color: var(--text-1, inherit);
-  border-color: var(--text-3, currentColor);
+.transport-switch .transport-select:hover {
+  color: var(--text);
 }
-.transport-switch select:focus-visible {
-  outline: 2px solid var(--primary, #6366f1);
-  outline-offset: 2px;
+.transport-switch .transport-select option {
+  background: var(--surface);
+  color: var(--text);
 }
-.transport-switch select option {
-  background: var(--surface, #1a1a1a);
-  color: var(--text-1, inherit);
+.transport-switch .transport-sep {
+  flex: 0 0 1px;
+  align-self: stretch;
+  width: 1px;
+  background: var(--border);
+}
+.transport-switch .login-gui-toggle,
+.transport-switch .userscript-toggle {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .theme-toggle,
@@ -479,36 +510,68 @@
   line-height: 1.4 !important;
 }
 
-.transport-switch {
+// [hdr-transport-group-v1] 权威段：`.hdr button:not(.btn)` 带着 !important 的 28×28 + 独立描边默认盒模型，
+//   组内按钮必须用更高优先级把它压掉，才能与分组融成一个控件（无独立描边、无固定尺寸、随组高拉伸）。
+.hdr .transport-switch {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: stretch !important;
+  height: 28px !important;
   flex-shrink: 0 !important;
-}
-
-.transport-switch select {
-  appearance: none !important;
-  padding: 4px 24px 4px 10px !important;
-  background: var(--surface-2) !important;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>") !important;
-  background-repeat: no-repeat !important;
-  background-position: right 8px center !important;
+  padding: 0 !important;
   border: 1px solid var(--border) !important;
   border-radius: var(--radius-6) !important;
+  background: var(--surface-2) !important;
+  overflow: hidden !important;
+  transition: border-color 0.15s !important;
+}
+
+.hdr .transport-switch:hover {
+  border-color: var(--border-2) !important;
+}
+
+.hdr .transport-switch:focus-within {
+  border-color: var(--primary) !important;
+}
+
+.hdr .transport-switch .transport-select {
+  height: 100% !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 0 22px 0 25px !important;
+  background-color: transparent !important;
   color: var(--text-2) !important;
   font-size: 12px !important;
   font-family: var(--mono, monospace) !important;
   cursor: pointer !important;
-  transition: all 0.15s !important;
   outline: 0 !important;
 }
 
-.transport-switch select:hover {
-  border-color: var(--border-2) !important;
+.hdr .transport-switch .transport-select:hover {
   color: var(--text) !important;
 }
 
-.transport-switch select:focus {
-  border-color: var(--primary) !important;
+.hdr .transport-switch .transport-sep {
+  flex: 0 0 1px !important;
+  align-self: stretch !important;
+  width: 1px !important;
+  background: var(--border) !important;
+}
+
+.hdr .transport-switch .login-gui-toggle,
+.hdr .transport-switch .userscript-toggle {
+  width: 30px !important;
+  height: 100% !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--text-3) !important;
+}
+
+.hdr .transport-switch .login-gui-toggle:hover,
+.hdr .transport-switch .userscript-toggle:hover {
+  background: var(--primary-bg) !important;
+  color: var(--primary) !important;
 }
 
 .layout-row {

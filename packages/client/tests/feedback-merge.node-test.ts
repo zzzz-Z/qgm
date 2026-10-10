@@ -145,3 +145,19 @@ test('承重：ScriptPanel 卸载必须撤窗', () => {
   const src = readFileSync(new URL('../components/script/ScriptPanel.vue', import.meta.url).pathname, 'utf8')
   assert.ok(src.includes('feedbackMerge.cancel()'), 'ScriptPanel onBeforeUnmount 未撤合并窗')
 })
+
+// [explicit-copyAndFill-v1] 承重：flush 回调调用的 copyAndFill 必须**显式 import**。
+// WHY: useAiWindow 是门面文件，被 vite.config 的 auto-import dirsScanOptions.fileFilter 排除扫描 ⇒
+//   其导出不会被 auto-import 注入；auto-imports.d.ts 虽仍声明（陈旧），运行时却解析为 undefined。
+//   曾漏 import ⇒ flush 里 await copyAndFill(...) 抛 TypeError，被 doFlush 的 try/catch 静默吞掉 ⇒
+//   崩溃脚本的失败结果永不回传（与「出错必须回传、不许静默失败」原则相悖）。
+// CONSTRAINT: 顺序判据（`字面量 import`）而非行为判据——node 测试无 vite auto-import，行为不可测；
+//   但「是否写出显式 import」是承重的：删掉这行 import，本断言即红。
+test('承重：exec-flow 必须显式 import copyAndFill（门面被 auto-import 排除扫描）', () => {
+  const src = readSrc()
+  assert.ok(
+    /import\s*\{[^}]*\bcopyAndFill\b[^}]*\}\s*from\s*'\.\.\/\.\.\/composables\/ai\/useAiWindow'/.test(src),
+    'exec-flow 未显式 import copyAndFill：useAiWindow 是门面、被 auto-import 排除扫描，'
+    + '靠 auto-import 兜底在运行时得 undefined ⇒ feedbackMerge flush 抛 TypeError 被 try/catch 静默吞 = 崩溃结果不回传',
+  )
+})

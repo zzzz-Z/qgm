@@ -1,13 +1,15 @@
 import 'virtual:uno.css'
 import App from './App.vue'
 import './style.css'
-import { vTooltip } from './directive'
+import { vOverflowTip, vTooltip } from './directive'
 // [ask-static-import-v1] useAsk 已被 App.vue 等静态引入、本就在主 chunk；
 // 此处再用动态 import 会触发 INEFFECTIVE_DYNAMIC_IMPORT 警告且零拆包收益，故静态引入
 
 /** app（相关状态/数据） */
 const app = createApp(App)
 app.directive('tooltip', vTooltip)
+// [overflow-tip-v1] 溢出才提示：单行省略号文本（ScriptCard 的 desc / why）被裁断时补全文提示
+app.directive('overflow-tip', vOverflowTip)
 app.mount('#app')
 
 // [ask-dev-entry-v1] 本地开发入口：把 useAsk.askUser 挂到 window.__aiAsk，便于在浏览器 console

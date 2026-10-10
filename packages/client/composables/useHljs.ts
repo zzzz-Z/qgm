@@ -37,7 +37,7 @@ export function escapeHtml(text: string): string {
 // 阈值取 200KB 覆盖典型源码文件（含长日志），超过时视觉降级为纯文本。
 const HLJS_MAX_LEN = 200_000
 
-/** 统一高亮入口：FileContentOverlay 与 FileTree 弹窗共用。 */
+/** 统一高亮入口：DiffViewer（变更预览 / 工作日志的行级 diff）与 FileTree 弹窗共用。 */
 export function highlightToHtml(text: string): string {
   if (!text) return ''
   if (text.length > HLJS_MAX_LEN) return escapeHtml(text)

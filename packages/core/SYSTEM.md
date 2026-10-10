@@ -105,9 +105,10 @@
 - **R3 幂等写入**：判断「已应用」必须校验 MARKER 语义完整，防止重复注入。
 - **task-board-v2**：复杂任务判定（board-trigger-v1，满足任一：≥3 步骤 / ≥2 文件 / 含构建·测试·验证收尾）必须在动手前 `__AI__.tasks.push([...])` 登记清单（先拆解再执行，粒度=可独立验证的单步）；简单任务禁止登记。生命周期：动手前 `start(['<原文>'])`（**同时仅允许一项 running**）；完成即 `complete(['<原文>'])`；确定做不成用 `fail(['<原文>'])` 收尾，不许沉默留在待办。running 30 分钟未 `complete` 判过期回退待办（`list()` 的 `expiredRunning` 列出），继续做就重新 `start`。登记行为有量化观测（board-hit-rate-v1）。
 - **board-id-direct-v1**：`start` / `complete` / `fail` **一律传 `list()` 返回的 id**（三级匹配只是兜底，长文本照抄可能「未命中」而让看板原地不动）；执行中项同时只允许一项，换项即重新 `start`。
-- **board-fail-explicit-v1**：确定做不成的任务必须 `fail(['<id>'])` 收尾并说明原因，**禁止沉默留在待办**（沉默待办与「还没轮到」不可区分，会让整批任务永久挂起）。
+- **board-fail-explicit-v1**：确定做不成的任务必须 `fail(['<id>'])` 收尾并说明原因，**禁止沉默留在待办**（沉默待办与「还没轮到」不可区分，会让整批任务永久挂起）。**`fail` 仅用于「确定做不成」**（不可逾越障碍 / 依赖永久缺失 / 需求取消）；「评估已完成、结论是无需改动」属**完成**，必须 `complete`——误用会让看板长期挂假失败项，且与 DONE 里「全部完成」声明自相矛盾。
 - **三级匹配**：① 任务 id ② 归一化全文（忽略空白与冒号全半角）③ 唯一子串包含；未命中在 `warnings` 点名。照抄原文仍是最稳做法。
-- **返回形状**：读板 `__AI__.tasks.list()` → `{ok, items, todo, done, running, expiredRunning, planPending}`；写接口 → `{ok, todo, done, items, running, warnings}`；异常返回 `{ok:false, error}` 不抛断脚本。sid 由服务端按会话分桶，脚本不自传。
+- **返回形状**：读板 `__AI__.tasks.list()` → `{ok, items, todo, done, running, expiredRunning, failed, planPending, summary}`；写接口 → `{ok, todo, done, items, running, warnings}`；异常返回 `{ok:false, error}` 不抛断脚本。sid 由服务端按会话分桶，脚本不自传。
+- **board-read-all-states-v1**：`failed` / `expiredRunning` 是**独立数组**，不在 `todo`/`done`/`running` 中；核查看板必须读 `failed`（或 `summary.failed`），只看后三者会漏掉失败项，从而在 DONE 里误称「全部完成」。`summary` 给出各态计数（`total/todo/running/done/failed/expiredRunning/planPending`），用于快速自检。
 
 ---
 
@@ -143,7 +144,7 @@
 
 **后台长任务（>180s / 流式输出）**：`await __AI__.shell(cmd, {background:true})` 立即返回 `{ok:true,background:true,id,pid,logPath}`（detached，不阻塞 `/run`，绕开 180s SIGTERM）。跨轮用 `shellStatus(id)` / `readShell(id, {from})`（按字节偏移取增量，返回 `{text,next,done}`）/ `killShell(id)` 管控。子进程退出会自写 `[@shell-done exit=N …]` 哨兵——`done:true` 即结束。`BG_ID=<id>` 自动打到 stdout 供前端秒级流式上屏（AI **不需要** `readShell` 再打印；收口判断仍须 `shellStatus(id)`）。
 
-**前台流式（fg-stream-v1）**：`await __AI__.shell(cmd, {stream:true})` 会把子进程 stdout/stderr 实时 tee 到脚本自身 stdout ⇒ 随 `/run` chunk 帧秒级上屏，不必等命令结束。**仍受 180s 外层 SIGTERM 限制**，只解决「看得到进度」，不解决「跑不完」。超过 180s 的任务仍须 `{background:true}` + 轮询。默认（不传 `stream`）行为完全不变。
+**前台流式（fg-stream-v1）**：`await __AI__.shell(cmd, {stream:true})` 会把子进程 stdout/stderr 实时 tee 到脚本自身 stdout ⇒ 随 `/run` chunk 帧秒级上屏，不必等命令结束。**仍受 180s 外层 SIGTERM 限制**，只解决「看得到进度」，不解决「跑不完」。超过 180s 的任务仍须 `{background:true}` + 轮询。默认（不传 `stream:true`）行为完全不变。
 
 > **子进程读真盘（overlay-blind-v1）**：`shell`/`exec` 失败时结果带 `hint` 字段指路 —— **先 `await __AI__.flush()` 落盘再验**，或直接用进程内校验（`syntaxCheck` / `lint`）。
 

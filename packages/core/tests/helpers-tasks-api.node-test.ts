@@ -20,7 +20,10 @@ interface TasksApi {
     done?: unknown[]
     running?: string
     expiredRunning?: string[]
+    failed?: string[]
     planPending?: number
+    // [board-summary-v1] 汇总计数（防漏读 failed）
+    summary?: { total: number, todo: number, running: number, done: number, failed: number, expiredRunning: number, planPending: number }
     error?: string
   }>
   // [task-board-fail-v1] 标记失败
@@ -118,6 +121,35 @@ it('G5: list 返回结构化 items 与派生视图', async () => {
   assert.equal(r.running, '任务甲')
   assert.deepEqual(r.expiredRunning, ['旧运行项'])
   assert.equal(r.planPending, 2)
+})
+
+// [board-summary-v1] 承重：failed 是独立数组，只看 todo/done/running 会漏读 → summary 必须直接暴露计数
+it('G5b: list 返回 summary 汇总，failed/expiredRunning 计数可见（防漏读）', async () => {
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      items: [
+        { id: 'a1', desc: '任务甲', status: 'running' },
+        { id: 'b2', desc: '任务乙', status: 'done' },
+        { id: 'c3', desc: '任务丙', status: 'failed' },
+      ],
+      todo: [],
+      done: [{ item: '任务乙', at: 5 }],
+      running: '任务甲',
+      expiredRunning: ['旧运行项'],
+      failed: ['任务丙'],
+      planPending: 0,
+    }),
+  })) as unknown as typeof fetch
+  const r = await api!.list()
+  assert.equal(r.ok, true)
+  assert.equal(r.failed?.length, 1, 'failed 必须作为独立数组返回')
+  assert.ok(r.summary, 'summary 必须存在（防只读 todo/done/running 漏掉失败项）')
+  assert.equal(r.summary!.failed, 1, 'summary.failed 必须暴露失败项计数')
+  assert.equal(r.summary!.expiredRunning, 1, 'summary.expiredRunning 必须暴露超时项计数')
+  assert.equal(r.summary!.total, 3)
+  assert.equal(r.summary!.done, 1)
 })
 
 it('G5: list 失败 → {ok:false, error}，不抛断脚本', async () => {

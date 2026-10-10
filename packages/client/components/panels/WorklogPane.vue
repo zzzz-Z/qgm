@@ -26,6 +26,28 @@ interface WorklogResult {
   stat: string
   markdown: string
 }
+// [vcs-svn-log-v1] /vcs/log 的返回结构（SVN 提交历史）
+interface SvnPathChange {
+  /** 单字符动作：A=新增 M=修改 D=删除 R=替换 */
+  action: string
+  /** file / dir */
+  kind: string
+  path: string
+}
+interface SvnLogEntry {
+  revision: number
+  author: string
+  /** ISO8601 UTC */
+  date: string
+  msg: string
+  paths: SvnPathChange[]
+}
+interface VcsLogResult {
+  ok: boolean
+  vcs?: string
+  reason?: string
+  entries?: SvnLogEntry[]
+}
 
 const props = defineProps<{ active: boolean }>()
 
@@ -60,6 +82,13 @@ const previewLoading = ref(false)
 const committing = ref(false)
 // [git-head-display-v1] 当前 HEAD（短 sha）；空串时模板隐藏
 const headRef = ref('')
+// [vcs-svn-log-v1] 版本控制类型：'git' 为乐观默认（git 用户不该看到模式切换的闪烁）；
+//   仅当 git 链路失败且 /vcs/log 报 vcs='svn' 时才翻成 'svn'
+const vcsMode = ref<'git' | 'svn'>('git')
+/** SVN 提交历史（每条含该次提交涉及的路径） */
+const svnEntries = ref<SvnLogEntry[]>([])
+/** 当前展开的 revision；null 表示全部收起 */
+const svnExpanded = ref<number | null>(null)
 
 const { toast } = useToast()
 // [use-worklog-commit-v1] commit msg 生成簇已抽到 useWorklogCommit
@@ -149,6 +178,57 @@ function statusClass(s: string): string {
   if (s === 'renamed' || s === 'copied') return 'st-move'
   return 'st-mod'
 }
+// ── [vcs-svn-log-v1] SVN 提交历史 ──
+/**
+ * 探测 VCS 并在确为 SVN 工作副本时接管展示。
+ * [WHY] `/git/worklog` 以 gitAvailable() 为前提，非 git 下一律返「非 git 仓库」；
+ *   SVN 工作副本要能看到提交记录，必须换用 `/vcs/log`。本函数只在 git 链路失败后被调用。
+ * [CONSTRAINT] 必须带 mySeq 校验：内部有 await，期间用户可能已触发新一轮 load，
+ *   过期响应不得覆写最新状态。
+ * @param mySeq 调用方本次 load 的序号
+ * @returns true 表示已按 SVN 模式接管（调用方应立即返回，不要再写 error）
+ */
+async function probeSvnLog(mySeq: number): Promise<boolean> {
+  try {
+    const r = await fetch('/__ai/vcs/log', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ limit: 20 }),
+    })
+    if (mySeq !== _loadSeq) return false
+    const j = await r.json().catch(() => ({})) as VcsLogResult
+    if (mySeq !== _loadSeq) return false
+    if (j.vcs !== 'svn') return false
+    vcsMode.value = 'svn'
+    svnEntries.value = Array.isArray(j.entries) ? j.entries : []
+    // 默认展开最新一次提交：用户打开面板最想看的就是「最近改了什么」
+    svnExpanded.value = svnEntries.value.length ? svnEntries.value[0].revision : null
+    result.value = null
+    error.value = ''
+    if (!j.ok) error.value = j.reason || 'svn log 失败'
+    return true
+  } catch {
+    return false
+  }
+}
+/** 展开/收起某次提交的变更文件 */
+function toggleSvn(rev: number): void {
+  svnExpanded.value = svnExpanded.value === rev ? null : rev
+}
+/** SVN 的 date 是 ISO8601 UTC；这里转成易读的本地时间 */
+function fmtSvnDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso || ''
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+/** SVN 动作字母 → 配色类（A/M/D/R，语义与 git 侧一致） */
+function svnActClass(a: string): string {
+  if (a === 'A') return 'st-add'
+  if (a === 'D') return 'st-del'
+  if (a === 'R') return 'st-move'
+  return 'st-mod'
+}
 function splitPath(p: string): { dir: string, name: string } {
   const i = p.lastIndexOf('/')
   return i < 0 ? { dir: '', name: p } : { dir: p.slice(0, i + 1), name: p.slice(i + 1) }
@@ -200,6 +280,10 @@ async function load(): Promise<void> {
     const j = await wlRes.json().catch(() => ({})) as WorklogResult
     if (mySeq !== _loadSeq) return
     if (!wlRes.ok || !j.ok) {
+      // [vcs-svn-log-v1] git 链路不可用 ⇒ 再探测是否为 SVN 工作副本。
+      //   刻意只在失败时才多打一次 /vcs/log：git 仓库的正常路径不多请求、不改分支，
+      //   保证本次改动对既有 git 行为零影响。
+      if (await probeSvnLog(mySeq)) return
       error.value = j.reason || (`HTTP ${wlRes.status}`)
       result.value = null
       return
@@ -263,8 +347,28 @@ async function copyFullLog(): Promise<void> {
 
 <template>
   <div class="wl-pane">
+    <!-- [vcs-svn-log-v1] SVN 工作副本：git 专属的提交区整体不可用，替换为只读标识 + 刷新入口
+         （刷新必须留在这里：切到 SVN 模式后，原来的刷新按钮随提交行一起被隐藏了） -->
+    <div v-if="vcsMode === 'svn'" class="wl-commit">
+      <div class="wl-vcs-bar">
+        <span class="wl-head-label">SVN</span>
+        <span class="wl-vcs-hint">只读 · 提交历史</span>
+        <button
+          class="wl-commit-refresh"
+          type="button"
+          :disabled="loading"
+          title="刷新提交历史"
+          aria-label="刷新提交历史"
+          @click="load"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+          </svg>
+        </button>
+      </div>
+    </div>
     <!-- [source-control] 顶部：提交消息框 + 生成按钮 + 分体式提交按钮（VSCode 风格） -->
-    <div class="wl-commit">
+    <div v-else class="wl-commit">
       <!-- [git-head-display-v1] 当前 HEAD：空串时隐藏；有值时显示短 sha 徽章 -->
       <div v-if="headRef" class="wl-head-row">
         <span class="wl-head-label">HEAD</span>
@@ -373,6 +477,45 @@ async function copyFullLog(): Promise<void> {
       <div v-else-if="error" class="wl-empty wl-error">
         {{ error }}
       </div>
+      <!-- [vcs-svn-log-v1] SVN 工作副本：展示提交历史 + 每次提交涉及的文件 -->
+      <template v-else-if="vcsMode === 'svn'">
+        <div class="wl-group">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+          <span class="wl-group-title">提交历史</span>
+          <span class="wl-group-count">{{ svnEntries.length }}</span>
+        </div>
+        <div v-if="!svnEntries.length" class="wl-empty">
+          暂无提交记录
+        </div>
+        <ul v-else class="wl-svn-list" role="list">
+          <li v-for="e in svnEntries" :key="`svn-${e.revision}`" class="wl-svn-item">
+            <div
+              class="wl-svn-head"
+              role="button"
+              tabindex="0"
+              :aria-label="`展开 r${e.revision} 的变更文件`"
+              @click="toggleSvn(e.revision)"
+              @keydown.enter.prevent="toggleSvn(e.revision)"
+              @keydown.space.prevent="toggleSvn(e.revision)"
+            >
+              <span class="wl-chev" :class="{ open: svnExpanded === e.revision }">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18" /></svg>
+              </span>
+              <code class="wl-svn-rev">r{{ e.revision }}</code>
+              <span class="wl-svn-msg" :title="e.msg">{{ e.msg || '(无提交信息)' }}</span>
+              <span class="wl-svn-meta">{{ e.author }} · {{ fmtSvnDate(e.date) }}</span>
+              <span class="wl-svn-nfiles">{{ e.paths.length }}</span>
+            </div>
+            <ul v-if="svnExpanded === e.revision" class="wl-svn-paths" role="list">
+              <li v-for="(p, i) in e.paths" :key="`svn-${e.revision}-${i}`" class="wl-svn-path">
+                <span class="wl-svn-act" :class="svnActClass(p.action)">{{ p.action }}</span>
+                <span class="wl-svn-path-text" :title="p.path">{{ p.path }}</span>
+                <span v-if="p.kind === 'dir'" class="wl-svn-kind">目录</span>
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </template>
       <div v-else-if="changeCount === 0" class="wl-empty">
         无变更
       </div>
@@ -426,6 +569,7 @@ async function copyFullLog(): Promise<void> {
       <FileContentOverlay
         v-if="previewPath"
         :file-name="previewPath"
+        mode="content"
         :content="previewContent"
         :loading="previewLoading"
         @close="previewPath = null"

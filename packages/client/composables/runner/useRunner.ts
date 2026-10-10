@@ -67,6 +67,18 @@ function dedupByPath<T extends { path: string }>(list: T[]): T[] {
   }, [])
 }
 
+/**
+ * [round-changes-runid-v1] 把服务端响应上的归属 runId 盖到每个**缺少** runId 的条目上。
+ * [WHY] `/__ai/run-changes` 的 manifest 条目只有 path/type；而变更预览要取「该轮运行前快照」
+ *   （POST /__ai/files/before 认 runId）才能算出 +/− 行。不盖 ⇒ 刷新后由兜底恢复出的本轮列表
+ *   每条都缺 runId，预览只会显示「未找到变更前快照」，diff 恒空——看着像服务端没落盘，其实是客户端丢字段。
+ * [CONSTRAINT] 条目自带 runId 时不覆盖（累积口径由 withOwner 提供归属轮，比本轮更精确）；
+ *   runId 缺省时原样返回（宁可缺，也不用错的轮去猜该轮的快照内容）。
+ */
+function stampRoundRunId(list: ChangeEntry[], runId?: string): ChangeEntry[] {
+  return list.map(c => (c.runId ? c : { ...c, runId }))
+}
+
 // DEDUP_LAST_RUN: 按 path 去重，只保留最近一次每文件的变更记录
 /** 变更列表（**本轮增量**）；初始化后立即 dedup 一次，兼容老版本 sessionStorage 残留 */
 const changes = useSessionStorage<ChangeEntry[]>(STORAGE_KEY_CHANGES, [])
@@ -289,9 +301,37 @@ async function loadCumulative(): Promise<void> {
  * [WHY] 返回 Promise 而非 `void` 触发：调用方（含测试）需要一个可等待的边界，
  *   否则「切了但没加载完」与「切了没加载」在断言上无法区分
  */
+/**
+ * [round-changes-v1] 本轮视图的权威兜底：从服务端 run manifest 取该轮改动
+ * [WHY] 本轮原本只有 summary 帧的 `changes` 一条路 —— 那一帧没被接住（刷新丢帧 / 多标签 /
+ *   执行方不是本页 useRunner）时本轮恒为空，而累积走独立磁盘 diff 照常有数据。服务端每轮 manifest
+ *   是本就落盘的权威记录，且**不依赖累积基准**，不会把单点故障变双点（故本轮仍是「单轮」语义，
+ *   不是累积的子集，与 [cumulative-baseline-v1] 的拆分保持一致）。
+ * [CONSTRAINT] 已有数据时不覆盖（避免与 summary 口径打架）；无 runId 时服务端按「最新一轮」返回，
+ *   因此即便本页从未执行过也能拿到最近一轮的改动；请求失败/无记录一律静默，绝不阻断主链路。
+ */
+async function loadRoundChanges(): Promise<void> {
+  if (changes.value.length) return // 本轮已有数据：不覆盖、不发请求
+  const runId = result.value?.runId || baselineRunId.value
+  try {
+    const res = await fetch('/__ai/run-changes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId: String(runId || '') }),
+    })
+    const data = (await res.json().catch(() => null)) as { runId?: string, changes?: ChangeEntry[] } | null
+    const list: ChangeEntry[] = Array.isArray(data?.changes) ? data!.changes : []
+    const stamped = stampRoundRunId(list, data?.runId)
+    if (stamped.length) changes.value = dedupByPath(stamped)
+  } catch {
+    /* 静默降级：兜底失败不影响主链路 */
+  }
+}
+
 function setChangeView(v: 'round' | 'cumulative'): Promise<void> {
   changeView.value = v
-  return v === 'cumulative' ? loadCumulative() : Promise.resolve()
+  // [round-changes-v1] 切回本轮时也走一次兜底：本页从未执行过（无 runId）时由服务端按最新一轮返回
+  return v === 'cumulative' ? loadCumulative() : loadRoundChanges()
 }
 
 /**
@@ -529,6 +569,9 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       if (data.ok && data.runId && !sessionBaselineRunId.value) sessionBaselineRunId.value = data.runId
       if (data.ok && data.runId) baselineRunId.value = data.runId
       if (result.value) result.value.baselineRunId = prevBaseline
+      // [round-changes-v1] summary 未带回本轮改动时，用服务端 run manifest 兜底 —— 这是「本轮恒空」的根治：
+      //   本轮不再只依赖浏览器有没有接住 summary 帧那一单条链路
+      if (changes.value.length === 0) await loadRoundChanges()
       // 累积视图打开时每轮结束都要刷新——否则面板停在旧累计上，用户以为改动没生效
       if (changeView.value === 'cumulative') await loadCumulative()
       wrappedEmitStep(data.ok ? 'done' : 'error', { exit: data.code, changeCount: changes.value.length })

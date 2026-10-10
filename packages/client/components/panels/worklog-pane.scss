@@ -473,3 +473,141 @@
   background: rgb(127 127 127 / 4%);
   border-radius: 4px;
 }
+
+/* ── [vcs-svn-log-v1] SVN 工作副本：只读标识条 + 提交历史 ──
+   配色复用 st-add/st-del/st-move/st-mod 的既有语义，避免同一面板出现两套颜色语言。 */
+.wl-vcs-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px;
+}
+
+.wl-vcs-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wl-svn-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wl-svn-item {
+  border: 0;
+}
+
+.wl-svn-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 10px;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wl-svn-head:hover {
+  background: rgb(127 127 127 / 10%);
+}
+
+.wl-svn-rev {
+  flex: 0 0 auto;
+  font: 600 11px/1.5 var(--mono, monospace);
+  color: var(--primary, #2563eb);
+  font-variant-numeric: tabular-nums;
+}
+
+.wl-svn-msg {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+}
+
+.wl-svn-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 42%;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+}
+
+.wl-svn-nfiles {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: var(--font-11);
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--surface-2, #21262d);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 展开的路径列表：左缩进对齐到 commit 标题文字，动作字母等宽不跳动 */
+.wl-svn-paths {
+  margin: 0;
+  padding: 0 0 4px 28px;
+  list-style: none;
+}
+
+.wl-svn-path {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 10px 2px 0;
+  overflow: hidden;
+  font: 400 11.5px/1.5 var(--mono, monospace);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.wl-svn-act {
+  flex: 0 0 auto;
+  width: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.wl-svn-act.st-mod {
+  color: var(--warning, #d29922);
+}
+
+.wl-svn-act.st-add {
+  color: var(--success, #3fb950);
+}
+
+.wl-svn-act.st-del {
+  color: var(--danger, #f85149);
+}
+
+.wl-svn-act.st-move {
+  color: var(--primary, #2563eb);
+}
+
+.wl-svn-path-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wl-svn-kind {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text-3);
+  background: rgb(127 127 127 / 12%);
+}

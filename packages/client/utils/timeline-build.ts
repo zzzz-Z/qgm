@@ -24,6 +24,9 @@ export interface ScriptItem {
   stderrText: string
   stderrHidden: number
   why: string
+  // [script-card-reason-v1] 失败原因（payload.reason）；须与 TerminalPane 的活构建路径同构，
+  //   否则将来把卡构建切回本函数时 reason 会静默丢失。
+  reason: string
 }
 export interface TextItem extends PreviewFields { type: 'text', key: string, timeLabel: string }
 export interface DoneItem extends PreviewFields { type: 'done', key: string, timeLabel: string }
@@ -155,6 +158,7 @@ export function buildOneCard(ev: { id: number, kind: string, ts: number, payload
     stderrText: errTail.text,
     stderrHidden: errTail.hiddenLines,
     why,
+    reason: String(p.reason || '').trim(),
   }
 }
 

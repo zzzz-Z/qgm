@@ -120,3 +120,46 @@ it('wiring: App.scss 必须有 .userscript-toggle 样式（不可见等于没做
   assert.match(scss, /\.userscript-toggle\s*\{/, '缺少按钮基础样式')
   assert.match(scss, /\.userscript-toggle:hover\s*\{/, '缺少 hover 态，header 里会显得像坏掉的控件')
 })
+
+// ── 合并结构断言（[hdr-transport-group-v1]，2026-10-09）──────────────────────
+// 用户要求把「油猴 / 无头」选择与「更新脚本」按钮合并成同一个分段控件。此处钉住「合并」本身：
+// 一旦有人把某个子控件挪出组容器、或让按钮重新长出独立描边（退回两个各自描边的控件），必须变红。
+
+/** 截出 `.transport-switch` 组容器的模板片段（组内无嵌套 div，故首个 `</div>` 即组尾） */
+function transportGroupMarkup(): string {
+  const src = read(APP_VUE)
+  const start = src.indexOf('class="transport-switch"')
+  assert.ok(start >= 0, '找不到 .transport-switch 组容器')
+  const end = src.indexOf('</div>', start)
+  assert.ok(end > start, '.transport-switch 组容器未闭合')
+  return src.slice(start, end)
+}
+
+it('合并：链路选择与更新按钮必须同处一个 .transport-switch 容器（拆开即红）', () => {
+  const group = transportGroupMarkup()
+  assert.ok(group.includes('class="transport-select"'), '「油猴 / 无头」选择不在组容器内 —— 已退回独立控件')
+  assert.ok(group.includes('class="userscript-toggle"'), '更新按钮不在组容器内 —— 已退回独立控件')
+  assert.ok(group.includes('transport-sep'), '缺少组内分隔线，两栏会糊在一起')
+})
+
+it('合并：组内按钮不得带独立描边/圆角（由分组统一提供，否则是「控件里套控件」）', () => {
+  const scss = read(APP_SCSS)
+  assert.match(
+    scss,
+    /\.hdr \.transport-switch \.userscript-toggle\s*\{[^}]*?border:\s*0\s*!important/,
+    '组内更新按钮未消掉自身描边（.hdr button:not(.btn) 的 !important 会把它重新画出来）',
+  )
+  assert.match(
+    scss,
+    /\.hdr \.transport-switch \.userscript-toggle\s*\{[^}]*?border-radius:\s*0\s*!important/,
+    '组内更新按钮未消掉自身圆角',
+  )
+  assert.match(scss, /\.hdr \.transport-switch\s*\{[^}]*?overflow:\s*hidden\s*!important/, '组容器未裁边，内部描边会溢出')
+  // 注意：`.transport-switch .transport-sep` 在文件里有两份（旧段 + 权威段），只断言其中一份会空转
+  // （删一份另一份仍满足 ⇒ 改坏也不红）。必须锚定**真正生效**的 `.hdr` 权威段。
+  assert.match(
+    scss,
+    /\.hdr \.transport-switch \.transport-sep\s*\{[^}]*?width:\s*1px\s*!important/,
+    '权威段未定义组内分隔线宽度（旧段那一条会被 .hdr 段的 !important 压掉，等于没有分隔线）',
+  )
+})

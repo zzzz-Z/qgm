@@ -213,6 +213,16 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   的 `SKIP_PATHS` 又显式豁免它 —— 放在那里的工单既不进 git 变更、也不进索引，应用端开箱看不到
   （2026-10-05 实测，该目录已积压 4 份 workorder）。草稿可留 `docs/plan/`，**派发前移到 `docs/`**；
   移入后 `pnpm docs:verify` 会双向守（实测把索引里的工单名改掉 → 报「悬空链接 + 未收录」exit 2）。
+- **新增 / 改名 `/__ai/*` HTTP 端点必须在本节登记**（`routes-registry-v1`）：SYSTEM.md §3.2 只教
+  `__AI__.*` 沙箱方法，而**`/__ai/*` 路由在 SYSTEM.md 里全无清单**（2026-10-09 实测：该文件内
+  grep `/__ai/`、`HTTP`、`端点` 三词全部为空）⇒ 新端点加完只有前端知道，工作台 AI 无从知晓。
+  约定：端点增删改时在本列表同步一行。
+  - 已登记 **`POST /__ai/vcs/log`** —— **只读**、与 VCS 类型无关的入口：读提交历史 + 每次提交
+    涉及的路径（现支持 SVN）。**非 svn 仓库返 200 + `ok:false`（那是正常探测结果，勿当故障）**；
+    确属 svn 但读历史失败才 400。存在理由：`/git/worklog`、`/git/diff` 整链路以 `gitAvailable()`
+    为前提，非 git 下直接 400 ⇒ SVN 工作副本拿不到任何历史。字段与实现以
+    `packages/core/src/vcs.ts` 为 SSOT（本表不重抄）；消费方 `WorklogPane.vue`；
+    端口见 `.ai-runner/.server-port`（dev 侧走 5174 代理 `/__ai/*`）。
 
 - **`pnpm test:e2e` 报 `ECONNREFUSED 127.0.0.1:<端口>` 时先读 `.ai-runner/.server-port`**（`[port-drift-file-v1]`）：
   该文件会被历史运行残留旧端口值，vite 代理据此指向错误端口。后端实际端口看 `pm2 jlist` 或 `curl 5175`。

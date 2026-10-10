@@ -31,6 +31,7 @@ test('冻结清单: 真仓库入选集合精确等于预期', () => {
     'docs/USAGE.md',
     'docs/defect-review-verification.md',
     'docs/defect-review.md',
+    'docs/plan-agent-loop-alignment.md',
     'docs/session-view-diagnosis.md',
   ].sort()
   assert.deepEqual(srcs, EXPECTED, '入选集合变了——新增/删除文档须同步此清单（ratchet）')

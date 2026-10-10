@@ -381,62 +381,13 @@
   opacity: 0.62;
   font-variant-numeric: tabular-nums;
 }
-.script-card-desc {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--text-2, #c9d1d9);
-  font-size: 12px;
-  font-weight: 300;
-  line-height: 1.4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.why-block {
-  @apply flex items-start gap-2;
-  padding: 4px 0 8px;
-  margin-bottom: 4px;
-  border-bottom: 1px dashed var(--border, #30363d);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-3, #8b949e);
-}
-.why-label {
-  flex: 0 0 auto;
-  padding: 1px 6px;
-  border-radius: 3px;
-  background: var(--surface-3, #161b22);
-  font: 400 10px/1.4 var(--mono, monospace);
-  letter-spacing: 0.5px;
-  color: var(--text-3, #8b949e);
-}
-.why-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  word-break: break-word;
-}
-.script-card-tail {
-  margin-top: 8px;
-  padding: 8px 0 0;
-  background: transparent;
-  border-top: 1px dashed var(--border, #30363d);
-  border-radius: 0;
-  max-height: 360px;
-  overflow-y: auto;
-  @apply scroll-thin;
-}
-.script-card-tail .tail-pre {
-  margin: 0;
-  padding: 2px 0;
-  font: 12px/1.6 var(--mono, monospace);
-  color: var(--text-2, #c9d1d9);
-  white-space: pre-wrap;
-  word-break: break-word;
-  tab-size: 2;
-}
-.script-card-tail .tail-pre.err {
-  color: var(--danger, #ef4444);
-}
+/* [script-card-head-v2] 此处原有 .script-card-desc / .why-block / .why-label / .why-text /
+   .script-card-tail / .tail-pre 一组样式 —— 已删除。
+   [WHY] 本文件以 scoped 挂载在 RoundCard / TerminalPane 上，选择器会被加上它们各自的
+   data-v 属性，而 ScriptCard 内部元素带的是 ScriptCard 自己的 data-v ⇒ 这些规则**永不命中**，
+   是卡拆分时随迁过来的死样式。留着更糟：它保存的是旧版 desc(12px/300) 与 why-block(带虚线边框)
+   的旧视觉，与 ScriptCard.vue 里的现行同名规则构成双源，改一处另一处仍满足任何字符串判据。
+   [CONSTRAINT] .script-card-time 必须保留 —— RoundCard 的 text/ask/question 卡头仍在用它。 */
 .done-summary-head {
   @apply flex items-center gap-2;
   font:
