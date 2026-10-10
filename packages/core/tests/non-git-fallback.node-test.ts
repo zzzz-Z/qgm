@@ -108,3 +108,22 @@ test('[回滚] /rollback-all 还原全部 + 回收 run 目录', async () => {
   assert.equal(fs.existsSync(path.join(TMP, 'src/new.ts')), false, 'added 应被删除')
   assert.equal(fs.existsSync(snap.runDir('R1')), false, 'run 目录应被回收')
 })
+
+test('[确认] /save 不回收快照：确认后仍可回滚（checkpoint-keep-v1）', async () => {
+  w('src/keep.ts', `OLD-KEEP${String.fromCharCode(10)}`)
+  const before = new Map<string, string>([['src/keep.ts', `OLD-KEEP${String.fromCharCode(10)}`]])
+  const changes: Change[] = [{ path: 'src/keep.ts', type: 'modified' }]
+  w('src/keep.ts', `NEW-KEEP${String.fromCharCode(10)}`)
+  snap.saveSnapshot('R2', before, changes)
+
+  const saved = await post(rollbackHono, '/save', { runId: 'R2' })
+  assert.equal(saved.status, 200)
+  // 判据承重：把 /save 的回收语句改回来，下面两条必须变红
+  assert.equal(fs.existsSync(snap.runDir('R2')), true, '/save 后 run 目录被回收 = 确认即失去后悔药')
+  assert.equal(fs.existsSync(path.join(snap.runDir('R2'), 'src/keep.ts.before')), true, '.before 被删则 modified 无法还原')
+
+  // 确认后回滚仍必须真还原
+  const res = await post(rollbackHono, '/rollback', { runId: 'R2', file: 'src/keep.ts' })
+  assert.equal(res.status, 200)
+  assert.equal(fs.readFileSync(path.join(TMP, 'src/keep.ts'), 'utf8'), `OLD-KEEP${String.fromCharCode(10)}`, '确认后回滚失败')
+})

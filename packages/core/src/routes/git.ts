@@ -1,6 +1,6 @@
 // [arch-hono/git-v1] /git/* —— HEAD / commit-loop / reset
 import { Hono } from 'hono'
-import { gitBranch, gitCommitAll, gitCommitHistory, gitCommitStaged, gitHead, gitRawDiff, gitResetHard, gitStage, gitStatusDetailed, gitUnstage, gitWorklog } from '../git.js'
+import { gitBranch, gitBranches, gitCheckout, gitCommitAll, gitCommitDetail, gitCommitHistory, gitCommitStaged, gitHead, gitRawDiff, gitResetHard, gitStage, gitStatusDetailed, gitUnstage, gitWorklog } from '../git.js'
 
 /** git 路由的 Hono 实例 */
 export const gitHono = new Hono()
@@ -20,6 +20,28 @@ gitHono.get('/git/branch', async (c) => {
 gitHono.get('/git/commits', async (c) => {
   const limit = Number(c.req.query('limit')) || 50
   const r = await gitCommitHistory(limit)
+  return c.json(r, r.ok ? 200 : 400)
+})
+
+// [git-branches-v1] 本地分支列表 + 当前分支
+gitHono.get('/git/branches', async (c) => {
+  const r = await gitBranches()
+  return c.json(r, r.ok ? 200 : 400)
+})
+
+// [git-checkout-v1] 切换分支（dirty 保护由后端强制）
+gitHono.post('/git/checkout', async (c) => {
+  let body: { branch?: string } | null = null
+  try { body = await c.req.json() } catch { body = null }
+  const branch = String(body?.branch || '').slice(0, 128)
+  const r = await gitCheckout(branch)
+  return c.json(r, r.ok ? 200 : 400)
+})
+
+// [git-commit-detail-v1] 单条提交详情（含完整 body + 改动文件列表）
+gitHono.get('/git/commit-detail', async (c) => {
+  const sha = String(c.req.query('sha') || '').slice(0, 64)
+  const r = await gitCommitDetail(sha)
   return c.json(r, r.ok ? 200 : 400)
 })
 

@@ -53,7 +53,7 @@ test('gitArchiveBranch 必须按 paths 决定是否叠加 exclude（防 pathspec
   //   2026-10-09 实测该守卫因 [archive-force-add-v1] 给两条分支各加了 `-f` 而假红——
   //   中间 flag 是可增的（`-f`/`--ignore-errors`…），但「一条带 exclude、一条不带」的结构不能变。
   //   [CONSTRAINT] 两侧仍必须各出现一次：单行回退 / 删掉任一分支仍必红（变异已验证）。
-  const addBranches = body.match(/\[[^\]]*'add'[^\]]*\.\.\.paths[^\]]*\]/g) || []
+  const addBranches = body.match(/\[[^\]]*'add'[^\]]*\.\.\.(?:paths|existingPaths)[^\]]*\]/g) || []
   assert.ok(
     addBranches.some(a => !a.includes(':(exclude)'))
     && addBranches.some(a => a.includes(':(exclude).ai-runner')),

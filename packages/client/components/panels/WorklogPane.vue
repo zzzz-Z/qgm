@@ -101,6 +101,24 @@ const branchRef = ref('')
 const commitsOpen = ref(false)
 const commitsLoading = ref(false)
 const commitsData = ref<Array<{ sha: string, short: string, author: string, date: string, subject: string }>>([])
+// [git-switch-branch-v1] 分支切换弹窗
+const branchesOpen = ref(false)
+const branchesLoading = ref(false)
+const branchesList = ref<string[]>([])
+const switchingBranch = ref(false)
+// [git-commit-detail-v1] 提交详情弹窗
+const detailOpen = ref(false)
+const detailLoading = ref(false)
+const detailData = ref<{
+  sha: string
+  short: string
+  author: string
+  email: string
+  date: string
+  subject: string
+  body: string
+  files: Array<{ status: string, path: string }>
+} | null>(null)
 // [vcs-svn-log-v1] 版本控制类型：'git' 为乐观默认（git 用户不该看到模式切换的闪烁）；
 //   仅当 git 链路失败且 /vcs/log 报 vcs='svn' 时才翻成 'svn'
 const vcsMode = ref<'git' | 'svn'>('git')
@@ -508,6 +526,53 @@ async function doCommit(): Promise<void> {
     committing.value = false
   }
 }
+/** [git-switch-branch-v1] 打开分支切换弹窗；每次打开都刷新列表（分支可能已变） */
+async function openBranches(): Promise<void> {
+  branchesOpen.value = true
+  branchesLoading.value = true
+  try {
+    const r = await fetch('/__ai/git/branches', { cache: 'no-store' })
+    const j = await r.json().catch(() => ({})) as { ok?: boolean, current?: string, list?: string[], reason?: string }
+    if (!r.ok || !j.ok) { toast(j.reason || `加载分支失败（HTTP ${r.status}）`, 'error', TOAST_LONG); return }
+    branchesList.value = Array.isArray(j.list) ? j.list : []
+  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
+  finally { branchesLoading.value = false }
+}
+function closeBranches(): void { branchesOpen.value = false }
+/** [git-switch-branch-v1] 切换分支（dirty 保护由后端强制） */
+async function switchBranch(b: string): Promise<void> {
+  if (switchingBranch.value || b === branchRef.value) return
+  switchingBranch.value = true
+  try {
+    const r = await fetch('/__ai/git/checkout', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ branch: b }),
+    })
+    const j = await r.json().catch(() => ({})) as { ok?: boolean, branch?: string, dirty?: boolean, reason?: string }
+    if (!r.ok || !j.ok) { toast(j.reason || `切换失败（HTTP ${r.status}）`, 'error', TOAST_LONG); return }
+    toast(`已切到 ${j.branch}`, 'success', TOAST_MEDIUM)
+    branchesOpen.value = false
+    // 切完刷新所有：分支名、HEAD、状态
+    commitsData.value = []
+    await load()
+  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
+  finally { switchingBranch.value = false }
+}
+/** [git-commit-detail-v1] 打开提交详情弹窗 */
+async function openDetail(sha: string): Promise<void> {
+  detailOpen.value = true
+  detailLoading.value = true
+  detailData.value = null
+  try {
+    const r = await fetch(`/__ai/git/commit-detail?sha=${encodeURIComponent(sha)}`, { cache: 'no-store' })
+    const j = await r.json().catch(() => ({})) as { ok?: boolean, detail?: typeof detailData.value, reason?: string }
+    if (!r.ok || !j.ok || !j.detail) { toast(j.reason || `加载详情失败（HTTP ${r.status}）`, 'error', TOAST_LONG); return }
+    detailData.value = j.detail
+  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
+  finally { detailLoading.value = false }
+}
+function closeDetail(): void { detailOpen.value = false }
 /**
  * [git-history-dialog-v1] 打开提交历史弹窗；懒加载，只拉一次。
  * [WHY] 底部常驻列表已删除；用户需要时才拉，避免开 tab 就打 log。
@@ -532,16 +597,6 @@ function fmtCommitDate(iso: string): string {
   if (Number.isNaN(d.getTime())) return iso || ''
   const p = (n: number): string => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
-/** 复制完整工作日志 Markdown，供窄区按钮消费 */
-async function copyFullLog(): Promise<void> {
-  if (!result.value || !result.value.markdown) return
-  try {
-    await navigator.clipboard.writeText(result.value.markdown)
-    toast('已复制完整工作日志', 'success', TOAST_MEDIUM)
-  } catch {
-    toast('复制失败：剪贴板不可用', 'error', TOAST_MEDIUM)
-  }
 }
 </script>
 
@@ -572,16 +627,18 @@ async function copyFullLog(): Promise<void> {
       <!-- [git-branch-display-v1] 分支名 + 短 sha：对齐 VSCode 源控面板顶部信息条 -->
       <div v-if="branchRef || headRef" class="wl-head-row">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M6 9v6" /><path d="M18 6a3 3 0 1 1-3 3" /><path d="M15 9a9 9 0 0 1-9 9" /></svg>
-        <span class="wl-head-branch">{{ branchRef || '(detached)' }}</span>
+        <button type="button" class="wl-head-branch" :title="`点击切换分支（当前 ${branchRef || '(detached)'}）`" @click="openBranches">
+          {{ branchRef || '(detached)' }}
+        </button>
         <code v-if="headRef" class="wl-head-sha">{{ headRef }}</code>
       </div>
       <!-- [commit-toolbar-v1] 按钮排：提交 / 复制日志 / 生成 / 刷新，统一 30×30 方形，置于输入框上方 -->
       <div class="wl-commit-toolbar">
         <button
+          v-tooltip="'提交'"
           class="wl-commit-btn"
           type="button"
           :disabled="loading || !result || !commitMsg.trim()"
-          title="提交"
           aria-label="提交"
           @click="doCommit"
         >
@@ -590,23 +647,10 @@ async function copyFullLog(): Promise<void> {
           </svg>
         </button>
         <button
-          class="wl-commit-more"
-          type="button"
-          :disabled="loading || !result || !result.markdown"
-          title="复制完整工作日志"
-          aria-label="复制完整工作日志"
-          @click="copyFullLog"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-        </button>
-        <button
+          v-tooltip="'根据变更生成 commit message'"
           class="wl-commit-gen"
           type="button"
           :disabled="loading || !result || !result.files?.length"
-          title="根据变更生成 commit message"
           aria-label="生成 commit message"
           @click="generateCommitMsg"
         >
@@ -617,10 +661,10 @@ async function copyFullLog(): Promise<void> {
           </svg>
         </button>
         <button
+          v-tooltip="'刷新工作日志'"
           class="wl-commit-refresh"
           type="button"
           :disabled="loading"
-          title="刷新工作日志"
           aria-label="刷新工作日志"
           @click="load"
         >
@@ -630,9 +674,9 @@ async function copyFullLog(): Promise<void> {
         </button>
         <!-- [git-history-dialog-v1] 查看提交历史：打开弹窗展示完整列表 -->
         <button
+          v-tooltip="'查看提交历史'"
           class="wl-commit-refresh"
           type="button"
-          title="查看提交历史"
           aria-label="查看提交历史"
           @click="openCommits"
         >
@@ -796,6 +840,85 @@ async function copyFullLog(): Promise<void> {
         </template>
       </template>
 
+      <!-- [git-switch-branch-v1] 分支切换弹窗 -->
+      <Teleport v-if="branchesOpen" to="body">
+        <div class="wl-hist-mask" @click.self="closeBranches">
+          <div class="wl-hist-box" role="dialog" aria-label="切换分支">
+            <div class="wl-hist-head">
+              <span class="wl-hist-title">切换分支</span>
+              <span class="wl-hist-count">{{ branchesList.length }}</span>
+              <button class="wl-hist-close" type="button" aria-label="关闭" @click="closeBranches">
+                ×
+              </button>
+            </div>
+            <div v-if="branchesLoading" class="wl-hist-loading">
+              加载中…
+            </div>
+            <ul v-else-if="branchesList.length" class="wl-hist-list" role="list">
+              <li v-for="b in branchesList" :key="b" class="wl-hist-item">
+                <button
+                  type="button"
+                  class="wl-hist-row"
+                  :class="{ 'is-active': b === branchRef }"
+                  :disabled="switchingBranch || b === branchRef"
+                  :aria-label="b === branchRef ? `当前分支 ${b}` : `切换到 ${b}`"
+                  @click="switchBranch(b)"
+                >
+                  <code class="wl-hist-sha">{{ b === branchRef ? '✓' : '' }}</code>
+                  <span class="wl-hist-subject">{{ b }}</span>
+                  <span class="wl-hist-meta">{{ b === branchRef ? '当前' : '' }}</span>
+                </button>
+              </li>
+            </ul>
+            <div v-else class="wl-hist-empty">
+              暂无本地分支
+            </div>
+          </div>
+        </div>
+      </Teleport>
+
+      <!-- [git-commit-detail-v1] 提交详情弹窗 -->
+      <Teleport v-if="detailOpen" to="body">
+        <div class="wl-hist-mask" @click.self="closeDetail">
+          <div class="wl-hist-box" role="dialog" aria-label="提交详情">
+            <div class="wl-hist-head">
+              <span class="wl-hist-title">提交详情</span>
+              <button class="wl-hist-close" type="button" aria-label="关闭" @click="closeDetail">
+                ×
+              </button>
+            </div>
+            <div v-if="detailLoading" class="wl-hist-loading">
+              加载中…
+            </div>
+            <div v-else-if="detailData" class="wl-detail">
+              <div class="wl-detail-meta">
+                <code>{{ detailData.short }}</code>
+                <span>{{ detailData.author }} &lt;{{ detailData.email }}&gt;</span>
+                <span>{{ fmtCommitDate(detailData.date) }}</span>
+              </div>
+              <div class="wl-detail-subject">
+                {{ detailData.subject }}
+              </div>
+              <pre v-if="detailData.body" class="wl-detail-body">{{ detailData.body }}</pre>
+              <div class="wl-detail-files">
+                <div class="wl-detail-files-head">
+                  改动文件 ({{ detailData.files.length }})
+                </div>
+                <ul class="wl-hist-list" role="list">
+                  <li v-for="(f, i) in detailData.files" :key="i" class="wl-hist-item">
+                    <code class="wl-hist-sha">{{ f.status }}</code>
+                    <span class="wl-hist-subject">{{ f.path }}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <div v-else class="wl-hist-empty">
+              无数据
+            </div>
+          </div>
+        </div>
+      </Teleport>
+
       <!-- [git-history-dialog-v1] 提交历史弹窗：Teleport 到 body，Esc / 点遮罩关闭 -->
       <Teleport v-if="commitsOpen" to="body">
         <div class="wl-hist-mask" @click.self="closeCommits">
@@ -812,9 +935,11 @@ async function copyFullLog(): Promise<void> {
             </div>
             <ul v-else-if="commitsData.length" class="wl-hist-list" role="list">
               <li v-for="c in commitsData" :key="c.sha" class="wl-hist-item">
-                <code class="wl-hist-sha">{{ c.short }}</code>
-                <span class="wl-hist-subject" :title="c.subject">{{ c.subject || '(无提交信息)' }}</span>
-                <span class="wl-hist-meta">{{ c.author }} · {{ fmtCommitDate(c.date) }}</span>
+                <button type="button" class="wl-hist-row" :aria-label="`查看 ${c.short} 详情`" @click="openDetail(c.sha)">
+                  <code class="wl-hist-sha">{{ c.short }}</code>
+                  <span class="wl-hist-subject" :title="c.subject">{{ c.subject || '(无提交信息)' }}</span>
+                  <span class="wl-hist-meta">{{ c.author }} · {{ fmtCommitDate(c.date) }}</span>
+                </button>
               </li>
             </ul>
             <div v-else class="wl-hist-empty">

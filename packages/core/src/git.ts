@@ -524,3 +524,85 @@ export async function gitCommitHistory(limit = 50): Promise<{ ok: boolean, commi
   }
   return { ok: true, commits }
 }
+
+/** [git-branches-v1] 本地分支列表 + 当前分支。 */
+export async function gitBranches(): Promise<{ ok: boolean, current: string, list: string[], reason?: string }> {
+  if (!(await gitAvailable())) return { ok: false, current: '', list: [], reason: '非 git 仓库' }
+  const cur = await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
+  if (cur.code !== 0) return { ok: false, current: '', list: [], reason: cur.stderr.trim() }
+  const r = await run('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads/'])
+  if (r.code !== 0) return { ok: false, current: '', list: [], reason: r.stderr.trim() }
+  const list = r.stdout.split('\n').map(s => s.trim()).filter(Boolean)
+  return { ok: true, current: cur.stdout.trim(), list }
+}
+
+/**
+ * [git-checkout-v1] 切换分支。
+ * [CONSTRAINT] 工作区脏时拒切（提示用户先 commit 或 stash），避免 checkout 覆盖/丢改动。
+ *   这是不可逆操作的硬门槛——即使调用方传 force 也不放行，需要走明确授权流程。
+ */
+export async function gitCheckout(branch: string): Promise<{ ok: boolean, branch?: string, dirty?: boolean, reason?: string }> {
+  if (!(await gitAvailable())) return { ok: false, reason: '非 git 仓库' }
+  const target = String(branch || '').trim().replace(/[^\w./-]/g, '').slice(0, 128)
+  if (!target) return { ok: false, reason: '分支名为空' }
+  // 校验分支存在（避免注入 + 明确报错）
+  const list = await run('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads/'])
+  if (list.code !== 0) return { ok: false, reason: list.stderr.trim() }
+  const branches = list.stdout.split('\n').map(s => s.trim()).filter(Boolean)
+  if (!branches.includes(target)) return { ok: false, reason: `分支不存在：${target}` }
+  // dirty 检查
+  const status = await run('git', ['status', '--porcelain'])
+  if (status.code !== 0) return { ok: false, reason: status.stderr.trim() }
+  if (status.stdout.trim()) return { ok: false, dirty: true, reason: '工作区有未提交改动，请先 commit 或 stash' }
+  const r = await run('git', ['checkout', target], 30_000)
+  if (r.code !== 0) return { ok: false, reason: r.stderr.trim() || `git checkout 退出码 ${r.code}` }
+  return { ok: true, branch: target }
+}
+
+/** [git-commit-detail-v1] 单条提交的完整信息 + 改动文件列表。 */
+export interface GitCommitDetail {
+  sha: string
+  short: string
+  author: string
+  email: string
+  date: string
+  subject: string
+  body: string
+  files: Array<{ status: string, path: string }>
+}
+
+export async function gitCommitDetail(sha: string): Promise<{ ok: boolean, detail?: GitCommitDetail, reason?: string }> {
+  if (!(await gitAvailable())) return { ok: false, reason: '非 git 仓库' }
+  const safe = String(sha || '').replace(/\W/g, '').slice(0, 64)
+  if (!safe) return { ok: false, reason: 'sha 为空' }
+  // 元信息（分隔符 %x00 保证 body 不被截断）
+  const meta = await run('git', ['--no-pager', 'show', '-s', '--pretty=format:%H%x00%h%x00%an%x00%ae%x00%aI%x00%s%x00%b', safe])
+  if (meta.code !== 0) return { ok: false, reason: meta.stderr.trim() }
+  const parts = meta.stdout.split('\u0000')
+  if (parts.length < 7) return { ok: false, reason: '提交元信息解析失败' }
+  // 改动文件（name-status 输出）
+  const ns = await run('git', ['--no-pager', 'show', '--name-status', '--pretty=format:', safe])
+  const files: Array<{ status: string, path: string }> = []
+  if (ns.code === 0) {
+    for (const line of ns.stdout.split('\n')) {
+      const t = line.trim()
+      if (!t) continue
+      const cols = t.split('\t')
+      if (cols.length < 2) continue
+      files.push({ status: cols[0], path: cols.slice(1).join('\t') })
+    }
+  }
+  return {
+    ok: true,
+    detail: {
+      sha: parts[0],
+      short: parts[1],
+      author: parts[2],
+      email: parts[3],
+      date: parts[4],
+      subject: parts[5],
+      body: parts[6].trim(),
+      files,
+    },
+  }
+}

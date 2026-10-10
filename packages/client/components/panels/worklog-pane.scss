@@ -766,3 +766,91 @@
   font-size: 11px;
   color: var(--text-3);
 }
+
+/* [git-switch-branch-v1] 分支名做成按钮：保持视觉与纯文本一致，hover 时高亮可点击 */
+button.wl-head-branch {
+  background: transparent;
+  border: 0;
+  padding: 0 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+button.wl-head-branch:hover {
+  background: rgb(127 127 127 / 12%);
+}
+
+/* [git-history-dialog-v1] 提交/分支列表项做成整行可点击按钮 */
+.wl-hist-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.5;
+  color: inherit;
+  transition: background 0.12s ease;
+}
+.wl-hist-row:hover:not(:disabled) {
+  background: rgb(127 127 127 / 10%);
+}
+.wl-hist-row:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.wl-hist-row.is-active {
+  background: rgb(88 166 255 / 8%);
+}
+
+/* [git-commit-detail-v1] 提交详情 */
+.wl-detail {
+  padding: 10px 12px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.wl-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.wl-detail-meta code {
+  font: 400 11px/1.4 var(--mono, monospace);
+  color: var(--warning, #d29922);
+}
+.wl-detail-subject {
+  margin-top: 6px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wl-detail-body {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface-2);
+  border-radius: 4px;
+  font: 400 11px/1.5 var(--mono, monospace);
+  color: var(--text-2);
+}
+.wl-detail-files {
+  margin: 10px -12px 0;
+  border-top: 1px solid var(--border);
+}
+.wl-detail-files-head {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+}
