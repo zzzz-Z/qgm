@@ -83,9 +83,13 @@ rollbackHono.post('/save', async (c) => {
   const runId = body?.runId
   if (!runId) return c.json({ error: '缺 runId' }, 400)
   const dir = runDir(String(runId))
-  // 用户确认改动 → 运行前 ref 与快照目录一起回收
-  const manifest = readManifest(String(runId))
-  await gitDropRef(manifest?.gitRef || '')
-  if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true })
+  // [checkpoint-keep-v1] 确认改动只写标记、不回收快照：此后仍可从该轮回滚，
+  //   避免「确认即失去后悔药」。回收交给 gcSnapshots(20) / pruneOldPreRefs(40)。
+  //   .before 内容副本必须留 —— rollback 侧按 manifest 读取，删了 modified 就无法还原。
+  if (fs.existsSync(dir)) {
+    try {
+      fs.writeFileSync(path.join(dir, '_confirmed.json'), JSON.stringify({ confirmedAt: Date.now() }))
+    } catch { /* 标记失败不阻断确认，下轮 GC 仍会回收 */ }
+  }
   return c.json({ ok: true })
 })
