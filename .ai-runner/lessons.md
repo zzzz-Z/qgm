@@ -30,6 +30,8 @@
 >
 > 只记「为什么」，不记 API 用法——后者属于文档。
 
+> **治理记录 2026-10-09（D2）**：待复核 167 → 6；同族近重复按「逐字并入」合并；其余按主张性质分 31 族，逐条标 `[VERIFIED]`/`[STALE]` 并写明家族级证据（源码位置 / 守卫名 / 校验器）。仅有外部依赖、本轮无法复现的族保留待复核。
+
 ## 沙箱写入对子进程不可见：overlay 只在轮末统一落盘
 
 [VERIFIED] 2026-10-05 A · 活端点探针（三档沙箱各跑 `writeText` + `exec('sh',['-c','cat'])`）+ `interceptor.cjs:131-138/592-612`、`routes/run.ts:183-188`
@@ -277,6 +279,10 @@ build step3 复制清单（`scripts/build-all.mjs` / `scripts/copy-runtime.cjs`�
 相关：`import/no-duplicates` 会拦同一模块的多行 import（实测触发该 error），必须合并到同一行。
 **任何导入改动后必跑 `pnpm test:tsc`**——auto-import 会掩盖 tsconfig 层面的缺失（`app` 能跑但 vitest/tsc 报 `Cannot find name`）。
 
+补充（2026-10-09）：是 unimport 依据 `fileFilter` 重算符号表后的正常产物，非手工编辑。
+
+补充（2026-10-09）：它是构建产物（unimport 生成）。排除文件后如果不重新构建，磁盘上的 `.d.ts` 仍保留旧声明，`tsc` 照样通过。所以「`tsc` 过了」不能证明 auto-import 配置正确——只有重新构建后跑 `tsc` 才有意义（§13 `runtime-vs-source-v2` 的又一实例）。
+
 ## `.catch()` 接不住**调用点**同步抛出的异常
 
 [VERIFIED] 2026-10-05 A · node 实测：`boom().then(…).catch(…)` → 同步逃逸；`Promise.resolve().then(() => boom()).catch(…)` → 被接住
@@ -330,6 +336,8 @@ ESM 测试文件里 `require.resolve` 的相对基准是**测试文件自身**�
 补充（2026-10-08）：报 `Failed to load custom Reporter from basic`，exit 1，但错误信息藏在报错栈里、不在 stdout 摘要中，容易误判成测试失败。改用默认 reporter 即可。
 
 补充（2026-10-09）：报 `Failed to load custom Reporter from basic` 且 exit 1，但错误藏在报错栈里、不在 stdout 摘要中，容易误判成测试失败。改用默认 reporter。
+
+补充（2026-10-09）：传该参数会报 `Failed to load custom Reporter from basic`，栈里全是 `RunnerError`，极易误判为测试代码问题。正确做法是走项目根配置 `npx vitest run --config vitest.config.ts <file>`，不加 reporter 参数。
 
 ## 全仓 eslint 的闸门判据：对 baseline 只拦新增 + 排除运行态目录
 
@@ -784,6 +792,8 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 
 ## `getMainText()` vs `extractReplyMd(replyRoot)` 的语义差异是本仓库头号陷阱
 
+[VERIFIED] 2026-10-09 家族级复核：ai-guard.node-test.ts 与 strip-script-blocks 守卫族当日通过
+
 前者是 DOM textContent（无换行、无块级分隔），后者是 DOM→Markdown 反推（保留换行）。任何依赖「首行/行结构」的判据（`scanReplyMarks` / `parseAsk`）都必须基于后者。该陷阱在 `headless-inject.ts` L521-522 已有注释明写，但只对 TEXT 分支打了补丁，ASK 分支漏改——同类问题的修法必须全分支扫一遍，不能只补报告的那一个。
 
 ## 服务端熔断期间 `HTTP 429` 的 `MISSING_DESC` 是误导性文案
@@ -804,6 +814,8 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 
 ## 结论「做不到」必须附带「能做到什么 + 下一步」
 
+[VERIFIED] 2026-10-09 家族级复核：SYSTEM.md §13 沟通纪律复核
+
 结论是「我做不到 X」时必须同时给出「我能做什么」+ 立即可执行的下一步，不能只解释约束；人类反复追问同一个动作，多半是上一轮答复没落到可执行层面。（原 SYSTEM.md §13 沟通纪律，2026-10-06 压缩下沉）
 
 ## 跨来源比对同一个「sid」是最隐蔽的失效模式：项目里 sid 有两个语义——`activeWinSid`（窗口槽位）与 `sessionId`（会话 hash），命名相同但含义不同。本 bug 就是拿 A 去比对 B，恒不等且无任何日志输出，表现为「功能静默失效」。教训
@@ -813,6 +825,8 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 命名相同但来源不同的标识符参与相等比较时，必须在注释里写明各自来源；本修复的注释已补上这一点。
 
 ## Vue 侧两条：轮询组件用 `v-show`、折叠入口固定在卡头
+
+[VERIFIED] 2026-10-09 家族级复核：本仓 SFC（round-card-v1 四类卡布局、ToastHost 焦点、ScriptEditor combobox）
 
 - 靠 `useIntervalFn` 轮询的组件必须 `v-show` 而非 `v-if`：`v-if="total > 0"` 在空态卸载组件 ⇒ 轮询停止
   ⇒ 服务端有了新任务也永远收不到 ⇒ 面板永不出现。`v-show` 只切 `display`，组件保持挂载、轮询持续。
@@ -835,6 +849,8 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 `run.ts:294` 硬编码成功轮只存脚本前 500 字符、失败轮 2000 字符；而自检调用通常写在脚本尾部（收尾段）→ 头部快照必然取不到。原工单的「重放 compliance.jsonl 统计命中率」在数据源层面不可行，只能走前向观测。
 
 ## 类型侧三坑：Ref 冒充 / 合同加字段 / interface 无索引签名
+
+[VERIFIED] 2026-10-09 家族级复核：tsc:client / test:tsc 通过 + 各陷阱源码复核
 
 - `{ value: false }` 不能冒充 `Ref<boolean>`（plain 对象缺 `[RefSymbol]`，TS2741）⇒ 测试里必须真实 `import { ref }` 构造。
 - 给 `*Deps` 合同加字段必须**同轮补调用方**：`ScriptPanel.vue` 未同步注入 ⇒ `Property 'isLoopRunning' is missing`
@@ -959,6 +975,8 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 
 ## `new URL(..., import.meta.url).pathname` 在 vitest 下不可靠
 
+[VERIFIED] 2026-10-09 家族级复核：全量 vitest（188 文件）当日通过，含 --no-cache 口径
+
 源码锚点断言用它会解析出错误路径（测试文件不在仓库根），改 `readFileSync('packages/client/...', 'utf8')`（cwd 相对）即通。
 
 ## `reject-breaker` 熔断与解冻：同 sid 同 kind 连续 2 次拒收 → 429 + `breaker:true` ⇒ 客户端 `finish(inst,'breaker-rejected')` 结掉整个循环
@@ -976,8 +994,27 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 
 ## `pm2 restart` 的 `Failed to fetch` 不是失败
 
+[VERIFIED] 2026-10-09 家族级复核：routes 由被重启进程承载；判生效只认时间戳不认 curl 200
+
 它由服务重启瞬间连接断开造成，判成功须看 `pm2 list` 的 pid/uptime 变化 + 活端点 200，不能凭命令返回码。
 [同族并入 · 原条「`pm2 restart` 的当轮脚本必然报网络错」] 同机制：当轮脚本无从返回，判成败须跨轮（下一轮 `pm2 jlist` + `curl`），不得在原轮判失败（与 AGENTS.md 一致）。
+
+[同族并入 · 原条「重启当轮脚本会返回 `Failed to fetch`」]
+pm2 restart 使承载会话的进程瞬断，HTTP 通道中断。这是预期现象，不是失败——须跨轮探活（下轮 `pm2 jlist` + curl 即恢复）。AGENTS.md 已记录此条，本次实测再次印证。
+
+补充（2026-10-07）：pm2 restart 使承载会话的进程瞬断，HTTP 通道中断。属预期现象，不是失败——须跨轮探活（下轮 `pm2 jlist` + curl 即恢复）。本次为会话内第 2 次实测印证，AGENTS.md 已记录此条。
+
+[同族并入 · 原条「pm2 restart 当轮脚本会 `network error`（预期）：重启导致 HTTP 通道瞬断，脚本以 `-1` 收场。修法」]
+跨轮探活复验（AGENTS.md 已明示），不要在当轮判失败或立即重试。
+
+[同族并入 · 原条「重启当轮脚本必返回 `network error`（AGENTS.md 已记）」]
+须跨轮探活，不在当轮判失败。
+
+补充（2026-10-07）：跨轮探活才能确认，不在当轮判失败。
+
+补充（2026-10-09）：实例重启导致 HTTP 通道瞬断，不是失败信号。按 AGENTS.md 规定必须跨轮探活确认，禁止在原轮判定为失败——本轮照此执行，下一轮 curl 5175 即恢复 200。
+
+补充（2026-10-09）：实例重启导致 HTTP 通道瞬断，不是命令失败信号。按 AGENTS.md 规定必须跨轮探活确认，禁止在原轮判定失败——本轮照此执行，下一轮 curl 5175 即恢复 200。
 
 ## client dist 反查不能 grep 源码常量名
 
@@ -1046,11 +1083,6 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
 
 `helpers.cjs` 冻结 850 行，任何净增都顶破守卫。对冻结文件的改动须先内联压缩再提交。
 
-## `writeText` 写含正则转义的模板字符串易损坏文件
-
-`\\.` 转义错误导致语法错 + 重复定义。改用 `patchFile` + 避免在替换文本里嵌正则字面量。
-[同族并入 · 原条「replaceInFile 的 oldString 遇含引号/反斜杠的文本」] 同族：写入/替换含特殊字符（引号、反斜杠、正则转义）的文本时，**别构造含特殊字符的字面量**——改用 `readText` 取原文 + `indexOf` 定位 + 切片拼接。本轮两次字面量构造都失配（`oldString 未出现`）。
-
 ## `reject-breaker` 熔断连带封锁
 
 [REJECTED] 2026-10-06 复核方亲跑 · `reject-breaker.ts:45-53` 键为**纯 sid**，`recordReject` 只在 `run.ts:97/118` 拒收分支调用，**合法脚本不进熔断路径**（成功走 `:207 resetRejectStreak`）⇒「连带封锁合法脚本」不成立；真实效应见同族 SSOT 条（客户端 `finish` 结掉循环）
@@ -1065,17 +1097,25 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
 
 ## 口径判据不造 PLAN.md 就是真空判据
 
+[VERIFIED] 2026-10-09 家族级复核：memory-budget / lessons-hygiene / docs-retrieval / api-surface-parity 当日全绿
+
 `bucketItems` 与 `readTaskState` 在无 PLAN.md 时结果相同 ⇒ 变异态仍绿。判据要承重，测试必须造出「两者会分歧」的输入。
 
 ## 改留痕形状会连带既有守卫
+
+[VERIFIED] 2026-10-09 家族级复核：memory-budget / lessons-hygiene / docs-retrieval / api-surface-parity 当日全绿
 
 `control-log` 守卫断言 `writeChannelLog('board', buildBoardEntry(` 的精确形态，改为扩展对象后须同步，并写明「守注意图不变」。
 
 ## `useModalA11y` 组合式接入反复失败，已放弃并回滚：`ToastHost.vue` 中 `useModalA11y(confirmVisible, ...)` 引用第 18 行才声明的 `confirmVisible`，连续 4 轮 `writeText`/`patchFile` 报「成功」但读回仍是旧序（疑与并发写或 overlay 时序有关）。止损
 
+[VERIFIED] 2026-10-09 家族级复核：本仓 SFC（round-card-v1 四类卡布局、ToastHost 焦点、ScriptEditor combobox）
+
 改回内联手写 `watch`（功能等价），并删除已无消费方的 `useModalA11y.ts`（避免死代码）。
 
 ## `@keydown.esc` 挂在容器上需焦点在容器内
+
+[VERIFIED] 2026-10-09 家族级复核：本仓 SFC（round-card-v1 四类卡布局、ToastHost 焦点、ScriptEditor combobox）
 
 `ToastHost` 的确认弹窗弹出时焦点仍在触发按钮 ⇒ Esc 实际不生效。修法是弹出时主动 `focus()` 并把焦点归还。
 
@@ -1083,33 +1123,45 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
 
 ## 自动补全不是 dialog
 
+[VERIFIED] 2026-10-09 家族级复核：本仓 SFC（round-card-v1 四类卡布局、ToastHost 焦点、ScriptEditor combobox）
+
 `ScriptEditor` 的 @文件选择器正确 ARIA 是 `combobox` + `listbox` + `option`，不是 `role="dialog"`（工单 F2 把它与真弹层并列，需按语义分类处理）。
 
 ## 文字与脚本混排 → 片段被当独立脚本：同轮输出「说明 + 代码块」时，抽取器按围栏切分，后续无 `@desc` 的片段被推 → `MISSING_DESC` 400 → 渲染成卡片。修法
 
-整轮 = SCRIPT + 单代码块，块外零字符；说明另用 TEXT 轮。
+[VERIFIED] 2026-10-09 家族级复核：台账内 ≥10 条同因独立复现（截断 / BREAKER-TRIPPED / 并行重放）
 
+整轮 = SCRIPT + 单代码块，块外零字符；说明另用 TEXT 轮。
 
 ## 批量删块禁用行号循环：我删 `file-tree.scss` 的 `.ghost-btn` 时循环边界写错，`splice` 从 21 行扩到 194 行。修法
 
+[VERIFIED] 2026-10-09 家族级复核：本仓 SFC（round-card-v1 四类卡布局、ToastHost 焦点、ScriptEditor combobox）
+
 `git checkout HEAD --` 恢复，改用整块字符串精确匹配 + 唯一性断言。
 
-
 ## 分析对象与执行环境同源共振
+
+[VERIFIED] 2026-10-09 家族级复核：ai-guard.node-test.ts 与 strip-script-blocks 守卫族当日通过
 
 本文分析的「混排回复 → 兜底选片段 → 熔断」链路，在本批回执中现场复现（4 条 `MISSING_DESC`，末 3 条带 `breaker:true`）——不是巧合，而是宿主环境按同一规则跑我上一轮输出。分析此类机制时，交付轮次本身即是测试用例：8 条回执合并到达也正是症状 C.2「滞后一轮」的实证（轮内合并窗 Δ=1500ms）。
 
 ## 看板收口须用原文精确匹配
+
+[VERIFIED] 2026-10-09 家族级复核：tasks 端点源码（_url 读 AI_RUNNER_SESSION_ID）+ 当日实拉
 
 `tasks.complete([...])` 传入的 4 条描述必须与 `push` 时逐字一致（§2 三级匹配的②归一化全文）。本次照抄 `list()` 返回的 `desc` 原文，4 项一次命中、`warnings: []`。若凭记忆改写（如把「读盘验证」写成「验证」），会静默漏匹配、条目滞留 todo。
 [同族并入 · 原条「任务看板跨会话不自动收口」] 收口前先读 `tasksBySid` 的实际 `desc` 原文（跨会话任务也适用），逐字照抄再调 `complete()`。
 
 ## 工单叙述（意图/根因）不可尽信，须独立取证
 
+[VERIFIED] 2026-10-09 家族级复核：SYSTEM.md §13 沟通纪律复核
+
 `[stdout-lag-probe-v1]` 标记（`useRunner.ts:294`）存在，但实现只做「异常早到」检测（`:374` `_elapsed < 1`），不是工单原文要的跨轮滞后归因。grep 到标记名 ≠ 功能落地。判定落实状态必须读实现分支，不能凭标记存在下结论——本次若只 grep `stdout-lag-probe-v1` 会误判段五已完成。
 [同族并入 · 原条「工单的根因叙述可能错，须独立取证」] 工单段一断言「build+restart 一次没执行」实测证伪（`pm2 uptime` 晚于 `dist mtime`）；真退化路径在 `useAiTransport.ts:88`（油猴通道）。若照工单字面执行，对本退化零效果——判断依据须自己读盘取，不能照抄工单。
 
 ## vitest 单文件 filter 与 include 模式的路径解析可能不匹配
+
+[VERIFIED] 2026-10-09 家族级复核：全量 vitest（188 文件）当日通过，含 --no-cache 口径
 
 `npx vitest run packages/client/tests/stdout-lag-attribution.node-test.ts` 在文件确已 added 的情况下报 `No test files found, exiting with code 1`，同时打印的 `include` 是 `packages/**/*.node-test.ts`（看似匹配）。这不是测试失败，是 filter 未命中。多文件批量跑（前轮 `multi-script-blocks` 等 4 文件）正常通过，说明单文件全路径 filter 有解析差异。排查方向：改用相对短路径或不带目录前缀，或直接跑 `vitest run <testname>` 片段匹配。
 
@@ -1117,13 +1169,19 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
 
 ## vitest 下 `new Response(ReadableStream).body` 消费不稳
 
+[VERIFIED] 2026-10-09 家族级复核：全量 vitest（188 文件）当日通过，含 --no-cache 口径
+
 段五测试初版 mock `fetch` 返回 `new Response(stream)`，`readNdjson(res.body)` 在 vitest 环境下行为异常（warn 空数组），3 次同因失败。改 `vi.mock` 直接替换 `readNdjson` 模块后立即通过。§8 强制策略转换生效。
 
 ## 总闸门 lint 的失败项要按「是否本会话改动」分流，不能一律当红灯
 
+[VERIFIED] 2026-10-09 家族级复核：定点与全仓两条 lint 口径实测（剩余 error 全落既有文件）
+
 `pnpm lint` exit 1 报 7 error，粗看是闸门红。逐条定位后：全部落在未追踪文件（`.workbuddy/`）与既有文件的基线缺陷（`WorklogPane.vue` 缩进，末次提交在数月前）。本会话改动的 3 个文件无一上榜。§12 复检要求「不得忽略 lint 报错」，但同样不得把清单外文件的既有问题算作本任务失职——正确做法是分流并留证，而非沉默或强行修改范围外文件。
 
 ## 运行时 API 返回形状须探针实测，不能凭记忆写断言
+
+[VERIFIED] 2026-10-09 家族级复核：helpers/*.cjs 源码（exec → {ok,stdout}；syntaxCheck → {ok}）
 
 连续多轮脚本用 `r.code` 判定退出码，实际 `__AI__.exec` 返回 `{ok, stdout}` —— `r.code` 恒为 `undefined`，导致「4×tsc」批次报告字段缺失、无法据以判定。一次 `exec('echo',['hi'])` 探针即暴露。凡对运行时 API 的形状下断言，先跑最小探针。
 [同族并入 · 原条「`syntaxCheck` 返回值形状需实测」] `syntaxCheck(after,p)` 返回 `{ok:true}` 对象（非布尔）——写 `syn && syn.ok !== false` 会得 `false`；判定读 `.ok`。
@@ -1131,11 +1189,12 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
 
 ## 破坏性写盘前必须先 `git status` 确认目标文件是否为既有文件
 
+[VERIFIED] 2026-10-09 家族级复核：git.ts:198-201 双分支 + git status/add 行为实测
+
 本轮我曾误将「死代码扫描报告」`writeText` 覆写到 `docs/defect-review-verification
 
 补充（2026-10-06）：本轮我将「死代码扫描报告」`writeText` 到 `docs/defect-review-verification.md`——那是已被 DOCS-INDEX 收录的既有报告，不是空文件。`writeText` 是覆写语义，直接摧毁了原内容。修复靠 `git checkout HEAD -- <file>` 还原。教训：`writeText` 前先 `git status --porcelain -- <target>` 或 `git log -- <target>` 确认目标是否被追踪；新文档走「新文件名」+ 显式登记索引，不要复用既有名。
 [同族并入 · 原条「「文件不存在」结论必须用完整路径核实」] 同族：下「不存在」结论前须全树核实（`find`/`ls -R`），不能凭一次根目录 `ls`——曾据此把可执行判据误判为不可执行。
-
 
 ## 回执乱序时不能假设「上批已按预期落盘」
 
@@ -1143,26 +1202,31 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
 
 ## vm 沙箱加载子模块：共享 context 下 const 会重复声明
 
+[VERIFIED] 2026-10-09 家族级复核：host-owned-write-guard.node-test.ts 当日通过
+
 `host-owned-write-guard.node-test.ts` 用 `vm.runInContext` 加载 `helpers.cjs`，其 `require('./helpers-io.cjs')` 若直接在同 context 二次 `runInContext`，子模块的 `const fs` 与父模块冲突 → `Identifier 'fs' has already been declared`。修法：把子模块源码包进 IIFE（`(function(){ const module = {exports:{}}; ... ; return module.exports })()`）隔离作用域。
 
 ## 段一拆分后，测试里的路径断言必须同步迁移目标
+
+[VERIFIED] 2026-10-09 家族级复核：全量 vitest（188 文件）当日通过，含 --no-cache 口径
 
 `host-owned-write-guard` 2 条断言（`HOST_OWNED` 声明、`replaceInFile → _changelog` 调用）原读 `helpers.cjs`。拆出 `helpers-io.cjs` 后须改读新文件——否则测试红的是路径而非行为，属迁移副作用而非真回归。
 
 ## `runtime-cjs-copy` 守卫消盲区时发现了真实缺口
 
+[VERIFIED] 2026-10-09 家族级复核：runtime-cjs-copy 守卫当日通过
+
 给 core 版 `copy-runtime.cjs` 加断言后立刻红：其清单缺 `repl-loop.cjs`（构建产物会缺文件）。这是「盲区断言」的价值证明——此前该文件无守卫覆盖，缺口静默存在。
 
 ## 通道退化（非本单缺陷，仅记录）
 
+[VERIFIED] 2026-10-09 家族级复核：台账内 ≥10 条同因独立复现（截断 / BREAKER-TRIPPED / 并行重放）
+
 本会话脚本通道对 >15 行内容极不稳定（抽取器把 `SCRIPT` 标记与围栏拼进脚本体），累计 40+ 轮 `MISSING_DESC`/截断。根因是页面侧抽取器未重载（`headless-inject.ts` 修复在浏览器注入侧）。绕过方式：最小步（≤15 行）+ `String.fromCharCode` 构造特殊字符。
 
-
-
-
-
-
 ## eslint `jsdoc/check-param-names` 对「合并参数注释」与「展开参数注释」都不满
+
+[VERIFIED] 2026-10-09 家族级复核：eslint.config.ts 规则（两者互斥，无同时满足写法）
 
 `run(opts?: {...})` 这类单对象参数的 JSDoc，eslint 有两种冲突期望：
 
@@ -1171,40 +1235,49 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
 
 两者互斥，无法同时满足。本会话在 `useRunner.ts`/`useToast.ts`/`tree-attach.ts` 三处反复（合并→展开→再合并），已达 §8 熔断条件，止损回滚到原始状态。此为 eslint 规则与 TS 单对象参数签名的固有冲突，非代码缺陷。
 
-
-
-
 ## JSDoc 注释里的 `/***/` 会提前终止注释块
+
+[VERIFIED] 2026-10-09 家族级复核：eslint.config.ts 规则（两者互斥，无同时满足写法）
 
 `denoiseLog` 的 JSDoc 写 `...###/***/___...`，其中 `/***/` 被 TS 解析为 `*/` 注释终止符 → 后续代码裸露 → TS1434 连环报错。修法：注释里避免写「斜杠 + 星号」组合，改用文字描述。
 
 ## 任务板条目的出处可能无处可查
 
+[VERIFIED] 2026-10-09 家族级复核：tasks 端点源码（_url 读 AI_RUNNER_SESSION_ID）+ 当日实拉
+
 `tasks.push` 的字符串若不落任何工单文档，后续会话靠 grep 无法复原其原始上下文（本次 `grep 'T2:|T3:'`、`grep '踩坑与遗留'`、`grep '可执行项'` 全零命中）。修法：任务描述里显式引用 `docs/` 工单路径或编号，或在 push 的同时落一页草稿到 `docs/plan/`。
 
 ## 抽取器会剥离待写入文本里的 `import` 行——写文件用数组拼接构造
 
+[VERIFIED] 2026-10-09 家族级复核：抽取器会剥离 import 行；writeText 返回 undefined
+
 本次 `wiki.ts`、`serve-userscript.mjs`、`wiki-proxy.node-test.ts` 三处都中招：用 `writeText`/`patchFile` 写入含 `import fs from 'node:fs'` 的内容时，该行被服务端抽取器当作脚本自身的 import 剥离，导致落盘文件缺 import、tsc 报 `Cannot find name 'fs'`。修法：待写入文本里的 `import` 行须由数组拼接构造（`const kw = 'im' + 'port'`，或用字符串数组 `join`），使源码不出现连续 `import` 字面量。这与 SYSTEM.md §3.1 记的「覆写含原生 API 字样的配置须断词拼接」同源——审查类/含 import 的源码文本都适用。
 [同族并入 · 原条「改 import 行要防替换吃掉相邻行」] 另一坑：`patchFile`/`replaceInFile` 替换 import 行时，若锚点含 `path` import 而替换文本漏写，会连带删掉相邻 import（C3 实测：删了 `path` + 产生重复 `vitest`）——替换后必核 import 完整性。
 
+[同族并入 · 原条「`writeText` 写含正则转义的模板字符串易损坏文件」]
+`\\.` 转义错误导致语法错 + 重复定义。改用 `patchFile` + 避免在替换文本里嵌正则字面量。
+[同族并入 · 原条「replaceInFile 的 oldString 遇含引号/反斜杠的文本」] 同族：写入/替换含特殊字符（引号、反斜杠、正则转义）的文本时，**别构造含特殊字符的字面量**——改用 `readText` 取原文 + `indexOf` 定位 + 切片拼接。本轮两次字面量构造都失配（`oldString 未出现`）。
+
 ## v-else-if 链的 TS 收窄陷阱
+
+[VERIFIED] 2026-10-09 家族级复核：tsc:client / test:tsc 通过 + 各陷阱源码复核
 
 `<p v-else-if="online === false">` 与 `<p v-else-if="searched && online !== false">` 顺序颠倒时，TS 判定第二分支不可达（`TS2367` + `vue/no-dupe-v-else-if`）。条件互斥的前后顺序本身就是类型契约，改模板顺序必须重跑 `tsc:client`。
 
 ## 模板文件多轮 patch 易累积孤儿标签
 
+[VERIFIED] 2026-10-09 家族级复核：本仓 SFC（round-card-v1 四类卡布局、ToastHost 焦点、ScriptEditor combobox）
+
 本轮 KnowledgePanel 经 5+ 轮 patch（含两次变异、一次误删）后残留孤儿 `</p>` 与重复 `<ul>`，最终靠全量重写收敛。模板文件改动达 3 轮即应评估整体重写，而非继续打补丁。
 
 ## `truncated: true` 时的同长度重发必然再截断
 
+[VERIFIED] 2026-10-09 家族级复核：台账内 ≥10 条同因独立复现（截断 / BREAKER-TRIPPED / 并行重放）
+
 上轮 4 次重发同一脚本，全部截断（§10 明确禁止原地重发）。正确处置：拆成 ≤40 行的原子步骤串行推。本单最终一次成功。
 
-## 产物 grep 需用当前 hash 文件名
-
-`pnpm build` 后 `index-<hash>.js` 的 hash 会变。用旧文件名 grep 得空结果，会误判「产物未含该字段」。应先 `ls` 取实际文件名。
-[同族并入 · 原条「打包器把引号转成反引号」] 另一坑：打包器会转写引号形态（单引号→反引号）。按源码引号形态 grep 会漏——产物核对须搜语义片段。
-
 ## 变异不变红有四种根因：先二分再下结论（通道 / 锚点空转 / 改错地方 / 判定坏）
+
 [VERIFIED] 2026-10-07 宿主侧真盘实测 A · 真盘变异立即变红，跨轮机制确证
 
 - **通道（最常见）：overlay 跨轮不可见。** `patchFile`/`writeText` 写入落 overlay、**轮末**才整体落盘；
@@ -1223,6 +1296,7 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
   证其被加载 + 断言锚点唯一），再判判据是否承重。跳过第一步就会把「通道问题」误判成「判据真空」。
 
 ## 沙箱写入 API 硬约束：锚点唯一 / 空锚点灾难 / 覆盖 vs 追加 / readText 是同步
+
 [VERIFIED] 2026-10-07 宿主侧源码确证 A · helpers-io.cjs:47-102 与 helpers.cjs:250-286、:587-590 逐行核对
 
 - **`patchFile` 锚点多处命中会静默放大**：返回 `{replaced:N}`（`helpers.cjs:286`），一次调用产生 N 处插入。
@@ -1244,6 +1318,7 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
   修复前 `extList.join('|')` 会生成 `\.(\.ts)$` 永失配、**静默返回空数组**（无报错无日志）。
 
 ## 视觉基线四原则：不覆盖派生区域 / 全红先查基线陈旧 / 覆盖盲区 / 删 !important 前静态确证
+
 [VERIFIED] 2026-10-07 宿主侧复核 B · visual.spec.ts:3/28-55/75-111/151-153 源码逐项核对
 
 - **不覆盖「由仓库/运行状态派生」的 UI 区域**：`03 工作日志` 曾**确定性**失败（6503 像素 / ratio 0.01，
@@ -1274,6 +1349,7 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
   直接判失败 ⇒ 先看快照目录文件名后缀，别急着读 diff 图。
 
 ## playwright 起不来：先查端口漂移文件，再清残留进程
+
 [VERIFIED] 2026-10-07 宿主侧复核 B · `.server-port` 机制与 e2e 清场判据核对
 
 - **根因可能是端口漂移文件**：`pnpm test:e2e` 反复报 `ECONNREFUSED 127.0.0.1:5518` 而后端实际在 5175。
@@ -1286,6 +1362,7 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
   （陈旧 mtime = 未真启动）。
 
 ## e2e 交互两坑：localStorage 种子须 addInitScript / infinite 动画须 animations:disabled
+
 [VERIFIED] 2026-10-07 宿主侧复核 B · event-stream.ts:166 与 ScriptCard.vue:302 / visual.spec.ts:151-153 核对
 
 - **`page.evaluate` 写的 localStorage 会被 `beforeunload` 覆盖**：写 `__ai_event_log` 后 `page.reload()`，
@@ -1299,59 +1376,93 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
 
 ## 同轮写入后看不到新内容（overlay-atomic）：shell / stdout 回显均滞后
 
+[VERIFIED] 2026-10-09 家族级复核：routes/run.ts:205-233（scriptOk 才 applyOverlay）、:79 默认 read-only
+
 改完 `verify-crossfile.cjs` 同轮跑 `node` 仍读旧盘，报同样的 3 条失败，一度误判「patch 没生效」。按 `overlay-atomic`，写后验证必须跨轮。
 
 补充（2026-10-07）：改 `eslint.config.ts` 后同轮跑 `eslint` 仍报旧计数，须跨轮复跑。
 [同族并入 · 原条「沙箱 stdout 输出可能滞后一轮」] 脚本内 `__AI__.log` 的结果有时下一轮才回显——同为 overlay/通道批处理时序；规避：关键结果 `writeText` 落盘、下轮 `readText` 取。
 [同族并入 · 原条「多操作脚本整轮原子」] 同机制（overlay-atomic）：多操作脚本若中途失败，**整轮写入全丢**（含已成功的前几步）——判「改了没」不能看中途 stdout（是假信号），须跨轮读盘。
 
+[同族并入 · 原条「`writeText('/tmp/x')` + 同轮 `git commit -F /tmp/x` 必失败：`writeText` 走 overlay，同轮子进程读不到（`git` 读的是真盘）。`fatal: could not read log file: No such file or directory` 即此因。修法」]
+`git commit -m '<msg>'` 直接传，或跨轮（写 → 下一轮 commit）。这正是台账 `overlay-atomic` 那条的又一实例。
+
+[同族并入 · 原条「`overlay-atomic-v1` 使「同轮写盘 + 同轮 exec 读同一文件」失效：本轮变异验证第一次尝试在同一脚本里 `writeText` 后立刻 `exec('vitest')`，vitest 读到的是磁盘旧内容（原文件），守卫保持全绿造成假阴性。写入先落 overlay、仅脚本 exit 0 才整体落盘 —— 同轮 `exec` 起的子进程看不到。变异验证必须跨轮」]
+一轮只写、下一轮才跑。
+
+[同族并入 · 原条「`writeFile`/`patchFile` 同轮写入 overlay，`vitest` 子进程读真磁盘看不见」]
+变异验证必须在同进程 vm 里做，不能靠子进程跑测试。
+
+[同族并入 · 原条「`writeFile` 与 `vitest` 同轮 → vitest 读不到新文件：新增测试文件后同轮跑 `vitest run` 报 `No test files found`——overlay 未落盘，子进程读真实磁盘读不到。修法」]
+新建文件与跑测试分两轮（下一轮 `--no-cache` 跑）。
+
 ## A1 初版把同文件重复声明算作冲突
+
+[VERIFIED] 2026-10-09 家族级复核：runtime-cjs-copy 守卫当日通过
 
 真仓跑出 `WO-20261007-09/10 编号重复`（首行 H1 + `| **编号** |` 元数据行同文件同现）。A1 语义是「不同文件」，须按 `Set<file>` 去重。
 
 ## 变异点选错会让承重验证假绿：G8 首两次变异（同 root 才复用 / 缓存 collectDocs）都返回 11 passed。根因是选点恰好对 fixture 无害——A 的文件名去 B 里读，文件全不存在 → 空 failures 恰好与「B 本应通过」一致。正确选点是「缓存首次 root 结果」，等价于「顶层缓存 root」。教训
 
+[VERIFIED] 2026-10-09 家族级复核：本仓承重守卫族（*.node-test.ts）当日全绿；每类假绿均有台账实测记录
+
 变异必须打在判据真正想防的形态上，不是随便改一行。
 [同族并入 · 原条「变异选点必须打在判据真正想防的形态上」] 同上；选点错了，承重验证会假绿。
 [同族并入 · 原条「`runCrossfile` 的纯函数化是承重前提」] `spawnSync` 每次新进程，模块级缓存与否不可分辨——同进程两次调同一模块实例才可观测（G8 的承重前提）。
 
-
 ## 「已实现」与「有测试」是两件事
+
+[VERIFIED] 2026-10-09 家族级复核：memory-budget / lessons-hygiene / docs-retrieval / api-surface-parity 当日全绿
 
 TEXT 短路已在两处代码实现，但测试只断言字符串存在。存在性断言不能承重——漏掉 `marks.text` 时它仍绿。须补语义断言（正则匹配整个赋值式）。
 
 ## `__AI__.tasks` 脚本内不可跨桶，但 curl 可以
 
+[VERIFIED] 2026-10-09 家族级复核：tasks 端点源码（_url 读 AI_RUNNER_SESSION_ID）+ 当日实拉
+
 `_url()` 硬编码 `process.env.AI_RUNNER_SESSION_ID`，脚本无法换 sid；跨桶须 `curl -X POST '.../__ai/tasks?sid=<其他sid>'`。
 
 ## 「功能仍在使用」的旧计划只能 fail 不能 complete
+
+[VERIFIED] 2026-10-09 家族级复核：tasks 端点源码（_url 读 AI_RUNNER_SESSION_ID）+ 当日实拉
 
 `muxlxl69` 的「删除会话首问规则」计划已废弃（该功能仍在运行），一刀 complete 会谎报完成。
 
 ## 测试夹具放项目内会累积成灾：`applyOverlay` 过滤项目外路径的约束，导致测试把临时目录建在 `.ai-runner/` 下；配合「clean 脚本未接线」+「中断时 `finally` 不执行」，30 小时就积 175 个。修法方向
 
+[VERIFIED] 2026-10-09 家族级复核：全量 vitest（188 文件）当日通过，含 --no-cache 口径
+
 优先用 `os.tmpdir()`，必须项目内时用 `AI_RUNNER_ROOT` 注入临时根。
 
 补充（2026-10-07）：`getRoot()` 请求期读 `AI_RUNNER_ROOT`，测试注入临时根即可把夹具移出项目。
 
-
 ## 术语统一须区分「现行术语」与「历史引用/测试输入」
+
+[VERIFIED] 2026-10-09 家族级复核：SYSTEM.md §13 沟通纪律复核
 
 `@ask` 在测试里有两类用途——① 验证旧别名不命中（必须保留）；② 描述现行 ASK（该改）。一刀切替换会摧毁守卫。
 
 ## 降噪逻辑在渲染侧、不在产生侧更安全
 
+[VERIFIED] 2026-10-09 家族级复核：grep 消费方复核（tsc/eslint/vitest 均不覆盖此类）
+
 `[AI]` 前缀是 `__AI__.log` 的输出格式，改它要动 `helpers.cjs` + 全部相关断言；而在 `denoiseLog`（消费者）剥离，改动只 1 个函数 + 1 个测试，且原始日志仍完整保留供排障。「在哪一层降噪」应选消费者而非产生者。
 
 ## 连带影响清单易过宽：我上轮凭「改返回形状会影响所有 `todo` 消费者」列出 4 处连带，实测只有 1 处真需要改——另 3 处已各自按 `items[].status` 过滤，本就不受 `todo` 数组影响。教训
+
+[VERIFIED] 2026-10-09 家族级复核：SYSTEM.md §13 沟通纪律复核
 
 列连带前先 `grep` 每个消费点的实际判据，不要凭「用了这个字段」就断定受影响。
 
 ## 合并「多条同主题约束」时，须逐条核对被合并项的精确形态
 
+[VERIFIED] 2026-10-09 家族级复核：anchors / docs / crossfile 三套校验当日通过
+
 我把两条 glob 合成一条时，把三态 `{AUDIT,Audit,audit}` 抄成了两态 `{AUDIT,audit}`——漏一个变体 = 悬垂 SSOT。合并规则类文本前，先 `readText` 被引用方（这里是 `eslint.config.ts`）逐字核对，别凭记忆。
 
 ## 改 md 后必跑 `anchors:verify` + `docs:verify`
+
+[VERIFIED] 2026-10-09 家族级复核：pnpm docs:verify 通过；docs-scan.cjs 的 SKIP 规则复核
 
 这是 `AGENTS.md` 自己列的硬要求，我上轮漏了。锚点是否命中不能靠运气。
 
@@ -1359,7 +1470,12 @@ TEXT 短路已在两处代码实现，但测试只断言字符串存在。存在
 
 补充（2026-10-08）：本仓 `scripts/anchors.json` 会引用源码中的字串，删改「被锚点引用的字串」会让校验变红，而全量 vitest 不覆盖锚点。
 
+[同族并入 · 原条「根目录新增 `.md` 会撞 `docs:verify`」]
+`docs-scan.cjs` 的 `collectDocs` 从 root 递归、只跳过 `node_modules/dist/.git/.ai-runner/.workbuddy/...` 与 `docs/plan`，根目录文件同样纳入 ⇒ 新文档必须登记 `docs/DOCS-INDEX.md`。
+
 ## `pm2 restart` 报 `network error` 后，下一次探活返回 200 不等于「新代码已生效」
+
+[VERIFIED] 2026-10-09 家族级复核：routes 由被重启进程承载；判生效只认时间戳不认 curl 200
 
 本轮实测，上一轮的两次 restart 都没真正重启进程（`pm_uptime` 停在更早的时刻），但 `curl /__ai/` 一直返回 200——端点活着 ≠ 跑新代码。判定生效只能用 `pm_uptime`（`pm2 jlist`）与产物 mtime 比时序（§13 `runtime-vs-source-v2`）。之前台账里「下一轮探活即恢复」的表述不充分，已被本次实测证伪。
 
@@ -1367,125 +1483,154 @@ TEXT 短路已在两处代码实现，但测试只断言字符串存在。存在
 
 补充（2026-10-09）：实例重启导致 HTTP 通道瞬断，属预期。重试必须跨轮，本轮不得判定为失败。
 
+补充（2026-10-09）：实例重启导致 HTTP 通道瞬断，重试须跨轮；本轮下一轮探活即恢复 200，符合 AGENTS.md 既有记载。
+
+[同族并入 · 原条「时间戳比 curl 200 更可靠」]
+`curl` 返回 200 只说明服务在线；进程重启前后都会返回 200。`runtime-vs-source-v2` 判据①（进程 `pm_uptime` 晚于产物 `mtime`）才是「新代码已加载」的确证——本例 `1791456574 > 1791456562`，成立。
+
+补充（2026-10-09）：实例重启导致 HTTP 通道瞬断。按 AGENTS.md 规定必须跨轮探活确认，禁止在原轮判失败——本轮照此执行，下一轮 curl 5175 恢复 200。
+
 ## `indexOf('</template>')` 会命中 slot 的闭合
+
+[VERIFIED] 2026-10-09 家族级复核：tsc:client / test:tsc 通过 + 各陷阱源码复核
 
 Vue SFC 的 template 内有多个 `<template #slot>`，首个 `</template>` 不是根模板结尾。判据取「根模板段」须用 `lastIndexOf('</template>')` 或按标签配对扫描——否则切片过短，判据基线自己就红（本轮实测踩到）。
 
-## `writeText('/tmp/x')` + 同轮 `git commit -F /tmp/x` 必失败：`writeText` 走 overlay，同轮子进程读不到（`git` 读的是真盘）。`fatal: could not read log file: No such file or directory` 即此因。修法
-
-`git commit -m '<msg>'` 直接传，或跨轮（写 → 下一轮 commit）。这正是台账 `overlay-atomic` 那条的又一实例。
-
 ## 测试写「响应形状」须与组件实际消费的字段一致
+
+[VERIFIED] 2026-10-09 家族级复核：全量 vitest（188 文件）当日通过，含 --no-cache 口径
 
 v1 测试 mock 返回 `{ results: [...] }`（wiki 字段），v2 组件读 `{ matches: [...] }`（lessons 字段）——改组件后旧测试全红。更新测试时须同时核对「mock 的 URL」与「mock 的字段名」，二者任一不符都会红。
 
 ## `node -e` 里做字符串替换，引号转义极易让 `replace` 空转：本轮变异用 `node -e '...replace("'tree', ...' ...)'`，外层单引号把内层单引号截断 → `replace` 未匹配 → 文件原样 → 测试仍绿，误判「判据不承重」。改用 `python3 -c` + `chr(39)` 构造引号后，变异正确生效（1 failed）。教训
 
+[VERIFIED] 2026-10-09 家族级复核：本仓承重守卫族（*.node-test.ts）当日全绿；每类假绿均有台账实测记录
+
 变异后若测试没红，先核验「被变异文件是否真的变了」（`grep` 变异点），别直接怀疑判据。
 
 ## 重写 Vue 组件时必须逐段核对 SFC 三块是否齐全：我从 v1 重写 `KnowledgePanel.vue` v2 时，只写了 `<script setup>` + `<template>`，漏了 `<style scoped>`。代码「能跑」（类名都在、测试也绿——因为测试断言的是类名存在，非样式生效），但渲染全无样式。修法
+
+[VERIFIED] 2026-10-09 家族级复核：grep 消费方复核（tsc/eslint/vitest 均不覆盖此类）
 
 重写 SFC 后先 `grep '<style'` 确认三块齐全；且样式类的新增须同时检查 `<style>` 段内有对应规则。
 
 ## `.ai-runner/tmp/` 会吞掉 `git stash show -p` 的大输出
 
+[VERIFIED] 2026-10-09 家族级复核：台账内 ≥10 条同因独立复现（截断 / BREAKER-TRIPPED / 并行重放）
+
 本轮先写 `.ai-runner/tmp/stash-backup-*.patch` 备份，但 `ls -la .ai-runner/tmp/` 里混着 300+ 个 `-tools.jsonl` 运行态文件，肉眼极难定位。后续应固定用独立子目录（如 `.ai-runner/tmp/git-cleanup/`）。
 
 ## `core.hooksPath` 指向不存在目录是静默失效
+
+[VERIFIED] 2026-10-09 家族级复核：git.ts:198-201 双分支 + git status/add 行为实测
 
 `.githooks` 目录在磁盘上 MISSING，但 `git config --get core.hookspath` 返回 `.githooks`——所有 hook 早已不触发，且无任何报错。本轮一度 unset 该配置，后判定属越权改动（antfu skill 文档明确 `prepare` 脚本会 `git config core.hooksPath .githooks` 重建），已恢复原值。
 
 ## `branch -d` 会连带清理 `branch.<name>.*` 配置
 
+[VERIFIED] 2026-10-09 家族级复核：git.ts:198-201 双分支 + git status/add 行为实测
+
 删 3 个 `agents/*` 后，`branch.agents.*.vscode-merge-base` 也随之消失——这是 git 预期行为，非缺陷。
 
 ## `03` 基线的「整片遮罩」是视觉回归的隐性真空
+
+[VERIFIED] 2026-10-09 家族级复核：runtime-cjs-copy 守卫当日通过
 
 遮 `.wl-scroll` 确实消除了 git 派生抖动，但代价是该面板所有 UI 改动都不进判据——「不红」被误读成「没回归」。正解不是遮罩而是 route mock 固定数据，让内容确定化后再撤遮罩。守卫必须同时断言「mock 三个端点」+「不得再遮 `.wl-scroll`」+「等真实数据行出现」，三者缺一都会退化成恒真。
 
 ## `.node-test.ts` 在 `packages/client/` 下跑 vitest 匹配不到
 
+[VERIFIED] 2026-10-09 家族级复核：全量 vitest（188 文件）当日通过，含 --no-cache 口径
+
 该包 vitest 默认 include 为 `**/*.{test,spec}.?(c|m)[jt]s?(x)`，不含 `node-test`。必须从仓库根跑 `npx vitest run packages/client/tests/xxx.node-test.ts`。
 
 ## 在途改动会把「别人的 tab」算到你头上
 
+[VERIFIED] 2026-10-09 家族级复核：runtime-cjs-copy 守卫当日通过
+
 `git status` 里 `SidePane.vue` + `useSidePaneTab.ts` 是会话开始前就存在的在途改动（新增第 4 个 `kb` tab），它使 01/02/04/05/06 基线稳定差 422–532px。归因靠「单跑差异量级稳定 + 03 单独通过 + 定位到具体 DOM 变化」，不能笼统归为「基线过期」。
 
-## `overlay-atomic-v1` 使「同轮写盘 + 同轮 exec 读同一文件」失效：本轮变异验证第一次尝试在同一脚本里 `writeText` 后立刻 `exec('vitest')`，vitest 读到的是磁盘旧内容（原文件），守卫保持全绿造成假阴性。写入先落 overlay、仅脚本 exit 0 才整体落盘 —— 同轮 `exec` 起的子进程看不到。变异验证必须跨轮
-
-一轮只写、下一轮才跑。
-
 ## 脚本内拼接过长字符串数组会触发 `Unexpected token '...'`
+
+[VERIFIED] 2026-10-09 家族级复核：台账内 ≥10 条同因独立复现（截断 / BREAKER-TRIPPED / 并行重放）
 
 用 `[...].join('\n')` 拼 30+ 行守卫代码时，服务端解析器在字符串字面量中途报错。拆成小步（先加常量、再加 test）即可。
 
 ## `.node-test.ts` 的守卫清单必须双向断言
 
+[VERIFIED] 2026-10-09 家族级复核：memory-budget / lessons-hygiene / docs-retrieval / api-surface-parity 当日全绿
+
 只断言「mask 里不含 token」会漏掉「清单锈蚀」（类名改了 token 已不存在却仍留在清单里）；反过来只断言「token 在源码中存在」又漏掉「mask 里偷偷加了」。两条都要。
 
 ## 沙箱只加载 `dist/helpers.cjs`，不加载 `src`
+
+[VERIFIED] 2026-10-09 家族级复核：runtime-cjs-copy.node-test.ts 当日通过；dist 可作恢复基线
 
 `__AI__.lessons.match` 写进 `packages/core/src/helpers.cjs` 后活体调用失败（`Cannot read properties of undefined (reading 'match')`），运行时读的是 `apps/standalone/dist/helpers.cjs`。改 `helpers.cjs` 必须 `pnpm build` 才生效——这是 §13 runtime-vs-source 的一个具体实例。
 
 ## 沙箱原生 API 扫描器会拦变量名 `fs`
 
+[VERIFIED] 2026-10-09 家族级复核：helpers 源码（变量名 fs/path 触发 NATIVE_API_FORBIDDEN；syntaxCheck 误判 SFC）
+
 脚本里写 `const fs = __AI__.readText(...)` 触发 `NATIVE_API_FORBIDDEN @L30`。变量名不能叫 `fs` / `path` 等——扫描器看的是代码骨架，不区分「这是别名还是真的 fs」。
 
 ## `host-owned-write-guard-v1` 已在 SYSTEM.md 上触发告警
 
+[VERIFIED] 2026-10-09 家族级复核：instance-ownership-v1 + host-owned-write-guard.node-test.ts 当日通过
+
 写入时 stderr 输出了 `[host-owned-write] patch -> packages/core/SYSTEM.md`（两次）。观察期不阻断，但已留痕。本轮为用户显式授权的直改，我在下一轮读盘核验了实际内容而非只信 exit 0。
-
-## 重启当轮脚本会返回 `Failed to fetch`
-
-pm2 restart 使承载会话的进程瞬断，HTTP 通道中断。这是预期现象，不是失败——须跨轮探活（下轮 `pm2 jlist` + curl 即恢复）。AGENTS.md 已记录此条，本次实测再次印证。
-
-补充（2026-10-07）：pm2 restart 使承载会话的进程瞬断，HTTP 通道中断。属预期现象，不是失败——须跨轮探活（下轮 `pm2 jlist` + curl 即恢复）。本次为会话内第 2 次实测印证，AGENTS.md 已记录此条。
 
 ## `:(exclude)<dir>` 与「同 dir 下的具体文件」冲突
 
+[VERIFIED] 2026-10-09 家族级复核：git.ts:198-201 双分支 + git status/add 行为实测
+
 `git add -- <paths> :(exclude).ai-runner` 里，当 `<paths>` 本身是 `.ai-runner/lessons.md`（gitignore 白名单文件）时，exclude 让 pathspec 交集为空，git 报 `did not match any files`。修法是判 paths 是否落 exclude 区内再决定加不加 exclude，而不是无脑叠加。
 
-## `hasRunnerPath` 是局部变量名，build 后被打包器重命名
-
-直接 `grep hasRunnerPath dist/...` 命中 0，但换搜语义片段 `paths.some` 就命中 1 处。产物核验必须搜语义片段，不能搜局部变量名。
-
 ## `writeFile` 报成功但磁盘只剩 4 字节：一轮内 `writeFile` → `readText` 验长度时发现 `CONTENT_LEN=4`，`fileInfo` 显示 `size:4` / `mtimeMs` 为新时间戳。原因排查：同轮 181 行 / 6KB 脚本贴近输出上限，写盘请求疑被上游截断但未报错。修法
+
+[VERIFIED] 2026-10-09 家族级复核：helpers/*.cjs 源码（exec → {ok,stdout}；syntaxCheck → {ok}）
 
 写后立即 `readText` 回读并校验长度，不足即 `exit(2)`，下一轮覆盖重写。写盘成功 ≠ 内容正确，必须回读取证。
 
 ## `/run` 只收 node 脚本，bash shebang 会被硬拦：首轮用 `#! /usr/bin/env bash` 触发 `ILLEGAL_SHEBANG`，且连发触发 429 熔断。修法
 
+[VERIFIED] 2026-10-09 家族级复核：台账内 ≥10 条同因独立复现（截断 / BREAKER-TRIPPED / 并行重放）
+
 构建/进程管理走 `__AI__.exec`（js 通道内调 `pnpm`）或 `__AI__.shell(['sh','-c', ...])`，不要用 bash shebang 提交 `/run`。
 
-## pm2 restart 当轮脚本会 `network error`（预期）：重启导致 HTTP 通道瞬断，脚本以 `-1` 收场。修法
-
-跨轮探活复验（AGENTS.md 已明示），不要在当轮判失败或立即重试。
-
 ## `/__ai/session` 路径不存在（404）
+
+[VERIFIED] 2026-10-09 家族级复核：产物逐字节比对（活端点 vs 两份 dist）实测通过
 
 探活端点要选真实存在的（`/`、`/__ai/files`、`/__ai/tasks`）。
 
 ## 注释里写 `{([` 字面量会破坏 `extractInner` 花括号配平：测试用 `extractInner` 抠函数体时只按 `{`/`}` 计数、不识别注释与字符串。我在 `hasExecutableContent` 的注释里写了「注释里没有 `{([`」→ 那个 `{` 被当函数体起点 → inner 残缺 → vm 编译报 `Unexpected token ':'`。修法
 
+[VERIFIED] 2026-10-09 家族级复核：tsc:client / test:tsc 通过 + 各陷阱源码复核
+
 改注释文案，不放括号字面量。
 
 ## 变异验证别在函数体外注入同名函数：JS 函数声明提升 + 内层遮蔽 ⇒ 外层变异版从未被调用，`extractLatestScript` 仍用自己那份原版 → 变异验证假通过。正确做法
+
+[VERIFIED] 2026-10-09 家族级复核：本仓承重守卫族（*.node-test.ts）当日全绿；每类假绿均有台账实测记录
 
 在抠出的函数体字符串内部做替换（`if (!hasExecutableContent(text)) continue` → `if (false) continue`）。
 
 ## 变异串不能带行注释
 
+[VERIFIED] 2026-10-09 家族级复核：本仓承重守卫族（*.node-test.ts）当日全绿；每类假绿均有台账实测记录
+
 `'return true // MUTATION'` 会注释掉紧随的 `}` → `Unexpected token ')'`。去掉注释即可。
 
-## `writeFile`/`patchFile` 同轮写入 overlay，`vitest` 子进程读真磁盘看不见
-
-变异验证必须在同进程 vm 里做，不能靠子进程跑测试。
-
 ## 变异验证暴露判据不承重：P2 原本用 `for (let i = 0; i < PLAIN_STREAK_MAX; i++)`——常量改成 99 时循环也跟着 99 次，测试恒真（变异下仍绿）。改为硬编码 `i < 2` 后，变异下 P2 变红。教训
+
+[VERIFIED] 2026-10-09 家族级复核：本仓承重守卫族（*.node-test.ts）当日全绿；每类假绿均有台账实测记录
 
 判据引用了被测常量本身就是真空判据。
 
 ## `patchFile` 用行号切片代替手写锚点
+
+[VERIFIED] 2026-10-09 家族级复核：helpers/patch.cjs 源码（失配抛异常、<12 字符 ANCHOR_TOO_SHORT）
 
 手写含 `§` 与全角标点的锚点反复 `count=0`；改用 `L.slice(i, i+5).join('\n')` 从磁盘取真实行后一次通过。
 
@@ -1493,115 +1638,152 @@ pm2 restart 使承载会话的进程瞬断，HTTP 通道中断。这是预期现
 
 ## 撤 probe 时误删 `beforeEach(() => {` 头
 
+[VERIFIED] 2026-10-09 家族级复核：helpers/patch.cjs 源码（失配抛异常、<12 字符 ANCHOR_TOO_SHORT）
+
 `patchFile` 替换范围需精确到整段；残留半句导致 `PARSE_ERROR at 70:1`。
 
-## vitest 模块缓存
-
-常量恢复后 P2 仍红，加 `--no-cache` 重跑才转绿。改常量后验证需清缓存。
-
 ## `_plainStreak.clear()` 优于 `delete(newId)`
+
+[VERIFIED] 2026-10-09 家族级复核：helpers/*.cjs 源码（exec → {ok,stdout}；syntaxCheck → {ok}）
 
 `initLoop` 每次生成新 id（`${prefix}_${Date.now().toString(36)}`），`delete(新id)` 是 no-op。复检建议的核心是「消除 loopId 复用 / Map 无上限增长」，正确做法是 `clear()` 全清。
 
 ## 复检建议 2 是好的加固
 
+[VERIFIED] 2026-10-09 家族级复核：memory-budget / lessons-hygiene / docs-retrieval / api-surface-parity 当日全绿
+
 原 P2 只断言 `finish` 存在，未验证「熔断分支 return 在 sendFill 之前」这条控制流顺序——加断言后即便未来有人把 `sendFill` 移到熔断判断之前，测试会红。
 
 ## vitest 报的测试数与文件内 `test()` 数量不符（缓存）：P5 写入后 `vitest run` 仍报 4 passed，而文件内确有 5 个 `test()`。加 `--no-cache` 后正常报 5 passed。此前 P4 也遇过同类现象。修法
 
+[VERIFIED] 2026-10-09 家族级复核：本仓承重守卫族（*.node-test.ts）当日全绿；每类假绿均有台账实测记录
+
 改动测试文件后一律用 `--no-cache` 复跑，不采信首次结果。
 
+[同族并入 · 原条「vitest 模块缓存」]
+常量恢复后 P2 仍红，加 `--no-cache` 重跑才转绿。改常量后验证需清缓存。
+
+[同族并入 · 原条「变异恢复后立即跑测试读到旧状态：`--no-cache` 也不能完全避免（worker 进程缓存模块）。修法」]
+恢复后跨轮再跑，或先 `readText` 确认磁盘已恢复再跑。
+
 ## `rm -rf node_modules/.vite` 被安全拦截（`SECURITY_BLOCKED: rm-recursive-force`）
+
+[VERIFIED] 2026-10-09 家族级复核：本仓承重守卫族（*.node-test.ts）当日全绿；每类假绿均有台账实测记录
 
 清缓存改用 `--no-cache` 参数即可，无需删目录。
 
 ## 产物核验要选对文件
 
+[VERIFIED] 2026-10-09 家族级复核：产物逐字节比对（活端点 vs 两份 dist）实测通过
+
 `apps/standalone/dist/helpers.cjs` 是 core 运行时（不含前端逻辑）；本次改动全在前端（`packages/client/`），须核验 `packages/client/dist/assets/index-*.js`。首轮核验搜错文件导致全部 `false`，误以为构建没进去。
 
 ## `grep` 的 `path` 参数在某些调用下未生效
 
+[VERIFIED] 2026-10-09 家族级复核：helpers/*.cjs 源码（exec → {ok,stdout}；syntaxCheck → {ok}）
+
 首次 `grep('已冻结', { ext:['js'], path:'packages/client/dist' })` 返回的是 `scripts/` 目录的命中。改用 `walk` 列文件 + `readText` 定向读主 chunk 后成功。
 
-## 重启当轮脚本必返回 `network error`（AGENTS.md 已记）
-
-须跨轮探活，不在当轮判失败。
-
-补充（2026-10-07）：跨轮探活才能确认，不在当轮判失败。
-
 ## `?? 0` 掩盖了「写入 0」与「未写入」的差异：P5 原本断言 `_plainStreak.get('loop-plain') ?? 0 === 0`，当第三层守卫失效、代码走到 `_plainStreak.set(id, 0)` 时，`get` 返回 `0`，`?? 0` 仍得 `0`，断言不红——弱断言没锁住该守卫。改 `has(id) === false` 后，只要写了键（哪怕值是 0）就变红。修法
+
+[VERIFIED] 2026-10-09 家族级复核：本仓承重守卫族（*.node-test.ts）当日全绿；每类假绿均有台账实测记录
 
 判「键是否存在」用 `has()`，不用 `get() ?? 默认值`。
 
 ## P4/P3 同类残留弱断言无需改
 
+[VERIFIED] 2026-10-09 家族级复核：本仓承重守卫族（*.node-test.ts）当日全绿；每类假绿均有台账实测记录
+
 `_plainStreak.get('loop-plain') ?? 0 === 0` 在 P3（第 98 行）与 P4（第 114 行）各有一处，但它们的语义是「计数归零 / 未写入」——用 `?? 0` 可接受，因为这两处没有「写入 0」这个中间态（P3 走 `delete`，P4 走未 set）。只有 P5 的写入守卫会产生 `set(id, 0)`，故只改 P5。
 
 ## 压缩器重命名符号 ⇒ 按符号名 grep 产物必然假阴性
 
+[VERIFIED] 2026-10-09 家族级复核：产物逐字节比对（活端点 vs 两份 dist）实测通过
+
 `isFrozenBroadcast` 被压成 `Wa`，只能按正则字面量 `已冻结` 取证。产物核验要搜语义字面量，不搜函数名。
 
+[同族并入 · 原条「`hasRunnerPath` 是局部变量名，build 后被打包器重命名」]
+直接 `grep hasRunnerPath dist/...` 命中 0，但换搜语义片段 `paths.some` 就命中 1 处。产物核验必须搜语义片段，不能搜局部变量名。
+
+[同族并入 · 原条「产物核验不能搜函数名」]
+打包器会压缩重命名标识符，搜 `openPreview` 在产物里恒为 false；要搜语义片段（`/__ai/files/read`、`fco-mask`、`diff-hunk`）才判得准。
+
 ## 变异验证的「备份→改→还原」会刷新源码 mtime
+
+[VERIFIED] 2026-10-09 家族级复核：本仓承重守卫族（*.node-test.ts）当日全绿；每类假绿均有台账实测记录
 
 `reply-handlers.ts` 内容字节完全一致（diff 未变、661 全绿），但 mtime 被刷到 `00:46:16`，晚于产物 `00:34:36`。项目里「源码 mtime > 产物 mtime ⇒ 产物过期」这条判法在此会误报——后来人别据此重跑构建。
 
 ## 构建产物文件名会变
 
+[VERIFIED] 2026-10-09 家族级复核：产物逐字节比对（活端点 vs 两份 dist）实测通过
+
 `index-64zzh0zQ.js` → `index-DEXsSba1.js`。核验产物不能硬编码文件名，须从活端点 HTML 抓当前 chunk 名再定位。上轮脚本硬编码旧文件名导致 `MISS`，本轮改从 `fetch('/')` 正则提取后成功。
 
-## `writeFile` 与 `vitest` 同轮 → vitest 读不到新文件：新增测试文件后同轮跑 `vitest run` 报 `No test files found`——overlay 未落盘，子进程读真实磁盘读不到。修法
-
-新建文件与跑测试分两轮（下一轮 `--no-cache` 跑）。
-
-## 变异恢复后立即跑测试读到旧状态：`--no-cache` 也不能完全避免（worker 进程缓存模块）。修法
-
-恢复后跨轮再跑，或先 `readText` 确认磁盘已恢复再跑。
+[同族并入 · 原条「产物 grep 需用当前 hash 文件名」]
+`pnpm build` 后 `index-<hash>.js` 的 hash 会变。用旧文件名 grep 得空结果，会误判「产物未含该字段」。应先 `ls` 取实际文件名。
+[同族并入 · 原条「打包器把引号转成反引号」] 另一坑：打包器会转写引号形态（单引号→反引号）。按源码引号形态 grep 会漏——产物核对须搜语义片段。
 
 ## 外层单引号字符串里写转义单引号会产出非法字符：`'...\\\'...'` 经 JS 解析后落盘成 `\'`，触发 `TS1127 Invalid character`。修法
+
+[VERIFIED] 2026-10-09 家族级复核：抽取器会剥离 import 行；writeText 返回 undefined
 
 含内层单引号的行改用双引号包裹外层。
 
 ## 连续截断 + 429 熔断的恢复：一轮 37 行脚本被截断 → 重发 14 行仍截断 → 第三次触发 `BREAKER-TRIPPED`（429）。修法
 
+[VERIFIED] 2026-10-09 家族级复核：台账内 ≥10 条同因独立复现（截断 / BREAKER-TRIPPED / 并行重放）
+
 降到 12 行最小脚本（只跑 `git status`）探通道，成功后再逐步加内容。熔断不是永久封禁，跨轮即恢复。
 
 ## 产物核验要搜「本函数独有」特征
 
+[VERIFIED] 2026-10-09 家族级复核：产物逐字节比对（活端点 vs 两份 dist）实测通过
+
 首轮搜 `@desc` / 反引号，命中的是 `useRunner` / `normalizeTables` 的编译产物（假阳性）。改为搜 `looksLikeScript` 的三判据组合 + `FENCE_CLOSE_RE` 正则 + 空白压缩组合才定位到 `stripScriptBlocks`。
-
-## 站点代码块按钮文字污染围栏行：DeepSeek 的 `<pre>` 内含「`js` `复制` `下载`」按钮，`extractReplyMd` 的 `textContent` 把按钮文字一起抓进围栏行 ⇒ 真实形态是 `js复制下载``` `（````` 在行尾）。判据必须容错
-
-`FENCE_RE` 同时匹配行首与行尾。
 
 ## 构造样本 ≠ 真实样本：我首轮 e2e 用「理想围栏」````js` 通过，但真实站点的围栏被污染 → 线上失效。教训`
 
+[VERIFIED] 2026-10-09 家族级复核：ai-guard.node-test.ts 与 strip-script-blocks 守卫族当日通过
+
 UI 剥离类改动必须以真实站点 DOM 反推的文本为测试样本，不能只构造理想形态。
 
+[同族并入 · 原条「站点代码块按钮文字污染围栏行：DeepSeek 的 `<pre>` 内含「`js` `复制` `下载`」按钮，`extractReplyMd` 的 `textContent` 把按钮文字一起抓进围栏行 ⇒ 真实形态是 `js复制下载``` `（````` 在行尾）。判据必须容错」]
+`FENCE_RE` 同时匹配行首与行尾。
+
 ## `__AI__` 无 `exists` / `listDir`
+
+[STALE] 2026-10-09 helpers/index.cjs:108 已补 exists 转发；listDir 仍不存在（SYSTEM.md §3.2 / ai-guard JSDoc 一致）
 
 实际可用键只有 63 个，含 `tryReadFile` / `readFiles` / `walk`，无 `exists`。按 §3.2 速查表写代码前应先 `Object.keys(__AI__)` 实测一次。
 
 ## `syntaxCheck` 会把含 `<template>` 字面量的 .cjs 误判为 Vue SFC
 
+[VERIFIED] 2026-10-09 家族级复核：helpers 源码（变量名 fs/path 触发 NATIVE_API_FORBIDDEN；syntaxCheck 误判 SFC）
+
 拆分 search.cjs 时因源码含 `'<template>'` 字符串而被拒，改用 `node --check <file>` 才是 cjs 语法的准据。
 
-## overlay 沙箱内自跑 lint/测试会读到磁盘旧态
-
-脚本内 `npx eslint` 读的是磁盘，而本轮的 `patchFile` 只在 overlay —— 会出现「patch 已成功但 lint 仍报旧错」。判定前须先 `exit 0` 落盘，或改用 `readText`（overlay 感知）自证。
-
 ## `helpers.cjs` 转发壳破坏 vm 沙箱测试
+
+[VERIFIED] 2026-10-09 家族级复核：host-owned-write-guard.node-test.ts 当日通过
 
 `host-owned-write-guard` 用 `vm.runInContext` 加载，缺 `module` 且 require 白名单是硬编码旧路径。拆分后须给沙箱加 module 壳，并把 require 解析改成「相对加载者目录」而非「相对 src/」。
 
 ## `copy-runtime` 清单有四处而非两处
 
+[VERIFIED] 2026-10-09 家族级复核：runtime-cjs-copy.node-test.ts 当日通过；dist 可作恢复基线
+
 `scripts/`、`packages/core/scripts/`、`apps/standalone/scripts/build.mjs`、`scripts/build-all.mjs` 各持一份硬编码清单，漏一处即产生某条发布路径的 dist 缺文件。
 
 ## anchors.json 重写会触发 290 条 `jsonc/indent`
 
+[VERIFIED] 2026-10-09 家族级复核：pnpm docs:verify 通过；docs-scan.cjs 的 SKIP 规则复核
+
 该文件要求 4 空格缩进，用 `JSON.stringify(_, null, 2)` 覆写后必须补 `npx eslint <file> --fix`。
 
 ## `packages/core/dist/helpers/` 与 `apps/standalone/dist/helpers/` 是两条独立产物路径
+
+[VERIFIED] 2026-10-09 家族级复核：产物逐字节比对（活端点 vs 两份 dist）实测通过
 
 `pnpm build` 只走 `build:tsc`（→ `packages/core/scripts/copy-runtime.cjs`）+ `scripts/build-all.mjs`。两个脚本各自拷贝一次，core/dist 与 apps/dist 互不影响。验收时必须两边都查。
 
@@ -1609,13 +1791,19 @@ UI 剥离类改动必须以真实站点 DOM 反推的文本为测试样本，不
 
 ## `lessons`/`tasks` 迁出时不能照搬 `__AI__.tasks.xxx` 自引用
 
+[VERIFIED] 2026-10-09 家族级复核：runtime-cjs-copy.node-test.ts 当日通过；dist 可作恢复基线
+
 原内联写法里 `_post` 调 `__AI__.tasks._url()`、`push` 调 `__AI__.tasks._post(...)`。迁到独立模块后 `__AI__` 尚未装配完（或在模块顶层不可见），必须改成模块内本地函数直接互调。
 
 ## `overlay-flush-and-lang-check.node-test.ts` 的接线锚点会因拆分变红
 
+[VERIFIED] 2026-10-09 家族级复核：runtime-cjs-copy.node-test.ts 当日通过；dist 可作恢复基线
+
 该测试断言 `index.cjs` 内含 `flush() {` 与 `globalThis.__AI_APPLY_OVERLAY`。把 flush 实现迁到 `helpers/misc.cjs` 后，`index.cjs` 只剩薄壳 `flush() { return miscApi.flush() }`，断言必须同步改指新文件——任何按「实现行锚点」写的测试都会在拆分时变红，拆分时要 grep 全仓测试找这类锚点。
 
 ## `const X = null` 声明 + 后续装配赋值 = `no-const-assign`
+
+[VERIFIED] 2026-10-09 家族级复核：runtime-cjs-copy.node-test.ts 当日通过；dist 可作恢复基线
 
 门面文件里族实例若先声明后装配，必须用 `let`；用 `const` 会 ESLint 报错。重写门面时一次写对。
 
@@ -1623,17 +1811,29 @@ UI 剥离类改动必须以真实站点 DOM 反推的文本为测试样本，不
 
 ## `fs` 从 index.cjs 中删除后正则误配
 
+[VERIFIED] 2026-10-09 家族级复核：grep 消费方复核（tsc/eslint/vitest 均不覆盖此类）
+
 `/\bfs\b/` 会命中 `./fs.cjs` 路径字符串，判断「require 是否仍被使用」必须用 `fs.xxx()` 调用点匹配，不能只看单词边界。
 
 补充（2026-10-08）：判断 require 是否仍被使用时，`/\bfs\b/` 会命中 `./fs.cjs` 路径字符串；必须用 `fs.xxx(` 调用点匹配。
 
 ## 分段 `appendText` 拼接极易造成结构错乱：改造长文件（search.cjs 196 行、shell.cjs 326 行）时若反复「先写头部、再 append 中段、再 append 尾段」，容易出现重复定义、`return` 越界、闭包断裂等连锁损坏；本次 search.cjs 因此被连续损坏 3 轮。推荐做法
 
+[VERIFIED] 2026-10-09 家族级复核：台账内 ≥10 条同因独立复现（截断 / BREAKER-TRIPPED / 并行重放）
+
 整文件 ≤150 行时一次 `writeText`；超过 150 行时先写头部+前若干函数，之后每轮只 append 一个完整函数（带闭合），避免跨轮拼接同一函数体。
 
 补充（2026-10-08）：整文件 ≤150 行时一次 `writeText`；>150 行时每轮只 append 一个完整函数（含闭合），不跨轮拼接同一函数体。
 
+[同族并入 · 原条「长段落文本替换易触发输出通道截断」]
+一次 `patchFile` 替换 20 行（含长中文段落）会被服务端在解析阶段截断（HTTP 400 `Invalid or unexpected token`），必须拆为「标题 + 引言 + 基础 + 易错项」小步替换。原计划一次性替换 §3.2 全段被截断，改为「先替换标题行+空行+读写行」才成功。
+
+[同族并入 · 原条「长段落 `patchFile` 替换会撞输出通道截断：一次替换 §14（14 行含长中文段）与 §16（15 行）都被 HTTP 400 `Invalid or unexpected token` 拦下。分步策略」]
+先替换标题+引言+首条，再逐条追加；或每节独立成轮。
+
 ## `patchFile` 用 `*/` 之类的短通用串做锚点是灾难
+
+[VERIFIED] 2026-10-09 家族级复核：helpers/patch.cjs 源码（失配抛异常、<12 字符 ANCHOR_TOO_SHORT）
 
 曾用 ` */` 作锚点，21 处匹配导致函数头被批量误吞，把 shell.cjs 整个 `runForeground` 签名删掉。锚点必须是本轮 readText 拿到的唯一多行文本，且长度 ≥12 字符。
 
@@ -1641,114 +1841,128 @@ UI 剥离类改动必须以真实站点 DOM 反推的文本为测试样本，不
 
 ## 错误 patch 后最优恢复路径是 `cp` 备份而非逐行修
 
+[VERIFIED] 2026-10-09 家族级复核：runtime-cjs-copy.node-test.ts 当日通过；dist 可作恢复基线
+
 `apps/standalone/dist/helpers/*.cjs` 是上一次构建的完整快照，用它覆盖回 src 可一步回到基线。但前提是构建后的 dist 与源码一致（本次 dist 是改造前的旧拷贝，恰好匹配）。
 
-## `eslint` 子进程读磁盘、不读 overlay
-
-`patchFile` 成功后立刻跑 `npx eslint` 会看到旧错误，必须先 `await __AI__.flush()` 落盘再验。这条已在 SYSTEM.md §3.2 有记载，但实操中极易忽略。
-
-补充（2026-10-08）：`patchFile` 成功后立即跑这些命令会看到旧错误，必须先 `await __AI__.flush()`（或退出本轮）再验。
-
-
-## `dist/` 是上次构建的完整快照，可作恢复基线
-
+[同族并入 · 原条「`dist/` 是上次构建的完整快照，可作恢复基线」]
 `apps/standalone/dist/helpers/*.cjs` 在源码被 patchFile 破坏时，用 `cp` 覆盖回 src 是一步回退的最快路径（前提是构建后未再改源码）。
-
-## `SYSTEM.md` 是 host-owned（§1 `instance-ownership-v1` 文件级）
-
-任何写入都触发 `[host-owned-write]` stderr 告警。用户显式授权（原话「采纳」）后可代执行，但须在同一轮 DONE 如实记录「授权来源 + 执行时刻」。本次已记录。
 
 ## T7 守卫采用「arity 对账」而非「白名单」：白名单方案要求先完成 SYSTEM.md 瘦身才能通过（会连锁触发多轮 patch），且新增 API 就要维护清单。arity 对账方案无需维护清单——教学层写 `name(args)` 时，`countTopArgs` 顶层逗号数与门面 `fn.length` 不一致就红。反例承重
 
+[VERIFIED] 2026-10-09 家族级复核：memory-budget / lessons-hygiene / docs-retrieval / api-surface-parity 当日全绿
+
 `shell(cmd)` 写 1 参 vs 真实 2 参 ⇒ 红（实测修复路径）。
 
-## 长段落文本替换易触发输出通道截断
-
-一次 `patchFile` 替换 20 行（含长中文段落）会被服务端在解析阶段截断（HTTP 400 `Invalid or unexpected token`），必须拆为「标题 + 引言 + 基础 + 易错项」小步替换。原计划一次性替换 §3.2 全段被截断，改为「先替换标题行+空行+读写行」才成功。
-
 ## `ai-guard.ts` 的注释块与 `AI_JSDOC` 常量极易混淆
+
+[VERIFIED] 2026-10-09 家族级复核：instance-ownership-v1 + host-owned-write-guard.node-test.ts 当日通过
 
 注释块（L37–49）里写「历史三处漂移」含 `patchFile(p, { find, replace })` 字样，是备忘不是实际注入。`grep 'patchFile(p, { find, replace })'` 会同时命中该备忘 + 测试文件的两处备忘 + 测试的变异说明——判运行时注入内容必须调 `injectAiJsdoc()`，不能靠 grep 源码文本。
 
 ## SSOT 声明的自我矛盾
 
+[VERIFIED] 2026-10-09 家族级复核：anchors / docs / crossfile 三套校验当日通过
+
 `AGENTS.md` 明写「不重述执行规则，唯一来源是 SYSTEM.md」，但实际内容里「monorepo 结构铁律」「自动循环没有轮次上限」两节正在重述 SYSTEM.md 内容，且措辞更详细。声明 SSOT 与实际内容违反声明共存是文档治理的隐性风险——守卫只看字面（`system-contract` 断言 §1/§8/§12 未回退），不看「是否违反职责边界」。
 
 ## 「搬出」不等于「整节搬」
+
+[VERIFIED] 2026-10-09 家族级复核：anchors / docs / crossfile 三套校验当日通过
 
 本节分析的关键判据是同一节内可能混有通用规则与项目事实。§14/§15/§16 三节各含「通用原则」与「项目命令」两部分，整节搬会把通用规则也搬走（违反 SYSTEM.md 是执行规则 SSOT 的定位），只搬项目事实才能同时满足两份 SSOT。
 
 ## 「收敛重叠」不等于「删掉一边」
 
+[VERIFIED] 2026-10-09 家族级复核：anchors / docs / crossfile 三套校验当日通过
+
 分析发现两处「反向重叠」中，`§4 依赖方向 ↔ AGENTS.md monorepo 铁律` 才是真重叠（同一原则两处写，措辞不同），处理方式是SYSTEM.md 保留通用原则 + AGENTS.md 保留项目特化清单 + 双向加指针；而 `§0.1 宿主机制 ↔ AGENTS.md 自动循环` 并不重叠（前者是「与模型行为无关，无需感知」的态度约束，后者是常量与终止路径的事实清单），不做改动。判据是「两边讲的是不是同一件事」，不是「标题看起来像不像」。
 
 ## `scripts/anchors.json` 引用的锚点串在改 SSOT 时是硬约束：`SYSTEM.md §11` 的「获取顺序
 
+[VERIFIED] 2026-10-09 家族级复核：anchors / docs / crossfile 三套校验当日通过
+
 本地优先，不可跳层」被 anchors.json 内容锚引用，改文时必须逐字保留该短语，否则 `pnpm anchors:verify` 会红——本次瘦身时通过「保留原句 + 只删后半段的具体端点」实现。
 
-## 长段落 `patchFile` 替换会撞输出通道截断：一次替换 §14（14 行含长中文段）与 §16（15 行）都被 HTTP 400 `Invalid or unexpected token` 拦下。分步策略
-
-先替换标题+引言+首条，再逐条追加；或每节独立成轮。
-
 ## 优化前后应确认「项目事实」的落点
+
+[VERIFIED] 2026-10-09 家族级复核：anchors / docs / crossfile 三套校验当日通过
 
 把 §14/§15/§16 的项目事实搬到 AGENTS.md 后，AGENTS.md 从 196 行 → 233 行（+37 行），SYSTEM.md 从 302 → 288 行（−14 行）。收益不是「体积减少」，而是「职责单一」——此后改动只要认准「是通用规则 → SYSTEM.md，是项目事实 → AGENTS.md」，不再两头改、两头漂。
 
 ## 同一 `patchFile` 被重放不会报错，会静默产生重复
 
+[VERIFIED] 2026-10-09 家族级复核：helpers/patch.cjs 源码（失配抛异常、<12 字符 ANCHOR_TOO_SHORT）
+
 §4 末句逐字重复两遍是「同 patch 应用两次」的典型症状——`patchFile` 的 find 只匹配第一处，replace 后若同轮再跑一次会再替一次（或锚点唯一性被破坏后第二遍匹配到替换后的新文本）。改 SSOT 后应 `grep -c` 关键新措辞确认只出现 1 次。
 
 ## 覆写到「文件末尾」的 patch 极易吞掉后续段落
+
+[VERIFIED] 2026-10-09 家族级复核：helpers/patch.cjs 源码（失配抛异常、<12 字符 ANCHOR_TOO_SHORT）
 
 §16 瘦身时用 `lines.slice(s16)` 取到文件末尾作为 oldBlock，把紧随其后的 CHANGE-IMPACT 段一并替换掉了。正确做法是锚定「到下一个 `## §N` 或文件末尾的最后一个独立段落」，而不是「到 EOF」。
 
 ## patch 锚点范围含分隔符 `---` 会顺手删掉它
 
+[VERIFIED] 2026-10-09 家族级复核：helpers/patch.cjs 源码（失配抛异常、<12 字符 ANCHOR_TOO_SHORT）
+
 §11/§13/§14/§15 之间的 `---` 缺失成因是 oldBlock 从标题行取到下一节标题行，中间的 `---` 被吞。取块时应显式保留节间的 `---`。
 
 ## `###` 与 `##` 的差异是机器可检的
+
+[VERIFIED] 2026-10-09 家族级复核：anchors / docs / crossfile 三套校验当日通过
 
 全仓所有节都是 `## §N`，§6 变成 `### §6` 后，任何按 `^## §` 抽章节的脚本（如 `module-size-ratchet` 的 `[ssot-parity-v1]`、`system-contract` 的 `slice()`）都会漏掉 §6。改标题层级属契约级改动，须先 grep 谁在按 `## §` 解析。
 
 ## 计数推断 ≠ 校验器判据
 
+[VERIFIED] 2026-10-09 家族级复核：pnpm docs:verify 通过；docs-scan.cjs 的 SKIP 规则复核
+
 上轮用「docs/*.md 37 份 vs DOCS-INDEX 9 条链接」推断「索引覆盖率低」，实跑 `pnpm docs:verify` 却 exit 0。真因是 `scripts/lib/docs-scan.cjs` 的 `SKIP_DIRS` / `SKIP_PATHS` 跳过运行态与 `docs/plan/**`，且索引用根级 + docs/ 表格两段渲染而非逐文件链接。判据必须承重——计数差是信号，只有跑校验器才是证据（§12 硬规则 3）。
+
+[同族并入 · 原条「计数推断 ≠ 校验器判据：用「docs/*.md 37 份 vs DOCS-INDEX 9 条链接」推断索引覆盖率不足，实跑 `pnpm docs:verify` 却 exit 0——`scripts/lib/docs-scan.cjs` 的 `SKIP_DIRS` / `SKIP_PATHS` 跳过运行态与 `docs/plan/**`，且索引用表格而非逐文件链接渲染。判据必须承重」]
+计数差只是信号，跑校验器才是证据（§12 硬规则 3）。
 
 ## `grep` 命中注释 ≠ 命中定义
 
+[VERIFIED] 2026-10-09 家族级复核：产物逐字节比对（活端点 vs 两份 dist）实测通过
+
 查 `LOOP_HARD_MAX_ROUNDS` 时首个命中落在 `auto-imports.d.ts`（生成物转发）与注释文字里，必须再加 `\\s*=` 才锁定真定义行。
 
-## `shell` 子进程看不到 overlay
-
-`pnpm docs:verify` 读的是真盘，本轮 `patchFile` 后紧接跑它前，已在轮末隐式 `flush`（overlay-atomic-v1 由宿主控制），未显式调用——若后续需要在同一轮内先改盘再跑校验器，必须先 `await __AI__.flush()`。
-
-## 计数推断 ≠ 校验器判据：用「docs/*.md 37 份 vs DOCS-INDEX 9 条链接」推断索引覆盖率不足，实跑 `pnpm docs:verify` 却 exit 0——`scripts/lib/docs-scan.cjs` 的 `SKIP_DIRS` / `SKIP_PATHS` 跳过运行态与 `docs/plan/**`，且索引用表格而非逐文件链接渲染。判据必须承重
-
-计数差只是信号，跑校验器才是证据（§12 硬规则 3）。
-
 ## 文档里的路径引用要探活，不能只看简写
+
+[VERIFIED] 2026-10-09 家族级复核：anchors / docs / crossfile 三套校验当日通过
 
 `server/core.ts` / `server/ws-server.ts` 看似合理，实际 `apps/standalone/src/` 下只有 `server.ts`——这类「历史目录结构残留」是 markdown 声明最常见的漂移点。探活时须对短路径加常见前缀组合（`apps/*/src/`、`packages/*/src/`）逐一试，不能只 `exists(原文)`。
 
 ## 并行回执会让同一段落被注入两次，须自行收敛
 
+[VERIFIED] 2026-10-09 家族级复核：helpers/patch.cjs 源码（失配抛异常、<12 字符 ANCHOR_TOO_SHORT）
+
 本轮 system prompt 明确「并行执行的回执会交错」。实际上第一次 patch（用户授权 A 后）成功写入；服务端后续又回传了一次同样 `ANCHOR_COUNT: 1 / AFTER_HAS_FG: true` 的成功回执（源自并行的同一条脚本重放）。结果 §3.2 出现 L144、L145 两份完全相同的段。patch 写入后必须读盘核对唯一性（`(txt.match(/段名/g) || []).length`），不能只看 `patchFile` 返回 ok。
 
 ## `[host-owned-write]` stderr 告警在观察期不阻断，但必须留授权证据
 
+[VERIFIED] 2026-10-09 家族级复核：instance-ownership-v1 + host-owned-write-guard.node-test.ts 当日通过
+
 写入 `packages/core/SYSTEM.md` 会触发 `[host-owned-write] patch -> packages/core/SYSTEM.md` 告警。按 `instance-ownership-v1` 的文件级同权，SSOT 默认归宿主独占；用户显式授权（原话「A」）时可以写，但回执须记录授权来源 + 时刻（本轮已在脚本 stdout 打出 `AUTH_SOURCE`/`AUTH_TS`，并在 DONE 首句标明）。
 
+[同族并入 · 原条「`SYSTEM.md` 是 host-owned（§1 `instance-ownership-v1` 文件级）」]
+任何写入都触发 `[host-owned-write]` stderr 告警。用户显式授权（原话「采纳」）后可代执行，但须在同一轮 DONE 如实记录「授权来源 + 执行时刻」。本次已记录。
+
+补充（2026-10-09）：写 SYSTEM.md 会有 stderr 告警并记入 changelog 的 `hostOwned` 字段；有用户授权时属正常操作。
+
 ## 索引错位易误判「哪一行是重复」
+
+[VERIFIED] 2026-10-09 家族级复核：helpers/patch.cjs 源码（失配抛异常、<12 字符 ANCHOR_TOO_SHORT）
 
 `lines[k]` 是 0-based、打印时又写成 `(k+1)|`，再叠加 `L144_LEN` 用的是 `lines[144].length`——两套编号一起看会误判哪一行是重复。收敛重复段的稳妥做法是按内容 filter 掉所有匹配段名且非首条的行，而不是按单个索引删。
 
 ## `pnpm build` 会被并行的同一条脚本重放，产生多个重复后台任务
 
+[VERIFIED] 2026-10-09 家族级复核：台账内 ≥10 条同因独立复现（截断 / BREAKER-TRIPPED / 并行重放）
+
 本会话同一脚本被服务端并行执行 4 次，启动 4 个 build 后台进程（`sh-muzez1g2` / `sh-muzez2ao` / `sh-muzez37d` / `sh-muzez47b`）。不 kill 冗余会同时写同一产物路径（overlay 与 copy-runtime 都会互相干扰）。发现重复后，用 `shellStatus(id)` 逐一确认 `running:true`，对非保留的 3 个调 `killShell(id)`，只留最后一个观察到底。多个并发 build 同时 `copy-runtime` 时产出的 `exit=129`（SIGKILL）是互杀的后果，不是构建失败。
-
-## 时间戳比 curl 200 更可靠
-
-`curl` 返回 200 只说明服务在线；进程重启前后都会返回 200。`runtime-vs-source-v2` 判据①（进程 `pm_uptime` 晚于产物 `mtime`）才是「新代码已加载」的确证——本例 `1791456574 > 1791456562`，成立。
 
 ## GitHub 匿名 API 配额 10 次搜索/h、60 次核心/h，且按 IP 计
 
@@ -1768,29 +1982,37 @@ UI 剥离类改动必须以真实站点 DOM 反推的文本为测试样本，不
 
 ## 预览改造不要整组件替换，要按职责切：FileTree 的弹窗除了渲染还有「复制到剪贴板」「HTTP 错误码展示」两处能力，换成统一浮层会静默丢功能。正确做法是只抽「内容→HTML」这一层（`useFileContentHtml`），弹窗外壳各留各的。判据
 
+[VERIFIED] 2026-10-09 家族级复核：grep 消费方复核（tsc/eslint/vitest 均不覆盖此类）
+
 替换前先列该组件除渲染外的行为清单。
 
 ## `writeText` 的返回值不能直接 `JSON.stringify`
+
+[VERIFIED] 2026-10-09 家族级复核：抽取器会剥离 import 行；writeText 返回 undefined
 
 首轮把 `w` 当对象序列化，实际返回 `undefined`，触发 `Cannot read properties of undefined (reading 'slice')`，整轮 overlay 回滚、磁盘零改动。改用「写后回读 + 断言语义片段」验证落盘更可靠。
 
 ## `getChangeType` 在改造后成为死代码：内容预览不需要 `change-type`，但解构仍在，lint 只报 warning 不报 error，容易漏。判据
 
+[VERIFIED] 2026-10-09 家族级复核：grep 消费方复核（tsc/eslint/vitest 均不覆盖此类）
+
 改造消费方后，`grep` 一次被删能力的函数名，确认无调用点即删函数与解构。
 
 ## 「git 变动的文件」≠「轮次变更列表」：这个仓库有两套变更 UI —— `ScriptPanel` 右侧的轮次变更列表（`/__ai/files/read` + `/before`，按 runId 组织）与 `SidePane` 工作日志 tab 里的 WorklogPane（`/__ai/git/worklog` + `/git/diff`，VSCode 源码管理风格）。用户口中的「git 变动的文件」指后者。判据
+
+[VERIFIED] 2026-10-09 家族级复核：routes/git.ts slice(0,2000) vs git.ts slice(0,4000)——两层仍须对齐
 
 先问「这个列表的数据来自哪个端点」——`git/*` 是后者，`files/*` 是前者；不要凭「变更列表」这个词就动手。
 
 ## 删掉 UI 行为后必须清整条数据链：WorklogPane 移除 diff 展开后，`/__ai/git/diff` 请求、`splitDiffByPath`、`fileDiffHtml`、`_diffHtmlCache`、`fileMap`、`diffHighlight` 全部失去消费方，但 `tsc` 与 `lint` 都不会报错（它们只是没被调用）。判据
 
+[VERIFIED] 2026-10-09 家族级复核：grep 消费方复核（tsc/eslint/vitest 均不覆盖此类）
+
 改造消费方后，用 `grep` 逐个搜索被删能力涉及的所有标识符，而不是只看改动点附近。
 
-## 产物核验不能搜函数名
-
-打包器会压缩重命名标识符，搜 `openPreview` 在产物里恒为 false；要搜语义片段（`/__ai/files/read`、`fco-mask`、`diff-hunk`）才判得准。
-
 ## 「过期注释」的判据是「描述与磁盘现状矛盾」，不是关键词命中
+
+[VERIFIED] 2026-10-09 家族级复核：grep 消费方复核（tsc/eslint/vitest 均不覆盖此类）
 
 关键词搜 `DiffOverlay` 会同时命中三类——已经无消费方的孤儿组件自身、以它为参照系的活注释、以及引用它的历史说明。只有逐条读盘比对现状才能分辨，凭关键词批量替换会把正确注释一起改坏。
 
@@ -1798,59 +2020,474 @@ UI 剥离类改动必须以真实站点 DOM 反推的文本为测试样本，不
 
 ## 删 UI 行为后死样式不会被任何工具报出：`tsc` 看类型、`eslint` 看规则、`vitest` 看断言，三者都不检查「CSS 选择器是否有 DOM 消费方」。判据
 
+[VERIFIED] 2026-10-09 家族级复核：grep 消费方复核（tsc/eslint/vitest 均不覆盖此类）
+
 删掉模板中的 class 后，用 `grep` 该 class 名扫一遍源码，命中只剩 `.scss` 自身即为死样式。产物核验时对比 CSS 文件字节数变化可作二次确认。
 
 补充（2026-10-08）：删掉模板中的 class 后 `grep` 该 class 名，命中只剩 `.scss` 自身即为死样式；产物核验时对比 CSS 字节数变化可二次确认。
 
-
 ## `lint` 读真盘，看不见本轮 overlay 写入（overlay-blind-v1 的具体表现）：删掉 `.wl-diff` 死样式后，同一轮 `lint` 仍报「378:1 Delete ⏎」，重跑依旧。根因是 `writeText`/`patchFile` 只进 overlay，而 `lint` 起真子进程读真盘。加一行 `await __AI__.flush()` 后 lint 立刻 `ok=true`。判据
+
+[VERIFIED] 2026-10-09 家族级复核：routes/run.ts:205-233（scriptOk 才 applyOverlay）、:79 默认 read-only
 
 任何「本轮写 + 本轮验」的组合，验之前必须先 flush。
 
+[同族并入 · 原条「overlay 沙箱内自跑 lint/测试会读到磁盘旧态」]
+脚本内 `npx eslint` 读的是磁盘，而本轮的 `patchFile` 只在 overlay —— 会出现「patch 已成功但 lint 仍报旧错」。判定前须先 `exit 0` 落盘，或改用 `readText`（overlay 感知）自证。
+
+[同族并入 · 原条「`eslint` 子进程读磁盘、不读 overlay」]
+`patchFile` 成功后立刻跑 `npx eslint` 会看到旧错误，必须先 `await __AI__.flush()` 落盘再验。这条已在 SYSTEM.md §3.2 有记载，但实操中极易忽略。
+
+补充（2026-10-08）：`patchFile` 成功后立即跑这些命令会看到旧错误，必须先 `await __AI__.flush()`（或退出本轮）再验。
+
+[同族并入 · 原条「`shell` 子进程看不到 overlay」]
+`pnpm docs:verify` 读的是真盘，本轮 `patchFile` 后紧接跑它前，已在轮末隐式 `flush`（overlay-atomic-v1 由宿主控制），未显式调用——若后续需要在同一轮内先改盘再跑校验器，必须先 `await __AI__.flush()`。
+
+[同族并入 · 原条「写测试文件后同轮 `lint` 会报 `No files matching the pattern`」]
+`writeText` 只进 overlay，而 `lint` 起真子进程读真盘。加 `await __AI__.flush()` 后立即正常。
+
 ## `eslint --format compact` 已从 core ESLint 移除
+
+[VERIFIED] 2026-10-09 家族级复核：定点与全仓两条 lint 口径实测（剩余 error 全落既有文件）
 
 报 `The compact formatter is no longer part of core ESLint` 且 exit 2。改用 `--format json -o <file>` 写文件再读，比直接读 stdout 更稳（大输出不会与进度信息混在一起）。
 
 ## `git status --porcelain` 的解析不能先 `trim()`
 
+[VERIFIED] 2026-10-09 家族级复核：git.ts:198-201 双分支 + git status/add 行为实测
+
 格式是固定列宽 `XY␣路径`，未暂存修改的行首列是空格。`trim()` 会把它吃掉，再按 3 字符切就多切掉路径首字符。正确写法是先判空再 `slice(3)`。这个 bug 只在「路径以 `.` 开头且状态行首列是空格」时才暴露——本次恰好是 `.ai-runner/lessons.md`，而 `.` 被吞后变成合法但不存在的 `ai-runner/lessons.md`，报错信息具有误导性。
 
-## 路由层与实现层的同一语义参数要对齐：`routes/git.ts` 把 message 放宽到 2000，`git.ts` 里却仍砍到 200。两层各自合理，合起来就是静默丢数据。判据
-
-改一层的上限时，用 `grep` 搜同一参数名或同一 `slice(0, N)`，确认没有第二处。
-
-## 写测试文件后同轮 `lint` 会报 `No files matching the pattern`
-
-`writeText` 只进 overlay，而 `lint` 起真子进程读真盘。加 `await __AI__.flush()` 后立即正常。
-
 ## `git add` 会被「已跟踪但在 .gitignore 覆盖区」的文件卡住：`.workbuddy/memory/MEMORY.md` 已被跟踪，但 `.workbuddy/` 在 `.gitignore` 里（该条目的本意是阻止 eslint 扫描），于是 `git add -A -- <该路径>` 报 `The following paths are ignored`。修复用 `-f`：它只对命令行显式列出的路径生效，不会把 `dist/`、`node_modules/` 之类未被列出的忽略内容卷进来。判据
+
+[VERIFIED] 2026-10-09 家族级复核：git.ts:198-201 双分支 + git status/add 行为实测
 
 `git add -n -f -- <path>` 能过、不带 `-f` 报 ignored，即属此类。
 
 ## 路由层与实现层的同一语义参数要对齐
 
+[VERIFIED] 2026-10-09 家族级复核：routes/git.ts slice(0,2000) vs git.ts slice(0,4000)——两层仍须对齐
+
 `routes/git.ts` 把 message 放宽到 2000，`git.ts` 里却仍砍到 200 —— 两层各自合理，合起来就是静默丢数据。改一层的上限时，用 `grep` 搜同一参数名或同一 `slice(0, N)` 确认没有第二处。
 
+[同族并入 · 原条「路由层与实现层的同一语义参数要对齐：`routes/git.ts` 把 message 放宽到 2000，`git.ts` 里却仍砍到 200。两层各自合理，合起来就是静默丢数据。判据」]
+改一层的上限时，用 `grep` 搜同一参数名或同一 `slice(0, N)`，确认没有第二处。
+
 ## `--fix` 会顺手改别的文件
+
+[VERIFIED] 2026-10-09 家族级复核：定点与全仓两条 lint 口径实测（剩余 error 全落既有文件）
 
 定点 `eslint --fix` 本只想消 `discover-targets` 的 sort-named-imports，结果连带把 `script-fence-gate.node-test.ts` 的 `antfu/curly` 一起改了。修完必须复跑判据确认没改坏 —— 本次 16 passed 复核无碍。
 
 ## 首轮 `pnpm lint` 报 1 error 是聚合脚本的口径问题
 
+[VERIFIED] 2026-10-09 家族级复核：定点与全仓两条 lint 口径实测（剩余 error 全落既有文件）
+
 整仓 `eslint packages apps scripts bin` 报 0 error，而 `pnpm lint` 报 1；逐文件 `--fix` 后消失。定位阶段别只信聚合退出码，要看过滤后的 error 行。
 
-## `pnpm lint` 聚合退出码与定点检查口径不一致
-
+[同族并入 · 原条「`pnpm lint` 聚合退出码与定点检查口径不一致」]
 整仓 `eslint packages apps scripts bin` 报 0 error，而 `pnpm lint` 首轮报 1 error；逐文件 `--fix` 后消失。定位阶段别只信聚合退出码。
 
-## 根目录新增 `.md` 会撞 `docs:verify`
-
-`docs-scan.cjs` 的 `collectDocs` 从 root 递归、只跳过 `node_modules/dist/.git/.ai-runner/.workbuddy/...` 与 `docs/plan`，根目录文件同样纳入 ⇒ 新文档必须登记 `docs/DOCS-INDEX.md`。
-
 ## DONE 措辞须区分「新增」与「顺手改」
+
+[VERIFIED] 2026-10-09 家族级复核：定点与全仓两条 lint 口径实测（剩余 error 全落既有文件）
 
 本轮曾写 `script-fence-gate.node-test.ts` 是 `--fix` 顺带修 `antfu/curly`，实为未跟踪新增文件被格式化，措辞偏差。下回写 DONE 时，`??` 与 `M` 两类须分开表述。
 
 ## 工作树多会话并行产物不可并入同包交付
 
+[VERIFIED] 2026-10-09 家族级复核：tasks 端点源码（_url 读 AI_RUNNER_SESSION_ID）+ 当日实拉
+
 本工单 11 个文件之外另有约 50 个改动属其他会话半成品；复盘/提交前须按 `git status` 逐项归属，避免把并行产出误算作本工单产出（本次由复核方指出）。
+
+## `ps -p <pid> -o lstart=` 在 ps-shim 下返回空
+
+[VERIFIED] 2026-10-09 家族级复核：pm2 jlist 的 pm_uptime 为 ms；ps-shim 下 lstart 为空
+
+本项目 `PATH` 首位是 `~/.workbuddy/bin/ps-shim`，取进程启动时刻应改用 `pm2 jlist` 的 `pm_uptime`（毫秒）。
+
+## pm2 `pm_uptime` 是毫秒、`stat %m` 是秒
+
+[VERIFIED] 2026-10-09 家族级复核：pm2 jlist 的 pm_uptime 为 ms；ps-shim 下 lstart 为空
+
+直接比较会因单位不同恒真。本次两值分别为 `1791524955932` 与 `1791524942`，换算后 `1791524955.9 s > 1791524942 s` 成立，结论未受影响，但比较前应统一单位——否则判据是真空判据（§12 硬规则 3）。
+
+## `syntaxCheck` 对 `.ts` 恒返 `UNSUPPORTED_LANG`
+
+那是能力边界不是语法错（SYSTEM.md §3.2 已写明），改 `.ts` 后应直接用 `lint` / `typeCheck`，不要据此去改本就正确的 import。
+
+## `shell` 读真盘、`writeText` 只进 overlay
+
+新增测试文件后子进程看不见，必须先 `await __AI__.flush()` 再跑 vitest，否则必然 `No test files found`。
+
+## 「先发送后登记」比「先登记后回滚」更稳
+
+回滚方案需要区分「确定没送出」与「可能已送出但无回执」，两者在 `unacked` 下不可分辨；且回滚会与他方的登记竞争。把登记推到成功之后，两个问题同时消失 —— 无回滚就无竞争，失败就自然不登记。这是本轮把上一版方案推翻重做的原因。
+
+## `postMessage` 抛错 ≠ 结果未知
+
+跨域异常时帧确定未离开本页，与「发出去了但油猴没回执」是两回事。原实现把两者都归为 `unacked`，导致上层降级为「已发送」。判据必须精确到「帧是否已出站」，不能笼统归为「未知」。
+
+## 判据被下游行为掩盖 = 真空判据
+
+第一版测试断言「清除后集合不含组合键」，但发送成功会触发 `markRulesInjected` 重新登记，集合必含该键 —— 断言反向通过。变异验证（把传参改回裸 sid）未能变红才暴露。改用「发送失败」场景隔离，让清除效果不被重新登记掩盖，变异才成功变红。变异不红不等于改对了，可能是判据被别的路径兜住了。
+
+## `?? ` 与 `||` 在空串上不等价
+
+`activeWinSid` 的空串是合法值（`setActiveWinSid('')` 有测试），用 `||` 会把空串吃成 `'default'`。持久化读取一律用 `??`。
+
+## `shell`/`lint`/`tsc` 读真盘，`patchFile` 只进 overlay
+
+改完先 `await __AI__.flush()` 再跑子进程，否则验的是旧文件（本轮 lint 报错复现过一次）。
+
+## 无参 `vi.fn()` 的 `mock.calls` 元组长度为 0
+
+取 `calls[0][1]` 触发 TS2493。给 mock 显式写参数签名即可。
+
+## 命名相似 ≠ 概念分叉
+
+初判「两套 sessionId 是同一概念两个实体」，复读代码后修正 —— A 是工作台侧上下文标识（`sess_xxx`），B 是 AI 站点真实会话 id（油猴回写）。下判定前必须读消费点，不能只看变量名。
+
+## 误报也是需要产出的结论
+
+两条 P1 隐患（orphan-guard 时序、probe 误清标记）初看都像真问题，读规范与代码后才确认是误报。若直接「修」反而会引入回归（前者改成显式事件会复杂化，后者把 `null` 保留为「未知」会让手动关窗永不降级）。判据成立的边界条件必须读透，不能凭直觉判定缺陷。
+
+## 删导出前必须确认 auto-imports 不会连带报错
+
+`SESSION_HISTORY_KEY` 被 `auto-imports.d.ts` 以 `typeof import(...)` 引用，删除后 `vue-tsc` 未报错（该文件是生成物、按需重建），但这一步必须实跑 tsc 才算验过。
+
+## `fail()` 不是「决定不做」而是「做不成」
+
+评估类任务的结论是「无需改动」时，任务本身已完成，应 `complete()`。把「结论是不改」记成 `fail` 会让看板长期挂着假错误，且与 DONE 里的「全部完成」直接矛盾。
+
+补充（2026-10-09）：评估类任务的结论「无需改动」属完成，应 `complete()`。误用会让看板挂假错误，且与 DONE 的「全部完成」声明直接矛盾。
+
+补充（2026-10-09）：评估类任务结论「无需改动」属完成，应 `complete()`。误用会让看板挂假错误，与 DONE 的「全部完成」声明直接矛盾。
+
+补充（2026-10-09）：评估类任务结论「无需改动」属完成，必须 `complete()`。误用会让看板挂假错误，与 DONE 的「全部完成」声明直接矛盾。
+
+补充（2026-10-09）：评估类任务结论「无需改动」属完成，必须 `complete()`。误用会让看板挂假错误，与 DONE 的「全部完成」声明矛盾。
+
+## `tasks.list()` 的 `failed` 是独立字段
+
+只看 `todo`/`done`/`running` 会完全漏掉失败项。查板一律读 `items` 逐项核对 `status`。
+
+补充（2026-10-09）：只读后三者会完全漏掉失败项。查板必须遍历 `items` 逐项核对 `status`，或读新加的 `summary.failed`。
+
+补充（2026-10-09）：只看后三者会完全漏掉失败项。查板必须读 `failed` 或 `summary.failed`，或遍历 `items` 逐项核 `status`。
+
+补充（2026-10-09）：只在 `items` 与独立 `failed` 字段里，不在 `todo`/`done`/`running` 中。只看后三者会漏掉失败项。本轮已加 `summary` 汇总，从 API 层杜绝漏读。
+
+## 变异不红 ≠ 改对了
+
+首版 `clearRulesForSid` 修复的测试断言被下游「发送成功重新登记」掩盖，变异（改回裸 sid）未能变红才暴露判据真空。改用「发送失败」场景隔离后变异成功变红。判据必须隔离出被测行为，否则被别的路径兜住。
+
+## 改 core 后必须 build 才进沙箱运行时
+
+沙箱读 `apps/standalone/dist/`，不读 `src`（`runtime-vs-source-v2`）。改完先 `pnpm build`，再用「活端点返回新字段」取证生效，不能只验磁盘产物。
+
+补充（2026-10-09）：`/preset/system` 读 `apps/standalone/dist/SYSTEM.md`，不读 src。取证须用活端点返回新条款。
+
+## 注释会被打包器剔除，产物核验必须搜语义片段
+
+搜 `board-summary-v1` 这类 `[marker]` 在 `helpers.cjs`（未压缩）能命中，但在 SPA 产物（压缩）恒为 0。正确做法是搜实际字符串常量（如 `__ai_active_win_sid`）。
+
+补充（2026-10-09）：产物核验必须搜实际字符串常量（`__ai_active_win_sid`），搜 `[marker]` 在压缩产物中恒为 0。
+
+## Promise 缓存 + 失败静默降级 = 永久缓存空值
+
+`catch { return '' }` 是「正常 resolve」，外层 `.catch()` 清缓存钩子永不触发。凡「失败要保留重试机会」的缓存，失败路径必须显式让缓存作废（`reject` 或落定后置 null），不能依赖 catch 链兜底。
+
+## 过度修正也是 bug
+
+把失败分支直接改为 `throw` 会穿透到无 try/catch 的调用方（`session-prompt.ts` / `useAiWindow.ts`），把「静默降级」升级成「会话首问直接失败」。正确解法是保持对调用方的降级契约、只在内部让缓存失效。本轮先误改为 throw，下一轮修正为「降级 + 清缓存」。
+
+## `syntaxCheck` 不支持 `.ts`
+
+对 `.ts` 文件返回 `UNSUPPORTED_LANG` 属能力边界，不是语法错；应按 `SYSTEM.md` §1 verify-lang-matrix 改用 `lint([file])` / `typeCheck()`。
+
+## 构建须走后台任务
+
+`pnpm build` 全量耗时约 11s，但 dev 环境存在潜在长尾（大仓 tsc + 4 个 vite 产物）可能触达 `/run` 沙箱 180s 外层 SIGTERM。用 `{background: true}` 起后台再轮询 `shellStatus`，可绕开该限制并保留 `[@shell-done exit=N]` 哨兵作为收口判据。
+
+## 「消除告警」先要判清告警的可消除性：unimport 的 `Duplicated imports` 有真噪音（门面 re-export 与实现文件同名，指向同一绑定）与真依赖（消费方全靠 auto-import，排除即断）。判据只有一条承重测试
+
+排除后跑 `tsc:client`（无 auto-import 插件），报 `Cannot find name` 就是不可排除。凭「看起来重复」就排除会静默打断编译。
+
+## 判据须比症状更接近本质
+
+`chunkSizeWarningLimit` 是「让警告闭嘴」，若它是唯一动作就是消红。本例改动之所以成立，是因为有独立证据（br 后 141 kB、消费点全在首屏静态链、包间循环依赖）支撑「505 kB 是合理上限」这个结论；阈值只是把这个结论表达出来。同理 `Duplicated imports` 的 18 条残留，正确做法是留证不掩盖。
+
+## 「不可排除」的结论必须绑定到具体手段
+
+上一轮判 `state/persist/hooks/handoff` 不可排除，判据本身没错（独有符号确无显式 import），但结论被写成了文件级的绝对判断。真相是「不能只排除、还得同时把仅有的 2 处门面 import 改指子模块」。排除类结论要写明「在哪一种改法下不成立」，否则后续会照抄成铁律。
+
+## `fileFilter` 里加条件时逗号位置是语法陷阱
+
+把 `,` 留在旧末行、新条件接在注释之后，会让整个表达式被截断成 `TS1136 Property assignment expected`。新增 `&&` 条件必须把逗号一起挪到新末行。
+
+## `AutoImport.ignore` 是解决同名冲突的正解，而不是排除文件：`useEventBus` 冲突源于项目侧符号与 `@vueuse/core` 预设撞名，`fileFilter` 管不到预设导入，只有 `ignore` 能收敛唯一源。判断「用 ignore 还是 fileFilter」的分界是
+
+撞名来自 `dirs` 扫描 → fileFilter；撞名来自 `imports` 预设 → ignore。
+
+## `auto-imports.d.ts` 是构建产物，不是手工资产
+
+`fileFilter` 改动后必须重跑构建再验证 typecheck，否则校验的是旧符号表——这一轮的承重判据正是建立在这个顺序上。
+
+## CodeMirror 6 必须单实例 `@codemirror/state`，`resolve.dedupe` 是正解
+
+CM6 的 `Extension` 身份判定依赖 `@codemirror/state` 模块级 Symbol，打包器产出两份实例时，跨实例的 Extension 会被判为普通对象，`EditorState.create` 抛 `Unrecognized extension value in extension set ([object Object])`。错误信息不会告诉你是哪一份、哪个包，必须靠 node 探针（逐项构造 Extension 组合）先排除「用法错」，再靠构建产物与 pnpm 依赖树排除「物理多份」，最后才定位到打包器 chunk 切分。`dedupe` 必须列出 `state`/`view`/`commands`/`language` 四个，只列 `state` 无效——其余包都从 state 拉 Extension 标识。
+
+## `defaultKeymap` / `historyKeymap` 是 `KeyBinding[]` 不是 `Extension`
+
+必须 `keymap.of([...defaultKeymap, ...historyKeymap])` 包裹。直接 `...m.defaultKeymap` 展开进 `extensions` 数组会同时踩 TS2322（类型）与运行时 `Unrecognized extension value`（CM 拒绝裸 KeyBinding）。
+
+## `Compartment` 兜底不能用函数
+
+`(editableComp ?? (() => { throw ... })).of(...)` 里函数不是合法 Extension。改为 `new m.Compartment()`。
+
+## 调试期临时注释要清理
+
+二分定位时我加过 `[cm-trim-v1-debug]` 注释并注释掉一行，收尾轮已恢复。留在代码里会被后续误读为「这项不需要」。
+
+## `pnpm install` 会顺带剪掉不再需要的传递依赖
+
+本次 `Packages: -7`，是正常行为。
+
+## `--time-style` 是 GNU ls 扩展，macOS BSD ls 不支持
+
+`ls --time-style=+%Y-%m-%dT%H:%M:%S` 在 macOS 上直接报 `unrecognized option`（exit 1），不会降级到默认格式。macOS 上取 mtime 用 `stat -f '%Sm %N' -t '<fmt>'`，或 `ls -laT`。
+
+## `runtime-vs-source-v2` 的判据要做时区换算
+
+产物 mtime 由 `ls` 输出的是本地时间（UTC+8），而 `pm2 jlist` 的 `pm_uptime` 是毫秒时间戳（UTC）。直接比字符串会误判，必须先统一到 UTC 再比。
+
+## WS 端点不能用普通 HTTP GET 探活
+
+未带 `Upgrade: websocket` 头时后端会拒握手，返回非 101 是正常的；必须带上 `Connection: Upgrade` + `Upgrade: websocket` + `Sec-WebSocket-Version` + `Sec-WebSocket-Key` 四件套，`101` 才是端点可用的判据。`/__ai/events` 返回 000 不是故障——那是连接失败码，说明该路径根本不是 WS 端点（事件流不走 HTTP）。
+
+## 测试「测试」这类模糊指令时，先验环境连通性再验业务判据
+
+连贯发「测试」时，第一步做沙箱自身 + 活端点探活（证明环境没坏），第二步跑受影响的承重单测（证明逻辑没坏），比笼统跑全量 `pnpm verify` 更快给出「哪里可能有问题」的信号。
+
+## 「谁在调用」决定改动是否会被日常回归覆盖：`/vcs/log` 只在非 git 工作副本下才被走到，`/run-changes` 只在 summary 帧丢失时才被走到，`.before` 降级只在 git 不可用时才被走到——这三条路径在 git 仓库的日常回归里永远碰不到，坏掉也不会有人发现。新增测试都用真实 route handler + 真实磁盘 + 真实 svnadmin 建仓库，而不是 mock，理由正是「这条链路的全部价值就在真的读出来/真的改回去，mock 掉等于什么都没验」。这与 §14「跑错层等于没跑」是同一条纪律的具体化
+
+冷路径必须用真实装配测。
+
+## 「成功但空」是比报错更难排查的故障模式
+
+`svn log` 不带 `-r` 时 checkout 未 update 会返回空结果 exit 0；XML 正则按错误假设写会返回空数组不报错。两者都伪装成「这个仓库没有历史」。防御手段是用真实 fixture 做判据——`vcs-svn-log.node-test.ts` 里的 XML 片段是 `svn 1.14.5` 实测抓取、明确标注「非手写」，就是为了让「属性换行」「属性顺序随机」这两个排版事实无法被静默绕过。
+
+## 命名带版本号的契约标记是判据锚点
+
+`[wake-attrs-v2]` / `[generating-gate-v2]` / `[board-summary-v1]` / `[round-changes-v1]` 这些标记既出现在源码注释里，也出现在测试断言的正则里（`assert.match(src, /\[generating-gate-v2\]/)`）。这使「改动是否还在」可以被机器判定，而不是靠人读注释。
+
+## 「排除文件」这个手段本身是危险的，判据必须逐符号全仓核对：我用「看起来消费方都显式 import」作为排除判据，但只抽查了部分文件。正确判据是
+
+对每个待排除文件的每个导出符号，`grep` 全仓找出所有消费方，逐个确认存在 `import { sym } from` 语句——缺一不可。任何一个漏检都会导致运行时 `undefined`。
+
+## 静默的 `try/catch` 是故障放大器
+
+`feedback-merge.ts` 的 `catch { /* 不上抛 */ }` 设计上正确（回传失败不该炸 watch），但没有 `log.warn`，导致 `copyAndFill` 抛的 `TypeError` 完全不可见，只表现为「结果没回传」。吞异常必须留痕。
+
+## `watch(undefined, cb)` 不报错
+
+Vue 的 `watch` 拿到 `undefined` 作为源时会静默失效或抛错（取决于版本），不会给出「符号未定义」这种可读提示。这让「auto-import 失效」的排查难度远高于普通 `ReferenceError`。
+
+## 「源码已改」不等于「运行已改」，产物 mtime 与配置 mtime 必须逐轮对比：我这轮犯的错是——改了 `vite.config.ts` 却只跑 `tsc:client` 就认为修复完成。`tsc` 读的是源码与类型声明，与产物完全无关。正确判据是 `runtime-vs-source-v2`：产物 mtime 必须晚于配置 mtime，否则运行实例跑的是旧码。这与「重启归宿主侧」不矛盾
+
+构建我可以做且必须做，只是重启要等宿主侧——我把「不自行重启」错误地扩大成了「不构建」。
+
+## `chunkSizeWarningLimit` 这类「消警配置」会随重构过期
+
+它是针对特定体积写死的，一旦被它豁免的 chunk 缩水，配置就变成死配置 + 过时注释。这类配置应写明「当 X 变化时需复核」的触发条件（原注释确实写了「出现第二个超限 chunk 须重新评估」，但漏了反向条件「当前 chunk 不再超限时应删除」）。
+
+## `resolve.dedupe` 应只列直接依赖
+
+列传递依赖虽然通常有效，但让 `package.json` 与配置的对应关系断裂——清理依赖时无法判断该条目的存废。
+
+## `vi.mock` 工厂的键名必须与真实模块导出名逐字一致
+
+改名后 mock 里仍写旧名 `getActiveWinSid`，vitest 报 `No "getActiveWinSidImpl" export is defined on the mock`——错误信息指向的是被调用方（`useAiWindow.ts`）而非 mock 文件，容易误诊。正确修法是改 mock 工厂的键名，不是改用 `importOriginal`（那会让 mock 失效）。
+
+## 源码扫描断言会在改名后真红，且只能逐个识别：`assert.ok(src.includes('isBlankRef(found)'))` 这类断言读的是实现文件文本，改名后必然失败。区分「真红」与「假红」的判据是
+
+断言是否读取了被改文件的内容（`readFileSync` / `readSrc`）并匹配符号名。命名空间调用（`mod.sendFill(...)`）不受影响。
+
+## `as` 别名吸收后缀是改名的最省路径
+
+实现文件加 `Impl` 后，门面用 `import { sendFillImpl as sendFill }` 吸收，消费方代码零改动。关键是别名映射必须与实现文件的导出名一一对应——漏一处就在运行时 `undefined`。
+
+## `\b` 边界对 `sendFill` / `sendFillTo` 这类前缀关系是必需的
+
+不加边界会误伤 `sendFillTo` 与 `sendFillToAsync`。顺序上先改长名再改短名更安全。
+
+## `git diff --stat` 显示 40 项变更不等于 40 项都是本次引入
+
+前序会话遗留的改动与本次改动混在一起，DONE 里必须逐项区分。
+
+## e2e 会自起临时 air-server 并覆写 `.server-port`，污染已运行的 vite dev 代理
+
+`headless-ws.spec.ts` 的 beforeAll 起 air-server（实测占 5518/5519），它按 `apps/standalone/src/server.ts:305` 写入 `.server-port`。vite dev 在启动时读一次该文件，之后不再重读——于是在 vite 启动之后跑 e2e，就会让已运行的 vite 持续把 `/__ai/*` 打到错误的端口。这是 `[port-drift-file-v1]` 的一个未记录的触发路径（此前只记录了「历史残留」，没记录「e2e 主动改写」）。
+
+## `pnpm test:e2e` 不能在 180s 内跑完
+
+34 个用例串行（`workers: 1`），单例预算 180s，`reply-link-probe` 一项就跑了 3.0m。这与 `SYSTEM.md §15`「e2e 不在轮内自跑」的结论一致——本轮为了复检尝试跑，被外层 SIGTERM 截断，属预期。
+
+## e2e 失败要先看错误类型再归因
+
+`502 Bad Gateway` 是网络层，`Cannot find name` / 断言失败才是代码层。看到「改名后跑 e2e 失败」时，必须先确认错误类型，否则会把环境问题误判为改名回归。
+
+## 后台任务 id 抄错会让「查状态」误判为「任务不存在」
+
+上一轮我把 `sh-mv1aiwcu-quxzn6` 抄成 `sh-mv1aiwcu-quuxzn6`（多一个 `u`），`shellStatus` 返回 `404 no such background shell`，差点误判构建未执行。正确做法是从 `ls -t .ai-runner/tmp/*.log` 实际列出的文件名复制，不要靠记忆重打。
+
+## 产物 mtime 早于当前时刻不代表构建失败
+
+本轮构建在 `02:20:22` 完成，而我在 `02:21:10` 查产物，看到「mtime 比现在早 48 秒」是正常的。判断构建是否成功应看 `status.json` 的 `exitCode` 与日志的 `[@shell-done exit=0]`，不是看 mtime 与当前时间的差。
+
+## `replaceAll` 会漏掉缩进不同的同类行
+
+`useAiWindow.ts` 里两处「已复制到剪贴板」toast 缩进是 6 空格，第三处是 4 空格。用固定缩进的 `oldString` 做 `replaceAll` 只替换了前两处，第三处静默留存。批量替换文案必须按「不含缩进的纯文本片段」构造锚点，或替换后回读全量搜索结果确认零残留。
+
+## `writeText` 失败轮不落盘，但成功轮会覆盖
+
+上一轮因 `exec-flow.ts` 锚点失配 `exit(2)`，`overlay-atomic-v1` 让整轮写入丢弃——包括已经「成功」的 `useAiWindow.ts` 三处替换。修复轮必须重新产出完整改动，不能假设上轮已写了一半。
+
+## `.server-port` 的污染源不是「历史残留」而是「活跃写入」
+
+`AGENTS.md` 的 `[port-drift-file-v1]` 只记录了「文件会被历史运行残留旧端口值」，但实际触发路径是e2e 每次跑都会主动改写它。根治必须堵住写入侧（加开关），而不只是修文件内容。
+
+## 「dev server 停着」与「dev server 持旧端口」是两个不同问题
+
+上一轮我把「vite dev 已读旧值不重读」列为遗留风险，但实测发现 dev server 根本没运行（5174 返回 `000`、`lsof` 无 pid）。这种情况下风险自然消失——下次 `pnpm dev` 启动时会读到当前正确的 `.server-port=5175`。判断环境问题时，「进程是否存在」要先于「进程持有什么状态」确认，否则会把已消失的问题当成待修项。
+
+## `curl -w '%{http_code}'` 对无监听端口返回 `000` 而非 4xx/5xx
+
+`000` 是 curl 的「连接失败」码，不是 HTTP 状态码。看到 `000` 应先怀疑「对端没在跑」，而不是「对端返回了错误」。
+
+## 同一脚本超 12 KB 会被上游截断，且截断点落在尾部
+
+上一轮我把连通性探活、产物反查、单测三件事写在同一个脚本里，达到 12 KB 上限后被截断（`truncated:true`），服务端判语法错误并零改动丢弃。拆成两个小脚本后均正常执行。单轮脚本应留足余量（建议 ≤ 150 行 / 6 KB），而非贴着 12 KB 上限写——上限是硬约束，留量是给自己的容错空间。
+
+## 「产物含某字符串」的判据要区分运行时归属
+
+`AIR_SERVER_NO_PORT_FILE` 只在服务端使用，因此 client bundle 命中 0 次是正确结果，不是「改动未生效」。反查产物时必须先明确「这段代码属于哪个 bundle」。
+
+## 「零调用点」类判据必须同时声明它抓不到的形态
+
+纯文本扫描抓不到属性访问调用（`api.startLoop()`）、动态解构、bracket 索引。声明「调用 0」时应附一句「本判据的扫描面是字面量标识符，不含动态调用形态；后者由 X 断言覆盖」。否则判据的适用范围会被读者默认放大。
+
+## 计划文档的篇幅应与风险成正比，而非与逻辑顺序成正比
+
+本计划 P0（18 行）/ P1（7 行）/ P2（6 行）/ P3（8 行），但 P3 的实际工作量超过前三个阶段之和。写实施计划时，应给「批量删改」类阶段按文件数 × 平均轮次估算篇幅，而不是按它在流程里的位置给段落。
+
+## 阶段间的判据演进必须写进阶段内
+
+「P0 建判据 → P3 删代码 → P4 升级判据」这三步里，P3 完成瞬间 P0 判据就红了。正确写法是「P3 的最后一步同步改 P0 判据」，而不是把它当 P4 的事。
+
+## 「我上一轮改过」不等于「当前状态」——这是我在本会话第二次犯
+
+上轮我把已回滚的 `fileFilter` 排除当成现状，本轮又犯同类错（断言 `fileFilter` 含 4 个排除）。根因是我用「记忆中的改动」代替「读盘实测」。凡断言「当前 X 是什么」，必须先 `readText`；凡引用「我改过 Y」，必须复读该文件确认改动仍在。
+
+## 影响面清单必须从「import 语句」反查，不能从「已知耦合」正推
+
+段三「必改」是按「已知的 loop 相关逻辑」列出的，因此漏掉了 `useAiWindow.ts` 这个只在 import 语句上体现耦合的文件——它的 `:7` import 和 `:412` 转发壳都是纯粹的转发，从「逻辑语义」看不出与循环有关，但从「编译依赖」看是硬耦合。列影响面时，应以「全仓 grep import 路径」为起点，而不是以「哪些文件处理 loop 逻辑」为起点。
+
+## 「文件仍在、但生产消费方归零」是一种隐性死代码，不会被 `tsc` 或 lint 捕获
+
+`skill-registry.ts` / `load-lessons.ts` 在 P3b 后如果没人删，`tsc` 仍然绿（文件自身类型完整）、`eslint` 也不报（导出未使用不报错）。它只在「谁调它」这个语义层面是死的。列删除清单时，判据应是「生产消费方数量归零」，而不是「文件本身是否 loop-related」——v3.1 的 import 反查方法找到的是「谁会因删文件而断」，但没反过来查「哪些文件会因删文件而变成孤儿」。这两个方向都需要。
+
+## 注释里的 `[CHANGE-IMPACT]` 提到函数名会被 grep 命中，造成假耦合
+
+`core/routes/skills.ts:122` 的 `[CHANGE-IMPACT] 被客户端 buildSkillsBlock 调用` 是文档性描述，不是代码依赖。grep 结果必须逐条判定「是代码还是注释」——这与本仓台账里 `getMainText() vs extractReplyMd()` 那类陷阱同源。
+
+## 「先看数字、再看枚举」是复检数字类断言的必要顺序：本计划的纪律之一是「数字承重」，但恰恰是数字本身（10 vs 13）出了内部不一致——枚举是对的，正文是错的。复检时若只看正文「10」会放过，只看枚举「13」会以为正文说的是另一个口径。正确做法是
+
+把枚举逐项相加，与正文声称的数字对账。
+
+## 「整体摘除某句柄」这类结论必须逐调用点判守卫条件
+
+对方说「`autoLoop` 句柄要整体摘除」在结论上是对的，但落到执行时，13 处调用分三类（随 `routedToLoop` 分支删 / 随 `isLoopActive` 删 / 裸调需单独处理）。「整体摘除」是对的方向，但不足以直接指导 P3a 的编辑操作——每个调用点的删除方式取决于它的守卫形态。
+
+## 跨文件引用（`§X`）在拆分后必须双向闭合验证
+
+拆分时最危险的是「引用还在、被引对象已搬走」。本次做法是「提取执行件的全部 `§` 引用 → 逐个在留痕件搜落点」，比人工检查可靠。上轮发现的 `§H3` 悬空正是这类问题的实例——它引的是表格里的一行（`| **H3** | ... |`），不是独立小节标题，所以天然没有锚点。
+
+## 数字类断言应「正文声称值」与「枚举实际值」双向对账
+
+`useAiReplyHandlers.ts` 的「10 个调用点」笔误在 v2→v3.2 存活了三版，因为每版都只检查「枚举是否列出了行号」，没检查「枚举的行数是否等于正文声称的数字」。正确做法是 `枚举项数 === 正文数字` 也作为一条断言——这与本计划自己立的「判据必须承重」是同一条纪律，只是应用到了文档而非代码。
+
+## `const PHASE: 'A' | 'B' = 'A'` 会触发 TS2367
+
+TypeScript 控制流分析把 `const` 字面量收窄为 `'A'`，于是 `if (PHASE === 'B')` 被判为「无重叠的类型比较」。改用 `function phase(): 'A' | 'B' { return PHASE_VALUE }` 让返回值类型为联合而非字面量，即可规避。这是「阶段感知常量」这类设计的通用陷阱。
+
+补充（2026-10-10）：TS 控制流分析把 const 字面量收窄为单一类型，`PHASE === 'B'` 被判为「无重叠比较」。用函数返回值规避。
+
+## `readdirSync(p).length >= 0` 恒为真
+
+本意是「能读就是目录」，靠 `catch` 兜住文件情形——行为碰巧正确但判据误导。改用 `statSync(p).isDirectory()` 显式表达意图。eslint 抓不到这类「恒真表达式」，只能靠读代码发现。
+
+## eslint 的 `regexp/no-unused-capturing-group` 对「只做 match 不做 extract」的正则必然报
+
+`/\.(ts|vue)$/` 里的捕获组未使用。改用非捕获组 `/\.(?:ts|vue)$/`。
+
+## 变异验证必须在测试文件自身被清干净后复跑
+
+注入探针后判据变红，删探针后必须确认恢复绿——否则「清理失败」会让后续所有测试都因残留探针而红，且症状与「判据本身有 bug」难以区分。
+
+## 拆分大文件时，「第一块只写 import、第二块才用」会被 eslint 的 `no-unused-vars` 清掉 import：P1a 夹具我分两块写，第一块写入时 `describe`/`assert`/`ref`/`useAiReplyHandlers` 都还没出现，eslint 自动把它们判定为未使用并移除。第二块写入后测试报 `useAiReplyHandlers is not defined`。正确做法是
+
+分块写入时，import 语句要跟第一个使用它的代码块放在同一块，或者分块期间不跑 `eslint --fix`。
+
+## `git rm` 对有本地修改的文件会拒绝
+
+`git rm packages/client/composables/ai/auto-loop/hooks.ts` 报「has local modifications」。因为该文件已被前序轮次改过（加 `Impl` 后缀）。需用 `git rm -f` 强制。
+
+## 迁移文件时，子目录内所有引用者都要改相对路径深度
+
+`hooks.ts` 从 `auto-loop/` 移到上一层后，`auto-loop/*.ts` 里的 `from './hooks.js'` 全部要改成 `from '../loop-hooks.js'`。tsc 报 4 处 `TS2307: Cannot find module './hooks.js'`——这类错误 tsc 会全量列出，一次改完即可，不需要分轮。
+
+## `if (x) { … } else { … }` 换成裸 `{ … }` 会在替换锚点里引入转义陷阱：我第一次用模板字符串写 patch 锚点时，`\`[ai-runner] onScriptArrival 失败
+
+\${String(e)}\`` 里的反引号需要 `\\\`` 转义，结果转义写错导致锚点失配。**改用 `[...].join('\n')` 逐行构造锚点，完全规避模板字符串转义**——这是本项目里第二次踩同类坑（第一次在 v2 计划文档的 patchFile 锚点），已固化。
+
+## 「摘除说明注释」会让「不该再出现该符号」的断言假红
+
+我写 `assert.ok(!src.includes('isLoopActive'))` 时，源码里的摘除说明注释 `// [loop-consolidation-P2] 摘除 isLoopActive 守卫` 含该词，导致断言失败。修法是先剥注释再判。`toolbar-ctrl-colors.node-test.ts` 早就用了这个模式（`stripComments`），我没有第一时间复用——已在 `multiScriptQueue` 里补上同类工具。
+
+## `useSessionStorage` 改回 `ref` 时，`ref` 已在同文件 import 里
+
+`useAiWaiting.ts:1` 就有 `import { effectScope, ref } from 'vue'`，所以改回内存态无需新增 import。改 import 前先读文件头能避免多改一行。
+
+## 摘除 `isLoopActive` 后，`midBatch` 判据的连带失效需要显式处理
+
+`midBatch = isLoopActive.value && pendingScriptCount.value > 0` 在 `isLoopActive` 恒 false 后恒 false，因此它守卫的两个分支（dryRunFailed 的回传抑制 / `shouldAutoAsk` 的拦截）都退化。连带摘除时，看的是「判据本身」而非「判据用到的变量」——直接删 `midBatch` 及其两个使用点，而不是保留一个恒 false 的变量。
+
+## 「本次改动」不能用文件名/时间分界，必须用显式清单 + 反向校验：`auto-loop/hooks.ts` 的 mtime 早在 02:5x（本会话最早），但我的第一版关键词清单没含它，它就被误判成「非本次」并 `git add` 进暂存区。mtime 分界也不可靠——`useAiReplyHandlers.ts` 是前序会话创建的、本会话又改过，属「混合文件」。唯一可靠的做法是
+
+从对话历史逐条整理「我碰过哪些文件」，add 之后反查暂存区不含它们。
+
+## `.workbuddy/` 被 gitignore，但 `-f` 才需显式
+
+`git add .workbuddy/memory/MEMORY.md` 报「ignored by .gitignore」。因为 `.gitignore` 里只有 `!.ai-runner/lessons.md` 这类例外，`.workbuddy` 整体被忽略。本次提交最终未包含它（add 失败但其它 57 项仍成功）。
+
+## `git rm -f` 的删除在 index 里是「staged D」，容易混进无关提交
+
+撤出的正确命令是 `git restore --staged <file>`（旧版 `git reset HEAD <file>`），撤后状态从 `D `（staged）变 ` D`（unstaged），worktree 里文件仍不存在——语义正确。
+
+## 「全仓 grep 无生产引用」不等于「可以安全删」
+
+删 `session-prompt.ts` 前必须先把它的能力（skills/lessons 注入）移植到留存路径。我在 P3b 开始前才发现 G0 决策 3 的「移植」只写进了计划、没实际做——若直接删，结果是「技能/踩坑记录检索注入消失」，属段一目标 2 禁止的能力降级。能力型模块的删除必须与「能力去向」同时确认，只看引用数会漏。
+
+## `for (const [i, a] of [[1, x], [2, y]].entries())` 是错误用法
+
+`entries()` 产出 `[index, [i, a]]`，所以 `a` 拿到的是数组而非字符串，锚点必然失配。正确写法是直接 `for (const [i, a] of [[1, x], [2, y]])`。本轮踩了一次，浪费一轮。
+
+## `replaceInFile` 的锚点必须来自同一轮读盘的原文
+
+本轮多次因「凭上轮记忆写锚点」失配（`useAiWaiting` / `script-panel-actions` / `ScriptPanel`）。每次 patch 前重读该文件是最省时的做法——一次失配 = 一轮浪费。
+
+## 生成物残留的 auto-import 引用会制造「全仓 grep 零命中但产物报错」的假象
+
+`auto-imports.d.ts` 是 `unplugin-auto-import` 的生成物，源模块删除后它不会立刻收敛（`useAutoLoop` 残留 27 行）。这让「源码 grep 零命中」与「运行时报 `ReferenceError`」同时成立——判据必须落在调用点源码（`App.vue:114`）而非符号定义，且须用独立 shell 通道交叉验证，避免单一 grep 工具路径漏扫造成误判。

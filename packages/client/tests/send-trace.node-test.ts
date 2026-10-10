@@ -8,8 +8,8 @@
 import { afterEach, describe, it, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { sendFill, sendFillTo, sendFillToAsync } from '../composables/ai/useAiWindowSend.js'
-import { removeWindowBySid, setActiveWinSid, setWindowEntry } from '../composables/ai/useAiWindowTable.js'
+import { sendFillImpl as sendFill, sendFillToImpl as sendFillTo, sendFillToAsync } from '../composables/ai/useAiWindowSend.js'
+import { removeWindowBySidImpl as removeWindowBySid, setActiveWinSidImpl as setActiveWinSid, setWindowEntry } from '../composables/ai/useAiWindowTable.js'
 
 interface FillFrame { type?: string, prompt?: string, ackId?: string, source?: string }
 interface TraceCall { url: string, init: { method?: string, body?: string } }
@@ -141,7 +141,7 @@ describe('出站留痕：真实驱动出口函数', () => {
 
   it('headless 出站也留痕（该分支不走 sendFillTo，行为级用例覆盖不到）', () => {
     const src = readFileSync(new URL('../composables/ai/useAiWindowSend.ts', import.meta.url), 'utf8')
-    const head = src.slice(src.indexOf('export function sendFill('), src.indexOf('export function sendFillToAsync('))
+    const head = src.slice(src.indexOf('export function sendFillImpl('), src.indexOf('export function sendFillToAsync('))
     assert.ok(head.includes('via: \'headless\''), 'headless 分支未留痕 ⇒ 该通道的提问频率仍不可测')
   })
 })

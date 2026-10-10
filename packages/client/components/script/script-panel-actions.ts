@@ -9,7 +9,7 @@ import { useToast } from '../../composables/ui/useToast'
 import { emit as emitBus } from '../../composables/ui/useEventStream'
 import { copyAndFill } from '../../composables/ai/useAiWindow'
 import { useAutoTakeover } from '../../composables/ai/useAutoTakeover'
-import { useAutoLoop } from '../../composables/ai/useAutoLoop'
+import { useAiWaiting } from '../../composables/ai/useAiWaiting'
 import { useRunner } from '../../composables/runner/useRunner'
 import { parseErrorLocations } from '../../utils/context-error-locations'
 import {
@@ -75,7 +75,9 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
   } = deps
   const { toast } = useToast()
   const { enable: enableAutoTakeover, disable: disableAutoTakeover, cancelAutoRun } = useAutoTakeover()
-  const { isLoopActive, softPause, loopPaused, resumeFromPause, clearSoftPause } = useAutoLoop()
+  // [loop-consolidation-P2] 摘除 isLoopActive（恒 false，无剩余使用点）
+  // [loop-consolidation-P3b] softPause / loopPaused / clearSoftPause 已迁至 useAiWaiting（随 auto-loop 退役）
+  const { softPause, loopPaused, clearSoftPause } = useAiWaiting()
   const { stop } = useRunner()
 
   /** 拼装 AI 回填 prompt（含失败源码 / 反馈摘要 / 变更列表 / 基线对比 / 原始输出） */
@@ -191,8 +193,11 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
    */
   function pauseAll(): void {
     if (loopPaused.value) {
-      if (isLoopActive.value || running.value) {
-        void resumeFromPause()
+      // [loop-consolidation-P2] 摘除 isLoopActive 守卫（恒 false）；只剩 running 判断
+      if (running.value) {
+        // [loop-consolidation-P3b] resumeFromPause 是循环专用（依赖 LoopInstance）；
+        //   留存路径只需复位暂停标志
+        clearSoftPause()
         return
       }
       clearSoftPause()
@@ -206,7 +211,8 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
       void runSmart()
       return
     }
-    if (isLoopActive.value || running.value) {
+    // [loop-consolidation-P2] 摘除 isLoopActive 守卫（恒 false）；只剩 running 判断
+    if (running.value) {
       softPause()
       toast('已暂停 · 再点一次恢复', 'info', TOAST_DEFAULT)
       return

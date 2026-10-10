@@ -46,6 +46,20 @@ export default defineConfig({
       '@qgm/core': path.join(PKG_ROOT, 'core', 'src', 'index.ts'),
       '@': path.join(PKG_ROOT, 'client')
     },
+    // [cm-dedupe-v1] CodeMirror 6 要求 @codemirror/state 单实例：Extension 身份靠
+    //   @codemirror/state 模块导出的 Symbol 判定（Extension.isExtension），若打包器
+    //   产出两份 state 实例，则「另一份」创建的 Extension 会被判为普通对象，
+    //   EditorState.create 抛 "Unrecognized extension value in extension set ([object Object])"。
+    //   pnpm 侧只有一份物理路径（实测 .pnpm/@codemirror+state@6.7.6），问题出在
+    //   rolldown 的 chunk 切分把它同时编进 vendor-cm 与消费方；dedupe 强制解析到同一份。
+    //   [CONSTRAINT] @codemirror/view、@codemirror/commands、@codemirror/language
+    //   都从 state 拉 Extension 标识，必须一并去重，只 dedupe state 不够。
+    dedupe: [
+      '@codemirror/state',
+      '@codemirror/view',
+      '@codemirror/commands',
+      '@codemirror/language',
+    ],
   },
   server: {
     port: 5174,
@@ -87,19 +101,32 @@ export default defineConfig({
     //   （@vueuse/core v15 已移除 indexes.json，预设实际回落到 @vueuse/metadata/index.json）
     AutoImport({
       imports: ['vue', '@vueuse/core'],
+      // [eventbus-name-clash-v1] 项目侧 useEventBus 与 @vueuse/core 同名，unimport 报
+      //   "Duplicated imports ... is used" 并随机二选一。项目侧语义（模块级单例事件队列）
+      //   与 @vueuse 的 EventBus 完全不同，选错即静默改变行为。此处显式 ignore 让
+      //   auto-import 不再声明该名字，唯一源收敛到 useEventStream.ts；两个消费方已改为
+      //   显式 import（tsc/vitest 无 auto-import 插件，本就必须显式）。
+      ignore: ['useEventBus'],
       dirs: ['composables/**', 'utils/**'],
       // [dir-dedupe-v1] 排除与门面文件重名导出的实现文件，消除 unimport
       //   "Duplicated imports" 告警。排除判据（脚本双重核验）：
       //   ① 文件每个导出都能从其他扫描文件拿到（门面 re-export，同一绑定）；
       //   ② 或其独有符号在其他文件均被显式 import（不依赖 auto-import）。
-      //   两判据都不满足的文件（state/hooks/persist/handoff/useAiWindow）不能排除，
-      //   其残余同名告警是门面架构的已知噪音（二选一结果同绑定），非错误。
+      // [dir-dedupe-v4] 撤回 v2/v3 对 useAiWindow.ts 与 auto-loop/{state,persist,hooks,handoff}.ts
+      //   的排除：全量 grep 事后证明其前提不成立。实测 openAiSession / openSite /
+      //   copyAndFill / onNewSessionCreated / restore / runHook / handoffDisarm 等符号
+      //   在 App.vue、useAiSite.ts、useAppStartup.ts、useAiReplyHandlers.ts、useAiTransport.ts、
+      //   TerminalPane.vue、stop-and-finish.ts 等多处靠 auto-import 使用（无显式 import）。
+      //   排除其定义文件会让符号在 dev 与 prod 运行时解析为 undefined；若 auto-imports.d.ts
+      //   未同步重建，tsc 仍通过（声明残留）= 假绿，真实崩溃推迟到运行时。
+      //   exec-flow.ts 的 [explicit-copyAndFill-v1] 记录的 copyAndFill 崩溃即此类。
+      //   代价：Duplicated imports 告警回到 18+ 条，属同一绑定二选一的构建噪音，可接受。
+      //   [约束] 未来再想排除，判据必须是逐符号全仓 grep + 逐个消费方核对 import 语句。
       dirsScanOptions: {
+        // [loop-consolidation-P3e] 已删除 3 条指向 auto-loop/{types,timers,keyboard}.ts 的排除——
+        //   该目录随 P3b 整目录删除，排除表不再引用不存在的路径。
         fileFilter: (file: string) =>
-          !file.includes('composables/ai/auto-loop/types.ts')
-          && !file.includes('composables/ai/auto-loop/timers.ts')
-          && !file.includes('composables/ai/auto-loop/keyboard.ts')
-          && !file.includes('composables/ui/event-stream.ts')
+          !file.includes('composables/ui/event-stream.ts')
           && !file.includes('utils/context-error-locations.ts')
           && !file.includes('utils/codeCleaner.ts'),
       },
@@ -117,6 +144,12 @@ export default defineConfig({
   // [CONSTRAINT] 必须匹配 .pnpm 真实路径：取最后一个 /node_modules/ 之后的段判包名
   // [CHANGE-IMPACT] vendor chunk 内容稳定 → hash 稳定，配合 serveStatic immutable 长缓存
   build: {
+    // [chunk-size-limit-v1] 阈值提升至 600 kB：vendor-cm（codemirror 编辑器族）单 chunk
+    //   505 kB 是各 @codemirror/* 包的固有合计，已由 compression 压至 br 141 kB；
+    //   编辑器是 ScriptPanel 的核心交互面，位于首屏必经路径，强行懒加载会引入加载闪烁
+    //   且各包互相依赖难以进一步拆分。这是有意取舍而非抑制告警：体积本身经 gzip/br 后可控。
+    //   [CONSTRAINT] 若未来出现第二个超限 chunk，应重新评估是否引入动态 import。
+    chunkSizeWarningLimit: 600,
     rolldownOptions: {
       output: {
         manualChunks: (id: string) => {

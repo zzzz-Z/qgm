@@ -15,22 +15,38 @@ function bumpWindows(): void { windowsTick.value++ }
 // 新窗口覆盖旧引用（简化：只跟最新一个），与油猴侧 window.opener 一一对应
 // [multi-loop-step3] 窗口表：按 sid 存储；activeWinSid 指向当前激活槽位
 const windowTable = new Map<string, { win: Window, url: string }>()
-const activeWinSid = ref<string>('default')
+// [refresh-same-session-v1] activeWinSid 持久化到 sessionStorage：刷新属同一会话，
+//   不恢复则回退默认 'default'，与刷新前的 'win_<modelId>' 不同 → 规则去重键不匹配 → 首问重复注入
+// [CONSTRAINT] 空串是合法值（setActiveWinSidImpl('') 有测试），读取用 ?? 不用 ||，否则空串被吃成 'default'
+const LS_ACTIVE_WIN_SID = '__ai_active_win_sid'
+function readActiveWinSid(): string {
+  try {
+    if (typeof sessionStorage === 'undefined') return 'default'
+    return sessionStorage.getItem(LS_ACTIVE_WIN_SID) ?? 'default'
+  } catch { return 'default' }
+}
+function persistActiveWinSid(sid: string): void {
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(LS_ACTIVE_WIN_SID, sid)
+  } catch { /* 配额/隐私模式：仅丢失刷新恢复能力 */ }
+}
+const activeWinSid = ref<string>(readActiveWinSid())
 
 /** 获取 Active Win Sid */
-export function getActiveWinSid(): string {
+export function getActiveWinSidImpl(): string {
   return activeWinSid.value
 }
 /**
  * 切换激活槽位
  * [CONSTRAINT] 不校验 sid 是否已存在于 windowTable —— 允许先切槽再 openSite 绑定
  */
-export function setActiveWinSid(sid: string): void {
+export function setActiveWinSidImpl(sid: string): void {
   activeWinSid.value = sid
+  persistActiveWinSid(sid)
   bumpWindows()
 }
 // [multi-loop-step7-url] 删除窗口表条目（供 App.vue 删会话时同步清理）
-export function removeWindowBySid(sid: string): void {
+export function removeWindowBySidImpl(sid: string): void {
   windowTable.delete(sid)
   bumpWindows()
 }
@@ -39,7 +55,7 @@ export function removeWindowBySid(sid: string): void {
  * [WHY] 页面刷新后内存引用可能失效；此处惰性校验 closed，命中即清理并返回 null
  * [CONSTRAINT] 跨域只允许读 win.closed，读其他属性会抛错
  */
-export function getWindowBySid(sid: string): Window | null {
+export function getWindowBySidImpl(sid: string): Window | null {
   const entry = windowTable.get(sid)
   if (!entry) return null
   if (entry.win.closed) {
@@ -50,7 +66,7 @@ export function getWindowBySid(sid: string): Window | null {
   return entry.win
 }
 /** 列出所有仍存活的窗口 */
-export function listWindows(): Array<{ sid: string, url: string }> {
+export function listWindowsImpl(): Array<{ sid: string, url: string }> {
   const out: Array<{ sid: string, url: string }> = []
   for (const [sid, v] of windowTable) {
     if (!v.win.closed) { out.push({ sid, url: v.url })
@@ -60,14 +76,14 @@ export function listWindows(): Array<{ sid: string, url: string }> {
   return out
 }
 /** 获取 Active Win */
-export function getActiveWin(): Window | null {
-  return getWindowBySid(activeWinSid.value)
+export function getActiveWinImpl(): Window | null {
+  return getWindowBySidImpl(activeWinSid.value)
 }
 /**
  * 绑定/解绑当前激活槽位的 window 引用
  * [CONSTRAINT] win=null 时从表里删除对应条目，等价于解绑
  */
-export function setActiveWin(win: Window | null): void {
+export function setActiveWinImpl(win: Window | null): void {
   const sid = activeWinSid.value
   if (!win) { windowTable.delete(sid); bumpWindows(); return }
   windowTable.set(sid, { win, url: url.value })
@@ -128,6 +144,11 @@ export function winNameOf(sid: string): string {
  * [CONSTRAINT] 探测会尝试 open —— 若目标不存在会新建空白同源窗口，须立即 close 回收；
  *   若目标存在（跨域），open 返回该引用但读 location 会抛 DOMException，据此区分两种情形。
  * [CHANGE-IMPACT] 命中时写回 windowTable（供 copyAndFill 免寻找窗口）；未命中时清标记。
+ * [probe-no-false-clear-v1] 无手势误清复核（2026-10-09）：
+ *   HTML 规范保证 name 对应 browsing context 已存在时 open('', name) 返回该引用、不新建、不受
+ *   手势限制；popup blocker 仅在「需新建」时介入。故返回 null / about:blank 均等价于「目标不存在」，
+ *   清标记是正确行为（覆盖用户手动关窗后切回前台的纠正场景）。反之若把 null 保留为「未知」，
+ *   手动关窗将永不降级。两害相权，维持现状。
  * @returns true 表示窗口真实存在（已写回表）；false 表示不存在（已清标记）
  */
 export function probeWindowBySid(sid: string): boolean {
@@ -159,7 +180,7 @@ export function probeWindowBySid(sid: string): boolean {
  *       每个 sid 在 windowTable 内已存自己的 url，从那里提取才是正确的 origin
  * [CONSTRAINT] sid 不存在 / url 解析失败 → 返回空串（调用方跳过发送，不用 '*' 兜底）
  * [CHANGE-IMPACT] useAiWindowSend 全部 send*To 依赖本函数计算 origin；
- *                与旧 targetOrigin() 语义一致，仅改为按 sid 取 url
+ *                与旧 targetOriginImpl() 语义一致，仅改为按 sid 取 url
  * @param sid 目标窗口 sid
  */
 export function targetOriginFor(sid: string): string {
@@ -177,7 +198,7 @@ export function targetOriginFor(sid: string): string {
  * 计算 postMessage 的目标 origin（当前激活槽位）
  * [CONSTRAINT] 保留旧 API 供 useAiWindow / 测试调用；内部转为 targetOriginFor(activeWinSid)
  */
-export function targetOrigin(): string {
+export function targetOriginImpl(): string {
   return targetOriginFor(activeWinSid.value)
 }
 // [win-sid-namespace-v1] 站点窗口槽位 sid 的唯一命名来源
@@ -196,7 +217,7 @@ export function winSidOf(modelId: string): string {
 //   [CONSTRAINT] 跨域读 location.href 会抛 DOMException = 真窗口，返回 false；
 //     只有能读到且恰为 about:blank 才判 true。
 //   [CHANGE-IMPACT] probeWindowBySid 与 copyAndFill 恢复分支共用此判据，改这里两处同步。
-export function isBlankRef(win: Window | null): boolean {
+export function isBlankRefImpl(win: Window | null): boolean {
   if (!win) return false
   try { return win.location.href === 'about:blank' } catch { return false }
 }

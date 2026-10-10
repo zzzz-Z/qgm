@@ -18,6 +18,8 @@ import { clampTextPreview, denoiseLog, tailTextPreview } from '../../utils/timel
 import { stripScriptBlocks } from '../../utils/strip-script-blocks'
 // [preview-ssot-v1] 预览阈值统一定义在 timeline-build（单一定义，防两处分叉）
 import { ASK_PREVIEW, DONE_PREVIEW, TAIL_KEEP_LINES, TAIL_MAX_CHARS, TEXT_PREVIEW } from '../../utils/timeline-build'
+// [eventbus-name-clash-v1] 显式 import（原因同 ScriptPanel.vue）
+import { useEventBus } from '../../composables/ui/useEventStream'
 
 // [timeline-denoise-v1] 长文本卡片共用的「预览 + 折叠」字段
 // [WHY] text / ask / done 三类卡片都要"超长才折叠"，字段同构可复用同一套折叠逻辑与样式
@@ -50,8 +52,14 @@ interface ScriptItem {
   stdoutHidden: number
   stderrText: string
   stderrHidden: number
-  // why 从卡片主体迁移至展开区，避免每张卡都占两行；空串表示无 why
+  // [script-card-head-v2] why 回到卡片头部（desc 下方第二行常显）：它是「这一步为什么做」，
+  //   与 desc 同属步骤属性而非输出；藏在展开区里等于要求用户逐行点开才能理解意图。
+  //   空串表示无 why（旧事件 payload 无此字段）。
   why: string
+  // [script-card-reason-v1] 失败原因：useRunner 的 error 分支会带 payload.reason
+  //   （「未收到 summary 帧」/「已取消」/异常文本）。此前该字段存在但从未渲染，
+  //   用户只能靠被截断的 stderr 尾去猜。空串表示无（成功态恒为空）。
+  reason: string
 }
 interface TextItem extends PreviewFields {
   type: 'text'
@@ -242,6 +250,8 @@ const timelineItems = computed(() => {
     const p = (ev.payload || {}) as Record<string, unknown>
     const desc = String(p.desc || '').trim()
     const why = String(p.why || '').trim()
+    // [script-card-reason-v1] 失败原因（仅 useRunner 的 error 分支下发）
+    const reason = String(p.reason || '').trim()
     const lang = String(p.lang || 'js')
     const phase = String(p.phase || 'running')
     const key = String(p.updateKey || `ev-${ev.id}`)
@@ -276,6 +286,7 @@ const timelineItems = computed(() => {
       stderrText: errTail.text,
       stderrHidden: errTail.hiddenLines,
       why,
+      reason,
     })
   }
 

@@ -12,34 +12,22 @@ const _path = _require('node:path')
 const here = _path.dirname(fileURLToPath(import.meta.url))
 const ROOT = _path.resolve(here, '..', '..', '..')
 
-const HANDLERS_SRC = 'packages/client/composables/ai/auto-loop/reply-handlers.ts'
 const EXEC_FLOW_SRC = 'packages/client/components/script/exec-flow.ts'
 function readSrc(rel: string): string { return _fs.readFileSync(_path.join(ROOT, rel), 'utf8') }
 
-test('G1: 循环引擎在 executeItemInner 阶段必须 sendFill 回传结果', () => {
-  const src = readSrc(HANDLERS_SRC)
-  const m = src.match(/async function executeItemInner[\s\S]*?\n {2}\}/)
-  assert.ok(m, '找不到 executeItemInner 函数体')
-  // [round-merge-v1] 出站口为守 §4 体积 ratchet 被上收到 flushRoundOutcome（不可内联：
-  //   reply-handlers.ts 冻结在 413 行）。故判据拆成两段：① 两条分支都在 executeItemInner 内交出结果；
-  //   ② 唯一出站口确实调用了 transport.sendFill。两段缺一即等于「结果回传未由循环引擎承接」。
-  assert.ok(m[0].includes('stageRoundOutcome(inst.id.value, cjsOutcome'), 'cjs 分支未交出结果：结果回传未由循环引擎承接')
-  assert.ok(m[0].includes('stageRoundOutcome(inst.id.value, bashOutcome'), 'bash 分支未交出结果：结果回传未由循环引擎承接')
-  const flush = src.match(/function flushRoundOutcome[\s\S]*?\n {2}\}/)
-  assert.ok(flush, '找不到 flushRoundOutcome 出站口')
-  // [loop-lessons-refresh-v1] 出站经 fillWithLessons（先按本轮错误检索 lessons 再发）。
-  // 判据拆两段：① 出站口调用 fillWithLessons；② fillWithLessons 内真的有 sendFill。
-  assert.ok(flush[0].includes('fillWithLessons(transport, outcomes'), '出站口未走 fillWithLessons：结果回传未由循环引擎承接')
-  const fillSrc = readSrc('packages/client/composables/ai/auto-loop/loop-lessons-fill.ts')
-  assert.ok(fillSrc.includes('transport.sendFill'), 'fillWithLessons 内无 sendFill：结果回传未由循环引擎承接')
-})
-
-test('G2: exec-flow 里 softPause 必须被 isLoopActive 守卫', () => {
+test('G2[P2]: exec-flow 回传成功后 softPause（isLoopActive 守卫已随循环收敛摘除）', () => {
   const src = readSrc(EXEC_FLOW_SRC)
-  // [assert-fix-v1] 用精确子串匹配实际调用行，避开注释里的反引号字面量干扰
+  // [loop-consolidation-P2] isLoopActive 恒 false（auto-loop 零调用点）⇒ 原「循环活动时不暂停」的守卫
+  //   已无意义，随 P2 一并摘除。留存路径下：发送成功即暂停（非循环路径恒可暂停）。
+  // [VARIANT] 把 `if (r !== 'failed') softPause()` 改回无条件 softPause() ⇒ 本断言仍应通过
+  //   （两者在恒可暂停语义下等价）；但删掉 softPause() ⇒ 应变红。
   assert.ok(
-    src.includes('!isLoopActive.value) softPause()'),
-    'exec-flow 里 softPause 调用未被 isLoopActive 守卫（循环活动时仍会暂停）',
+    src.includes('if (r !== \'failed\') softPause()'),
+    'exec-flow 回传成功后未 softPause（非循环路径应能暂停等待 AI 回包）',
+  )
+  assert.ok(
+    !src.includes('isLoopActive.value) softPause()'),
+    'isLoopActive 守卫应已随 P2 摘除，不应再出现',
   )
 })
 
@@ -111,4 +99,6 @@ test('G4: run() 开始时 autoFeedbackRequested 被重置', async () => {
   r.running.value = false
 })
 
+// [loop-consolidation-P3d] 删 G5：其断言对象 auto-loop/reply-handlers.ts 随 P3b 删除；
+//   失败结果回传的守卫由留存路径的 feedback-merge 承担（见 retained-done-fixture）。
 void origFetch

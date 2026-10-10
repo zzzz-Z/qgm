@@ -2,7 +2,6 @@
 // 去 props 变量绑定：模板直接用解构名，赋值给 props 会触发 unused-imports warning
 defineProps<{
   running: boolean
-  isLoopActive: boolean
   autoTakeoverEnabled: boolean
   // 循环暂停标志：按钮在「暂停 / 恢复」间切换
   loopPaused: boolean
@@ -40,12 +39,19 @@ const emit = defineEmits<{
       </svg>
     </button>
 
+    <!-- [ctrl-btn-semantic-color-v2] 本按钮是循环的「控制键」，配色按**点击后会发生什么**分三态，
+         不再是一个颜色走天下（旧版运行中/已暂停共用 #f0abfc 粉紫：既说不出语义，
+         亮色主题下对比度只有 1.65:1 ≈ 看不见）：
+           未运行 → .takeover 蓝 --primary  = 「开始」
+           运行中 → .pause    琥珀 --warning = 「按住」
+           已暂停 → .resume   绿   --success = 「继续」
+         两个运行态必须可区分（图标之外多一重颜色通道），守卫见 tests/toolbar-ctrl-colors.node-test.ts -->
     <button
-      v-if="running || isLoopActive || autoTakeoverEnabled"
+      v-if="running || autoTakeoverEnabled"
       v-tooltip="loopPaused ? '恢复：继续等待 AI 回包' : '暂停：不取 AI 脚本、不接收工作台结果'"
       :aria-label="loopPaused ? '恢复循环' : '暂停循环'"
-      class="primary-btn stop head-run"
-      :class="{ 'is-waiting': aiWaiting || delivering }"
+      class="primary-btn head-run"
+      :class="{ 'pause': !loopPaused, 'resume': loopPaused, 'is-waiting': aiWaiting || delivering }"
       :aria-busy="aiWaiting || delivering"
       @click="emit('pauseAll')"
     >
@@ -163,17 +169,29 @@ const emit = defineEmits<{
   transform: translateY(0);
   box-shadow: 0 1px 2px rgb(0 0 0 / 30%);
 }
-.tpl-bar button.primary-btn.stop {
+.tpl-bar button.primary-btn.pause {
   background: transparent;
-  border: 1px solid #f0abfc;
-  color: #f0abfc;
+  border: 1px solid var(--warning);
+  color: var(--warning);
   box-shadow: none;
 }
-.tpl-bar button.primary-btn.stop:hover:not(:disabled) {
-  background: rgb(240 171 252 / 14%);
-  border-color: #f5c6ff;
-  color: #f5c6ff;
-  box-shadow: 0 0 0 3px rgb(240 171 252 / 12%);
+.tpl-bar button.primary-btn.pause:hover:not(:disabled) {
+  background: var(--warning-bg);
+  border-color: var(--warning);
+  color: var(--warning);
+  box-shadow: 0 0 0 3px var(--warning-bg);
+}
+.tpl-bar button.primary-btn.resume {
+  background: transparent;
+  border: 1px solid var(--success);
+  color: var(--success);
+  box-shadow: none;
+}
+.tpl-bar button.primary-btn.resume:hover:not(:disabled) {
+  background: var(--success-bg);
+  border-color: var(--success);
+  color: var(--success);
+  box-shadow: 0 0 0 3px var(--success-bg);
 }
 .tpl-bar button.primary-btn.is-waiting > svg {
   display: none;
@@ -228,9 +246,14 @@ const emit = defineEmits<{
 .primary-btn.run:hover:not(:disabled) {
   filter: brightness(1.05);
 }
-/* [stop-btn-color-v1] 停止态唯一配色 = 上方 .tpl-bar button.primary-btn.stop（#f0abfc 粉紫描边）。
-   曾有一条低优先级的 .primary-btn.stop { color: rgb(236 19 19) } 真红规则与此矛盾（复制粘贴残留），
-   仅靠优先级被压制；按钮一旦移出 .tpl-bar 就会变真红 ⇒ 已删除，防止双源分叉。 */
+/* [ctrl-btn-semantic-color-v2] 循环控制键配色的**唯一事实来源** = 上方两条
+   `.tpl-bar button.primary-btn.pause / .resume` + 未运行态的 `.takeover`（--primary 蓝）。
+   三态语义与色相一致：开始=蓝（发起）、暂停=琥珀（按住）、恢复=绿（继续）；
+   全部走语义令牌，亮/暗两套自动生效。
+   历史：旧版这两态共用硬编码 #f0abfc 粉紫（`[stop-btn-color-v1]`），
+   语义上说不通（粉紫既不是"暂停"也不是"恢复"），且亮色主题下对比度仅 1.65:1（白底几乎不可见）
+   —— 已按用户 2026-10-09 要求「结合实际语义修改」拆成两态两色。
+   [CONSTRAINT] 禁止再引入裸 hex 到这里；新增状态请复用 --primary/--warning/--success/--danger。 */
 .primary-btn .ico {
   font-size: var(--font-10);
   line-height: 1;

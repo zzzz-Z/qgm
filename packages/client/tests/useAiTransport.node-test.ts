@@ -119,9 +119,5 @@ test('[P5-3] 提供 unMute 且能复位 flag', () => {
   assert.ok(/muted = false/.test(src), 'unMute 未复位 flag')
 })
 
-test('[P5-3] startLoop 前调 unMute 防永久静音', () => {
-  // [start-family-v1] startLoop 已从 useAutoLoop.ts 抽至 auto-loop/start-family.ts；
-  // unMute 调用本身仍存在（迁移未丢语义），改读迁移后文件
-  const ualSrc = fs.readFileSync(path.join(process.cwd(), 'packages/client/composables/ai/auto-loop/start-family.ts'), 'utf8')
-  assert.ok(/transport\.unMute\?\.\(\)/.test(ualSrc), 'startLoop 缺 unMute 调用')
-})
+// [loop-consolidation-P3d] 删除 [P5-3] 用例：其断言对象 auto-loop/start-family.ts 随 P3b 删除，
+//   而 startLoop 的 unMute 语义已随整条循环链路退役（无消费者）。

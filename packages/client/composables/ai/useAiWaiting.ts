@@ -1,12 +1,9 @@
 import { effectScope, ref } from 'vue'
-import { useSessionStorage, useTimeoutFn } from '@vueuse/core'
+import { useTimeoutFn } from '@vueuse/core'
 /** 跨组件共享的「等待 AI 回复」（单一数据源） */
 
 // 3 分钟无回复则复位 waiting，避免永久卡死
 const WATCHDOG_MS = 180_000
-/** sessionStorage 键：loopPaused 持久化；刷新后仍保持暂停态 */
-const LS_LOOP_PAUSED = '__ai_loop_paused'
-
 /** 是否处于等待 AI 回复状态；内存态，不持久化 */
 const waiting = ref(false)
 
@@ -23,17 +20,32 @@ const timeoutFn = scope.run(() => useTimeoutFn(() => {
 
 /**
  * 暂停闸：阻断续推 / 发脚本 / 等待
- * [WHY] 走 vueuse useSessionStorage 替换原手工 sessionStorage + watch：
- * 自动惰性读写 + 序列化 + storage 事件跨标签页同步
- * [CONSTRAINT] 类型必须是 boolean 与下游引用一致；serializer 用 '1'/'0' 兼容历史持久化格式
- * [CHANGE-IMPACT] 多标签页共享 sessionStorage 时，一处改暂停会立即同步到另一处
+ * [loop-consolidation-P2] 从 useSessionStorage 改回内存态 ref。
+ * [WHY] 原持久化会让「异常残留 true 后刷新不清」——手动消息被静默拦下（useAiTransport.ts:100 自陈）。
+ *   单路径下暂停是临时态：刷新本身已中断当前会话，恢复可交互才符合预期。
+ * [CONSTRAINT] 仍是模块级单例，多组件共享；接口不变（.value 读写）。
+ * [CHANGE-IMPACT] 刷新后不再保持暂停态；跨标签页各自独立（原本也不跨）。
  */
-export const loopPaused = useSessionStorage<boolean>(LS_LOOP_PAUSED, false, {
-  serializer: {
-    read: raw => raw === '1',
-    write: v => (v ? '1' : '0'),
-  },
-})
+export const loopPaused = ref(false)
+
+/**
+ * [loop-consolidation-P3b] 从 auto-loop/pause-control.ts 迁出：软暂停只置标志，不动状态机。
+ * [WHY] script-panel-actions / ScriptPanel / exec-flow 三处留存路径都要用它；
+ *   留在 auto-loop/ 会随 P3b 删除目录一起消失。
+ * [CONSTRAINT] 与旧实现逐字等价（旧版还调 bindKeyboard/transport.mute，那些是循环专用，已在 P2 摘除）。
+ */
+export function softPause(): void {
+  loopPaused.value = true
+}
+
+/**
+ * [loop-consolidation-P3b] 从 auto-loop/pause-control.ts 迁出：复位残留暂停标志。
+ * [WHY] ScriptPanel 二次点击发送时调用：清除第一次发送后 softPause 留下的 paused 状态。
+ * [CONSTRAINT] 旧实现含 isLoopActive 守卫（恒 false）与 transport.unMute，前者已摘、后者已随循环退役。
+ */
+export function clearSoftPause(): void {
+  loopPaused.value = false
+}
 
 /**
  * 进入等待 AI 回复状态并重置看门狗
@@ -73,6 +85,8 @@ function armWatchdog(): void {
 export function useAiWaiting() {
   return {
     loopPaused,
+    softPause,
+    clearSoftPause,
     waiting,
     startWaiting() {
       waiting.value = true

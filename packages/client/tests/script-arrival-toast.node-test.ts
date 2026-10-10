@@ -17,14 +17,7 @@ const h = vi.hoisted(() => ({
   toasts: [] as Array<{ msg: string, type: string }>,
 }))
 
-vi.mock('../composables/ai/useAutoLoop', () => ({
-  useAutoLoop: () => ({
-    getLoopBySessionId: () => undefined,
-    isInstActive: () => false,
-    onScriptArrival: async () => {},
-    onNonScriptReply: async () => {},
-  }),
-}))
+// [loop-consolidation-P3d] 删除 useAutoLoop mock：useAiReplyHandlers 已在 P2 摘除该依赖
 vi.mock('../composables/ai/useAutoTakeover', () => ({
   useAutoTakeover: () => ({
     enabled: ref(false),

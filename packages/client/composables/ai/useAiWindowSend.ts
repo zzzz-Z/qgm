@@ -2,12 +2,12 @@
 // 动态 import 只会触发 INEFFECTIVE_DYNAMIC_IMPORT；改为命名空间静态导入，
 // loadTransport() 以 Promise.resolve 保留异步签名，调用方零改动
 import * as transportMod from './useAiTransport.js'
-import { getActiveWinSid, getWindowBySid, targetOriginFor } from './useAiWindowTable'
+import { getActiveWinSidImpl as getActiveWinSid, getWindowBySidImpl as getWindowBySid, targetOriginFor } from './useAiWindowTable'
 import { log } from '../../utils/log' // [restore-import-v1] 早前清理误删
 import { traceSend } from './send-trace' // [send-trace-v1] 出站留痕（P1-3）
 
 /** fill 消息载荷：向 AI 窗口投递的提问文本 */
-export interface FillPayload {
+export interface FillPayloadImpl {
   prompt: string
   /** 可选：附加上下文/契约摘要，由调用方组装 */
   context?: string
@@ -15,7 +15,7 @@ export interface FillPayload {
    * 可选：图片 DataURL 数组（data:image/*;base64,...）
    * [image-channel-v2] 图片走独立通道而非塞进 prompt，避免油猴侧需从文本 parse
    * [CONSTRAINT] 单张大小 ≈ MAX_ATTACH_BYTES×4/3；接收端需实现 images→粘贴逻辑，否则静默丢弃
-   * [CHANGE-IMPACT] 消费方 sendFillTo / headless transport.sendFill；旧接收端不识该字段不报错
+   * [CHANGE-IMPACT] 消费方 sendFillToImpl / headless transport.sendFillImpl；旧接收端不识该字段不报错
    */
   images?: string[]
   /**
@@ -27,7 +27,7 @@ export interface FillPayload {
 }
 
 /** rotate 消息载荷：切换会话/话题的指令 */
-export interface RotatePayload { instruction: string }
+export interface RotatePayloadImpl { instruction: string }
 
 /**
  * new-session 消息载荷：开启新会话时携带的**首问正文**
@@ -35,7 +35,7 @@ export interface RotatePayload { instruction: string }
  *   由 session-prompt.buildNewSessionPrompt 拼成「规则/技能/lessons + 目标」。
  *   当前油猴端已不消费该字段（只切会话），headless 端同理。
  */
-export interface NewSessionPayload { summary: string }
+export interface NewSessionPayloadImpl { summary: string }
 
 /** Transport 模块（已静态化；保留 Promise 形态兼容既有 await loadTransport() 调用点） */
 const _transportMod: Promise<typeof import('./useAiTransport.js')> = Promise.resolve().then(() => transportMod)
@@ -78,12 +78,12 @@ function headlessSend(methodName: string, ...args: unknown[]) {
  * - origin 精确到 protocol://host，不用 '*'
  * - 窗口未打开或已关闭 → 返回 false，调用方 toast 提示
  */
-export function sendFillTo(sid: string, payload: FillPayload): boolean {
+export function sendFillToImpl(sid: string, payload: FillPayloadImpl): boolean {
   const win = getWindowBySid(sid)
-  if (!win) { log.warn('[sendFillTo] win=null sid=', sid, 'active=', getActiveWinSid()); return false }
+  if (!win) { log.warn('[sendFillToImpl] win=null sid=', sid, 'active=', getActiveWinSid()); return false }
   // [per-sid-origin-v1] 按 sid 查 windowTable 中的 url 计算 origin；多站点并存不再错发
   const origin = targetOriginFor(sid)
-  if (!origin) { log.warn('[sendFillTo] origin="" sid=', sid); return false }
+  if (!origin) { log.warn('[sendFillToImpl] origin="" sid=', sid); return false }
   try {
     // [send-trace-v1] source 只服务留痕：剥掉后再上线，避免污染协议载荷
     const { source: traceSource, ...wire } = payload
@@ -92,36 +92,36 @@ export function sendFillTo(sid: string, payload: FillPayload): boolean {
     traceSend({ sid, via: 'tm', source: traceSource || 'direct', prompt: payload.prompt, ok: true })
     return true
   } catch (e) {
-    log.warn('[sendFillTo] postMessage threw', e)
+    log.warn('[sendFillToImpl] postMessage threw', e)
     return false
   }
 }
 /**
- * 向当前激活槽位发 fill；headless 时走 transport.sendFill
+ * 向当前激活槽位发 fill；headless 时走 transport.sendFillImpl
  * [CONSTRAINT] headless 分支 fire-and-forget 恒返回 true；tampermonkey 分支返回实际发送结果
  */
-export function sendFill(payload: FillPayload): boolean {
+export function sendFillImpl(payload: FillPayloadImpl): boolean {
   if (isHeadless()) {
-    headlessSend('sendFill', getActiveWinSid(), payload)
+    headlessSend('sendFillImpl', getActiveWinSid(), payload)
     traceSend({ sid: getActiveWinSid(), via: 'headless', source: payload.source || 'loop-round', prompt: payload.prompt, ok: true })
     return true
   }
-  // [send-trace-v1] 生产路径里 sendFillTo 的直接调用方只有 ds 桥（循环引擎），故此处显式标 loop-round
-  return sendFillTo(getActiveWinSid(), { source: 'loop-round', ...payload })
+  // [send-trace-v1] 生产路径里 sendFillToImpl 的直接调用方只有 ds 桥（循环引擎），故此处显式标 loop-round
+  return sendFillToImpl(getActiveWinSid(), { source: 'loop-round', ...payload })
 }
 
 /**
- * 异步 fill：发帧后等油猴回 fill-ack；明确拒绝 = failed，超时/抛错 = unacked（结果未知）
- * [WHY] 同步 sendFillTo 的 postMessage 恒返回 true，对端是否存在/是否处理完全不可知 → UI 假「已发送」
+ * 异步 fill：发帧后等油猴回 fill-ack；明确拒绝 / postMessage 抛错 = failed，超时 = unacked（结果未知）
+ * [WHY] 同步 sendFillToImpl 的 postMessage 恒返回 true，对端是否存在/是否处理完全不可知 → UI 假「已发送」
  * [unacked-degrade-v1] 原实现在超时时硬判 failed → 旧版油猴（不回 fill-ack，仓库脚本须手动更新）
  *   每次新窗口注入系统提示词必弹「首问未送达」报错，但 fill 实际已被处理 → 误报。
  *   三态化：ack ok=true → sent；ack ok=false → failed（油猴明确说没送达）；
  *   超时/postMessage 抛错 → unacked（发帧结果未知，由调用方降级为按已发送处理并提示更新油猴）
  * [CONSTRAINT] ackId 由本函数生成并随帧下发；只匹配自己的 ackId，避免并发 fill 串话
  * [CHANGE-IMPACT] 返回类型从二元改三态：调用方（useAiWindow.fillWithDegrade 与测试）需同步适配；
- *   循环轮次内路径仍用 sendFillTo（行为不变）
+ *   循环轮次内路径仍用 sendFillToImpl（行为不变）
  */
-export function sendFillToAsync(sid: string, payload: FillPayload, timeoutMs = 5000): Promise<'sent' | 'failed' | 'unacked'> {
+export function sendFillToAsync(sid: string, payload: FillPayloadImpl, timeoutMs = 5000): Promise<'sent' | 'failed' | 'unacked'> {
   const win = getWindowBySid(sid)
   if (!win) { log.warn('[sendFillToAsync] win=null sid=', sid); return Promise.resolve('failed') }
   const origin = targetOriginFor(sid)
@@ -156,13 +156,15 @@ export function sendFillToAsync(sid: string, payload: FillPayload, timeoutMs = 5
     // [send-trace-v1] 出站留痕（P1-3）：抛错同样是一次真实出站尝试，用 ok 区分「送达」与「噪声」。
     //   本函数的唯一生产调用方是 copyAndFill（ScriptPanel/exec-flow 的结果回传），故默认归因 copyOutput。
     traceSend({ sid, via: 'tm', source: traceSource || 'copyOutput', prompt: payload.prompt, ok: posted })
-    if (!posted) { finish('unacked'); return }
+    // [post-throw-failed-v1] postMessage 抛错 = 帧确定未送出，不是「结果未知」：
+    //   原判 unacked 会让上层降级为「已发送」，静默吞掉真实失败（与 N2 修复配套）
+    if (!posted) { finish('failed'); return }
     setTimeout(finish, timeoutMs, 'unacked')
   })
 }
 
 /** 通知油猴停止（清 lastScript / Observer / 监听） */
-export function sendStopTo(sid: string): boolean {
+export function sendStopToImpl(sid: string): boolean {
   const win = getWindowBySid(sid)
   if (!win) return false
   const origin = targetOriginFor(sid)
@@ -175,16 +177,16 @@ export function sendStopTo(sid: string): boolean {
   }
 }
 /** 向当前激活槽位发 stop */
-export function sendStop(): boolean {
-  if (isHeadless()) { headlessSend('sendStop', getActiveWinSid()); return true }
-  return sendStopTo(getActiveWinSid())
+export function sendStopImpl(): boolean {
+  if (isHeadless()) { headlessSend('sendStopImpl', getActiveWinSid()); return true }
+  return sendStopToImpl(getActiveWinSid())
 }
 
 /**
  * 向指定槽位发 rotate 指令（切换会话/话题）
  * [CONSTRAINT] origin 无法解析时返回 false，不用 '*'（违反安全约束）
  */
-export function sendRotateTo(sid: string, payload: RotatePayload): boolean {
+export function sendRotateToImpl(sid: string, payload: RotatePayloadImpl): boolean {
   const win = getWindowBySid(sid)
   if (!win) return false
   const origin = targetOriginFor(sid)
@@ -195,9 +197,9 @@ export function sendRotateTo(sid: string, payload: RotatePayload): boolean {
   } catch { return false }
 }
 /** 向当前激活槽位发 rotate */
-export function sendRotate(payload: RotatePayload): boolean {
-  if (isHeadless()) { headlessSend('sendRotate', getActiveWinSid(), payload); return true }
-  return sendRotateTo(getActiveWinSid(), payload)
+export function sendRotateImpl(payload: RotatePayloadImpl): boolean {
+  if (isHeadless()) { headlessSend('sendRotateImpl', getActiveWinSid(), payload); return true }
+  return sendRotateToImpl(getActiveWinSid(), payload)
 }
 
 /**
@@ -206,7 +208,7 @@ export function sendRotate(payload: RotatePayload): boolean {
  *              油猴侧不应再拼接
  * [no-handoff-summary-v1] 载荷里已不含「上一轮总结」；油猴端当前不消费该字段（只切会话）
  */
-export function sendNewSessionTo(sid: string, payload: NewSessionPayload): boolean {
+export function sendNewSessionToImpl(sid: string, payload: NewSessionPayloadImpl): boolean {
   const win = getWindowBySid(sid)
   if (!win) return false
   const origin = targetOriginFor(sid)
@@ -217,7 +219,7 @@ export function sendNewSessionTo(sid: string, payload: NewSessionPayload): boole
   } catch { return false }
 }
 /** 向当前激活槽位发 new-session */
-export function sendNewSession(payload: NewSessionPayload): boolean {
-  if (isHeadless()) { headlessSend('sendNewSession', getActiveWinSid(), payload); return true }
-  return sendNewSessionTo(getActiveWinSid(), payload)
+export function sendNewSessionImpl(payload: NewSessionPayloadImpl): boolean {
+  if (isHeadless()) { headlessSend('sendNewSessionImpl', getActiveWinSid(), payload); return true }
+  return sendNewSessionToImpl(getActiveWinSid(), payload)
 }

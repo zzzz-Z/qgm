@@ -14,11 +14,12 @@ import type { SessionEntry } from './composables/ui/useAppStorage'
 // [theme-binding-v1] theme 必须显式值导入：模板 @click 里有 `theme = theme === 'dark' ? ...` 赋值，
 // 若靠 auto-import 解析，编译器会生成 __unimport_theme 引用 → 对 auto-import 符号赋值非法，
 // vite build / rolldown 报 [PARSE_ERROR] Cannot assign to this expression（dev 模式不报，只有构建才炸）
-// [fallback-sid-v1] effectiveSessionId 为 computed，auto-imports.d.ts 未收录 → 显式导入（与 theme 合并，守 no-duplicates）
-import { effectiveSessionId, theme } from './composables/ui/useAppStorage'
+import { theme } from './composables/ui/useAppStorage'
 // [win-sid-namespace-v1] 站点窗口槽位 sid 共享命名 + 切换活跃槽位
-import { setActiveWinSid, winSidOf } from './composables/ai/useAiWindowTable'
-import { revealSideTab } from './composables/ui/useSidePaneTab'
+import { setActiveWinSidImpl as setActiveWinSid, winSidOf } from './composables/ai/useAiWindowTable'
+// [kb-entry-unique-v1] 知识库入口唯一：只在右侧栏 SidePane 的 kb tab（折叠态也保留图标条，
+// 点 tab 自身即展开）。此处曾有一个 header 按钮切到 kb tab，与侧栏完全重复，已按用户指定删除（2026-10-09）。
+// 守卫见 tests/kb-sidepane-wiring.node-test.ts —— 不要再在 App 加回侧栏 tab 的入口按钮。
 // [useSitesStore-import-v1] 统一 store 启动时迁移 + 切站点写 activeModelId
 // [workspace-guide-lazy-v1] 引导页仅 !hasWorkspace 时渲染（v-if 闸门），异步拆包不进首屏 chunk
 const WorkspaceGuide = defineAsyncComponent(() => import('./components/panels/WorkspaceGuide.vue'))
@@ -47,9 +48,9 @@ const urlInputRef = ref<HTMLInputElement | null>(null)
 
 /** 自动接管模式开关 */
 const autoTakeover = useAutoTakeover()
-const { resetSession } = useSessionManager()
+const { resetSession, restoreFromStorage } = useSessionManager()
 const { url: siteUrl, setUrl: setSiteUrl, modelId } = useAiSite()
-// [app-storage-extracted-v1] SessionEntry/loadHistory/saveHistory 已抽至 useAppStorage
+// [app-storage-extracted-v1] SessionEntry 类型与按站点历史读写已抽至 useAppStorage
 // [site-isolate-v1] 会话历史按站点分桶；切站点时由下方 watch(modelId) 重新加载
 const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
 
@@ -106,11 +107,9 @@ watch(modelId, (v) => {
   setActiveWinSid(winSidOf(String(v || 'deepseek')))
 }, { immediate: true })
 watch(activeSessionId, (v) => {
-  // [use-storage-v1] 落盘由 useStorage 托管；此处仅保留 loop/window 表同步副作用
-  // 同步到 loop 实例表与窗口表（多循环并发的前提）
-  const sid = v || 'default'
-  setActiveLoopSessionId(sid)
-  createLoopInstanceFor(sid)
+  // [use-storage-v1] 落盘由 useStorage 托管
+  // [loop-consolidation-P3e] 原 loop 实例表同步（setActiveLoopSessionId / createLoopInstanceFor）
+  //   随 P3 删除 useAutoLoop 一并移除：循环状态单一真相源已收敛到 useRuntime，实例表不再存在
   // [win-sid-slot-v1] 不在此写入 activeWinSid：会话 id 每次开新会话都变，
   // 而 activeWinSid 是「AI 窗口槽位」（默认 default），写入会话 id 会让 headless 每次
   // 落到全新 profile 目录 → 未登录 + 白开浏览器（报告 §1.2）。槽位切换由 AiWindowList 显式驱动。
@@ -129,12 +128,13 @@ onMounted(async () => {
   // [sites-store-wire-v1] 首次启动迁移旧分散键到统一 store
   try { migrateIfNeeded() } catch { /* 未就绪不阻断 */ }
   await probeWorkspace()
+  // [refresh-same-session-v1] 普通刷新：从 sessionStorage 恢复会话上下文；
+  //   切项目路径的 reopenAfterSwitchProject 会先 resetSession 清掉，故顺序无副作用
+  try { restoreFromStorage() } catch { /* 未就绪时忽略 */ }
   maybeScheduleReopen()
   subscribeHeadlessReply()
-  // 注入 activeSessionId 读取器：循环启动时取当前活动会话 id 绑定到 loopSessionId
-  // [fallback-sid-v1] 用 effectiveSessionId：无真实 AI 会话时退化为每 tab fallback，
-  //   保证循环 sessionId 绑定非空 → tasks 写入正确桶 + finish 时能清空
-  setActiveSessionIdGetter(() => effectiveSessionId.value)
+  // [loop-consolidation-P3e] 原 setActiveSessionIdGetter 注入（供 loop 启动读 sid）随 P3
+  //   删除 useAutoLoop 一并移除：无消费者；循环 sid 由 useRuntime 直接承载
   await reconnectAfterRefresh()
 })
 
@@ -396,37 +396,45 @@ function onLoginGui() {
           </svg>
         </button>
       </div>
-      <label class="transport-switch" title="AI 传输链路（切换后自动刷新）">
-        <select :value="transportKind" aria-label="AI 传输链路" @change="onTransportChange">
-          <option value="tampermonkey">油猴</option>
-          <option value="headless">无头</option>
+      <!-- [hdr-transport-group-v1] 传输链路控组合一：把「油猴 / 无头」选择、无头引导登录、更新油猴脚本
+           收进同一个分段控件（原先是三个各自描边的独立控件，视觉上零散且高度不一）。
+           结构： [ 链路选择 ▾ | (无头时) 引导登录 | 更新脚本 ] -->
+      <div class="transport-switch" role="group" aria-label="AI 传输链路（切换后自动刷新）" title="AI 传输链路（切换后自动刷新）">
+        <select
+          class="transport-select"
+          :value="transportKind"
+          aria-label="AI 传输链路"
+          @change="onTransportChange"
+        >
+          <option value="tampermonkey">
+            油猴
+          </option>
+          <option value="headless">
+            无头
+          </option>
         </select>
-      </label>
-      <!-- [headless-login-gui-v1] 无头模式下引导用户在有头窗口完成一次登录 -->
-      <button
-        v-if="transportKind === 'headless'"
-        v-tooltip="'引导登录：打开有头窗口，登录后关窗即可（登录态落盘复用）'"
-        aria-label="引导登录"
-        class="login-gui-toggle"
-        @click="onLoginGui"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
-      </button>
-      <!-- [userscript-update-v1] 安装 / 更新油猴脚本：打开本地分发端点，Tampermonkey 拦截并弹更新页 -->
-      <button
-        v-tooltip="'安装 / 更新油猴脚本（打开本地分发端点，Tampermonkey 会弹出安装或更新确认）'"
-        aria-label="更新油猴脚本" class="userscript-toggle"
-        @click="onUpdateUserscript"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
-      </button>
-      <button
-        v-tooltip="'知识库：经验台账 / 项目文档 / 外部 Wiki 检索'"
-        aria-label="知识库" class="kb-toggle"
-        @click="revealSideTab('kb')"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
-      </button>
+        <!-- [headless-login-gui-v1] 无头模式下引导用户在有头窗口完成一次登录 -->
+        <template v-if="transportKind === 'headless'">
+          <span class="transport-sep" aria-hidden="true" />
+          <button
+            v-tooltip="'引导登录：打开有头窗口，登录后关窗即可（登录态落盘复用）'"
+            aria-label="引导登录"
+            class="login-gui-toggle"
+            @click="onLoginGui"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
+          </button>
+        </template>
+        <span class="transport-sep" aria-hidden="true" />
+        <!-- [userscript-update-v1] 安装 / 更新油猴脚本：打开本地分发端点，Tampermonkey 拦截并弹更新页 -->
+        <button
+          v-tooltip="'安装 / 更新油猴脚本（打开本地分发端点，Tampermonkey 会弹出安装或更新确认）'"
+          aria-label="更新油猴脚本" class="userscript-toggle"
+          @click="onUpdateUserscript"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
+        </button>
+      </div>
     </div>
   </header>
 

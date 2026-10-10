@@ -19,7 +19,14 @@ import { currentSiteUrl, useAiSite } from '../ai/useAiSite'
 import { log } from '../../utils/log'
 import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
 
-type AiReply = import('../ai/auto-loop/types').AiReply
+// [loop-consolidation-P3a] 内联 AiReply（原 import('../ai/auto-loop/types').AiReply）；
+//   该目录将随 P3b 删除，此处仅用作 onReply 回调的形参断言。
+interface AiReply {
+  kind: 'script' | 'done' | 'plain' | 'multi' | 'stopped' | 'limit'
+  item?: import('../runner/useScriptInbox').InboxItem
+  count?: number
+  text?: string
+}
 
 /** 启动族注入面：App.vue 局部状态 */
 export interface AppStartupDeps {

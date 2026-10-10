@@ -10,12 +10,14 @@ import type { AttachedFile } from './attach-manager'
 import { createTreeAttach } from './tree-attach'
 // 预览/撤回/变更类型已抽到 preview-manager.ts
 import { createPreviewManager } from './preview-manager'
+// [preview-diff-v1] 预览的变更类型直接复用面板同一套类型（避免本地再写一份字面量联合）
+import type { ChangeType } from '../../types'
 // 侧栏拖拽已抽到 side-resize.ts
 import { createSideResize } from './side-resize'
 // exec 全流程已抽到 exec-flow.ts
 import { createExecFlow } from './exec-flow'
-// [multi-script-v1] 同一条回复还有排队脚本时抑制中途回传（见 pending-scripts.ts 的 CONSTRAINT）
-import { pendingScriptCount, roundMergePending } from '../../composables/ai/auto-loop/pending-scripts'
+// [loop-consolidation-P3a] 原 roundMergePending（循环内轮末合并窗信号）随 auto-loop 退役；
+//   留存路径的回传窗信号是 feedbackPending（feedback-merge 的 onFeedbackPending 回调）。
 // 组件内定时器统一走 vueuse：随组件卸载自动清理，省去手动 clear
 // [script-panel-utils-v2-extracted]
 import TerminalPane from './TerminalPane.vue'
@@ -26,6 +28,9 @@ import { useScriptPanelActions } from './script-panel-actions'
 import SidePane from '../panels/SidePane.vue'
 // 左侧常驻多窗口面板
 import AiWindowList from '../panels/AiWindowList.vue'
+// [eventbus-name-clash-v1] 显式 import：与 @vueuse/core 的 useEventBus 同名，已在 vite
+//   AutoImport.ignore 中屏蔽 auto-import 源，此处必须显式引入（tsc/vitest 无该插件）。
+import { useEventBus } from '../../composables/ui/useEventStream'
 
 defineOptions({ name: 'ScriptPanel' })
 
@@ -36,8 +41,12 @@ const FileContentOverlay = defineAsyncComponent(() => import('../diff/FileConten
 const SIDE_WIDTH_KEY = LS_SIDE_WIDTH_KEY
 /** 侧栏默认宽度（像素） */
 const SIDE_WIDTH_DEFAULT = 320
-/** 内容预览打开时的侧栏加宽值（像素） */
-const SIDE_WIDTH_DIFF = 560
+// [side-width-stable-v1] 侧栏宽度**只由用户拖拽决定**（sideWidthBase ←→ localStorage），
+//   不随「打开内容预览 / 切 tab」自动变化 —— 2026-10-09 用户指定：显示弹窗时 sidebar 宽度不要变化。
+//   [WHY] 原先的 SIDE_WIDTH_DIFF=560 是「行级 diff 内嵌在侧栏」时代的配套动作：要看清 diff 得把侧栏撑宽。
+//     预览早已改为独立浮层（FileContentOverlay，960px 宽），侧栏不再需要让位；留下的自动加宽只表现为
+//     「一点文件列表，右侧面板就跳宽/回缩」，把用户自己拖好的宽度冲掉（截图取证）。
+//   [CONSTRAINT] 宽度写入只允许两条路径：side-resize.ts 的拖拽、onMounted 的 localStorage 回填。
 let runStartAt = 0
 /** 编辑器 */
 const editorRef = ref<{ insertText: (t: string) => void } | null>(null)
@@ -70,14 +79,19 @@ const lastDuration = ref('')
 const runningElapsed = ref('')
 /** 当前正在执行的命令 */
 const runningCommand = ref('')
-/** 侧栏标签页 */
-const sideTab = ref<'tree' | 'changes'>('tree')
 /** 窄屏抽屉开合 */
 const sideDrawerOpen = ref(false)
 /** 预览中的文件路径 */
 const previewFile = ref<string | null>(null)
-/** 预览文件的内容 */
-const previewContent = ref<string>('')
+// ── [preview-diff-v1] 预览数据：diff 需要**两侧**内容，不再只有「变更后」 ──
+/** 预览的变更类型（决定 diff 口径：新增/删除不看另一侧，修改要两侧） */
+const previewType = ref<ChangeType>('modified')
+/** 变更后内容（当前磁盘内容） */
+const previewAfter = ref<string>('')
+/** 变更前内容（归属轮运行前快照） */
+const previewBefore = ref<string>('')
+/** [preview-diff-v1] 变更前快照缺失（git 基准 / 快照被回收）⇒ 只有上下文行，弹窗须显式说明 */
+const previewBaselineMissing = ref(false)
 /** 内容拉取中 */
 const previewLoading = ref(false)
 /** 树展开的 stream id 集合 */
@@ -119,19 +133,14 @@ const changeViewProxy = computed<'round' | 'cumulative'>({
 // 已删除 countdown（延迟机制移除）
 const { enabled: autoTakeoverEnabled, scheduleAutoRun } = useAutoTakeover()
 // ── 领域 composable ──
-const { waiting: aiWaiting, startWaiting: startAiWaiting } = useAiWaiting()
+// [loop-consolidation-P3b] softPause / loopPaused 已迁至 useAiWaiting（随 auto-loop 退役）
+const { waiting: aiWaiting, startWaiting: startAiWaiting, softPause, loopPaused } = useAiWaiting()
 const { events: busEvents } = useEventBus()
 const { stripComments, stripBlankLines } = useCodeCleaner()
 // [tw-removed-v1] 已删 useTwDisplay（打字机缓冲链）：twLines/twErrLines 解构后零消费，
 //   twStdout/twStderr 也只被 TerminalPane 当作「有无输出」布尔用，逐字动画无真实消费者。
 //   空态判定改为直接透传 useRunner 的 liveStdout / liveStderr。
-const {
-  loopState,
-  isLoopActive,
-  // [pause-resume-v1] 软暂停：不打断已发出的 fill，仅拦后续脚本与结果
-  softPause,
-  loopPaused,
-} = useAutoLoop()
+// [loop-consolidation-P3b] 摘除 loopState（原从 useAutoLoop 取，恒 idle ⇒ watch 永不触发）
 /**
  * [deliver-window-v1] 「脚本已跑完、结果还没发出去」的回传窗是否开著。
  * [WHY] 两条路径各有一段静默窗：循环路径 ROUND_MERGE_MS(1500ms)、非循环自动回传
@@ -139,7 +148,7 @@ const {
  *   startAiWaiting 又被挪到 flush 时点，界面上就是「显示成功 → 几秒空白 → 突然发出去」。
  * [CONSTRAINT] 只读派生，不反写两个窗；计时与 spinner 都按「含回传窗」口径走。
  */
-const delivering = computed(() => roundMergePending.value > 0 || feedbackPending.value)
+const delivering = computed(() => feedbackPending.value)
 /** 含回传窗的忙碌口径：脚本执行中 + 结果等待出站 */
 const busyOrDelivering = computed(() => running.value || delivering.value)
 // 运行计时器：组件级 scope，卸载自动清理（等价原 onBeforeUnmount clearInterval）
@@ -164,14 +173,17 @@ const { removeAttach, clearAll, onEditorPaste, onDesktopDrop } = createAttachMan
 const { registerTreeDrop, buildPromptWithAttachments } = createTreeAttach({ attachedFiles })
 /** V12 显式通道取消订阅句柄；onMounted 赋值、onBeforeUnmount 释放 */
 let unsubscribeTreeDrop: (() => void) | undefined
-// 预览/撤回（previewFile/previewContent/previewLoading 由本组件持有）
+// 预览/撤回（previewFile/previewType/previewBefore/previewAfter/previewLoading 由本组件持有）
 // [cumulative-baseline-v1] 这里传 visibleChanges（随视图切换）而非 changes：
 //   面板显示的是哪套变更集，预览取内容就必须跟同一套口径（含 deleted 的归属轮 runId）
-const { onPreviewFile, onRollback, onRollbackAll } = createPreviewManager({
+const { onPreviewFile, onRollback, onRollbackAll, closePreview } = createPreviewManager({
   changes: visibleChanges,
   result,
   previewFile,
-  previewContent,
+  previewType,
+  previewBefore,
+  previewAfter,
+  previewBaselineMissing,
   previewLoading,
   rollback,
   rollbackAll,
@@ -224,7 +236,6 @@ const { copyOutput, feedbackMerge } = createExecFlow({
   confirmDialog,
   startAiWaiting,
   softPause,
-  isLoopActive,
   // [deliver-window-v1] 回传窗开关 → 面板的 delivering 状态
   onFeedbackPending: (v) => { feedbackPending.value = v },
 })
@@ -245,12 +256,8 @@ const lastStreamId = computed(() => {
 
 // [user-run-wait] 点运行 → 立即置“等待 AI 回复”loading
 
-// [loop-loading] 循环态统一触发等待 loading，确保从发问起有「等待 AI」提示
-watch(loopState, (v, old) => {
-  if ((v === 'waiting' || v === 'preparing') && v !== old) {
-    startAiWaiting()
-  }
-})
+// [loop-consolidation-P3b] 摘除 watch(loopState)：循环状态恒 idle，该 loading 触发条件不可达；
+//   「等待 AI」提示由 runSmart / copyOutput 的 startAiWaiting 直接承担。
 watch(lastStreamId, (id) => {
   if (!id) return
   const s2 = new Set(treeExpanded.value)
@@ -261,28 +268,14 @@ watch(lastStreamId, (id) => {
 })
 watch(
   () => visibleChanges.value.length,
-  (len, prevLen) => {
-    if (len === 0) {
-      previewFile.value = null
-      previewContent.value = ''
-    }
-    if (len > 0 && (!prevLen || prevLen === 0)) {
-      sideTab.value = 'changes'
-    }
+  (len) => {
+    // [side-width-stable-v1] 这里原先还有一句 `sideTab.value = 'changes'`（变更出现时切到变更 tab）：
+    //   ScriptPanel 的 sideTab 是**本地 ref、从未绑定给 SidePane**（SidePane 的 tab 由
+    //   useSidePaneTab + useFoldState 自己管）⇒ 那句赋值一直是空转，宽度联动删掉后一并清除。
+    //   若日后真要「变更出现自动切 tab」，正确入口是 useSidePaneTab 的 sidePaneTab + reveal tick。
+    if (len === 0) closePreview()
   },
 )
-watch(sideTab, () => {
-  if (resizingSide.value) return
-  sideWidth.value = previewFile.value
-    ? Math.max(sideWidthBase.value, SIDE_WIDTH_DIFF)
-    : sideWidthBase.value
-})
-watch(previewFile, (v) => {
-  if (resizingSide.value) return
-  sideWidth.value = v
-    ? Math.max(sideWidthBase.value, SIDE_WIDTH_DIFF)
-    : sideWidthBase.value
-})
 /**
  * 脚本跑完的结果分支：成功/失败文案 + 自动回传判定。
  * [deliver-window-v1] 计时收口**不在这里**（见下方 watch(busyOrDelivering)）：
@@ -291,11 +284,8 @@ watch(previewFile, (v) => {
 function handleRunResult(): void {
   const r = result.value
   if (!r) return
-  // [multi-script-v1] 同一条 AI 回复还有排队脚本未跑完 → 本轮不做中途回传
-  // [WHY] 批量脚本执行到一半就把中间结果塞给 AI，会在 AI 侧开启新一轮回复，
-  //   与仍在排队/执行中的块互相踩踏；等队列清空后由最后一块统一回传。
-  // [CONSTRAINT] 只在循环内生效：非循环路径没有队列概念，行为保持原样
-  const midBatch = isLoopActive.value && pendingScriptCount.value > 0
+  // [loop-consolidation-P2] 摘除 midBatch：原为「循环内队列未清空时抑制中途回传」，
+  //   isLoopActive 恒 false ⇒ 该守卫失效。pendingScriptCount 属循环内队列信号，留存路径无队列概念。
   if (r.dryRunFailed) {
     // [ui-icon-discipline-v1] chrome 层去 emoji：语义由 statusClass 承担（'err' 已上色）
     statusText.value = '预检失败 · 未落盘'
@@ -305,10 +295,7 @@ function handleRunResult(): void {
       'warn',
       5000,
     )
-    if (midBatch || isLoopActive.value) {
-      // 队列未清空 / 循环活动：回传权归循环引擎（reply-handlers 的 executeItemInner），
-      // 此处不得再发一次，否则同一次执行会出现「循环引擎 + ScriptPanel」双发
-    } else if (autoTakeoverEnabled.value) {
+    if (autoTakeoverEnabled.value) {
       scheduleAutoRun(() => { void copyOutput(autoFeedbackRequested.value) })
     } else {
       void copyOutput(autoFeedbackRequested.value)
@@ -319,7 +306,8 @@ function handleRunResult(): void {
   statusText.value = r.ok ? '成功' : '失败'
   statusClass.value = r.ok ? 'ok' : 'err'
   // autoAskOnResult: 失败或只读诊断（成功无改动、非循环）时延迟 3s 自动复制并发给 AI（主动停止除外）
-  const isReadonlyProbe = isReadonlyResult(r, isLoopActive.value)
+  // [loop-consolidation-P2] isLoopActive 恒 false（非循环路径始终按非循环口径判定只读）
+  const isReadonlyProbe = isReadonlyResult(r, false)
   const forceFeedback = autoFeedbackRequested.value
   const shouldAutoAsk
     = forceFeedback
@@ -331,7 +319,7 @@ function handleRunResult(): void {
       || r.test?.ok === false
   // [loop-feedback-authority-v2] 循环活动时回传权归循环引擎，ScriptPanel 一律不再发：
   //   本块执行完时循环引擎也会发（且已按队列是否清空合并成一次），两处都发即为同轮双发。
-  if (shouldAutoAsk && !midBatch && !isLoopActive.value && r.error !== '已取消') {
+  if (shouldAutoAsk && r.error !== '已取消') {
     if (forceFeedback) clearAutoFeedback()
     if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput(forceFeedback) })
     else void copyOutput(forceFeedback)
@@ -462,7 +450,6 @@ function onHtmlDrop(e: DragEvent) {
       <ScriptEditor
         ref="editorRef"
         v-model="script"
-        :is-loop-active="isLoopActive"
         :is-running="running"
         :on-run="() => { void runSmart() }"
         :on-history-prev="cmdHistoryPrev"
@@ -473,7 +460,6 @@ function onHtmlDrop(e: DragEvent) {
         <template #action-bar>
           <ScriptToolbar
             :running="running"
-            :is-loop-active="isLoopActive"
             :loop-paused="loopPaused"
             :auto-takeover-enabled="autoTakeoverEnabled"
             :script="script"
@@ -539,12 +525,16 @@ function onHtmlDrop(e: DragEvent) {
       @preview="onPreviewFile"
     />
 
+    <!-- [preview-diff-v1] 变更预览浮层：展示该文件变更前后的行级 diff（新增 / 删除） -->
     <FileContentOverlay
       v-if="previewFile"
       :file-name="previewFile"
-      :content="previewContent"
+      :before="previewBefore"
+      :after="previewAfter"
+      :change-type="previewType"
+      :baseline-missing="previewBaselineMissing"
       :loading="previewLoading"
-      @close="previewFile = null"
+      @close="closePreview"
     />
   </div>
 </template>

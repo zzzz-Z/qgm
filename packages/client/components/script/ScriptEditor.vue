@@ -14,15 +14,17 @@ interface CMModule {
   Prec: typeof import('@codemirror/state').Prec
   Compartment: typeof import('@codemirror/state').Compartment
   RangeSetBuilder: typeof import('@codemirror/state').RangeSetBuilder
-  basicSetup: typeof import('codemirror').basicSetup
-  cmJavascript: typeof import('@codemirror/lang-javascript').javascript
+  drawSelection: typeof import('@codemirror/view').drawSelection
+  highlightSpecialChars: typeof import('@codemirror/view').highlightSpecialChars
+  history: typeof import('@codemirror/commands').history
+  defaultKeymap: typeof import('@codemirror/commands').defaultKeymap
+  historyKeymap: typeof import('@codemirror/commands').historyKeymap
 }
 
 /** 组件接收的 props 定义 */
 const props = defineProps<{
   modelValue: string
   isRunning: boolean
-  isLoopActive: boolean
   onRun?: () => boolean | void
   onHistoryPrev?: () => void
   onHistoryNext?: () => void
@@ -67,10 +69,8 @@ const {
   pickerPick,
 } = useFilePicker({ getCmView: () => cmView })
 
-watch(() => props.isLoopActive, (v) => {
-  if (!cmView || !CM || !editableComp) return
-  cmView.dispatch({ effects: editableComp.reconfigure(CM.EditorView.editable.of(!v)) })
-})
+// [loop-consolidation-P2] 摘除 isLoopActive watch：非循环路径无只读需求，
+//   编辑器恒可编辑。原循环路径的可编辑切换随 auto-loop 子系统一并退役。
 // 外部 script 变化同步到编辑器
 watch(() => props.modelValue, (v) => {
   if (!cmView) return
@@ -124,11 +124,10 @@ function onDrop(e: DragEvent) {
  */
 async function ensureCM(): Promise<CMModule> {
   if (CM) return CM
-  const [v, s, j, c] = await Promise.all([
+  const [v, s, c] = await Promise.all([
     import('@codemirror/view'),
     import('@codemirror/state'),
-    import('@codemirror/lang-javascript'),
-    import('codemirror'),
+    import('@codemirror/commands'),
   ])
   CM = {
     EditorView: v.EditorView,
@@ -141,8 +140,11 @@ async function ensureCM(): Promise<CMModule> {
     Prec: s.Prec,
     Compartment: s.Compartment,
     RangeSetBuilder: s.RangeSetBuilder,
-    basicSetup: c.basicSetup,
-    cmJavascript: j.javascript,
+    drawSelection: v.drawSelection,
+    highlightSpecialChars: v.highlightSpecialChars,
+    history: c.history,
+    defaultKeymap: c.defaultKeymap,
+    historyKeymap: c.historyKeymap,
   }
   return CM
 }
@@ -235,16 +237,26 @@ async function createEditor() {
   const state = m.EditorState.create({
     doc: props.modelValue,
     extensions: [
-      m.basicSetup,
-      m.cmJavascript(),
+      // [cm-trim-v1] 按需裁剪：只保留输入框真正需要的扩展，剔除 basicSetup 的折叠/
+      //   补全/括号匹配/搜索/自动缩进/多光标等高亮代码编辑器功能。
+      //   [WHY] 本输入框消费自然语言 + @路径，行号已由 SCSS display:none 隐藏，
+      //   语法高亮对指令无价值；CM6 扩展按需 tree-shake，精简后体积显著下降。
+      //   [CHANGE-IMPACT] 连带移除 @codemirror/lang-javascript 与 codemirror(basicSetup)
+      //   依赖，以及未使用的 @codemirror/theme-one-dark；如需回滚语义高亮须同时恢复三者。
+      m.highlightSpecialChars(),
+      m.history(),
+      m.drawSelection(),
+      // [cm-trim-v1] defaultKeymap/historyKeymap 是 KeyBinding[] 而非 Extension，
+      //   必须经 keymap.of() 包裹才能进 extensions 数组（否则 TS2322）
+      m.keymap.of([...m.defaultKeymap, ...m.historyKeymap]),
       /* editor-no-h-scroll */
       m.EditorView.lineWrapping,
       // 智能体风：placeholder 提示 Enter 发送 / Shift+Enter 换行
       m.placeholder('输入消息…  Enter 发送 / Shift+Enter 换行'),
       // 显式空检查：editableComp 依赖 @codemirror 动态 import，失败时为 undefined；
       // 用 ! 会让 state 创建得到非法 extension 参数（静默失效）；此处提前抛出让错误位置清晰
-      (editableComp ?? (() => { throw new Error('cm-editable 扩展未加载') }))
-        .of(m.EditorView.editable.of(!props.isLoopActive)),
+      (editableComp ?? new m.Compartment())
+        .of(m.EditorView.editable.of(true)),
       m.EditorView.theme({
         '&': {
           height: '100%',

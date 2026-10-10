@@ -4,6 +4,11 @@ import type { Ref } from 'vue'
 import type { ChangeType } from '../../types'
 // [auto-feedback-merge-v1] 非循环自动回传合并窗（显式 import，勿依赖 auto-import：vitest 裸跑）
 import { createFeedbackMerge } from '../../composables/runner/feedback-merge'
+// [explicit-copyAndFill-v1] 显式 import：useAiWindow 是门面文件，vite.config 的 auto-import
+//   dirsScanOptions 已将其排除扫描，靠 auto-import 兜底会在 dev/prod 运行时把 copyAndFill 解析为
+//   undefined → feedbackMerge flush 调用时抛 TypeError → 被 doFlush 的 try/catch 静默吞掉 →
+//   崩溃脚本的失败结果永不回传（与「出错应回传而非静默失败」原则相悖）。显式 import 修复。
+import { copyAndFill } from '../../composables/ai/useAiWindow'
 
 /** 执行结果（ScriptPanel 用到的子集） */
 export interface ExecResult {
@@ -30,8 +35,6 @@ export interface ExecFlowDeps {
   confirmDialog: (msg: string, opts?: { type?: 'danger' | 'default', okText?: string, cancelText?: string }) => Promise<boolean>
   startAiWaiting: () => void
   softPause: () => void
-  // [loop-no-pause-v1] R1：循环活动时禁止 softPause，需注入循环状态
-  isLoopActive: Ref<boolean>
   /** [auto-feedback-merge-v1] 合并窗时长覆盖（测试注入小值；缺省 3000ms） */
   autoFeedbackMergeMs?: number
   /** [deliver-window-v1] 合并窗开关回调：true=结果在窗内等待出站，UI 据此保持「执行中」 */
@@ -43,7 +46,7 @@ export interface ExecFlowDeps {
  * @param deps - 依赖面
  */
 export function createExecFlow(deps: ExecFlowDeps) {
-  const { running, result, changes, liveStdout, liveStderr, copied, runningCommand, pushCmdHistory, buildAiPrompt, confirmDialog, startAiWaiting, softPause, isLoopActive, autoFeedbackMergeMs, onFeedbackPending } = deps
+  const { running, result, changes, liveStdout, liveStderr, copied, runningCommand, pushCmdHistory, buildAiPrompt, confirmDialog, startAiWaiting, softPause, autoFeedbackMergeMs, onFeedbackPending } = deps
   const { toast } = useToast()
   const execPolicyOverride = ref<string | null>(null)
   const lastAutoAskedRunId = ref('')
@@ -55,10 +58,10 @@ export function createExecFlow(deps: ExecFlowDeps) {
   //   与 ScriptPanel 的 [loop-feedback-authority-v2] 同语义）。
   const feedbackMerge = createFeedbackMerge(async (items, mergedText) => {
     const r = await copyAndFill(mergedText)
-    // [send-fail-no-pause-v1] 仅发送成功时暂停；[loop-no-pause-v1] R1：循环活动时不得 softPause
-    if (r !== 'failed' && !isLoopActive.value) softPause()
+    // [loop-consolidation-P2] 摘除 isLoopActive 守卫（恒 false）；非循环路径恒可暂停
+    if (r !== 'failed') softPause()
     if (r === 'failed') {
-      toast('发送失败，已复制到剪贴板', 'warn', TOAST_MEDIUM)
+      toast('发送失败', 'warn', TOAST_MEDIUM)
       return
     }
     const okN = items.filter(i => i.ok).length
@@ -69,7 +72,8 @@ export function createExecFlow(deps: ExecFlowDeps) {
     copiedTimer = setTimeout(() => { copied.value = false; copiedTimer = null }, 2000)
   }, {
     delayMs: autoFeedbackMergeMs,
-    isActive: () => !isLoopActive.value,
+    // [loop-consolidation-P2] 原为 !isLoopActive.value（恒 true）；摘除循环后合并窗恒活跃
+    isActive: () => true,
     onPendingChange: onFeedbackPending,
   })
 

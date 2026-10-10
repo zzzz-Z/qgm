@@ -24,12 +24,12 @@ it('appendFingerprints：有指纹时产出「文件 | 行 | 符号 | 类别」'
     ok: false,
     code: 1,
     fingerprints: [
-      { file: 'packages/client/composables/ai/loopLogic.ts', line: 17, symbol: 'LOOP_HARD_MAX_ROUNDS', kind: 'variable' },
+      { file: 'packages/client/components/script/exec-flow.ts', line: 50, symbol: 'createExecFlow', kind: 'function' },
     ],
   })
   const text = p.join('\n')
   assert.match(text, /# 失败定位（AST 指纹）/)
-  assert.match(text, /packages\/client\/composables\/ai\/loopLogic\.ts \| 17 \| `LOOP_HARD_MAX_ROUNDS` \| variable/)
+  assert.match(text, /packages\/client\/components\/script\/exec-flow\.ts \| 50 \| `createExecFlow` \| function/)
 })
 
 it('appendFeedbackSummary：无测试目标时显式说明「未运行」，且不得出现 test ✓', () => {

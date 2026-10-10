@@ -9,7 +9,7 @@ import { afterEach, describe, it, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { sendFillToAsync } from '../composables/ai/useAiWindowSend.js'
-import { isBlankRef, removeWindowBySid, setWindowEntry } from '../composables/ai/useAiWindowTable.js'
+import { isBlankRefImpl as isBlankRef, removeWindowBySidImpl as removeWindowBySid, setWindowEntry } from '../composables/ai/useAiWindowTable.js'
 
 interface AckFrame { type: string, ackId?: string, ok?: boolean }
 interface FillFrame extends AckFrame { prompt?: string, context?: string, images?: string[] }
@@ -110,12 +110,12 @@ describe('sendFillToAsync（WO-20261006-01 fill-ack 闭环，宿主侧动态补�
     assert.equal(listeners.size, 0, '超时后也必须移除监听')
   })
 
-  it('postMessage 抛错（跨域异常）→ 立即 unacked（发帧结果未知，非油猴明确拒绝）', async () => {
+  it('postMessage 抛错（跨域异常）→ 立即 failed（帧确定未送出，非「结果未知」）', async () => {
     stubHostWindow()
     const { win } = makeTarget({ throwOnPost: true })
     setWindowEntry('s1', { win, url: URL_OK })
     const r = await sendFillToAsync('s1', { prompt: 'p' })
-    assert.equal(r, 'unacked')
+    assert.equal(r, 'failed')
     assert.equal(listeners.size, 0)
   })
 
@@ -146,11 +146,11 @@ describe('getWindowBySid 死窗口守卫（既有行为，防退化）', () => {
     const { win, sent } = makeTarget()
     ;(win as unknown as { closed: boolean }).closed = true
     setWindowEntry('s1', { win, url: URL_OK })
-    const { sendFillTo } = await import('../composables/ai/useAiWindowSend.js')
+    const { sendFillToImpl: sendFillTo } = await import('../composables/ai/useAiWindowSend.js')
     const r = sendFillTo('s1', { prompt: 'p' })
     assert.equal(r, false, 'closed 窗口必须显式返回 false')
     assert.equal(sent.length, 0, 'postMessage 不得被调用（否则静默成功）')
-    const { getWindowBySid } = await import('../composables/ai/useAiWindowTable.js')
+    const { getWindowBySidImpl: getWindowBySid } = await import('../composables/ai/useAiWindowTable.js')
     assert.equal(getWindowBySid('s1'), null, '引用应被清理')
   })
 

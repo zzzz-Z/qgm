@@ -14,14 +14,7 @@ const h = vi.hoisted(() => ({
   pushCalls: [] as unknown[],
 }))
 
-vi.mock('../composables/ai/useAutoLoop', () => ({
-  useAutoLoop: () => ({
-    getLoopBySessionId: () => undefined,
-    isInstActive: () => false,
-    onScriptArrival: async () => {},
-    onNonScriptReply: async () => {},
-  }),
-}))
+// [loop-consolidation-P3d] 删除 useAutoLoop mock：useAiReplyHandlers 已在 P2 摘除该依赖
 vi.mock('../composables/ai/useAutoTakeover', () => ({
   useAutoTakeover: () => ({
     enabled: ref(false),
@@ -66,7 +59,9 @@ test('承重：rescan:true 的 script ⇒ 只回填 push，不执行 run/schedul
 
 test('承重(源码锚点)：script 分支必须含 rescan 早退守卫，且在 scheduleAutoRun 之前', () => {
   const s = readFileSync('packages/client/composables/ai/useAiReplyHandlers.ts', 'utf8')
-  const guard = s.indexOf('if (payload.rescan === true) return')
+  // [loop-consolidation-P3d] 守卫形态已变为「块内先 reportArrival 再 return」；
+  //   判据改锚定「rescan 判定 + 早退」的组合，保持与 scheduleAutoRun 的相对位置检查
+  const guard = s.indexOf('if (payload.rescan === true) {')
   const sched = s.indexOf('autoTakeover.scheduleAutoRun')
   assert.ok(guard > 0, '缺少 rescan 早退守卫（[rescan-no-autorun-v1]）')
   assert.ok(sched > 0, '找不到 scheduleAutoRun')

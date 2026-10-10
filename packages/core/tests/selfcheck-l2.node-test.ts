@@ -192,7 +192,7 @@ test('G14: BeforeDoneFinal 两侧枚举 + hook 超时 > 内部总预算', () => 
   const b = nodeFs.readFileSync(nodePath.join(CWD0, 'packages/core/src/utils/hooks.ts'), 'utf8')
   assert.ok(b.includes('BeforeDoneFinal: 1_200_000'), 'hook 超时须抬到 1200s（> 内部预算 960s）')
   assert.ok(b.includes('BeforeDone: 180_000'))
-  const c = nodeFs.readFileSync(nodePath.join(CWD0, 'packages/client/composables/ai/auto-loop/hooks.ts'), 'utf8')
+  const c = nodeFs.readFileSync(nodePath.join(CWD0, 'packages/client/composables/ai/loop-hooks.ts'), 'utf8')
   assert.ok(c.includes('BeforeDoneFinal'))
   const d = nodeFs.readFileSync(nodePath.join(CWD0, 'packages/core/src/routes/hooks.ts'), 'utf8')
   assert.ok(d.includes('BeforeDoneFinal'))

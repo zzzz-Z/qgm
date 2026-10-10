@@ -1,14 +1,14 @@
-// [lessons-inject-parity-guard-v1] 守卫：lessons 注入必须同时覆盖「循环首轮」与「新会话首问」。
-// [WHY] load-lessons.ts 与 session-prompt.ts 的注释都声明「被两个 prompt 构建函数消费」，
-//       但历史上只有 buildLoopInitialPrompt 真的接了——声明与实现漂移，且无任何测试会发现。
-//       本测试把这条契约钉死：任一入口漏接，测试立刻红。
+// [lessons-inject-parity-guard-v1] 守卫：首问规则头的 lessons 注入必须真的生效。
+// [WHY] 原 sessionPromptLessons.node-test.ts 测的 buildLoopInitialPrompt/buildNewSessionPrompt
+//   随 auto-loop 收敛（P3b）删除；其 4 组守卫（注入对齐 / 状态行图例 / 窗口卫生 / 预算封顶）
+//   已改挂到 first-prompt.ts 的 prependFirstPromptRules（留存路径的真实拼装点）。
 // [CONSTRAINT] 用全局 Response 造响应，不用 `as any`；load-rules 有 Promise 缓存，每个用例前必须 clearRulesCache()。
 import { afterEach, beforeEach, it, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildLoopInitialPrompt, buildNewSessionPrompt } from '../composables/ai/session-prompt.js'
+import { prependFirstPromptRules } from '../composables/ai/first-prompt.js'
 import { clearRulesCache } from '../composables/ai/load-rules.js'
 import { LESSONS_BUDGET } from '../composables/ai/load-lessons.js'
 
@@ -52,68 +52,51 @@ function makeFetch(opts: { lessons?: string | null, throwAll?: boolean, matches?
 beforeEach(() => clearRulesCache())
 afterEach(() => vi.unstubAllGlobals())
 
-it('buildLoopInitialPrompt：注入 lessons 块并剥掉维护者引言', async () => {
+it('prependFirstPromptRules：注入 lessons 块并剥掉维护者引言', async () => {
   vi.stubGlobal('fetch', makeFetch())
-  const p = await buildLoopInitialPrompt('把 X 做完')
-  assert.ok(p.includes(LESSONS_MARK), '循环首轮必须带 lessons')
+  const p = await prependFirstPromptRules('把 X 做完')
+  assert.ok(p.includes(LESSONS_MARK), '首问必须带 lessons')
   assert.ok(p.includes('坑A'), 'lessons 正文必须进入 prompt')
   assert.ok(!p.includes('维护者协议引言'), '维护者引言应被 stripPreface 丢弃')
-  assert.ok(p.includes('把 X 做完'), '目标正文不得被挤掉')
+  assert.ok(p.includes('把 X 做完'), '问题正文不得被挤掉')
+  assert.ok(p.includes('# 会话首问规则（自动携带）'), '规则头标记必须在位')
+  assert.ok(p.includes('SYSTEM-OK'), '规则注入必须保留')
 })
 
-it('buildNewSessionPrompt：同样注入 lessons（与循环首轮对齐）', async () => {
-  vi.stubGlobal('fetch', makeFetch())
-  const p = await buildNewSessionPrompt('把 X 做完')
-  assert.ok(p.includes(LESSONS_MARK), '新会话首问必须带 lessons —— 漏接即本断言失败')
-  assert.ok(p.includes('坑A'), 'lessons 正文必须进入 prompt')
-  assert.ok(p.includes('把 X 做完'), '目标正文不得被挤掉')
-})
-
-// [no-handoff-summary-v1] 承重判据：新会话首问**不得**再拼接「上一轮会话总结」。
-// [WHY] 旧实现 `head + '# 上一轮会话总结' + summary` 把由 DOM 反推的交接正文搬进新会话；
-//   一旦提取走到整页兜底（replyRoot=document）且走 textContent（无换行），新会话首问就会
-//   出现一坨由侧栏会话标题 / 问候语 / 输入区按钮文案黏成的垃圾（实测 2026-10-07）。
-//   本用例把「不搬运」钉死：谁把该段加回来，这里立刻红。
-it('[no-handoff-summary-v1] buildNewSessionPrompt：不搬运上一轮总结，改带目标段', async () => {
-  vi.stubGlobal('fetch', makeFetch())
-  const p = await buildNewSessionPrompt('把 X 做完')
-  assert.ok(!p.includes('上一轮会话总结'), '交接正文不得再拼进新会话首问')
-  assert.ok(p.includes('# 目标'), '应以「# 目标」段替代')
-  assert.ok(p.includes('SYSTEM-OK'), '规则注入必须保留（自动循环靠它拿协议）')
-  assert.ok(p.includes(LESSONS_MARK), 'lessons 注入必须保留')
-})
-
-it('网络全挂：两个入口都降级但保留业务正文，不抛错', async () => {
+it('网络全挂：降级但保留业务正文，不抛错', async () => {
   vi.stubGlobal('fetch', makeFetch({ throwAll: true }))
-  const a = await buildLoopInitialPrompt('目标Z')
+  const a = await prependFirstPromptRules('目标Z')
   assert.equal(a, '目标Z')
-  const b = await buildNewSessionPrompt('目标Z')
-  assert.equal(b, '目标Z')
 })
 
 it('lessons 读不到：注入块为空，其余内容不受影响', async () => {
   vi.stubGlobal('fetch', makeFetch({ lessons: null }))
-  const p = await buildLoopInitialPrompt('目标W')
+  const p = await prependFirstPromptRules('目标W')
   assert.ok(!p.includes(LESSONS_MARK))
   assert.ok(p.includes('SYSTEM-OK') && p.includes('目标W'))
 })
 
+it('幂等：prompt 已含 SYSTEM.md 块时原样返回', async () => {
+  vi.stubGlobal('fetch', makeFetch())
+  const raw = '<file path="SYSTEM.md">x</file>\n\n问题'
+  const p = await prependFirstPromptRules(raw)
+  assert.equal(p, raw, '已含规则块时应原样返回（防重复注入）')
+})
 it('lessons 超预算：按条目边界截断且优先保留最新条目', async () => {
   const big = (t: string) => `## ${t}\n${'x'.repeat(4000)}\n`
   vi.stubGlobal('fetch', makeFetch({ lessons: big('旧坑') + big('新坑') }))
-  const p = await buildLoopInitialPrompt('目标V')
+  const p = await prependFirstPromptRules('目标V')
   assert.ok(p.includes('新坑'), '应优先保留文件尾（较新）的条目')
-  assert.ok(!p.includes('旧坑'), '超出 6000 预算的旧条目应被截断')
+  assert.ok(!p.includes('旧坑'), '超出预算的旧条目应被截断')
 })
 
-// ── 状态行图例：台账里有「已被推翻 / 已失效」的条目时，头部必须给出解释 ─────────────
+// ── 状态行图例：台账里有「已被推翻 / 已失效」的条目时，头部必须给出解释 ─────────
 // [lessons-status-legend-v1] 背景：lessons.md 的条目带状态行 —— `[VERIFIED]` / `[REJECTED]`
 //   （实测推翻，**正文是错的**）/ `[STALE]`（曾为真、机制已改，**现在不适用**）/ `（待复核）`。
-//   实测（治理后 56 条）：尾 6,000 字符注入窗口内含 **2 条 `[STALE]`**，而头部消息此前只说
-//   「缺省 = 待复核」——AI 读到一条「某 bug 存在」的 STALE 正文，无从知道它已被修好，
-//   会照着**已失效的现象**去修。图例是这条链上唯一的解释来源，故守卫它：
+//   AI 读到一条「某 bug 存在」的 STALE 正文，无从知道它已被修好，会照着**已失效的现象**去修。
+//   图例是这条链上唯一的解释来源，故守卫它：
 //   ① 四种状态可辨识；② `[REJECTED]`/`[STALE]` 必须是「叫停」语义，不能与 `[VERIFIED]` 同档；
-//   ③ 图例挂在 `head` 上、不进 6,000 字符条目预算 ⇒ 截断路径下同样必须在。
+//   ③ 图例挂在 head 上、不进字符预算 ⇒ 截断路径下同样必须在。
 
 const LESSONS_MIXED_STATUS = [
   '## 已修掉的坑',
@@ -128,7 +111,7 @@ const LESSONS_MIXED_STATUS = [
 
 it('注入块必须携带状态行图例：四种状态都可辨识', async () => {
   vi.stubGlobal('fetch', makeFetch({ lessons: LESSONS_MIXED_STATUS }))
-  const p = await buildLoopInitialPrompt('目标L')
+  const p = await prependFirstPromptRules('目标L')
   for (const s of ['`[VERIFIED]`', '`[REJECTED]`', '`[STALE]`', '`（待复核）`']) {
     assert.ok(p.includes(s), `图例缺少状态 ${s}：AI 无从判断该条结论是否仍然成立`)
   }
@@ -137,30 +120,23 @@ it('注入块必须携带状态行图例：四种状态都可辨识', async () =
 
 it('图例语义：REJECTED / STALE 必须是否定措辞，不能与 VERIFIED 同档', async () => {
   vi.stubGlobal('fetch', makeFetch({ lessons: LESSONS_MIXED_STATUS }))
-  const p = await buildLoopInitialPrompt('目标M')
+  const p = await prependFirstPromptRules('目标M')
   assert.match(p, /\[REJECTED\][^\n]*不要照做/, 'REJECTED 未说明「正文是错的」：会被当现行结论')
   assert.match(p, /\[STALE\][^\n]*不适用/, 'STALE 未说明「现已不适用」：会被当成现存的 bug 去修')
-  // 双向：不许为了强调否定而把 VERIFIED 也写成参考级，否则真实约束被弱化
   assert.match(p, /\[VERIFIED\][^\n]*铁律/)
 })
 
-it('截断路径下图例同样存在（图例不计入 6000 字符条目预算）', async () => {
+it('截断路径下图例同样存在（图例不计入条目预算）', async () => {
   const big = (t: string) => `## ${t}\n${'x'.repeat(4000)}\n`
   vi.stubGlobal('fetch', makeFetch({ lessons: big('旧坑') + big('新坑') }))
-  const p = await buildLoopInitialPrompt('目标N')
+  const p = await prependFirstPromptRules('目标N')
   assert.ok(p.includes('`[STALE]`'), '截断时图例丢了：条目只剩状态标记，AI 无从解读')
   assert.match(p, /仅注入最近 1\/2 条/, '截断提示本身也必须在位')
 })
-
-// ── 注入窗口的状态质量：全局比例达标 ≠ 窗口干净 ────────────────────────────────
-// [lessons-window-hygiene-v1] 背景：`lessons-hygiene.node-test.ts` 只守**全局**待复核比例（≤30%）。
-//   但注入窗口是**从文件尾往前**截的，而台账 append-only ⇒ 新条目（缺省即未复核）必然堆在尾部
-//   ——「全局达标、窗口全脏」是真实盲区：2026-10-06 实测全局 64/141 = 45.4% 的同时，
-//   窗口内 30/30 = **100% 未复核**，即 AI 读到的东西 100% 未经证据检验。
-// [CONSTRAINT] 读**真实台账**（仓库里的 `.ai-runner/lessons.md`）、走**真实实现**
-//   （`buildLessonsBlock` 的窗口选择），不复制一份算法——复制品会与被守对象漂移。
-// [阈值标定 2026-10-06] 治理前窗口 pending 占比 = 1.00（30/30）；治理后 = 0.50（4/8）。
-//   取 0.60：两侧都留有区分度，且允许「新采集的 pending 占窗口一半」这一正常态。
+// ── 注入窗口的状态质量：全局比例达标 ≠ 窗口干净 ─────────────────────────────
+// [lessons-window-hygiene-v1] 背景：台账是 append-only ⇒ 新条目（缺省即未复核）必然堆在尾部，
+//   而注入窗口从文件尾往前截 ⇒「全局达标、窗口全脏」是真实盲区。
+// [CONSTRAINT] 读**真实台账**、走**真实实现**（buildLessonsBlock 的窗口选择），不复制算法。
 const WINDOW_PENDING_MAX = 0.6
 
 function injectedEntries(prompt: string): string[] {
@@ -172,7 +148,7 @@ function injectedEntries(prompt: string): string[] {
 }
 
 function isPendingEntry(e: string): boolean {
-  // 与 lessons-status.cjs / lessons-hygiene 同口径：`## 标题` 后的**首个非空行**才是状态行
+  // 与 lessons-status.cjs 同口径：`## 标题` 后的**首个非空行**才是状态行
   const first = e.split('\n').slice(1).find(l => l.trim() !== '') || ''
   return !/^\[(?:VERIFIED|REJECTED|STALE)\]/i.test(first.trim())
 }
@@ -180,40 +156,37 @@ function isPendingEntry(e: string): boolean {
 it('注入窗口内待复核占比 ≤ 60%：全局达标不等于 AI 看到的是干净的', async () => {
   const md = fs.readFileSync(path.join(ROOT, '.ai-runner', 'lessons.md'), 'utf8')
   vi.stubGlobal('fetch', makeFetch({ lessons: md }))
-  const p = await buildLoopInitialPrompt('目标H')
+  const p = await prependFirstPromptRules('目标H')
   const entries = injectedEntries(p)
-  // 防空转：窗口为空时 ratio 会退化成 0/0，判据就恒真了
   assert.ok(entries.length >= 3, `窗口内只解析到 ${entries.length} 条，判据可能被真空满足`)
   const pending = entries.filter(isPendingEntry)
   const ratio = pending.length / entries.length
   assert.ok(
     ratio <= WINDOW_PENDING_MAX,
     `注入窗口内待复核 ${pending.length}/${entries.length} = ${(ratio * 100).toFixed(0)}%，超 ${WINDOW_PENDING_MAX * 100}%。`
-    + ` AI 只读窗口 ⇒ 积压必须清到窗口以外才有意义。窗口内首条待复核：${pending[0]?.split('\n')[0] || '(无)'}`,
+    + ` AI 只读窗口 ⇒ 积压必须清到窗口以外才有意义。窗口内首条待复核：${pending[0]?.split('\n')[0] || '(无)'}`
   )
 })
 
-// ── 判据②：命中再多，注入块条目部分也不得越 LESSONS_BUDGET 预算 ──────────────
 it('检索命中超预算：条目部分仍 ≤ LESSONS_BUDGET（变异：去掉封顶必红）', async () => {
   const big = (t: string) => ({ title: t, body: `${'x'.repeat(5000)}`, state: 'pending', score: 9, matched: [] })
   vi.stubGlobal('fetch', makeFetch({ matches: [big('坑一'), big('坑二'), big('坑三')] }))
-  const p = await buildLoopInitialPrompt('目标B')
+  const p = await prependFirstPromptRules('目标B')
   const entries = injectedEntries(p)
   assert.ok(entries.length >= 1, '检索命中却零注入：判据可能被真空满足')
   const used = entries.reduce((n, e) => n + e.length, 0)
   assert.ok(used <= LESSONS_BUDGET, `条目部分 ${used} 字符 > 预算 ${LESSONS_BUDGET}：封顶失效`)
 })
 
-// ── 判据④：检索端点不可用 ⇒ 回退尾截断（块非空，等于旧行为），不空注入、不抛 ──
 it('检索端点 500：回退尾截断，块非空（变异：删回退分支必红）', async () => {
   vi.stubGlobal('fetch', makeFetch({ matchStatus: 500 }))
-  const p = await buildLoopInitialPrompt('目标R')
+  const p = await prependFirstPromptRules('目标R')
   assert.ok(p.includes(LESSONS_MARK), '检索失败后未回退尾截断：块为空 = 丢掉了既往踩坑')
   assert.ok(p.includes('坑A'), '回退路径必须真的注入条目，而非空壳')
 })
 
 it('检索请求抛错：同样回退尾截断，不抛到调用方', async () => {
   vi.stubGlobal('fetch', makeFetch({ matchThrows: true }))
-  const p = await buildLoopInitialPrompt('目标S')
+  const p = await prependFirstPromptRules('目标S')
   assert.ok(p.includes('坑A'), '抛错路径也必须回退，不得让异常穿出')
 })

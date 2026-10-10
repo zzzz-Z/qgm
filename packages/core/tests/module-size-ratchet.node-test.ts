@@ -146,9 +146,9 @@ describe('§4 文件体积 ratchet', () => {
 
     // 另两处守卫在别的包（无跨包共享常量模块），只能读源码字面量——读的是「它的声明」，判的是「与 §4 同值」
     const hclc = fs.readFileSync(path.join(ROOT, 'packages/core/tests/hclc-guard.node-test.ts'), 'utf8')
-    const askW = fs.readFileSync(path.join(ROOT, 'packages/client/tests/ask-wiring.node-test.ts'), 'utf8')
+    // [loop-consolidation-P3d] ask-wiring.node-test.ts 已随 auto-loop 收敛删除；
+    //   其「单文件 import ≤ N」的守卫职责由 hclc-guard 单独承担（下方断言已覆盖）
     const docImport = pick(/单文件唯一\s*`import`\s*模块数\s*>\s*(\d+)/, '单文件唯一 import 模块数上限')
     expect(Number((hclc.match(/const LIMIT = (\d+)/) || [])[1]), 'hclc-guard 的 LIMIT 未随 §4 同步').toBe(docImport)
-    expect(Number((askW.match(/imports <= (\d+)/) || [])[1]), 'ask-wiring 的 import 上限未随 §4 同步').toBe(docImport)
   })
 })

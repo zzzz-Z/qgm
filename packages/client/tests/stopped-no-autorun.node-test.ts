@@ -17,14 +17,7 @@ const h = vi.hoisted(() => ({
   pushCalls: [] as unknown[],
 }))
 
-vi.mock('../composables/ai/useAutoLoop', () => ({
-  useAutoLoop: () => ({
-    getLoopBySessionId: () => undefined, // 模拟「循环已终止 ⇒ 非路由到循环」的旁路成型条件
-    isInstActive: () => false,
-    onScriptArrival: async () => {},
-    onNonScriptReply: async () => {},
-  }),
-}))
+// [loop-consolidation-P3d] 删除 useAutoLoop mock：useAiReplyHandlers 已在 P2 摘除该依赖
 vi.mock('../composables/ai/useAutoTakeover', () => ({
   // 致命点：scheduleAutoRun 就是无条件立即 fn()，连 enabled 都不看
   useAutoTakeover: () => ({ enabled: ref(false), disable: () => {}, scheduleAutoRun: (fn: () => void) => fn() }),

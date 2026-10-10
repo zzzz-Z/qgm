@@ -63,7 +63,9 @@ test.beforeAll(async () => {
   }
   child = spawn(process.execPath, ['apps/standalone/bin/air-server.cjs'], {
     cwd: ROOT,
-    env: Object.assign({}, process.env, { AIR_SERVER_PORT: String(PORT), AIR_SERVER_HOST: HOST }),
+    // [e2e-no-port-write-v1] 告诉 air-server 不要写 .ai-runner/.server-port：
+    //   测试实例用完即杀，它写入的测试端口会残留并被已运行的 vite dev 误读（详见 server.ts 同名注释）
+    env: Object.assign({}, process.env, { AIR_SERVER_PORT: String(PORT), AIR_SERVER_HOST: HOST, AIR_SERVER_NO_PORT_FILE: '1' }),
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   child.stdout?.on('data', d => process.stdout.write(`[air-server] ${d.toString()}`))

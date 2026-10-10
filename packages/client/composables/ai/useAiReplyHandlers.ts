@@ -11,7 +11,8 @@ import type { SessionEntry } from '../ui/useAppStorage'
 import { useToast } from '../ui/useToast'
 import { pushTerminalNotice, useRunner } from '../runner/useRunner'
 import { useScriptInbox } from '../runner/useScriptInbox'
-import { useAutoLoop } from './useAutoLoop'
+// [hooks-relocate-v1] runHook 已从 auto-loop/hooks.ts 迁至 loop-hooks.ts（P1b），供非循环 DONE 分支使用
+import { runHook } from './loop-hooks'
 import { useAutoTakeover } from './useAutoTakeover'
 import { useAiSite } from './useAiSite'
 import { useAiWaiting } from './useAiWaiting'
@@ -30,7 +31,6 @@ import {
   TOAST_LONG,
   TOAST_LONGEST,
   TOAST_MEDIUM,
-  TOAST_MEDIUM_SHORT,
 } from '../../utils/toast-durations'
 
 type EventKindStr = 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary' | 'ai:ask' | 'ai:feedback' | 'ai:decision' | 'ai:need-files' | 'ai:stream'
@@ -83,7 +83,6 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   const { toast } = useToast()
   const runner = useRunner()
   const scriptInbox = useScriptInbox()
-  const autoLoop = useAutoLoop()
   const autoTakeover = useAutoTakeover()
   const { url: siteUrl, setUrl: setSiteUrl, modelId, MODELS } = useAiSite()
   const { stopWaiting: stopAiWaiting } = useAiWaiting()
@@ -123,8 +122,8 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     if (!isFromActiveAiSite(e)) return
     stopAiWaiting()
     const sid = String(payload.sessionId || '')
-    const inst = sid ? autoLoop.getLoopBySessionId(sid) : undefined
-    const routedToLoop = Boolean(inst && autoLoop.isInstActive(inst))
+    // [loop-consolidation-P2] 摘除 routedToLoop：auto-loop 子系统零调用点，判定恒 false，
+    //   分支已无意义（详见 docs/plan/loop-consolidation.md 段五 P2）。
     const kind = String(payload.kind || '')
 
     if (kind === 'error') {
@@ -135,9 +134,6 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     if (kind === 'stopped') {
       stoppedAtBySid.set(sid, Date.now()) // [stopped-plain-noise-v1] 记录时刻，窗口内 plain 一律丢弃
       toast('AI 网页已停止生成，本轮不再等待', 'warn', TOAST_LONG)
-      if (routedToLoop) {
-        void autoLoop.onNonScriptReply({ kind: 'stopped', text: String(payload.text || '') }, sid)
-      }
       return
     }
 
@@ -149,11 +145,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     if (kind === 'limit') {
       toast(formatLimitToast(payload.text), 'warn', TOAST_LONGEST)
 
-      if (routedToLoop) {
-        void autoLoop.onNonScriptReply({ kind: 'limit', text: String(payload.text || '') }, sid)
-      } else {
-        toast('请手动开启新会话后重试', 'info', TOAST_MEDIUM)
-      }
+      toast('请手动开启新会话后重试', 'info', TOAST_MEDIUM)
       return
     }
 
@@ -177,14 +169,27 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       // [WHY] 原实现此处无条件 killCurrent + return，使 reply-handlers 的 done 分支（含 finish）成为死代码，
       //   自检闸门（hooks.json BeforeDone）与看板清空从未真正触发过
       // [CHANGE-IMPACT] 循环内 DONE 时引擎自带 done-summary-archive 通知；本处不再重复 emitBus
-      if (routedToLoop) {
-        void autoLoop.onNonScriptReply({ kind: 'done', text: String(payload.text || '') }, sid)
-        return
-      }
-      if (autoLoop.isLoopActive.value) {
-        try { void autoLoop.killCurrent() } catch (err) { log.error('[done-stop-loop]', err) }
-      }
       if (autoTakeover.enabled.value) autoTakeover.disable()
+      const doneSid = String(activeSessionId.value || '')
+      // [retained-done-gate-v1] P1b：非循环路径的 DONE 收尾接入 BeforeDone 自检 + 看板清桶。
+      // [WHY] 此前这两件事只在 auto-loop 的 finish() 里做，而该子系统零调用点 ⇒ 生产中从未触发
+      //   （reply-handlers.ts:175 的注释自陈）。收敛后留存路径必须承接，否则等于减配。
+      // [CONSTRAINT] hook 是 fail-open（runHook 网络失败返回 ok，见 loop-hooks.ts）；
+      //   reject 仅告警不阻断 —— 非循环路径没有「循环可续」，AI 已声明 DONE，阻断只会让用户卡住。
+      void runHook('BeforeDoneFinal', { loopId: '', round: 0, startCommit: '', reason: 'retained-path' })
+        .then((gate) => {
+          if (gate.action === 'reject') toast(`自检未通过：${gate.reason || 'hook rejected'}`, 'warn', TOAST_LONG)
+        })
+        .catch(() => { /* runHook 自身 fail-open，此处兜底 */ })
+      // [board-clear-on-done-v1] 看板清桶：sid 空则跳过（对齐 taskboard-sid-guard-v1 ——
+      //   多窗口下全局桶=别家数据，宁残留旧数据不可误清他窗）
+      if (doneSid) {
+        void fetch('/__ai/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'set', sid: doneSid, todo: [], done: [], clear: 'finish' }),
+        }).catch(() => { /* fire-and-forget：失败不阻断 DONE 收尾 */ })
+      }
       const doneText = String(payload.text || '')
       // [reply-mark-v1] DONE 不再限定首行（倒装写法也合法）→ 按标记**行号**剥掉它，
       //   而不是只剥行首前缀：否则「先总结后 DONE」时该行会原样留在总结卡里
@@ -216,7 +221,15 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       // [CHANGE-IMPACT] 仅影响 prod（pm2 托管）；dev 双进程下该端点为 no-op。
       // [auto-restart-notice-v1] 重启前弹窗：WS 断连前告知用户，避免「页面突然刷新」困惑
       toast('服务将在 5 秒后自动重启以应用新产物，页面将短暂断开', 'info', TOAST_LONGEST)
-      void fetch('/__ai/restart', { method: 'POST' }).catch(() => { /* swallow: 重启请求失败不影响任务完成 */ })
+      // [restart-content-type-v1] 服务端有全局守卫只收 application/json（无该头的 POST 一律 415），
+      //   而本调用此前既无 body 也无 Content-Type ⇒ **DONE 后的自动重启恒失败且静默**（实测 415）。
+      //   [WHY] 重启失效会让「客户端产物已换、服务端进程仍跑旧代码」的状态长期存在，
+      //   表现为部分端点 404、行为与源码对不上（2026-10-10 上午的产物不同步即由此放大）。
+      void fetch('/__ai/restart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      }).catch(() => { /* swallow: 重启请求失败不影响任务完成 */ })
       return
     }
 
@@ -225,46 +238,76 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       const lang = (payload.lang === 'bash' ? 'bash' : payload.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
       const site = String(payload.site || e.origin || '')
       const item = scriptInbox.push({ code, lang, site, hash: payload.hash ? String(payload.hash) : undefined })
+      // [arrive-log-v1] 到达探针：本分支此前**零落盘**——收件箱是内存态、到达播报已删，
+      //   于是「页面没推」与「推了被本分支静默吞掉」在服务端完全同形（都表现为「什么都没发生」），
+      //   只能靠猜。这里把「到达 + 最终命中哪条出口」上报，落 `.ai-runner/logs/arrive.jsonl`。
+      // [CONSTRAINT] fire-and-forget：不读响应、失败静默，绝不影响主链路（与 /__ai/lessons 同范式）。
+      const reportArrival = (reason: string): void => {
+        void fetch('/__ai/arrive-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sid,
+            lang,
+            reason,
+            desc: (code.split('\n').find(l => /@desc/.test(l)) || '').trim().slice(0, 160),
+            lines: code.split('\n').length,
+            bytes: code.length,
+          }),
+        }).catch(() => { /* swallow: 探针失败不阻断主链路 */ })
+      }
       if (item) {
-        const lineCount = code.split('\n').length
-        toast(`📥 脚本 · ${lang} · ${lineCount} 行${item.desc ? ` · ${item.desc}` : ''}`, 'info', TOAST_MEDIUM_SHORT)
+        // [script-toast-removed-v1] 2026-10-09 用户指定：删除「脚本 · js · N 行 · desc」到达 toast。
+        // [WHY] 该 toast 本轮到达即弹，与时间线里同一脚本的 ScriptCard（含 desc/why/耗时/结果）完全重复；
+        //   长循环下每个脚本都弹一次，把屏幕中央的注意力从真正要看的东西上抢走（截图实测）。
+        //   信息没有丢：脚本仍进 inbox、仍回填编辑器、仍进时间线由卡片承载。
+        // [CHANGE-IMPACT] 删除后本分支不再有"已到达"提示；「等待执行超时」「停止后不自动执行」
+        //   等**异常态**提示保留（那些是用户需要动手的信号，不是重复播报）。
+        // [WARNING] 守卫 script-arrival-toast.node-test.ts 按本文件**不含**该 toast 的图标前缀来判承重
+        //   ⇒ 本注释里也不要再写出那个前缀字符（写了会让守卫假红）。
         // [rescan-no-autorun-v1] rescan 重扫只回填编辑器/面板，不进执行分流：
         //   刷新后循环恒为 stopped，若照旧走 else 会无条件 runner.run(autoFeedback:true)
         //   → 回传 → AI 生成新脚本 → 再执行，形成自增强环（工单 WO-20261006-03 段二）。
-        if (payload.rescan === true) return
+        if (payload.rescan === true) {
+          reportArrival('rescan')
+          return
+        }
         // [refresh-no-autorun-v1] 页面刚加载（刷新）后冷静期内到达的脚本不执行
-        if (Date.now() - PAGE_BOOT_TS < REFRESH_GUARD_MS) return
+        if (Date.now() - PAGE_BOOT_TS < REFRESH_GUARD_MS) {
+          reportArrival('refresh-guard')
+          return
+        }
         // [stopped-no-autorun-v1] 循环已随之终止 ⇒ 本轮的残余脚本只回填编辑器，不自动执行。
         //   [WHY] 否则走 else 分支的 scheduleAutoRun（无条件立即 fn()）执行后再回传 AI，
         //   形成没有任何记账/自检/预算反馈的「循环外自动执行」旁路（WO-20261005 段三）。
         //   [CHANGE-IMPACT] 已回填完毕（push 已发生）；用户确认无误后可手动点运行，路径不丢。
         if (inStoppedWindow(sid)) {
+          reportArrival('stopped-window')
           toast('AI 网页已停止生成：脚本仅回填编辑器，未自动执行（确认无误请手动运行）', 'warn', TOAST_LONG)
           return
         }
+        // [arrive-log-v1] 走到这里 = 已排入执行分流（下面的调度入口立即调用回调，无延迟、不过开关）
+        reportArrival('run')
         const runKey = takePendingAskKey() || uid('run')
-        if (routedToLoop) {
-          void autoLoop.onScriptArrival(item, sid).catch((e: unknown) => {
-            toast('脚本分发异常，已复位', 'error', 5000)
-            log.error?.(`[ai-runner] onScriptArrival 失败：${String(e)}`)
-          })
-        } else {
-          const retryRun = async (attempt: number): Promise<void> => {
-            if (!runner.running.value) {
-              void runner.run({ script: code, runKey, autoFeedback: true })
-              return
-            }
-            if (attempt >= 20) {
-              toast('等待执行超时（20s），请手动点击运行', 'warn', TOAST_MEDIUM)
-              return
-            }
-            await promiseTimeout(1000)
-            await retryRun(attempt + 1)
+        // [loop-consolidation-P2] 摘除 routedToLoop 的 if/else：只保留留存路径（原 else 分支）
+        const retryRun = async (attempt: number): Promise<void> => {
+          if (!runner.running.value) {
+            void runner.run({ script: code, runKey, autoFeedback: true })
+            return
           }
-          autoTakeover.scheduleAutoRun(() => {
-            retryRun(0).catch(error => log.error('[retry-run] failed:', error))
-          })
+          if (attempt >= 20) {
+            toast('等待执行超时（20s），请手动点击运行', 'warn', TOAST_MEDIUM)
+            return
+          }
+          await promiseTimeout(1000)
+          await retryRun(attempt + 1)
         }
+        autoTakeover.scheduleAutoRun(() => {
+          retryRun(0).catch(error => log.error('[retry-run] failed:', error))
+        })
+      } else {
+        // [arrive-log-v1] 去重命中（同归一化 hash 已入队）⇒ push 返回 null，此后全链路零痕迹
+        reportArrival('dedup')
       }
       return
     }
@@ -281,13 +324,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       emitBus('ai:done', 'AI 回复 DONE', { payload: { kind: 'done', text: 'DONE' } })
     }
 
-    if (routedToLoop) {
-      void autoLoop.onNonScriptReply({
-        kind: kind as 'done' | 'plain' | 'multi',
-        count: Number(payload.count) || 0,
-        text: payload.text !== undefined ? String(payload.text) : undefined,
-      }, sid)
-    }
+    // [loop-consolidation-P2] 摘除 routedToLoop 分支（恒 false）
   }
 
   /** 处理旧版油猴 ai-runner:script 单脚本消息 */
@@ -300,14 +337,8 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     const item = scriptInbox.push({ code, lang, site, hash: payload.hash ? String(payload.hash) : undefined })
     if (item) {
       const sid = String(payload.sessionId || '')
-      const inst = sid ? autoLoop.getLoopBySessionId(sid) : undefined
-      const routedToLoop = Boolean(inst && autoLoop.isInstActive(inst))
-      if (routedToLoop) {
-        void autoLoop.onScriptArrival(item, sid).catch((e: unknown) => {
-          toast('脚本分发异常，已复位', 'error', 5000)
-          log.error?.(`[ai-runner] onScriptArrival 失败：${String(e)}`)
-        })
-      } else {
+      // [loop-consolidation-P2] 摘除 routedToLoop 分支（恒 false）；只保留留存路径（原 else 体）
+      {
         // [refresh-no-autorun-v1] 旧油猴路径同样受冷静期约束（其 payload 无 rescan 字段，
         //   故只需时间窗判断）；防刷新后旧版脚本被无条件执行。
         if (Date.now() - PAGE_BOOT_TS < REFRESH_GUARD_MS) return
@@ -330,7 +361,9 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     const text = String(payload.text || '')
     const sid = String(payload.sessionId || '')
     const degraded = Boolean(payload.degraded)
-    void autoLoop.onSummary(text, sid, degraded)
+    // [loop-consolidation-P2] 摘除 autoLoop.onSummary：会话轮转在实盘不存在（段四 C6 三重死因），
+    //   onSummaryImpl 亦 gate 在 inst.state === 'handoff' 恒不执行。本函数保留骨架供未来重建。
+    void text; void sid; void degraded
   }
 
   /** 处理 ai-runner:new-session-created 新会话建立 */
@@ -352,7 +385,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       activeSessionId.value = id
       setSiteUrl(url)
     }
-    void aiWindow.onNewSessionCreated(url, id)
+    // [loop-consolidation-P3a] 摘除 aiWindow.onNewSessionCreated（转发壳随 auto-loop 退役）
   }
 
   /** 处理 ai-runner:url-updated URL 回写 */

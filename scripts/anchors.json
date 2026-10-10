@@ -113,10 +113,6 @@
       "contains": "eslint-disable regexp/no-super-linear-backtracking"
     },
     {
-      "file": "packages/client/composables/ai/loopLogic.ts",
-      "contains": "Number.POSITIVE_INFINITY"
-    },
-    {
       "file": "scripts/tampermonkey-session-id.user.js",
       "contains": "_msgBuf"
     },
@@ -155,38 +151,6 @@
     {
       "file": "AGENTS.md",
       "contains": "自动循环没有轮次上限"
-    },
-    {
-      "file": "packages/client/composables/ai/loopLogic.ts",
-      "contains": "export const LOOP_HARD_MAX_ROUNDS = 50"
-    },
-    {
-      "file": "packages/client/composables/ai/loopLogic.ts",
-      "contains": "export const LOOP_HARD_MAX_MS = 30 * 60 * 1000"
-    },
-    {
-      "file": "packages/client/composables/ai/loopLogic.ts",
-      "contains": "[drop-round-limit] 轮次上限已取消"
-    },
-    {
-      "file": "packages/client/composables/ai/auto-loop/after-round.ts",
-      "contains": "finish(inst, 'hard-rounds'"
-    },
-    {
-      "file": "packages/client/composables/ai/auto-loop/after-round.ts",
-      "contains": "finish(inst, 'hard-timeout'"
-    },
-    {
-      "file": "packages/client/composables/ai/auto-loop/stop-and-finish.ts",
-      "contains": "[breaker-sendstop-first-v1]"
-    },
-    {
-      "file": "packages/client/composables/ai/auto-loop/handoff.ts",
-      "contains": "export async function startHandoff"
-    },
-    {
-      "file": "packages/client/composables/ai/auto-loop/handoff.ts",
-      "contains": "export const SUMMARY_INSTRUCTION"
     },
     {
       "file": "packages/core/tests/limit-marker-guard.node-test.ts",

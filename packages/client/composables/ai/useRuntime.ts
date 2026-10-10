@@ -5,10 +5,26 @@ import { useStorage } from '@vueuse/core'
 // 从 useAutoLoop / useAiWaiting 集中过来；状态变更的副作用由本文件的 watch 承担。
 // 调用方只读 state、只调 action，不自己维护循环状态。
 import { getTransport } from './useAiTransport.js'
-import type { LoopState } from './auto-loop/types.js'
 
-/** 运行时类型（类型别名） */
-export type RuntimeKind = LoopState
+/**
+ * 运行时类型（类型别名）
+ * [loop-consolidation-P3a] 原为 auto-loop/types.ts 的 LoopState 别名；该目录将随 P3b 删除，
+ *   故内联字面量集合（与 transitions.ts 的 ACTIVE 集合语义一致）。改这里时无需同步别处。
+ */
+export type RuntimeKind
+  = | 'idle'
+    | 'running'
+    | 'preparing'
+    | 'waiting'
+    | 'parsing'
+    | 'executing'
+    | 'feedback'
+    | 'stopped'
+    | 'interrupted'
+    | 'handoff'
+    | 'budget-limited'
+    | 'waiting-input'
+    | 'paused'
 /** 运行时阶段（类型别名） */
 export type RuntimeStage = '' | 'plan' | 'implement' | 'verify'
 

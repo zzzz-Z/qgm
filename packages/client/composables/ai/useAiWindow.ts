@@ -1,22 +1,26 @@
-import { promiseTimeout, useClipboard } from '@vueuse/core'
+import { promiseTimeout } from '@vueuse/core'
 import { currentSiteUrl, url } from './useAiSite'
-import { loadRulesBlock } from './load-rules.js'
+// [loop-consolidation-P3d] 拼装逻辑抽到 first-prompt.ts（独立职责 + 稳定测试落点）
+import { prependFirstPromptRules } from './first-prompt.js'
 // [restore-import-v1] log 早前按 auto-import 名单清理时误删（app 侧兜底可跑，但 tsc --noEmit / vitest 无该插件）
 import { log } from '../../utils/log'
 import { useSessionManager } from './useSessionManager'
-import { onNewSessionCreated as onNewSessionCreatedImpl } from './auto-loop/handoff.js'
+// [loop-consolidation-P3a] 摘除对 auto-loop/handoff 的 import（该目录将随 P3b 删除）
+// [cm-name-dedupe-v1] 实现文件已把 9 个撞名导出加 Impl 后缀（unimport 同时扫门面与实现，
+//   同名双源会报 Duplicated imports）。门面用 as 别名吸收后缀：内部代码与对外 API 保持原名不变，
+//   实现文件导出名与门面导出名不再相同 ⇒ 告警消除且消费方零感知。
 import {
-  getActiveWin,
-  getActiveWinSid,
-  getWindowBySid,
-  isBlankRef,
-  listWindows,
+  getActiveWinImpl as getActiveWin,
+  getActiveWinSidImpl as getActiveWinSid,
+  getWindowBySidImpl as getWindowBySid,
+  isBlankRefImpl as isBlankRef,
+  listWindowsImpl as listWindows,
   markWindowOpened,
-  removeWindowBySid,
-  setActiveWin,
-  setActiveWinSid,
+  removeWindowBySidImpl as removeWindowBySid,
+  setActiveWinImpl as setActiveWin,
+  setActiveWinSidImpl as setActiveWinSid,
   setWindowEntry,
-  targetOrigin,
+  targetOriginImpl as targetOrigin,
   // [host-fix-tsc-v1] waitWindowReady 用的是按 sid 取 origin 的 targetOriginFor，
   //   误写成只导入 targetOrigin（activeWinSid 版）⇒ test:tsc 无 auto-import 兜底时报 TS2304
   targetOriginFor,
@@ -24,36 +28,93 @@ import {
 // [host-fix-tsc-v1] toast 原依赖 auto-import 兜底：app 能跑、test:tsc/vitest 裸跑必 TS2304
 //   （AGENTS.md「auto-import 会掩盖导入错误」——本轮 test:tsc 实抓，显式导入修复）
 import { toast } from '../ui/useToast'
+// [unacked-hint-v2] toast 时长统一走 utils/toast-durations 单一事实源（与 App.vue 的 TOAST_* 同源）；
+//   同样必须显式 import：test:tsc / vitest 裸跑无 auto-import 插件兜底（同上条 host-fix-tsc-v1）
+import { TOAST_LONG, TOAST_LONGEST } from '../../utils/toast-durations'
+// [cm-name-dedupe-v1] 实现文件 useAiWindowSend.ts 已把 send 域 8 个函数与 3 个 Payload 接口
+//   加 Impl 后缀（unimport 同时扫门面与实现，同名双源会报 Duplicated imports）。
+//   门面用 as 别名吸收后缀：内部代码与对外 API 名不变，实现文件导出名与门面导出名不再相同 ⇒ 告警消除。
 import {
   isHeadless,
   loadTransport,
-  sendFill,
-  sendFillTo,
+  sendFillImpl as sendFill,
+  sendFillToImpl as sendFillTo,
   sendFillToAsync,
-  sendNewSession,
-  sendNewSessionTo,
-  sendRotate,
-  sendRotateTo,
-  sendStop,
-  sendStopTo,
+  sendNewSessionImpl as sendNewSession,
+  sendNewSessionToImpl as sendNewSessionTo,
+  sendRotateImpl as sendRotate,
+  sendRotateToImpl as sendRotateTo,
+  sendStopImpl as sendStop,
+  sendStopToImpl as sendStopTo,
 } from './useAiWindowSend'
 
-export type { FillPayload, NewSessionPayload, RotatePayload } from './useAiWindowSend'
+export type {
+  FillPayloadImpl as FillPayload,
+  NewSessionPayloadImpl as NewSessionPayload,
+  RotatePayloadImpl as RotatePayload,
+} from './useAiWindowSend'
 
 // ── 类型 ──
 type FillResult = 'sent' | 'opened' | 'failed'
 
 // ── 模块级常量 ──
-// [copy-via-vueuse] 模块级单例：useClipboard 内部会注册 copy 事件监听，
-// 在 setup 外反复构造会残留 listener；提升为模块级只注册一次
-const _clipboard = useClipboard()
 
 // [rules-always-v1] 每会话首次发送必带规则：以 sessionId 为键去重；
 // 切换工作区触发 reload 后 useSessionManager 会重新 generateId → 新键 → 规则自动重新注入
 // [rules-set-cap-v1] 报告 P2：只增不减；改用 LRU 风格数组 + Set 去重，上限 100
-const _rulesInjectedSids = new Set<string>()
-const _rulesInjectedOrder: string[] = []
+// [refresh-same-session-v1] 集合持久化到 sessionStorage：刷新属同一会话，
+//   不恢复则集合清空 → 去重失效 → 首问规则重复注入（用户报告的真实场景）
 const RULES_INJECTED_MAX = 100
+const LS_RULES_INJECTED = '__ai_rules_injected'
+function readRulesInjected(): { set: Set<string>, order: string[] } {
+  try {
+    if (typeof sessionStorage === 'undefined') return { set: new Set(), order: [] }
+    const raw = sessionStorage.getItem(LS_RULES_INJECTED)
+    if (!raw) return { set: new Set(), order: [] }
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return { set: new Set(), order: [] }
+    const order = arr.map(String).filter(Boolean).slice(-RULES_INJECTED_MAX)
+    return { set: new Set(order), order }
+  } catch { return { set: new Set(), order: [] } }
+}
+const _rulesInit = readRulesInjected()
+const _rulesInjectedSids = _rulesInit.set
+const _rulesInjectedOrder = _rulesInit.order
+function persistRulesInjected(): void {
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(LS_RULES_INJECTED, JSON.stringify(_rulesInjectedOrder))
+  } catch { /* 配额/隐私模式：仅丢失刷新恢复能力 */ }
+}
+
+/**
+ * [rules-mark-on-success-v1] 投递成功后才登记去重：失败不消耗额度，下次调用仍会注入。
+ * [WHY] 原实现「先登记后发送」，帧被静默丢弃后本会话内永不补注入（用户报告「首问未带规则」）；
+ *       先发送后登记同时根治并发回滚竞争（无回滚则无从删掉他人登记）。
+ * [CONSTRAINT] 含 LRU 淘汰，Order 与 Set 必须同步增删。
+ */
+function markRulesInjected(sid: string): void {
+  _rulesInjectedSids.add(sid)
+  _rulesInjectedOrder.push(sid)
+  while (_rulesInjectedOrder.length > RULES_INJECTED_MAX) {
+    const old = _rulesInjectedOrder.shift()
+    if (old) _rulesInjectedSids.delete(old)
+  }
+  persistRulesInjected()
+}
+
+/**
+ * [stale-rules-clear-v1] 清掉某 sid 的规则去重记录：目标窗口确已关闭时调用。
+ * [WHY] 关闭后 B3 会新开窗口 = 新 AI 上下文，其上下文里没有 SYSTEM.md；
+ *   不清记录则去重命中，新窗口的 AI 收不到规则（刷新恢复去重集合后新增的场景）。
+ * [CONSTRAINT] 只在该 sid 确实已关闭时调用，避免误清导致重复注入。
+ */
+function clearRulesForSid(sid: string): void {
+  if (!_rulesInjectedSids.has(sid)) return
+  _rulesInjectedSids.delete(sid)
+  const i = _rulesInjectedOrder.indexOf(sid)
+  if (i >= 0) _rulesInjectedOrder.splice(i, 1)
+  persistRulesInjected()
+}
 
 /**
  * 打开 AI 站点窗口并按 sid 保存引用；headless 模式改走 WS
@@ -72,12 +133,23 @@ export function openSite(atUrl?: string, sid?: string): Window | null {
   const target = atUrl ?? url.value
   const useSid = sid ?? getActiveWinSid()
   const targetWithSid = withSidHash(target, useSid)
+  // [win-reuse-focus-v1] open 前先取既有引用：同名 window.open 命中活窗口时是「复用」，
+  //   浏览器**不会**把复用的窗口带到前台 —— 用户在别的窗口上，体感是「点了按钮没反应」，
+  //   而那个窗口恰恰是工作台唯一能 postMessage 到的受控窗口（自己手动开的页无 opener / 无 name）。
+  //   记住这个引用只用于把「复用」与「新建」在日志里分开，行为差异全在下面的 focus()。
+  // [CONSTRAINT] 只读引用、不做任何导航：本函数仍按原语义把窗口导航到 target（新会话/指定会话依赖它）
+  const preWin = getWindowBySid(useSid)
   const win = window.open(targetWithSid, windowName(useSid))
   if (win) {
     setWindowEntry(useSid, { win, url: target })
     setActiveWinSid(useSid)
     // [win-opened-marker-v1] 标记已打开：sessionStorage 支撑刷新后列表判定
     markWindowOpened(useSid, true)
+    // [win-reuse-focus-v1] 显式把受控窗口提到前台：否则复用分支下 fill 投递成功，
+    //   用户却看不到任何变化（还在盯自己手动开的那张孤儿页），只能判定为「没反应」。
+    //   focus 属跨域白名单方法，跨域可调；被拒（无用户手势 / 休眠标签）只忽略，不影响已登记的引用。
+    try { win.focus() } catch { /* 跨域或休眠标签页：忽略 */ }
+    if (preWin === win) log.info('[openSite] 复用已有同名窗口并激活 sid=', useSid)
   }
   return win
 }
@@ -104,20 +176,12 @@ function withSidHash(url: string, sid: string): string {
  * [load-rules-wired-v1] 实现已抽到 load-rules.ts（含 Promise 缓存），本函数仅做幂等守卫与拼装
  */
 async function _prependFirstPromptRules(prompt: string): Promise<string> {
-  // [rules-idempotent-v1] 幂等守卫：prompt 已含 SYSTEM.md 块 → 直接返回
-  if (prompt.includes('<file path="SYSTEM.md">')) return prompt
-  try {
-    const block = await loadRulesBlock()
-    if (!block) return prompt
-    return `# 会话首问规则（自动携带）\n\n${block}\n\n# 问题\n\n${prompt}`
-  } catch {
-    return prompt
-  }
+  // [loop-consolidation-P3d] 实现已抽到 first-prompt.ts（含幂等守卫与三块并行检索）
+  return prependFirstPromptRules(prompt)
 }
 
 /**
- * 复制 prompt 到剪贴板并发送到 AI 窗口
- * [WHY] 剪贴板是油猴侧输入框粘贴的兜底路径；即便 postMessage 失败用户仍能手动粘贴
+ * 发送 prompt 到 AI 窗口
  * [CONSTRAINT] 返回 'sent' 表示已注入运行中的窗口；'opened' 表示新开了窗口；'failed' 表示全失败
  * [CHANGE-IMPACT] 内部会改动 _rulesInjectedSids / sessionId 状态，多次调用同一 prompt 会去重
  * @param prompt 待发送的原始问题；空串直接返回 failed
@@ -137,10 +201,15 @@ let _unackedHintShown = false
 async function fillWithDegrade(sid: string, payload: { prompt: string, images?: string[] }): Promise<'sent' | 'failed'> {
   const r = await sendFillToAsync(sid, payload)
   if (r !== 'unacked') return r
-  log.warn('[copyAndFill] fill 未收到回执（油猴脚本可能为旧版），降级按已发送处理 sid=', sid)
+  log.warn('[copyAndFill] fill 未收到回执（该页可能未运行油猴脚本 / 油猴为旧版），降级按已发送处理 sid=', sid)
   if (!_unackedHintShown) {
     _unackedHintShown = true
-    toast('AI 窗口未回执：油猴脚本可能为旧版（不回 fill-ack），已按已发送处理；建议更新油猴脚本以获得准确的送达判定', 'warn')
+    // [unacked-hint-v2] 首因不是「油猴是旧版」而是「这个页面里根本没有脚本」：
+    //   ① 用户自己开的 AI 页没有 opener，回执无处可发（工作台侧表现为永远收不到 ack）；
+    //   ② Chrome 刚打开「允许运行用户脚本」时，**已加载**的旧页面不会自动补注入，必须重载。
+    //   两种成因的处置都是「重载该页 / 改用工作台按钮开窗」，故按可操作顺序重写提示文案。
+    // [CONSTRAINT] 文案须保留「未回执」字样：e2e/fail-feedback-probe.spec.ts 用它判定回传出站阶段已抵达
+    toast('AI 窗口未回执：该页可能没运行油猴脚本。请在该窗口按 F5 重载后重试；若是你自己手动打开的页面则无法回传（无 opener），请改用工作台按钮重开。本条已按「已发送」处理', 'warn', TOAST_LONGEST)
   }
   return 'sent'
 }
@@ -148,6 +217,10 @@ async function fillWithDegrade(sid: string, payload: { prompt: string, images?: 
 export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean, skipRules?: boolean, images?: string[] }): Promise<FillResult> {
   if (!prompt) return 'failed'
   let finalPrompt = prompt
+  // [rules-mark-on-success-v1] 若本轮已 prepend 规则，记下待登记键；投递成功后才写入去重集合
+  let pendingRulesKey: string | null = null
+  // [stale-rules-clear-v2] 组合键（窗口 sid + 会话 id）；供 B2 判定原窗口已关时精确清记录
+  let rulesKey = ''
   // [image-channel-v2] 图片独立通道 payload；无图片时展开为空对象，不污染 postMessage 载荷
   // [CONSTRAINT] images 为 DataURL 数组（来自 kind==='image' 的 AttachedFile.content 收集）
   // [CHANGE-IMPACT] 消费方 sendFillTo / transport.sendFill；接收端未实现则图片丢失，prompt 不受影响
@@ -159,35 +232,33 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     //       组合键下同一窗口同一会话只注入一次；切窗口 / 换会话 id 视为新会话重新注入
     // [CHANGE-IMPACT] _rulesInjectedSids 内容格式变化；语义仍为「已注入规则头的会话标识」
     const sid = `${getActiveWinSid()}:${sessionId.value}`
+    rulesKey = sid
     // [chat-first-no-rules-v1] skipRules=true 用于纯聊天首问（"开始聊天"）：不注入 SYSTEM.md，
     // [WHY] 携带三态契约会让 AI 按 SCRIPT 输出，无 @desc/@why 被 post-run 判 400；
     //       会话级纯聊天不需要规则头，规则仅在真正启动循环/接管任务时注入。
     // [CONSTRAINT] skipRules 不写入 _rulesInjectedSids：后续 startLoop 首次调用仍会正常注入。
     if (sid && !opts?.skipRules && (opts?.forceRules || !_rulesInjectedSids.has(sid))) {
       // [rules-add-order-v1] add 必须在 prepend 成功之后：原实现在 await 前登记，
-      // 若 prepend 后续抛错（复制到剪贴板前），sid 会被永久标记为「已注入」，规则静默丢失
+      // 若 prepend 后续抛错，sid 会被永久标记为「已注入」，规则静默丢失
       finalPrompt = await _prependFirstPromptRules(prompt)
-      // [rules-set-cap-v1] 记录注入 + LRU 淘汰
-      _rulesInjectedSids.add(sid)
-      _rulesInjectedOrder.push(sid)
-      while (_rulesInjectedOrder.length > RULES_INJECTED_MAX) {
-        const old = _rulesInjectedOrder.shift()
-        if (old) _rulesInjectedSids.delete(old)
-      }
+      pendingRulesKey = sid
     }
   } catch { /* ignore */ }
   // [track-original-prompt] 只记录原始 prompt：UI 展示不应包含自动携带的规则头
   // [WHY] 用户报告「打开新会话 发了两次 SYSTEM.md」实为 finalPrompt 上屏；
   //       语义上「用户消息」是原始输入，「规则头」是系统提示，不该混入用户消息卡
   useSessionManager().trackMessage('user', prompt)
-  await _clipboard.copy(finalPrompt)
+  // [rules-observability-v1] 仅在实际注入了规则时打印，避免每次发送都刷屏
+  if (pendingRulesKey) log.info('[copyAndFill] rules injected key=', pendingRulesKey, 'finalLen=', finalPrompt.length)
   if (isHeadless()) {
     const t = await loadTransport()
     const tr = t.useAiTransport().transport
     tr.sendOpen?.(getActiveWinSid(), { url: url.value })
     // [manual-fill-bypass-paused-v1] 必须尊重真实返回值：旧实现无条件 return 'sent'，
     // WS 发送失败时用户消息照样上屏+亮「思考中」，实际帧从未发出，表现为永久无响应
-    return tr.sendFill(getActiveWinSid(), { prompt: finalPrompt, ...imagePayload }) ? 'sent' : 'failed'
+    const sent = tr.sendFill(getActiveWinSid(), { prompt: finalPrompt, ...imagePayload })
+    if (sent && pendingRulesKey) markRulesInjected(pendingRulesKey)
+    return sent ? 'sent' : 'failed'
   }
 
   const sid = getActiveWinSid()
@@ -199,7 +270,13 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     const r = await fillWithDegrade(sid, { prompt: finalPrompt, ...imagePayload })
     if (r === 'failed') {
       log.warn('[copyAndFill] B1 fill failed sid=', sid, 'name=', name)
-      toast('首问未送达（窗口未就绪/输入框未就绪）；完整内容已复制到剪贴板，请手动粘贴', 'error')
+      // [first-fill-hint-v2] 原文案只说「窗口/输入框未就绪」，但最常见的两个真因是
+      //   ① 该 AI 页没在跑油猴脚本（Chrome 刚开「允许运行用户脚本」时旧页面不补注入）；
+      //   ② 窗口是用户自己手动开的（无 opener/name，工作台根本没有它的引用）。
+      //   两者都能靠「按 F5 / 用工作台按钮重开」解决，故把处置写进提示。
+      toast('首问未送达：AI 窗口未就绪或未找到输入框。请在该窗口按 F5 重载后重试；若该窗口是自己手动打开的，请改用工作台按钮重开', 'error', TOAST_LONG)
+    } else if (pendingRulesKey) {
+      markRulesInjected(pendingRulesKey)
     }
     return r
   }
@@ -216,6 +293,15 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
       //   这与 probeWindowBySid 的同款识别一致：同源 about:blank = 新开空白页，非真窗口。
       if (isBlankRef(found)) {
         try { found.close() } catch { /* 用户已关闭，忽略 */ }
+        // [stale-rules-clear-v2] 拿到的是新建空白页 = 原窗口已关，后续 B3 会新开窗口；
+        //   新窗口是全新 AI 上下文，其历史里没有 SYSTEM.md →
+        //   必须清去重记录并强制重新 prepend，否则刷新恢复集合后首问会漏带规则
+        // [FIX] 原实现传裸窗口 sid，与集合里的组合键不匹配 → 清除静默失效
+        clearRulesForSid(rulesKey)
+        if (rulesKey && !opts?.skipRules && pendingRulesKey === null) {
+          finalPrompt = await _prependFirstPromptRules(prompt)
+          pendingRulesKey = rulesKey
+        }
       } else {
         setWindowEntry(sid, { win: found, url: url.value })
         setActiveWinSid(sid)
@@ -226,7 +312,10 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
 
   if (win && !win.closed) {
     const ok1 = await fillWithDegrade(sid, { prompt: finalPrompt, ...imagePayload })
-    if (ok1 === 'sent') return 'sent'
+    if (ok1 === 'sent') {
+      if (pendingRulesKey) markRulesInjected(pendingRulesKey)
+      return 'sent'
+    }
   }
 
   // 3. 都失败 → 尝试开新窗口（可能被 popup blocker 拦截）
@@ -234,10 +323,14 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
   if (w) {
     await promiseTimeout(1500)
     const ok2 = await fillWithDegrade(sid, { prompt: finalPrompt, ...imagePayload })
-    if (ok2 === 'failed') {
-      toast('首问未送达（窗口未就绪/输入框未就绪）；完整内容已复制到剪贴板，请手动粘贴', 'error')
+    if (ok2 === 'sent') {
+      if (pendingRulesKey) markRulesInjected(pendingRulesKey)
+      return 'opened'
     }
-    return ok2 === 'sent' ? 'opened' : 'failed'
+    // [first-fill-hint-v2] 这里是「新窗口已开出但 1.5s 后 fill 仍失败」：
+    //   站点加载慢（页面里还没有油猴）是最常见成因，重载即可；不要只说「窗口未就绪」让用户无从下手。
+    toast('新开窗口的首问未送达：站点可能还没加载好，或该页未运行油猴脚本。请在该窗口按 F5 重载后重新发送', 'error', TOAST_LONG)
+    return 'failed'
   }
 
   // 4. 全失败
@@ -318,21 +411,17 @@ export async function openAiSession(opts?: {
   }
   if (!win) return { win: null, fill: null }
   if (!p) return { win, fill: null }
-  if (!preWin) await waitWindowReady(preSid)
+  if (!preWin) {
+    // [ready-warn-v1] 接住就绪判定：未就绪仍继续（不阻断），但明确告警——帧大概率被丢弃
+    const ready = await waitWindowReady(preSid)
+    if (!ready) log.warn('[openAiSession] 新窗口 15s 内未就绪（可能被拦截/站点加载失败），规则可能未注入 sid=', preSid)
+  }
   const fill = await copyAndFill(p, { forceRules: opts?.forceRules, skipRules: opts?.skipRules })
   return { win, fill }
 }
 
-/**
- * [new-session-unified-v1] 新会话建立事件的统一入口（转发壳）
- * [WHY] UI 层（App.vue）原本直接 import auto-loop 的 onNewSessionCreated，把状态机细节泄漏到窗口层；
- *       收口到此处后，"窗口 → 新会话建立" 语义的调用方只看 useAiWindow
- * [CONSTRAINT] 纯转发，不改变入参/返回语义；实现仍归 auto-loop/handoff.ts
- * [CHANGE-IMPACT] App.vue 的 import 从 useAutoLoop 改为 useAiWindow；handoff 内部逻辑不受影响
- */
-export async function onNewSessionCreated(url: string, id: string): Promise<void> {
-  return onNewSessionCreatedImpl(url, id)
-}
+// [loop-consolidation-P3a] 原 onNewSessionCreated 转发壳已删（唯一实现随 auto-loop 退役）。
+//   调用方 useAiReplyHandlers.handleNewSessionCreated 的本地逻辑（标记 handedOff / 入历史 / 切 session）不受影响。
 
 export function useAiWindow() {
   return {
@@ -348,7 +437,6 @@ export function useAiWindow() {
     openSite,
     copyAndFill,
     openAiSession,
-    onNewSessionCreated,
   }
 }
 

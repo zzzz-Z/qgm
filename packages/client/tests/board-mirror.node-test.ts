@@ -98,18 +98,12 @@ test('⑤ 反例：抓取失败 / sid 为空 ⇒ 空串，绝不阻断回传', a
   assert.equal(await fetchBoardMirror(''), '', 'sid 为空直接返回空串')
 })
 
-test('⑥ 注入点锚点：循环回传与面板回传两处都真的调用了看板注入', () => {
-  const loop = read('packages/client/composables/ai/auto-loop/loop-lessons-fill.ts')
+test('[P3d] ⑥ 注入点锚点：面板回传真的调用了看板注入', () => {
+  // [loop-consolidation-P3d] 原「循环回传」分支断言随 auto-loop/loop-lessons-fill.ts 删除；
+  //   留存路径的面板回传注入不变。
   const panel = read('packages/client/components/script/script-panel-actions.ts')
-  assert.ok(loop.includes('await fetchBoardMirror()'), '循环回传必须注入看板块')
-  assert.ok(loop.includes('import { fetchBoardMirror } from \'../board-mirror.js\''), '循环回传须显式 import')
   assert.ok(panel.includes('await fetchBoardMirror()'), '面板回传必须注入看板块')
   assert.ok(panel.includes('from \'../../composables/ai/board-mirror\''), '面板回传须显式 import')
-  // [WHY] 循环回传有「单块逐字等价」的回归红线：注入必须发生在 base 之后，不得改写 buildRoundBatchPrompt 本体
-  assert.ok(
-    /const base = buildRoundBatchPrompt\(outcomes\)[\s\S]*?fetchBoardMirror/.test(loop),
-    '看板注入必须在 base prompt 之后拼接（不得改动 buildRoundBatchPrompt 逐字红线）',
-  )
 })
 
 test('⑦ 教学锚点：SYSTEM.md 必须写明 id 直传与失败必报', () => {

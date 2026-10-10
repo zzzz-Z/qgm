@@ -301,13 +301,20 @@ server.on('error', (e: NodeJS.ErrnoException) => {
 server.listen(PORT, HOST, () => {
   const base = `http://${HOST}:${PORT}`
   // [port-drift-file-v1] 端口漂移后前端 proxy 需知真实端口；原子写避免读到半截
-  try {
-    const portFile = path.join(ROOT, '.ai-runner', '.server-port')
-    fs.mkdirSync(path.dirname(portFile), { recursive: true })
-    const tmp = `${portFile}.tmp-${process.pid}`
-    fs.writeFileSync(tmp, String(PORT))
-    fs.renameSync(tmp, portFile)
-  } catch { /* 端口文件失败不阻断启动 */ }
+  // [e2e-no-port-write-v1] 测试起的临时实例（e2e headless-ws 的 beforeAll，端口 5518/5519）
+  //   不得写该文件：它会覆盖真实端口，而 vite dev 在**启动时**已读入旧值且不会重读 ⇒
+  //   用完即杀后 .server-port 残留测试端口，dev 的 /__ai/* 代理全部 502（实测 2026-10-10，
+  //   表现为 e2e 里 baseline-diff / fail-feedback-probe / visual 共 18 例全红）。
+  //   [CONSTRAINT] 只认显式环境变量，不按端口区间推断——区间判据会在端口漂移时误判。
+  if (process.env.AIR_SERVER_NO_PORT_FILE !== '1') {
+    try {
+      const portFile = path.join(ROOT, '.ai-runner', '.server-port')
+      fs.mkdirSync(path.dirname(portFile), { recursive: true })
+      const tmp = `${portFile}.tmp-${process.pid}`
+      fs.writeFileSync(tmp, String(PORT))
+      fs.renameSync(tmp, portFile)
+    } catch { /* 端口文件失败不阻断启动 */ }
+  }
   console.log(`  AI Runner server:  ${base}${PREFIX}/`)
   console.log(`  WebSocket:         ${base}${WS_PATH}`)
 })
