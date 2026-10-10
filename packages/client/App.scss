@@ -93,34 +93,7 @@
     border-color 0.15s,
     box-shadow 0.15s;
 }
-.ds-url.editing {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgb(37 99 235 / 15%);
-}
-.ds-value {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font: 12px/1.4 var(--mono);
-  cursor: pointer;
-  max-width: min(720px, 55vw);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ds-value:hover {
-  color: var(--primary);
-}
-.ds-input {
-  width: 260px;
-  padding: 2px 4px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text);
-  font: 12px/1.4 var(--mono);
-}
+
 .theme-toggle {
   width: 26px;
   height: 26px;
@@ -178,17 +151,7 @@
   flex-direction: column;
   overflow: hidden;
 }
-.ds-value-static {
-  padding: 0 2px;
-  color: var(--text);
-  font: 12px/1.4 var(--mono, monospace);
-  max-width: min(720px, 55vw);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: default;
-  user-select: text;
-}
+
 @keyframes sbMaskIn {
   from {
     opacity: 0;
@@ -201,16 +164,10 @@
   .ds-url {
     max-width: calc(100vw - 460px);
   }
-  .ds-value-static {
-    max-width: min(480px, 42vw);
-  }
 }
 @media (max-width: 1100px) {
   .ds-url {
     max-width: calc(100vw - 320px);
-  }
-  .ds-value-static {
-    max-width: min(400px, 42vw);
   }
 }
 @media (max-width: 1024px) {
@@ -245,14 +202,12 @@
 
 /* [ui-p1a-appscss-dedup-v1] V11 去重：与紧随其后的同一选择器块重复（后者为权威，text-3 / 8% 版本）。 */
 
-.theme-toggle,
-.open-ai-toggle {
+.theme-toggle {
   background: transparent;
   border: 1px solid transparent;
   color: var(--text-3);
 }
-.theme-toggle:hover,
-.open-ai-toggle:hover {
+.theme-toggle:hover {
   background: rgb(255 255 255 / 6%);
   color: var(--text);
   border-color: rgb(255 255 255 / 8%);
@@ -338,12 +293,10 @@
   background: transparent;
 }
 
-.theme-toggle,
-.open-ai-toggle {
+.theme-toggle {
   cursor: pointer;
 }
-.theme-toggle:disabled,
-.open-ai-toggle:disabled {
+.theme-toggle:disabled {
   cursor: not-allowed;
 }
 
@@ -464,38 +417,8 @@
   overflow: visible;
 }
 
-.ds-url:hover,
-.ds-url.editing {
+.ds-url:hover {
   border-color: var(--primary) !important;
-}
-
-.ds-value-static {
-  flex: 0 0 auto;
-  color: var(--text-2);
-  font-size: 12px;
-  font-family: var(--mono, monospace);
-  cursor: pointer;
-
-  white-space: nowrap;
-
-  max-width: none;
-  overflow: visible;
-  text-overflow: clip;
-}
-
-.ds-input {
-  flex: 1 1 auto;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 12px;
-  font-family: var(--mono, monospace);
-  outline: 0;
-
-  width: auto;
-  min-width: 0;
-  max-width: none;
 }
 
 .ask-count {

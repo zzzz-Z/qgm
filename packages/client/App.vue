@@ -39,17 +39,11 @@ const keyboardHelpOpen = ref(false)
 /** [wiki-panel-v1] 知识库面板开关 */
 /** 信息 */
 const absenceInfo = ref<{ daysAgo: number } | null>(null)
-/** URL 是否处于编辑态 */
-const urlEditing = ref(false)
-/** URL 编辑中的临时值 */
-const urlDraft = ref('')
-/** URL 输入框引用 */
-const urlInputRef = ref<HTMLInputElement | null>(null)
 
 /** 自动接管模式开关 */
 const autoTakeover = useAutoTakeover()
 const { resetSession, restoreFromStorage } = useSessionManager()
-const { url: siteUrl, setUrl: setSiteUrl, modelId } = useAiSite()
+const { modelId } = useAiSite()
 // [app-storage-extracted-v1] SessionEntry 类型与按站点历史读写已抽至 useAppStorage
 // [site-isolate-v1] 会话历史按站点分桶；切站点时由下方 watch(modelId) 重新加载
 const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
@@ -79,12 +73,6 @@ const {
 // 组件 unmount 时自动 removeEventListener；HMR / 热重载下重复注册会引发 message 重复处理
 useEventListener(window, 'message', onSessionIdMessage)
 useEventListener(window, 'keydown', onShiftQuestion)
-
-/** 顶部 AI 会话地址显示 */
-const headerUrl = computed(() => {
-  const s = sessionHistory.value.find(x => x.id === activeSessionId.value)
-  return s ? s.url : siteUrl.value
-})
 
 // [site-isolate-v1] 切站点 → 保存旧站点 activeSessionId，加载新站点历史与激活会话
 // [WHY] 需求：每站点独立会话上下文；activeSessionId 是 useStorage 单例，切换时需手动轮换
@@ -164,89 +152,7 @@ function addSessionToHistory(id: string, url: string, title: string) {
   sessionHistory.value = [entry, ...sessionHistory.value.filter(s => s.id !== id)].slice(0, 50)
   saveHistoryScoped()
 }
-/**
- * 打开 Url Edit
- */
-function openUrlEdit() {
-  urlEditing.value = true
-  urlDraft.value = headerUrl.value
-  nextTick(() => {
-    urlInputRef.value?.focus()
-    urlInputRef.value?.select()
-  })
-}
-/**
- * 执行 cancel Url
- */
-function cancelUrl() {
-  urlEditing.value = false
-  urlDraft.value = ''
-}
-/**
- * 执行 save Url
- */
-function saveUrl() {
-  const v = urlDraft.value.trim()
-  if (!v) { cancelUrl(); return }
-  if (!setSiteUrl(v)) {
-    try { toast('URL 格式不合法', 'error') } catch { /* ignore */ }
-    return
-  }
-  // [url-edit-v2] 同步当前活动会话 url，避免 headerUrl 从 sessionHistory 读到旧值回退
-  try {
-    const sid = activeSessionId.value
-    if (sid) {
-      sessionHistory.value = sessionHistory.value.map(x => x.id === sid ? { ...x, url: v } : x)
-      saveHistoryScoped()
-    }
-  } catch { /* ignore */ }
-  urlEditing.value = false
-  urlDraft.value = ''
-}
-// [url-edit] blur 自动保存
-/**
- * 响应 Url Blur
- */
-function onUrlBlur() {
-  if (urlEditing.value) saveUrl()
-}
-/**
- * 响应 Open Ai Win
- */
-async function onOpenAiWin() {
-  const at = headerUrl.value || siteUrl.value
-  // URL 无会话 ID 时，打开新会话并预填「开始聊天」
-  const hasSession = /\/a\/chat\/s\/[\w-]{8,}/.test(at)
-  if (hasSession) {
-    const w = openSite(at)
-    if (!w) {
-      toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', TOAST_MEDIUM)
-      return
-    }
-    toast('已打开 / 激活 AI 窗口', 'success', TOAST_SHORT)
-    return
-  }
-  // [new-session-clear-first-v1] 无会话分支等同开新会话：先清事件流残留，避免旧 js 卡随新窗口上屏
-  // [WHY] 与 onNewSession 保持一致；不清 sessionStorage 会话上下文（用户可能想保留当前对话历史）
-  // [CHANGE-IMPACT] 只清事件流，不动 sessionId / messages；影响面小于 onNewSession
-  try { clearEvents() } catch { /* 未就绪时忽略 */ }
-  // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 规则注入一次完成
-  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), sid: winSidOf(String(modelId.value || 'deepseek')), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，到 GitHub 搜索适配本项目的 skill，总结后列出供用户选择。', forceRules: true })
-  if (!win && transportKind.value !== 'headless') {
-    toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', TOAST_MEDIUM)
-    return
-  }
-  if (transportKind.value === 'headless') {
-    toast(fill === 'sent' ? '无头会话已启动，正在发送首问…' : '无头会话启动失败，请检查无头链路状态', fill === 'sent' ? 'info' : 'warn', 4000)
-    return
-  }
-  toast('已打开新会话，正在发送「开始聊天」…', 'info', TOAST_SHORT)
-  if (fill === 'sent' || fill === 'opened') {
-    toast('已发送「开始聊天」，等待会话地址回写', 'success', TOAST_SHORT_MEDIUM)
-  } else {
-    toast('发送失败，请检查 AI 窗口是否就绪', 'warn', TOAST_MEDIUM)
-  }
-}
+
 /**
  * 打开一个全新的 AI 会话窗口（强制新会话，无论当前是否有会话）
  */
@@ -261,7 +167,7 @@ async function onNewSession() {
   loopPaused.value = true
   autoTakeover.disable()
   // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
-  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), sid: winSidOf(String(modelId.value || 'deepseek')), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，到 GitHub 搜索适配本项目的 skill，总结后列出供用户选择。', forceRules: true })
+  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), sid: winSidOf(String(modelId.value || 'deepseek')), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，开始执行任务。', forceRules: true })
   if (!win) {
     toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', TOAST_MEDIUM)
     return
@@ -352,50 +258,18 @@ function onLoginGui() {
         <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
         <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
       </button>
-      <div class="ds-url" :class="{ editing: urlEditing }">
-        <input
-          v-if="urlEditing"
-          ref="urlInputRef"
-          v-model="urlDraft"
-          class="ds-input"
-          spellcheck="false"
-          placeholder="https://..."
-          :size="Math.max(30, urlDraft.length + 2)"
-          @keydown.enter.prevent="saveUrl"
-          @keydown.esc.prevent="cancelUrl"
-          @blur="onUrlBlur"
-        >
-        <span
-          v-else
-          v-tooltip="headerUrl ? '点击编辑对话地址' : '点击输入 AI 站点 URL'"
-          class="ds-value-static"
-          @click="openUrlEdit"
-        >{{ headerUrl || '（点击输入 URL）' }}</span>
-        <button
-          v-tooltip="'打开 / 激活 AI 窗口（点此建立工作台与 AI 站的连接）'"
-          aria-label="打开 AI 窗口"
-          class="open-ai-toggle"
-          @click="onOpenAiWin"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-            <polyline points="15 3 21 3 21 9" />
-            <line x1="10" y1="14" x2="21" y2="3" />
-          </svg>
-        </button>
-        <button
-          v-tooltip="'打开一个新的 AI 会话窗口（强制新会话，不影响当前会话）'"
-          aria-label="打开新会话"
-          class="new-session-toggle"
-          @click="onNewSession"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            <line x1="12" y1="8" x2="12" y2="13" />
-            <line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
-          </svg>
-        </button>
-      </div>
+      <button
+        v-tooltip="'打开一个新的 AI 会话窗口（强制新会话，不影响当前会话）'"
+        aria-label="打开新会话"
+        class="new-session-toggle"
+        @click="onNewSession"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          <line x1="12" y1="8" x2="12" y2="13" />
+          <line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
+        </svg>
+      </button>
       <!-- [hdr-transport-group-v1] 传输链路控组合一：把「油猴 / 无头」选择、无头引导登录、更新油猴脚本
            收进同一个分段控件（原先是三个各自描边的独立控件，视觉上零散且高度不一）。
            结构： [ 链路选择 ▾ | (无头时) 引导登录 | 更新脚本 ] -->
