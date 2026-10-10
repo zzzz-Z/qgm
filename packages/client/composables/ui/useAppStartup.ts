@@ -63,7 +63,7 @@ export function useAppStartup(deps: AppStartupDeps) {
     try { clearEvents() } catch { /* 未就绪时忽略 */ }
     await promiseTimeout(600)
     try {
-      const { win } = await aiWin.openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，到 GitHub 搜索适配本项目的 skill，总结后列出供用户选择。', forceRules: true })
+      const { win } = await aiWin.openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，开始执行任务。', forceRules: true })
       if (win) {
         try { getTransport() } catch { /* 油猴模式下无需 */ }
       } else {

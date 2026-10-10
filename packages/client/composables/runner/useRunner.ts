@@ -200,7 +200,10 @@ const baselineRunId = useSessionStorage<string>(STORAGE_KEY_BASELINE, '')
  */
 const sessionBaselineRunId = useSessionStorage<string>(STORAGE_KEY_SESSION_BASELINE, '')
 /** 变更视图：`round` = 本轮增量，`cumulative` = 自会话基准以来的累积；持久化到 sessionStorage */
-const changeView = useSessionStorage<'round' | 'cumulative'>(STORAGE_KEY_CHANGE_VIEW, 'round')
+// [checkpoint-default-v1] 默认累积视图：本轮增量随每轮 run() 开头清空（见 :387），
+//   任务进行中列表会闪空；累积不随 run 清空，进行中始终可见自会话基准以来的改动。
+//   存量 sessionStorage 已存 'round' 的会话沿用其选择，只有新会话/清空 storage 才拿到新默认。
+const changeView = useSessionStorage<'round' | 'cumulative'>(STORAGE_KEY_CHANGE_VIEW, 'cumulative')
 /** 累积变更列表（每条带归属轮）；仅累积视图下展示 */
 const cumulativeChanges = ref<ChangeEntry[]>([])
 /** 累积列表是否加载中 */

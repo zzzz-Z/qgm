@@ -9,8 +9,27 @@ import fs from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 import { mount } from '@vue/test-utils'
-import { describe, it } from 'vitest'
+import { beforeAll, describe, it } from 'vitest'
 import FileContentOverlay from '../components/diff/FileContentOverlay.vue'
+import DiffViewer from '../components/diff/DiffViewer.vue'
+
+// [preview-diff-render-canvas-stub-v1] @git-diff-view 的 TextMeasure 用 canvas 2d context 做字体测量；
+//   happy-dom 不实现该 API（getContext('2d') 恒 null）⇒ 组件挂载即抛 TypeError，所有渲染断言跟着红。
+//   只打桩 2d context，其余类型走原实现，避免误伤其他路径。
+beforeAll(() => {
+  HTMLCanvasElement.prototype.getContext = function (type: string) {
+    if (type === '2d') {
+      return {
+        font: '',
+        measureText: (s: string) => ({ width: String(s).length * 6 }),
+        fillText: () => {},
+        save: () => {},
+        restore: () => {},
+      }
+    }
+    return null
+  } as unknown as typeof HTMLCanvasElement.prototype.getContext
+})
 
 // 与 aiwin-collapse.node-test.ts 同法：SFC 默认导出在测试里放宽类型，只为拿到 mount 的 props 校验
 const OVERLAY = FileContentOverlay as any
@@ -23,30 +42,30 @@ function render(props: Record<string, unknown>) {
 const MODIFIED = { fileName: 'a.ts', before: 'L1\nOLD\nL3\n', after: 'L1\nNEW\nL3\n', changeType: 'modified' }
 
 describe('变更预览浮层：diff 渲染', () => {
-  it('modified ⇒ 渲染出「新增行」与「删除行」，并给出 +N/−M 统计', () => {
+  it('modified ⇒ 两侧内容与类型正确传给 DiffViewer，表头展示文件名与徽标', () => {
     const w = render(MODIFIED)
-    const adds = w.findAll('.diff-line.add')
-    const dels = w.findAll('.diff-line.del')
-    assert.equal(adds.length, 1, '没有渲染新增行 ⇒ 用户看不到这一轮加了什么')
-    assert.match(adds[0].text(), /NEW/, '新增行内容不对')
-    assert.equal(dels.length, 1, '没有渲染删除行 ⇒ 用户看不到这一轮删了什么')
-    assert.match(dels[0].text(), /OLD/, '删除行内容不对')
-    const stats = w.find('.diff-stats').text()
-    assert.match(stats, /\+1/, `缺新增计数（实际 ${stats}）`)
-    assert.match(stats, /-1/, `缺删除计数（实际 ${stats}）`)
-    // 表头仍是 DiffViewer 的（文件名 + 类型徽标），不是另起一套
+    // 库（@git-diff-view）在 happy-dom 下不渲染行级 DOM（TextMeasure 缺 canvas 2d），
+    // 断言下沉到宿主契约层：真正的风险是「before/after 被吞」→ 整份文件错算成全新增。
+    const dv = w.findComponent(DiffViewer)
+    assert.ok(dv.exists(), '未渲染 DiffViewer')
+    assert.equal(dv.props('before'), MODIFIED.before, 'before 未传对 ⇒ 整份文件会被算成新增')
+    assert.equal(dv.props('after'), MODIFIED.after, 'after 未传对')
+    assert.equal(dv.props('fileName'), 'a.ts')
+    assert.equal(dv.props('changeType'), 'modified')
     assert.match(w.find('.diff-header').text(), /a\.ts/)
     assert.match(w.find('.diff-badge').text(), /MODIFIED/)
   })
 
-  it('added / deleted 是整份标色：新增全绿、删除全红', () => {
+  it('added / deleted 走 changeType 口径传给 DiffViewer（归空在库侧，宿主只传原值与口径）', () => {
     const added = render({ fileName: 'n.ts', before: '', after: 'x\ny\n', changeType: 'added' })
-    assert.ok(added.findAll('.diff-line.add').length >= 2, 'added 未整份标为新增')
-    assert.equal(added.findAll('.diff-line.del').length, 0, 'added 不该出现删除行')
+    const aDv = added.findComponent(DiffViewer)
+    assert.equal(aDv.props('changeType'), 'added', 'added 未传 changeType ⇒ 库无法把 before 归空')
+    assert.equal(aDv.props('after'), 'x\ny\n', 'added 的 after 未传对')
 
     const deleted = render({ fileName: 'd.ts', before: 'x\ny\n', after: '', changeType: 'deleted' })
-    assert.ok(deleted.findAll('.diff-line.del').length >= 2, 'deleted 未整份标为删除')
-    assert.equal(deleted.findAll('.diff-line.add').length, 0, 'deleted 不该出现新增行')
+    const dDv = deleted.findComponent(DiffViewer)
+    assert.equal(dDv.props('changeType'), 'deleted', 'deleted 未传 changeType ⇒ 库无法把 after 归空')
+    assert.equal(dDv.props('before'), 'x\ny\n', 'deleted 的 before 未传对')
   })
 
   it('loading ⇒ 显示占位，且不渲染 diff（别把空内容当「无变更」）', () => {
@@ -85,9 +104,12 @@ describe('变更预览浮层：关闭通道与模式隔离', () => {
     assert.ok(plain.find('.fco-pre').exists(), '非 md 文件没走 <pre> 分支')
   })
 
-  it('工作日志侧显式声明 mode="content"（默认值换成 diff 也不会串台）', () => {
+  it('工作日志侧由 previewMode 控制模式：默认 content，绑定进 FileContentOverlay', () => {
     const src = fs.readFileSync(path.resolve(process.cwd(), 'packages/client/components/panels/WorklogPane.vue'), 'utf8')
-    assert.match(src, /mode="content"/, 'WorklogPane 没钉住 content 模式 ⇒ 浮层默认模式一变它就被改成 diff')
+    // [worklog-diff-preview-v1] 变更列表点击：有 patch 切 'diff'，无 patch 退回 'content'（默认）。
+    // 只钉 mode="content" 字面量会被 dynamic 绑定合法绕过，断言默认值 + 模板绑定两处。
+    assert.match(src, /const previewMode = ref<'diff' \| 'content'>\('content'\)/, 'previewMode 默认值不再钉死 content')
+    assert.match(src, /:mode="previewMode"/, '模板未把 previewMode 绑到 mode')
   })
 })
 

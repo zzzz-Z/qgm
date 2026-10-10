@@ -31,10 +31,10 @@ test('win-sid-namespace: AiWindowList 用共享 winSidOf（不再本地硬编码
   assert.ok(!/return `win_\$\{modelId\}`/.test(src), '本地仍硬编码 win_ 前缀（应与共享函数统一）')
 })
 
-test('win-sid-namespace: App.vue 两处 openAiSession 显式传 sid=winSidOf(modelId)', () => {
+test('win-sid-namespace: App.vue openAiSession 显式传 sid=winSidOf(modelId)', () => {
   const src = readSrc(APP_SRC)
   const matches = src.match(/openAiSession\(\{[^}]*sid:\s*winSidOf\(/g) || []
-  assert.equal(matches.length, 2, `应为 2 处 openAiSession 传 sid=winSidOf，实际 ${matches.length}`)
+  assert.equal(matches.length, 1, `应为 1 处 openAiSession 传 sid=winSidOf，实际 ${matches.length}`)
 })
 
 test('win-opened-marker: useAiWindowTable 导出 markWindowOpened / isWindowMarkedOpened / probeWindowBySid / winNameOf', () => {

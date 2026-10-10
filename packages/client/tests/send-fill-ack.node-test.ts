@@ -214,3 +214,15 @@ describe('waitWindowReady 接线（结构性断言，与 fill-ack 闭环配套�
     assert.ok((src.match(/fillWithDegrade\(sid,/g) || []).length === 3, 'copyAndFill 三个窗口分支都必须走降级包装')
   })
 })
+
+describe('复用窗口导航后必须重新等就绪（reuse-nav-ready-v1）', () => {
+  it('openAiSession 复用分支（win === preWin）也必须 await waitWindowReady', () => {
+    const src = readFileSync(new URL('../composables/ai/useAiWindow.ts', import.meta.url), 'utf8')
+    // 判据承重：删掉 else if 分支（或改回只看 preWin），本条必须变红
+    assert.ok(/else if \(win === preWin\)/.test(src), '复用分支判据 win === preWin 缺失')
+    assert.ok(
+      /else if \(win === preWin\) \{[\s\S]*?await waitWindowReady\(preSid, 5000\)/.test(src),
+      '复用分支必须 await waitWindowReady（带短超时），否则油猴重注入期 fill 被丢弃 ⇒ 新会话丢 SYSTEM.md',
+    )
+  })
+})

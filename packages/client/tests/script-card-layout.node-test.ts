@@ -61,7 +61,7 @@ test('hasBody 只看原始输出，不再含 why（含 why ⇒ 无输出步骤�
   assert.ok(m, '未找到 hasBody 定义（表达式形态变更后需同步本判据）')
   const expr = m[1]
   assert.ok(!/\bwhy\b/.test(expr), `hasBody 又包含 why ⇒ 折叠箭头泛滥回归。实际表达式：${expr.trim()}`)
-  assert.match(expr, /stdoutText/, 'hasBody 应包含 stdoutText（否则有输出的步骤点不开）')
+  assert.match(expr, /changes/, 'hasBody 应包含 changes（否则有变更的步骤点不开）')
   assert.match(expr, /stderrText/, 'hasBody 应包含 stderrText（否则失败输出点不开）')
 })
 
@@ -83,7 +83,7 @@ test('why 常显在头部（回到展开区 ⇒ 又变成「逐行点开才看�
 
 test('展开区只剩原始输出，不得再渲染 why（与头部重复 = 双源）', () => {
   assert.ok(!/card\.why/.test(TAIL), '展开区又渲染 why ⇒ 与头部常显的 why 重复')
-  assert.match(TAIL, /card\.stdoutText/, '展开区丢了 stdout 渲染')
+  assert.match(TAIL, /card\.changes/, '展开区丢了变更文件列表渲染')
   assert.match(TAIL, /card\.stderrText/, '展开区丢了 stderr 渲染')
 })
 
@@ -124,7 +124,7 @@ test('reason 贯通：活构建路径 + 同构备份都从 payload 取值并写�
   // 否则类型上有、运行时空 —— 头部 v-if 恒假，等于没做。
   assert.match(
     read(PANE),
-    /why,\n\s*reason,\n\s*\}\)/,
+    /why,\n\s*reason,/,
     `${PANE} 的 run:start 卡片未把 reason 放进返回对象 ⇒ 运行期恒定拿不到（类型通过但头部不显示）`,
   )
   assert.match(read(CARD), /reason:\s*string/, 'ScriptCard 的 CardData 缺 reason ⇒ 模板取到 undefined')

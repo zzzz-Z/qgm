@@ -38,6 +38,7 @@ function card(over: Partial<Record<string, unknown>> = {}) {
     reason: '',
     exit: 0,
     changeCount: 1,
+    changes: [],
     stdoutText: '',
     stdoutHidden: 0,
     stderrText: '',
@@ -70,18 +71,16 @@ describe('ScriptCard 真实渲染', () => {
     w.unmount()
   })
 
-  it('有 stdout ⇒ 才可点击，展开后展开区只有输出、不含 why', async () => {
-    const w = render({ why: '为什么要跑这一步', stdoutText: 'line1\nline2', stdoutHidden: 3 })
+  it('有变更文件 ⇒ 才可点击，展开后展开区只有变更列表、不含 why', async () => {
+    const w = render({ why: '为什么要跑这一步', changes: [{ path: 'a.ts', type: 'modified' }] })
     const head = w.find('.script-card-head')
-    assert.ok(head.classes().includes('is-clickable'), '有输出却不能展开')
+    assert.ok(head.classes().includes('is-clickable'), '有变更却不能展开')
     assert.equal(head.attributes('aria-expanded'), 'false')
-    // 展开区仅在点击后出现
     assert.ok(!w.find('.script-card-tail').exists(), '未点击就渲染了展开区')
     await head.trigger('click')
     const tail = w.find('.script-card-tail')
     assert.ok(tail.exists(), '点击后未渲染展开区')
-    assert.match(tail.text(), /line1/, '展开区无 stdout')
-    assert.match(tail.text(), /前 3 行已省略/, '展开区缺省略提示')
+    assert.match(tail.text(), /a\.ts/, '展开区无变更文件路径')
     assert.ok(!/\bwhy\b|为什么要跑这一步/.test(tail.text()), '展开区仍有 why ⇒ 与头部重复')
     assert.equal(w.find('.script-card-why').text().includes('为什么要跑这一步'), true, 'why 未常显在头部')
     w.unmount()
@@ -127,10 +126,10 @@ describe('ScriptCard 真实渲染', () => {
     w.unmount()
   })
 
-  it('键盘可达：有输出时 Enter 可展开', async () => {
-    const w = render({ stdoutText: 'x' })
+  it('键盘可达：有变更时 Enter 可展开', async () => {
+    const w = render({ changes: [{ path: 'a.ts', type: 'added' }] })
     await w.find('.script-card-head').trigger('keydown.enter')
-    assert.ok(w.find('.script-card-tail').exists(), 'Enter 未展开 ⇒ 键盘用户打不开原始输出')
+    assert.ok(w.find('.script-card-tail').exists(), 'Enter 未展开 ⇒ 键盘用户打不开变更列表')
     w.unmount()
   })
 })

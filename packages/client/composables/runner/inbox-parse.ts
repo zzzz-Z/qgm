@@ -3,8 +3,10 @@
 
 /**
  * 归一化脚本内容，用于 push 去重指纹
- * [WHY] 剔除 shebang / 注释 / 空白后比较，避免仅元信息变化被判为新脚本
- * [CONSTRAINT] 只去行首 shebang 与单行注释；不剥离多行块注释
+ * [WHY] 剔除 shebang / 无关注释 / 空白后比较，避免仅格式变化被判为新脚本。
+ *   [script-identity-v1] @desc / @why 例外：它们是脚本身份（语义标识），保留参与 hash，
+ *   避免「同骨架不同阶段」的脚本被误判为重复（分阶段收尾场景）。
+ * [CONSTRAINT] 只去行首 shebang 与非元信息单行注释；不剥离多行块注释
  * [CHANGE-IMPACT] 输出被 useScriptInbox 用作 Set 键；改归一规则会让历史去重失效（重新接受旧脚本）
  * @param code 原始脚本内容；null / undefined 会按空串处理
  */
@@ -16,6 +18,11 @@ export function normalizeForHash(code: string): string {
       if (!l) return false
       // shebang 行
       if (l.startsWith('#!')) return false
+      // [script-identity-v1] @desc / @why 是脚本身份，不剥离：原实现剥掉全部注释 ⇒
+      //   同骨架不同 @desc 的脚本 hash 相同 ⇒ 分阶段脚本第 2 次起被静默去重
+      //   （arrive.jsonl 记 reason=dedup，runner/reject 双静默）。只保留首部两条。
+      if (/^\/\/\s*@(?:desc|why)\b/.test(l)) return true
+      if (/^#\s*@(?:desc|why)\b/.test(l)) return true
       // cjs/js 注释
       if (l.startsWith('//')) return false
       // bash 注释（也覆盖 #!）

@@ -55,3 +55,31 @@ test('parseMeta lang=js 与 cjs 行为一致', () => {
   const code = '// @why: because\nfoo'
   assert.deepEqual(parseMeta(code, 'js'), parseMeta(code, 'cjs'))
 })
+
+// [script-identity-v1] @desc / @why 必须参与 hash：它们是脚本身份而非可随意改的注释。
+// [WHY] 原实现剥掉全部注释 ⇒ 「同骨架不同 @desc」的分阶段脚本 hash 相同 ⇒ 第 2 次起被静默去重
+//   （arrive.jsonl 记 reason=dedup，runner/reject 双静默，用户体感「脚本没执行」）。
+// [CONSTRAINT] 变异：把 filter 里的 @desc/@why 例外删掉 ⇒ 本用例必红。
+test('normalizeForHash：@desc/@why 参与 hash（同骨架不同 desc 视为不同脚本）', () => {
+  const A = '// @desc 阶段一\n// @why 理由一\nconst r = 1'
+  const B = '// @desc 阶段二\n// @why 理由二\nconst r = 1'
+  assert.notEqual(normalizeForHash(A), normalizeForHash(B), '不同 @desc/@why 被误判为同一脚本 ⇒ 分阶段脚本会被静默去重')
+})
+
+test('normalizeForHash：实现差异仍参与 hash（同 desc 不同代码）', () => {
+  const A = '// @desc 同一描述\n// @why 同一理由\nconst r = 1'
+  const B = '// @desc 同一描述\n// @why 同一理由\nconst r = 2'
+  assert.notEqual(normalizeForHash(A), normalizeForHash(B), '实现差异未参与 hash ⇒ 真新脚本会被误判为重复')
+})
+
+test('normalizeForHash：@desc/@why 之外的注释仍被剥离', () => {
+  const A = '// @desc x\n// @why y\n// 普通注释一\nconst r = 1'
+  const B = '// @desc x\n// @why y\n// 普通注释二\nconst r = 1'
+  assert.equal(normalizeForHash(A), normalizeForHash(B), '普通注释应被归一化（保持既有语义）')
+})
+
+test('normalizeForHash：shebang 仍被剥离（不参与 hash）', () => {
+  const A = '// @desc x\n// @why y\nconst r = 1'
+  const B = '#!/usr/bin/env node\n// @desc x\n// @why y\nconst r = 1'
+  assert.equal(normalizeForHash(A), normalizeForHash(B), 'shebang 应被剥离')
+})

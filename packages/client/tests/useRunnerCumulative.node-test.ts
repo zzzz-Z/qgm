@@ -1,7 +1,7 @@
 // [cumulative-baseline-v1] 变更视图（本轮 / 累积）与「回滚归属」的契约守卫
 // WHY: 累积视图最容易出的两类静默错误是——①切换后不加载（面板停在旧累计）；
 //      ②回滚仍用本轮 runId（服务端 400，用户以为撤了其实没撤）。两者都不报错，故锁成测试。
-import { beforeAll, beforeEach, test } from 'vitest'
+import { beforeAll, beforeEach, test, vi } from 'vitest'
 import assert from 'node:assert/strict'
 
 // ===== 全局 storage / window 桩（与 useRunner.node-test.ts 同构；vueuse 需要它们）=====
@@ -245,4 +245,14 @@ test('累积返回同 path 重复条目时按 path 去重', async () => {
 
   assert.equal(r.cumulativeChanges.value.length, 1)
   assert.equal(r.cumulativeChanges.value[0].type, 'added')
+})
+
+// [checkpoint-default-v1] 默认视图必须是 cumulative：本轮增量随每轮 run() 开头清空，
+//   任务进行中列表会闪空；累积不随 run 清空，进行中始终可见。改回 'round' 本条应变红。
+test('默认变更视图为 cumulative（新会话不闪空）', async () => {
+  sessionStorage.clear()
+  vi.resetModules()
+  const fresh = await import('../../../packages/client/composables/runner/useRunner')
+  const r = fresh.useRunner()
+  assert.equal(r.changeView.value, 'cumulative', '默认视图应为 cumulative，否则任务进行中变更列表会闪空')
 })
