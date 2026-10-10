@@ -445,6 +445,7 @@ function onHtmlDrop(e: DragEvent) {
         :done-summary="doneSummary"
         :ai-waiting="aiWaiting"
         :delivering="delivering"
+        @preview="onPreviewFile"
       />
       <!-- 编辑器 (下方) -->
       <ScriptEditor

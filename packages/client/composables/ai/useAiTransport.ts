@@ -84,8 +84,14 @@ export function createTampermonkeyTransport(): AiTransport {
     if (!d || typeof d !== 'object') return
     const t = (d as { type?: string }).type
     const sid = String((d as { sid?: string }).sid || (d as { sessionId?: string }).sessionId || '')
-    if (t === 'ai-runner:reply') { for (const cb of replyCbs) cb((d as { reply?: unknown }).reply, sid) }
-    else if (t === 'ai-runner:script') { for (const cb of replyCbs) cb({ kind: 'script', item: (d as { item?: unknown }).item }, sid) }
+    if (t === 'ai-runner:reply') {
+      // [tm-reply-shape-v2] tampermonkey 实际把 kind/text 平铺在**顶层**（见 classifyAndPost 的 post({ type, kind, text, sessionId, site })），
+      //   不包 reply 字段。原写法 cb(d.reply, sid) 会拿到 undefined —— 诊断日志实测 raw=undefined 印证。
+      //   兼容两种格式：有 reply 字段用它，没有则用 d 自身作为 raw。
+      const payload = (d as { reply?: unknown }).reply
+      const raw = payload !== undefined ? payload : d
+      for (const cb of replyCbs) cb(raw, sid)
+    } else if (t === 'ai-runner:script') { for (const cb of replyCbs) cb({ kind: 'script', item: (d as { item?: unknown }).item }, sid) }
     else if (t === 'ai-runner:summary') { for (const cb of summaryCbs) cb(String((d as { text?: string }).text || ''), sid, Boolean((d as { degraded?: boolean }).degraded)) }
     else if (t === 'ai-runner:new-session-created') { for (const cb of newSidCbs) cb(String((d as { url?: string }).url || ''), String((d as { id?: string }).id || '')) }
   }

@@ -1,6 +1,6 @@
 // [arch-hono/git-v1] /git/* —— HEAD / commit-loop / reset
 import { Hono } from 'hono'
-import { gitCommitAll, gitCommitStaged, gitHead, gitRawDiff, gitResetHard, gitStage, gitStatusDetailed, gitUnstage, gitWorklog } from '../git.js'
+import { gitBranch, gitCommitAll, gitCommitHistory, gitCommitStaged, gitHead, gitRawDiff, gitResetHard, gitStage, gitStatusDetailed, gitUnstage, gitWorklog } from '../git.js'
 
 /** git 路由的 Hono 实例 */
 export const gitHono = new Hono()
@@ -8,6 +8,19 @@ export const gitHono = new Hono()
 gitHono.get('/git/head', async (c) => {
   const head = await gitHead()
   return c.json({ ok: Boolean(head), head: head || '' })
+})
+
+// [git-branch-v1] 当前分支名
+gitHono.get('/git/branch', async (c) => {
+  const b = await gitBranch()
+  return c.json({ ok: Boolean(b), branch: b || '' })
+})
+
+// [git-history-v1] 提交历史（弹窗用）
+gitHono.get('/git/commits', async (c) => {
+  const limit = Number(c.req.query('limit')) || 50
+  const r = await gitCommitHistory(limit)
+  return c.json(r, r.ok ? 200 : 400)
 })
 
 // [git-stage-v1] 详细状态：XY 位区分已暂存/未暂存，供 VSCode 风格双分组列表消费

@@ -599,7 +599,6 @@
   background: rgb(127 127 127 / 12%);
 }
 
-
 /* [git-stage-v1] 行内暂存/取消暂存按钮：默认隐藏，hover 时可见（VSCode 风格） */
 .wl-row-action {
   flex: 0 0 auto;
@@ -610,14 +609,19 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font: 700 12px/1 ui-monospace, monospace;
+  font:
+    700 12px/1 ui-monospace,
+    monospace;
   color: var(--text-3);
   background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.1s ease, color 0.1s ease, border-color 0.1s ease;
+  transition:
+    opacity 0.1s ease,
+    color 0.1s ease,
+    border-color 0.1s ease;
 }
 .wl-item-head:hover .wl-row-action {
   opacity: 1;
@@ -636,7 +640,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font: 700 12px/1 ui-monospace, monospace;
+  font:
+    700 12px/1 ui-monospace,
+    monospace;
   color: var(--text-3);
   background: transparent;
   border: 1px solid transparent;
@@ -646,4 +652,152 @@
 .wl-group-action:hover {
   color: var(--primary, #2563eb);
   border-color: var(--primary, #2563eb);
+}
+
+/* [git-branch-display-v1] 顶部分支名（对齐 VSCode 源控面板） */
+.wl-head-branch {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 11px/1.4 var(--mono, monospace);
+  color: var(--text-2);
+}
+
+/* [git-history-dialog-v1] 提交历史弹窗（Teleport 到 body，样式为全局） */
+.wl-hist-mask {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 9999);
+  background: rgb(0 0 0 / 55%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.wl-hist-box {
+  width: min(720px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-10, 10px);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 40%);
+  overflow: hidden;
+}
+.wl-hist-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+.wl-hist-title {
+  flex: 1;
+}
+.wl-hist-count {
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+.wl-hist-close {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-3);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.wl-hist-close:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.wl-hist-loading,
+.wl-hist-empty {
+  padding: 20px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.wl-hist-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+.wl-hist-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.wl-hist-item:nth-child(odd) {
+  background: rgb(127 127 127 / 5%);
+}
+.wl-hist-sha {
+  flex: 0 0 auto;
+  font: 400 11px/1.4 var(--mono, monospace);
+  color: var(--warning, #d29922);
+}
+.wl-hist-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.wl-hist-meta {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* [worklog-debug-v1] 临时诊断条：问题解决后移除 */
+.wl-debug {
+  margin: 4px 0;
+  padding: 6px 8px;
+  font-size: 11px;
+  background: rgb(255 200 0 / 10%);
+  border: 1px solid rgb(255 200 0 / 40%);
+  border-radius: 4px;
+  color: var(--text-2);
+}
+.wl-debug-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.wl-debug-head button {
+  background: transparent;
+  border: 0;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.wl-debug-body {
+  margin: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font: 400 10px/1.4 var(--mono, monospace);
+  max-height: 200px;
+  overflow: auto;
 }

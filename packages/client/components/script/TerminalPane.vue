@@ -47,6 +47,8 @@ interface ScriptItem {
   // [timeline-denoise-v1] 结果摘要：exit 码 / 变更文件数，让「跑成没、动了几个文件」一眼可见
   exit: number | null
   changeCount: number
+  // [script-card-changes-v1] 本次执行变更文件列表
+  changes: Array<{ path: string, type: string }>
   // [timeline-denoise-v1] 原始输出只保留尾部若干行，省略量显式标注（替代原先无提示的字符切片）
   stdoutText: string
   stdoutHidden: number
@@ -126,6 +128,8 @@ const props = defineProps<{
   //   此前这段完全不可见：界面显示「成功」却什么都没发生，用户以为卡住或漏发。
   delivering?: boolean
 }>()
+// [script-card-changes-v1] 冒泡 ScriptCard 的预览点击 → 由 ScriptPanel 打开浮层
+const emit = defineEmits<{ preview: [path: string] }>()
 
 /** 阶段中文标签表；未命中回退为原值 */
 const PHASE_LABEL: Record<string, string> = {
@@ -287,6 +291,8 @@ const timelineItems = computed(() => {
       stderrHidden: errTail.hiddenLines,
       why,
       reason,
+      // [script-card-changes-v1] 本次执行变更文件
+      changes: Array.isArray(p.changes) ? (p.changes as Array<{ path: string, type: string }>) : [],
     })
   }
 
@@ -474,6 +480,7 @@ function normalizeAskOptions(raw: unknown): Array<{ id: string, label: string }>
               v-else-if="card.type === 'script'"
               :key="card.key"
               :card="card"
+              @preview="(p) => emit('preview', p)"
             />
             <RoundCard
               v-else

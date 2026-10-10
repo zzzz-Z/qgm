@@ -574,7 +574,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       if (changes.value.length === 0) await loadRoundChanges()
       // 累积视图打开时每轮结束都要刷新——否则面板停在旧累计上，用户以为改动没生效
       if (changeView.value === 'cumulative') await loadCumulative()
-      wrappedEmitStep(data.ok ? 'done' : 'error', { exit: data.code, changeCount: changes.value.length })
+      wrappedEmitStep(data.ok ? 'done' : 'error', { exit: data.code, changeCount: changes.value.length, changes: changes.value.map(c => ({ path: c.path, type: c.type })) })
     } else {
       result.value = {
         runId: '',
@@ -606,7 +606,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       // 兜底：任何提前 return（HTTP 错误 / 无 body）都会走到这，确保 emit 结束态
       if (finalPhase === 'running') {
         const ok = result.value?.ok === true
-        wrappedEmitStep(ok ? 'done' : 'error', { exit: result.value?.code, changeCount: changes.value.length, fallback: true })
+        wrappedEmitStep(ok ? 'done' : 'error', { exit: result.value?.code, changeCount: changes.value.length, changes: changes.value.map(c => ({ path: c.path, type: c.type })), fallback: true })
       }
       running.value = false
     }

@@ -17,6 +17,8 @@ interface CardData {
   // [timeline-denoise-v1] 结果摘要：仅终态事件带值（运行中为 null / 0）
   exit: number | null
   changeCount: number
+  // [script-card-changes-v1] 本次执行变更文件列表（供展开区显示）
+  changes: Array<{ path: string, type: string }>
   // [timeline-denoise-v1] 原始输出已由 TerminalPane 折叠为尾部若干行；省略量显式标注
   stdoutText: string
   stdoutHidden: number
@@ -25,6 +27,8 @@ interface CardData {
 }
 
 const props = defineProps<{ card: CardData }>()
+// [script-card-changes-v1] 点击变更文件 → 冒泡给父组件打开预览浮层
+const emit = defineEmits<{ preview: [path: string] }>()
 
 // 展开状态下沉到卡片内；父组件不再需要 expandedCards 集合
 const expanded = ref(false)
@@ -33,7 +37,9 @@ const expanded = ref(false)
 // 改为 computed：仅当 card 引用变化时重算一次。
 // [script-card-head-v2] why 已移出 hasBody —— 它现在常显在头部（见模板），不再需要展开。
 //   于是「▸ 折叠箭头」只在真有 stdout/stderr 的步骤上出现，不再几乎每行都长一个。
-const hasBody = computed(() => Boolean(props.card.stdoutText || props.card.stderrText))
+// [script-card-changes-v1] 展开条件改为「有变更文件 或 有 stderr」：
+//   stdout 里的 ✓ ok(...) 打点是噪音，成功无变更的步骤不应长出可点开的箭头。
+const hasBody = computed(() => props.card.changes.length > 0 || Boolean(props.card.stderrText))
 // [timeline-denoise-v1] 结果摘要只在终态出现，运行中 / 等待中不占位
 const isFinal = computed(() => props.card.phaseClass === 'phase-done' || props.card.phaseClass === 'phase-error')
 const isFailed = computed(() => props.card.phaseClass === 'phase-error')
@@ -124,11 +130,21 @@ function toggle(): void { expanded.value = !expanded.value }
     <!-- [script-card-head-v2] 展开区只剩原始输出（why 已上提到头部）：
          有输出的步骤才配折叠箭头，不再是「几乎每行都能点开、点开只有一段复述」。 -->
     <div v-if="expanded && hasBody" class="script-card-tail">
-      <!-- [timeline-denoise-v1] 省略提示置于保留内容之前：丢掉的正是更早的行 -->
-      <div v-if="card.stdoutHidden > 0" class="tail-omitted">
-        ⋯ 前 {{ card.stdoutHidden }} 行已省略
-      </div>
-      <pre v-if="card.stdoutText" class="tail-pre">{{ card.stdoutText }}</pre>
+      <!-- [script-card-changes-v1] 变更文件列表：点击打开预览浮层（由父组件承接） -->
+      <ul v-if="card.changes.length" class="tail-files" role="list">
+        <li v-for="c in card.changes" :key="c.path" class="tail-file">
+          <button
+            class="tail-file-btn"
+            type="button"
+            :aria-label="`预览 ${c.path}`"
+            @click.stop="emit('preview', c.path)"
+          >
+            <span class="tail-file-status" :class="`st-${c.type}`">{{ c.type === 'added' ? 'A' : c.type === 'deleted' ? 'D' : 'M' }}</span>
+            <span class="tail-file-path">{{ c.path }}</span>
+          </button>
+        </li>
+      </ul>
+      <!-- [timeline-denoise-v1] 有 stderr 时才展示：失败信息是必看内容，正常输出不上屏 -->
       <div v-if="card.stderrHidden > 0" class="tail-omitted">
         ⋯ 前 {{ card.stderrHidden }} 行已省略
       </div>
@@ -355,3 +371,44 @@ function toggle(): void { expanded.value = !expanded.value }
   }
 }
 </style>
+
+/* [script-card-changes-v1] 变更文件列表：紧凑、可点击预览 */
+.tail-files {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.tail-file {
+  line-height: 1.5;
+}
+.tail-file-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 6px;
+  font: 400 12px/1.5 var(--mono, monospace);
+  color: var(--text-2);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+.tail-file-btn:hover { background: rgb(127 127 127 / 10%); }
+.tail-file-status {
+  flex: 0 0 auto;
+  width: 14px;
+  text-align: center;
+  font-weight: 700;
+}
+.tail-file-status.st-added { color: var(--success, #3fb950); }
+.tail-file-status.st-deleted { color: var(--danger, #f85149); }
+.tail-file-status.st-modified { color: var(--warning, #d29922); }
+.tail-file-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

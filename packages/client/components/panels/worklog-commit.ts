@@ -46,6 +46,10 @@ export function useWorklogCommit(deps: UseWorklogCommitDeps) {
   const aiError = ref('')
   const pendingCommitRequest = ref(false)
   const pendingCommitSid = ref('')
+  // [gitmsg-window-v1] 请求发起时刻；用于「时间窗闸门」而非「超时清状态」——
+  //   用户实测 AI 生成 msg 后 > 60s 才回，超时清状态会让真回包到达时被 !pending 门挡下。
+  //   新语义：pending 保持到被消费为止；超时只提示不关闸。
+  const waitingSince = ref(0)
   let pendingTimer: ReturnType<typeof setTimeout> | null = null
 
   /**
@@ -158,10 +162,14 @@ export function useWorklogCommit(deps: UseWorklogCommitDeps) {
     const prompt = [
       'ASK',
       '请根据我提供的代码变更，生成标准 Git commit message。',
+      '【重要】回复必须以哨兵前缀 `GITMSG:` 开头（单独一行，冒号后直接跟 commit message），',
+      '  客户端靠这个前缀精确提取你的输出。例如：',
+      '  GITMSG: feat(client): add git stage UI',
+      '  若有多行 body，则首行仍是 `GITMSG: <head>`，后续行为 body（无需再加前缀）。',
       '【输入】变更内容（git diff）：',
       '【规则】',
-      '1. 只输出 commit message 本身，不要解释、不要 markdown 代码块、不要前后缀。',
-      '2. 格式：<type>(<scope>): <subject>；body/footer 可选。',
+      '1. 只输出 commit message 本身（带哨兵前缀），不要解释、不要 markdown 代码块、不要其他前后缀。',
+      '2. 格式：GITMSG: <type>(<scope>): <subject>；body/footer 可选。',
       '3. type 只能使用：feat、fix、docs、style、refactor、perf、test、build、ci、chore、revert。',
       '4. scope 可选，小写模块名。',
       '5. subject 一句话概括，英文祈使句现在时，不加句号；中文简洁。',
@@ -179,15 +187,21 @@ export function useWorklogCommit(deps: UseWorklogCommitDeps) {
     aiCommitMsg.value = ''
     pendingCommitRequest.value = true
     pendingCommitSid.value = getActiveWinSid() || 'default'
+    waitingSince.value = Date.now()
+    console.warn('[generateCommitMsg] sending prompt', { files: result.value.files.length, sid: pendingCommitSid.value, promptLen: prompt.length })
     if (pendingTimer) clearTimeout(pendingTimer)
+    // [gitmsg-window-v1] 超时提示但**不关闸门**：AI 侧生成 commit message 常需 > 60s，
+    //   若超时清 pendingCommitRequest，真回包到达时会被 onReply 的 !pending 门挡下 →
+    //   用户看到「AI 回复超时」但实际 msg 已生成却丢失。新语义：pending 只由
+    //   成功消费清空；超时仅提示，回包晚到仍可被消费。
     pendingTimer = setTimeout(() => {
       if (pendingCommitRequest.value) {
-        pendingCommitRequest.value = false
         aiGenerating.value = false
-        aiError.value = 'AI 回复超时（60 秒）'
+        aiError.value = 'AI 生成中…（已超过 3 分钟，仍在等待回复）'
         pendingTimer = null
+        // 刻意不清 pendingCommitRequest：等待继续
       }
-    }, 60_000)
+    }, 180_000)
 
     const r = await copyAndFill(prompt)
     if (r === 'failed') {
@@ -204,5 +218,5 @@ export function useWorklogCommit(deps: UseWorklogCommitDeps) {
     if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null }
   }
 
-  return { aiGenerating, aiCommitMsg, aiError, pendingCommitRequest, pendingCommitSid, extractCommitLine, extractCommitMessage, generateLocalCommitMsg, generateCommitMsg, cleanup }
+  return { aiGenerating, aiCommitMsg, aiError, pendingCommitRequest, pendingCommitSid, waitingSince, extractCommitLine, extractCommitMessage, generateLocalCommitMsg, generateCommitMsg, cleanup }
 }

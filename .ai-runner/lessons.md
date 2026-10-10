@@ -2551,3 +2551,15 @@ TypeScript 控制流分析把 `const` 字面量收窄为 `'A'`，于是 `if (PHA
 正确用法：`hunks: [fullPatchString]`，即整段 git 输出作为单元素数组。README 里 `hunks: ["..."]` 的示例容易被误读为「每个 hunk 一段」。
 
 定位方法：写一个直跑 `@git-diff-view/core` 的 node 脚本，对 4 种构造方式（hunks-only / 空 content+hunks / 5 参构造 / 无 hunks）打印 `splitLineLength`，一次对照就能判定。
+
+## `eslint --fix` 一次收敛 scss 的 prettier 报错
+
+手写 scss 追加块反复触发 `format/prettier`（双空行、`font:` 缩写换行等）无法靠手改命中。直接 `npx eslint <file> --fix` 一次通过。这与 AGENTS.md「跨区搬运后必须补 npx eslint <file> --fix」同源——审查类文档的硬约束在 scss 上同样适用。
+
+## overlay 事务性：写入后必须先 flush 再触发破坏性动作
+
+`__AI__.writeText` 只进 overlay，`exit -1`（如调用 `pm2 restart` 触发的 HTTP 通道瞬断）会整轮回滚。上面第二轮修 scss 时踩过：`writeText` 后没 `flush` 就 `pm2 restart`，结果 restart 报 network error → exit -1 → 本轮的 splice 修改全丢，下一轮读盘发现 602 行双空行仍在。正确姿势：`await __AI__.flush()` 后再做任何可能让本轮回滚的操作。
+
+## 换数据源时须逐字段核对「下游依赖哪些字段」
+
+`rowsFor` 从 `result.value.files` 换到 `stagingStatus` 时，我补了 `added`/`removed` 却漏了 `diff`，导致 `openPreview` 静默退化为 content 模式——不报错、不警告，UI 只是「看起来不对」。这类静默降级的坑，判据须落在行为层（截图 / e2e 断言 diff 行数）而非类型层（tsc 对 `row.diff === undefined` 完全无感）。

@@ -95,6 +95,17 @@ const previewChangeType = ref<'added' | 'modified' | 'deleted'>('modified')
 const committing = ref(false)
 // [git-head-display-v1] 当前 HEAD（短 sha）；空串时模板隐藏
 const headRef = ref('')
+// [git-branch-display-v1] 当前分支名（顶部展示，对齐 VSCode 源控面板）
+const branchRef = ref('')
+// [git-history-dialog-v1] 提交历史弹窗：按钮触发，拉 /__ai/git/commits
+const commitsOpen = ref(false)
+const commitsLoading = ref(false)
+const commitsData = ref<Array<{ sha: string, short: string, author: string, date: string, subject: string }>>([])
+// [worklog-debug-v1] 临时诊断：把 onReply 收到的 raw 结构可视化到 UI（用户无需开 console）
+const debugRaw = ref('')
+// [worklog-debug-v2] onMounted 订阅状态可视化（catch 里也写，判断是否订阅失败）
+const debugMountStatus = ref('(未挂载)')
+const debugVisible = ref(true)
 // [vcs-svn-log-v1] 版本控制类型：'git' 为乐观默认（git 用户不该看到模式切换的闪烁）；
 //   仅当 git 链路失败且 /vcs/log 报 vcs='svn' 时才翻成 'svn'
 const vcsMode = ref<'git' | 'svn'>('git')
@@ -113,6 +124,7 @@ const {
   aiError,
   pendingCommitRequest,
   pendingCommitSid,
+  waitingSince,
   extractCommitLine,
   extractCommitMessage,
   generateCommitMsg,
@@ -129,10 +141,11 @@ const {
 // 提交框每输入一字触发重渲染时不再重复调用（报告 §5.1.4）。
 // [worklog-rows-template-v1] 预生成行数据：保留 f 全部字段，附加派生的 name/dir/stCls/stLetter。
 // [worklog-content-preview-v1] 行数据不再承载展开态：点击改为打开内容预览浮层。
-// [git-stage-v1] 统计映射：path -> {added, removed}，来自 worklog 的 numstat
+// [git-stage-v1] 统计映射：path -> {added, removed, diff}，来自 worklog 的 numstat + 原始 patch
+// [worklog-diff-preview-v1] 同时挂 diff：openPreview 靠它判断走 diff 模式还是退回 content 模式
 const statByPath = computed(() => {
-  const m = new Map<string, { added: number, removed: number }>()
-  for (const f of result.value?.files || []) m.set(f.path, { added: f.added || 0, removed: f.removed || 0 })
+  const m = new Map<string, { added: number, removed: number, diff: string }>()
+  for (const f of result.value?.files || []) m.set(f.path, { added: f.added || 0, removed: f.removed || 0, diff: f.diff || '' })
   return m
 })
 /** 已暂存栏（提交源） */
@@ -150,29 +163,77 @@ watch(() => props.active, (v) => { if (v && !result.value && !loading.value) voi
 onMounted(() => {
   try {
     const t = getTransport()
+    debugMountStatus.value = `transport kind=${t && t.kind ? t.kind : '?'} · 订阅中`
     unsubscribeReply = t.onReply((raw: unknown, sid: string) => {
-      if (!pendingCommitRequest.value) return
-      // [worklog-sid-gate-v2] 移除 sid 比对：tampermonkey 回包 sid=sessionId（会话 hash），
-      // 而 pendingCommitSid=getActiveWinSid()（槽位 id），两值来源不同必然失配 → 回填永久失效。
-      // 一次性 pendingCommitRequest 标志即正确闸门：消费后立即置 false，不会重复触发。
-      void sid
-      const reply = raw as { kind?: string, text?: string } | null
-      if (!reply) return
-      const kind = String(reply.kind || 'plain')
-      if (kind !== 'plain' && kind !== 'multi' && kind !== 'done') return
-      const text = String(reply.text || '').trim()
+      // [gitmsg-window-v1] 闸门改为「时间窗」而不是「一次性 pending 标志」：
+      //   超时只提示不关闸，AI 生成 msg 晚到时仍能被消费。10 分钟窗口兜底防永久挂着。
+      const WINDOW_MS = 600_000
+      const elapsed = waitingSince.value ? Date.now() - waitingSince.value : -1
+      const inWindow = waitingSince.value > 0 && elapsed >= 0 && elapsed < WINDOW_MS
+      // [worklog-reply-shape-v2] 兼容 script kind：
+      //   AI 的 commit message 回复可能被 tampermonkey 判成 `script` kind（prompt 里带 ```diff 围栏触发），
+      //   此时内容在 reply.item.code 而非 reply.text。扩展取值来源，两个字段都试。
+      const replyShape = raw as { kind?: string, text?: string, item?: { code?: string } } | null
+      const textFromText = replyShape && typeof replyShape.text === 'string' ? replyShape.text : ''
+      const textFromItem = replyShape && replyShape.item && typeof replyShape.item.code === 'string' ? replyShape.item.code : ''
+      const text = (textFromText || textFromItem).trim()
+      // [worklog-reply-diag-v2] 打印完整 raw 供诊断（展开 Object 可看全部字段）
+      console.warn('[worklog-onReply] raw=', raw)
+      // [worklog-debug-v1] 写入 UI 可见诊断条
+      try {
+        const shape = raw as { kind?: string, text?: string, item?: { code?: string } } | null
+        debugRaw.value = JSON.stringify({
+          at: new Date().toLocaleTimeString(),
+          inWindow,
+          elapsed,
+          kind: shape && shape.kind,
+          textLen: shape && shape.text ? String(shape.text).length : 0,
+          hasItem: Boolean(shape && shape.item),
+          itemCodeLen: shape && shape.item && shape.item.code ? String(shape.item.code).length : 0,
+          textHead: shape && shape.text ? String(shape.text).slice(0, 120) : '',
+        }, null, 2)
+      } catch { /* ignore */ }
+      console.warn('[worklog-onReply]', {
+        inWindow,
+        elapsed,
+        pending: pendingCommitRequest.value,
+        aiGen: aiGenerating.value,
+        sid,
+        kind: replyShape && replyShape.kind,
+        textLen: text.length,
+        hasItem: Boolean(replyShape && replyShape.item),
+      })
+      // 闸门：不在窗口内直接忽略（不管 pending 标志，因为超时不清 pending 会让它常驻）
+      if (!inWindow) return
       if (!text) return
-      // [commit-message-multiline-v1] 用多行提取：保留 AI 生成的 body/footer
-      const msg = extractCommitMessage(text) || extractCommitLine(text)
-      if (!msg) return
+      // [gitmsg-sentinel-v1] 靠 prompt 里约定的 GITMSG 哨兵前缀精确提取：
+      //   不再依赖 kind（页面侧扫描推断不准），也不再依赖「看起来像 commit」的模糊匹配。
+      //   只要回复里出现 GITMSG: 就提取其后内容作为 commit message。
+      // [gitmsg-sentinel-v1] indexOf 定位哨兵，不用正则（eslint 拦 super-linear-backtracking）
+      const SENTINEL = 'GITMSG:'
+      const sentinelIdx = text.indexOf(SENTINEL)
+      if (sentinelIdx < 0) {
+        console.warn('[worklog-onReply] skip: no GITMSG sentinel')
+        return
+      }
+      const afterSentinel = text.slice(sentinelIdx + SENTINEL.length).trim()
+      const msg = extractCommitMessage(afterSentinel) || extractCommitLine(afterSentinel)
+      if (!msg) {
+        console.warn('[worklog-onReply] skip: extract returned empty')
+        return
+      }
+      console.warn('[worklog-onReply] CONSUME', { msgLen: msg.length, head: msg.slice(0, 60) })
       aiCommitMsg.value = msg
       commitMsg.value = msg
       aiGenerating.value = false
       pendingCommitRequest.value = false
       pendingCommitSid.value = ''
+      // 消费后关闭窗口（避免重复消费）
+      waitingSince.value = 0
       cleanupWorklogCommit()
     })
-  } catch { /* transport 未就绪时静默；用户可手动编辑 */ }
+    debugMountStatus.value = `transport kind=${t && t.kind ? t.kind : '?'} · 已订阅`
+  } catch (e) { debugMountStatus.value = `FAILED: ${String(e)}` }
 })
 onUnmounted(() => {
   if (unsubscribeReply) { try { unsubscribeReply() } catch { /* ignore */ } unsubscribeReply = null }
@@ -194,6 +255,7 @@ function rowsFor(files: GitStatusFile[], wantStaged: boolean): Array<{
   stLetter: string
   added: number
   removed: number
+  diff: string
 }> {
   const stats = statByPath.value
   const out: Array<{
@@ -205,6 +267,7 @@ function rowsFor(files: GitStatusFile[], wantStaged: boolean): Array<{
     stLetter: string
     added: number
     removed: number
+    diff: string
   }> = []
   for (const f of files) {
     const inThis = wantStaged ? f.staged : f.unstaged
@@ -220,6 +283,7 @@ function rowsFor(files: GitStatusFile[], wantStaged: boolean): Array<{
       stLetter: statusLetter(f.status),
       added: st?.added || 0,
       removed: st?.removed || 0,
+      diff: st?.diff || '',
     })
   }
   return out
@@ -397,7 +461,7 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const [wlRes, headRes, stRes] = await Promise.all([
+    const [wlRes, headRes, stRes, brRes] = await Promise.all([
       fetch('/__ai/git/worklog', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -407,6 +471,8 @@ async function load(): Promise<void> {
       fetch('/__ai/git/head', { cache: 'no-store' }),
       // [git-stage-v1] 三请求并发：暂存区状态独立端点在 VSCode 语义下更清晰
       fetch('/__ai/git/status', { cache: 'no-store' }),
+      // [git-branch-display-v1] 分支名与 head 并发拉取
+      fetch('/__ai/git/branch', { cache: 'no-store' }),
     ])
     if (mySeq !== _loadSeq) return
     const j = await wlRes.json().catch(() => ({})) as WorklogResult
@@ -425,6 +491,12 @@ async function load(): Promise<void> {
       const hj = await headRes.json().catch(() => ({})) as { ok?: boolean, head?: string }
       if (mySeq !== _loadSeq) return
       headRef.value = hj && hj.ok && hj.head ? String(hj.head).slice(0, 12) : ''
+    } catch { /* ignore */ }
+    // [git-branch-display-v1] branch 独立消费；失败仅清空显示
+    try {
+      const bj = await brRes.json().catch(() => ({})) as { ok?: boolean, branch?: string }
+      if (mySeq !== _loadSeq) return
+      branchRef.value = bj && bj.ok && bj.branch ? String(bj.branch) : ''
     } catch { /* ignore */ }
     if (mySeq !== _loadSeq) return
     result.value = j
@@ -476,6 +548,31 @@ async function doCommit(): Promise<void> {
     committing.value = false
   }
 }
+/**
+ * [git-history-dialog-v1] 打开提交历史弹窗；懒加载，只拉一次。
+ * [WHY] 底部常驻列表已删除；用户需要时才拉，避免开 tab 就打 log。
+ */
+async function openCommits(): Promise<void> {
+  commitsOpen.value = true
+  if (commitsData.value.length || commitsLoading.value) return
+  commitsLoading.value = true
+  try {
+    const r = await fetch('/__ai/git/commits?limit=100', { cache: 'no-store' })
+    const j = await r.json().catch(() => ({})) as { ok?: boolean, commits?: Array<{ sha: string, short: string, author: string, date: string, subject: string }>, reason?: string }
+    if (!r.ok || !j.ok) { toast(j.reason || `加载提交历史失败（HTTP ${r.status}）`, 'error', TOAST_LONG); return }
+    commitsData.value = Array.isArray(j.commits) ? j.commits : []
+  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
+  finally { commitsLoading.value = false }
+}
+/** [git-history-dialog-v1] 关闭弹窗（不清空数据，二次打开免请求） */
+function closeCommits(): void { commitsOpen.value = false }
+/** [git-history-dialog-v1] ISO8601 → 本地易读时间 */
+function fmtCommitDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso || ''
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
 /** 复制完整工作日志 Markdown，供窄区按钮消费 */
 async function copyFullLog(): Promise<void> {
   if (!result.value || !result.value.markdown) return
@@ -512,10 +609,22 @@ async function copyFullLog(): Promise<void> {
     </div>
     <!-- [source-control] 顶部：提交消息框 + 生成按钮 + 分体式提交按钮（VSCode 风格） -->
     <div v-else class="wl-commit">
-      <!-- [git-head-display-v1] 当前 HEAD：空串时隐藏；有值时显示短 sha 徽章 -->
-      <div v-if="headRef" class="wl-head-row">
-        <span class="wl-head-label">HEAD</span>
-        <code class="wl-head-sha">{{ headRef }}</code>
+      <!-- [git-branch-display-v1] 分支名 + 短 sha：对齐 VSCode 源控面板顶部信息条 -->
+      <div v-if="branchRef || headRef" class="wl-head-row">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M6 9v6" /><path d="M18 6a3 3 0 1 1-3 3" /><path d="M15 9a9 9 0 0 1-9 9" /></svg>
+        <span class="wl-head-branch">{{ branchRef || '(detached)' }}</span>
+        <code v-if="headRef" class="wl-head-sha">{{ headRef }}</code>
+      </div>
+      <!-- [worklog-debug-v1] 临时诊断条：显示 onReply 收到的 raw 结构，问题解决后移除 -->
+      <div v-if="debugVisible" class="wl-debug">
+        <div class="wl-debug-head">
+          <span>onReply 诊断</span>
+          <button type="button" aria-label="关闭" @click="debugVisible = false">
+            ×
+          </button>
+        </div>
+        <pre class="wl-debug-body">[mount] {{ debugMountStatus }}
+[onReply] {{ debugRaw || '(尚未收到任何回包)' }}</pre>
       </div>
       <!-- [commit-toolbar-v1] 按钮排：提交 / 复制日志 / 生成 / 刷新，统一 30×30 方形，置于输入框上方 -->
       <div class="wl-commit-toolbar">
@@ -568,6 +677,18 @@ async function copyFullLog(): Promise<void> {
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+          </svg>
+        </button>
+        <!-- [git-history-dialog-v1] 查看提交历史：打开弹窗展示完整列表 -->
+        <button
+          class="wl-commit-refresh"
+          type="button"
+          title="查看提交历史"
+          aria-label="查看提交历史"
+          @click="openCommits"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" />
           </svg>
         </button>
       </div>
@@ -725,18 +846,34 @@ async function copyFullLog(): Promise<void> {
           </ul>
         </template>
       </template>
-      <!-- [worklog-history-v1] 提交历史：最近若干条，来自 /git/worklog includeHistory -->
-      <div v-if="result && result.history && result.history.length" class="wl-history">
-        <div class="wl-group">
-          <span class="wl-group-title">最近提交</span>
-          <span class="wl-group-count">{{ result.history.length }}</span>
+
+      <!-- [git-history-dialog-v1] 提交历史弹窗：Teleport 到 body，Esc / 点遮罩关闭 -->
+      <Teleport v-if="commitsOpen" to="body">
+        <div class="wl-hist-mask" @click.self="closeCommits">
+          <div class="wl-hist-box" role="dialog" aria-label="提交历史">
+            <div class="wl-hist-head">
+              <span class="wl-hist-title">提交历史</span>
+              <span class="wl-hist-count">{{ commitsData.length }}</span>
+              <button class="wl-hist-close" type="button" aria-label="关闭" @click="closeCommits">
+                ×
+              </button>
+            </div>
+            <div v-if="commitsLoading" class="wl-hist-loading">
+              加载中…
+            </div>
+            <ul v-else-if="commitsData.length" class="wl-hist-list" role="list">
+              <li v-for="c in commitsData" :key="c.sha" class="wl-hist-item">
+                <code class="wl-hist-sha">{{ c.short }}</code>
+                <span class="wl-hist-subject" :title="c.subject">{{ c.subject || '(无提交信息)' }}</span>
+                <span class="wl-hist-meta">{{ c.author }} · {{ fmtCommitDate(c.date) }}</span>
+              </li>
+            </ul>
+            <div v-else class="wl-hist-empty">
+              暂无提交记录
+            </div>
+          </div>
         </div>
-        <ul class="wl-history-list" role="list">
-          <li v-for="(h, i) in result.history" :key="`h-${i}`" class="wl-history-item">
-            {{ h }}
-          </li>
-        </ul>
-      </div>
+      </Teleport>
 
       <FileContentOverlay
         v-if="previewPath"

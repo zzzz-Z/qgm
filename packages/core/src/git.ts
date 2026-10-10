@@ -477,3 +477,50 @@ export async function gitCommitStaged(message: string): Promise<{ ok: boolean, c
   const head = await run('git', ['rev-parse', 'HEAD'])
   return { ok: true, commit: head.stdout.trim().slice(0, 12) }
 }
+
+/** [git-branch-v1] 当前分支名（detached 时返回 HEAD 字面量）。 */
+export async function gitBranch(): Promise<string | null> {
+  if (!(await gitAvailable())) return null
+  const r = await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
+  return r.code === 0 ? r.stdout.trim() : null
+}
+
+/** [git-history-v1] 单条提交记录 */
+export interface GitCommit {
+  /** 完整 sha */
+  sha: string
+  /** 短 sha */
+  short: string
+  /** 作者名 */
+  author: string
+  /** ISO8601 时间 */
+  date: string
+  /** 首行标题 */
+  subject: string
+}
+
+/**
+ * [git-history-v1] 读取提交历史（弹窗完整展示）。
+ * [CONSTRAINT] limit 上限 200，防大仓库一次拉爆；用 %x09 作字段分隔，避免 subject 含空格被切。
+ */
+export async function gitCommitHistory(limit = 50): Promise<{ ok: boolean, commits: GitCommit[], reason?: string }> {
+  if (!(await gitAvailable())) return { ok: false, commits: [], reason: '非 git 仓库' }
+  const n = Math.max(1, Math.min(200, Number(limit) || 50))
+  const fmt = '%H%x09%h%x09%an%x09%aI%x09%s'
+  const r = await run('git', ['--no-pager', 'log', `-n${n}`, `--pretty=format:${fmt}`])
+  if (r.code !== 0) return { ok: false, commits: [], reason: r.stderr.trim() }
+  const commits: GitCommit[] = []
+  for (const line of r.stdout.split('\n')) {
+    if (!line.trim()) continue
+    const parts = line.split('\t')
+    if (parts.length < 5) continue
+    commits.push({
+      sha: parts[0],
+      short: parts[1],
+      author: parts[2],
+      date: parts[3],
+      subject: parts.slice(4).join('\t'),
+    })
+  }
+  return { ok: true, commits }
+}
