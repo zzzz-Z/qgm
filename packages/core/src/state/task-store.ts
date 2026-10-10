@@ -29,7 +29,7 @@ export interface TaskItem {
   deps?: string[]
 }
 
-// [task-running-timeout-v1] running 自动过期阈值：对齐自动循环硬上限 LOOP_HARD_MAX_MS(30min)
+// [task-running-timeout-v1] running 自动过期阈值：30min 取自已退役自动循环的硬上限（原 LOOP_HARD_MAX_MS，该子系统已整体删除）
 // [WHY] start 后 AI 崩溃/忘记 complete ⇒ 面板动画永转，无任何对账机制；过期后回退 pending 可自愈
 export const RUNNING_TIMEOUT_MS = 30 * 60 * 1000
 
