@@ -51,6 +51,8 @@ export interface PreviewManagerDeps {
   previewBaselineMissing: Ref<boolean>
   /** 内容拉取中；模板据此显示占位而非把空内容当「文件为空」 */
   previewLoading: Ref<boolean>
+  /** [git-diff-hunks-v1] git unified diff 片段；有值时优先于 before/after 渲染 */
+  previewHunks: Ref<string[]>
   rollback: (file: string) => Promise<RollbackResult | null | undefined>
   rollbackAll: () => Promise<unknown>
 }
@@ -88,11 +90,32 @@ async function readAfter(file: string): Promise<string> {
 }
 
 /**
+ * 读取文件与 HEAD / 工作区的 unified diff（单文件）
+ * [git-diff-hunks-v1] 变更弹窗优先走这里：patch 直传 DiffViewer 的 hunks 参数，
+ *   渲染与 WorklogPane 的行级 diff 同源；失败/无 patch 时返回空串，调用方回落快照。
+ * @param file 相对仓库根路径
+ */
+async function fetchGitPatch(file: string): Promise<string> {
+  try {
+    const res = await fetch('/__ai/git/diff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: [file] }),
+    })
+    if (!res.ok) return ''
+    const data = await res.json()
+    return String(data?.diff || '')
+  } catch {
+    return ''
+  }
+}
+
+/**
  * 创建预览管理器
  * @param deps - 依赖面
  */
 export function createPreviewManager(deps: PreviewManagerDeps) {
-  const { changes, result, previewFile, previewType, previewBefore, previewAfter, previewBaselineMissing, previewLoading, rollback, rollbackAll } = deps
+  const { changes, result, previewFile, previewType, previewBefore, previewAfter, previewBaselineMissing, previewLoading, previewHunks, rollback, rollbackAll } = deps
   const { toast } = useToast()
   // [preview-seq-v1] 请求序号：快速切 A/B 时旧响应会覆盖新内容；关闭后再返回会复活弹窗
   let previewSeq = 0
@@ -109,6 +132,7 @@ export function createPreviewManager(deps: PreviewManagerDeps) {
     previewAfter.value = ''
     previewBaselineMissing.value = false
     previewLoading.value = false
+    previewHunks.value = []
   }
 
   /** 切换内容预览：同文件再点关闭；否则取两侧内容并写入 */
@@ -127,6 +151,17 @@ export function createPreviewManager(deps: PreviewManagerDeps) {
     previewBaselineMissing.value = false
     previewLoading.value = true
     try {
+      // [git-diff-hunks-v1] 优先请求 git unified diff：能拿到就直传 hunks 给 DiffViewer，
+      //   与「工作日志」渲染同源；不依赖 run 快照，对 git 基准 / 快照回收场景免疫。
+      const gitPatch = await fetchGitPatch(p)
+      if (seq !== previewSeq) return
+      if (gitPatch) {
+        previewHunks.value = [gitPatch]
+        previewBaselineMissing.value = false
+        previewLoading.value = false
+        return
+      }
+      previewHunks.value = []
       // added 只有「后」、deleted 只有「前」，另一侧根本不发请求（省一次往返，也避免把
       // 「快照缺失」误判成异常态）
       const afterTask: Promise<string> = type === 'deleted' ? Promise.resolve('') : readAfter(p)

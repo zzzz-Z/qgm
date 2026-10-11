@@ -137,5 +137,4 @@
 
 - `packages/core/SYSTEM.md` 顶部「应用级 / 工作区级」边界（本会话新增）。
 - `AGENTS.md`「monorepo 结构铁律」——本方案不破坏。
-- 阶段闸门：`bin/check-status.cjs`，`prompt-budget 2/3`，规则「≥ 2 周不做新功能」。
 - 关联机制：`overlay-atomic-v1`（§2 沙箱）、`instance-ownership-v1`（§1 实例生命周期）、`board-read-all-states-v1`（§2 看板）。

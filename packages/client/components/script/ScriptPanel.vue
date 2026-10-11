@@ -94,6 +94,8 @@ const previewBefore = ref<string>('')
 const previewBaselineMissing = ref(false)
 /** 内容拉取中 */
 const previewLoading = ref(false)
+/** [git-diff-hunks-v1] git unified diff 片段；有值时优先于 before/after 渲染 */
+const previewHunks = ref<string[]>([])
 /** 树展开的 stream id 集合 */
 const treeExpanded = ref<Set<number>>(new Set())
 // ── 附件 / 命令历史 / 滚动 ref ──
@@ -185,6 +187,7 @@ const { onPreviewFile, onRollback, onRollbackAll, closePreview } = createPreview
   previewAfter,
   previewBaselineMissing,
   previewLoading,
+  previewHunks,
   rollback,
   rollbackAll,
 })
@@ -535,6 +538,7 @@ function onHtmlDrop(e: DragEvent) {
       :change-type="previewType"
       :baseline-missing="previewBaselineMissing"
       :loading="previewLoading"
+      :hunks="previewHunks"
       @close="closePreview"
     />
   </div>

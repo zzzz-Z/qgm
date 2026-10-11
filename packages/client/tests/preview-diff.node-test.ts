@@ -27,6 +27,8 @@ let afterStore: Record<string, string> = {}
 /** 运行前快照（/files/before），key = `${runId}|${file}`；缺项即 exists:false */
 let beforeStore: Record<string, { content: string, exists: boolean }> = {}
 let calls: Call[] = []
+/** [git-diff-hunks-v1] git unified diff 片段；有值时直接走 hunks 分支 */
+let gitDiffStore: Record<string, string> = {}
 /** 挂住**第一个** before 请求（竞态用例）：返回放行函数 */
 let gateFirstBefore: (() => void) | null = null
 let gateArmed = false
@@ -37,14 +39,24 @@ beforeEach(() => {
   afterStore = {}
   beforeStore = {}
   calls = []
+  gitDiffStore = {}
   gateFirstBefore = null
   gateArmed = false
   g.fetch = async (url: string, init?: { body?: string }) => {
     const u = String(url)
     const body = init?.body ? JSON.parse(init.body) as Record<string, unknown> : null
     calls.push({ url: u, body })
+    if (u.includes('/git/diff')) {
+      // [git-diff-hunks-v1] 默认返回空 diff ⇒ 走回落路径（before/after 快照）；
+      //   需要测 hunks 路径的用例通过 gitDiffStore 注入非空 patch
+      const f = String((body?.files as string[] | undefined)?.[0] ?? '')
+      const p = gitDiffStore[f] ?? ''
+      return json({ ok: true, diff: p, filesCount: p ? 1 : 0 })
+    }
     if (u.includes('/files/before')) {
-      if (gateFirstBefore && !gateArmed) {
+      // [gate-by-file-v1] 只挂 A.ts 的 before 请求：加 /git/diff 优先路径后请求顺序可能变，
+      //   按「第一个 before」挂可能挂到 B ⇒ 测试锁死。改为按目标文件判，时序无关。
+      if (gateFirstBefore && !gateArmed && String(body?.file) === 'A.ts') {
         gateArmed = true
         await new Promise<void>((resolve) => { gateFirstBefore = resolve })
       }
@@ -67,6 +79,7 @@ function setup(changes: ChangeLite[], runId: string | null = 'run-1') {
     previewAfter: ref(''),
     previewBaselineMissing: ref(false),
     previewLoading: ref(false),
+    previewHunks: ref<string[]>([]),
   }
   const mgr = createPreviewManager({
     ...state,
@@ -84,7 +97,7 @@ describe('变更预览取数（before / after 两侧）', () => {
     await mgr.onPreviewFile('a.ts')
 
     const urls = calls.map(c => c.url).sort()
-    assert.deepEqual(urls, ['/__ai/files/before', '/__ai/files/read'], `请求面不对：${urls.join(', ')}`)
+    assert.deepEqual(urls, ['/__ai/files/before', '/__ai/files/read', '/__ai/git/diff'], `请求面不对：${urls.join(', ')}`)
     assert.equal(state.previewBefore.value, 'L1\nOLD\nL3\n', 'before 未写入 ⇒ diff 少一侧，标不出删除')
     assert.equal(state.previewAfter.value, 'L1\nNEW\nL3\n', 'after 未写入 ⇒ diff 少一侧，标不出新增')
     assert.equal(state.previewType.value, 'modified')
@@ -97,7 +110,7 @@ describe('变更预览取数（before / after 两侧）', () => {
     const { state, mgr } = setup([{ path: 'n.ts', type: 'added' }])
     await mgr.onPreviewFile('n.ts')
 
-    assert.deepEqual(calls.map(c => c.url), ['/__ai/files/read'], 'added 不该去拉变更前快照')
+    assert.deepEqual(calls.map(c => c.url), ['/__ai/git/diff', '/__ai/files/read'], 'added 不该去拉变更前快照')
     assert.equal(state.previewBefore.value, '', 'before 必须为空 ⇒ 由 changeType 决定整份标为新增')
     assert.equal(state.previewAfter.value, 'brand new\n')
     assert.equal(state.previewType.value, 'added')
@@ -109,7 +122,7 @@ describe('变更预览取数（before / after 两侧）', () => {
     const { state, mgr } = setup([{ path: 'd.ts', type: 'deleted' }])
     await mgr.onPreviewFile('d.ts')
 
-    assert.deepEqual(calls.map(c => c.url), ['/__ai/files/before'], 'deleted 不该去读磁盘当前内容')
+    assert.deepEqual(calls.map(c => c.url), ['/__ai/git/diff', '/__ai/files/before'], 'deleted 不该去读磁盘当前内容')
     assert.equal(state.previewBefore.value, 'gone\n')
     assert.equal(state.previewAfter.value, '', 'after 必须为空 ⇒ 整份标为删除')
     assert.equal(state.previewType.value, 'deleted')
@@ -124,7 +137,7 @@ describe('变更预览取数（before / after 两侧）', () => {
     const b = setup([{ path: 'c.ts', type: 'modified' }], null)
     calls = [] // 上一半的请求计数必须清空，否则断言会把 a 的请求算进来
     await b.mgr.onPreviewFile('c.ts')
-    assert.deepEqual(calls.map(c => c.url), ['/__ai/files/read'], '没有 runId 时不该盲发 before 请求')
+    assert.deepEqual(calls.map(c => c.url), ['/__ai/git/diff', '/__ai/files/read'], '没有 runId 时不该盲发 before 请求')
     assert.equal(b.state.previewBaselineMissing.value, true, '无依据时必须标缺失，不能静默当空')
   })
 

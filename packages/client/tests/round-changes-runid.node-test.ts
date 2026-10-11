@@ -72,6 +72,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   let payload: unknown = {}
   if (url.includes('/run-changes')) {
     payload = roundReply
+  } else if (url.includes('/git/diff')) {
+    // [git-diff-hunks-v1] 默认返回空 diff ⇒ 走回落路径（before/after 快照）；
+    //   本文件测的是「归属轮 runId → before 快照」链路，不测 hunks 直传
+    payload = { ok: true, diff: '', filesCount: 0 }
   } else if (url.includes('/files/before')) {
     const key = `${String(body.runId)}|${String(body.file)}`
     payload = key in beforeStore ? { content: beforeStore[key], exists: true } : { content: '', exists: false }
@@ -130,6 +134,7 @@ function drivePreview(r: ReturnType<typeof mod.useRunner>) {
     previewAfter: after,
     previewBaselineMissing: missing,
     previewLoading: loading,
+    previewHunks: refStub<string[]>([]),
     rollback: async () => ({ ok: true }),
     rollbackAll: async () => ({ ok: true }),
   })

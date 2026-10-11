@@ -111,11 +111,12 @@ gitHono.post('/git/worklog', async (c) => {
 // [WHY] 用户反馈 worklog markdown 链路看不到详细 diff；本端点直接返回 diff 原文，规避 markdown 渲染链路
 // [CONSTRAINT] 与 /git/worklog 共享 ref 白名单 + env 加固；不生成 markdown，仅返回 { ok, diff, filesCount }
 gitHono.post('/git/diff', async (c) => {
-  let body: { since?: string, until?: string } | null = null
+  let body: { since?: string, until?: string, files?: string[] } | null = null
   try { body = await c.req.json() } catch { body = null }
   const r = await gitRawDiff({
     since: body?.since,
     until: body?.until,
+    files: Array.isArray(body?.files) ? body.files : undefined,
   })
   return c.json(r, r.ok ? 200 : 400)
 })

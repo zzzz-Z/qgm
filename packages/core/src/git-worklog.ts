@@ -14,6 +14,8 @@ export interface WorklogOptions {
   until?: string
   /** 是否附带 git log 最近提交；默认 true */
   includeHistory?: boolean
+  /** [git-diff-files-v1] 仅取这些路径的 diff（相对仓库根）；缺省取全部 */
+  files?: string[]
 }
 
 /** 工作日志生成结果 */
@@ -58,7 +60,12 @@ export async function gitRawDiff(opts: WorklogOptions = {}): Promise<RawDiffResu
     stderrTail,
   })
   if (!(await gitAvailable())) return fail('非 git 仓库')
-  const raw = await run('git', ['--no-pager', 'diff', '-U3', '--no-color', '--no-ext-diff', ...(until ? [since, until] : [since])])
+  // [git-diff-files-v1] files 过滤：`git diff [refs] -- <path...>`；空数组视作未指定
+  const filesFilter = Array.isArray(opts.files) ? opts.files.filter(f => typeof f === 'string' && f.length > 0) : []
+  const refs = until ? [since, until] : [since]
+  const args = ['--no-pager', 'diff', '-U3', '--no-color', '--no-ext-diff', ...refs]
+  if (filesFilter.length) args.push('--', ...filesFilter)
+  const raw = await run('git', args)
   if (raw.code !== 0) return fail(`git diff 失败: ${raw.stderr.slice(-300)}`)
   const ESC = String.fromCharCode(27)
   const ANSI_RE = new RegExp(`${ESC}\\[[0-9;]*[a-z]`, 'gi')
