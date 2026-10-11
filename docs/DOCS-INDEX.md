@@ -56,6 +56,7 @@
 | `docs/workorder-app-board-reconcile-2026-10-06.md` | 判决 + 改造直派工单（WO-20261006-05，**当前活跃**）：对应用端《看板登记为何反复复发》提案的裁决——**方案 A（行为推导自动 start/complete）不做**（结束半边已由 finish/initLoop 清桶实现，且 auto-complete 会把未完成项从面板抹掉=假状态；开始半边不可自动推导）、**B 降级为只读对账 + 警告**、C 不单独做（`SYSTEM.md:101` 已写全生命周期，再补属假强制）；实据含 M3 收尾丢失率 **8/30 = 26.7%**（口径 archive/observe-metrics:89）+ 本会话「23:16 后零看板写 vs 三次提交」时刻表 + 逐项收口定性（A1 只能 `fail` 不能 `complete`）。 |
 
 | `docs/proposal-section-10-token-budget-2026-10-11.md` | 提案→已落地（2026-10-11）：SYSTEM.md §10 补充——「思考与脚本共享单轮输出预算（T + S ≤ B）」因果模型 + 「事前分轮」预防手段，已直接写入 §10。含弱判据路径（扩展 `budgetNotice.node-test.ts`）、与 WO-14 P1-4 措辞协调、日志隔离独立议题（多工作区方案必选组件）。 |
+| `docs/plan-multi-workspace-2026-10-11.md` | 多工作区方案（计划）：现状取证（`workspace.ts` / `runProcess(cwd)` / overlay 已 per-process）+ 三条路径（每工作区一进程 / 单宿主带 workspaceId / git worktree）+ 推荐路径 B 分阶段 + 四项前置决策 + 改造清单 + 风险 + 与 SYSTEM.md 应用级/工作区级边界的关系。**待拍板，撞阶段闸门。** |
 
 ## 归档
 
