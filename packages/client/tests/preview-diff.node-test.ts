@@ -215,6 +215,28 @@ describe('变更预览取数（before / after 两侧）', () => {
 // [side-width-stable-v1] 反向锁：侧栏宽度不得再与预览联动。
 // [WHY] 这条缺陷**没有**可循的界面异常：面板只是「自己变宽了一点」，人眼回归看不出来；
 //   而它的实现只可能出现在 ScriptPanel 里（往 sideWidth.value 写入）。写死在这里，重新引入必红。
+describe('[git-diff-hunks-v1] git diff 优先路径', () => {
+  test('git diff 有 patch：走 hunks 分支，不发 before/after 请求', async () => {
+    gitDiffStore['a.ts'] = 'diff --git a/a.ts b/a.ts\n@@ -1 +1 @@\n-old\n+new\n'
+    const { state, mgr } = setup([{ path: 'a.ts', type: 'modified' }])
+    await mgr.onPreviewFile('a.ts')
+    assert.deepEqual(calls.map(c => c.url), ['/__ai/git/diff'], '有 patch 时不该再请求快照')
+    assert.equal(state.previewHunks.value.length, 1, 'previewHunks 未设置 ⇒ 弹窗仍空')
+    assert.ok(state.previewHunks.value[0].includes('diff --git'), 'patch 内容不对')
+    assert.equal(state.previewBaselineMissing.value, false)
+    assert.equal(state.previewLoading.value, false, 'loading 未收口')
+  })
+
+  test('无 patch：回落 before/after 快照路径', async () => {
+    afterStore['b.ts'] = 'L1\nNEW\n'
+    beforeStore['run-1|b.ts'] = { content: 'L1\nOLD\n', exists: true }
+    const { state, mgr } = setup([{ path: 'b.ts', type: 'modified' }])
+    await mgr.onPreviewFile('b.ts')
+    assert.equal(state.previewHunks.value.length, 0, '无 patch 时 previewHunks 应为空')
+    assert.equal(state.previewBefore.value, 'L1\nOLD\n', '应回落到 before 快照')
+    assert.equal(state.previewAfter.value, 'L1\nNEW\n')
+  })
+})
 describe('侧栏宽度不随预览变化（用户指定）', () => {
   const RAW = fs.readFileSync(path.resolve(process.cwd(), 'packages/client/components/script/ScriptPanel.vue'), 'utf8')
   // [comment-strip-guard-v1] 判据是「源码不含某 token」时**必须先剥注释**：否则解释性注释里提到该
