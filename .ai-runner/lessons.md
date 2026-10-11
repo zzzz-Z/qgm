@@ -1494,6 +1494,10 @@ TEXT 短路已在两处代码实现，但测试只断言字符串存在。存在
 
 补充（2026-10-09）：实例重启导致 HTTP 通道瞬断。按 AGENTS.md 规定必须跨轮探活确认，禁止在原轮判失败——本轮照此执行，下一轮 curl 5175 恢复 200。
 
+补充（2026-10-10）：`pm2 restart ai-runner` 会杀掉并重启服务端进程——你自己的 `/run` HTTP 通道也在这台服务上，所以当轮脚本拿到 `TypeError: network error` 是结构性必然（不是执行失败）。
+
+`AGENTS.md` 已明写「下一轮探活即恢复，重试须跨轮，不得在原轮判定为失败」。本轮严格遵此——重启轮报错 → 下一轮 `curl 5175` 得 200，属正常恢复路径。
+
 ## `indexOf('</template>')` 会命中 slot 的闭合
 
 [VERIFIED] 2026-10-09 家族级复核：tsc:client / test:tsc 通过 + 各陷阱源码复核
@@ -2826,3 +2830,11 @@ TypeScript 控制流分析把 `const` 字面量收窄为 `'A'`，于是 `if (PHA
 ## `skipRules` 的语义不只是「跳过规则」
 
 源码注释写的是「skipRules=true 用于纯聊天首问」，看起来像首问专用。但实际上 `skipRules` 是声明调用点不是「需要规则头」的语义——它同时决定了「是否写入 `_rulesInjectedSids`」（`:239` 注释：「skipRules 不写入 `_rulesInjectedSids`：后续 startLoop 首次调用仍会正常注入」）。所以对回传用 `skipRules: true` 是既不带规则头、也不污染首问去重状态的双重正确。只把它读成「首问开关」会错过这个适用场景。
+
+## `git status --short` 的 `XY` 前缀会咬「startsWith」判据
+
+我用 `dirty[0].startsWith(' M .ai-runner/lessons.md')` 判断「是否只有 lessons 变更」——失败。因为 `.split('\n')` 后每行本身就是 `" M path"`（首字符是空格），我把整段 `.join()` 后前导空格丢了，再 `.split()` 出来的元素是 `"M .ai-runner/lessons.md"`（无前导空格）。
+
+修法：判据用 `line.trim()` 后再比对路径结尾（`/lessons\.md$/.test(line.trim())`），或直接 `git status --porcelain` 保留完整格式并逐字符比对。
+
+这类「前缀样式不匹配」是脚本判据的常见坑：别用 `startsWith` 匹配带状态位的行，用正则锚定路径尾部更稳。

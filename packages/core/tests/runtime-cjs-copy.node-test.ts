@@ -3,6 +3,9 @@
 //   vitest/tsc 都从源码树跑 ⇒ 恒命中 packages/core/src/<name>.cjs，永远测不到「构建没复制」。
 //   bundle 落在 apps/standalone/dist/_server/index.js ⇒ 解析成 apps/standalone/dist/<name>.cjs。
 // CHANGE-IMPACT: 清单漏项 ⇒ 发布态该子进程 Cannot find module（实测 /session 帧 500 REPL_EXITED）。
+// [build-all-inclusive-dist-v1] monorepo 根 build 一揽子刷新所有包 dist，SYSTEM.md 亦须同步。
+//   WHY: 三份构建脚本各负责一个 dist 目录（根 / 包级），任一份漏拷 ⇒ 该形态 /__ai/preset/system 陈旧或 404。
+//   变异判据：删掉任一份脚本里 join(..., 'SYSTEM.md') 引用 ⇒ 对应断言变红。
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -40,6 +43,12 @@ function referencedRuntimeCjs(): Set<string> {
   return out
 }
 
+/** 判据：文件里是否出现 join(..., 'SYSTEM.md') 调用形态 */
+function hasSystemMdPathJoin(file: string): boolean {
+  const txt = fs.readFileSync(file, 'utf8')
+  return /\.join\([^)]*'SYSTEM\.md'/.test(txt)
+}
+
 const REFERENCED = referencedRuntimeCjs()
 const BUILD_LIST = readCopyList(BUILD_ALL)
 const COPY_LIST = readCopyList(COPY_RUNTIME)
@@ -47,6 +56,11 @@ const COPY_LIST_CORE = readCopyList(COPY_RUNTIME_CORE)
 
 test('源码确实引用了运行时 .cjs（防空转）', () => {
   assert.ok(REFERENCED.size >= 3, `expected >=3 referenced runtime cjs, got [${[...REFERENCED].join(', ')}]`)
+})
+
+test('preset.ts 引用 SYSTEM.md（防空转）', () => {
+  const preset = fs.readFileSync(path.join(SRC_DIR, 'routes', 'preset.ts'), 'utf8')
+  assert.ok(/\.join\([^)]*'SYSTEM\.md'/.test(preset), 'preset.ts 未引用 SYSTEM.md ⇒ 判据真空')
 })
 
 test('每个被引用的 .cjs 在 src 中真实存在', () => {
@@ -76,4 +90,10 @@ test('core 版 copy-runtime.cjs 清单亦覆盖全部被引用 .cjs（消盲区�
 test('repl-loop.cjs 必须在两份清单内（/session 子进程入口）', () => {
   assert.ok(BUILD_LIST.has('repl-loop.cjs'), 'build-all.mjs 缺 repl-loop.cjs')
   assert.ok(COPY_LIST.has('repl-loop.cjs'), 'copy-runtime.cjs 缺 repl-loop.cjs')
+})
+
+test('三份构建脚本都复制 SYSTEM.md', () => {
+  assert.ok(hasSystemMdPathJoin(BUILD_ALL), 'build-all.mjs 缺 SYSTEM.md 复制')
+  assert.ok(hasSystemMdPathJoin(COPY_RUNTIME), 'scripts/copy-runtime.cjs 缺 SYSTEM.md 复制')
+  assert.ok(hasSystemMdPathJoin(COPY_RUNTIME_CORE), 'packages/core/scripts/copy-runtime.cjs 缺 SYSTEM.md 复制')
 })

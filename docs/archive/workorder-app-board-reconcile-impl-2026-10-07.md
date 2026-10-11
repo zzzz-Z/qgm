@@ -2,7 +2,7 @@
 
 > 派发方：宿主侧（2026-10-07 00:0x 轮）。
 > **这是执行单，不是判决书**：判决（不做方案 A/B/C）与承重判据的 SSOT 仍是
-> [`docs/workorder-app-board-reconcile-2026-10-06.md`](workorder-app-board-reconcile-2026-10-06.md)（WO-05），
+> [`docs/archive/workorder-app-board-reconcile-2026-10-06.md`](workorder-app-board-reconcile-2026-10-06.md)（WO-05），
 > **本单不重述判据**——两份副本必然各自漂移。
 > 本单只补三件 WO-05 没定死、或被应用端正确质疑过的事：**落点定案**（段一）、**来源区分**（段二）、
 > **两个新风险的处置**（段三 / 段四）。末段是宿主侧确认后的执行顺序。

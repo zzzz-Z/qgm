@@ -14,7 +14,7 @@
 2. **但它诊断的是已自愈的桶**：`sess-tab-muxno8op-opgmtw` 末条 complete 后 `pending=0`，**已不在 `state.json`**。
    真残留是它**完全没提**的两个桶：`sess-tab-muxhztg9-jzevr4`（**9 pending**）、`sess-tab-muxlxl69-w7rz7b`（2 pending + 1 running）。
 3. **它把 ① 标为「主因」与数据相悖**：全日志 `complete 未命中` 仅 6 次，**漂移造成的泄漏 = 0 条**（详见段一）。
-4. **档 B 是对昨天已被否决方案的重提**：`docs/workorder-app-board-reconcile-2026-10-06.md`（WO-20261006-05）§一 已判
+4. **档 B 是对昨天已被否决方案的重提**：`docs/archive/workorder-app-board-reconcile-2026-10-06.md`（WO-20261006-05）§一 已判
    「自动 complete **不做**」，理由与本单独立推出的完全相同（详见段三）。
 5. **档 C 同样不构成本问题的正解**：该病是**批次级注意力衰减**（WO-20261006-05 §二 已实证），逐项 TTL 治不了它。
 
@@ -67,7 +67,7 @@
 
 ### 档 B（`board-collect.cjs`：把超时 pending 批量 complete）→ **否决其「批量 complete」形态**
 
-**这不是新问题，昨天已判过。** `docs/workorder-app-board-reconcile-2026-10-06.md`（WO-20261006-05）§一 问 1：
+**这不是新问题，昨天已判过。** `docs/archive/workorder-app-board-reconcile-2026-10-06.md`（WO-20261006-05）§一 问 1：
 
 > 「自动 complete 所有 running」= 把未完成项从面板上抹掉 ⇒ 面板变空，用户读成「都做完了」。
 > 这不是「让看板与现实一致」，而是**用假状态覆盖真状态**，并且顺手摧毁本单要用的对账锚点。

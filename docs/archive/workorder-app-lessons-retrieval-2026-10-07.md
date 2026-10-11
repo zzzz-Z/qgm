@@ -8,7 +8,7 @@
 | :--------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **编号**   | `WO-20261007-09`（v2）                                                                                                                                                |
 | **标题**   | lessons 检索化——把「尾截断注入 5.3%」改为「按当前任务检索 top-k」                                                                                                     |
-| **范围**   | 计划 [`docs/plan/knowledge-integration-master-plan.md`](plan/knowledge-integration-master-plan.md) **阶段 B**（P0）                                                   |
+| **范围**   | 计划 [`docs/archive/knowledge-integration-master-plan.md`](knowledge-integration-master-plan.md) **阶段 B**（P0）                                                     |
 | **依赖**   | **无**（不阻塞于 A0/LLM Wiki——见段〇）                                                                                                                                |
 | **归属**   | 应用端实现；构建允许；**重启 5175 归宿主侧**                                                                                                                          |
 | **一句话** | `lessons.md` 现 113 KB / 155 条，注入预算 6 000 字符且**从文件尾截断** ⇒ 实际进上下文 ≈ 5.3%，95 条 `[VERIFIED]` 基本不在场。本单改为**按当前任务检索相关条目**注入。 |
@@ -253,6 +253,6 @@ client buildLessonsBlock(query)            ← packages/client/composables/ai/lo
 
 ---
 
-> **背景**：本单是 `docs/plan/knowledge-integration-master-plan.md` §5 阶段 B 的落地；
+> **背景**：本单是 `docs/archive/knowledge-integration-master-plan.md` §5 阶段 B 的落地；
 > 诊断依据见该文件 §2 P1（注入率 5.3%）。**SSOT 不迁移**：`lessons.md` 仍是唯一台账，
 > 本单改的是「怎么把它的内容喂进上下文」，不改它的存储。

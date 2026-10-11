@@ -135,23 +135,20 @@ pnpm docker:down      # 下线
   改走注入的 `__AI__`：`readText/writeText/replaceInFile/patchFile/grep/walk/exec/shell/lint/typeCheck/tasks/…`
 - **语法预检**：超 300 行或 12KB 判为超长；`vm.Script` 三段式语法检查，截断需「错误族 + 结构未闭合」双判据
 
-### 5.2 AI 自动循环（auto-loop）
+### 5.2 脚本执行路径（自动循环子系统已退役）
 
-一轮 = 发送 → 等待 → 解析 → 执行 → 反馈 → 进入下一轮（`auto-loop/after-round.ts`）。
+**当前形态（单路径，无循环）**：脚本到达 → `useAiReplyHandlers.ts` 分流 → `runner.run({ autoFeedback: true })`。
+一次脚本执行完即结束本轮，等待下一次 AI 回复——**没有循环计数、没有硬轮上限、没有 `finish(inst, ...)` 终止**。
 
-- **上限**：软轮次上限已取消（`LOOP_MAX_ROUNDS = Infinity`）；硬上限 **50 轮** / **30 分钟**；
-  单轮等待超时 **90s**（上一轮是 bash 则 180s）
-- **状态机**：`idle → running → preparing → waiting → parsing → executing → feedback → …`，
-  另有 `paused / handoff / budget-limited / stopped / interrupted`；非法转移只 warn 不阻断
-- **终止原因**：`done` 正常收尾 · `hard-rounds` / `hard-timeout` · `round-timeout` · `window-lost` ·
-  `ai-stopped` · `hook-reject-*` · `interrupted`（用户停止，会先 `POST /git/reset`）· `breaker-rejected`
-- **收尾**：`sendStop` → 解绑键盘 → `POST /__ai/git/commit-loop` 存档（回滚场景跳过）→ 置 `paused`
-- **bash 执行**：客户端 `GIT_WRITE_RE` 先拦一次（`git push|reset|checkout|clean|commit|…`），
-  服务端 `BASH_BLACKLIST` 再拦（`rm -rf`、`sudo`、`curl|sh`、`git reset --hard` 等 10 条），
-  `POST /exec` 超时 120s；`bashPolicy` 默认 `on-request`，循环模式下降为 `never`
-- **轮内合并窗**：AI 站点逐块推送脚本（间隔实测 p95≈1.17s），故用 `ROUND_MERGE_MS = 1500`
-  的合并窗收口——队列非空不收口，到点仍有待执行就原地等；被拒绝则**丢弃不重排**
-- **PLAN 续跑**：收到 `DONE` 但 `/__ai/tasks` 仍有待办时继续跑，超过 `PLAN_RESUME_MAX` 才放行
+- **auto-loop 子系统已退役**（loop-consolidation P3e）：`composables/ai/auto-loop/` 目录与 `loopLogic.ts` 已整体删除；
+  `LOOP_HARD_MAX_ROUNDS` / `LOOP_HARD_MAX_MS` / `PLAIN_STREAK_MAX` 均为历史名称、现已不存在
+  （判据承重于 `packages/client/tests/loop-single-path.node-test.ts`）。
+- **三条旁路守卫**（`useAiReplyHandlers.ts`）：停止窗内不自动执行（`stopped-no-autorun-v1`）·
+  刷新冷静期内不自动执行（`refresh-no-autorun-v1`）· 同 hash 去重不重复入队（`dedup`）。
+- **自动接管**（`useAutoTakeover.ts`）：脚本到达即立即执行，无随机延迟。
+- **收尾闸门**（`retained-done-gate v1`）：非循环路径 DONE 接入 `BeforeDoneFinal` 自检 + 看板清桶；reject 仅 toast 告警、不阻断。
+- **单轮等待超时**：90s；超时后置 paused 并提示手动运行。
+- **轮内合并窗**：AI 站点逐块推送脚本（间隔实测 p95≈1.17s），队列非空不收口，到点仍有待执行就原地等；被拒绝则**丢弃不重排**。
 
 ### 5.3 两条传输链路
 
@@ -376,7 +373,7 @@ packages/client/                # @qgm/client：唯一一份 SPA
 ├── App.vue                     # 顶栏 / 引导页 / 主区装配
 ├── components/{script,panels,diff,feedback}/
 ├── composables/
-│   ├── ai/                     # 传输链路、站点与窗口、auto-loop/*（20 个模块）
+│   ├── ai/                     # 传输链路、站点与窗口、脚本分流与回传（17 个模块）
 │   ├── runner/                 # 收件箱、执行反馈、回传合并
 │   ├── ui/                     # 存储、事件流、提问卡、启动族
 │   └── data/useFileTree.ts
@@ -445,8 +442,8 @@ pnpm dev
   在 `routes/index.ts` 的 `HONO_SUB_APPS` 与 `HONO_PREFIXES` 同时注册（漏一个就 404）
 - **加面板**：新建 `packages/client/components/panels/XxxPanel.vue`，在 `SidePane.vue` 的
   `_tabAllowed` 里登记
-- **改循环行为**：`packages/client/composables/ai/auto-loop/` 下按职责拆（状态机在 `transitions.ts`、
-  收口在 `pending-scripts.ts`、收尾在 `stop-and-finish.ts`）
+- **改脚本执行行为**：`packages/client/composables/ai/useAiReplyHandlers.ts`（脚本到达分流）+
+  `packages/client/composables/runner/`（收件箱、执行反馈、回传合并）
 - **加规则**：改 `packages/core/SYSTEM.md`（规则契约 SSOT）
 - **改导入**：本项目开了 `unplugin-auto-import`（覆盖 vue / @vueuse 与项目内 composables），
   删掉显式 import 后应用仍能跑但 `vitest` / `tsc` 会红 ⇒ **任何导入改动后必跑 `pnpm test:tsc`**

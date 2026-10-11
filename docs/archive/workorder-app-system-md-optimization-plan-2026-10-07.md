@@ -202,7 +202,14 @@
 - **D1**：P0-2 的 G6-b 是否要求「标注里写的路径必须存在」。风险是改文件名时会红（但那正是它要防的漂移）。
 - **D2**：P1-4 取「改措辞」还是「真上闸门」。建议前者。
 - **D3**：P2-6（§1 拆分）做不做。若做，先答「收益是什么」。
-- **D4**：是否要求应用端在提优化建议前，`git diff -w` + 读一遍现存裁决单。今天已出现第 N 次「陈旧上下文产出」：同一批建议在 13:xx 与 15:xx 被以不同形式重提，且全文不引用 `docs/workorder-app-system-md-review-verdict-2026-10-07.md`。
+- **D4**：是否要求应用端在提优化建议前，`git diff -w` + 读一遍现存裁决单。今天已出现第 N 次「陈旧上下文产出」：同一批建议在 13:xx 与 15:xx 被以不同形式重提，且全文不引用 `docs/archive/workorder-app-system-md-review-verdict-2026-10-07.md`。
+
+### 应用端处置记录（2026-10-11）
+
+- **P1-3 已落地**：全仓 `grep "每轮注入"` 零命中；`packages/core/tests/system-contract.node-test.ts:2` 已是「每会话注入一次」；`docs/DOCS-INDEX.md` 维护规则段同步。
+- **D4 已落地**：`AGENTS.md` 已含 `[read-verdict-first-v1]` 条目（`git diff -w` + 读现存裁决单）。本条从待决转为已采纳。
+- **D1 / D2 / D3**：仍待宿主侧拍板——三项均涉及 `packages/core/SYSTEM.md` 与新增守卫，属宿主独占侧。
+- **关联**：`docs/review-ai-runner-vs-agents-2026-10-11.md` §5 的「对比文档改写清单」所在对比文档不在本仓库磁盘上（属宿主侧会话上下文），无法代做；其可执行部分（`symbol()` 升级调研、`verify-contracts.cjs` 退出原因分类）已由该文档记录，供下一轮调研。
 
 ## 段六 可复现命令
 

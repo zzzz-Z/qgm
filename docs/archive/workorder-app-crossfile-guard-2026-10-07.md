@@ -1,7 +1,7 @@
 # WO-20261007-10：跨文件一致性守卫（知识整合计划 · P4 缺机器守卫）
 
 > 派发方：宿主侧（2026-10-07 14:2x 轮）。
-> 来源：`plan/knowledge-integration-master-plan.md` **§2 P4**「权威分级靠约定，缺机器守卫」
+> 来源：`docs/archive/knowledge-integration-master-plan.md` **§2 P4**「权威分级靠约定，缺机器守卫」
 > ＋ **§8 D5**「是否为『跨文件一致性』补机器守卫（P4）」→ 建议 **补**——
 > **至少覆盖「工单编号唯一性 + SSOT 指针失效检测」**，影响「决定是否新增守卫工单」。
 > 编号说明：`WO-20261007-07` 已被应用端自拟工单占用；本单取空号 **10**
@@ -75,7 +75,7 @@
 宿主侧实测（探针：`/tmp/crossfile-probe.cjs`，js 口径同 `verify-docs-index.cjs`）
 
 - 用「文件前 40 行内出现即算」的宽谓词 ⇒ **13 条假重复**，**全部是交叉引用**
-  （例：`docs/workorder-app-pitfalls-and-residual-risks-2026-10-07.md` 正文引用 `WO-20261007-01`）。
+  （例：`docs/archive/workorder-app-pitfalls-and-residual-risks-2026-10-07.md` 正文引用 `WO-20261007-01`）。
   宽谓词**不可用**。
 - 收紧为下面两条后 ⇒ **21 个自我声明编号 / 真重复 0 / 编号日期与文件名不一致 0**（精确、可作基线）。
 
@@ -210,7 +210,7 @@ fixture 不得落在真仓库内（同 WO-08 的 stub 纪律）。
 - **阶段 C（首问瘦身）** —— 需 `prompt-budget 3/3` 或用户授权。
 - **阶段 E/F（文档镜像 / 自建索引 = A0 解除方案）** —— 需 D1 拍板 + 开闸；边界见段〇.3。
 - **「规范性声明冲突」的自动判定** —— 本单**明确不覆盖**。
-  已知实例：`plan/knowledge-integration-master-plan.md` 与 `workorder-app-kb-integration-…` 两份文档
+  已知实例：`docs/archive/knowledge-integration-master-plan.md` 与 `workorder-app-kb-integration-…` 两份文档
   同日给出字面冲突的规范句（「docs/\*.md 归 L1 索引」 vs 「不把项目文档镜像进 wiki」）。
   这类**语义矛盾无法机械判定**，机械可判的只有「指针是否存在」「编号是否唯一」。
   本单只做后者；前者仍靠人工复核（已登记为 master plan §8 D1）。

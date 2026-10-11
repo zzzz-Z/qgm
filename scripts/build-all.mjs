@@ -53,6 +53,21 @@ const sysSrc = path.join(ROOT, 'packages', 'core', 'SYSTEM.md')
 const sysDst = path.join(distRoot, 'SYSTEM.md')
 if (fs.existsSync(sysSrc)) { fs.copyFileSync(sysSrc, sysDst); console.log('[build-all] copied SYSTEM.md') }
 else { console.log('[build-all] skip (missing) SYSTEM.md') }
+
+// [build-all-inclusive-dist-v1] monorepo 根 build 一揽子刷新所有包的 dist：
+//   - scripts/copy-runtime.cjs                → 根 dist/（npm 分发形态）
+//   - packages/core/scripts/copy-runtime.cjs  → packages/core/dist/（@qgm/core 独立发布形态）
+// WHY: 两份 copy-runtime 各自维护自己的 dist 目录；根 build 漏跑 → 发布态 SYSTEM.md 陈旧
+// CHANGE-IMPACT: 删此段 → 根 dist/SYSTEM.md 与 packages/core/dist/SYSTEM.md 不随 build 更新
+console.log('[build-all] step 4: refresh per-package dist (root + core)')
+const { execFileSync } = await import('node:child_process')
+for (const s of ['scripts/copy-runtime.cjs', 'packages/core/scripts/copy-runtime.cjs']) {
+  try {
+    execFileSync(process.execPath, [s], { cwd: ROOT, stdio: 'inherit' })
+  } catch (e) {
+    console.error(`[build-all] ${s} failed:`, e && e.message ? e.message : e)
+  }
+}
 console.log('[build-all] done')
 
 // [AIRUNNER-BUILD-WATCH-V1] --watch 常驻：src/ 变更 → 自动重建 server + 拷贝 runtime

@@ -241,6 +241,8 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   无法看清真实改动）；② 读 `docs/workorder-app-*-verdict-*.md` / `-plan-*.md` 里已裁决/已驳回
   的项，不重提、不改已驳回方案。
 
+- **思考与脚本共享单轮输出预算**（`token-budget-v1`）：截断根因不是脚本太长，而是思考（T）与脚本（S）共占同一份输出预算（B）——`T + S ≤ B`。行数不是判据，token 才是（实测：89 行通过、20 行截断，差别全在当轮思考量）。详细规则见 `SYSTEM.md` §10；提案背景与测试评估见 `docs/proposal-section-10-token-budget-2026-10-11.md`。
+
 ## 详见
 
 - 执行规则（输出契约 / 沙箱 API / 架构红线 / 注释命名 / 重试预算 / 级联 / 输出预算 / 技能加载）→ [`packages/core/SYSTEM.md`](./packages/core/SYSTEM.md)

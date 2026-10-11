@@ -106,5 +106,5 @@
 ## 段九（已升格独立工单）
 
 写盘安全三件套（helpers-io.cjs 拆分 + appendText/fileInfo + AGENTS.md 两条）已抽出为
-**WO-20261007-04**：见 `docs/workorder-app-disk-io-safety-2026-10-07.md`（含用户行数裁定、
+**WO-20261007-04**：见 `docs/archive/workorder-app-disk-io-safety-2026-10-07.md`（含用户行数裁定、
 设计修正与全部验收判据）。本段只留指针，防双源漂移；段五补修（runId 归因）仍在本单执行。
