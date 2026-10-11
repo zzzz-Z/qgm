@@ -1,6 +1,7 @@
 /* eslint-disable regexp/no-super-linear-backtracking, regexp/optimal-quantifier-concatenation -- markdown 任务行解析正则，复杂度固有 */
 import fs from 'node:fs'
 import path from 'node:path'
+import { resolveScopedRoot } from '../workspace-scope.js'
 // AIRUNNER-BATCH4-1B-NO-CONFIG
 
 /** 计划中的单个任务：编号、标题、状态 */
@@ -27,7 +28,7 @@ export interface PlanTask {
 export function parsePlanTodo(planPath?: string): PlanTask[] {
   // [root-env-align-v1] 与 config.setRoot 对齐：setRoot 写 AI_RUNNER_ROOT，原实现只读 AIR_ROOT
   // 导致 standalone 切换工作区后 PLAN.md 仍从启动 cwd 读取（隐藏 bug）
-  const base = process.env.AI_RUNNER_ROOT || process.env.AIR_ROOT || process.cwd()
+  const base = resolveScopedRoot()
   const p = planPath || path.join(base, 'PLAN.md')
   let src = ''
   try { src = fs.readFileSync(p, 'utf8') } catch { return [] }

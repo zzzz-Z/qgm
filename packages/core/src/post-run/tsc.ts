@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { runProcess } from '../process/proc.js'
+import { resolveScopedRoot } from '../workspace-scope.js'
 // AIRUNNER-BATCH10-3B-SPLIT-TARGETS: 类型与 root 派生已内联/外移，解除对 config.js 的依赖（strip-types 可加载）
 
 /**
@@ -10,7 +11,7 @@ import { runProcess } from '../process/proc.js'
  * [CONSTRAINT] 每次读 env 而非缓存常量，兼容 config.setRoot 的运行时改动
  */
 function getRoot(): string {
-  return process.env.AI_RUNNER_ROOT || process.env.AIR_ROOT || process.cwd()
+  return resolveScopedRoot()
 }
 
 /**

@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { resolveScopedRoot } from '../workspace-scope.js'
 // AIRUNNER-BATCH4-2A-INLINE-CONST
 // 从 src/config.ts 内联；strip-types 无法解析 .js 后缀 import（T6）；改常量需同步 config.ts
 
@@ -22,7 +23,7 @@ export interface IndexDiffEntry {
  * [root-track-v1] 原为 module-level const：setRoot 后仍指向启动 cwd（隐藏 bug，与 git.ts 同类）
  */
 function getRoot(): string {
-  return process.env.AI_RUNNER_ROOT || process.cwd()
+  return resolveScopedRoot()
 }
 /** 遍历项目时跳过的目录 */
 const EXCLUDE_DIRS = new Set(['node_modules', '.git', 'dist', '.vite', '.turbo', '.cache'])

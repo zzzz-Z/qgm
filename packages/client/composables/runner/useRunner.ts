@@ -10,6 +10,8 @@ import { readNdjson } from '../../utils/stream'
 import { log } from '../../utils/log'
 // [tasks-api-sid-v1] 沙箱 __AI__.tasks 分桶需会话 id；显式 import 便于 vitest 裸跑
 import { effectiveSessionId } from '../ui/useAppStorage'
+// [multi-workspace-v1] /run 携带目标工作区 id；缺省由服务端用活跃工作区
+import { useWorkspaces } from '../data/useWorkspaces'
 
 /** sessionStorage 键：脚本内容 */
 const STORAGE_KEY_SCRIPT = '__ai_runner_script'
@@ -446,6 +448,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         gitCommit: gitCommit.value,
         smoke: smokeEnabled.value,
         sessionId: effectiveSessionId.value || undefined,
+        workspaceId: useWorkspaces().activeId.value || undefined,
         sandbox: (() => { try { return localStorage.getItem('__ai_sandbox') || 'read-only' } catch { return 'read-only' } })(),
       }),
       signal: abortController.signal,

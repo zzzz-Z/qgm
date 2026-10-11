@@ -1,6 +1,8 @@
 import path from 'node:path'
 import os from 'node:os'
 import fs from 'node:fs'
+import { createHash } from 'node:crypto'
+import { getScopeRoot } from './workspace-scope.js'
 
 // pkg-structure
 
@@ -37,9 +39,11 @@ export function setRoot(rootPath: string): void {
 }
 /**
  * 获取 Root
+ * [multi-workspace-v1] 作用域化：/run 在 runWithWorkspace 内执行时解析为该请求的工作区 root，
+ *   否则回落活跃 ROOT——103 处既有调用点零改动即获得按请求隔离（并发运行不串台）
  */
 export function getRoot(): string {
-  return ROOT
+  return getScopeRoot(ROOT)
 }
 
 /**
@@ -66,39 +70,32 @@ export function getHasWorkspace(): boolean {
  * [WHY] 生产环境重启后需恢复用户选择的工作区；存 home 而非工作区自身，避免"没工作区时无处存"的鸡生蛋问题
  * [CONSTRAINT] 依赖 os.homedir()；SSR / 无 HOME 环境回落空串由各函数 try/catch 兜底
  */
-const WORKSPACE_CONF_DIR = path.join(os.homedir(), '.ai-runner')
+const WORKSPACE_CONF_DIR = process.env.AI_RUNNER_WORKSPACE_CONF_DIR || path.join(os.homedir(), '.ai-runner')
 /** 工作区配置文件绝对路径 */
 const WORKSPACE_CONF_FILE = path.join(WORKSPACE_CONF_DIR, 'workspace.json')
+
+/** 注册表（内存权威态，落盘经 persistWorkspace） */
+const workspaces = new Map<string, WorkspaceEntry>()
+// eslint-disable-next-line import/no-mutable-exports -- 可变绑定：activateWorkspace 会改写（与 ROOT 同理）
+export let activeWorkspaceId: string | null = null
 
 /**
  * 持久化当前工作区（用户选择成功后调用）
  * [WHY] 跨进程重启恢复用户选择；不持久化则每次启动都要重选
  * [CONSTRAINT] 目录不存在自动创建；写入失败静默（配额 / 只读 fs 场景不阻断主流程）
- * [CHANGE-IMPACT] 与 loadPersistedWorkspace 严格配对；键名 root 变更会导致旧配置读取失败
+ * [CHANGE-IMPACT] 与 loadWorkspaceRegistry 严格配对；键名 root 变更会导致旧配置读取失败
  */
 export function persistWorkspace(): void {
   try {
     fs.mkdirSync(WORKSPACE_CONF_DIR, { recursive: true })
-    fs.writeFileSync(WORKSPACE_CONF_FILE, JSON.stringify({ root: ROOT, at: Date.now() }))
+    // [multi-workspace-v1] root 字段保留（旧版客户端/脚本只读它）；注册表与活跃 id 是新增字段
+    fs.writeFileSync(WORKSPACE_CONF_FILE, JSON.stringify({
+      root: ROOT,
+      at: Date.now(),
+      workspaces: [...workspaces.values()],
+      activeId: activeWorkspaceId,
+    }))
   } catch { /* ignore: 持久化失败不阻断主流程 */ }
-}
-
-/**
- * 从用户配置目录恢复工作区
- * [WHY] standalone 启动早期调用；返回路径合法性由本函数保证（存在且为目录）
- * [CONSTRAINT] 任何异常（文件缺失 / JSON 损坏 / 目录不存在）统一返回 null；调用方据此判定"用户未选过"
- * @returns 合法的绝对路径；不可用时 null
- */
-export function loadPersistedWorkspace(): string | null {
-  try {
-    const raw = fs.readFileSync(WORKSPACE_CONF_FILE, 'utf8')
-    const j = JSON.parse(raw)
-    const r = String(j?.root || '')
-    if (!r) return null
-    if (!fs.existsSync(r)) return null
-    if (!fs.statSync(r).isDirectory()) return null
-    return r
-  } catch { return null }
 }
 
 /**
@@ -108,6 +105,119 @@ export function loadPersistedWorkspace(): string | null {
  */
 export function clearPersistedWorkspace(): void {
   try { fs.rmSync(WORKSPACE_CONF_FILE, { force: true }) } catch { /* ignore */ }
+}
+
+// [multi-workspace-v1] 多工作区注册表：多份代码树并存，同一时刻恰一个是活跃工作区。
+// [WHY] 阶段 1（只读多工作区）：注册表只是「单工作区切换」之上的簿记层——activate 落到既有
+//   setRoot 原语，103 处 getRoot() 消费点语义不变；阶段 2 的按 id 并行执行由 workspace-scope 承担。
+// [CONSTRAINT] id 由解析后路径确定性派生（同路径重复注册幂等）；移除活跃工作区被拒绝（避免悬空 activeId）。
+
+/** 注册表条目：确定性 id、root 绝对路径、展示名（root 基名）、入库时刻 */
+export interface WorkspaceEntry {
+  id: string
+  root: string
+  label: string
+  addedAt: number
+}
+
+/** 由 root 绝对路径派生确定性工作区 id（同路径幂等） */
+function workspaceIdFor(root: string): string {
+  return createHash('sha1').update(root).digest('hex').slice(0, 12)
+}
+
+/**
+ * 注册工作区（幂等）：路径规范化后按 id 去重；已存在则原样返回。
+ * [CHANGE-IMPACT] /workspace/select、/workspace/pick 也会调用本函数——旧入口切换即自动入册
+ * @param root 工作区根目录绝对路径（须已存在且为目录，由调用方校验）
+ * @param activate 注册后是否立即激活（首个注册默认激活）
+ */
+export function registerWorkspace(root: string, activate?: boolean): WorkspaceEntry {
+  const resolved = path.resolve(root)
+  const id = workspaceIdFor(resolved)
+  let entry = workspaces.get(id)
+  if (!entry) {
+    entry = { id, root: resolved, label: path.basename(resolved) || resolved, addedAt: Date.now() }
+    workspaces.set(id, entry)
+  }
+  if (activate || !activeWorkspaceId) activateWorkspace(id)
+  else persistWorkspace()
+  return entry
+}
+
+/**
+ * 移除工作区：活跃工作区不可移除（防止悬空 activeId）。
+ * @returns ok=false 时 reason 说明原因
+ */
+export function removeWorkspace(id: string): { ok: boolean, reason?: string } {
+  if (id === activeWorkspaceId) return { ok: false, reason: '不能移除活跃工作区，请先切换到其他工作区' }
+  if (!workspaces.has(id)) return { ok: false, reason: `工作区不存在：${id}` }
+  workspaces.delete(id)
+  persistWorkspace()
+  return { ok: true }
+}
+
+/**
+ * 激活工作区：落到既有 setRoot 原语（hasWorkspace 置位、SCRIPTS_DIR 重算、env 写权威源），
+ * 这正是「注册表是簿记层，切换语义不变」的实现点。
+ */
+export function activateWorkspace(id: string): { ok: boolean, reason?: string } {
+  const entry = workspaces.get(id)
+  if (!entry) return { ok: false, reason: `工作区不存在：${id}` }
+  activeWorkspaceId = id
+  setRoot(entry.root)
+  persistWorkspace()
+  return { ok: true }
+}
+
+/** 按 id 查注册表条目；不存在返回 null */
+export function getWorkspace(id: string): WorkspaceEntry | null {
+  return workspaces.get(id) ?? null
+}
+
+/** 注册表快照（按入库时间升序） */
+export function getWorkspaces(): WorkspaceEntry[] {
+  return [...workspaces.values()].sort((a, b) => a.addedAt - b.addedAt)
+}
+
+/** 当前活跃工作区 id；null = 未激活 */
+export function getActiveWorkspaceId(): string | null {
+  return activeWorkspaceId
+}
+
+/**
+ * 启动时从 workspace.json 恢复注册表并激活活跃项。
+ * [WHY] standalone 启动唯一合法入口（替代直接调 loadPersistedWorkspace）；
+ *   旧格式（仅 {root}）自动迁移为单条注册并激活，用户无感升级。
+ * [CONSTRAINT] 恢复前不清 Map（幂等可重复调用）；磁盘缺失/损坏按「无注册」处理返回 null
+ * @returns 恢复并激活的 root；无可恢复项返回 null
+ */
+export function loadWorkspaceRegistry(): string | null {
+  try {
+    const raw = fs.readFileSync(WORKSPACE_CONF_FILE, 'utf8')
+    const j = JSON.parse(raw) as { root?: string, workspaces?: WorkspaceEntry[] }
+    const list = Array.isArray(j.workspaces) ? j.workspaces : []
+    for (const e of list) {
+      if (!e || typeof e.root !== 'string' || !fs.existsSync(e.root) || !fs.statSync(e.root).isDirectory()) continue
+      const id = workspaceIdFor(path.resolve(e.root))
+      if (!workspaces.has(id)) {
+        workspaces.set(id, { id, root: path.resolve(e.root), label: String(e.label || path.basename(e.root) || e.root), addedAt: Number(e.addedAt) || Date.now() })
+      }
+    }
+    // 旧格式迁移：只有 root 没有 workspaces 数组
+    if (workspaces.size === 0 && j.root && fs.existsSync(j.root) && fs.statSync(j.root).isDirectory()) {
+      registerWorkspace(j.root)
+    }
+    const target = (typeof j === 'object' && j && 'activeId' in j && typeof (j as { activeId?: unknown }).activeId === 'string')
+      ? String((j as { activeId: string }).activeId)
+      : ''
+    const act = target && workspaces.has(target) ? target : [...workspaces.keys()][0]
+    if (act) {
+      activeWorkspaceId = act
+      setRoot(workspaces.get(act)!.root)
+      return workspaces.get(act)!.root
+    }
+    return null
+  } catch { return null }
 }
 /** 项目识别前缀，用于日志与缓存命名空间 */
 export const PREFIX = '/__ai'

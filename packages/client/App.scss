@@ -1,40 +1,57 @@
 // [app-vue-style-v1] PLAN 4.7 阈值整改：从 App.vue 抽出（811 行）
 // 由 App.vue 的 <style scoped lang="scss" src="./App.scss"> 引用
 
+// [trae-shell-v1] 全局外壳：左栏贯通到顶（AiWindowList 与 .hdr 平行）
+.app-shell {
+  display: flex;
+  flex-direction: row;
+  height: 100vh;
+  overflow: hidden;
+}
+.app-shell-empty {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.app-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* [trae-shell-v1] header 左栏折叠按钮 */
+.hdr-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-6);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.hdr-collapse-btn:hover {
+  color: var(--text);
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
 .hdr {
   flex-shrink: 0;
   position: relative;
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
-
   padding: 8px 18px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-}
-.title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.logo {
-  font-size: 18px;
-}
-.title h1 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.2px;
-}
-.env {
-  padding: 2px 8px;
-  border-radius: var(--radius-10);
-  background: var(--surface-2);
-  color: var(--text-3);
-  font-size: 11px;
-  font-weight: 500;
-  border: 1px solid var(--border);
-  letter-spacing: 0.3px;
+  justify-content: end
 }
 
 .tabs {
@@ -143,6 +160,7 @@
   min-height: 0;
   display: flex;
   overflow: hidden;
+  border-radius: 15px;
 }
 .layout-main {
   flex: 1;
@@ -321,11 +339,9 @@
 .hdr {
   display: flex !important;
   align-items: center !important;
-  justify-content: space-between !important;
   padding: 8px 16px !important;
   min-height: 48px !important;
   background: var(--surface) !important;
-  border-bottom: 1px solid var(--border) !important;
   flex-shrink: 0 !important;
   gap: 16px !important;
 }

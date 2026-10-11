@@ -26,8 +26,6 @@ import ScriptToolbar from './ScriptToolbar.vue'
 import ScriptAttachBar from './ScriptAttachBar.vue'
 import { useScriptPanelActions } from './script-panel-actions'
 import SidePane from '../panels/SidePane.vue'
-// 左侧常驻多窗口面板
-import AiWindowList from '../panels/AiWindowList.vue'
 // [eventbus-name-clash-v1] 显式 import：与 @vueuse/core 的 useEventBus 同名，已在 vite
 //   AutoImport.ignore 中屏蔽 auto-import 源，此处必须显式引入（tsc/vitest 无该插件）。
 import { useEventBus } from '../../composables/ui/useEventStream'
@@ -418,9 +416,7 @@ function onHtmlDrop(e: DragEvent) {
 </script>
 
 <template>
-  <div ref="paneRef" class="bg-\[var\(--bg\)\] flex pane h-screen overflow-hidden" :class="{ 'is-resizing-side': resizingSide }">
-    <!-- 左侧常驻：多 AI 窗口列表（展示 + 激活切换） -->
-    <AiWindowList />
+  <div ref="paneRef" class="bg-\[var\(--bg\)\] flex pane h-full overflow-hidden" :class="{ 'is-resizing-side': resizingSide }">
     <!-- [ui-responsive-v1] 窄屏抽屉触发钮：≤1100px 显示（桌面端 scss 隐藏），
          把右侧面板从文档流列变为可滑入浮层，修复窄屏主区被挤成细条（F1）。
          此前 sideDrawerOpen 是**死状态**（声明后零写入）。 -->

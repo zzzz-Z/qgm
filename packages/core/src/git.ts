@@ -526,11 +526,18 @@ export async function gitCommitHistory(limit = 50): Promise<{ ok: boolean, commi
 }
 
 /** [git-branches-v1] 本地分支列表 + 当前分支。 */
-export async function gitBranches(): Promise<{ ok: boolean, current: string, list: string[], reason?: string }> {
-  if (!(await gitAvailable())) return { ok: false, current: '', list: [], reason: '非 git 仓库' }
-  const cur = await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
+/**
+ * [git-branches-v1] 本地分支列表 + 当前分支。
+ * [trae-new-workspace-v1] 新增可选 repoPath：新建工作区表单需列出「用户所选基仓库」的分支，
+ *   而活跃 root 未必是目标仓库。传路径时改用 `git -C <path>` 走子命令，跳过 gitAvailable 短路。
+ * [CONSTRAINT] 路径必须是 git 工作副本；非 git 目录会由 rev-parse 返回非 0 并落 reason。
+ */
+export async function gitBranches(repoPath?: string): Promise<{ ok: boolean, current: string, list: string[], reason?: string }> {
+  const withC = (args: string[]): string[] => (repoPath ? ['-C', repoPath, ...args] : args)
+  if (!repoPath && !(await gitAvailable())) return { ok: false, current: '', list: [], reason: '非 git 仓库' }
+  const cur = await run('git', withC(['rev-parse', '--abbrev-ref', 'HEAD']))
   if (cur.code !== 0) return { ok: false, current: '', list: [], reason: cur.stderr.trim() }
-  const r = await run('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads/'])
+  const r = await run('git', withC(['for-each-ref', '--format=%(refname:short)', 'refs/heads/']))
   if (r.code !== 0) return { ok: false, current: '', list: [], reason: r.stderr.trim() }
   const list = r.stdout.split('\n').map(s => s.trim()).filter(Boolean)
   return { ok: true, current: cur.stdout.trim(), list }

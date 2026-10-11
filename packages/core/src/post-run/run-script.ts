@@ -2,6 +2,7 @@
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { getRoot } from '../config.js'
+import { getScopeWorkspaceId } from '../workspace-scope.js'
 import { injectAiJsdoc, scanNativeApisWithFallback, scanScriptHead } from './ai-guard.js' // [ai-guard-v1]
 import { runProcess } from '../process/proc.js'
 import { buildWrapperCode } from './run-script-wrapper.js'
@@ -92,6 +93,8 @@ export async function runScript(
       AI_RUNNER_TOOL_LOG: toolLogPath || '',
       AI_RUNNER_SANDBOX: sandbox || 'read-only',
       AI_RUNNER_SESSION_ID: sessionId || '',
+      // [multi-workspace-v1] 本次运行所属工作区（ALS 作用域），沙箱内 __AI__ 与日志可按其分桶
+      AI_RUNNER_WORKSPACE_ID: getScopeWorkspaceId() || '',
     },
     timeoutMs,
     signal,

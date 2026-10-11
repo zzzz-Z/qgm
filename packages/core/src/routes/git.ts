@@ -25,7 +25,9 @@ gitHono.get('/git/commits', async (c) => {
 
 // [git-branches-v1] 本地分支列表 + 当前分支
 gitHono.get('/git/branches', async (c) => {
-  const r = await gitBranches()
+  // [trae-new-workspace-v1] 可选 path query：新建工作区表单按用户所选目录拉分支
+  const p = c.req.query('path') || undefined
+  const r = await gitBranches(p)
   return c.json(r, r.ok ? 200 : 400)
 })
 

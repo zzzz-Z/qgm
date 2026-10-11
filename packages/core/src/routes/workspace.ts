@@ -2,7 +2,18 @@
 import { Hono } from 'hono'
 import fs from 'node:fs'
 import path from 'node:path'
-import { clearPersistedWorkspace, clearWorkspace, getHasWorkspace, getRoot, persistWorkspace, setRoot } from '../config.js'
+import {
+  activateWorkspace,
+  clearPersistedWorkspace,
+  clearWorkspace,
+  getActiveWorkspaceId,
+  getHasWorkspace,
+  getRoot,
+  getWorkspace,
+  getWorkspaces,
+  registerWorkspace,
+  removeWorkspace,
+} from '../config.js'
 import { execFile } from 'node:child_process'
 
 /** workspace 路由的 Hono 实例 */
@@ -112,12 +123,11 @@ workspaceHono.post('/workspace/select', async (c) => {
   let stat
   try { stat = fs.statSync(target) } catch { return c.json({ error: '无法访问路径' }, 400) }
   if (!stat.isDirectory()) return c.json({ error: '不是目录' }, 400)
-  setRoot(target)
-  // [workspace-mode-v1] 用户显式选择即持久化，供下次启动恢复
-  persistWorkspace()
+  // [multi-workspace-v1] 选择即入册并激活（activateWorkspace → setRoot + persistWorkspace）
+  const entry = registerWorkspace(target, true)
   // [workspace-project-info-v1] 切换后即读取新项目画像
   const project = collectProjectInfo(target)
-  return c.json({ ok: true, root: getRoot(), project })
+  return c.json({ ok: true, root: getRoot(), id: entry.id, project })
 })
 // [native-picker] 系统原生目录选择器（macOS osascript / Linux zenity / Windows PowerShell）
 
@@ -192,10 +202,122 @@ workspaceHono.post('/workspace/pick', async (c) => {
     const st = fs.statSync(r.path)
     if (!st.isDirectory()) return c.json({ ok: false, error: '不是目录' }, 400)
   } catch { return c.json({ ok: false, error: '路径不存在' }, 400) }
-  setRoot(r.path)
-  // [workspace-mode-v1] 系统选择器路径同样持久化
-  persistWorkspace()
+  // [multi-workspace-v1] 系统选择器路径同样入册并激活
+  const entry = registerWorkspace(r.path, true)
   // [workspace-project-info-v1] 系统选择器切换后同样采集画像
   const project = collectProjectInfo(r.path)
-  return c.json({ ok: true, path: r.path, root: getRoot(), project })
+  return c.json({ ok: true, path: r.path, root: getRoot(), id: entry.id, project })
+})
+
+/**
+ * POST /workspace/pick-path —— 只调系统文件选择器返回路径，不入册、不激活。
+ * [trae-new-workspace-v1] 「新建工作区」表单需要「选基仓库目录」而非「切工作区」；
+ *   原 /workspace/pick 会立即入册并激活（切 root），与「新建」语义冲突。
+ * [CONSTRAINT] 与 /workspace/pick 共用 nativePick；取消 204 / 不支持 501 语义保持一致。
+ */
+workspaceHono.post('/workspace/pick-path', async (c) => {
+  const r = await nativePick()
+  if (!r.ok) {
+    if (r.error === 'canceled') return c.body(null, 204)
+    const status = r.unsupported ? 501 : 500
+    return c.json({ ok: false, error: r.error, unsupported: Boolean(r.unsupported) }, status as 400)
+  }
+  try {
+    const st = fs.statSync(r.path)
+    if (!st.isDirectory()) return c.json({ ok: false, error: '不是目录' }, 400)
+  } catch { return c.json({ ok: false, error: '路径不存在' }, 400) }
+  return c.json({ ok: true, path: r.path })
+})
+
+// [multi-workspace-v1] 多工作区注册表端点（登记于 AGENTS.md routes-registry-v1）：
+
+/** GET /workspace/registry —— 只读：注册表全量 + 活跃 id；工作区面板的列表数据源 */
+workspaceHono.get('/workspace/registry', (c) => {
+  return c.json({ ok: true, workspaces: getWorkspaces(), activeId: getActiveWorkspaceId() })
+})
+
+/** POST /workspace/register {path, activate?} —— 把已有目录入册；已存在幂等返回原条目 */
+workspaceHono.post('/workspace/register', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { path?: string, activate?: boolean } | null
+  const target = String(body?.path || '').trim()
+  if (!target) return c.json({ ok: false, error: '路径为空' }, 400)
+  if (!fs.existsSync(target)) return c.json({ ok: false, error: '路径不存在' }, 400)
+  let stat
+  try { stat = fs.statSync(target) } catch { return c.json({ ok: false, error: '无法访问路径' }, 400) }
+  if (!stat.isDirectory()) return c.json({ ok: false, error: '不是目录' }, 400)
+  const entry = registerWorkspace(target, body?.activate === true)
+  return c.json({ ok: true, workspace: entry, activeId: getActiveWorkspaceId() })
+})
+
+/** POST /workspace/activate {id} —— 切活跃工作区（= 切换执行与读写的 root） */
+workspaceHono.post('/workspace/activate', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { id?: string } | null
+  const id = String(body?.id || '').trim()
+  if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
+  const r = activateWorkspace(id)
+  if (!r.ok) return c.json({ ok: false, error: r.reason }, 404)
+  const entry = getWorkspace(id)
+  return c.json({ ok: true, root: getRoot(), workspace: entry })
+})
+
+/** POST /workspace/remove {id} —— 出册；活跃工作区拒移（409），防悬空 activeId */
+workspaceHono.post('/workspace/remove', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { id?: string } | null
+  const id = String(body?.id || '').trim()
+  if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
+  const r = removeWorkspace(id)
+  if (!r.ok) return c.json({ ok: false, error: r.reason }, 409)
+  return c.json({ ok: true, workspaces: getWorkspaces(), activeId: getActiveWorkspaceId() })
+})
+
+// [multi-workspace-create-v1] 新建工作区：三种模式统一入口
+//   - register：入册已有目录（同 /workspace/register）
+//   - worktree：git worktree add -b <branch> <path>（同仓库切新分支，共享 .git）
+//   - clone：git clone <url> <path>（独立仓库）
+// [CONSTRAINT] 三种模式成功后都调 registerWorkspace 入册；activate=true 时 setRoot + persist
+// [SECURITY] path / url / branch 直接传给 git，但最终路径由 fs.existsSync 校验且不做 shell 拼接（execFile 传数组）
+/** POST /workspace/create {mode, path, branch?, url?, baseRepo?, activate?} */
+workspaceHono.post('/workspace/create', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as {
+    mode?: 'register' | 'worktree' | 'clone'
+    path?: string
+    branch?: string
+    url?: string
+    baseRepo?: string
+    activate?: boolean
+  } | null
+  const mode = body?.mode || 'register'
+  const target = String(body?.path || '').trim()
+  if (!target) return c.json({ ok: false, error: 'path 为空' }, 400)
+
+  // 目标路径必须不存在（新建语义），已存在则走 /workspace/register
+  if (fs.existsSync(target)) return c.json({ ok: false, error: '路径已存在，请使用 register 模式' }, 400)
+
+  if (mode === 'register') {
+    // register 要求路径已存在，与上条互斥；此处只接受其它两种「新建」模式
+    return c.json({ ok: false, error: 'register 模式路径必须已存在' }, 400)
+  }
+
+  if (mode === 'worktree') {
+    const branch = String(body?.branch || '').trim()
+    if (!branch) return c.json({ ok: false, error: 'branch 为空' }, 400)
+    const baseRepo = String(body?.baseRepo || '').trim() || getRoot()
+    if (!fs.existsSync(path.join(baseRepo, '.git'))) return c.json({ ok: false, error: 'baseRepo 不是 git 仓库' }, 400)
+    // git worktree add -b <branch> <path>：在 baseRepo 下为新分支建独立工作树
+    const r = await execCmd('git', ['-C', baseRepo, 'worktree', 'add', '-b', branch, target], 120000)
+    if (r.code !== 0) return c.json({ ok: false, error: r.stderr.trim() || `git worktree 失败 (exit ${r.code})` }, 400)
+  }
+  else if (mode === 'clone') {
+    const url = String(body?.url || '').trim()
+    if (!url) return c.json({ ok: false, error: 'url 为空' }, 400)
+    const r = await execCmd('git', ['clone', url, target], 300000)
+    if (r.code !== 0) return c.json({ ok: false, error: r.stderr.trim() || `git clone 失败 (exit ${r.code})` }, 400)
+  }
+  else {
+    return c.json({ ok: false, error: `未知 mode: ${mode}` }, 400)
+  }
+
+  const entry = registerWorkspace(target, body?.activate === true)
+  const project = collectProjectInfo(target)
+  return c.json({ ok: true, workspace: entry, project, activeId: getActiveWorkspaceId() })
 })

@@ -45,6 +45,7 @@ declare global {
   const TOAST_SHORT_MEDIUM: typeof import('./utils/toast-durations').TOAST_SHORT_MEDIUM
   const TOAST_VERY_LONG: typeof import('./utils/toast-durations').TOAST_VERY_LONG
   const activeSessionId: typeof import('./composables/ui/useAppStorage').activeSessionId
+  const aiWindowListCollapsed: typeof import('./composables/ui/useAiWindowListCollapse').aiWindowListCollapsed
   const applyToEditor: typeof import('./composables/runner/useScriptInbox').applyToEditor
   const askUser: typeof import('./composables/ui/useAsk').askUser
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
@@ -498,6 +499,7 @@ declare global {
   const useWindowFocus: typeof import('@vueuse/core').useWindowFocus
   const useWindowScroll: typeof import('@vueuse/core').useWindowScroll
   const useWindowSize: typeof import('@vueuse/core').useWindowSize
+  const useWorkspaces: typeof import('./composables/data/useWorkspaces').useWorkspaces
   const watch: typeof import('vue').watch
   const watchArray: typeof import('@vueuse/core').watchArray
   const watchAtMost: typeof import('@vueuse/core').watchAtMost
@@ -553,6 +555,9 @@ declare global {
   // @ts-ignore
   export type { Message } from './composables/ai/useSessionManager'
   import('./composables/ai/useSessionManager')
+  // @ts-ignore
+  export type { WorkspaceItem } from './composables/data/useWorkspaces'
+  import('./composables/data/useWorkspaces')
   // @ts-ignore
   export type { FeedbackItem, FeedbackMergeOpts, FeedbackMerge } from './composables/runner/feedback-merge'
   import('./composables/runner/feedback-merge')
@@ -651,6 +656,7 @@ declare module 'vue' {
     readonly TOAST_SHORT_MEDIUM: UnwrapRef<typeof import('./utils/toast-durations')['TOAST_SHORT_MEDIUM']>
     readonly TOAST_VERY_LONG: UnwrapRef<typeof import('./utils/toast-durations')['TOAST_VERY_LONG']>
     readonly activeSessionId: UnwrapRef<typeof import('./composables/ui/useAppStorage')['activeSessionId']>
+    readonly aiWindowListCollapsed: UnwrapRef<typeof import('./composables/ui/useAiWindowListCollapse')['aiWindowListCollapsed']>
     readonly applyToEditor: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['applyToEditor']>
     readonly askUser: UnwrapRef<typeof import('./composables/ui/useAsk')['askUser']>
     readonly asyncComputed: UnwrapRef<typeof import('@vueuse/core')['asyncComputed']>
@@ -1104,6 +1110,7 @@ declare module 'vue' {
     readonly useWindowFocus: UnwrapRef<typeof import('@vueuse/core')['useWindowFocus']>
     readonly useWindowScroll: UnwrapRef<typeof import('@vueuse/core')['useWindowScroll']>
     readonly useWindowSize: UnwrapRef<typeof import('@vueuse/core')['useWindowSize']>
+    readonly useWorkspaces: UnwrapRef<typeof import('./composables/data/useWorkspaces')['useWorkspaces']>
     readonly watch: UnwrapRef<typeof import('vue')['watch']>
     readonly watchArray: UnwrapRef<typeof import('@vueuse/core')['watchArray']>
     readonly watchAtMost: UnwrapRef<typeof import('@vueuse/core')['watchAtMost']>

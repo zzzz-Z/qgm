@@ -1,58 +1,31 @@
 <script setup lang="ts">
 import { TOAST_LONGEST, TOAST_MEDIUM, TOAST_SHORT, TOAST_SHORT_MEDIUM } from './utils/toast-durations'
 import ScriptPanel from './components/script/ScriptPanel.vue'
-// [ask-standalone-v1] 交互提问独立通道：手动模式同样生效，不再依赖 loop 状态
+import AiWindowList from './components/panels/AiWindowList.vue'
 import { useAiReplyHandlers } from './composables/ai/useAiReplyHandlers'
 import { useAppStartup } from './composables/ui/useAppStartup'
-// [userscript-update-v1] 显式导入：模板 @click 直接引用，不依赖 auto-import（构建期 dts 未必已含该项）
 import { updateUserscript } from './composables/ui/useUserscriptUpdate'
 import ToastHost from './components/feedback/ToastHost.vue'
 import TooltipHost from './components/feedback/TooltipHost.vue'
 import KeyboardHelp from './components/feedback/KeyboardHelp.vue'
-// [app-storage-extracted-v1]
 import type { SessionEntry } from './composables/ui/useAppStorage'
-// [theme-binding-v1] theme 必须显式值导入：模板 @click 里有 `theme = theme === 'dark' ? ...` 赋值，
-// 若靠 auto-import 解析，编译器会生成 __unimport_theme 引用 → 对 auto-import 符号赋值非法，
-// vite build / rolldown 报 [PARSE_ERROR] Cannot assign to this expression（dev 模式不报，只有构建才炸）
 import { theme } from './composables/ui/useAppStorage'
-// [win-sid-namespace-v1] 站点窗口槽位 sid 共享命名 + 切换活跃槽位
 import { setActiveWinSidImpl as setActiveWinSid, winSidOf } from './composables/ai/useAiWindowTable'
-// [kb-entry-unique-v1] 知识库入口唯一：只在右侧栏 SidePane 的 kb tab（折叠态也保留图标条，
-// 点 tab 自身即展开）。此处曾有一个 header 按钮切到 kb tab，与侧栏完全重复，已按用户指定删除（2026-10-09）。
-// 守卫见 tests/kb-sidepane-wiring.node-test.ts —— 不要再在 App 加回侧栏 tab 的入口按钮。
-// [useSitesStore-import-v1] 统一 store 启动时迁移 + 切站点写 activeModelId
-// [workspace-guide-lazy-v1] 引导页仅 !hasWorkspace 时渲染（v-if 闸门），异步拆包不进首屏 chunk
-const WorkspaceGuide = defineAsyncComponent(() => import('./components/panels/WorkspaceGuide.vue'))
-// [kb-panel-side-v1] 知识库已迁入右侧栏 tab（ScriptPanel→SidePane），此处不再内联渲染
-// [app-storage-extracted-v1] SESSION_HISTORY_KEY 已抽至 useAppStorage
-/** mock 通道（?mock=1）：注入合成 message，无需打开真实 AI 站点即可自检整条链路 */
-const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
-/** localStorage 键：上次访问时间 */
 
-// [use-storage-v1] activeSessionId / sandboxMode / theme 均为 useAppStorage 的 useStorage 单例（跨标签页同步）
-// [use-storage-v1] transportKind 已迁移到 useAiTransport 的 useStorage 单例
-// [workspace-mode-v1] 工作区绑定状态：无工作区时渲染引导页
-// [CONSTRAINT] 默认 true 避免首帧闪烁；onMounted 探测后按服务端返回值覆盖
+const WorkspaceGuide = defineAsyncComponent(() => import('./components/panels/WorkspaceGuide.vue'))
+const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
 const hasWorkspace = ref(true)
-/** 键盘帮助面板开关 */
 const keyboardHelpOpen = ref(false)
-/** [wiki-panel-v1] 知识库面板开关 */
-/** 信息 */
 const absenceInfo = ref<{ daysAgo: number } | null>(null)
 
 /** 自动接管模式开关 */
 const autoTakeover = useAutoTakeover()
 const { resetSession, restoreFromStorage } = useSessionManager()
 const { modelId } = useAiSite()
-// [app-storage-extracted-v1] SessionEntry 类型与按站点历史读写已抽至 useAppStorage
-// [site-isolate-v1] 会话历史按站点分桶；切站点时由下方 watch(modelId) 重新加载
 const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
 
 const { toast } = useToast()
-/** 脚本收件箱：来自 AI 的脚本队列 */
 
-// [use-ai-reply-handlers-v1] 消息处理簇已抽到 composable；本组件仅接线
-// [CONSTRAINT] 必须在 useEventListener(window, "message", ...) 之前；否则回调引用为 undefined
 const { onSessionIdMessage } = useAiReplyHandlers({
   sessionHistory,
   saveHistoryScoped,
@@ -60,7 +33,6 @@ const { onSessionIdMessage } = useAiReplyHandlers({
   isMockMode: () => MOCK_MODE,
 })
 
-// [use-app-startup-wired-v1] 启动族（探测 / 重开 / 订阅 / 回放）已抽到 useAppStartup
 const {
   probeWorkspace,
   maybeScheduleReopen,
@@ -69,43 +41,26 @@ const {
   syncActiveSessionFromSite,
   migrateLastVisit,
 } = useAppStartup({ hasWorkspace, sessionHistory, onSessionIdMessage })
-// [use-event-listener-v1] 用 vueuse useEventListener 而非原生 addEventListener：
-// 组件 unmount 时自动 removeEventListener；HMR / 热重载下重复注册会引发 message 重复处理
+
 useEventListener(window, 'message', onSessionIdMessage)
 useEventListener(window, 'keydown', onShiftQuestion)
 
-// [site-isolate-v1] 切站点 → 保存旧站点 activeSessionId，加载新站点历史与激活会话
-// [WHY] 需求：每站点独立会话上下文；activeSessionId 是 useStorage 单例，切换时需手动轮换
-// [CONSTRAINT] 只在 modelId 真变化时执行；非 immediate，避免 setup 首帧覆盖 onMounted 恢复逻辑
-// [CHANGE-IMPACT] 切换触发下游 watch(activeSessionId)，连带 setActiveWinSid 等副作用
 watch(modelId, (newId, oldId) => {
   if (!newId || newId === oldId) return
-  // [sites-store-wire-v1] 切站点：写统一 store 的 activeModelId
   try { setActiveModelId(newId) } catch { /* 未就绪不阻断 */ }
   saveActiveSessionIdBySite(String(oldId ?? ''), activeSessionId.value)
   sessionHistory.value = loadHistoryBySite(newId)
   activeSessionId.value = loadActiveSessionIdBySite(newId)
 })
-// [win-sid-namespace-v1] modelId → activeWinSid 同步：站点选中即窗口槽位激活
-// [WHY] AiWindowList 用 win_<modelId> 判「是否已打开」；开窗路径未传 sid 会登记到 default，
-//   两套 sid 从不重合 → 站点列表恒显示未打开。此处联动后二者共用 win_<modelId>。
-// [CONSTRAINT] immediate 覆盖首帧（App.vue 初次挂载即绑定）；新增站点切换由上面的 watch 兜底
-// [CHANGE-IMPACT] activeWinSid 语义变化：不再恒 default，而是跟随选中站点
+
 watch(modelId, (v) => {
   setActiveWinSid(winSidOf(String(v || 'deepseek')))
 }, { immediate: true })
+
 watch(activeSessionId, (v) => {
-  // [use-storage-v1] 落盘由 useStorage 托管
-  // [loop-consolidation-P3e] 原 loop 实例表同步（setActiveLoopSessionId / createLoopInstanceFor）
-  //   随 P3 删除 useAutoLoop 一并移除：循环状态单一真相源已收敛到 useRuntime，实例表不再存在
-  // [win-sid-slot-v1] 不在此写入 activeWinSid：会话 id 每次开新会话都变，
-  // 而 activeWinSid 是「AI 窗口槽位」（默认 default），写入会话 id 会让 headless 每次
-  // 落到全新 profile 目录 → 未登录 + 白开浏览器（报告 §1.2）。槽位切换由 AiWindowList 显式驱动。
-  // [site-isolate-v1] 活动会话值同步到当前站点专属键，供切站点时回读
   saveActiveSessionIdBySite(modelId.value, v || '')
 }, { immediate: true })
-// [use-storage-v1] sandboxMode / bashPolicy 落盘均由 useStorage 托管，不再手动 watch
-// [use-storage-v1] theme 仅保留 DOM data-theme 副作用；落盘由 useStorage 托管
+
 watch(theme, (v) => {
   document.documentElement.setAttribute('data-theme', v)
 }, { immediate: true })
@@ -243,82 +198,83 @@ function onLoginGui() {
 </script>
 
 <template>
-  <header class="hdr">
-    <div class="title">
-      <span class="logo" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 2L4.5 13.5h6l-1 8.5L18.5 10.5h-6l1-8.5z" fill="url(#ai-runner-grad)" stroke="#4d8bff" stroke-width="1.2" stroke-linejoin="round" /><defs><linearGradient id="ai-runner-grad" x1="4" y1="2" x2="19" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#6b83ff" /><stop offset="100%" stop-color="#4d6bfe" /></linearGradient></defs></svg></span>
-      <h1>AI Runner</h1>
-      <span class="env">dev</span>
-    </div>
-    <div class="hdr-right">
-      <button
-        v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
-        class="theme-toggle" aria-label="切换主题"
-        @click="theme = theme === 'dark' ? 'light' : 'dark'"
-      >
-        <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
-        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
-      </button>
-      <button
-        v-tooltip="'打开一个新的 AI 会话窗口（强制新会话，不影响当前会话）'"
-        aria-label="打开新会话"
-        class="new-session-toggle"
-        @click="onNewSession"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          <line x1="12" y1="8" x2="12" y2="13" />
-          <line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
-        </svg>
-      </button>
-      <!-- [hdr-transport-group-v1] 传输链路控组合一：把「油猴 / 无头」选择、无头引导登录、更新油猴脚本
+  <div v-if="!hasWorkspace" class="app-shell-empty">
+    <WorkspaceGuide />
+  </div>
+  <div v-else class="app-shell">
+    <AiWindowList />
+    <div class="app-body">
+      <header class="hdr">
+        <div class="hdr-right">
+          <button
+            v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
+            class="theme-toggle" aria-label="切换主题"
+            @click="theme = theme === 'dark' ? 'light' : 'dark'"
+          >
+            <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
+          </button>
+          <button
+            v-tooltip="'打开一个新的 AI 会话窗口（强制新会话，不影响当前会话）'"
+            aria-label="打开新会话"
+            class="new-session-toggle"
+            @click="onNewSession"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              <line x1="12" y1="8" x2="12" y2="13" />
+              <line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
+            </svg>
+          </button>
+          <!-- [hdr-transport-group-v1] 传输链路控组合一：把「油猴 / 无头」选择、无头引导登录、更新油猴脚本
            收进同一个分段控件（原先是三个各自描边的独立控件，视觉上零散且高度不一）。
            结构： [ 链路选择 ▾ | (无头时) 引导登录 | 更新脚本 ] -->
-      <div class="transport-switch" role="group" aria-label="AI 传输链路（切换后自动刷新）" title="AI 传输链路（切换后自动刷新）">
-        <select
-          class="transport-select"
-          :value="transportKind"
-          aria-label="AI 传输链路"
-          @change="onTransportChange"
-        >
-          <option value="tampermonkey">
-            油猴
-          </option>
-          <option value="headless">
-            无头
-          </option>
-        </select>
-        <!-- [headless-login-gui-v1] 无头模式下引导用户在有头窗口完成一次登录 -->
-        <template v-if="transportKind === 'headless'">
-          <span class="transport-sep" aria-hidden="true" />
-          <button
-            v-tooltip="'引导登录：打开有头窗口，登录后关窗即可（登录态落盘复用）'"
-            aria-label="引导登录"
-            class="login-gui-toggle"
-            @click="onLoginGui"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
-          </button>
-        </template>
-        <span class="transport-sep" aria-hidden="true" />
-        <!-- [userscript-update-v1] 安装 / 更新油猴脚本：打开本地分发端点，Tampermonkey 拦截并弹更新页 -->
-        <button
-          v-tooltip="'安装 / 更新油猴脚本（打开本地分发端点，Tampermonkey 会弹出安装或更新确认）'"
-          aria-label="更新油猴脚本" class="userscript-toggle"
-          @click="onUpdateUserscript"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
-        </button>
-      </div>
-    </div>
-  </header>
+          <div class="transport-switch" role="group" aria-label="AI 传输链路（切换后自动刷新）" title="AI 传输链路（切换后自动刷新）">
+            <select
+              class="transport-select"
+              :value="transportKind"
+              aria-label="AI 传输链路"
+              @change="onTransportChange"
+            >
+              <option value="tampermonkey">
+                油猴
+              </option>
+              <option value="headless">
+                无头
+              </option>
+            </select>
+            <!-- [headless-login-gui-v1] 无头模式下引导用户在有头窗口完成一次登录 -->
+            <template v-if="transportKind === 'headless'">
+              <span class="transport-sep" aria-hidden="true" />
+              <button
+                v-tooltip="'引导登录：打开有头窗口，登录后关窗即可（登录态落盘复用）'"
+                aria-label="引导登录"
+                class="login-gui-toggle"
+                @click="onLoginGui"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
+              </button>
+            </template>
+            <span class="transport-sep" aria-hidden="true" />
+            <!-- [userscript-update-v1] 安装 / 更新油猴脚本：打开本地分发端点，Tampermonkey 拦截并弹更新页 -->
+            <button
+              v-tooltip="'安装 / 更新油猴脚本（打开本地分发端点，Tampermonkey 会弹出安装或更新确认）'"
+              aria-label="更新油猴脚本" class="userscript-toggle"
+              @click="onUpdateUserscript"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
+            </button>
+          </div>
+        </div>
+      </header>
 
-  <!-- [workspace-mode-v1] 无工作区：渲染引导页；有工作区：正常布局 -->
-  <WorkspaceGuide v-if="!hasWorkspace" />
-  <div v-else class="layout-row">
-    <div class="layout-main">
-      <main class="main">
-        <ScriptPanel />
-      </main>
+      <div class="layout-row">
+        <div class="layout-main">
+          <main class="main">
+            <ScriptPanel />
+          </main>
+        </div>
+      </div>
     </div>
   </div>
   <ToastHost />

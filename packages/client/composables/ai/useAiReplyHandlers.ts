@@ -164,7 +164,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
         void askUser(_ask).then((answer) => {
           if (answer === null) return
           try { emitBus('ai:ask', `回答：${String(answer).slice(0, 40)}`, { payload: { text: String(answer), role: 'user-answer' } }) } catch { /* swallow: 事件流失败不阻断发送 */ }
-          void aiWindow.copyAndFill(`【ASK 回答】${answer}`)
+          void aiWindow.copyAndFill(`【ASK 回答】${answer}`, { skipRules: true })
         })
         return
       }

@@ -24,16 +24,12 @@ test('白名单: 排除工单 / 日期后缀 / 子目录', () => {
 test('冻结清单: 真仓库入选集合精确等于预期', () => {
   const chunks = listDocChunks(ORIG_ROOT)
   const srcs = Array.from(new Set(chunks.map(c => c.src))).sort()
+  // [docs-slim-2026-10-11] d096c578「删除过期文档」移除 6 篇（FRONTEND-REVIEW / VERIFY-TARGET-BINDING-SUMMARY /
+  //   defect-review×2 / plan-agent-loop-alignment / session-view-diagnosis）——按本清单自述的 ratchet 规则同步
   const EXPECTED = [
     'docs/DESIGN.md',
     'docs/DOCS-INDEX.md',
-    'docs/FRONTEND-REVIEW.md',
     'docs/USAGE.md',
-    'docs/defect-review-verification.md',
-    'docs/defect-review.md',
-    'docs/plan-agent-loop-alignment.md',
-    'docs/session-view-diagnosis.md',
-    'docs/VERIFY-TARGET-BINDING-SUMMARY.md',
   ].sort()
   assert.deepEqual(srcs, EXPECTED, '入选集合变了——新增/删除文档须同步此清单（ratchet）')
 })

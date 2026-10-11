@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Change, Manifest, RunLogEntry } from '../config.js'
+import { resolveScopedRoot } from '../workspace-scope.js'
 
 /** 文件快照元数据：路径、大小、修改时间、哈希 */
 export interface FileMeta {
@@ -30,7 +31,7 @@ export type LogChannel = 'runner' | 'pipeline' | 'decisions' | 'reject' | 'board
 // 可变路径用 getter（config.setRoot 会写 AI_RUNNER_ROOT 到 env；避免 ESM 常量快照）。
 
 /** 获取项目根目录 */
-const getRoot = (): string => process.env.AI_RUNNER_ROOT || process.cwd()
+const getRoot = (): string => resolveScopedRoot() // [multi-workspace-v1] ALS 作用域优先，env/cwd 回落
 /** 获取运行记录目录（.ai-runner/runs） */
 const getRunsDir = (): string => path.join(getRoot(), '.ai-runner/runs')
 /** 获取临时脚本目录（.ai-runner/scripts） */

@@ -1,8 +1,9 @@
 // [P3-4] 失败指纹 → 源文件函数定位（typescript AST，零新增依赖）
 import fs from 'node:fs'
 import path from 'node:path'
-import process from 'node:process' // [fix-import-process-v1]
+// [fix-import-process-v1]
 import ts from 'typescript'
+import { resolveScopedRoot } from '../workspace-scope.js'
 // 内联 ROOT 去掉相对导入：--experimental-strip-types 不重写 .js → .ts 路径
 // 与 config.ts 的初始值一致（setRoot 未调用时）
 // 从 env 读 ROOT，避免 strip-types 下 import config 失败
@@ -22,7 +23,7 @@ export interface Fingerprint {
  * [CONSTRAINT] config.setRoot 调用后 env 会变，此处每次读 env 以保证与主进程一致
  */
 function getRoot(): string {
-  return process.env.AI_RUNNER_ROOT || process.cwd()
+  return resolveScopedRoot()
 }
 /**
  * 用 TS AST 定位某行所属的最内层具名符号

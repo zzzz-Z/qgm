@@ -1,13 +1,14 @@
 // 从错误输出提取项目内源文件路径
 import fs from 'node:fs'
 import path from 'node:path'
+import { resolveScopedRoot } from '../workspace-scope.js'
 // AIRUNNER-BATCH10-1-INLINE-ROOT: 内联 root 派生，解除对 config.js 的依赖（strip-types 可加载）
 
 /**
  * 获取 Root
  */
 function getRoot(): string {
-  return process.env.AI_RUNNER_ROOT || process.env.AIR_ROOT || process.cwd()
+  return resolveScopedRoot()
 }
 // 从错误输出里提取项目内的源文件路径。
 // 支持 V8 / Node 常见栈格式：

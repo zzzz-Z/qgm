@@ -133,7 +133,7 @@ pnpm docker:down      # 下线
   `id_rsa*`、`.npmrc`、`.pypirc` 等一律 `EACCES`
 - **脚本内 API**：不能直接用 `fs` / `child_process` / `os` / `path` / `process.exit(`（命中 `NATIVE_API_FORBIDDEN`），
   改走注入的 `__AI__`：`readText/writeText/replaceInFile/patchFile/grep/walk/exec/shell/lint/typeCheck/tasks/…`
-- **语法预检**：超 300 行或 12KB 判为超长；`vm.Script` 三段式语法检查，截断需「错误族 + 结构未闭合」双判据
+- **语法预检**：超 300 行 / 12KB 仅标记 `overBudget` 留痕、不拦截（§10 非闸门）；`vm.Script` 三段式语法检查，截断需「错误族 + 结构未闭合」双判据
 
 ### 5.2 脚本执行路径（自动循环子系统已退役）
 

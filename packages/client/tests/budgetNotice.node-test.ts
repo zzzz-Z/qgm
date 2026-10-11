@@ -49,10 +49,15 @@ it('余量充足：说清「还能写」，且不得出现拆小措辞（单向�
   const text = ran()
   assert.match(text, /本轮输出体积/)
   assert.match(text, /60 行 \/ 2\.0 KB/)
-  assert.match(text, /硬上限 300 行 \/ 12 KB/)
+  // §10 现行口径：300 行 / 12 KB 是「非拦截闸门 + 确定性安全工作区」，不得再写成「硬上限」
+  assert.match(text, /非闸门，超限只留痕不拦截/)
+  assert.match(text, /300 行 \/ 12 KB 是确定性安全工作区/)
+  assert.doesNotMatch(text, /硬上限/)
   assert.match(text, /单轮建议 ≤ 150 行/)
   assert.match(text, /余量充足（已用 20%）/)
   assert.match(text, /不必把一轮能做完的事拆成多轮/)
+  // [token-budget-v1] 横幅只测 S（服务端测不到 T），须显式声明，防止「余量充足」被误读为整轮安全
+  assert.match(text, /只计脚本 S/)
   assert.doesNotMatch(text, /主动拆小/)
   assert.doesNotMatch(text, /已超预算/)
 })

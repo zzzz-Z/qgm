@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { getRoot } from '../config.js'
+import { getScopeWorkspaceId } from '../workspace-scope.js'
 import { parsePlanTodo } from '../utils/plan-parser.js'
 
 /** 已完成任务条目：ID、标题、完成时间 */
@@ -92,6 +93,8 @@ export interface TaskState {
   planPending?: number
   version?: number
   sessionId?: string
+  // [multi-workspace-v1] 当前工作区 id（ALS 作用域；state.json 已按 root 隔离，此字段供观测）
+  workspaceId?: string
   // [pipeline-api-v1] 链路状态（供 PipelineGraph 渲染）
   pipeline?: Record<string, { status?: string, startedAt?: number, durationMs?: number }>
   // [tasks-by-sid-v1] 按 sid 分桶的任务：解决多窗口共享 state.json 时面板串台
@@ -267,6 +270,8 @@ function readStateRaw(): TaskState {
       doneAt: obj.doneAt !== undefined ? Number(obj.doneAt) : undefined,
       version: obj.version !== undefined ? Number(obj.version) : undefined,
       sessionId: typeof obj.sessionId === 'string' ? obj.sessionId : undefined,
+      // [multi-workspace-v1] 透传 workspaceId
+      workspaceId: typeof obj.workspaceId === 'string' ? obj.workspaceId : undefined,
       // [pipeline-api-v1] 透传 pipeline
       pipeline: (obj.pipeline && typeof obj.pipeline === 'object') ? obj.pipeline as TaskState['pipeline'] : undefined,
       updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : undefined,
@@ -477,6 +482,8 @@ export function readTaskState(sid?: string): TaskState {
     updatedAt: raw.updatedAt,
     version: raw.version,
     sessionId: raw.sessionId,
+    // [multi-workspace-v1] 透传工作区 id（state.json 已按 root 隔离，供观测）
+    workspaceId: raw.workspaceId,
     // [tier1c-4] decisions 直传（state.json 里已是 {t,c,r,rej} 结构）
     decisions: raw.decisions,
   }
@@ -690,6 +697,8 @@ export function commitTaskState(next: TaskState, sid?: string, expectedVersion?:
     version: prevVersion + 1,
     // [session-single-source-v1] 有真 sid 时以它为最近活跃会话，保证 sessionId ∈ tasksBySid keys
     sessionId: sid || getSessionId(),
+    // [multi-workspace-v1] 工作区 id（ALS 作用域；state.json 已按 root 隔离，供观测与跨区聚合）
+    workspaceId: getScopeWorkspaceId() || undefined,
   }
   const tmp = `${statePath()}.tmp-${process.pid}`
   fs.writeFileSync(tmp, JSON.stringify(merged, null, 2))

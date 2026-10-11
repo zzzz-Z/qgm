@@ -56,7 +56,7 @@ it('截断 + 超预算：给出拆小重发的可执行指令，且禁止原地�
   assert.match(text, /只重发\*\*尚未完成\*\*的部分/)
 })
 
-it('截断 + 未超预算：提示「恰好卡在上限附近」，而非误报超预算', () => {
+it('截断 + 未超预算：提示「恰好卡在安全工作区边缘」，而非误报超预算', () => {
   const p: string[] = []
   appendScriptInvalid(p, blocked({
     truncated: true,
@@ -64,7 +64,19 @@ it('截断 + 未超预算：提示「恰好卡在上限附近」，而非误报�
   }))
   const text = p.join('\n')
   assert.match(text, /未超预算/)
+  assert.match(text, /安全工作区边缘/)
   assert.doesNotMatch(text, /已超预算/)
+})
+
+it('§10 口径：截断分支的体积账本必须标明「非拦截闸门 / 安全工作区」，不得写成硬上限', () => {
+  const p: string[] = []
+  appendScriptInvalid(p, blocked({
+    truncated: true,
+    scriptSize: { lines: 480, bytes: 14 * 1024, overBudget: true, maxLines: 300, maxBytes: 12 * 1024 },
+  }))
+  const text = p.join('\n')
+  assert.match(text, /§10 安全工作区 300 行 \/ 12 KB，非拦截闸门/)
+  assert.doesNotMatch(text, /硬上限|预算上限/)
 })
 
 it('截断分支不得出现「重新生成完整脚本」式规劝（那正是原地重试的源头）', () => {

@@ -1,5 +1,5 @@
 /* eslint-disable no-console -- 服务端日志 */
-import { attachWs, createRouter, loadPersistedWorkspace, PREFIX, ROOT, setRoot } from '@qgm/core'
+import { attachWs, createRouter, loadWorkspaceRegistry, PREFIX, ROOT, setRoot } from '@qgm/core'
 import http from 'node:http'
 import fs from 'node:fs'
 import { pipeline } from 'node:stream'
@@ -76,8 +76,9 @@ process.on('unhandledRejection', (r) => { logCrash('unhandledRejection', r) })
 // [workspace-mode-v1] 生产环境启动策略：默认无工作区，仅当用户曾选择过才恢复
 // [WHY] 独立部署时 ROOT 默认进程启动目录，不应隐式视为"已选工作区"；从 ~/.ai-runner/workspace.json 恢复是唯一合法入口
 // [CONSTRAINT] 必须在 createRouter 之前调用，保证 hasWorkspace 与 ROOT 在首个请求前就位
-// [CHANGE-IMPACT] loadPersistedWorkspace() 无值时 hasWorkspace 保持 false，所有工作区相关路由返回 409
-const persistedRoot = loadPersistedWorkspace()
+// [CHANGE-IMPACT] loadWorkspaceRegistry() 无值时 hasWorkspace 保持 false，所有工作区相关路由返回 409；
+//   [multi-workspace-v1] 旧格式（仅 {root}）自动迁移为单条注册并激活，用户无感升级
+const persistedRoot = loadWorkspaceRegistry()
 if (persistedRoot) setRoot(persistedRoot)
 
 /** router（相关状态/数据） */

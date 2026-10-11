@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { resolveScopedRoot } from '../workspace-scope.js'
 
 // [A13] 规则文件 hash：让 compliance 报告可按规则版本分组
 let _rulesHashCache: string | null = null
@@ -11,8 +12,9 @@ let _rulesHashCache: string | null = null
  * 获取 Root
  */
 function getRoot(): string {
-  return process.env.AI_RUNNER_ROOT || process.env.AIR_ROOT || process.cwd()
-}// skills 变更后清缓存
+  return resolveScopedRoot()
+}
+// skills 变更后清缓存
 /**
  * 清空 Rules Hash Cache
  */

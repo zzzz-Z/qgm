@@ -228,6 +228,24 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   - 已登记 **`POST /__ai/skills/match`** —— **只读**，按任务文本做 BM25 检索，返回命中技能元数据 +
     正文截断（`BODY_MAX_LINES`/`BODY_MAX_CHARS`/`TOTAL_MAX_CHARS` 三常量共同决定注入体积）。
     消费方 `skill-registry.ts`；**自 `first-prompt-rules-v2` 起首问不再自动调用它**（见下条）。
+  - 已登记 **`GET /__ai/workspace/registry`**（multi-workspace-v1）—— **只读**，返回工作区注册表
+    `{ok, workspaces:[{id, root, label, addedAt}], activeId}`。注册表内存权威态在
+    `packages/core/src/config.ts`（`loadWorkspaceRegistry` 启动恢复，落盘 ~/.ai-runner/workspace.json，
+    旧格式 `{root}` 自动迁移）；消费方 `useWorkspaces.ts` → `AiWindowList.vue`（左栏工作区列表）。
+  - 已登记 **`POST /__ai/workspace/register`** —— body `{path, activate?}`：把已有目录入册（幂等，
+    id 由路径派生）；`activate:true` 同时激活。旧入口 `/workspace/select`、`/workspace/pick`
+    现在也会自动入册并激活。SSOT 同上 `config.ts`。
+  - 已登记 **`POST /__ai/workspace/activate`** —— body `{id}`：切活跃工作区（= setRoot 切执行 root）；
+    未 id 返回 404。消费方 `useWorkspaces.ts`（激活成功后整页 reload，与 WorkspaceGuide 同约定）。
+  - 已登记 **`POST /__ai/workspace/remove`** —— body `{id}`：出册；**活跃工作区拒移（409）**防悬空 activeId。
+  - 已登记 **`POST /__ai/workspace/create`**（multi-workspace-create-v1）—— body `{mode, path, branch?, url?, baseRepo?, activate?}`：
+    新建工作区三种模式——`worktree`（`git worktree add -b <branch> <path>`，同仓库切新分支共享 .git）、
+    `clone`（`git clone <url> <path>`，独立仓库）；`register` 模式要求路径已存在（走 `/workspace/register`）。
+    目标路径已存在返 400；成功后自动入册（activate=true 时 setRoot + persist）。SSOT：`routes/workspace.ts`。
+  - 已登记 **`POST /__ai/run`**（既有端点增补）—— body 新增 `workspaceId?`：目标工作区缺省用活跃项；
+    注册表外 id 返 404。执行链包在 `workspace-scope.ts` 的 ALS 作用域里，脚本 cwd / overlay /
+    post-run tsc·lint / 快照 / 日志按目标工作区 root 解析（并发运行互不串台）；
+    summary 帧新增 `workspaceId` 字段。SSOT：`routes/run.ts` + `workspace-scope.ts`。
 
 - **`pnpm test:e2e` 报 `ECONNREFUSED 127.0.0.1:<端口>` 时先读 `.ai-runner/.server-port`**（`[port-drift-file-v1]`）：
   该文件会被历史运行残留旧端口值，vite 代理据此指向错误端口。后端实际端口看 `pm2 jlist` 或 `curl 5175`。
@@ -241,7 +259,7 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   无法看清真实改动）；② 读 `docs/workorder-app-*-verdict-*.md` / `-plan-*.md` 里已裁决/已驳回
   的项，不重提、不改已驳回方案。
 
-- **思考与脚本共享单轮输出预算**（`token-budget-v1`）：截断根因不是脚本太长，而是思考（T）与脚本（S）共占同一份输出预算（B）——`T + S ≤ B`。行数不是判据，token 才是（实测：89 行通过、20 行截断，差别全在当轮思考量）。详细规则见 `SYSTEM.md` §10；提案背景与测试评估见 `docs/proposal-section-10-token-budget-2026-10-11.md`。
+- **思考与脚本共享单轮输出预算**（`token-budget-v1`）：截断根因不是脚本太长，而是思考（T）与脚本（S）共占同一份输出预算（B）——`T + S ≤ B`。行数不是判据，token 才是（实测：89 行通过、20 行截断，差别全在当轮思考量）。详细规则见 `SYSTEM.md` §10。
 
 ## 详见
 

@@ -127,8 +127,9 @@ export function appendFingerprints(p: string[], r: PromptResult | null): void {
 
 /**
  * [budget-feedback-v1] 单轮体积的「预警线」比例
- * [WHY] §10 的 300 行 / 12 KB 是**硬上限**，但撞到上限时已经站在被截断的边缘了；
- *   预警线取硬上限的 70%（≈210 行 / 8.4 KB），在还来得及收窄时就提示。
+ * [WHY] §10 的 300 行 / 12 KB 是**非拦截闸门**：超限只留痕不拦截，但它是最可靠的确定性
+ *   安全工作区（在此之内一定不因体积被截），撞到该体积已站在截断边缘；
+ *   预警线取安全工作区的 70%（≈210 行 / 8.4 KB），在还来得及收窄时就提示。
  * [CONSTRAINT] 必须 < 1.0，否则「预警」与「超预算」两档合并，退化成永不触发的死分支。
  */
 export const BUDGET_WARN_RATIO = 0.7
@@ -152,7 +153,8 @@ export function appendBudgetNotice(p: string[], r: PromptResult | null): void {
   const maxKb = Math.round(sz.maxBytes / 1024)
   p.push('# 本轮输出体积（服务端实测）')
   p.push(`- 上一轮脚本：${sz.lines} 行 / ${kb.toFixed(1)} KB`)
-  p.push(`- §10 预算：硬上限 ${sz.maxLines} 行 / ${maxKb} KB；**单轮建议 ≤ 150 行**（给截断留余量）`)
+  p.push(`- §10 预算（非闸门，超限只留痕不拦截）：${sz.maxLines} 行 / ${maxKb} KB 是确定性安全工作区；**单轮建议 ≤ 150 行**（合计 >150 行时尾段易截断）`)
+  p.push(`- 注：本块百分比只计脚本 S；思考 T 与 S 共享单轮输出预算（T + S ≤ B），服务端测不到 T`)
   if (sz.overBudget) {
     p.push(`- ⚠ 上一轮**已超预算**（用掉 ${pct}%）：它能完整到达属于侥幸，下一轮务必拆成多个小脚本`)
   } else if (ratio >= BUDGET_WARN_RATIO) {
@@ -359,17 +361,17 @@ export function appendScriptInvalid(p: string[], r: PromptResult | null): void {
       const kb = (r.scriptSize.bytes / 1024).toFixed(1)
       p.push(
         `- 到达体积：${r.scriptSize.lines} 行 / ${kb} KB`
-        + `（预算上限 ${r.scriptSize.maxLines} 行 / ${Math.round(r.scriptSize.maxBytes / 1024)} KB）`,
+        + `（§10 安全工作区 ${r.scriptSize.maxLines} 行 / ${Math.round(r.scriptSize.maxBytes / 1024)} KB，非拦截闸门）`,
       )
       p.push(r.scriptSize.overBudget
         ? '- ⚠ 到达体积**已超预算**：这一轮本就输出不完，与任务难度无关，纯粹是单轮太长'
-        : '- 到达体积未超预算：说明本轮恰好卡在上限附近，下一轮务必留出余量')
+        : '- 到达体积未超预算：说明本轮恰好卡在安全工作区边缘，下一轮务必留出余量')
     }
     p.push('')
     p.push('请这样做（**不要原地重试**）：')
     p.push('1. **禁止**重发同样长度的脚本——同样长度必然再次被切断，只是白烧一轮')
     p.push('2. 把本轮改动**拆成多个小脚本**：一条回复里可以给出多个代码块，它们会被**串行**执行')
-    p.push('3. 每个脚本只推进一个原子步骤，**建议 ≤ 150 行**（给上限留出至少一半余量）')
+    p.push('3. 每个脚本只推进一个原子步骤，**建议 ≤ 150 行**（给安全工作区留出至少一半余量）')
     p.push('4. 若前几个块已成功落盘，只重发**尚未完成**的部分，不要从头再来')
   } else {
     p.push('**判定：脚本语法/契约不合法，服务端在解析阶段就拦下了它（未执行）。**')

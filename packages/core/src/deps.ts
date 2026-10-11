@@ -3,7 +3,7 @@
 
 // 环境元数据
 
-export { type Change, getRoot, SCRIPTS_DIR } from './config.js'
+export { type Change, getRoot, getWorkspace, SCRIPTS_DIR } from './config.js'
 
 // Git
 export { gitCommitAfter, gitSnapshot } from './git.js'
@@ -95,3 +95,7 @@ export {
   saveIndexBefore,
   scanIndex,
 } from './utils/index.js'
+
+// [multi-workspace-v1] 工作区作用域（ALS）：/run 请求级 root 隔离
+//   run.ts 直 import 会使该文件模块数达 9（>8 阻断），与 scanScriptHead 同理走 barrel
+export { runWithWorkspace } from './workspace-scope.js'
