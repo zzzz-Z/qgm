@@ -1,8 +1,15 @@
 # 多工作区方案（计划）
 
 - **性质**：应用端提案（待宿主 / 用户拍板），**未开工**。
+- **实施状态（2026-10-11 更新）**：用户已拍板，分支 `feat/multi-workspace` 已落地
+  **阶段 1 全部 + 阶段 2 核心链路**：工作区注册表（config.ts，幂等入册 / 激活 / 拒移活跃项）、
+  `/run` 带 `workspaceId`（缺省活跃项，未知 id 404）、ALS root 作用域（`workspace-scope.ts`，
+  103 处 getRoot 消费点与 8 处 env 旁路零改语义即获得按请求隔离）、左栏站点列表改工作区列表
+  （AiWindowList.vue + useWorkspaces.ts）。未做：传输层（油猴 / 无头）消息带 workspaceId、
+  看板 `running` 每工作区一项（SYSTEM.md §2 宿主契约，只提案）、git worktree / clone 式新建（D3 另两入口）。
 - **关联**：`packages/core/SYSTEM.md` 顶部「应用级 / 工作区级」边界（本会话新增）。
 - **闸门**：属新功能，撞阶段闸门（`bin/check-status.cjs` 报 `prompt-budget 2/3`，规则「≥ 2 周不做新功能」）。
+  用户已显式授权开工（2026-10-11）。
 
 ## §0 一句话
 
@@ -32,10 +39,15 @@
 
 - `/run` 请求不带 workspaceId（隐含使用 `getRoot()` 返回的单值）。
 - `getRoot()` 返回单个 root；多工作区需要按 id 索引的列表 + 当前活跃 id。
-- UI 是单工作区视图（`SidePane` 是站点列表，切站点不切工作区）。
-- 看板 `running` 是 `string`（SYSTEM.md §2 契约），多工作区同时跑时需要改成每工作区一项 running。
+- UI 是单工作区视图（站点列表在 `AiWindowList.vue`（ScriptPanel 左栏），**不是** SidePane——
+  SidePane 是 tree/changes/worklog/kb/terminal 标签页；站点切model的会话逻辑在 `useAiSite.ts` / App.vue）。
+- 看板 `running` 是 `string`（SYSTEM.md §2 契约），多工作区同时跑时需要改成每工作区一项。
 - `tasksBySid` 按 sid 分桶，sid 与 workspaceId 是两个维度——需明确工作区切换时 sid 是否新建。
 - 传输层（油猴 / 无头）回传消息不带 workspaceId。
+- **`getRoot()` 调用面（2026-10-11 实测）**：103 处消费、38 个文件；另有 **8 处 env 旁路**
+  （snapshot / tsc / lint / overlay / compliance / error-files / plan-parser / error-fingerprint / file-index
+  直接读 `process.env.AI_RUNNER_ROOT`，import 不到 config）——单宿主并发时 post-run 会解析到错误 root，
+  这是比「config.ts 单值改多值」更大的隐藏改造面（解法见 §5 D5）。
 - **观测层**：跨会话 / 跨工作区的日志目前是隔离的（AGENTS.md 已记录此模式），多工作区必须自带统一观测层。
 
 ## §3 三条路径
@@ -91,20 +103,24 @@
 - **D2：sid 与 workspaceId 的关系**。同工作区多会话（sid 不同）？同会话跨工作区（workspaceId 变）？两者是独立维度还是绑定？建议：**独立维度**——sid 是会话，workspaceId 是工作区，一个会话可切换工作区，一个工作区可服务多个会话。
 - **D3：新建工作区的方式**。`git worktree`（同仓库多分支）/ `git clone`（异仓库）/ 指向已有目录（只注册）。建议：三种都支持，UI 上分三个入口。
 - **D4：并发写入策略**。同工作区同时被两会话操作时的行为：拒绝 / 排队 / 后写胜。建议：**拒绝**（后到者报冲突）——与 `overlay-atomic-v1` 的「整轮原子」语义一致。
+- **D5（2026-10-11 新增，可行性分析结论）：root 解析策略**。103 处 `getRoot()` + 8 处 env 旁路逐点穿参不可行（改动面失控）；
+  采用 **AsyncLocalStorage 作用域**：`/run` 解析 workspaceId 后把执行链包进 `runWithWorkspace()`，
+  `getRoot()` 与 8 处本地 resolver 改读「ALS store → env → cwd」逐级回落——调用点零改动即按请求隔离，
+  并发运行不串台。落地：`packages/core/src/workspace-scope.ts`。
 
 ## §6 改造清单（阶段 2）
 
 按依赖顺序：
 
-1. **`config.ts`**：单 root → `Map<workspaceId, Root>` + `activeWorkspaceId`。
-2. **`workspace.ts`**：新增 `POST /workspace/create`（git worktree / clone / register）、`DELETE /workspace/:id`、`POST /workspace/:id/activate`。
-3. **`/run` 路由**：请求体加 `workspaceId`；缺省用活跃工作区。
-4. **`runProcess` 调用点**：从 `run-script` 或 `session-manager` 传 `cwd: workspaceRoot(id)`。
-5. **看板 `running`**：`task-store.ts` 从 string 改为 `Record<workspaceId, string>`。
-6. **`SYSTEM.md §2`**：同步 `running` 契约（宿主独占，应用端只提案）。
-7. **传输层**：`/__ai/ws` 与油猴回传消息体加 `workspaceId`。
-8. **UI**：`SidePane.vue` 从站点列表改为工作区列表；`TerminalPane` / `ScriptPanel` / `TaskProgressPanel` 按 workspaceId 分视图。
-9. **观测层**：`logs/*.jsonl` 每条加 `workspaceId`；跨工作区聚合视图。
+1. **`config.ts`**：单 root → `Map<workspaceId, Root>` + `activeWorkspaceId`（✅ 已落地；activate 仍落 `setRoot` 原语，103 处消费点语义不变）。
+2. **`workspace.ts`**：新增 `POST /workspace/create`（git worktree / clone / register）、`DELETE /workspace/:id`、`POST /workspace/:id/activate`（✅ 已落地 register / activate / remove / registry 四端点；create 的 worktree / clone 入口未做）。
+3. **`/run` 路由**：请求体加 `workspaceId`；缺省用活跃工作区（✅ 已落地；未知 id 404）。
+4. **`runProcess` 调用点**：从 `run-script` 或 `session-manager` 传 `cwd: workspaceRoot(id)`（✅ 经 D5 ALS 隐式生效，`run-script.ts` 的 `getRoot()` 自动按作用域解析）。
+5. **看板 `running`**：`task-store.ts` 从 string 改为 `Record<workspaceId, string>`（未做——SYSTEM.md §2 宿主契约，只提案）。
+6. **`SYSTEM.md §2`**：同步 `running` 契约（宿主独占，应用端只提案）（未做）。
+7. **传输层**：`/__ai/ws` 与油猴回传消息体加 `workspaceId`（未做；沙箱子进程已注入 `AI_RUNNER_WORKSPACE_ID` env 供后续接线）。
+8. **UI**：左栏从站点列表改为工作区列表——**实际文件是 `AiWindowList.vue`（ScriptPanel 左栏）而非 SidePane**（✅ 已落地，配 `useWorkspaces.ts`；原承重测试 `aiwin-collapse.node-test.ts` 的 aria 断言同步更新）。
+9. **观测层**：`logs/*.jsonl` 每条加 `workspaceId`；跨工作区聚合视图（runner 通道已带 runId/sid，workspaceId 接线未做）。
 
 ## §7 风险
 
@@ -113,7 +129,12 @@
 - **`.ai-runner` 状态分裂**：`lessons.md` / `skills/` 建议共享（跨工作区累积），`state.json` 按工作区分片（看板隔离）。
 - **观测层缺口**：跨会话日志目前隔离；多工作区必须自带统一观测层，否则每个新会话都在同一盲区里重造轮子（AGENTS.md 已记录此模式）。
 - **`instance-ownership-v1` 边界**：多工作区后，5175 的启动 / 重启是否要按工作区独立？本方案不涉及（沿用现有 pm2 托管模型）。
-- **`AGENTS.md` 的加载位置**：`SYSTEM.md` 是应用级（每会话一次注入，跨工作区相同）；`AGENTS.md` 是工作区级（每工作区各一份）。宿主当前从「进程 cwd」读取 AGENTS.md——多工作区后须改为从「活跃工作区 root」读。**这是本方案的核心机制依赖**（与本会话新建的层级边界直接相关）。
+- **`AGENTS.md` 的加载位置**：`SYSTEM.md` 是应用级（每会话一次注入，跨工作区相同）；`AGENTS.md` 是工作区级（每工作区各一份）。
+  **2026-10-11 取证修正**：core 代码里并没有「宿主从进程 cwd 读 AGENTS.md」的运行时实现
+  （只有 `workspace.ts` 的 `hasAgents` 探测与 docs 检索器读 `docs/`）——该注入发生在 harness 层。
+  因此「宿主改为按活跃工作区读 AGENTS.md」不是代码改造项，而是 harness 侧需要跟进的层级约定；
+  应用侧能保证的是：`/workspace/activate` 切换 root 后，工作区级的 `.ai-runner` 状态
+  （state.json / scripts / snapshots / 日志）天然随 root 分片（✅ 已随 ALS 落地）。
 
 ## §8 明确不做
 
