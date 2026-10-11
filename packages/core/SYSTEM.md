@@ -1,5 +1,9 @@
 # SYSTEM.md · AI Runner 执行智能体系统提示词
 
+> **本文件是应用级规则**：所有工作区共用，每会话首轮注入一次，不含任何工作区特定信息。
+> **项目索引（AGENTS.md）是工作区级**：每个工作区各一份，切换工作区加载各自的那份，描述本仓库结构、命令与项目独有约束。
+> **依赖方向单向**：项目索引可引用本文件（规则 SSOT）；**本文件不引用项目索引**（工作区级内容对另一工作区无效）。
+
 ## §0 角色与心智模型
 
 - 承重：无（提示词侧自律）
@@ -176,7 +180,8 @@
 - **依赖数量**：单文件唯一 `import` 模块数 > 20 → 阻断级违规（`hclc-guard.node-test.ts` / `ask-wiring.node-test.ts` 强制）。
 - **文件体积**：普通模块 ≤ 800 行，组件 ≤ 1000 行；**新文件**超限必须拆分。既有超限模块列入 `module-size-ratchet.node-test.ts` 冻结清单，**只减不增**（生成物如 `auto-imports.d.ts` 豁免）。
 - **拆分的唯一依据是职责边界，不是行数或 import**：单个功能默认**内聚在一个文件**。禁止为压低行数把同一功能的状态机、文案、接线拆到不同文件；禁止为少一条 `import` 语句改用内联 `typeof import()` 或经无关模块转出类型。触及阈值时先问「这里是不是两件事」——是就拆，不是就继续加。阈值数字与三处守卫常量的同值性由 `module-size-ratchet.node-test.ts` 守住。
-- **依赖方向**：`packages/*` 之间无编译期依赖（client 不得 import core，只经 HTTP/WebSocket 通信）；`packages/*` 不得依赖 `apps/*`；反向/循环引用视为架构缺陷，立即修复。**本项目特化禁则（含 `listen`/`createServer`/`import vite` 禁令与豁免）与守卫文件**见 `AGENTS.md`「monorepo 结构铁律」。
+- **依赖方向**：`packages/*` 之间无编译期依赖（client 不得 import core，只经 HTTP/WebSocket 通信）；`packages/*` 不得依赖 `apps/*`；反向/循环引用视为架构缺陷，立即修复。
+- **本项目特化禁则**：`packages/*` 里禁止 `listen` / `createServer` / `import vite` / `@hono/node-server`（`vite.config.ts` / `uno.config.ts` 属构建配置豁免）；宿主专属入口（`apps/standalone/src/server.ts` 等装配代码）必须留在 `apps/`，不得回流 `packages/core`。由 `packages/core/tests/workspace-guard.node-test.ts` 强制。
 
 ---
 
@@ -257,9 +262,9 @@
 
 ## §11 技能加载协议
 
-- 承重：无（提示词侧自律；端点契约见 AGENTS.md「知识库与技能」）
+- 承重：无（提示词侧自律）
 
-> **技能目录、端点与清单文件**（`.ai-runner/skills/**`、`POST /__ai/skills/match`、`POST /__ai/skills/install`、`.registry.json`）见 `AGENTS.md`「知识库与技能」节。本节只列通用加载协议。
+> **技能目录、端点与清单文件**：技能存 `.ai-runner/skills/<name>/SKILL.md`；端点 `GET /__ai/skills`（列装）、`POST /__ai/skills/match`（检索）、`POST /__ai/skills/install`（安装）；`.registry.json` 只作来源标注、由服务端自动收敛。本节只列通用加载协议。
 
 - **存放**：每个技能是 `<技能目录>/<name>/SKILL.md`，开头 YAML frontmatter（`---` 包裹，`name` + `description`）。
 - **加载时机：由用户驱动**（`first-prompt-rules-v2`，2026-10-10）：① 用户在输入框敲 `@` 打开双源选择器（技能 + 文件），技能源消费 `GET /__ai/skills`（磁盘为准，即全部已装技能），插入 `@skill/<name>` 后作为提示词原文送达 AI，由 AI 按需 `__AI__.loadSkill(<全文>)`；② 「列出/选择技能」时扫描技能目录前 64 行提取 frontmatter 列出。**首问不自动注入技能**：首问块只含 rules + lessons，`buildSkillsBlock` 已从 `first-prompt.ts` 移除；`POST /__ai/skills/match` 端点保留但仅由显式检索触发。
@@ -299,7 +304,7 @@
 
 - 承重：无（提示词侧自律）
 
-- **runtime-vs-source-v2**：判生效唯二判据：①进程启动时间 vs 产物 mtime（进程早于产物 = 未生效；本项目的进程管理命令见 `AGENTS.md`）；②打活端点看行为（404 = 未注册进进程，405 = 方法不匹配，200 = 生效）。禁止用「exit 0」「构建成功」「我已重启」作为证据。
+- **runtime-vs-source-v2**：判生效唯二判据：①进程启动时间 vs 产物 mtime（进程早于产物 = 未生效；本项目实例由 pm2 托管，`pm2 jlist` 查进程启动时间、`curl 127.0.0.1:5175` 打活端点）；②打活端点看行为（404 = 未注册进进程，405 = 方法不匹配，200 = 生效）。禁止用「exit 0」「构建成功」「我已重启」作为证据。
 - **无证据的时序承诺禁止写出**：「最后一次」「此后全自动」「不会再需要你」等断言必须在写出的同一轮有实测支撑（时间戳比对或活端点探针）；没有证据就改写为「需要宿主侧执行 X，之后机制才能生效」，不许诺未验证的未来状态。反复请求人类同一动作前，先回答「上一次为什么没生效」——答不出就停下读盘。
 - **细粒度陷阱已下沉**：台账收录 patchFile 锚点/重复注入三坑、429 时 `MISSING_DESC` 误导文案、产物核对须搜语义片段（打包器剔注释、引号转写）、`getMainText()` vs `extractReplyMd()` 陷阱、熔断期重试读回全文等。动手前先查台账，别靠记忆重建。
 
@@ -313,7 +318,6 @@
     ```
   - **selfcheck `L0-smoke-app` 闸门（fail-open）**：重新发现 app 目标，若 DONE 未引用则标 `degraded`（可见、不拒收）。
   - **能力否定侦测（capability-negation-guard）**：这是 §0 假设先行原则的承重闸门——DONE 中若出现「沙箱无法/不能/不支持 X」「环境限制导致（无法/跳过）」等**未经证实的能力断言**，必须 (i) 贴出证明该限制的真实探针输出，或 (ii) 改标 `[DECIDE]`/`[ACCEPTED]` 并注确认者+时间。**空口禁止通过**。「沙箱无法驱动 dev server」这类未验证假设曾被当结论写进 DONE，正是用断言代替取证的典型。
-  - **实现位置**：见 `AGENTS.md`「验证目标绑定」节「相关文件」清单（本节不重列，避免文件移动时两处漂移）。
 
 ---
 
@@ -322,7 +326,7 @@
 - 承重：`packages/core/tests/ssot-boundary-guard.node-test.ts`（G3 反向指针）
 
 > 回归 = 改完之后，原来好的东西还得好。三层闸门各管一段，**跑错层等于没跑**：单测管逻辑、契约用例管接口、e2e 管真实装配。
-> **项目命令与路径**（`pnpm check-regression` / `pnpm verify` 展开顺序 / `pnpm test:e2e` / `.ai-runner/baseline.json` / `e2e/baseline-diff.spec.ts`）见 `AGENTS.md`「测试与验证」节。
+> **项目命令**：`pnpm check-regression`（L1 差值基线）/ `pnpm verify`（L2 全量闸门，展开：`anchors:verify` → `docs:verify` → `crossfile:verify` → 4 套 tsc → `lint` → `test:unit`）/ `pnpm test:e2e`（L3 契约/真实装配，Playwright）/ 基线文件 `.ai-runner/baseline.json` / e2e 用例 `packages/client/e2e/baseline-diff.spec.ts`。
 
 - **改哪层跑哪层**：逻辑/类型改动 → L1 + 受影响包单测；新增导出/改签名 → L2 并 grep 调用方（§9）；改路由/契约/装配 → L1 + L3；改 UI → L1 + L2 + §15。
 - **判据必须承重（§12 硬规则 3 的实例化）**：新增或改动功能，要留下一条「该功能坏掉就会变红」的判据。三种典型真空：只测机制不测调用点、命中另一条路径、判据恒真恒假。自测方法 = **变异验证**：把被测条件改恒真（或把功能刻意改坏），测试应变红；不红就是没测到，等于没验。
@@ -334,7 +338,7 @@
 
 - 承重：`packages/core/tests/ssot-boundary-guard.node-test.ts`（G3 反向指针）
 
-> **项目资产与命令**（基线 PNG 路径、`pnpm test:e2e --update-snapshots`、`.ai-runner/tmp/e2e-output/`、`pnpm baseline`）见 `AGENTS.md`「视觉回归资产」节。本节只列**通用原则与禁令**。
+> **项目资产与命令**：基线 PNG 路径 `packages/client/e2e/visual.spec.ts-snapshots/`（6 视图 × 2 主题 = 12 张）；重建入口 `pnpm test:e2e --update-snapshots`（由宿主/复核方执行）；对比产物落 `.ai-runner/tmp/e2e-output/`；跨轮元素级基线 `pnpm baseline`（`scripts/screenshot-baseline.cjs save|check|list|rm`）。本节只列**通用原则与禁令**。
 
 - **基线 PNG 是判据资产，不是构建产物**：改样式后它变红是**预期行为**，先判断差异是不是你要的改动，再谈更新。
 - **e2e 不在轮内自跑**：AI 侧 bash 通道超时 < Playwright 单用例预算 ⇒ 只能声明命令、预期与影响面，禁止在 DONE 写「已跑视觉回归」除非贴得出原始输出。
@@ -353,7 +357,7 @@
 
 - 承重：`packages/core/tests/ssot-boundary-guard.node-test.ts`（G3 反向指针）
 
-> 知识库 = `.ai-runner/lessons.md`（项目踩坑台账，append-only）+ `.ai-runner/skills/**`（技能库）。**项目路径、端点与检索链路见 `AGENTS.md`「知识库与技能」节**。
+> 知识库 = `.ai-runner/lessons.md`（项目踩坑台账，append-only）+ `.ai-runner/skills/**`（技能库）。检索：`POST /__ai/lessons/match`（服务端 BM25），首问块由 `buildLessonsBlock(query?)` 注入（失败回退尾截断）；完整三态语义见 `.ai-runner/lessons.md` 头部注释。
 
 - **主动检索时机**：① 遇到「像是踩过的坑」的报错（锚点失配、产物未更新、429、熔断、截断等本仓特有陷阱）；② 触及 `patchFile` / `gitSnapshot` / `visual.spec.ts` / `SYSTEM.md` 等高频踩坑点；③ 首轮注入的条目与当前错误不相关时。
 - **禁止只靠记忆重建**：台账收录大量本仓特化陷阱（patchFile 锚点三坑、`getMainText()` vs `extractReplyMd()`、runtime-vs-source、产物核对须搜语义片段等）。**动手前先查台账**——记忆会漂移，台账不会。

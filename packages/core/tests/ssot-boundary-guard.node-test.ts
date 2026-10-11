@@ -64,12 +64,15 @@ test('G2 AGENTS.md 引用的每个 UPPER_SNAKE 常量名必须在源码中真实
   assert.deepEqual(missing, [], `AGENTS.md 引用了源码中不存在的常量（悬空声明）：${missing.join(', ')}`)
 })
 
-test('G3 反向指针：SYSTEM.md §14/§15/§16 头部必须保留「AGENTS.md」字样', () => {
+test('G3 SYSTEM.md §0 之后的正文不得引用工作区级的 AGENTS.md', () => {
   const system = fs.readFileSync(path.join(ROOT, 'packages/core/SYSTEM.md'), 'utf8')
-  for (const anchor of ['## §14 ', '## §15 ', '## §16 ']) {
-    const at = system.indexOf(anchor)
-    assert.ok(at > -1, `SYSTEM.md 找不到 ${anchor}（标题被改名）`)
-    const head = system.slice(at, at + 600)
-    assert.ok(head.includes('AGENTS.md'), `${anchor} 头部未指向 AGENTS.md（反向指针丢失）`)
-  }
+  // 头部说明块（§0 之前）已声明层级关系，允许提及；§0 之后的正文属规则主体，不得反向依赖工作区级索引
+  const bodyStart = system.indexOf('## §0')
+  assert.ok(bodyStart > -1, 'SYSTEM.md 找不到 §0 标题')
+  const body = system.slice(bodyStart)
+  // 变异：在 §0 之后任意位置加回 AGENTS.md 引用 ⇒ 本测试红
+  assert.ok(
+    !body.includes('AGENTS.md'),
+    'SYSTEM.md §0 之后的正文引用了工作区级的 AGENTS.md（应用级规则不得反向依赖）',
+  )
 })
