@@ -135,7 +135,7 @@ export function finalizeArgs(opts: {
   const { video, audio, bgm, subtitle, output, bgmVolume, encoder } = opts
   const args = ['-y', '-i', video, '-i', audio]
   if (bgm) args.push('-i', bgm)
-  if (subtitle) args.push('-vf', `subtitles=${subtitle}`)
+  if (subtitle) args.push('-vf', subtitleFilter(subtitle, opts.subtitleStyle))
   if (bgm) {
     args.push(
       '-filter_complex',

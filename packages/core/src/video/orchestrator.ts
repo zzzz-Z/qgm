@@ -155,7 +155,7 @@ async function finishPipeline(
   ctx: { script: string, terms: string[], ffmpegBin: string, ffprobeBin: string, duration: number },
 ): Promise<TaskState> {
   const dir = store.taskDir(state.taskId)
-  const { ffmpegBin, ffprobeBin, terms, duration } = ctx
+  const { ffmpegBin, terms, duration } = ctx
   const params = state.params
   const aspect = params.aspect || '9:16'
   const cfg = loadConfig()
