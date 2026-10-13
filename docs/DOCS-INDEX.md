@@ -21,6 +21,7 @@
 - `docs/DOCS-INDEX.md`：本文件，全仓 markdown 文档索引契约，由 `pnpm docs:verify` 双向校验。
 - `docs/USAGE.md`：打包与部署指南。
 - `docs/DESIGN.md`：设计文档。
+- `docs/moneyprinter-turbo-port-plan.md`：MoneyPrinterTurbo 能力重写方案——五阶段视频生成流水线，剧本由 AI 生成脚本落盘、编排器读文件，ffmpeg 假设可用。
 - `docs/plan/**`：计划草稿目录，被 `.gitignore` 忽略，不参与索引校验（`docs-scan.cjs` 的 `SKIP_PATHS` 显式豁免）。
 
 ## packages/
