@@ -2,7 +2,7 @@
 <!-- [WHY] 对齐 MPT 的 WebUI，消费 /__ai/video/* 端点；作为右侧栏新 tab。 -->
 <!-- [CONSTRAINT] 轮询间隔 2s，任务终态即停；不轮询时不留定时器。 -->
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 interface TaskSummary {
   taskId: string
@@ -21,6 +21,8 @@ const STATUS_LABEL: Record<string, string> = {
   completed: '已完成',
   failed: '失败',
 }
+/** 阶段顺序：用于把当前 stage 映射为「第几步」 */
+const STAGE_ORDER = ['script', 'terms', 'audio', 'materials', 'compose']
 let timer: ReturnType<typeof setInterval> | null = null
 /** 阶段中文名 */
 const STAGE_LABEL: Record<string, string> = {
@@ -40,6 +42,17 @@ const tasks = ref<TaskSummary[]>([])
 const submitting = ref(false)
 const message = ref('')
 
+/** 任务统计：总数 / 进行中 / 已完成 / 失败 */
+const stats = computed(() => {
+  const by = (s: string) => tasks.value.filter(t => t.status === s).length
+  return {
+    total: tasks.value.length,
+    active: by('pending') + by('processing'),
+    done: by('completed'),
+    failed: by('failed'),
+  }
+})
+
 onUnmounted(stopPolling)
 
 /** 挂载即刷新 */
@@ -47,6 +60,10 @@ refresh().then(() => {
   if (tasks.value.some(t => t.status === 'pending' || t.status === 'processing')) startPolling()
 })
 
+/** 当前 stage 在第几步（1-based）；未知阶段返回 0 */
+function stageIndex(stage: string): number {
+  return STAGE_ORDER.indexOf(stage) + 1
+}
 /** 拉任务列表 */
 async function refresh() {
   try {
@@ -97,13 +114,30 @@ async function remove(taskId: string) {
   await fetch(`/__ai/video/tasks/${taskId}`, { method: 'DELETE' })
   await refresh()
 }
+/** 手动刷新：立即拉一次，若有进行中任务则续跑轮询 */
+async function manualRefresh() {
+  message.value = ''
+  await refresh()
+  if (tasks.value.some(t => t.status === 'pending' || t.status === 'processing')) startPolling()
+}
 </script>
 
 <template>
   <div class="video-panel">
-    <h3 class="vp-title">
-      视频生成
-    </h3>
+    <div class="vp-head">
+      <h3 class="vp-title">
+        视频生成
+      </h3>
+      <button class="vp-refresh" title="刷新" @click="manualRefresh">
+        刷新
+      </button>
+    </div>
+    <div class="vp-stats">
+      <span>共 {{ stats.total }}</span>
+      <span v-if="stats.active" class="vp-st-active">进行 {{ stats.active }}</span>
+      <span v-if="stats.done" class="vp-st-done">完成 {{ stats.done }}</span>
+      <span v-if="stats.failed" class="vp-st-failed">失败 {{ stats.failed }}</span>
+    </div>
 
     <label class="vp-label">主题</label>
     <input v-model="subject" class="vp-input" placeholder="例如：长安古风故事" @keyup.enter="submit">
@@ -159,7 +193,7 @@ async function remove(taskId: string) {
           <div class="vp-bar" :style="{ width: `${t.progress}%` }" />
         </div>
         <div class="vp-meta">
-          <span v-if="t.stage">{{ STAGE_LABEL[t.stage] || t.stage }}</span>
+          <span v-if="t.stage">第 {{ stageIndex(t.stage) }}/5 步 · {{ STAGE_LABEL[t.stage] || t.stage }}</span>
           <span v-if="t.error" class="vp-err">{{ t.error }}</span>
         </div>
         <div class="vp-actions">
@@ -180,6 +214,41 @@ async function remove(taskId: string) {
 .video-panel {
   padding: 12px;
   font-size: 13px;
+}
+.vp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.vp-refresh {
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.vp-stats {
+  display: flex;
+  gap: 10px;
+  margin: 6px 0 10px;
+  font-size: 12px;
+  color: var(--fg-dim, #888);
+}
+.vp-st-active {
+  color: var(--accent, #4a8);
+}
+.vp-st-done {
+  color: #4c8;
+}
+.vp-st-failed {
+  color: #e55;
+}
+.vp-status.st-completed {
+  color: #4c8;
+}
+.vp-status.st-failed {
+  color: #e55;
+}
+.vp-status.st-processing {
+  color: var(--accent, #4a8);
 }
 .vp-title {
   margin: 0 0 8px;
