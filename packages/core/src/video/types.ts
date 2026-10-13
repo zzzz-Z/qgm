@@ -32,6 +32,8 @@ export interface VideoTaskParams {
   subtitleEngine?: SubtitleEngine
   bgmPath?: string
   bgmVolume?: number
+  /** 拼接顺序：顺序（默认）或随机打乱 */
+  clipOrder?: 'sequential' | 'random'
 }
 
 /** 任务持久化状态 */

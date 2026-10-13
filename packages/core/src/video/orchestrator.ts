@@ -160,19 +160,21 @@ async function finishPipeline(
     const dest = path.join(matDir, `clip_${String(i + 1).padStart(2, '0')}.mp4`)
     downloaded.push(await deps.material.download(mats[i], dest))
   }
-  state.materialPaths = downloaded
+  // [F23] 拼接顺序：随机打乱时用 Fisher-Yates，保输入不变
+  const ordered = params.clipOrder === 'random' ? shuffle(downloaded) : downloaded
+  state.materialPaths = ordered
   store.writeState(state)
 
   // 阶段 5：合成
   if (advance(state, 'compose', params.stopAt)) return state
   const encoder = await compositor.pickVideoEncoder(ffmpegBin)
-  const secs = clipSeconds(duration, downloaded.length)
+  const secs = clipSeconds(duration, ordered.length)
   const normDir = path.join(dir, 'normalized')
   fs.mkdirSync(normDir, { recursive: true })
   const normalized: string[] = []
-  for (let i = 0; i < downloaded.length; i++) {
+  for (let i = 0; i < ordered.length; i++) {
     const out = path.join(normDir, `n_${String(i + 1).padStart(2, '0')}.mp4`)
-    await compositor.runFfmpeg(ffmpegBin, compositor.normalizeClipArgs(downloaded[i], out, secs[i], aspect, encoder))
+    await compositor.runFfmpeg(ffmpegBin, compositor.normalizeClipArgs(ordered[i], out, secs[i], aspect, encoder))
     normalized.push(out)
   }
   const listFile = path.join(dir, 'concat.txt')
@@ -202,4 +204,14 @@ async function finishPipeline(
   state.stage = 'compose'
   store.writeState(state)
   return state
+}
+
+/** Fisher-Yates 洗牌（不改原数组）；用于 F23 随机拼接顺序 */
+function shuffle<T>(arr: T[]): T[] {
+  const a = arr.slice()
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
 }

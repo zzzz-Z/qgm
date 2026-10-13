@@ -160,3 +160,59 @@ videoHono.put('/config', async (c) => {
   saveConfig(next)
   return c.json({ ok: true, config: maskConfig(next) })
 })
+
+/** BGM 列表：扫描 `.ai-runner/video/bgm/` */
+videoHono.get('/musics', (c) => {
+  const root = getRoot() || '.'
+  const dir = path.join(root, '.ai-runner/video/bgm')
+  if (!fs.existsSync(dir)) return c.json({ ok: true, items: [] })
+  const items = fs.readdirSync(dir).filter(f => /\.(?:mp3|m4a|wav|aac)$/i.test(f))
+  return c.json({ ok: true, items })
+})
+
+/** 上传 BGM：body 为 {name, contentBase64} */
+videoHono.post('/musics', async (c) => {
+  let body: { name?: string, contentBase64?: string } = {}
+  try { body = await c.req.json() as { name?: string, contentBase64?: string } } catch { return c.json({ ok: false, error: '请求体必须是 JSON' }, 400) }
+  const name = path.basename(String(body.name || ''))
+  if (!name || !body.contentBase64) return c.json({ ok: false, error: '缺少 name 或 contentBase64' }, 400)
+  const root = getRoot() || '.'
+  const dir = path.join(root, '.ai-runner/video/bgm')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, name), Buffer.from(body.contentBase64, 'base64'))
+  return c.json({ ok: true, path: path.join(dir, name) })
+})
+
+/** 本地素材列表：扫描工作区 `assets/` */
+videoHono.get('/materials', (c) => {
+  const root = getRoot() || '.'
+  const dir = path.join(root, 'assets')
+  if (!fs.existsSync(dir)) return c.json({ ok: true, items: [] })
+  const items = fs.readdirSync(dir).filter(f => /\.(?:mp4|mov|webm|mkv|avi)$/i.test(f))
+  return c.json({ ok: true, items })
+})
+
+/** 上传本地素材：body 为 {name, contentBase64} */
+videoHono.post('/materials', async (c) => {
+  let body: { name?: string, contentBase64?: string } = {}
+  try { body = await c.req.json() as { name?: string, contentBase64?: string } } catch { return c.json({ ok: false, error: '请求体必须是 JSON' }, 400) }
+  const name = path.basename(String(body.name || ''))
+  if (!name || !body.contentBase64) return c.json({ ok: false, error: '缺少 name 或 contentBase64' }, 400)
+  const root = getRoot() || '.'
+  const dir = path.join(root, 'assets')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, name), Buffer.from(body.contentBase64, 'base64'))
+  return c.json({ ok: true, path: path.join(dir, name) })
+})
+
+/** 分步：仅生成剧本提示词（给 AI 用；返回待写入路径与提示词） */
+videoHono.post('/scripts', async (c) => {
+  let body: { videoSubject?: string } = {}
+  try { body = await c.req.json() as { videoSubject?: string } } catch { /* ignore */ }
+  const subject = String(body.videoSubject || '').trim()
+  if (!subject) return c.json({ ok: false, error: '缺少 videoSubject' }, 400)
+  const taskId = store.newTaskId()
+  const st = store.createInitialState(taskId, { videoSubject: subject, videoSource: 'local' })
+  store.writeState(st)
+  return c.json({ ok: true, taskId, scriptPath: path.join(store.taskDir(taskId), 'script.txt') })
+})
