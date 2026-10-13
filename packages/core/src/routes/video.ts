@@ -57,7 +57,7 @@ function buildDeps() {
 }
 
 /** 创建视频任务：返回 taskId 与初始状态 */
-videoHono.post('/tasks', async (c) => {
+videoHono.post('/video/tasks', async (c) => {
   let body: Record<string, unknown> = {}
   try { body = await c.req.json() as Record<string, unknown> } catch { return c.json({ ok: false, error: '请求体必须是 JSON' }, 400) }
   const subject = String(body.videoSubject || '').trim()
@@ -79,7 +79,7 @@ videoHono.post('/tasks', async (c) => {
 })
 
 /** 任务列表；支持 limit 与 status 过滤 */
-videoHono.get('/tasks', (c) => {
+videoHono.get('/video/tasks', (c) => {
   const limit = Number(c.req.query('limit') || 50)
   const status = c.req.query('status')
   let items = store.listStates()
@@ -98,20 +98,20 @@ videoHono.get('/tasks', (c) => {
 })
 
 /** 任务详情 */
-videoHono.get('/tasks/:id', (c) => {
+videoHono.get('/video/tasks/:id', (c) => {
   const st = store.readState(c.req.param('id'))
   if (!st) return c.json({ ok: false, error: '任务不存在' }, 404)
   return c.json({ ok: true, task: st })
 })
 
 /** 删除任务及其全部产物 */
-videoHono.delete('/tasks/:id', (c) => {
+videoHono.delete('/video/tasks/:id', (c) => {
   const ok = store.removeTask(c.req.param('id'))
   return c.json({ ok, removed: ok })
 })
 
 /** 下载成品；文件缺失返 404 */
-videoHono.get('/tasks/:id/download', async (c) => {
+videoHono.get('/video/tasks/:id/download', async (c) => {
   const st = store.readState(c.req.param('id'))
   if (!st || !st.outputPath || !fs.existsSync(st.outputPath)) return c.json({ ok: false, error: '成品不存在' }, 404)
   const buf = fs.readFileSync(st.outputPath)
@@ -121,7 +121,7 @@ videoHono.get('/tasks/:id/download', async (c) => {
 })
 
 /** 写入剧本文件（供编排器读取；由 AI 脚本落盘后也可直接 POST） */
-videoHono.post('/tasks/:id/script', async (c) => {
+videoHono.post('/video/tasks/:id/script', async (c) => {
   const id = c.req.param('id')
   if (!store.readState(id)) return c.json({ ok: false, error: '任务不存在' }, 404)
   let body: { script?: string } = {}
@@ -135,7 +135,7 @@ videoHono.post('/tasks/:id/script', async (c) => {
 })
 
 /** 写入搜索词文件 */
-videoHono.post('/tasks/:id/terms', async (c) => {
+videoHono.post('/video/tasks/:id/terms', async (c) => {
   const id = c.req.param('id')
   if (!store.readState(id)) return c.json({ ok: false, error: '任务不存在' }, 404)
   let body: { terms?: string[] } = {}
@@ -149,12 +149,12 @@ videoHono.post('/tasks/:id/terms', async (c) => {
 })
 
 /** 读取配置（敏感字段脱敏） */
-videoHono.get('/config', (c) => {
+videoHono.get('/video/config', (c) => {
   return c.json({ ok: true, config: maskConfig(loadConfig()) })
 })
 
 /** 更新配置（脱敏占位保留原值，不覆盖真实 Key） */
-videoHono.put('/config', async (c) => {
+videoHono.put('/video/config', async (c) => {
   let body: Record<string, unknown> = {}
   try { body = await c.req.json() as Record<string, unknown> } catch { return c.json({ ok: false, error: '请求体必须是 JSON' }, 400) }
   const cur = loadConfig()
@@ -194,7 +194,7 @@ videoHono.put('/config', async (c) => {
 })
 
 /** BGM 列表：扫描 `.ai-runner/video/bgm/` */
-videoHono.get('/musics', (c) => {
+videoHono.get('/video/musics', (c) => {
   const root = getRoot() || '.'
   const dir = path.join(root, '.ai-runner/video/bgm')
   if (!fs.existsSync(dir)) return c.json({ ok: true, items: [] })
@@ -203,7 +203,7 @@ videoHono.get('/musics', (c) => {
 })
 
 /** 上传 BGM：body 为 {name, contentBase64} */
-videoHono.post('/musics', async (c) => {
+videoHono.post('/video/musics', async (c) => {
   let body: { name?: string, contentBase64?: string } = {}
   try { body = await c.req.json() as { name?: string, contentBase64?: string } } catch { return c.json({ ok: false, error: '请求体必须是 JSON' }, 400) }
   const name = path.basename(String(body.name || ''))
@@ -216,7 +216,7 @@ videoHono.post('/musics', async (c) => {
 })
 
 /** 本地素材列表：扫描工作区 `assets/` */
-videoHono.get('/materials', (c) => {
+videoHono.get('/video/materials', (c) => {
   const root = getRoot() || '.'
   const dir = path.join(root, 'assets')
   if (!fs.existsSync(dir)) return c.json({ ok: true, items: [] })
@@ -225,7 +225,7 @@ videoHono.get('/materials', (c) => {
 })
 
 /** 上传本地素材：body 为 {name, contentBase64} */
-videoHono.post('/materials', async (c) => {
+videoHono.post('/video/materials', async (c) => {
   let body: { name?: string, contentBase64?: string } = {}
   try { body = await c.req.json() as { name?: string, contentBase64?: string } } catch { return c.json({ ok: false, error: '请求体必须是 JSON' }, 400) }
   const name = path.basename(String(body.name || ''))
@@ -238,7 +238,7 @@ videoHono.post('/materials', async (c) => {
 })
 
 /** 分步：仅生成剧本提示词（给 AI 用；返回待写入路径与提示词） */
-videoHono.post('/scripts', async (c) => {
+videoHono.post('/video/scripts', async (c) => {
   let body: { videoSubject?: string } = {}
   try { body = await c.req.json() as { videoSubject?: string } } catch { /* ignore */ }
   const subject = String(body.videoSubject || '').trim()
