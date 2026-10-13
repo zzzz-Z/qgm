@@ -16,6 +16,7 @@ import { AzureTTSAdapter } from '../video/providers/tts-azure.js'
 import { PexelsMaterialProvider } from '../video/providers/material-pexels.js'
 import { PixabayMaterialProvider } from '../video/providers/material-pixabay.js'
 import { CogVideoXMaterialProvider } from '../video/providers/material-cogvideox.js'
+import { AgnesMaterialProvider } from '../video/providers/material-agnes.js'
 import type { VideoTaskParams } from '../video/types.js'
 
 /** /video 路由 Hono 实例 */
@@ -35,7 +36,10 @@ function buildTTS() {
 /** 组装素材源：优先级 AI > Pexels > Pixabay > Local；后者始终可用的兜底 */
 function buildMaterial(root: string) {
   const cfg = loadConfig()
-  if (cfg.ai.apiKey) return new CogVideoXMaterialProvider(cfg.ai.apiKey, cfg.ai.model)
+  if (cfg.ai.apiKey) {
+    if (cfg.ai.provider === 'cogvideox') return new CogVideoXMaterialProvider(cfg.ai.apiKey, cfg.ai.model)
+    return new AgnesMaterialProvider(cfg.ai.apiKey)
+  }
   if (cfg.material.pexelsApiKey) return new PexelsMaterialProvider(cfg.material.pexelsApiKey)
   if (cfg.material.pixabayApiKey) return new PixabayMaterialProvider(cfg.material.pixabayApiKey)
   return new LocalMaterialProvider(path.join(root, 'assets'))
@@ -171,6 +175,15 @@ videoHono.put('/config', async (c) => {
   if (b.azure) {
     if (typeof b.azure.apiKey === 'string' && !isMasked(b.azure.apiKey)) next.azure.apiKey = b.azure.apiKey
     if (typeof b.azure.region === 'string') next.azure.region = b.azure.region
+  }
+  if (b.ai) {
+    if (typeof b.ai.apiKey === 'string' && !isMasked(b.ai.apiKey)) next.ai.apiKey = b.ai.apiKey
+    if (b.ai.provider === 'agnes' || b.ai.provider === 'cogvideox') next.ai.provider = b.ai.provider
+    if (typeof b.ai.model === 'string') next.ai.model = b.ai.model
+  }
+  if (b.material) {
+    if (typeof b.material.pexelsApiKey === 'string' && !isMasked(b.material.pexelsApiKey)) next.material.pexelsApiKey = b.material.pexelsApiKey
+    if (typeof b.material.pixabayApiKey === 'string' && !isMasked(b.material.pixabayApiKey)) next.material.pixabayApiKey = b.material.pixabayApiKey
   }
   if (b.video) {
     if (typeof b.video.aspect === 'string') next.video.aspect = b.video.aspect

@@ -14,6 +14,13 @@ interface TaskSummary {
   updatedAt: number
 }
 
+/** 任务状态中文名 */
+const STATUS_LABEL: Record<string, string> = {
+  pending: '排队中',
+  processing: '生成中',
+  completed: '已完成',
+  failed: '失败',
+}
 let timer: ReturnType<typeof setInterval> | null = null
 /** 阶段中文名 */
 const STAGE_LABEL: Record<string, string> = {
@@ -26,7 +33,7 @@ const STAGE_LABEL: Record<string, string> = {
 
 /** 表单：主题、素材来源、画幅 */
 const subject = ref('')
-const videoSource = ref<'local' | 'pexels' | 'pixabay'>('local')
+const videoSource = ref<'local' | 'pexels' | 'pixabay' | 'ai'>('local')
 const aspect = ref<'9:16' | '16:9'>('9:16')
 /** 任务列表与提交状态 */
 const tasks = ref<TaskSummary[]>([])
@@ -113,6 +120,9 @@ async function remove(taskId: string) {
         <option value="pixabay">
           Pixabay
         </option>
+        <option value="ai">
+          AI 生成
+        </option>
       </select>
     </div>
 
@@ -143,13 +153,13 @@ async function remove(taskId: string) {
       <li v-for="t in tasks" :key="t.taskId" class="vp-item">
         <div class="vp-item-head">
           <span class="vp-subject">{{ t.subject }}</span>
-          <span class="vp-status" :class="`st-${t.status}`">{{ t.status }}</span>
+          <span class="vp-status" :class="`st-${t.status}`">{{ STATUS_LABEL[t.status] || t.status }}</span>
         </div>
         <div class="vp-progress">
           <div class="vp-bar" :style="{ width: `${t.progress}%` }" />
         </div>
         <div class="vp-meta">
-          <span v-if="t.stage">{{ t.stage }}</span>
+          <span v-if="t.stage">{{ STAGE_LABEL[t.stage] || t.stage }}</span>
           <span v-if="t.error" class="vp-err">{{ t.error }}</span>
         </div>
         <div class="vp-actions">
