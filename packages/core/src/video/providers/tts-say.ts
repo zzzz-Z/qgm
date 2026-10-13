@@ -7,15 +7,17 @@ import path from 'node:path'
 import type { TTSResult } from '../types.js'
 import type { TTSAdapter, TTSOptions } from './tts-types.js'
 
-/** 执行命令；非零退出抛错 */
+/** 执行命令；非零退出抛错。返回 stdout + stderr 拼接（afinfo 走 stdout，say 走 stderr） */
 function run(bin: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args)
+    let stdout = ''
     let stderr = ''
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
     child.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
     child.on('error', (e: Error) => reject(new Error(`${bin} 启动失败: ${e.message}`)))
     child.on('close', (code: number | null) => {
-      if (code === 0) resolve(stderr)
+      if (code === 0) resolve(stdout + stderr)
       else reject(new Error(`${bin} 退出码 ${code}\n${stderr.slice(-1000)}`))
     })
   })
