@@ -11,6 +11,7 @@ export interface VideoConfig {
   material: { pexelsApiKey: string, pixabayApiKey: string, cacheTtlHours: number }
   tts: { provider: 'edge' | 'say', voice: string, rate: number, volume: number }
   azure: { apiKey: string, region: string }
+  ai: { apiKey: string, model: string }
   whisper: { modelSize: string, device: string }
   video: { aspect: string, subtitleFont: string, subtitleFontSize: number, subtitleColor: string, bgmVolume: number }
 }
@@ -20,6 +21,7 @@ const DEFAULTS: VideoConfig = {
   material: { pexelsApiKey: '', pixabayApiKey: '', cacheTtlHours: 24 },
   tts: { provider: 'edge', voice: 'zh-CN-XiaoxiaoNeural', rate: 1, volume: 1 },
   azure: { apiKey: '', region: '' },
+  ai: { apiKey: '', model: 'cogvideox-3' },
   whisper: { modelSize: 'large-v3-turbo', device: 'cpu' },
   video: { aspect: '9:16', subtitleFont: 'PingFang SC', subtitleFontSize: 48, subtitleColor: '#FFFFFF', bgmVolume: 0.3 },
 }
@@ -68,6 +70,7 @@ export function maskConfig(cfg: VideoConfig): VideoConfig {
   if (out.material.pexelsApiKey) out.material.pexelsApiKey = MASK
   if (out.material.pixabayApiKey) out.material.pixabayApiKey = MASK
   if (out.azure.apiKey) out.azure.apiKey = MASK
+  if (out.ai.apiKey) out.ai.apiKey = MASK
   return out
 }
 

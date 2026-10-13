@@ -12,6 +12,9 @@ import { LocalMaterialProvider } from '../video/providers/material-local.js'
 import { SayTTSAdapter } from '../video/providers/tts-say.js'
 import { EdgeTTSAdapter } from '../video/providers/tts-edge.js'
 import { FallbackTTSAdapter } from '../video/providers/tts-fallback.js'
+import { PexelsMaterialProvider } from '../video/providers/material-pexels.js'
+import { PixabayMaterialProvider } from '../video/providers/material-pixabay.js'
+import { CogVideoXMaterialProvider } from '../video/providers/material-cogvideox.js'
 import type { VideoTaskParams } from '../video/types.js'
 
 /** /video 路由 Hono 实例 */
@@ -24,12 +27,21 @@ function buildTTS() {
   return new FallbackTTSAdapter(new EdgeTTSAdapter(), new SayTTSAdapter())
 }
 
+/** 组装素材源：优先级 AI > Pexels > Pixabay > Local；后者始终可用的兜底 */
+function buildMaterial(root: string) {
+  const cfg = loadConfig()
+  if (cfg.ai.apiKey) return new CogVideoXMaterialProvider(cfg.ai.apiKey, cfg.ai.model)
+  if (cfg.material.pexelsApiKey) return new PexelsMaterialProvider(cfg.material.pexelsApiKey)
+  if (cfg.material.pixabayApiKey) return new PixabayMaterialProvider(cfg.material.pixabayApiKey)
+  return new LocalMaterialProvider(path.join(root, 'assets'))
+}
+
 /** 依赖：TTS + 本地素材（默认目录为工作区内 assets/）；ffmpeg 走 bin/ */
 function buildDeps() {
   const root = getRoot() || '.'
   return {
     tts: buildTTS(),
-    material: new LocalMaterialProvider(path.join(root, 'assets')),
+    material: buildMaterial(root),
     ffmpegBin: path.join(root, 'bin', 'ffmpeg'),
     ffprobeBin: path.join(root, 'bin', 'ffprobe'),
   }
