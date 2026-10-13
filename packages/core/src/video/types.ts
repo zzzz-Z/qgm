@@ -34,6 +34,8 @@ export interface VideoTaskParams {
   bgmVolume?: number
   /** 拼接顺序：顺序（默认）或随机打乱 */
   clipOrder?: 'sequential' | 'random'
+  /** 片段转场：true 时用 xfade 过渡（默认 false 硬切） */
+  transition?: boolean
 }
 
 /** 任务持久化状态 */

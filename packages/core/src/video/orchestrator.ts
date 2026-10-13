@@ -177,10 +177,16 @@ async function finishPipeline(
     await compositor.runFfmpeg(ffmpegBin, compositor.normalizeClipArgs(ordered[i], out, secs[i], aspect, encoder))
     normalized.push(out)
   }
-  const listFile = path.join(dir, 'concat.txt')
-  fs.writeFileSync(listFile, concatList(normalized))
   const combined = path.join(dir, 'combined.mp4')
-  await compositor.runFfmpeg(ffmpegBin, compositor.concatArgs(listFile, combined))
+  // [F24] 转场为可选：开启时走 xfade，否则用 concat 硬切
+  const xfade = params.transition ? compositor.buildXfadeArgs(normalized, secs, combined, encoder) : null
+  if (xfade) {
+    await compositor.runFfmpeg(ffmpegBin, xfade)
+  } else {
+    const listFile = path.join(dir, 'concat.txt')
+    fs.writeFileSync(listFile, concatList(normalized))
+    await compositor.runFfmpeg(ffmpegBin, compositor.concatArgs(listFile, combined))
+  }
   state.combinedPath = combined
 
   const finalOut = path.join(dir, 'final.mp4')

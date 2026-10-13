@@ -156,3 +156,36 @@ export function finalizeArgs(opts: {
 export async function audioDuration(audioPath: string, bin = 'ffprobe'): Promise<number> {
   return probeDuration(audioPath, bin)
 }
+
+/** 单次转场时长（秒）；两侧各占一半，总时长损失为 fade */
+const XFADE_SEC = 0.5
+
+/** 转场滤镜名（ffmpeg xfade 支持 fade/wipeleft/slideup 等） */
+const XFADE_TYPE = 'fade'
+
+/**
+ * 用 xfade + acrossfade 串接多段标准化片段；无音频（-an）时只接视频轨。
+ * [WHY] concat 只能硬切；转场需要 filter_complex 逐步合成，N 段要 N-1 次 xfade。
+ * [CONSTRAINT] 每段已标准化为同分辨率/帧率，故 xfade 不会触发尺寸重采样；
+ *   段数 < 2 时返回 null，由调用方回退到 concat。
+ */
+export function buildXfadeArgs(inputs: string[], durations: number[], output: string, encoder: string): string[] | null {
+  if (inputs.length < 2) return null
+  const args: string[] = ['-y']
+  for (const p of inputs) args.push('-i', p)
+  const filters: string[] = []
+  let lastV = '0:v'
+  let offset = 0
+  for (let i = 1; i < inputs.length; i++) {
+    const outV = i === inputs.length - 1 ? 'vout' : `v${i}`
+    const dur = durations[i - 1] ?? 0
+    offset += Math.max(0, dur - XFADE_SEC)
+    filters.push(`[${lastV}][${i}:v]xfade=transition=${XFADE_TYPE}:duration=${XFADE_SEC}:offset=${offset.toFixed(3)}[${outV}]`)
+    lastV = `v${i}`
+  }
+  args.push('-filter_complex', filters.join(';'))
+  args.push('-map', '[vout]')
+  args.push('-c:v', encoder, '-pix_fmt', 'yuv420p', '-an')
+  args.push(output)
+  return args
+}

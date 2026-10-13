@@ -50,6 +50,8 @@ videoHono.post('/tasks', async (c) => {
     aspect: body.aspect as VideoTaskParams['aspect'],
     voiceName: body.voiceName ? String(body.voiceName) : undefined,
     subtitleEnabled: body.subtitleEnabled !== false,
+    clipOrder: body.clipOrder === 'random' ? 'random' : 'sequential',
+    transition: body.transition === true,
   }
   const state = await startTask(params, buildDeps())
   return c.json({ ok: state.status !== 'failed', taskId: state.taskId, status: state.status, error: state.error })
