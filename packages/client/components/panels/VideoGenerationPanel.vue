@@ -53,6 +53,9 @@ const cfgLoading = ref(false)
 const cfgMsg = ref('')
 /** 本地编辑副本；Key 显示为 **** 时表示「不改」 */
 const cfgForm = ref<VideoConfigView | null>(null)
+/** 本地素材与 BGM 列表 */
+const materials = ref<string[]>([])
+const musics = ref<string[]>([])
 
 /** 任务统计：总数 / 进行中 / 已完成 / 失败 */
 const stats = computed(() => {
@@ -67,6 +70,7 @@ const stats = computed(() => {
 
 onUnmounted(stopPolling)
 
+loadAssets()
 /** 挂载即刷新 */
 refresh().then(() => {
   if (tasks.value.some(t => t.status === 'pending' || t.status === 'processing')) startPolling()
@@ -102,6 +106,19 @@ async function saveConfig() {
     }
   } catch (e) {
     cfgMsg.value = `保存失败：${String(e).slice(0, 80)}`
+  }
+}
+/** 拉本地素材与 BGM 列表 */
+async function loadAssets() {
+  try {
+    const [m, b] = await Promise.all([
+      fetch('/__ai/video/materials', { headers: { accept: 'application/json' } }),
+      fetch('/__ai/video/musics', { headers: { accept: 'application/json' } }),
+    ])
+    materials.value = ((await m.json()) as { items?: string[] }).items || []
+    musics.value = ((await b.json()) as { items?: string[] }).items || []
+  } catch {
+    /* 列表拉取失败不阻塞主流程 */
   }
 }
 /** 展开配置时按需加载 */
@@ -254,6 +271,10 @@ async function manualRefresh() {
       </select>
     </div>
 
+    <p v-if="videoSource === 'local'" class="vp-assets">
+      本地素材 {{ materials.length }} 个 · BGM {{ musics.length }} 首
+    </p>
+
     <div class="vp-row">
       <label class="vp-label">画幅</label>
       <select v-model="aspect" class="vp-select">
@@ -308,6 +329,11 @@ async function manualRefresh() {
 .video-panel {
   padding: 12px;
   font-size: 13px;
+}
+.vp-assets {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--fg-dim, #888);
 }
 .vp-cfg {
   margin-bottom: 10px;
