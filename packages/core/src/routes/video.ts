@@ -12,6 +12,7 @@ import { LocalMaterialProvider } from '../video/providers/material-local.js'
 import { SayTTSAdapter } from '../video/providers/tts-say.js'
 import { EdgeTTSAdapter } from '../video/providers/tts-edge.js'
 import { FallbackTTSAdapter } from '../video/providers/tts-fallback.js'
+import { AzureTTSAdapter } from '../video/providers/tts-azure.js'
 import { PexelsMaterialProvider } from '../video/providers/material-pexels.js'
 import { PixabayMaterialProvider } from '../video/providers/material-pixabay.js'
 import { CogVideoXMaterialProvider } from '../video/providers/material-cogvideox.js'
@@ -20,11 +21,15 @@ import type { VideoTaskParams } from '../video/types.js'
 /** /video 路由 Hono 实例 */
 export const videoHono = new Hono()
 
-/** 组装 TTS：按配置选 provider；edge 走降级链，say 直接可用 */
+/** 组装 TTS：Azure（有 Key）> Edge（默认）> say；均带离线兜底 */
 function buildTTS() {
   const cfg = loadConfig()
-  if (cfg.tts.provider === 'say') return new SayTTSAdapter()
-  return new FallbackTTSAdapter(new EdgeTTSAdapter(), new SayTTSAdapter())
+  const say = new SayTTSAdapter()
+  if (cfg.tts.provider === 'say') return say
+  const primary = cfg.azure.apiKey
+    ? new AzureTTSAdapter(cfg.azure.apiKey, cfg.azure.region)
+    : new EdgeTTSAdapter()
+  return new FallbackTTSAdapter(primary, say)
 }
 
 /** 组装素材源：优先级 AI > Pexels > Pixabay > Local；后者始终可用的兜底 */
