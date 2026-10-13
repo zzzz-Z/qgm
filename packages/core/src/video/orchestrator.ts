@@ -64,6 +64,25 @@ function concatList(files: string[]): string {
   return `${files.map(f => `file '${f.replace(/'/g, '\'\\\'\'')}'`).join('\n')}\n`
 }
 
+/** 素材去重：按来源 URL / 本地路径分组，组内保留时长最长的一条 */
+// [video-material-dedup-v1] 对应 MPT 的 _prioritize_unique_source_clips。
+// [WHY] 检索结果常含同一素材的多个规格；重复拼接会让画面反复出现同段。
+function dedupMaterials<T extends { url?: string, localPath?: string, duration?: number }>(items: T[]): T[] {
+  const groups = new Map<string, T[]>()
+  for (const m of items) {
+    const key = m.localPath || (m.url ? m.url.split('?')[0] : Math.random().toString(36))
+    const list = groups.get(key) || []
+    list.push(m)
+    groups.set(key, list)
+  }
+  const out: T[] = []
+  for (const list of groups.values()) {
+    const best = list.reduce((a, b) => ((b.duration || 0) > (a.duration || 0) ? b : a))
+    out.push(best)
+  }
+  return out
+}
+
 /** 主流程：创建任务 → 读剧本 → 读搜索词 → TTS 合成（可 stopAt 中止） */
 export async function startTask(
   params: VideoTaskParams,
@@ -129,7 +148,7 @@ async function finishPipeline(
   if (advance(state, 'materials', params.stopAt)) return state
   const mats = params.videoMaterials && params.videoMaterials.length
     ? params.videoMaterials.map(p => ({ provider: params.videoSource, url: '', duration: 0, width: 0, height: 0, localPath: p }))
-    : await deps.material.search(terms.length ? terms : [params.videoSubject], { aspect, limit: 6 })
+    : dedupMaterials(await deps.material.search(terms.length ? terms : [params.videoSubject], { aspect, limit: 6 }))
   if (!mats.length) throw new Error('未获取到任何素材')
   const matDir = path.join(dir, 'materials')
   fs.mkdirSync(matDir, { recursive: true })

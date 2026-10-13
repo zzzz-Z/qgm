@@ -9,6 +9,8 @@ import * as store from '../video/file-task-store.js'
 import { startTask } from '../video/orchestrator.js'
 import { LocalMaterialProvider } from '../video/providers/material-local.js'
 import { SayTTSAdapter } from '../video/providers/tts-say.js'
+import { EdgeTTSAdapter } from '../video/providers/tts-edge.js'
+import { FallbackTTSAdapter } from '../video/providers/tts-fallback.js'
 import type { VideoTaskParams } from '../video/types.js'
 
 /** /video 路由 Hono 实例 */
@@ -18,7 +20,7 @@ export const videoHono = new Hono()
 function buildDeps() {
   const root = getRoot() || '.'
   return {
-    tts: new SayTTSAdapter(),
+    tts: new FallbackTTSAdapter(new EdgeTTSAdapter(), new SayTTSAdapter()),
     material: new LocalMaterialProvider(path.join(root, 'assets')),
     ffmpegBin: path.join(root, 'bin', 'ffmpeg'),
     ffprobeBin: path.join(root, 'bin', 'ffprobe'),
