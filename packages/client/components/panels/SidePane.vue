@@ -37,12 +37,14 @@ const model = defineModel<boolean>('sideDrawerOpen', { required: true })
 
 defineOptions({ name: 'SidePane' })
 
-const _tabAllowed = ['tree', 'changes', 'worklog', 'kb', 'terminal'] as const
+const _tabAllowed = ['tree', 'changes', 'worklog', 'kb', 'terminal', 'video'] as const
 const WorklogPane = defineAsyncComponent(() => import('./WorklogPane.vue'))
 // [kb-panel-side-v1] 知识库面板：接入右侧栏第四 tab，懒加载（与 worklog 同范式）
 const KnowledgePanel = defineAsyncComponent(() => import('./KnowledgePanel.vue'))
 // [terminal-panel-v1] 终端面板：vue-web-terminal + /__ai/exec，懒加载同 worklog 范式
 const TerminalPanel = defineAsyncComponent(() => import('./TerminalPanel.vue'))
+// [video-panel-v1] 视频生成面板：首切才加载，之后 v-show 保活
+const VideoGenerationPanel = defineAsyncComponent(() => import('./VideoGenerationPanel.vue'))
 
 // [worklog-lazy-v1] WorklogPane（含 markdown-it 渲染链）仅首次切到 worklog tab 才加载
 // [WHY] worklogLoaded 闸门 v-if 保证 defineAsyncComponent 的 loader 到首切才触发；
@@ -51,6 +53,7 @@ const TerminalPanel = defineAsyncComponent(() => import('./TerminalPanel.vue'))
 const worklogLoaded = shallowRef(false)
 const kbLoaded = shallowRef(false)
 const terminalLoaded = shallowRef(false)
+const videoLoaded = shallowRef(false)
 
 // 折叠 + tab 选择持久化（PLAN 5.4）
 const fold = useFoldState('default', 'side-pane')
@@ -79,6 +82,7 @@ watch(sideTab, (tab) => {
   if (tab === 'worklog') worklogLoaded.value = true
   if (tab === 'kb') kbLoaded.value = true
   if (tab === 'terminal') terminalLoaded.value = true
+  if (tab === 'video') videoLoaded.value = true
 }, { immediate: true })
 // [side-pane-tab-v1] 外部请求（工具栏按钮）→ 切 tab + 展开；collapsed 由 revealTick watch 控制
 watch(sidePaneRevealTick, () => {
@@ -122,6 +126,10 @@ defineExpose({ selectTab })
       <!-- [terminal-panel-v1] 终端 tab：本地 shell，执行走 /__ai/exec（懒加载同 kb 范式） -->
       <button v-tooltip="'终端'" aria-label="终端" :class="{ 'side-tab-active': sideTab === 'terminal' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('terminal')">
         <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></svg></span>
+      </button>
+      <!-- [video-panel-v1] 视频生成 tab：主题提交 + 任务进度（懒加载，同 kb 范式） -->
+      <button v-tooltip="'视频生成'" aria-label="视频生成" :class="{ 'side-tab-active': sideTab === 'video' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('video')">
+        <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg></span>
       </button>
 
       <!-- [fix-side-collapse] 收起/展开 -->
@@ -197,6 +205,10 @@ defineExpose({ selectTab })
     <!-- [terminal-panel-v1] 终端面板：首切才加载，之后 v-show 保活 -->
     <div v-show="sideTab === 'terminal'" class="side-terminal flex flex-col flex-1 min-h-0 overflow-hidden">
       <TerminalPanel v-if="terminalLoaded" />
+    </div>
+    <!-- [video-panel-v1] 视频生成面板：首切才加载，之后 v-show 保活 -->
+    <div v-show="sideTab === 'video'" class="side-video flex flex-col flex-1 min-h-0 overflow-y-auto">
+      <VideoGenerationPanel v-if="videoLoaded" />
     </div>
   </aside>
 </template>
