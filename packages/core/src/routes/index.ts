@@ -29,6 +29,7 @@ import { wikiHono } from './wiki.js'
 import { shellLogHono } from './shell-log.js'
 // [arrive-log-v1] 脚本到达前端的留痕入口（页面通道每推一条上报一次 ⇒ logs/arrive.jsonl）
 import { arriveLogHono } from './arrive-log.js'
+import { videoHono } from './video.js'
 
 /** 所有子路由 Hono 应用实例列表 */
 export const HONO_SUB_APPS = [
@@ -56,6 +57,7 @@ export const HONO_SUB_APPS = [
   wikiHono,
   shellLogHono,
   arriveLogHono,
+  videoHono,
 ]
 
 // 已迁移到 Hono 的路径前缀——dispatchHono 只对这些前缀做 bridge
@@ -94,4 +96,5 @@ export const HONO_PREFIXES = [
   // [arrive-log-v1] 到达留痕。**同 shell-log 刻意不进**豁免：日志落在工作区的 .ai-runner/logs 下，
   //   无工作区时本就无会话可记（豁免反而会让 getRoot() 落到旧 cwd）
   '/arrive-log',
+  '/video',
 ]

@@ -16,6 +16,7 @@ packages/client/e2e/playwright-report/
 !.env.example
 coverage/
 
-
-
-
+# [video-ffmpeg-bin-v1] 视频合成用的静态二进制（~95MB × 2），不进 git；
+# 由 scripts/fetch-ffmpeg.cjs 或手工从构建服务器下载。
+bin/ffmpeg
+bin/ffprobe
