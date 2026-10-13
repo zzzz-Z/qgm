@@ -13,6 +13,12 @@ interface TaskSummary {
   error?: string
   updatedAt: number
 }
+interface VideoConfigView {
+  ai: { apiKey: string, model: string, provider: 'agnes' | 'cogvideox' }
+  material: { pexelsApiKey: string, pixabayApiKey: string, cacheTtlHours: number }
+  azure: { apiKey: string, region: string }
+  tts: { provider: 'edge' | 'say', voice: string, rate: number, volume: number }
+}
 
 /** 任务状态中文名 */
 const STATUS_LABEL: Record<string, string> = {
@@ -41,6 +47,12 @@ const aspect = ref<'9:16' | '16:9'>('9:16')
 const tasks = ref<TaskSummary[]>([])
 const submitting = ref(false)
 const message = ref('')
+/** 配置面板展开状态与已加载配置 */
+const showConfig = ref(false)
+const cfgLoading = ref(false)
+const cfgMsg = ref('')
+/** 本地编辑副本；Key 显示为 **** 时表示「不改」 */
+const cfgForm = ref<VideoConfigView | null>(null)
 
 /** 任务统计：总数 / 进行中 / 已完成 / 失败 */
 const stats = computed(() => {
@@ -60,6 +72,43 @@ refresh().then(() => {
   if (tasks.value.some(t => t.status === 'pending' || t.status === 'processing')) startPolling()
 })
 
+/** 拉配置（脱敏） */
+async function loadConfig() {
+  cfgLoading.value = true
+  cfgMsg.value = ''
+  try {
+    const res = await fetch('/__ai/video/config', { headers: { accept: 'application/json' } })
+    const data = await res.json() as { ok: boolean, config?: VideoConfigView }
+    if (data.ok && data.config) cfgForm.value = data.config
+  } catch (e) {
+    cfgMsg.value = `配置加载失败：${String(e).slice(0, 80)}`
+  } finally {
+    cfgLoading.value = false
+  }
+}
+/** 保存配置（**** 占位由后端跳过） */
+async function saveConfig() {
+  if (!cfgForm.value) return
+  cfgMsg.value = ''
+  try {
+    const res = await fetch('/__ai/video/config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(cfgForm.value),
+    })
+    const data = await res.json() as { ok: boolean, config?: VideoConfigView, error?: string }
+    if (data.ok && data.config) { cfgForm.value = data.config; cfgMsg.value = '已保存' }
+    else { cfgMsg.value = `保存失败：${data.error || '未知'}`
+    }
+  } catch (e) {
+    cfgMsg.value = `保存失败：${String(e).slice(0, 80)}`
+  }
+}
+/** 展开配置时按需加载 */
+function toggleConfig() {
+  showConfig.value = !showConfig.value
+  if (showConfig.value && !cfgForm.value) loadConfig()
+}
 /** 当前 stage 在第几步（1-based）；未知阶段返回 0 */
 function stageIndex(stage: string): number {
   return STAGE_ORDER.indexOf(stage) + 1
@@ -139,6 +188,51 @@ async function manualRefresh() {
       <span v-if="stats.failed" class="vp-st-failed">失败 {{ stats.failed }}</span>
     </div>
 
+    <details class="vp-cfg" :open="showConfig" @toggle="(e) => { if ((e.target as HTMLDetailsElement).open !== showConfig) toggleConfig() }">
+      <summary class="vp-cfg-sum">
+        素材源配置
+      </summary>
+      <div v-if="cfgForm" class="vp-cfg-body">
+        <label class="vp-label">AI 素材源</label>
+        <select v-model="cfgForm.ai.provider" class="vp-select">
+          <option value="agnes">
+            Agnes AI（免费）
+          </option>
+          <option value="cogvideox">
+            CogVideoX（付费）
+          </option>
+        </select>
+        <label class="vp-label">AI API Key</label>
+        <input v-model="cfgForm.ai.apiKey" class="vp-input" placeholder="留空则不启用" type="password">
+
+        <label class="vp-label">Pexels API Key</label>
+        <input v-model="cfgForm.material.pexelsApiKey" class="vp-input" placeholder="可选" type="password">
+
+        <label class="vp-label">Pixabay API Key</label>
+        <input v-model="cfgForm.material.pixabayApiKey" class="vp-input" placeholder="可选" type="password">
+
+        <label class="vp-label">TTS 引擎</label>
+        <select v-model="cfgForm.tts.provider" class="vp-select">
+          <option value="edge">
+            Edge TTS（在线）
+          </option>
+          <option value="say">
+            macOS say（离线）
+          </option>
+        </select>
+
+        <button class="vp-btn vp-btn-sm" @click="saveConfig">
+          保存配置
+        </button>
+        <p v-if="cfgMsg" class="vp-msg">
+          {{ cfgMsg }}
+        </p>
+      </div>
+      <p v-else-if="cfgLoading" class="vp-msg">
+        加载中…
+      </p>
+    </details>
+
     <label class="vp-label">主题</label>
     <input v-model="subject" class="vp-input" placeholder="例如：长安古风故事" @keyup.enter="submit">
 
@@ -214,6 +308,25 @@ async function manualRefresh() {
 .video-panel {
   padding: 12px;
   font-size: 13px;
+}
+.vp-cfg {
+  margin-bottom: 10px;
+  border: 1px solid var(--border, #333);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+.vp-cfg-sum {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--fg-dim, #888);
+}
+.vp-cfg-body {
+  padding-top: 6px;
+}
+.vp-btn-sm {
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
 }
 .vp-head {
   display: flex;
