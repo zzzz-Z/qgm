@@ -7,6 +7,7 @@ import * as store from './file-task-store.js'
 import * as compositor from './compositor.js'
 import { loadConfig } from './config.js'
 import { boundariesToEntries, entriesToSrt } from './subtitle.js'
+import { transcribe } from './subtitle-whisper.js'
 import type { TaskState, VideoTaskParams } from './types.js'
 import type { MaterialProvider } from './providers/material-types.js'
 import type { TTSAdapter } from './providers/tts-types.js'
@@ -120,10 +121,22 @@ export async function startTask(
       outputPath: audioPath,
     })
     state.audioPath = tts.audioPath
-    if (params.subtitleEnabled !== false && tts.wordBoundaries && tts.wordBoundaries.length) {
-      const srt = entriesToSrt(boundariesToEntries(tts.wordBoundaries))
-      state.subtitlePath = path.join(dir, 'subtitle.srt')
-      fs.writeFileSync(state.subtitlePath, srt)
+    if (params.subtitleEnabled !== false) {
+      // 优先词边界（Edge TTS 直出）；无边界且指定 whisper 引擎时走本地转写
+      let entries = tts.wordBoundaries && tts.wordBoundaries.length
+        ? boundariesToEntries(tts.wordBoundaries)
+        : null
+      if (!entries && params.subtitleEngine === 'whisper') {
+        try {
+          entries = await transcribe(tts.audioPath, { outDir: dir, model: cfg.whisper.modelSize })
+        } catch (e) {
+          console.warn(`[video] whisper 转写失败，跳过字幕：${String(e).slice(0, 200)}`)
+        }
+      }
+      if (entries && entries.length) {
+        state.subtitlePath = path.join(dir, 'subtitle.srt')
+        fs.writeFileSync(state.subtitlePath, entriesToSrt(entries))
+      }
     }
     store.writeState(state)
     return await finishPipeline(state, deps, { script, terms, ffmpegBin, ffprobeBin, duration: tts.duration })
