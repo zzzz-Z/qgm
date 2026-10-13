@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import * as store from './file-task-store.js'
 import * as compositor from './compositor.js'
+import { loadConfig } from './config.js'
 import { boundariesToEntries, entriesToSrt } from './subtitle.js'
 import type { TaskState, VideoTaskParams } from './types.js'
 import type { MaterialProvider } from './providers/material-types.js'
@@ -111,10 +112,11 @@ export async function startTask(
     // 阶段 3：TTS 合成 + 字幕生成
     if (advance(state, 'audio', params.stopAt)) return state
     const audioPath = path.join(dir, 'audio.mp3')
+    const cfg = loadConfig()
     const tts = await deps.tts.synthesize(script, {
-      voice: params.voiceName || 'Tingting',
-      rate: params.voiceRate,
-      volume: params.voiceVolume,
+      voice: params.voiceName || cfg.tts.voice,
+      rate: params.voiceRate ?? cfg.tts.rate,
+      volume: params.voiceVolume ?? cfg.tts.volume,
       outputPath: audioPath,
     })
     state.audioPath = tts.audioPath
@@ -143,6 +145,7 @@ async function finishPipeline(
   const { ffmpegBin, ffprobeBin, terms, duration } = ctx
   const params = state.params
   const aspect = params.aspect || '9:16'
+  const cfg = loadConfig()
 
   // 阶段 4：素材获取
   if (advance(state, 'materials', params.stopAt)) return state
@@ -184,8 +187,13 @@ async function finishPipeline(
     audio: state.audioPath!,
     bgm: params.bgmPath,
     subtitle: state.subtitlePath,
+    subtitleStyle: {
+      fontName: cfg.video.subtitleFont,
+      fontSize: cfg.video.subtitleFontSize,
+      color: cfg.video.subtitleColor,
+    },
     output: finalOut,
-    bgmVolume: params.bgmVolume ?? 0.3,
+    bgmVolume: params.bgmVolume ?? cfg.video.bgmVolume,
     encoder,
   }))
   state.outputPath = finalOut

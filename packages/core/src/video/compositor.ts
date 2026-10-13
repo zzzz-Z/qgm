@@ -95,12 +95,39 @@ export function concatArgs(listFile: string, output: string): string[] {
   return ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', output]
 }
 
+/** 字幕样式（对齐 F16）；缺省则用 ffmpeg 默认 */
+export interface SubtitleStyle {
+  fontName?: string
+  fontSize?: number
+  color?: string
+}
+
+/** RGB (#RRGGBB) → ASS 颜色 (&H00BBGGRR)；非 # 开头原样返回 */
+function assColor(rgb: string): string {
+  if (!/^#[0-9a-f]{6}$/i.test(rgb)) return rgb
+  const r = rgb.slice(1, 3)
+  const g = rgb.slice(3, 5)
+  const b = rgb.slice(5, 7)
+  return `&H00${(b + g + r).toUpperCase()}`
+}
+
+/** 组装 subtitles filter 的 force_style 片段 */
+function subtitleFilter(path: string, style?: SubtitleStyle): string {
+  const parts: string[] = []
+  if (style?.fontName) parts.push(`FontName=${style.fontName}`)
+  if (style?.fontSize) parts.push(`FontSize=${style.fontSize}`)
+  if (style?.color) parts.push(`PrimaryColour=${assColor(style.color)}`)
+  if (!parts.length) return `subtitles=${path}`
+  return `subtitles=${path}:force_style='${parts.join(',')}'`
+}
+
 /** 混音 + 字幕烧录参数；bgmPath 缺省时仅混合配音与字幕 */
 export function finalizeArgs(opts: {
   video: string
   audio: string
   bgm?: string
   subtitle?: string
+  subtitleStyle?: SubtitleStyle
   output: string
   bgmVolume: number
   encoder: string

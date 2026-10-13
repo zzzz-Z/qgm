@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import fs from 'node:fs'
 import path from 'node:path'
 import { getRoot } from '../config.js'
+import { isMasked, loadConfig, maskConfig, saveConfig } from '../video/config.js'
 import * as store from '../video/file-task-store.js'
 import { startTask } from '../video/orchestrator.js'
 import { LocalMaterialProvider } from '../video/providers/material-local.js'
@@ -16,11 +17,18 @@ import type { VideoTaskParams } from '../video/types.js'
 /** /video 路由 Hono 实例 */
 export const videoHono = new Hono()
 
-/** 依赖：say TTS + 本地素材（默认目录为工作区内 assets/） */
+/** 组装 TTS：按配置选 provider；edge 走降级链，say 直接可用 */
+function buildTTS() {
+  const cfg = loadConfig()
+  if (cfg.tts.provider === 'say') return new SayTTSAdapter()
+  return new FallbackTTSAdapter(new EdgeTTSAdapter(), new SayTTSAdapter())
+}
+
+/** 依赖：TTS + 本地素材（默认目录为工作区内 assets/）；ffmpeg 走 bin/ */
 function buildDeps() {
   const root = getRoot() || '.'
   return {
-    tts: new FallbackTTSAdapter(new EdgeTTSAdapter(), new SayTTSAdapter()),
+    tts: buildTTS(),
     material: new LocalMaterialProvider(path.join(root, 'assets')),
     ffmpegBin: path.join(root, 'bin', 'ffmpeg'),
     ffprobeBin: path.join(root, 'bin', 'ffprobe'),
@@ -115,4 +123,40 @@ videoHono.post('/tasks/:id/terms', async (c) => {
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'terms.json'), JSON.stringify(terms, null, 2))
   return c.json({ ok: true })
+})
+
+/** 读取配置（敏感字段脱敏） */
+videoHono.get('/config', (c) => {
+  return c.json({ ok: true, config: maskConfig(loadConfig()) })
+})
+
+/** 更新配置（脱敏占位保留原值，不覆盖真实 Key） */
+videoHono.put('/config', async (c) => {
+  let body: Record<string, unknown> = {}
+  try { body = await c.req.json() as Record<string, unknown> } catch { return c.json({ ok: false, error: '请求体必须是 JSON' }, 400) }
+  const cur = loadConfig()
+  const next = JSON.parse(JSON.stringify(cur)) as typeof cur
+  // 只接受已知字段；敏感字段遇到 **** 视为「不改」
+  const b = body as Partial<typeof cur>
+  if (b.material) {
+    if (typeof b.material.pexelsApiKey === 'string' && !isMasked(b.material.pexelsApiKey)) next.material.pexelsApiKey = b.material.pexelsApiKey
+    if (typeof b.material.pixabayApiKey === 'string' && !isMasked(b.material.pixabayApiKey)) next.material.pixabayApiKey = b.material.pixabayApiKey
+    if (typeof b.material.cacheTtlHours === 'number') next.material.cacheTtlHours = b.material.cacheTtlHours
+  }
+  if (b.tts) {
+    if (b.tts.provider === 'edge' || b.tts.provider === 'say') next.tts.provider = b.tts.provider
+    if (typeof b.tts.voice === 'string') next.tts.voice = b.tts.voice
+    if (typeof b.tts.rate === 'number') next.tts.rate = b.tts.rate
+    if (typeof b.tts.volume === 'number') next.tts.volume = b.tts.volume
+  }
+  if (b.azure) {
+    if (typeof b.azure.apiKey === 'string' && !isMasked(b.azure.apiKey)) next.azure.apiKey = b.azure.apiKey
+    if (typeof b.azure.region === 'string') next.azure.region = b.azure.region
+  }
+  if (b.video) {
+    if (typeof b.video.aspect === 'string') next.video.aspect = b.video.aspect
+    if (typeof b.video.bgmVolume === 'number') next.video.bgmVolume = b.video.bgmVolume
+  }
+  saveConfig(next)
+  return c.json({ ok: true, config: maskConfig(next) })
 })
