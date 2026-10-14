@@ -1,6 +1,6 @@
 // [arch-hono/git-v1] /git/* —— HEAD / commit-loop / reset
 import { Hono } from 'hono'
-import { gitBranch, gitBranches, gitCheckout, gitCommitAll, gitCommitDetail, gitCommitHistory, gitCommitStaged, gitHead, gitRawDiff, gitResetHard, gitStage, gitStatusDetailed, gitUnstage, gitWorklog } from '../git.js'
+import { gitBranch, gitBranches, gitCheckout, gitCommitAll, gitCommitDetail, gitCommitHistory, gitCommitStaged, gitDiscard, gitHead, gitRawDiff, gitResetHard, gitStage, gitStatusDetailed, gitUnstage, gitWorklog } from '../git.js'
 
 /** git 路由的 Hono 实例 */
 export const gitHono = new Hono()
@@ -68,6 +68,15 @@ gitHono.post('/git/unstage', async (c) => {
   try { body = await c.req.json() } catch { body = null }
   const paths = Array.isArray(body?.paths) ? body.paths.filter(p => typeof p === 'string') : []
   const r = await gitUnstage(paths)
+  return c.json(r, r.ok ? 200 : 400)
+})
+
+// [git-discard-v1] 丢弃工作区改动（VSCode「放弃更改」）；已跟踪走 restore，未跟踪走 clean
+gitHono.post('/git/discard', async (c) => {
+  let body: { paths?: string[] } | null = null
+  try { body = await c.req.json() } catch { body = null }
+  const paths = Array.isArray(body?.paths) ? body.paths.filter(p => typeof p === 'string') : []
+  const r = await gitDiscard(paths)
   return c.json(r, r.ok ? 200 : 400)
 })
 

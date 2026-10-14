@@ -34,10 +34,12 @@ test('win-sid-namespace: AiWindowList 已改工作区列表，与站点窗口逻
   assert.ok(!src.includes('winSidOf'), '工作区面板不得再消费站点 sid 命名空间')
 })
 
-test('win-sid-namespace: App.vue openAiSession 显式传 sid=winSidOf(modelId)', () => {
+test('win-sid-namespace: App.vue 用 winSidOf 维护活跃窗口 sid', () => {
+  // [new-session-toggle-removed-v1] onNewSession（App.vue 唯一的 openAiSession 入口）已按用户要求删除，
+  //   sid 命名空间改由 setActiveWinSid(winSidOf(...)) 在 App.vue 侧承载。
   const src = readSrc(APP_SRC)
-  const matches = src.match(/openAiSession\(\{[^}]*sid:\s*winSidOf\(/g) || []
-  assert.equal(matches.length, 1, `应为 1 处 openAiSession 传 sid=winSidOf，实际 ${matches.length}`)
+  const matches = src.match(/setActiveWinSid\(\s*winSidOf\(/g) || []
+  assert.equal(matches.length, 1, `应为 1 处 setActiveWinSid(winSidOf(...))，实际 ${matches.length}`)
 })
 
 test('win-opened-marker: useAiWindowTable 导出 markWindowOpened / isWindowMarkedOpened / probeWindowBySid / winNameOf', () => {

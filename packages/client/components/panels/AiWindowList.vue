@@ -292,10 +292,10 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 .ai-window-list.is-collapsed .awl-new-workspace-label {
   display: none;
 }
-.ai-window-list.is-collapsed .awl-new-workspace {
-  justify-content: center;
-  padding: 8px 0;
-  margin: 0 6px 8px;
+/* [left-rail-collapsed-content-v1] 收起态只留顶部折叠开关：隐藏「新建工作区」按钮与工作区列表 */
+.ai-window-list.is-collapsed .awl-new-workspace,
+.ai-window-list.is-collapsed .awl-list {
+  display: none;
 }
 .ai-window-list.is-collapsed .awl-item {
   justify-content: center;

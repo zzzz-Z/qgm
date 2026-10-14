@@ -42,7 +42,8 @@ test('wiring: ScriptPanel 必须渲染 statusText 族（防只写不读的死状
   // 根模板末尾用 lastIndexOf：文件内有多个 slot template，首个 </template> 是 slot 的闭合
   const tplEnd = src.lastIndexOf('</template>')
   const tpl = src.slice(tplStart, tplEnd)
-  for (const sym of ['statusText', 'statusClass', 'runningElapsed', 'lastDuration']) {
+  // [card-duration-v1] 耗时已迁到每张卡片头部渲染，template 不再渲染 lastDuration ⇒ 期望列表移除
+  for (const sym of ['statusText', 'statusClass', 'runningElapsed']) {
     assert.ok(tpl.includes(sym), `status-bar: template 未渲染 ${sym}（只写不读的死状态回归）`)
   }
   assert.ok(src.includes('status-bar'), '缺少 status-bar 容器标记')

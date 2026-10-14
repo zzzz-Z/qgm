@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { sidePaneRevealTick, sidePaneTab } from '../../composables/ui/useSidePaneTab'
-import FileTree from './FileTree.vue'
-import FileList from './FileList.vue'
-import type { ChangeEntry } from '../../types'
+import { sidePaneRevealTick, sidePaneTab } from '../../composables/ui/useSidePaneTab';
+import FileTree from './FileTree.vue';
+import FileList from './FileList.vue';
+import type { ChangeEntry } from '../../types';
 
 /** 标签页类型：从 _tabAllowed 派生，保证与运行时白名单一致 */
 // [WHY] TS 类型别名编译期惰性求值，`typeof _tabAllowed` 引用后置 const 无 TDZ 风险
@@ -108,9 +108,9 @@ defineExpose({ selectTab })
       <button aria-label="文件树" :class="{ 'side-tab-active': sideTab === 'tree' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('tree')">
         <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg></span>
       </button>
-      <button v-tooltip="'变更列表'" aria-label="变更列表" :class="{ 'side-tab-active': sideTab === 'changes' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('changes')">
+      <!-- <button v-tooltip="'变更列表'" aria-label="变更列表" :class="{ 'side-tab-active': sideTab === 'changes' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('changes')">
         <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg></span><span v-if="props.changes.length" class="side-tab-badge text-[10px] text-[var(--bg)] leading-none font-bold px-1 rounded-full bg-[var(--primary)] inline-flex h-4 min-w-4 shadow-[0_0_0_2px_var(--surface)] items-center justify-center absolute tabular-nums -right-1 -top-1">{{ props.changes.length }}</span>
-      </button>
+      </button> -->
       <!-- 工作日志 tab：VSCode 源码管理风格（提交框 + 变更列表 + 行级 diff）
            [WHY] 用户要求把原 WorklogDialog 弹窗改为侧栏 tab，与树/变更列表并列
            [CHANGE-IMPACT] 内容由 WorklogPane.vue 提供；active 由 sideTab 派生，非活动时不发请求 -->

@@ -302,23 +302,28 @@
 .wl-doc.st-move {
   color: var(--primary, #2563eb);
 }
-.wl-name {
+/* [worklog-row-vertical-v1] 文件名 / 路径改上下两行：名称大字在上，路径小字在下 */
+.wl-file-text {
   flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.wl-name {
   min-width: 0;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .wl-dir {
-  flex: 0 1 auto;
   min-width: 0;
-  max-width: 45%;
   color: var(--text-3);
-  font-size: 11.5px;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-left: 4px;
-  text-align: right;
+  white-space: nowrap;
 }
 .wl-st {
   flex: 0 0 auto;
@@ -631,6 +636,12 @@
   border-color: var(--primary, #2563eb);
 }
 
+/* [git-discard-v1] 行内「放弃更改」：hover 染危险色，与暂存（主色）形成语义区分 */
+.wl-row-action.wl-row-discard:hover {
+  color: var(--danger, #f85149);
+  border-color: var(--danger, #f85149);
+}
+
 /* [git-stage-v1] 分组标题右侧的「全部暂存 / 全部取消暂存」按钮 */
 .wl-group-action {
   margin-left: 6px;
@@ -652,6 +663,30 @@
 .wl-group-action:hover {
   color: var(--primary, #2563eb);
   border-color: var(--primary, #2563eb);
+}
+
+/* [git-branch-dropdown-v1] 分支切换：就地下拉（原 Teleport 弹窗改为点击按钮就地展开） */
+.wl-branch-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+}
+.wl-branch-drop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 180px;
+  max-width: 320px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  overflow: hidden;
 }
 
 /* [git-branch-display-v1] 顶部分支名（对齐 VSCode 源控面板） */

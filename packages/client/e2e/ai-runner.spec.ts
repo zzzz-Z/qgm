@@ -22,7 +22,7 @@ test.describe('AI Runner', () => {
     const tabs = page.locator('.side-tab')
     await expect(tabs).toHaveCount(4)
     await tabs.nth(0).click()
-    await expect(page.locator('.tree .tree-head')).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('.tree .list')).toBeVisible({ timeout: 5000 })
   })
 
   test('运行按钮可见', async ({ page }) => {

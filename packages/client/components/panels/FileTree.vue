@@ -6,7 +6,6 @@
 import { createDragController } from './drag-controller'
 import { getFileIcon, iconSvg } from './file-tree-icons'
 import type { FileNode } from '../../types'
-import { TOAST_MEDIUM } from '../../utils/toast-durations'
 // [ui-p1c-tree-expand-wire-v1] V4：展开态抽到同目录 composable（显式 import 兜住 vitest 无 auto-import）
 import { useTreeExpand } from './use-tree-expand'
 // [workspace-epoch-v1] 显式 import 同上：watch(workspaceEpoch) 在 tsc/vitest 下需要真实绑定
@@ -42,16 +41,10 @@ interface FileReadResponse { files?: FileReadItem[] }
 // 通过 setup scope 在组件卸载时自动清理；因此必须定义在 setup 顶层而非函数内
 const _clipboard = useClipboard()
 
-// [choose-workspace-feedback-v1] 工作区选择失败需向用户提示：静默会让用户误以为按钮无响应
-const { toast } = useToast()
-
 const { tree, loading, copiedPath, load, loadChildren, getChildren, isChildrenLoading, copyPath } = useFileTree()
 
 // 从 localStorage 恢复展开态
 const fold = useFoldState('default', 'filetree')
-
-/** 当前工作区项目名；初值兜底 '工作区'，onMounted 后按 /__ai/workspace 或 package.json name 修正 */
-const projectName = ref('工作区')
 
 // [ui-p1c-tree-expand-wire-v1] V4：展开态 + 持久化 + 懒加载触发统一由 composable 承载
 const { toggle, isOpen, rehydrate } = useTreeExpand(fold, loadChildren)
@@ -67,25 +60,6 @@ const fileError = ref('')
 // 原实现无条件写 fileDialog 会「用 A 的内容显示在 B 路径下」或「关闭后复活」（报告 §2.7）
 let fileDialogSeq = 0
 
-/** 根节点 */
-const rootPath = computed(() => {
-  if (!tree.value.length) return '.'
-  const first = String(tree.value[0].path || '')
-  if (!first.startsWith('/')) return '.'
-  const idx = first.lastIndexOf('/')
-  return idx > 0 ? first.slice(0, idx) : '.'
-})
-
-/** 根节点节点 */
-const rootNode = computed(() => {
-  if (!props.root) return null
-  return {
-    name: projectName.value,
-    path: rootPath.value,
-    type: 'directory'
-  } as FileNode
-})
-
 // [ft-hljs] 渲染分流复用 useFileContentHtml 的单点实现，避免与变更预览各写一份
 const isMarkdown = computed(() => isMarkdownPath(fileDialog.value?.path || ''))
 
@@ -93,51 +67,15 @@ const isMarkdown = computed(() => isMarkdownPath(fileDialog.value?.path || ''))
 const fileDialogHtml = computed(() => renderFileContent(fileDialog.value?.content || '', fileDialog.value?.path || ''))
 
 /**
- * [workspace-epoch-v1] 拉取根层文件树 + 解析项目名；挂载与「执行 root 变更」后共用。
- * [WHY] 原实现把这段只写在 onMounted 里，而 SidePane 用 v-show 保活（切工作区不卸载）
- *   ⇒ 切/建工作区后树与项目名停留在旧 root（用户报告：新建工作区后 sidebar 数据没更新）。
- * [CONSTRAINT] 每次进入先把 projectName 复位再重新解析，否则旧 root 的非空值会挡住新 root 的解析。
+ * [workspace-epoch-v1] 拉取根层文件树；挂载与「执行 root 变更」后共用。
+ * [WHY] 原实现只写在 onMounted 里，而 SidePane 用 v-show 保活（切工作区不卸载）
+ *   ⇒ 切/建工作区后树停留在旧 root（用户报告：新建工作区后 sidebar 数据没更新）。
  */
 async function loadRoot(): Promise<void> {
   await load()
   // [expanded-rehydrate-v1] 刷新后 expanded 已从持久化恢复，但 loadChildren 从未被调过，
   // 子节点空 → 展开态但内容空白（报告 §2.5）。
   rehydrate()
-  projectName.value = '工作区'
-  // 优先用 /__ai/workspace 返回的 root 目录名；其次 package.json name
-  try {
-    const ws = await fetch('/__ai/workspace', { headers: { accept: 'application/json' } })
-    if (ws.ok) {
-      const wj = await ws.json() as { root?: string }
-      const r = String(wj?.root || '').replace(/[\\/]+$/, '')
-      if (r) {
-        const parts = r.split('/').filter(Boolean)
-        const base = parts[parts.length - 1] || ''
-        if (base) projectName.value = base
-      }
-    }
-  } catch { /* ignore */ }
-  if (projectName.value === '工作区' || !projectName.value) {
-    const pkgNode = tree.value.find(n => n.name === 'package.json')
-    if (pkgNode) {
-      try {
-        const res = await fetch('/__ai/files/read', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ paths: [pkgNode.path] }),
-        })
-        if (res.ok) {
-          const j = await res.json() as Record<string, unknown>
-          const arr = (Array.isArray((j as FileReadResponse).files) ? (j as FileReadResponse).files : (Array.isArray(j) ? j : [])) as FileReadItem[]
-          const hit = arr.find((x: FileReadItem) => x && x.path === pkgNode.path) || arr[0] || {}
-          if (hit.content) {
-            const parsed = JSON.parse(hit.content)
-            if (parsed.name) projectName.value = String(parsed.name).split('/').pop() || String(parsed.name)
-          }
-        }
-      } catch { /* ignore */ }
-    }
-  }
 }
 
 if (props.root) {
@@ -148,17 +86,16 @@ if (props.root) {
   watch(workspaceEpoch, () => { void loadRoot() })
 }
 
-// 拖拽控制器（须在 rootNode/getFileIcon/iconSvg/collectFilePathsAsync/toggle/copyPath 声明之后）
+// 拖拽控制器（须在 getFileIcon/iconSvg/collectFilePathsAsync/toggle/copyPath 声明之后）
 const dragCtl = createDragController({
   isDraggable: () => !!props.draggable,
-  rootNode,
   getFileIcon,
   iconSvg,
   collectFilePathsAsync,
   toggle,
   copyPath,
 })
-const { onRootPointerDown, onPointerDown } = dragCtl
+const { onPointerDown } = dragCtl
 
 onBeforeUnmount(() => dragCtl.dispose())
 
@@ -258,68 +195,10 @@ async function copyFileContent() {
  * [CONSTRAINT] 不阻止其他按键冒泡（Enter / 复制快捷键交给浏览器默认行为）
  */
 function onDialogKey(e: KeyboardEvent) { if (e.key === 'Escape') closeFileDialog() }
-
-// [native-picker] 调用系统原生文件夹选择器（macOS osascript / Windows / Linux 各平台实现）；
-// 不支持平台或用户取消时静默返回，本组件不提供浏览器式回退
-/**
- * 执行 choose Workspace
- */
-async function chooseWorkspace(): Promise<void> {
-  try {
-    const r = await fetch('/__ai/workspace/pick', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}',
-    })
-    // 204 = 用户取消
-    if (r.status === 204) return
-    if (r.ok) {
-      const j = await r.json().catch(() => ({})) as { ok?: boolean, canceled?: boolean }
-      if (j && j.ok) {
-        // [workspace-switch-inplace-v1] 原地切换：与 AiWindowList.activate 同一语义，不整页 reload
-        // （原 reload 会在启动期触发 openAiSession 自动开新 AI 窗口，与「切换不打开新窗口」冲突）。
-        // [CONSTRAINT] /workspace/pick 服务端已 registerWorkspace(path, true) → setRoot + persist；
-        //   前端只补「清会话上下文 + 刷新注册表」，与新 root 的 SYSTEM.md 首问保持干净起点。
-        const { useWorkspaces } = await import('../../composables/data/useWorkspaces')
-        const ws = useWorkspaces()
-        const active = ws.activeId.value
-        if (active) await ws.activate(active)
-        else await ws.load()
-        return
-      }
-      if (j && j.canceled) return
-    }
-    // [choose-workspace-feedback-v1] 501 / 5xx 必须提示：
-    // 用户点击后无 reload 也无提示会误判按钮失效；取消（204/200+canceled）仍保持静默
-    if (r.status === 501) {
-      toast('当前平台不支持系统选择器，请手动输入路径', 'warn', TOAST_MEDIUM)
-      return
-    }
-    toast(`选择失败：HTTP ${r.status}`, 'error', TOAST_MEDIUM)
-  } catch (e) {
-    toast(`选择失败：${e instanceof Error ? e.message : String(e)}`, 'error', TOAST_MEDIUM)
-  }
-}
 </script>
 
 <template>
   <div class="tree" :class="{ 'is-root': props.root }">
-    <div v-if="props.root" class="tree-head">
-      <div
-        v-if="rootNode"
-        v-tooltip="props.draggable ? `拖动到左侧：${rootNode.path}` : rootNode.path"
-        class="row dir root-row"
-        :class="{ 'is-draggable': props.draggable }"
-        @pointerdown="onRootPointerDown"
-      >
-        <span class="icon" v-html="iconSvg('folder')" />
-        <span class="name">{{ rootNode.name }}</span>
-      </div>
-      <button v-tooltip="'选择工作区目录'" class="refresh ws-btn" aria-label="选择工作区" @click="chooseWorkspace">
-        <svg class="ft-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5a2 2 0 0 1 2-2h2.2a2 2 0 0 1 1.4.6l1.2 1.2a2 2 0 0 0 1.4.6H16a2 2 0 0 1 2 2v1" /><rect x="3" y="9.5" width="12" height="9.5" rx="2" /><line x1="19" y1="14" x2="19" y2="20" /><line x1="16" y1="17" x2="22" y2="17" /></svg>
-      </button>
-    </div>
-
     <!-- [ui-p2b-skeleton-wire-v1] V6：首屏改骨架屏，占位出「文件行」的形状 -->
     <div v-if="props.root && loading && !tree.length" class="skeleton-list" aria-busy="true" aria-label="正在加载文件树">
       <div

@@ -1,10 +1,13 @@
 <script setup lang="ts">
+/* eslint-disable vue3-script-setup/declaration-order -- createGitActions 入参是下方 refs/composables 产出，按规则重排会 TDZ */
 import { useWorklogCommit } from './worklog-commit'
+import { createGitActions } from './worklog-git-actions'
 import { useToast } from '../../composables/ui/useToast'
 // [workspace-epoch-v1] 显式 import：watch(workspaceEpoch) 在 vitest 下无 auto-import 兜底
 import { useWorkspaces } from '../../composables/data/useWorkspaces'
 import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
 
+// [SENTINEL-1791947630] diagnostic probe
 // @desc VSCode 源码管理风格侧栏：提交框 + 变更文件列表 + 点击预览文件内容
 // @why 用户要求把工作日志从弹窗改为 SidePane tab，视觉参照 VSCode 源代码管理面板
 // @change-impact 依赖 /__ai/git/worklog 端点；父组件 SidePane 通过 v-show 切换本面板可见性
@@ -108,6 +111,8 @@ const branchesOpen = ref(false)
 const branchesLoading = ref(false)
 const branchesList = ref<string[]>([])
 const switchingBranch = ref(false)
+// [git-branch-dropdown-v1] 下拉容器 ref：点击外部关闭（弹窗已改为就地下拉）
+const branchWrapRef = ref<HTMLElement | null>(null)
 // [git-commit-detail-v1] 提交详情弹窗
 const detailOpen = ref(false)
 const detailLoading = ref(false)
@@ -230,6 +235,8 @@ onUnmounted(() => {
   if (unsubscribeReply) { try { unsubscribeReply() } catch { /* ignore */ } unsubscribeReply = null }
   cleanupWorklogCommit()
 })
+
+onClickOutside(branchWrapRef, () => { branchesOpen.value = false })
 
 /**
  * [git-stage-v1] 根据 XY 位把文件按所属栏补齐展示字段。
@@ -408,44 +415,6 @@ async function openPreview(file: { path: string, status?: string, diff?: string 
     if (seq === _previewSeq) previewLoading.value = false
   }
 }
-/**
- * [git-stage-v1] 把路径加入暂存区（VSCode 未暂存栏的 + 动作）。
- */
-async function stageFiles(paths: string[]): Promise<void> {
-  if (!paths.length) return
-  try {
-    const r = await fetch('/__ai/git/stage', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ paths }),
-    })
-    const j = await r.json().catch(() => ({})) as { ok?: boolean, reason?: string }
-    if (!r.ok || !j.ok) { toast(j.reason || `暂存失败（HTTP ${r.status}）`, 'error', TOAST_LONG); return }
-    await load()
-  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
-}
-/** [git-stage-v1] 从暂存区撤下（VSCode 已暂存栏的 - 动作，保留工作区内容）。 */
-async function unstageFiles(paths: string[]): Promise<void> {
-  if (!paths.length) return
-  try {
-    const r = await fetch('/__ai/git/unstage', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ paths }),
-    })
-    const j = await r.json().catch(() => ({})) as { ok?: boolean, reason?: string }
-    if (!r.ok || !j.ok) { toast(j.reason || `取消暂存失败（HTTP ${r.status}）`, 'error', TOAST_LONG); return }
-    await load()
-  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
-}
-/** [git-stage-v1] 全量暂存：把未暂存栏全部加入暂存区 */
-async function stageAll(): Promise<void> {
-  await stageFiles(unstagedRows.value.map(r => r.path))
-}
-/** [git-stage-v1] 全量取消暂存 */
-async function unstageAll(): Promise<void> {
-  await unstageFiles(stagedRows.value.map(r => r.path))
-}
 async function load(): Promise<void> {
   // [load-seq-guard-v1] 捕获本次请求序号；后续每个 await 后校验，过期即丢弃
   const mySeq = ++_loadSeq
@@ -539,7 +508,12 @@ async function doCommit(): Promise<void> {
     committing.value = false
   }
 }
-/** [git-switch-branch-v1] 打开分支切换弹窗；每次打开都刷新列表（分支可能已变） */
+/** [git-switch-branch-v1] 点击分支按钮：已展开则收起，未展开则展开并刷新列表 */
+function toggleBranches(): void {
+  if (branchesOpen.value) { branchesOpen.value = false; return }
+  void openBranches()
+}
+/** [git-switch-branch-v1] 拉分支列表并展开下拉；每次打开都刷新（分支可能已变） */
 async function openBranches(): Promise<void> {
   branchesOpen.value = true
   branchesLoading.value = true
@@ -551,7 +525,6 @@ async function openBranches(): Promise<void> {
   } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
   finally { branchesLoading.value = false }
 }
-function closeBranches(): void { branchesOpen.value = false }
 /** [git-switch-branch-v1] 切换分支（dirty 保护由后端强制） */
 async function switchBranch(b: string): Promise<void> {
   if (switchingBranch.value || b === branchRef.value) return
@@ -611,6 +584,16 @@ function fmtCommitDate(iso: string): string {
   const p = (n: number): string => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
+// [worklog-git-actions-v1] git 动作簇外提到同目录模块（§4 组件 1000 行红线）
+const { stageFiles, unstageFiles, stageAll, unstageAll, discardFiles, discardAll } = createGitActions({
+  toast,
+  reload: () => load(),
+  confirm: msg => confirmDialog(msg, { type: 'danger', okText: '放弃' }),
+  unstagedRows,
+  stagedRows,
+  toastLong: TOAST_LONG,
+  toastMedium: TOAST_MEDIUM,
+})
 </script>
 
 <template>
@@ -640,9 +623,36 @@ function fmtCommitDate(iso: string): string {
       <!-- [git-branch-display-v1] 分支名 + 短 sha：对齐 VSCode 源控面板顶部信息条 -->
       <div v-if="branchRef || headRef" class="wl-head-row">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M6 9v6" /><path d="M18 6a3 3 0 1 1-3 3" /><path d="M15 9a9 9 0 0 1-9 9" /></svg>
-        <button type="button" class="wl-head-branch" :title="`点击切换分支（当前 ${branchRef || '(detached)'}）`" @click="openBranches">
-          {{ branchRef || '(detached)' }}
-        </button>
+        <div ref="branchWrapRef" class="wl-branch-wrap">
+          <button type="button" class="wl-head-branch" :title="`点击切换分支（当前 ${branchRef || '(detached)'}）`" @click="toggleBranches">
+            {{ branchRef || '(detached)' }}
+          </button>
+          <!-- [git-branch-dropdown-v1] 分支下拉：就地绝对定位，替换原 Teleport 弹窗 -->
+          <div v-if="branchesOpen" class="wl-branch-drop" role="listbox" aria-label="切换分支">
+            <div v-if="branchesLoading" class="wl-hist-loading">
+              加载中…
+            </div>
+            <ul v-else-if="branchesList.length" class="wl-hist-list" role="list">
+              <li v-for="b in branchesList" :key="b" class="wl-hist-item">
+                <button
+                  type="button"
+                  class="wl-hist-row"
+                  :class="{ 'is-active': b === branchRef }"
+                  :disabled="switchingBranch || b === branchRef"
+                  :aria-label="b === branchRef ? `当前分支 ${b}` : `切换到 ${b}`"
+                  @click="switchBranch(b)"
+                >
+                  <code class="wl-hist-sha">{{ b === branchRef ? '✓' : '' }}</code>
+                  <span class="wl-hist-subject">{{ b }}</span>
+                  <span class="wl-hist-meta">{{ b === branchRef ? '当前' : '' }}</span>
+                </button>
+              </li>
+            </ul>
+            <div v-else class="wl-hist-empty">
+              暂无本地分支
+            </div>
+          </div>
+        </div>
         <code v-if="headRef" class="wl-head-sha">{{ headRef }}</code>
       </div>
       <!-- [commit-toolbar-v1] 按钮排：提交 / 复制日志 / 生成 / 刷新，统一 30×30 方形，置于输入框上方 -->
@@ -710,28 +720,6 @@ function fmtCommitDate(iso: string): string {
         />
       </div>
       <!-- 分体式：主区提交、窄区复制完整日志；分隔线用半透明白 -->
-      <!-- AI 生成结果展示：生成中 / 成功 / 失败 -->
-      <div v-if="aiGenerating || aiCommitMsg || aiError" class="wl-ai-result">
-        <div v-if="aiGenerating" class="wl-ai-loading">
-          <span class="wl-ai-spinner" aria-hidden="true" />
-          <span>AI 生成中…</span>
-        </div>
-        <div v-else-if="aiError" class="wl-ai-error">
-          {{ aiError }}
-        </div>
-        <div v-else class="wl-ai-ok">
-          <span class="wl-ai-label">AI</span>
-          <span class="wl-ai-text">{{ aiCommitMsg }}</span>
-          <button
-            class="wl-ai-apply"
-            type="button"
-            title="填入消息框"
-            @click="commitMsg = aiCommitMsg"
-          >
-            填入
-          </button>
-        </div>
-      </div>
     </div>
 
     <div class="wl-scroll">
@@ -803,11 +791,9 @@ function fmtCommitDate(iso: string): string {
                 <span class="wl-doc" :class="f.stCls">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
                 </span>
-                <span class="wl-name">{{ f.name }}</span>
-                <span class="wl-dir">{{ f.dir }}</span>
-                <span v-if="f.added || f.removed" class="wl-stat">
-                  <span v-if="f.added" class="wl-add">+{{ f.added }}</span>
-                  <span v-if="f.removed" class="wl-del">−{{ f.removed }}</span>
+                <span class="wl-file-text">
+                  <span class="wl-name">{{ f.name }}</span>
+                  <span class="wl-dir">{{ f.dir }}</span>
                 </span>
                 <span class="wl-st" :class="f.stCls">{{ f.stLetter }}</span>
                 <button class="wl-row-action" type="button" title="取消暂存" aria-label="取消暂存" @click.stop="unstageFiles([f.path])">
@@ -827,6 +813,9 @@ function fmtCommitDate(iso: string): string {
               <span class="wl-del">−{{ delTotal }}</span>
             </span>
             <span class="wl-group-count">{{ unstagedRows.length }}</span>
+            <button class="wl-group-action" type="button" title="全部放弃更改" aria-label="全部放弃更改" @click="discardAll">
+              ↺
+            </button>
             <button class="wl-group-action" type="button" title="全部暂存" aria-label="全部暂存" @click="stageAll">
               +
             </button>
@@ -837,58 +826,22 @@ function fmtCommitDate(iso: string): string {
                 <span class="wl-doc" :class="f.stCls">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
                 </span>
-                <span class="wl-name">{{ f.name }}</span>
-                <span class="wl-dir">{{ f.dir }}</span>
-                <span v-if="f.added || f.removed" class="wl-stat">
-                  <span v-if="f.added" class="wl-add">+{{ f.added }}</span>
-                  <span v-if="f.removed" class="wl-del">−{{ f.removed }}</span>
+                <span class="wl-file-text">
+                  <span class="wl-name">{{ f.name }}</span>
+                  <span class="wl-dir">{{ f.dir }}</span>
                 </span>
-                <span class="wl-st" :class="f.stCls">{{ f.stLetter }}</span>
+                <button class="wl-row-action wl-row-discard" type="button" title="放弃更改" aria-label="放弃更改" @click.stop="discardFiles([f.path])">
+                  ↺
+                </button>
                 <button class="wl-row-action" type="button" title="暂存" aria-label="暂存" @click.stop="stageFiles([f.path])">
                   +
                 </button>
+                <span class="wl-st" :class="f.stCls">{{ f.stLetter }}</span>
               </div>
             </li>
           </ul>
         </template>
       </template>
-
-      <!-- [git-switch-branch-v1] 分支切换弹窗 -->
-      <Teleport v-if="branchesOpen" to="body">
-        <div class="wl-hist-mask" @click.self="closeBranches">
-          <div class="wl-hist-box" role="dialog" aria-label="切换分支">
-            <div class="wl-hist-head">
-              <span class="wl-hist-title">切换分支</span>
-              <span class="wl-hist-count">{{ branchesList.length }}</span>
-              <button class="wl-hist-close" type="button" aria-label="关闭" @click="closeBranches">
-                ×
-              </button>
-            </div>
-            <div v-if="branchesLoading" class="wl-hist-loading">
-              加载中…
-            </div>
-            <ul v-else-if="branchesList.length" class="wl-hist-list" role="list">
-              <li v-for="b in branchesList" :key="b" class="wl-hist-item">
-                <button
-                  type="button"
-                  class="wl-hist-row"
-                  :class="{ 'is-active': b === branchRef }"
-                  :disabled="switchingBranch || b === branchRef"
-                  :aria-label="b === branchRef ? `当前分支 ${b}` : `切换到 ${b}`"
-                  @click="switchBranch(b)"
-                >
-                  <code class="wl-hist-sha">{{ b === branchRef ? '✓' : '' }}</code>
-                  <span class="wl-hist-subject">{{ b }}</span>
-                  <span class="wl-hist-meta">{{ b === branchRef ? '当前' : '' }}</span>
-                </button>
-              </li>
-            </ul>
-            <div v-else class="wl-hist-empty">
-              暂无本地分支
-            </div>
-          </div>
-        </div>
-      </Teleport>
 
       <!-- [git-commit-detail-v1] 提交详情弹窗 -->
       <Teleport v-if="detailOpen" to="body">

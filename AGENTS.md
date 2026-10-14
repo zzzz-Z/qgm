@@ -242,6 +242,11 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
     新建工作区三种模式——`worktree`（`git worktree add -b <branch> <path>`，同仓库切新分支共享 .git）、
     `clone`（`git clone <url> <path>`，独立仓库）；`register` 模式要求路径已存在（走 `/workspace/register`）。
     目标路径已存在返 400；成功后自动入册（activate=true 时 setRoot + persist）。SSOT：`routes/workspace.ts`。
+  - 已登记 **`POST /__ai/git/discard`**（git-discard-v1）—— 丢弃指定路径的工作区改动
+    （VSCode「放弃更改」语义）：已跟踪走 `git restore --worktree`，未跟踪走 `git clean -f` 删除。
+    **只动工作区，不动索引/HEAD**；已暂存的改动须先 `/git/unstage` 才会被本端点丢弃。
+    body `{paths: string[]}`；路径白名单拒绝对路径与 `..` 穿越。SSOT：`packages/core/src/git.ts` 的 `gitDiscard`；
+    消费方 `WorklogPane.vue`（未暂存栏行级撤销 + 分组头「全部放弃」）。路由定义：`routes/git.ts`。
   - 已登记 **`POST /__ai/run`**（既有端点增补）—— body 新增 `workspaceId?`：目标工作区缺省用活跃项；
     注册表外 id 返 404。执行链包在 `workspace-scope.ts` 的 ALS 作用域里，脚本 cwd / overlay /
     post-run tsc·lint / 快照 / 日志按目标工作区 root 解析（并发运行互不串台）；

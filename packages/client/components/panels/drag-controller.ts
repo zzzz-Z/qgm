@@ -1,5 +1,4 @@
 // [drag-controller-v1] 从 FileTree.vue 抽出：树节点拖拽（ghost / pointer 事件 / drop 派发）
-import type { ComputedRef } from 'vue'
 // [ui-p2a-drag-bus-wire-v1] V12：drop 改走显式通道；drag / drag-cancel 无任何消费者，删除
 import { emitTreeDrop } from '../../composables/ui/drag-bus'
 import type { FileNode } from '../../types'
@@ -17,7 +16,6 @@ interface DragState {
 export interface DragControllerDeps {
   /** 组件是否开启可拖拽（来自 props） */
   isDraggable: () => boolean
-  rootNode: ComputedRef<FileNode | null>
   getFileIcon: (name: string) => string
   iconSvg: (name: string, cls?: string) => string
   collectFilePathsAsync: (node: FileNode) => Promise<string[]>
@@ -30,7 +28,7 @@ export interface DragControllerDeps {
  * @param deps - 依赖面
  */
 export function createDragController(deps: DragControllerDeps) {
-  const { isDraggable, rootNode, getFileIcon, iconSvg, collectFilePathsAsync, toggle, copyPath } = deps
+  const { isDraggable, getFileIcon, iconSvg, collectFilePathsAsync, toggle, copyPath } = deps
   let drag: DragState | null = null
   let ghost: HTMLElement | null = null
 
@@ -83,15 +81,6 @@ export function createDragController(deps: DragControllerDeps) {
   /** 解除页面锁定 */
   function unlockPage(): void {
     document.documentElement.classList.remove('ai-runner-dragging')
-  }
-
-  /** 根节点按下：代理给 onPointerDown */
-  function onRootPointerDown(e: PointerEvent): void {
-    if (!isDraggable()) return
-    if (e.button !== 0) return
-    const node = rootNode.value
-    if (!node) return
-    onPointerDown(e, node)
   }
 
   /** 节点按下：建立 drag 状态、异步拉目录 paths、注册全局监听 */
@@ -170,5 +159,5 @@ export function createDragController(deps: DragControllerDeps) {
     drag = null
   }
 
-  return { onRootPointerDown, onPointerDown, onPointerMove, onPointerUp, onPointerCancel, cleanup, dispose }
+  return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, cleanup, dispose }
 }

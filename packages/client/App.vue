@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { TOAST_LONGEST, TOAST_MEDIUM, TOAST_SHORT, TOAST_SHORT_MEDIUM } from './utils/toast-durations'
+import { TOAST_LONGEST, TOAST_MEDIUM } from './utils/toast-durations'
 import ScriptPanel from './components/script/ScriptPanel.vue'
 import AiWindowList from './components/panels/AiWindowList.vue'
 import { useAiReplyHandlers } from './composables/ai/useAiReplyHandlers'
@@ -111,32 +111,6 @@ function addSessionToHistory(id: string, url: string, title: string) {
 }
 
 /**
- * 打开一个全新的 AI 会话窗口（强制新会话，无论当前是否有会话）
- */
-async function onNewSession() {
-  // [new-session-clear-first-v1] 顺序修正：先清残留再开新会话
-  // [WHY] 原顺序 openAiSession → clearEvents：copyAndFill 内部 trackMessage 把 finalPrompt 写入消息队列，
-  //       随后 clearEvents 只清事件流不清 messages；且 resetSession 会换 sessionId → 规则去重键击穿（用户报告）
-  // [CONSTRAINT] clearEvents 需在 openAiSession 之前调用，否则新会话事件流被同步清空
-  // [CHANGE-IMPACT] 与 useAiWindow.copyAndFill 的 track-original-prompt / rules-dedup-key-v2 配套
-  try { clearEvents() } catch { /* 未就绪时忽略 */ }
-  try { resetSession() } catch { /* 未就绪时忽略 */ }
-  loopPaused.value = true
-  autoTakeover.disable()
-  // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
-  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), sid: winSidOf(String(modelId.value || 'deepseek')), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，准备执行任务。', forceRules: true })
-  if (!win) {
-    toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', TOAST_MEDIUM)
-    return
-  }
-  toast('已打开新会话，正在发送「开始聊天」…', 'info', TOAST_SHORT)
-  if (fill === 'sent' || fill === 'opened') {
-    toast('已发送「开始聊天」，等待会话地址回写', 'success', TOAST_SHORT_MEDIUM)
-  } else {
-    toast('发送失败，请检查 AI 窗口是否就绪', 'warn', TOAST_MEDIUM)
-  }
-}
-/**
  * [userscript-update-v1] 安装 / 更新油猴脚本
  * [WHY] 脚本改动后需让 Tampermonkey 重新拉取；分发端点每次请求都重读磁盘，
  *       故「打开端点 URL」即等价于「更新到最新版本」。
@@ -238,18 +212,6 @@ function onLoginGui() {
           >
             <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
             <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
-          </button>
-          <button
-            v-tooltip="'打开一个新的 AI 会话窗口（强制新会话，不影响当前会话）'"
-            aria-label="打开新会话"
-            class="new-session-toggle"
-            @click="onNewSession"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              <line x1="12" y1="8" x2="12" y2="13" />
-              <line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
-            </svg>
           </button>
           <!-- [hdr-transport-group-v1] 传输链路控组合一：把「油猴 / 无头」选择、无头引导登录、更新油猴脚本
            收进同一个分段控件（原先是三个各自描边的独立控件，视觉上零散且高度不一）。

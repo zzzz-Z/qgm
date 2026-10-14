@@ -462,6 +462,45 @@ export async function gitUnstage(paths: string[]): Promise<{ ok: boolean, reason
 }
 
 /**
+ * [git-discard-v1] 丢弃指定路径的工作区改动（VSCode「放弃更改」语义）。
+ * [WHY] 已跟踪文件走 git restore --worktree（回 HEAD 内容）；未跟踪文件 restore 无效，
+ *   须另走 git clean -f 删除。两类混在同一批 paths 里，分别处理才不会漏删或误报。
+ * [CONSTRAINT] 只动工作区，不动索引 / HEAD；已暂存的改动需先 unstage 才会被本接口丢弃。
+ *   路径白名单与 gitRestoreFile 一致（拒绝对路径与 .. 穿越）。
+ */
+export async function gitDiscard(paths: string[]): Promise<{ ok: boolean, discarded: string[], reason?: string }> {
+  if (!(await gitAvailable())) return { ok: false, discarded: [], reason: '非 git 仓库' }
+  const safe = paths
+    .map(p => String(p || '').replace(/\\/g, '/'))
+    .filter(p => p && !p.startsWith('/') && !p.split('/').includes('..'))
+  if (safe.length === 0) return { ok: true, discarded: [] }
+
+  // 未跟踪文件：git restore 对其无效，须单独 git clean -f
+  const status = await run('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
+  const untracked = new Set<string>()
+  if (status.code === 0) {
+    for (const entry of status.stdout.split('\u0000').filter(Boolean)) {
+      if (entry.length >= 4 && entry[0] === '?' && entry[1] === '?') untracked.add(entry.slice(3))
+    }
+  }
+  const tracked = safe.filter(p => !untracked.has(p))
+  const untrackedHit = safe.filter(p => untracked.has(p))
+
+  if (tracked.length > 0) {
+    const r = await run('git', ['restore', '--worktree', '--', ...tracked])
+    if (r.code !== 0) {
+      const r2 = await run('git', ['checkout', '--', ...tracked])
+      if (r2.code !== 0) return { ok: false, discarded: [], reason: r.stderr.trim() || `git restore 退出码 ${r.code}` }
+    }
+  }
+  if (untrackedHit.length > 0) {
+    const r = await run('git', ['clean', '-f', '--', ...untrackedHit])
+    if (r.code !== 0) return { ok: false, discarded: tracked, reason: r.stderr.trim() || `git clean 退出码 ${r.code}` }
+  }
+  return { ok: true, discarded: safe }
+}
+
+/**
  * [git-stage-v1] 提交当前暂存区到当前分支（真实 git commit，非 ai-archive）。
  * [WHY] VSCode 语义：用户点了提交就前进当前分支，与 AI 自动存档（ai-archive）分属两条通道。
  * [CONSTRAINT] 暂存区为空时返回 empty:true（不报错）；不触发 --no-verify（保留钩子）。
