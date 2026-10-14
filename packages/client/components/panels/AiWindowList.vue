@@ -1,23 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { TOAST_MEDIUM, TOAST_SHORT_MEDIUM } from '../../utils/toast-durations'
+import { TOAST_LONG, TOAST_MEDIUM, TOAST_SHORT_MEDIUM } from '../../utils/toast-durations'
 import { aiWindowListCollapsed, aiWindowListCollapsed as collapsed } from '../../composables/ui/useAiWindowListCollapse'
 import { useToast } from '../../composables/ui/useToast'
 import { useWorkspaces } from '../../composables/data/useWorkspaces'
 
 const adding = ref(false)
-const addMode = ref<'register' | 'worktree' | 'clone'>('register')
+// [trae-single-mode-v1] 只保留「目录」模式（用户明示删掉分支/克隆）：
+// addMode 单值保留下游 if 判据的兼容外壳，避免大范围改动。
+const addMode = ref<'register'>('register')
 const pathInput = ref('')
-const branchInput = ref('')
-const urlInput = ref('')
 const busy = ref(false)
-// [trae-new-workspace-v1] 新建工作区：先选基仓库目录 → 列分支下拉；不让用户手填分支名
-const baseRepoPath = ref('')
-const branches = ref<string[]>([])
 const pickingRepo = ref(false)
 
 const { toast } = useToast()
-const { workspaces, activeId, loading, load, activate, register, remove, create, pickPath, listBranches } = useWorkspaces()
+const { workspaces, activeId, loading, load, activate, register, remove, pickPath } = useWorkspaces()
 
 const items = computed(() => workspaces.value.map(w => ({
   id: w.id,
@@ -34,16 +31,45 @@ async function onClick(item: { id: string, label: string, active: boolean }): Pr
   busy.value = true
   const r = await activate(item.id)
   busy.value = false
-  // activate 成功会整页 reload；走到这里说明失败
-  toast(`切换工作区失败：${r.error || '未知错误'}`, 'error', TOAST_MEDIUM)
+  // [workspace-switch-inplace-v1] 原地切换不再 reload ⇒ 成功与失败都会走到这里，必须判 r.ok
+  if (!r.ok) { toast(`切换工作区失败：${r.error || '未知错误'}`, 'error', TOAST_MEDIUM) }
+}
+async function submitAdd(): Promise<void> {
+  const p = pathInput.value.trim()
+  if (!p) { toast('请先点击选择目录', 'warn', TOAST_SHORT_MEDIUM); return }
+  if (busy.value) return
+  busy.value = true
+  const r = await register(p, false)
+  busy.value = false
+  if (!r.ok) { toast(`操作失败：${r.error || '未知错误'}`, 'error', TOAST_MEDIUM); return }
+  pathInput.value = ''
+  adding.value = false
+  toast('工作区已就绪', 'info', TOAST_SHORT_MEDIUM)
 }
 /**
- * [trae-new-workspace-v1] 选基仓库目录 → 拉分支列表，供分支下拉消费。
- * [WHY] 需求明确「选了工作区才能选 git 分支，而不是让人填」：分支来自真实 git 仓库，
- *   用户手填易错（拼错/不存在）且无法校验。
- * [CONSTRAINT] 走 /workspace/pick-path（只选路径不入册），避免误触 setRoot + reload。
+ * [trae-modal-pick-v1] 打开「新建工作区」弹窗，重置所有输入状态。
+ * [WHY] 原入口是内联表单（挤在左栏里且 pathInput/urlInput 手填），
+ *   改为模态后「打开动作」与「状态清空」合并，避免上次残留。
  */
-async function onPickRepo(): Promise<void> {
+function openModal(): void {
+  addMode.value = 'register'
+  pathInput.value = ''
+  adding.value = true
+}
+/**
+ * [trae-modal-pick-v1] 关闭「新建工作区」弹窗并清空状态。
+ * [CONSTRAINT] 取消与确认后都走本函数；submitAdd 成功后自身也清一次（幂等）。
+ */
+function closeModal(): void {
+  adding.value = false
+  pathInput.value = ''
+}
+/**
+ * [trae-modal-pick-v1] 通用「选目标目录」：目录模式选自己、分支/克隆模式选新工作区父目录。
+ * [WHY] 手填绝对路径易错（拼错 / 不存在 / 无权限）；统一走系统选择器。
+ * [CONSTRAINT] 与 onPickRepo 共用 pickPath()（同一个 /workspace/pick-path）；pickingRepo 防重入。
+ */
+async function onPickTarget(): Promise<void> {
   if (pickingRepo.value) return
   pickingRepo.value = true
   const r = await pickPath()
@@ -53,54 +79,49 @@ async function onPickRepo(): Promise<void> {
     toast(`选择目录失败：${r.error || (r.unsupported ? '当前平台不支持系统选择器' : '未知错误')}`, 'error', TOAST_MEDIUM)
     return
   }
-  baseRepoPath.value = r.path || ''
-  branches.value = []
-  branchInput.value = ''
-  if (!baseRepoPath.value) return
-  const b = await listBranches(baseRepoPath.value)
-  if (!b.ok) {
-    toast(`列分支失败：${b.error || '未知错误'}`, 'warn', TOAST_MEDIUM)
-    return
-  }
-  branches.value = b.list || []
-  // [user-friendly] 默认选中当前分支，多数场景直接创建新分支即可
-  if (b.current && branches.value.includes(b.current)) branchInput.value = b.current
-}
-async function submitAdd(): Promise<void> {
-  const p = pathInput.value.trim()
-  if (!p) { toast('请输入工作区绝对路径', 'warn', TOAST_SHORT_MEDIUM); return }
-  if (busy.value) return
-  busy.value = true
-  let r: { ok: boolean, error?: string }
-  if (addMode.value === 'register') {
-    r = await register(p, false)
-  } else if (addMode.value === 'worktree') {
-    if (!baseRepoPath.value) { busy.value = false; toast('请先选择基仓库目录', 'warn', TOAST_SHORT_MEDIUM); return }
-    const branch = branchInput.value.trim()
-    if (!branch) { busy.value = false; toast('请选择分支', 'warn', TOAST_SHORT_MEDIUM); return }
-    r = await create({ mode: 'worktree', path: p, branch, baseRepo: baseRepoPath.value, activate: false })
-  } else {
-    const url = urlInput.value.trim()
-    if (!url) { busy.value = false; toast('请输入仓库 URL', 'warn', TOAST_SHORT_MEDIUM); return }
-    r = await create({ mode: 'clone', path: p, url, activate: false })
-  }
-  busy.value = false
-  if (!r.ok) { toast(`操作失败：${r.error || '未知错误'}`, 'error', TOAST_MEDIUM); return }
-  pathInput.value = ''
-  branchInput.value = ''
-  urlInput.value = ''
-  baseRepoPath.value = ''
-  branches.value = []
-  adding.value = false
-  toast('工作区已就绪', 'info', TOAST_SHORT_MEDIUM)
+  pathInput.value = r.path || ''
 }
 async function onRemove(item: { id: string, label: string }): Promise<void> {
   if (busy.value) return
+  const wasActive = item.id === activeId.value
   busy.value = true
   const r = await remove(item.id)
   busy.value = false
   if (!r.ok) { toast(`移除失败：${r.error || '未知错误'}`, 'error', TOAST_MEDIUM); return }
-  toast(`已移除工作区 ${item.label}`, 'info', TOAST_SHORT_MEDIUM)
+  // [workspace-remove-active-v1] 删活跃项时 DeepSeek 窗口仍停在原会话：服务端已回退 root，
+  //   但受控窗口不会自动导航——明确告知用户，避免误以为窗口已跟随切换。
+  if (wasActive) {
+    toast(`已移除工作区 ${item.label}；DeepSeek 窗口仍停在该会话，切换其他工作区即可跟随切换`, 'info', TOAST_LONG)
+  } else {
+    toast(`已移除工作区 ${item.label}`, 'info', TOAST_SHORT_MEDIUM)
+  }
+}
+/**
+ * [workspace-open-newwin-v1] 在新浏览器窗口打开该工作区。
+ * [WHY] 用户要求每个工作区项可单独在新窗口打开，便于并行查看不同工作区；
+ *   通过 ?workspaceId=<id> 让新窗口启动时自动切到该工作区（App.vue 读取 query 参数）。
+ * [CONSTRAINT] 使用 window.open 打开同源页面，不加 noopener（新窗口需要读 sessionStorage 上的位置信息）。
+ */
+async function onOpenNewWindow(item: { id: string, label: string }): Promise<void> {
+  // [workspace-session-bind-v1] 用户确认 Q2：打开新会话 = 导航受控 DeepSeek 窗口到新会话，
+  //   而不是新开浏览器窗口（新开窗口不受工作台控制，source 校验会拒收其消息）。
+  // [CONSTRAINT] 先激活该工作区（原地切换 + 清会话上下文），再让站点导航到新会话 URL。
+  try {
+    const { useWorkspaces } = await import('../../composables/data/useWorkspaces')
+    const { openAiSession } = await import('../../composables/ai/useAiWindow')
+    const { currentSiteUrl } = await import('../../composables/ai/useAiSite')
+    const ws = useWorkspaces()
+    if (item.id !== ws.activeId.value) await ws.activate(item.id)
+    // [workspace-open-new-session-v1] 两步走：先导航到新会话（不带首问），等窗口就绪后再发。
+    // [WHY] 一步到位时导航会让油猴重注入，首问落在加载中页面被静默丢弃
+    //   （openAiSession 现在未就绪即返回 fill:null，不再弹误导性报错，但首问确实没发出去）。
+    // [CONSTRAINT] 第二步依赖第一步的导航完成；fill 为 null 时说明未就绪，由用户手动重试。
+    await openAiSession({ atUrl: currentSiteUrl(), forceRules: true })
+    const { fill } = await openAiSession({ forceRules: true, initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，准备执行任务。' })
+    if (fill === null) toast('新会话已打开；窗口尚未就绪，首问未发送，请稍后重试', 'warn', TOAST_MEDIUM)
+  } catch {
+    toast('打开新会话失败，请检查站点窗口是否就绪', 'error', TOAST_MEDIUM)
+  }
 }
 </script>
 
@@ -133,89 +154,54 @@ async function onRemove(item: { id: string, label: string }): Promise<void> {
       class="awl-new-workspace"
       type="button"
       aria-label="新建工作区"
-      @click="adding = true"
+      @click="openModal"
     >
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
       <span class="awl-new-workspace-label">新建工作区</span>
     </button>
     <!-- [trae-shell-v1] 原 awl-head 已删：折叠按钮上移到顶部 awl-top-spacer 内 -->
-    <div v-if="adding" class="awl-add-row">
-      <div class="awl-modes" role="tablist" aria-label="新建模式">
-        <button type="button" class="awl-mode" :class="{ active: addMode === 'register' }" @click="addMode = 'register'">
-          目录
-        </button>
-        <button type="button" class="awl-mode" :class="{ active: addMode === 'worktree' }" @click="addMode = 'worktree'">
-          分支
-        </button>
-        <button type="button" class="awl-mode" :class="{ active: addMode === 'clone' }" @click="addMode = 'clone'">
-          克隆
-        </button>
-      </div>
-      <!-- [trae-new-workspace-v1] worktree 模式：选基仓库目录 → 下拉选分支（不让人手填） -->
-      <template v-if="addMode === 'worktree'">
-        <div class="awl-repo-row">
-          <input
-            v-model="baseRepoPath"
-            class="awl-add-input"
-            type="text"
-            placeholder="基仓库目录（点右侧选择）"
-            spellcheck="false"
-            readonly
-          >
-          <button
-            class="awl-add"
-            type="button"
-            aria-label="选择基仓库目录"
-            :disabled="busy || pickingRepo"
-            @click="onPickRepo"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" /></svg>
-          </button>
-        </div>
-        <select
-          v-if="branches.length"
-          v-model="branchInput"
-          class="awl-add-input"
-          :disabled="busy"
-        >
-          <option value="">
-            请选择分支
-          </option>
-          <option v-for="b in branches" :key="b" :value="b">
-            {{ b }}
-          </option>
-        </select>
-        <div v-else-if="baseRepoPath" class="awl-hint">
-          该目录非 git 仓库或暂无本地分支
-        </div>
-      </template>
-      <input
-        v-if="addMode === 'clone'"
-        v-model="urlInput"
-        class="awl-add-input"
-        type="text"
-        placeholder="git@... 或 https://..."
-        spellcheck="false"
-        :disabled="busy"
+    <!-- [trae-modal-pick-v1-template] 原内联 awl-add-row 整块已迁至模态弹窗（Teleport 到 body） -->
+    <Teleport to="body">
+      <div
+        v-if="adding"
+        class="awl-modal-mask"
+        role="dialog"
+        aria-modal="true"
+        aria-label="新建工作区"
+        @click.self="closeModal"
       >
-      <div class="awl-path-row">
-        <input
-          v-model="pathInput"
-          class="awl-add-input"
-          type="text"
-          :placeholder="addMode === 'register' ? '/path/to/project' : '/path/to/new'"
-          spellcheck="false"
-          :disabled="busy"
-          @keydown.enter.prevent="submitAdd"
-        >
-        <button class="awl-add" type="button" aria-label="确认" :disabled="busy" @click="submitAdd">
-          ✓
-        </button>
-        <button class="awl-close awl-add-cancel" type="button" aria-label="取消" @click="adding = false; pathInput = ''; branchInput = ''; urlInput = ''">
-          ×
-        </button>
+        <div class="awl-modal-card">
+          <header class="awl-modal-head">
+            <h3>新建工作区</h3>
+            <button class="awl-modal-close" type="button" aria-label="关闭" @click="closeModal">
+              ×
+            </button>
+          </header>
+
+          <p class="awl-modal-hint">
+            选择一个已存在的项目目录
+          </p>
+          <button
+            class="awl-modal-pick"
+            type="button"
+            :disabled="busy || pickingRepo"
+            @click="onPickTarget"
+          >
+            {{ pathInput ? pathInput : '点击选择目录' }}
+          </button>
+
+          <footer class="awl-modal-foot">
+            <button class="awl-modal-btn" type="button" :disabled="busy" @click="closeModal">
+              取消
+            </button>
+            <button class="awl-modal-btn primary" type="button" :disabled="busy" @click="submitAdd">
+              确认
+            </button>
+          </footer>
+        </div>
       </div>
-    </div>
+    </Teleport>
+
     <ul class="awl-list" role="listbox">
       <li
         v-for="w in items"
@@ -234,7 +220,16 @@ async function onRemove(item: { id: string, label: string }): Promise<void> {
           <span class="awl-sub">{{ w.active ? '激活中' : w.root }}</span>
         </div>
         <button
-          v-if="!w.active"
+          v-tooltip="'在该工作区开新会话'"
+          class="awl-open-new"
+          type="button"
+          :aria-label="`在新窗口打开 ${w.label}`"
+          @click.stop="onOpenNewWindow(w)"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+        </button>
+        <button
+          v-tooltip="w.active ? '移除当前工作区（自动切到下一个）' : '移除'"
           class="awl-close"
           type="button"
           :aria-label="`移除 ${w.label}`"
@@ -293,6 +288,7 @@ async function onRemove(item: { id: string, label: string }): Promise<void> {
 }
 .ai-window-list.is-collapsed .awl-meta,
 .ai-window-list.is-collapsed .awl-close,
+.ai-window-list.is-collapsed .awl-open-new,
 .ai-window-list.is-collapsed .awl-new-workspace-label {
   display: none;
 }
@@ -536,6 +532,32 @@ async function onRemove(item: { id: string, label: string }): Promise<void> {
   opacity: 0.9;
 }
 
+.awl-open-new {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.awl-item:hover .awl-open-new {
+  opacity: 1;
+}
+.awl-open-new:hover {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
 .awl-close {
   width: 20px;
   height: 20px;
@@ -572,17 +594,124 @@ async function onRemove(item: { id: string, label: string }): Promise<void> {
   cursor: default;
 }
 
-/* [ui-responsive-v1][trae-shell-v1] 窄屏响应式条：从 script-panel.scss 迁来；
-   原先 .awl-item-name 是笔误（源码里不存在），导致窄屏文字在 48px 条里溢出。
-   [CHANGE-IMPACT] aiwin-collapse 测试的断言行径已同步到本文件。 */
-@media (max-width: 1100px) {
-  .ai-window-list .awl-meta,
-  .ai-window-list .awl-close {
-    display: none;
-  }
-  .ai-window-list .awl-item {
-    justify-content: center;
-    padding: 7px 0;
-  }
+/* [awl-narrow-name-visible-v1] 原 `@media (max-width: 1100px)` 整块已删。
+   [WHY] 它把 .awl-meta（名称+路径）在 ≤1100px 一律 display:none —— 与折叠态无关，
+     于是在常见笔记本视口（~1014px）展开左栏后名称仍消失（用户报告「名称怎么没了」，
+     浏览器实测：is-collapsed=false、面板 280px，.awl-meta 仍为 none）。该规则迁自旧文件里
+     拼错的 .awl-item-name（恒不命中，无副作用），改正为真类名后从「无效」变成「真隐藏」。
+   [CONSTRAINT] 折叠成图标条的诉求由 .is-collapsed 规则承担（左栏默认即折叠态）；
+     展开态面板固定 280px，容纳名称绰绰有余 ⇒ 窄屏不再隐藏任何文字。
+   [CHANGE-IMPACT] aiwin-collapse 测试的窄屏断言已同步为「窄屏不得隐藏 .awl-meta」。 */
+
+/* [trae-modal-pick-v1-style] 新建工作区弹窗：遮罩 + 居中卡片 */
+.awl-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 45%);
+  backdrop-filter: blur(2px);
+}
+.awl-modal-card {
+  width: min(440px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
+}
+.awl-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.awl-modal-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.awl-modal-close {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.awl-modal-close:hover {
+  background: rgb(255 255 255 / 8%);
+  color: var(--text);
+}
+.awl-modal-hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.awl-modal-pick {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.awl-modal-pick:hover:not(:disabled) {
+  border-color: var(--primary, #58a6ff);
+  color: var(--text);
+}
+.awl-modal-pick:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.awl-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.awl-modal-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.awl-modal-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: rgb(255 255 255 / 6%);
+}
+.awl-modal-btn.primary {
+  border-color: var(--primary, #58a6ff);
+  background: var(--primary-bg);
+  color: var(--primary, #58a6ff);
+}
+.awl-modal-btn.primary:hover:not(:disabled) {
+  background: var(--primary, #58a6ff);
+  color: #fff;
+}
+.awl-modal-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 </style>

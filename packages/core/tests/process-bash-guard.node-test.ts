@@ -3,7 +3,7 @@
 // AIRUNNER-BATCH22-1-CONSOLIDATE: 从 src/process/bash-guard.node-test.ts 迁至 client/test/process-bash-guard.node-test.ts
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { BASH_BLACKLIST, BASH_TIMEOUT_MS, buildEnvWhitelist, checkBashBlacklist, ENV_WHITELIST } from '../../../packages/core/src/process/bash-guard.js'
+import { BASH_BLACKLIST, BASH_TIMEOUT_MS, buildEnvWhitelist, checkBashBlacklist, COLOR_ENV_OVERRIDES, ENV_WHITELIST } from '../../../packages/core/src/process/bash-guard.js'
 
 const RM_RF = 'rm -rf /tmp/x'
 const RM_UP = 'RM -RF /tmp/x'
@@ -96,12 +96,17 @@ test('ENV_WHITELIST 精确内容', () => {
   assert.deepEqual([...ENV_WHITELIST], ['PATH', 'HOME', 'LANG', 'LC_ALL', 'NODE_ENV', 'TZ', 'PWD', 'USER'])
 })
 
-test('buildEnvWhitelist: 只保留白名单键 + PWD 覆盖为 rootDir', () => {
+test('buildEnvWhitelist: 只保留白名单键 + 强制色覆盖 + PWD 覆盖为 rootDir', () => {
   const env = buildEnvWhitelist('/proj/root')
   assert.equal(env.PWD, '/proj/root')
-  const allowed = new Set(ENV_WHITELIST)
+  // [terminal-color-v1] 强制色键是无条件覆盖，不属「透传白名单」；两者并集才是合法键集。
+  const allowed = new Set([...ENV_WHITELIST, ...Object.keys(COLOR_ENV_OVERRIDES)])
   for (const k of Object.keys(env)) {
     assert.ok(allowed.has(k), `contains non-whitelist key: ${k}`)
+  }
+  // 强制色键必须真的被注入
+  for (const [k, v] of Object.entries(COLOR_ENV_OVERRIDES)) {
+    assert.equal(env[k], v, `missing color override: ${k}`)
   }
 })
 

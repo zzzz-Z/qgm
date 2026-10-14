@@ -1,4 +1,4 @@
-// [multi-workspace-v1] 承重测试：工作区注册表（幂等入册 / 激活 / 拒移活跃项）
+// [multi-workspace-v1] 承重测试：工作区注册表（幂等入册 / 激活 / 移除含活跃项回退）
 //   + ALS root 作用域（runWithWorkspace 内 getRoot 按请求隔离）+ workspace.json 持久化往返（含旧格式迁移）。
 // [CONSTRAINT] 测试必须与真实 ~/.ai-runner 隔离：AI_RUNNER_WORKSPACE_CONF_DIR 指向临时目录，
 //   且 config.ts 在模块顶层读该 env ⇒ 必须先设 env 再动态 import（配合 vi.resetModules 得到干净实例）。
@@ -36,21 +36,49 @@ it('注册幂等：同路径重复注册返回同一条目；label 取 basename�
   assert.equal(cfg.getWorkspaces().length, 1, '注册表不得因重复注册膨胀')
 })
 
-it('移除保护：活跃工作区拒移（防悬空 activeId）；非活跃可移除', async () => {
+it('[workspace-remove-active-v1] 活跃工作区可移除：自动回退到剩余项；无剩余则清空', async () => {
   const cfg = await import('../src/config.js')
   const a = cfg.registerWorkspace(tmpRoot, true)
   const other = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-runner-ws-b-'))
   try {
     const b = cfg.registerWorkspace(other, false)
-    const r1 = cfg.removeWorkspace(a.id)
-    assert.equal(r1.ok, false, '活跃工作区必须拒移')
-    const r2 = cfg.removeWorkspace(b.id)
-    assert.equal(r2.ok, true)
-    assert.equal(cfg.getWorkspaces().length, 1)
+    // 非活跃项：可直接移除，活跃态不受影响
+    const r1 = cfg.removeWorkspace(b.id)
+    assert.equal(r1.ok, true, '非活跃项必须可移除')
     assert.equal(cfg.getActiveWorkspaceId(), a.id, '移除非活跃项不得影响活跃态')
+    // 活跃项：可移除并自动回退（本例已无剩余项 → 清空 + hasWorkspace=false）
+    const r2 = cfg.removeWorkspace(a.id)
+    assert.equal(r2.ok, true, '活跃项也必须可移除（auto-fallback 语义）')
+    assert.equal(cfg.getWorkspaces().length, 0)
+    assert.equal(cfg.getActiveWorkspaceId(), null, '无剩余项时 activeId 必须置 null')
+    assert.equal(cfg.getHasWorkspace(), false, '无剩余项时必须回落引导页状态')
   } finally {
     fs.rmSync(other, { recursive: true, force: true })
   }
+})
+
+it('[workspace-session-bind-v1] sessions 读写往返：set 后可读、落盘后 load 仍可读', async () => {
+  const cfg = await import('../src/config.js')
+  const a = cfg.registerWorkspace(tmpRoot, true)
+  assert.equal(cfg.getWorkspaceSession(a.id), null, '初始无绑定')
+  const ok = cfg.setWorkspaceSession(a.id, { url: 'https://chat.deepseek.com/a/chat/s/abc', sessionId: 'abc' })
+  assert.equal(ok, true, '已注册工作区写入应成功')
+  assert.equal(cfg.getWorkspaceSession(a.id)?.sessionId, 'abc')
+  // 模拟重启：resetModules 后从磁盘恢复
+  vi.resetModules()
+  const cfg2 = await import('../src/config.js')
+  cfg2.loadWorkspaceRegistry()
+  assert.equal(cfg2.getWorkspaceSession(a.id)?.url, 'https://chat.deepseek.com/a/chat/s/abc', '重启后绑定应恢复')
+})
+
+it('[workspace-session-bind-v1] 绑定约束：未注册工作区写入被拒；出册时绑定被清', async () => {
+  const cfg = await import('../src/config.js')
+  const a = cfg.registerWorkspace(tmpRoot, true)
+  assert.equal(cfg.setWorkspaceSession('nope-id', { url: 'x', sessionId: 'y' }), false, '未注册工作区必须拒绝写入')
+  cfg.setWorkspaceSession(a.id, { url: 'https://x/1', sessionId: '1' })
+  assert.equal(cfg.getWorkspaceSession(a.id)?.sessionId, '1')
+  cfg.removeWorkspace(a.id)
+  assert.equal(cfg.getWorkspaceSession(a.id), null, '出册必须清绑定')
 })
 
 it('ALS 作用域：runWithWorkspace 内 getRoot/resolveScopedRoot 解析为作用域 root，外部不受影响', async () => {

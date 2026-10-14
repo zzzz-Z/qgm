@@ -121,6 +121,28 @@ function normalizeTables(src: string): string {
 }
 
 /**
+ * 修复 DOM→Markdown 反推时被污染的代码围栏
+ * [md-fence-unglue-v1] headless elToMd 对代码块头部容器（语言标签 + 复制/下载按钮）走兜底 inner()
+ *   不加换行 ⇒ 按钮文字与开围栏 ``` 粘连成一行（实测形态「ts复制下载```ts」），``` 不在行首，
+ *   markdown-it 不认作围栏 ⇒ 整块代码降级成裸段落（DONE 总结卡片截图实证）。
+ *   ① 把不在行首的 ``` 顶回行首；② 剥掉断行后残留的按钮文字尾巴（语言标签 + 复制/下载）。
+ * [CONSTRAINT] 必须早于 normalizeTables 执行：后者的 inFence 状态机以「行首 ```」为判据，
+ *   粘连行不入围栏态，代码行会被误当表格处理。
+ * [CONSTRAINT] 断行判据分三层，只放行真实围栏形态、挡住内容误伤：
+ *   · ``` 在行尾（其后无内容或仅空白）⇒ 必断（粘连闭围栏）；
+ *   · ``` 后跟语言白名单标签（ts/js/vue/bash/...，markdown-it highlight.js 全量语言集的常用子集 + code/text 兜底）⇒ 断（粘连开围栏带信息串）；
+ *   · 其余（``` 后跟普通单词字符如 `a```b`，`` ` `` 是内容）⇒ 不断（测试用例④承重）。
+ *   反向收益：行首信息串 ```ts 命中语言白名单会因前字符已排除（`[^\n`]`）不再处理，天然幂等。
+ * [CONSTRAINT] 残留尾巴只剥「ASCII 语言标签 ≤20 字符 + 复制/下载」缀，正文其余部分保留
+ *   （「代码示例：ts复制下载」→「代码示例：」）；中文正文行含「下载」不匹配该形态，不误删。
+ */
+function unglueFences(src: string): string {
+  return src
+    .replace(/([^\n`])```(?=\s*$|(?:ts|js|tsx|jsx|vue|svelte|html|css|scss|less|json|ya?ml|toml|ini|md|markdown|py|java|go|rs|c|cpp|csharp|cs|sh|bash|zsh|shell|sql|docker|diff|xml|php|rb|lua|swift|kotlin|dart|r|matlab|perl|scala|clj|haskell|ex|erl|code|text|txt|plaintext)\b)/gim, '$1\n```')
+    .replace(/[\w+#.-]{0,20}(?:复制下载|复制|下载)[ \t]*$/gm, '')
+}
+
+/**
  * 把 markdown 文本渲染为 HTML 字符串
  * [WHY] html:false 阻断原始 HTML；normalizeTables 兜底 AI 偷懒省略的表格分隔行
  * [CONSTRAINT] 空串返回空串（调用方 v-html 遇空串不渲染任何节点）
@@ -137,7 +159,7 @@ export function renderMarkdown(src: string): string {
   if (!src) return ''
   const hit = _mdCache.get(src)
   if (hit !== undefined) return hit
-  const html = md.render(normalizeTables(src))
+  const html = md.render(normalizeTables(unglueFences(src)))
   if (_mdCache.size >= MD_CACHE_MAX) {
     const first = _mdCache.keys().next().value
     if (first !== undefined) _mdCache.delete(first)

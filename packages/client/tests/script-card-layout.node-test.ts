@@ -153,3 +153,21 @@ test('死样式副本：terminal-pane.scss 不得再留同名 .script-card-desc 
   // 反向对照：真正被 RoundCard 复用的那条必须留着，防「一刀切删光」
   assert.ok(scss.includes('.script-card-time {'), 'terminal-pane.scss 误删了 RoundCard 仍在用的 .script-card-time')
 })
+
+// ---------- ⑥ 完整输出面板：最新卡始终接 liveStdout ----------
+
+test('最新 script 卡始终接 liveStdout，不得以 running 为闸门（跑到终态即退回尾部快照 ⇒ 完整输出缩水）', () => {
+  const pane = read(PANE)
+  const m = pane.match(/const latestScriptKey = computed\(\(\) =>([\s\S]*?)\n\}\)/)
+  assert.ok(m, '未找到 latestScriptKey 定义（改名 / 改形态后需同步本判据）')
+  assert.ok(
+    !/props\.running/.test(m[1]),
+    'latestScriptKey 又以 props.running 为闸门 ⇒ 卡片一进 done 就退回 stdoutText 尾部快照，'
+    + '用户跑完瞬间「完整输出面板」缩水成 TAIL 若干行（useRunner 只在下一轮 run() 开头清空 liveStdout）',
+  )
+  assert.match(
+    pane,
+    /card\.key === latestScriptKey \? liveStdout : ''/,
+    '模板未把 liveStdout 绑到「最新一张」卡 ⇒ 完整输出面板拿不到全量输出',
+  )
+})

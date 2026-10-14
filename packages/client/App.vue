@@ -70,6 +70,8 @@ watch(theme, (v) => {
 onMounted(async () => {
   // [sites-store-wire-v1] 首次启动迁移旧分散键到统一 store
   try { migrateIfNeeded() } catch { /* 未就绪不阻断 */ }
+  // [workspace-open-newwin-v1] 新窗口（?workspaceId=<id>）启动即切到目标工作区
+  await activateWorkspaceFromQuery()
   await probeWorkspace()
   // [refresh-same-session-v1] 普通刷新：从 sessionStorage 恢复会话上下文；
   //   切项目路径的 reopenAfterSwitchProject 会先 resetSession 清掉，故顺序无副作用
@@ -122,7 +124,7 @@ async function onNewSession() {
   loopPaused.value = true
   autoTakeover.disable()
   // [session-open-facade] 统一走 openAiSession：开窗 + 首问 + 强制规则一次完成
-  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), sid: winSidOf(String(modelId.value || 'deepseek')), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，开始执行任务。', forceRules: true })
+  const { win, fill } = await openAiSession({ atUrl: currentSiteUrl(), sid: winSidOf(String(modelId.value || 'deepseek')), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，准备执行任务。', forceRules: true })
   if (!win) {
     toast('打开失败：可能被浏览器拦截，请允许此站点弹窗', 'warn', TOAST_MEDIUM)
     return
@@ -165,6 +167,29 @@ function onShiftQuestion(e: KeyboardEvent) {
  * [WHY] transport 决定 useAiSite 的 _isHeadless 判定与传输层加载，reload 是最简可靠的生效方式
  * [CONSTRAINT] 从 <select> 的 change 事件取值；非 "headless" 一律回落 "tampermonkey"
  */
+/**
+ * [workspace-open-newwin-v1] 从 URL query 读 workspaceId 并激活该工作区。
+ * [WHY] AiWindowList 的「在新窗口打开」按钮用 ?workspaceId=<id> 打开同源新窗口；
+ *   新窗口启动时必须消费该参数才生效，否则新窗口打开的还是活跃工作区。
+ * [CONSTRAINT] 无参数 / 激活失败时静默返回，不阻断正常启动。
+ * [CHANGE-IMPACT] 参数消费成功后必须从 URL 移除，避免刷新时反复触发 activate。
+ */
+async function activateWorkspaceFromQuery(): Promise<void> {
+  try {
+    const q = new URLSearchParams(window.location.search)
+    const id = q.get('workspaceId')
+    if (!id) return
+    const { useWorkspaces } = await import('./composables/data/useWorkspaces')
+    const r = await useWorkspaces().activate(id)
+    if (!r.ok) return
+    try {
+      const u = new URL(window.location.href)
+      u.searchParams.delete('workspaceId')
+      window.history.replaceState({}, '', u.toString())
+    } catch { /* 非关键路径 */ }
+  } catch { /* 未就绪：忽略 */ }
+}
+
 function onTransportChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
   // [use-storage-v1] ref 赋值即持久化，无需手动 setItem

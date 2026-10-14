@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { useWorklogCommit } from './worklog-commit'
 import { useToast } from '../../composables/ui/useToast'
+// [workspace-epoch-v1] 显式 import：watch(workspaceEpoch) 在 vitest 下无 auto-import 兜底
+import { useWorkspaces } from '../../composables/data/useWorkspaces'
 import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
 
 // @desc VSCode 源码管理风格侧栏：提交框 + 变更文件列表 + 点击预览文件内容
@@ -149,6 +151,8 @@ const {
   getError: () => error.value,
   splitPath,
 })
+// [workspace-epoch-v1] 执行 root 变更计数（详见下方 watch 处说明）
+const { workspaceEpoch } = useWorkspaces()
 
 // [worklog-rows-v1] 预生成行数据：splitPath / statusLetter / statusClass 每行仅算一次，
 // 提交框每输入一字触发重渲染时不再重复调用（报告 §5.1.4）。
@@ -172,6 +176,15 @@ const delTotal = computed(() => (result.value?.files || []).reduce((s, f) => s +
 
 // [worklog-lazy-v1] immediate：组件在 tab 激活时才异步挂载，挂载即 active=true，非 immediate watch 不会触发
 watch(() => props.active, (v) => { if (v && !result.value && !loading.value) void load() }, { immediate: true })
+// [workspace-epoch-v1] 切/建/删工作区后执行 root 变化：本组件由 v-show 保活（不重挂载），而上面的
+//   immediate watch 带 `!result.value` 闸门 —— 旧 root 已加载过结果 ⇒ 切 root 后不会重拉，
+//   提交历史/暂存区会一直停在旧 root。故显式监听 epoch 无条件刷新。
+// [CONSTRAINT] 非活动时不发请求（与本组件「非活动不发请求」约定一致）：清空结果让下次激活重拉。
+watch(workspaceEpoch, () => {
+  if (props.active) { void load(); return }
+  result.value = null
+  error.value = ''
+})
 
 onMounted(() => {
   try {

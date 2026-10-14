@@ -7,7 +7,7 @@
 //   · 用**成功**脚本（exit 0），覆盖非失败路径；
 //   · 断言 §14 功能回归的「结果出站」链（EXECUTE ok + copyOutput 出站）；
 //   · 全部基于公开契约（page.postMessage + /__ai/run + send.jsonl），不 mock 内部模块。
-// [前置] 与 fail-feedback-probe 同：独立 air-server（避开 prod 5175）+ vite dev 前端（5174）。
+// [前置] 与 fail-feedback-probe 同：独立 air-server（避开 prod 5175）+ vite dev 前端（5274）。
 // [run] AIR_TEST_PORT=5520 pnpm test:e2e packages/client/e2e/retained-path-probe.spec.ts
 import { expect, test } from '@playwright/test'
 import { spawn } from 'node:child_process'
@@ -21,7 +21,7 @@ const ROOT = process.cwd()
 const PORT = Number(process.env.AIR_TEST_PORT) || 5520
 const HOST = '127.0.0.1'
 const HTTP_URL = `http://${HOST}:${PORT}/__ai/`
-const FRONTEND = 'http://localhost:5174/?mock=1'
+const FRONTEND = 'http://localhost:5274/?mock=1'
 const SEND_LOG = join(ROOT, '.ai-runner', 'logs', 'send.jsonl')
 const RUN_LOG = join(ROOT, '.ai-runner', 'logs', 'runner.jsonl')
 const READY_BUDGET_MS = Number(process.env.AIR_TEST_READY_MS) || 150_000

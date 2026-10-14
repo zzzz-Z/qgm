@@ -23,7 +23,7 @@ export default defineConfig({
   //   真要在多平台跑视觉用例，须为各平台单独提交基线（或另设 snapshotDir）。
   snapshotPathTemplate: '{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}{-projectName}{ext}',
   use: {
-    baseURL: 'http://localhost:5174/__ai/',
+    baseURL: 'http://localhost:5274/__ai/',
     trace: 'retain-on-failure',
     permissions: ['clipboard-read', 'clipboard-write'],
   },
@@ -40,7 +40,7 @@ export default defineConfig({
     cwd: '../..',
     // [e2e-webserver-url-v1] 探活前端根路径即可；/__ai/* 经 proxy 转发后端，
     //   后端由具体 spec 的 beforeAll 独立拉起，webServer 探活不应依赖代理后端是否就绪
-    url: 'http://localhost:5174/',
+    url: 'http://localhost:5274/',
     reuseExistingServer: true,
     timeout: 120_000,
   },

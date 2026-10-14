@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.7.2
+// @version      1.7.4
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -898,7 +898,10 @@
 
   const replyObserver = new MutationObserver(() => {
     if (observerDebounce) clearTimeout(observerDebounce)
-    observerDebounce = setTimeout(classifyAndPost, 350)
+    observerDebounce = setTimeout(() => {
+      observerDebounce = null
+      classifyAndPost()
+    }, 350)
   })
 
   // [stop-v2] 监听生命周期标志 + 重挂入口
@@ -1052,7 +1055,12 @@
     }
     if (!files.length) return
 
-    // 1) 优先 paste：Slate/ProseMirror 走此路径
+    // [image-paste-dup-fix-v1] 双路径**互斥**：原实现先 paste 再无条件塞 file-input，
+    //   两条路径在 DeepSeek 上都会生效 ⇒ 同一张图上传两次（用户实测「一张变两张」）。
+    //   [WHY] 判据用「paste 是否真的被站点消费」不可靠（dispatchEvent 无返回值）；
+    //     改为：只在 paste 路径**抛异常**时才走 file-input 兜底（异常 = 构造/派发失败）。
+    //   [CONSTRAINT] 与 headless-inject 的同名实现保持语义一致（两处刻意同构）。
+    let pasted = false
     try {
       const dt = new DataTransfer()
       for (const f of files) dt.items.add(f)
@@ -1064,18 +1072,21 @@
       try { Object.defineProperty(ev, 'clipboardData', { value: dt }) } catch { /* clipboardData 构造后只读，defineProperty 兜底 */ }
       box.focus()
       box.dispatchEvent(ev)
-    } catch { /* fallthrough: paste 不被支持时走 file input */ }
+      pasted = true
+    } catch { /* paste 不被支持：落 file-input 兜底 */ }
 
-    // 2) 兜底：找隐藏 input[type=file] 塞 FileList + change 事件
-    try {
-      const input = document.querySelector('input[type=file]')
-      if (input) {
-        const dt2 = new DataTransfer()
-        for (const f of files) dt2.items.add(f)
-        try { input.files = dt2.files } catch { /* 部分浏览器 security 拒写 files，交由 change 事件触发站点自身逻辑 */ }
-        input.dispatchEvent(new Event('change', { bubbles: true }))
-      }
-    } catch { /* ignore */ }
+    // 兜底：仅当 paste 路径失败时才塞 file input（避免双重上传）
+    if (!pasted) {
+      try {
+        const input = document.querySelector('input[type=file]')
+        if (input) {
+          const dt2 = new DataTransfer()
+          for (const f of files) dt2.items.add(f)
+          try { input.files = dt2.files } catch { /* 部分浏览器 security 拒写 files，交由 change 事件触发站点自身逻辑 */ }
+          input.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+      } catch { /* ignore */ }
+    }
   }
 
   // ⭐ 核心修复：Slate.js / React 富文本用 ClipboardEvent('paste')

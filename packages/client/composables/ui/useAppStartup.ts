@@ -15,9 +15,9 @@ import { clearInbox } from '../runner/useScriptInbox'
 import { useSessionManager } from '../ai/useSessionManager'
 import { useAiWindow } from '../ai/useAiWindow'
 import { getTransport, transportKind } from '../ai/useAiTransport'
-import { currentSiteUrl, useAiSite } from '../ai/useAiSite'
+import { useAiSite } from '../ai/useAiSite'
 import { log } from '../../utils/log'
-import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
+import { TOAST_LONG } from '../../utils/toast-durations'
 
 // [loop-consolidation-P3a] 内联 AiReply（原 import('../ai/auto-loop/types').AiReply）；
 //   该目录将随 P3b 删除，此处仅用作 onReply 回调的形参断言。
@@ -57,19 +57,15 @@ export function useAppStartup(deps: AppStartupDeps) {
     } catch { /* ignore: 探测失败保持默认放行 */ }
   }
 
-  /** [auto-new-session-on-switch-v1] 切项目后：清本地状态 → 等布局稳 → openAiSession */
+  /**
+   * [workspace-switch-no-window-v1] 切项目后：清本地状态，**不再自动开 AI 站点窗口**。
+   * [WHY] 用户要求「切换工作区时不打开新窗口」——原实现在此调 openAiSession 自动开新站点窗口。
+   *   原地切换已由 useWorkspaces.activate 完成本地状态刷新；这里只保留清残留会话上下文的语义。
+   * [CONSTRAINT] 保留函数名与导出，避免其它调用点连锁改动。
+   */
   async function reopenAfterSwitchProject(): Promise<void> {
     try { resetSession() } catch { /* 未就绪时忽略 */ }
     try { clearEvents() } catch { /* 未就绪时忽略 */ }
-    await promiseTimeout(600)
-    try {
-      const { win } = await aiWin.openAiSession({ atUrl: currentSiteUrl(), initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，开始执行任务。', forceRules: true })
-      if (win) {
-        try { getTransport() } catch { /* 油猴模式下无需 */ }
-      } else {
-        toast('新会话窗口打开失败（可能被浏览器拦截弹窗）', 'warn', TOAST_MEDIUM)
-      }
-    } catch { /* ignore */ }
   }
 
   /** 从 sessionStorage 读取切项目标志；命中则 fire-and-forget 触发 reopen */

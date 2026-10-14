@@ -6,6 +6,8 @@ import { getScopeWorkspaceId } from '../workspace-scope.js'
 import { injectAiJsdoc, scanNativeApisWithFallback, scanScriptHead } from './ai-guard.js' // [ai-guard-v1]
 import { runProcess } from '../process/proc.js'
 import { buildWrapperCode } from './run-script-wrapper.js'
+import { COLOR_ENV_OVERRIDES } from '../process/bash-guard.js'
+import { SCRIPT_TIMEOUT_HINT, SCRIPT_TIMEOUT_MS } from '../process/timeouts.js'
 
 /** 脚本运行的返回结果：退出码、stdout、stderr */
 export interface RunResult {
@@ -23,7 +25,7 @@ export interface RunResult {
  * [CONSTRAINT] 失败统一走 code=2 + JSON stderr；onChunk 用于 NDJSON 流式回传（缺省则只返回汇总结果）
  * [CHANGE-IMPACT] 被 run.ts 的 EXECUTE 阶段消费；返回结构的 code / stdout / stderr 决定 pipeline 状态
  * @param scriptPath 脚本文件绝对路径
- * @param timeoutMs 执行超时毫秒数（默认 60s）
+ * @param timeoutMs 执行超时毫秒数（缺省取 SCRIPT_TIMEOUT_MS，同源于 process/timeouts.ts）
  * @param signal 外部取消信号（来自 run.ts 的 AbortController）
  * @param overlayPath 沙箱写操作的 overlay 落盘路径
  * @param toolLogPath 工具调用 JSONL 日志路径
@@ -33,7 +35,7 @@ export interface RunResult {
  */
 export async function runScript(
   scriptPath: string,
-  timeoutMs = 180_000,
+  timeoutMs = SCRIPT_TIMEOUT_MS,
   signal?: AbortSignal,
   overlayPath?: string,
   toolLogPath?: string,
@@ -95,10 +97,16 @@ export async function runScript(
       AI_RUNNER_SESSION_ID: sessionId || '',
       // [multi-workspace-v1] 本次运行所属工作区（ALS 作用域），沙箱内 __AI__ 与日志可按其分桶
       AI_RUNNER_WORKSPACE_ID: getScopeWorkspaceId() || '',
+      ...COLOR_ENV_OVERRIDES,
     },
     timeoutMs,
     signal,
     onChunk,
+    // [run-timeout-visible-v1] 短标签，与 stderr 里的教学后缀分工：标签给「是什么」，后缀给「怎么办」
+    timeoutLabel: 'sandbox-timeout',
   })
-  return { code: r.code, stdout: r.stdout, stderr: r.stderr, timedOut: r.timedOut }
+  // [sandbox-timeout-hint-v1] 超时轮把绕行指引并进 stderr：AI 只看 code=-1 时会把「超时」
+  //   当「失败」无脑重试（白烧轮次），后缀让它一眼看到 background 出口
+  const errText = r.timedOut ? `${r.stderr}\n${SCRIPT_TIMEOUT_HINT}` : r.stderr
+  return { code: r.code, stdout: r.stdout, stderr: errText, timedOut: r.timedOut }
 }

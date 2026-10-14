@@ -76,6 +76,19 @@ const WORKSPACE_CONF_FILE = path.join(WORKSPACE_CONF_DIR, 'workspace.json')
 
 /** 注册表（内存权威态，落盘经 persistWorkspace） */
 const workspaces = new Map<string, WorkspaceEntry>()
+
+/**
+ * [workspace-session-bind-v1] 工作区 → DeepSeek 会话绑定（单窗口切换地址的数据源）。
+ * [WHY] 切工作区时需要把受控 DeepSeek 窗口导航到该工作区对应的会话；无绑定时才新建。
+ * [CONSTRAINT] sessionId 允许空串（新建但尚未回写）；url 是导航目标，两者都存便于回写识别。
+ */
+export interface WorkspaceSession {
+  url: string
+  sessionId: string
+  updatedAt: number
+}
+/** 工作区 id → 会话绑定（内存权威态，落盘经 persistWorkspace） */
+const workspaceSessions = new Map<string, WorkspaceSession>()
 // eslint-disable-next-line import/no-mutable-exports -- 可变绑定：activateWorkspace 会改写（与 ROOT 同理）
 export let activeWorkspaceId: string | null = null
 
@@ -94,6 +107,7 @@ export function persistWorkspace(): void {
       at: Date.now(),
       workspaces: [...workspaces.values()],
       activeId: activeWorkspaceId,
+      sessions: Object.fromEntries(workspaceSessions),
     }))
   } catch { /* ignore: 持久化失败不阻断主流程 */ }
 }
@@ -145,13 +159,31 @@ export function registerWorkspace(root: string, activate?: boolean): WorkspaceEn
 }
 
 /**
- * 移除工作区：活跃工作区不可移除（防止悬空 activeId）。
+ * 移除工作区。
+ * [workspace-remove-active-v1] 允许移除活跃工作区：自动切到剩余项中最早入册的一个，
+ *   若已无剩余项则清空（setRoot("") → hasWorkspace=false → UI 回引导页）。
+ * [WHY] 原「活跃不可移除」会让用户点 × 无反应（toast 提示需先切），与「每个 tab 都能删除」冲突。
+ * [CONSTRAINT] 回退顺序按 addedAt 升序（与注册表 getWorkspaces 一致）；无剩余项时调 clearWorkspace。
  * @returns ok=false 时 reason 说明原因
  */
 export function removeWorkspace(id: string): { ok: boolean, reason?: string } {
-  if (id === activeWorkspaceId) return { ok: false, reason: '不能移除活跃工作区，请先切换到其他工作区' }
   if (!workspaces.has(id)) return { ok: false, reason: `工作区不存在：${id}` }
+  const wasActive = id === activeWorkspaceId
   workspaces.delete(id)
+  // [workspace-session-bind-v1] 工作区出册时同步清会话绑定，避免脏键累积
+  workspaceSessions.delete(id)
+  if (wasActive) {
+    const remaining = [...workspaces.values()].sort((a, b) => a.addedAt - b.addedAt)
+    const next = remaining[0]
+    if (next) {
+      activeWorkspaceId = next.id
+      setRoot(next.root)
+    } else {
+      activeWorkspaceId = null
+      clearWorkspace()
+      clearPersistedWorkspace()
+    }
+  }
   persistWorkspace()
   return { ok: true }
 }
@@ -179,6 +211,33 @@ export function getWorkspaces(): WorkspaceEntry[] {
   return [...workspaces.values()].sort((a, b) => a.addedAt - b.addedAt)
 }
 
+/**
+ * [workspace-session-bind-v1] 读某工作区的会话绑定；无绑定返回 null。
+ * [CONSTRAINT] 只读，不触发持久化；调用方按需决定是否回退到「新建会话」。
+ */
+export function getWorkspaceSession(id: string): WorkspaceSession | null {
+  return workspaceSessions.get(id) ?? null
+}
+
+/**
+ * [workspace-session-bind-v1] 写某工作区的会话绑定（幂等覆盖）。
+ * [CONSTRAINT] 只接受已注册的工作区 id（防止脏键累积）；写入后立即持久化。
+ * @returns 工作区不存在时返回 false，调用方据此提示
+ */
+export function setWorkspaceSession(id: string, session: { url: string, sessionId: string }): boolean {
+  if (!workspaces.has(id)) return false
+  workspaceSessions.set(id, { url: String(session.url || ''), sessionId: String(session.sessionId || ''), updatedAt: Date.now() })
+  persistWorkspace()
+  return true
+}
+
+/**
+ * [workspace-session-bind-v1] 会话绑定全量快照（端点 GET 用）。
+ */
+export function getWorkspaceSessions(): Record<string, WorkspaceSession> {
+  return Object.fromEntries(workspaceSessions)
+}
+
 /** 当前活跃工作区 id；null = 未激活 */
 export function getActiveWorkspaceId(): string | null {
   return activeWorkspaceId
@@ -194,8 +253,15 @@ export function getActiveWorkspaceId(): string | null {
 export function loadWorkspaceRegistry(): string | null {
   try {
     const raw = fs.readFileSync(WORKSPACE_CONF_FILE, 'utf8')
-    const j = JSON.parse(raw) as { root?: string, workspaces?: WorkspaceEntry[] }
+    const j = JSON.parse(raw) as { root?: string, workspaces?: WorkspaceEntry[], sessions?: Record<string, WorkspaceSession> }
     const list = Array.isArray(j.workspaces) ? j.workspaces : []
+    // [workspace-session-bind-v1] 恢复会话绑定（缺字段 / 类型不符一律跳过，不阻断注册表恢复）
+    if (j.sessions && typeof j.sessions === 'object') {
+      for (const [wid, s] of Object.entries(j.sessions)) {
+        if (!s || typeof s.url !== 'string' || typeof s.sessionId !== 'string') continue
+        workspaceSessions.set(wid, { url: s.url, sessionId: s.sessionId, updatedAt: Number(s.updatedAt) || 0 })
+      }
+    }
     for (const e of list) {
       if (!e || typeof e.root !== 'string' || !fs.existsSync(e.root) || !fs.statSync(e.root).isDirectory()) continue
       const id = workspaceIdFor(path.resolve(e.root))

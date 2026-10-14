@@ -14,12 +14,14 @@ const TERMINAL_NAME = 'ai-runner-shell'
 
 /**
  * 把一段输出追加到终端。
- * [WHY] appendMessage 只接受字符串并原样追加，流式帧逐块到达时用它（pushMessage 会重新解析消息对象，过重）。
- * @param text - 原始输出片段（保留换行）
+ * [terminal-color-v1] 改走 pushMessage 的 type:'ansi' 通道：vue-web-terminal 内部 _parseANSI
+ *   会把 ANSI 着色码翻译成 HTML span（其余控制码过滤），这是组件内置能力，无需额外依赖。
+ * [WHY] appendMessage 走纯文本路径，会把 '\x1b[32m...' 原样显示成乱码；必须用 pushMessage + 消息对象。
+ * @param text - 原始输出片段（含 ANSI 转义码，保留换行）
  */
 function appendLine(text: string): void {
   if (!text) return
-  TerminalApi.appendMessage(TERMINAL_NAME, text)
+  TerminalApi.pushMessage(TERMINAL_NAME, { type: 'ansi', content: text })
 }
 /**
  * 执行用户输入的命令，流式回填 stdout/stderr，结束时调 success/failed 收尾。

@@ -84,6 +84,12 @@ export interface RunResponse {
   errorFiles?: string[]
   scriptCtx?: string
   /**
+   * [run-timeout-visible-v1] 服务端判定「脚本因沙箱超时被杀」（与逻辑失败区分）。
+   * [CONSTRAINT] summary 帧已下发此字段；前端必须承接，否则 UI 与回执把超时当普通失败，
+   *   AI 会对「已部分成功但超时」的轮次无脑重试（服务端加字段、前端静默丢弃的典型缺口）。
+   */
+  timedOut?: boolean
+  /**
    * [truncation-detect-v1] 服务端判定「本轮脚本在尾部被上游截断」
    * [WHY] 截断是输出通道故障，不是 AI 的逻辑失败：反馈文案必须从「重试」改成
    *   「缩小本轮范围、拆成多个小脚本」，否则 AI 会原地重发同样长的脚本再被截断

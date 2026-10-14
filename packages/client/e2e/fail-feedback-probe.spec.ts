@@ -8,7 +8,7 @@ import { join } from 'node:path'
 
 if (process.env.NODE_TEST_CONTEXT) { process.exit(0) }
 
-// [fail-feedback-probe-v2] dev 隔离端到端：独立 air-server（避开 prod 5175）+ vite dev 前端(5174)
+// [fail-feedback-probe-v2] dev 隔离端到端：独立 air-server（避开 prod 5175）+ vite dev 前端(5274)
 // 通道用 ?mock=1（tampermonkey 传输 + isFromActiveAiSite 恒真），reply 直接 window.postMessage 进前端，
 //   不经服务端 relay（服务端会丢弃客户端发来的 headless:reply / headless:script，见 attach-ws.ts:27）。
 // 脚本经前端 → fetch('/__ai/run') 在独立 air-server 真实执行（崩溃 exit≠0）→ 失败结果回传。
@@ -30,7 +30,7 @@ const ROOT = process.cwd()
 const PORT = Number(process.env.AIR_TEST_PORT) || 5519
 const HOST = '127.0.0.1'
 const HTTP_URL = `http://${HOST}:${PORT}/__ai/`
-const FRONTEND = 'http://localhost:5174/?mock=1'
+const FRONTEND = 'http://localhost:5274/?mock=1'
 /** 独立回传日志：air-server 写仓库根 .ai-runner/logs/send.jsonl */
 const SEND_LOG = join(ROOT, '.ai-runner', 'logs', 'send.jsonl')
 /** 执行日志：air-server 写仓库根 .ai-runner/logs/runner.jsonl */

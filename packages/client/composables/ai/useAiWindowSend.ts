@@ -6,6 +6,18 @@ import { getActiveWinSidImpl as getActiveWinSid, getWindowBySidImpl as getWindow
 import { log } from '../../utils/log' // [restore-import-v1] 早前清理误删
 import { traceSend } from './send-trace' // [send-trace-v1] 出站留痕（P1-3）
 
+/**
+ * [fill-msgid-v1] 出站 fill 的唯一标识，供油猴侧 _seenInbound 去重。
+ * [WHY] 油猴 L1229 靠 d.msgId 判重（防 postMessage 重试/多窗口重复消费），
+ *   但客户端此前从不带该字段 ⇒ 判重恒不成立，重发会重复注入（含同一张图上传两次）。
+ * [CONSTRAINT] 只需本轮内唯一（时间戳 + 自增序），不要求全局唯一；不带 ts 避免与协议字段混淆。
+ */
+let _outboundMsgSeq = 0
+function nextFillMsgId(): string {
+  _outboundMsgSeq = (_outboundMsgSeq + 1) >>> 0
+  return `f_${Date.now().toString(36)}-${_outboundMsgSeq.toString(36)}`
+}
+
 /** fill 消息载荷：向 AI 窗口投递的提问文本 */
 export interface FillPayloadImpl {
   prompt: string
@@ -14,7 +26,7 @@ export interface FillPayloadImpl {
   /**
    * 可选：图片 DataURL 数组（data:image/*;base64,...）
    * [image-channel-v2] 图片走独立通道而非塞进 prompt，避免油猴侧需从文本 parse
-   * [CONSTRAINT] 单张大小 ≈ MAX_ATTACH_BYTES×4/3；接收端需实现 images→粘贴逻辑，否则静默丢弃
+   * [CONSTRAINT] 单张大小不再设上限（attach-no-size-limit-v1）；接收端需实现 images→粘贴逻辑，否则静默丢弃
    * [CHANGE-IMPACT] 消费方 sendFillToImpl / headless transport.sendFillImpl；旧接收端不识该字段不报错
    */
   images?: string[]
@@ -87,7 +99,7 @@ export function sendFillToImpl(sid: string, payload: FillPayloadImpl): boolean {
   try {
     // [send-trace-v1] source 只服务留痕：剥掉后再上线，避免污染协议载荷
     const { source: traceSource, ...wire } = payload
-    win.postMessage({ type: 'ai-runner:fill', ...wire }, origin)
+    win.postMessage({ type: 'ai-runner:fill', ...wire, msgId: nextFillMsgId() }, origin)
     // [send-trace-v1] 出站留痕（P1-3）：逐条记 ts/sid/source/首部，供「发送间隔分布」与「同轮双发」定案
     traceSend({ sid, via: 'tm', source: traceSource || 'direct', prompt: payload.prompt, ok: true })
     return true
@@ -148,7 +160,7 @@ export function sendFillToAsync(sid: string, payload: FillPayloadImpl, timeoutMs
     let posted = false
     try {
       window.addEventListener('message', onMsg)
-      win.postMessage({ type: 'ai-runner:fill', ...wire, ackId }, origin)
+      win.postMessage({ type: 'ai-runner:fill', ...wire, ackId, msgId: nextFillMsgId() }, origin)
       posted = true
     } catch (e) {
       log.warn('[sendFillToAsync] postMessage threw', e)

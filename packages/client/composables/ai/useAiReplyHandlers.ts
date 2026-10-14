@@ -375,14 +375,34 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       addSessionToHistory(id, url, `轮转 · ${hhmm}`)
       activeSessionId.value = id
       setSiteUrl(url)
+      // [workspace-session-bind-v1] 新会话建立 → 落盘绑定
+      void persistSessionBinding(url, id)
     }
     // [loop-consolidation-P3a] 摘除 aiWindow.onNewSessionCreated（转发壳随 auto-loop 退役）
+  }
+
+  /**
+   * [workspace-session-bind-v1] 把当前 DeepSeek 会话 url+sessionId 回写到活跃工作区绑定。
+   * [WHY] 用户在站点里手动切会话时，若不回写，下次切 tab 会导航回旧会话（用户报告）。
+   * [CONSTRAINT] 无活跃工作区 / 无 url 时跳过；失败静默（回写属旁路，不阻断主流程）。
+   */
+  async function persistSessionBinding(url: string, sessionId: string): Promise<void> {
+    try {
+      if (!url) return
+      const { useWorkspaces } = await import('../data/useWorkspaces')
+      const ws = useWorkspaces()
+      const wid = ws.activeId.value
+      if (!wid) return
+      await ws.setSession(wid, { url, sessionId: String(sessionId || '') })
+    } catch { /* 未就绪 / 网络失败：忽略 */ }
   }
 
   /** 处理 ai-runner:url-updated URL 回写 */
   function handleUrlUpdated(payload: MessageEvent['data']): void {
     const u = String(payload.url || '')
     if (u && u !== siteUrl.value) setSiteUrl(u)
+    // [workspace-session-bind-v1] 回写绑定：站点里切会话 → 落盘到活跃工作区
+    void persistSessionBinding(u, String(payload.sessionId || activeSessionId.value || ''))
   }
 
   /** 处理 ai-runner:session-id 会话 ID 回写 */
@@ -399,6 +419,8 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     sessionHistory.value = [...sessionHistory.value]
     saveHistoryScoped()
     setSiteUrl(url)
+    // [workspace-session-bind-v1] 会话 id 回写 → 同步落盘绑定
+    void persistSessionBinding(url, String(payload.id || ''))
   }
 
   /** 消息分发入口：按 data.type 路由到各 handler */

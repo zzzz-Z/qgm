@@ -141,8 +141,8 @@ export const BUDGET_WARN_RATIO = 0.7
  *   决策回路，它才能在动手前判断「这轮还能加多少」，而不是写完才发现超了。
  * [CONSTRAINT] 仅 `runId` 非空（脚本**真跑过**）时产出：前置拦截轮（无 runId）的体积
  *   由 appendScriptInvalid 说明——那是「为什么被截断」的因果解释，两处输出体积会互相重复。
- * [CONSTRAINT] 措辞必须**双向**：余量充足时也要说清「还能写」，否则 AI 会一律按最小值输出，
- *   把一轮能做完的事拆成三轮——过度拆分同样烧轮次，且让每轮都重新加载上下文、更易截断。
+ * [CONSTRAINT] 只报可测的量（脚本块 S），**不给基于 S 的行动建议**——§10 的约束是 T + S ≤ B，
+ *   而 T 服务端测不到 ⇒ 任何「还能写多少」的结论都缺依据（曾是判据真空，见 budget-notice-honest-v1）。
  */
 export function appendBudgetNotice(p: string[], r: PromptResult | null): void {
   const sz = r?.scriptSize
@@ -152,15 +152,11 @@ export function appendBudgetNotice(p: string[], r: PromptResult | null): void {
   const kb = sz.bytes / 1024
   const maxKb = Math.round(sz.maxBytes / 1024)
   p.push('# 本轮输出体积（服务端实测）')
-  p.push(`- 上一轮脚本：${sz.lines} 行 / ${kb.toFixed(1)} KB`)
-  p.push(`- §10 预算（非闸门，超限只留痕不拦截）：${sz.maxLines} 行 / ${maxKb} KB 是确定性安全工作区；**单轮建议 ≤ 150 行**（合计 >150 行时尾段易截断）`)
-  p.push(`- 注：本块百分比只计脚本 S；思考 T 与 S 共享单轮输出预算（T + S ≤ B），服务端测不到 T`)
+  p.push(`- 上一轮脚本块：${sz.lines} 行 / ${kb.toFixed(1)} KB`)
+  p.push(`- §10 安全工作区（非闸门）：${sz.maxLines} 行 / ${maxKb} KB；含 patchFile 的 find/replace 合计 >150 行时尾段易截断`)
+  p.push(`- 脚本块占安全工作区 ${pct}%。**此比例不含思考量 T**（§10 约束是 T + S ≤ B，服务端测不到 T）⇒ 无法据此判断剩余预算`)
   if (sz.overBudget) {
-    p.push(`- ⚠ 上一轮**已超预算**（用掉 ${pct}%）：它能完整到达属于侥幸，下一轮务必拆成多个小脚本`)
-  } else if (ratio >= BUDGET_WARN_RATIO) {
-    p.push(`- ⚠ 已用掉 ${pct}% 的预算：余量不多，下一轮请**主动拆小**，不要在单轮里继续叠加改动`)
-  } else {
-    p.push(`- 余量充足（已用 ${pct}%）：本轮可以适度多推进，不必把一轮能做完的事拆成多轮`)
+    p.push(`- ⚠ 上一轮脚本块**已超安全工作区**：它能完整到达属于侥幸`)
   }
   p.push('')
 }

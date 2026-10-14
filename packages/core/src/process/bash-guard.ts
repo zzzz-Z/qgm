@@ -55,6 +55,21 @@ export const ENV_WHITELIST: ReadonlyArray<string> = [
 ]
 
 /**
+ * [terminal-color-v1] 强制色覆盖：`/__ai/exec` 起的子进程不是 TTY（spawn 未接 pty），
+ * 现代 CLI（pnpm/npm/git/ls）在非 TTY 下默认禁色，终端面板看不到彩色。
+ * 显式声明 256 色能力 + FORCE_COLOR，让工具主动输出 ANSI；前端 TerminalPanel 用
+ * vue-web-terminal 的 type:'ansi' 通道把转义码渲染为 HTML span。
+ * [CONSTRAINT] 独立常量而非并入 ENV_WHITELIST：后者语义是「从 process.env 透传」，
+ *   本组是「无条件覆盖」，两者混用会让白名单失去「不泄漏其他键」的守卫意义。
+ */
+export const COLOR_ENV_OVERRIDES: Readonly<Record<string, string>> = {
+  TERM: 'xterm-256color',
+  COLORTERM: 'truecolor',
+  FORCE_COLOR: '1',
+  CLICOLOR_FORCE: '1',
+}
+
+/**
  * 基于白名单构造 env 对象。未列出的环境变量全部剥离。
  * 注意：PWD 显式设为项目 ROOT（覆盖当前进程 PWD，避免子进程继承错工作目录）。
  */
@@ -65,6 +80,7 @@ export function buildEnvWhitelist(rootDir: string): NodeJS.ProcessEnv {
     if (v !== undefined) env[key] = v
   }
   env.PWD = rootDir
+  Object.assign(env, COLOR_ENV_OVERRIDES)
   return env
 }
 

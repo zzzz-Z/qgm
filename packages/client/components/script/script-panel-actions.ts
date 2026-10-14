@@ -118,7 +118,7 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
       if (board) { p.push(''); p.push(board) }
     } catch { /* 看板不可用时不影响结果回传 */ }
     p.push('')
-    p.push('下一个回答必须以 SCRIPT 开头且只输出脚本，不要输出任何文本总结。')
+    p.push('下一个回答必须以 SCRIPT 开头且只输出脚本(参考system.md ## §1 输出契约与状态机)。')
     return p.join('\n')
   }
 
@@ -159,6 +159,9 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
     emitBus('ai:ask', rawScript.slice(0, 40), { payload: { text: rawScript } })
     startAiWaiting()
     script.value = ''
+    // [attach-clear-on-send-v1] 发送成功后一并清空附件：附件内容已随本条消息消费，
+    //   留在列表里会让用户以为「还没发出去」（用户报告）；与工具栏「清空」语义一致。
+    attachedFiles.value = []
   }
 
   /** 全局键盘快捷键：Alt+R 触发智能发送 */

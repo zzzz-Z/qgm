@@ -9,6 +9,8 @@ import type { FileNode } from '../../types'
 import { TOAST_MEDIUM } from '../../utils/toast-durations'
 // [ui-p1c-tree-expand-wire-v1] V4：展开态抽到同目录 composable（显式 import 兜住 vitest 无 auto-import）
 import { useTreeExpand } from './use-tree-expand'
+// [workspace-epoch-v1] 显式 import 同上：watch(workspaceEpoch) 在 tsc/vitest 下需要真实绑定
+import { useWorkspaces } from '../../composables/data/useWorkspaces'
 import { isMarkdownPath, renderFileContent } from '../../composables/useFileContentHtml'
 
 defineOptions({ name: 'FileTree' })
@@ -90,47 +92,60 @@ const isMarkdown = computed(() => isMarkdownPath(fileDialog.value?.path || ''))
 /** 渲染后的 HTML；.md 走 markdown，其余走 hljs 高亮 */
 const fileDialogHtml = computed(() => renderFileContent(fileDialog.value?.content || '', fileDialog.value?.path || ''))
 
-if (props.root) {
-  onMounted(async () => {
-    await load()
-    // [expanded-rehydrate-v1] 刷新后 expanded 已从持久化恢复，但 loadChildren 从未被调过，
-    // 子节点空 → 展开态但内容空白（报告 §2.5）。
-    rehydrate()
-    // 优先用 /__ai/workspace 返回的 root 目录名；其次 package.json name
-    try {
-      const ws = await fetch('/__ai/workspace', { headers: { accept: 'application/json' } })
-      if (ws.ok) {
-        const wj = await ws.json() as { root?: string }
-        const r = String(wj?.root || '').replace(/[\\/]+$/, '')
-        if (r) {
-          const parts = r.split('/').filter(Boolean)
-          const base = parts[parts.length - 1] || ''
-          if (base) projectName.value = base
-        }
-      }
-    } catch { /* ignore */ }
-    if (projectName.value === '工作区' || !projectName.value) {
-      const pkgNode = tree.value.find(n => n.name === 'package.json')
-      if (pkgNode) {
-        try {
-          const res = await fetch('/__ai/files/read', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ paths: [pkgNode.path] }),
-          })
-          if (res.ok) {
-            const j = await res.json() as Record<string, unknown>
-            const arr = (Array.isArray((j as FileReadResponse).files) ? (j as FileReadResponse).files : (Array.isArray(j) ? j : [])) as FileReadItem[]
-            const hit = arr.find((x: FileReadItem) => x && x.path === pkgNode.path) || arr[0] || {}
-            if (hit.content) {
-              const parsed = JSON.parse(hit.content)
-              if (parsed.name) projectName.value = String(parsed.name).split('/').pop() || String(parsed.name)
-            }
-          }
-        } catch { /* ignore */ }
+/**
+ * [workspace-epoch-v1] 拉取根层文件树 + 解析项目名；挂载与「执行 root 变更」后共用。
+ * [WHY] 原实现把这段只写在 onMounted 里，而 SidePane 用 v-show 保活（切工作区不卸载）
+ *   ⇒ 切/建工作区后树与项目名停留在旧 root（用户报告：新建工作区后 sidebar 数据没更新）。
+ * [CONSTRAINT] 每次进入先把 projectName 复位再重新解析，否则旧 root 的非空值会挡住新 root 的解析。
+ */
+async function loadRoot(): Promise<void> {
+  await load()
+  // [expanded-rehydrate-v1] 刷新后 expanded 已从持久化恢复，但 loadChildren 从未被调过，
+  // 子节点空 → 展开态但内容空白（报告 §2.5）。
+  rehydrate()
+  projectName.value = '工作区'
+  // 优先用 /__ai/workspace 返回的 root 目录名；其次 package.json name
+  try {
+    const ws = await fetch('/__ai/workspace', { headers: { accept: 'application/json' } })
+    if (ws.ok) {
+      const wj = await ws.json() as { root?: string }
+      const r = String(wj?.root || '').replace(/[\\/]+$/, '')
+      if (r) {
+        const parts = r.split('/').filter(Boolean)
+        const base = parts[parts.length - 1] || ''
+        if (base) projectName.value = base
       }
     }
-  })
+  } catch { /* ignore */ }
+  if (projectName.value === '工作区' || !projectName.value) {
+    const pkgNode = tree.value.find(n => n.name === 'package.json')
+    if (pkgNode) {
+      try {
+        const res = await fetch('/__ai/files/read', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ paths: [pkgNode.path] }),
+        })
+        if (res.ok) {
+          const j = await res.json() as Record<string, unknown>
+          const arr = (Array.isArray((j as FileReadResponse).files) ? (j as FileReadResponse).files : (Array.isArray(j) ? j : [])) as FileReadItem[]
+          const hit = arr.find((x: FileReadItem) => x && x.path === pkgNode.path) || arr[0] || {}
+          if (hit.content) {
+            const parsed = JSON.parse(hit.content)
+            if (parsed.name) projectName.value = String(parsed.name).split('/').pop() || String(parsed.name)
+          }
+        }
+      } catch { /* ignore */ }
+    }
+  }
+}
+
+if (props.root) {
+  onMounted(() => { void loadRoot() })
+  // [workspace-epoch-v1] 切/建/删工作区（useWorkspaces 的 activate/register/create/remove）后
+  // 服务端已 setRoot；本组件因 v-show 保活不会重挂载，必须在此重拉，否则显示旧 root 内容。
+  const { workspaceEpoch } = useWorkspaces()
+  watch(workspaceEpoch, () => { void loadRoot() })
 }
 
 // 拖拽控制器（须在 rootNode/getFileIcon/iconSvg/collectFilePathsAsync/toggle/copyPath 声明之后）
@@ -261,12 +276,15 @@ async function chooseWorkspace(): Promise<void> {
     if (r.ok) {
       const j = await r.json().catch(() => ({})) as { ok?: boolean, canceled?: boolean }
       if (j && j.ok) {
-        // 切项目后：写标记，让 reload 后的 App 开新会话并连接
-        try {
-          sessionStorage.setItem('__ai_switch_project', '1')
-          sessionStorage.setItem('__ai_switch_project_at', String(Date.now()))
-        } catch { /* sessionStorage 不可用时退化为普通 reload */ }
-        window.location.reload()
+        // [workspace-switch-inplace-v1] 原地切换：与 AiWindowList.activate 同一语义，不整页 reload
+        // （原 reload 会在启动期触发 openAiSession 自动开新 AI 窗口，与「切换不打开新窗口」冲突）。
+        // [CONSTRAINT] /workspace/pick 服务端已 registerWorkspace(path, true) → setRoot + persist；
+        //   前端只补「清会话上下文 + 刷新注册表」，与新 root 的 SYSTEM.md 首问保持干净起点。
+        const { useWorkspaces } = await import('../../composables/data/useWorkspaces')
+        const ws = useWorkspaces()
+        const active = ws.activeId.value
+        if (active) await ws.activate(active)
+        else await ws.load()
         return
       }
       if (j && j.canceled) return

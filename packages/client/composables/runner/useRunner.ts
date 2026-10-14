@@ -408,6 +408,8 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   const lang = /^#!\s*\/usr\/bin\/env\s+(?:bash|sh)\b/m.test(code) ? 'bash' : 'cjs'
   // [run-uk-unique] 每次运行唯一 key，避免同 key 覆盖历史事件导致位置错乱
   const UK = opts?.runKey || uid('run')
+  // [card-duration-v1] 本轮起点：供每张卡片独立显示执行耗时（终态时计算）
+  const _runStartTs = Date.now()
   const emitStep = (phase: string, over: Record<string, unknown> = {}) => {
     // [timeline-denoise-v1] summary 只放 desc：原先拼接了原始 stdout 尾行（titleOf），
     //   但 summary 从未被任何组件渲染，却会随每次 250ms 节流更新写进 localStorage ——
@@ -419,7 +421,11 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   }
   let finalPhase: 'running' | 'done' | 'error' = 'running' // [loading-fix]
   const wrappedEmitStep = (phase: string, over: Record<string, unknown> = {}) => {
-    if (phase === 'done' || phase === 'error') finalPhase = phase
+    if (phase === 'done' || phase === 'error') {
+      finalPhase = phase
+      // [card-duration-v1] 终态带本轮耗时（run 起点 → 收口），供每张卡片各自显示
+      over = { ...over, durationMs: Date.now() - _runStartTs }
+    }
     emitStep(phase, over)
   }
   wrappedEmitStep('running')
@@ -538,6 +544,8 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         runId: String(s.runId || ''),
         code: Number(s.code ?? -1),
         ok: Boolean(s.ok),
+        // [run-timeout-visible-v1] 承接超时标记：UI/回执据此把「超时被杀」与「逻辑失败」分开
+        timedOut: Boolean(s.timedOut),
         scriptDesc: String(s.scriptDesc || ''),
         scriptWhy: String(s.scriptWhy || ''),
         // 输出以流式 chunk 累积为准；summary 仅带 tail 兜底（刷新/丢帧），notice 附加服务端提示

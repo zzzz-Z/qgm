@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 /** 测试服务端口 */
 // [port-auto-v1] 允许在 EADDRINUSE 时递增，故用 let
-let PORT = Number(process.env.AIR_SERVER_PORT) || 5175
+const PORT = Number(process.env.AIR_SERVER_PORT) || 5175
 /** 容器 */
 const HOST = process.env.AIR_SERVER_HOST || '127.0.0.1'
 /** WS_PATH（相关状态/数据） */
@@ -271,28 +271,13 @@ const server = http.createServer((req, res) => {
 g.__aiRunnerServer = server // [dev-hmr-core-v1-server-reg]
 attachWs(server, { wsPath: WS_PATH })
 
-// [port-auto-v1] 端口占用自动切换：EADDRINUSE 时递增端口重试，直到成功或超过上限
-// [WHY] dev 环境常有残留进程占用 5175；手动换端口体验差，自动切换更顺滑
-// [CONSTRAINT] PORT_MAX_TRIES 限上限防无限循环；重试无 sleep —— 连续 EADDRINUSE 会很快耗尽预算
-// [CHANGE-IMPACT] 前端 vite 代理指向 5175；自动切端口后前端需用 AIR_BACKEND_URL 重定向
-const PORT_MAX_TRIES = 20
-let portTries = 0
+// [port-no-drift-v1] 拒绝自动漂移：端口被占即报错退出
+// [WHY] 自动漂移是静默故障放大器——服务在别处跑着，客户端与 vite 代理仍指原端口，
+//   表现为「服务没挂但全部连不上」，极难定位（2026-10-13 实测）。
+// [CONSTRAINT] 端口是契约：占不到就响亮失败，让 pm2 记录明确错误。
 server.on('error', (e: NodeJS.ErrnoException) => {
   if (e && e.code === 'EADDRINUSE') {
-    if (portTries < PORT_MAX_TRIES) {
-      portTries += 1
-      const nextPort = PORT + 1
-      console.warn(`⚠ 端口 ${PORT} 已被占用，自动切到 ${nextPort}（尝试 ${portTries}/${PORT_MAX_TRIES}）`)
-      PORT = nextPort
-      try {
-        server.listen(PORT, HOST)
-      } catch (err) {
-        console.error(`✗ 重试 listen 失败：${String(err)}`)
-        process.exit(1)
-      }
-      return
-    }
-    console.error(`✗ 端口 ${PORT} 已被占用，已连续重试 ${PORT_MAX_TRIES} 次仍失败`)
+    console.error(`✗ 端口 ${PORT} 已被占用；拒绝自动漂移（客户端仍指旧端口会全部连不上）`)
     console.error('  · 手动换端口：AIR_SERVER_PORT=5177 pnpm start')
     console.error(`  · 或结束占用：lsof -tiTCP:${PORT} -sTCP:LISTEN | xargs kill`)
     process.exit(1)
@@ -301,21 +286,7 @@ server.on('error', (e: NodeJS.ErrnoException) => {
 })
 server.listen(PORT, HOST, () => {
   const base = `http://${HOST}:${PORT}`
-  // [port-drift-file-v1] 端口漂移后前端 proxy 需知真实端口；原子写避免读到半截
-  // [e2e-no-port-write-v1] 测试起的临时实例（e2e headless-ws 的 beforeAll，端口 5518/5519）
-  //   不得写该文件：它会覆盖真实端口，而 vite dev 在**启动时**已读入旧值且不会重读 ⇒
-  //   用完即杀后 .server-port 残留测试端口，dev 的 /__ai/* 代理全部 502（实测 2026-10-10，
-  //   表现为 e2e 里 baseline-diff / fail-feedback-probe / visual 共 18 例全红）。
-  //   [CONSTRAINT] 只认显式环境变量，不按端口区间推断——区间判据会在端口漂移时误判。
-  if (process.env.AIR_SERVER_NO_PORT_FILE !== '1') {
-    try {
-      const portFile = path.join(ROOT, '.ai-runner', '.server-port')
-      fs.mkdirSync(path.dirname(portFile), { recursive: true })
-      const tmp = `${portFile}.tmp-${process.pid}`
-      fs.writeFileSync(tmp, String(PORT))
-      fs.renameSync(tmp, portFile)
-    } catch { /* 端口文件失败不阻断启动 */ }
-  }
+  // [port-contract-v1] 端口为契约：prod 恒 5175、dev 恒 5275，不再有漂移 ⇒ 无需落端口文件
   console.log(`  AI Runner server:  ${base}${PREFIX}/`)
   console.log(`  WebSocket:         ${base}${WS_PATH}`)
 })

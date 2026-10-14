@@ -74,7 +74,7 @@ _openToolLog()
 /** [chalk] 语义输出统一走 chalk；协议帧（__AI_*__ / __AI_MODE_DIFF__）保持裸 console 供 runner 解析。 */
 let _chalk = null
 try { _chalk = require('chalk') } catch { _chalk = null }
-const _useColor = Boolean(process.stdout && process.stdout.isTTY) && !process.env.NO_COLOR
+const _useColor = (Boolean(process.stdout && process.stdout.isTTY) || Boolean(process.env.FORCE_COLOR)) && !process.env.NO_COLOR
 const _c = (_chalk && _useColor)
   ? _chalk
   : { green: s => s, yellow: s => s, red: s => s, cyan: s => s, gray: s => s, dim: s => s }

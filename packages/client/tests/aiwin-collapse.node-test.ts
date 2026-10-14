@@ -96,9 +96,79 @@ test('折叠态样式承重：48px 图标条 + 隐藏文字块/删除钮/新建�
   assert.ok(!collapsedRule.includes('.awl-dot'), '折叠态把圆点也藏了 ⇒ 站点身份/激活态全丢')
 })
 
-test('窄屏响应式条不得再引用不存在的 .awl-item-name（旧写法使文字在 48px 里溢出）', () => {
+test('[trae-modal-pick-v1] 新建工作区必须走模态弹窗 + 系统选择器，禁止手填路径', () => {
+  const raw = fs.readFileSync(path.join(ROOT, LIST_REL), 'utf8')
+  // [WHY] 用户明确要求「改为弹窗选择，所有都不要手填」；回归形态包括：
+  //   ① 表单退回内联（无 Teleport 遮罩）② 路径字段退回 <input v-model=pathInput>
+  //   ③ pick 按钮丢失 onPickTarget 挂点（点不动/无反应）
+  //   [CONSTRAINT] 只断结构，不断样式细节——样式可回归，语义契约不可丢。
+  assert.match(raw, /<Teleport to="body">/, '模态弹窗须用 Teleport 到 body（否则被面板 overflow 裁剪）')
+  assert.match(raw, /class="awl-modal-mask"/, '缺少模态遮罩')
+  assert.match(raw, /class="awl-modal-card"/, '缺少模态卡片容器')
+  assert.match(raw, /function openModal\(/, '缺少 openModal 入口')
+  assert.match(raw, /function closeModal\(/, '缺少 closeModal 出口')
+  assert.match(raw, /async function onPickTarget\(/, '缺少 onPickTarget（系统选择器入口）')
+  assert.ok((raw.match(/@click="onPickTarget"/g) || []).length >= 1, '缺少 onPickTarget 挂点')
+  const badPathInput = /<input[^>]*v-model="pathInput"/.test(raw)
+  assert.ok(!badPathInput, '禁止手填工作区路径：必须改为按钮 + 只读展示（onPickTarget）')
+  assert.ok(!raw.includes('class="awl-add-row"'), '旧内联 awl-add-row 残留')
+  assert.ok(!raw.includes('@click="adding = true"'), '旧入口未改 openModal')
+})
+
+test('[trae-single-mode-v1] 只保留「目录」模式：分支/克隆 tab 及其模板与专属状态已删', () => {
+  const raw = fs.readFileSync(path.join(ROOT, LIST_REL), 'utf8')
+  // [WHY] 用户明示删掉「分支」「克隆」两个 tab；回归形态包括：
+  //   ① tablist 回来了 ② worktree/clone 的模板分支还在 ③ 对应 ref/函数未清干净
+  //   [CONSTRAINT] addMode 单值保留下游 if 判据兼容外壳；断言只看结构与语义，不锁样式。
+  //   [CONSTRAINT] 判据前必须剥离注释：JSDoc 里会保留「原入口是 pathInput/urlInput 手填」「与 onPickRepo 共用 pickPath」等
+  //     历史沿革说明，那些是有效文档而非死代码——不剥离会误判为残留。
+  const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  assert.ok(!raw.includes('role="tablist"'), '三模式 tablist 应已删除')
+  assert.ok(!/addMode\s*===?\s*'worktree'/.test(code), 'worktree 模式引用残留')
+  assert.ok(!/addMode\s*===?\s*'clone'/.test(code), 'clone 模式引用残留')
+  assert.ok(!code.includes('branchInput'), 'branchInput 变量/引用残留')
+  assert.ok(!code.includes('urlInput'), 'urlInput 变量/引用残留')
+  assert.ok(!code.includes('baseRepoPath'), 'baseRepoPath 变量/引用残留')
+  assert.ok(!code.includes('onPickRepo'), 'onPickRepo 函数/引用残留')
+  // 三模式专属：listBranches / create 不应被本文件引用
+  assert.ok(!code.includes('listBranches'), 'listBranches 引用残留')
+  assert.ok(!code.includes('create('), 'create() 调用残留')
+})
+
+test('[workspace-open-newwin-v1] 每项含「在新窗口打开」按钮，且删除按钮不再受 active 限制', () => {
+  const raw = fs.readFileSync(path.join(ROOT, LIST_REL), 'utf8')
+  // 承重判据：① open-new 按钮存在且挂上 onOpenNewWindow ② onOpenNewWindow 真用 window.open
+  //   ③ 删除按钮不再有 v-if="!w.active"（活跃项也可删）
+  assert.match(raw, /class="awl-open-new"/, '缺少「在新窗口打开」按钮')
+  assert.match(raw, /@click\.stop="onOpenNewWindow\(w\)"/, '新窗口按钮未挂 onOpenNewWindow')
+  const fnIdx = raw.indexOf('function onOpenNewWindow')
+  assert.ok(fnIdx > 0, '缺少 onOpenNewWindow 函数')
+  const fnBody = raw.slice(fnIdx, fnIdx + 1200)
+  assert.match(fnBody, /openAiSession\(/, 'onOpenNewWindow 应调用 openAiSession（导航受控窗口，不新开浏览器窗口）')
+  assert.match(fnBody, /useWorkspaces/, 'onOpenNewWindow 应先切换工作区')
+  const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  assert.ok(!/v-if="!w\.active"[^>]*class="awl-close"/.test(code), '删除按钮仍受 v-if="!w.active" 限制')
+  assert.ok(!/<button[^>]*v-if="!w\.active"[^>]*>[\s\S]{0,200}?awl-close/.test(code), '删除按钮仍受 v-if="!w.active" 限制')
+})
+
+test('[awl-narrow-name-visible-v1] 窄屏（≤1100px）不得隐藏 .awl-meta，且不得再引用不存在的 .awl-item-name', () => {
   const raw = fs.readFileSync(path.join(ROOT, LIST_REL), 'utf8')
   const scss = raw.replace(/\/\*[\s\S]*?\*\//g, '')
-  assert.ok(!scss.includes('.awl-item-name'), '.awl-item-name 在源码中不存在 ⇒ 该选择器恒不命中（文字未隐藏）')
-  assert.ok(scss.includes('.ai-window-list .awl-meta'), '窄屏未隐藏 .awl-meta')
+  assert.ok(!scss.includes('.awl-item-name'), '.awl-item-name 在源码中不存在 ⇒ 该选择器恒不命中')
+  // [WHY] 旧规则在 ≤1100px 一律 display:none 掉 .awl-meta，导致展开态名称消失（用户报告）。
+  //   [CONSTRAINT] 断言「任何 max-width 媒体查询块内都不得出现 .awl-meta」——
+  //   折叠隐藏由 .is-collapsed 承担，窄屏不得再按视口宽度藏名称。
+  const mediaRe = /@media[^{]*max-width[^{]*\{/g
+  let m: RegExpExecArray | null
+  while ((m = mediaRe.exec(scss)) !== null) {
+    // 从媒体查询块的 `{` 起做花括号配平，切出整块
+    let depth = 1
+    let i = m.index + m[0].length
+    for (; i < scss.length && depth > 0; i++) {
+      if (scss[i] === '{') depth++
+      else if (scss[i] === '}') depth--
+    }
+    const block = scss.slice(m.index, i)
+    assert.ok(!block.includes('.awl-meta'), `窄屏媒体查询块内隐藏了 .awl-meta ⇒ 展开态名称会消失：${block}`)
+  }
 })

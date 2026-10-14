@@ -221,8 +221,13 @@ describe('复用窗口导航后必须重新等就绪（reuse-nav-ready-v1）', (
     // 判据承重：删掉 else if 分支（或改回只看 preWin），本条必须变红
     assert.ok(/else if \(win === preWin\)/.test(src), '复用分支判据 win === preWin 缺失')
     assert.ok(
-      /else if \(win === preWin\) \{[\s\S]*?await waitWindowReady\(preSid, 5000\)/.test(src),
-      '复用分支必须 await waitWindowReady（带短超时），否则油猴重注入期 fill 被丢弃 ⇒ 新会话丢 SYSTEM.md',
+      /else if \(win === preWin\) \{[\s\S]*?await waitWindowReady\(preSid, 15000\)/.test(src),
+      '复用分支必须 await waitWindowReady(15000)：导航重载的油猴重注入期与新开窗口同级，短超时会让 fill 落在加载中页面 ⇒ 弹「首问未送达」',
+    )
+    // [workspace-switch-nav-race-v1] 未就绪时必须直接 return（不再投递注定失败的 fill）
+    assert.ok(
+      /await waitWindowReady\(preSid, 15000\)[\s\S]{0,120}?return \{ win, fill: null \}/.test(src),
+      '复用分支未就绪时必须 return { win, fill: null }，否则会走 B1 弹误导性「首问未送达」',
     )
   })
 })

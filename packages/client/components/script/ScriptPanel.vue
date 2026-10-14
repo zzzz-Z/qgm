@@ -72,7 +72,6 @@ const sideWidthBase = ref(SIDE_WIDTH_DEFAULT)
 /** 是否正在拖动侧栏 */
 const resizingSide = ref(false)
 /** 上次运行时长（显示用） */
-const lastDuration = ref('')
 /** 命令已运行秒数 */
 const runningElapsed = ref('')
 /** 当前正在执行的命令 */
@@ -337,7 +336,6 @@ watch(running, (v) => {
     runStartAt = performance.now()
     statusText.value = '运行中…'
     statusClass.value = ''
-    lastDuration.value = ''
     runningElapsed.value = '0.0s'
     // resume 等价 setInterval 启动；重复 resume 幂等（内部判断 isActive）
     resumeElapsed()
@@ -357,8 +355,6 @@ watch(busyOrDelivering, (v) => {
   pauseElapsed()
   runningElapsed.value = ''
   if (!runStartAt) return
-  const ms = performance.now() - runStartAt
-  lastDuration.value = ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`
   runStartAt = 0
 })
 
@@ -476,15 +472,14 @@ function onHtmlDrop(e: DragEvent) {
         </template>
       </ScriptEditor>
 
-      <!-- [status-bar-v1] 执行状态条：接入此前零渲染出口的 statusText/statusClass/runningElapsed/lastDuration -->
+      <!-- [status-bar-v1] 执行状态条：statusText/statusClass/runningElapsed；耗时已移到每张卡片头部（[card-duration-v1]） -->
       <div
-        v-if="statusText || runningElapsed || lastDuration"
+        v-if="statusText || runningElapsed"
         class="status-bar text-11px px-12px py-4px flex gap-8px items-center"
         :class="statusClass === 'err' ? 'text-red-400' : statusClass === 'ok' ? 'text-green-400' : 'text-[var(--text-3)]'"
       >
         <span v-if="statusText">{{ statusText }}</span>
         <span v-if="runningElapsed" class="font-mono">{{ runningElapsed }}</span>
-        <span v-else-if="lastDuration" class="font-mono opacity-70">耗时 {{ lastDuration }}</span>
       </div>
 
       <div v-if="fileSuccess" class="overlay success">

@@ -11,8 +11,11 @@ import {
   getRoot,
   getWorkspace,
   getWorkspaces,
+  getWorkspaceSession,
+  getWorkspaceSessions,
   registerWorkspace,
   removeWorkspace,
+  setWorkspaceSession,
 } from '../config.js'
 import { execFile } from 'node:child_process'
 
@@ -260,13 +263,41 @@ workspaceHono.post('/workspace/activate', async (c) => {
   return c.json({ ok: true, root: getRoot(), workspace: entry })
 })
 
-/** POST /workspace/remove {id} —— 出册；活跃工作区拒移（409），防悬空 activeId */
+/**
+ * [workspace-session-bind-v1] GET /workspace/session —— 只读：会话绑定全量快照。
+ * [CONSTRAINT] 返回 {ok, sessions: Record<workspaceId, {url, sessionId, updatedAt}>}；
+ *   快照可能包含已出册的键（服务端 remove 时会清，但并发场景允许短暂残留）。
+ */
+workspaceHono.get('/workspace/session', (c) => {
+  return c.json({ ok: true, sessions: getWorkspaceSessions() })
+})
+
+/**
+ * [workspace-session-bind-v1] POST /workspace/session {id, url, sessionId} —— 写某工作区的会话绑定。
+ * [CONSTRAINT] 目标工作区必须已注册（否则 404）；写后立即持久化（config.setWorkspaceSession 内落盘）。
+ */
+workspaceHono.post('/workspace/session', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { id?: string, url?: string, sessionId?: string } | null
+  const id = String(body?.id || '').trim()
+  if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
+  const url = String(body?.url || '')
+  const sessionId = String(body?.sessionId || '')
+  const ok = setWorkspaceSession(id, { url, sessionId })
+  if (!ok) return c.json({ ok: false, error: '工作区不存在' }, 404)
+  return c.json({ ok: true, session: getWorkspaceSession(id) })
+})
+
+/**
+ * POST /workspace/remove {id} —— 出册。
+ * [workspace-remove-active-v1] 活跃工作区**可**移除：服务端会自动回退到剩余项（无剩余则清空）；
+ *   仅「工作区不存在」返回 404，其它错误回 400。
+ */
 workspaceHono.post('/workspace/remove', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { id?: string } | null
   const id = String(body?.id || '').trim()
   if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
   const r = removeWorkspace(id)
-  if (!r.ok) return c.json({ ok: false, error: r.reason }, 409)
+  if (!r.ok) return c.json({ ok: false, error: r.reason }, 404)
   return c.json({ ok: true, workspaces: getWorkspaces(), activeId: getActiveWorkspaceId() })
 })
 

@@ -7,7 +7,6 @@ import { defineConfig } from 'vite'
 import UnoCSS from 'unocss/vite'
 import vue from '@vitejs/plugin-vue'
 import { compression } from 'vite-plugin-compression2'
-import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import AutoImport from 'unplugin-auto-import/vite'
@@ -17,15 +16,9 @@ const CLIENT_ROOT = path.dirname(fileURLToPath(import.meta.url))
 /** pkg根目录 */
 const PKG_ROOT = path.dirname(CLIENT_ROOT)
 /** BACKEND（相关状态/数据） */
-// [port-drift-file-v1] 后端漂移端口落 .ai-runner/.server-port；env 显式优先，其次读文件，末选 5175
-const REPO_ROOT = path.dirname(PKG_ROOT)
+// [port-contract-v1] 端口为契约：dev 后端恒 5275（dev-all 会传 AIR_BACKEND_URL 覆盖）
 function resolveBackend(): string {
-  if (process.env.AIR_BACKEND_URL) return process.env.AIR_BACKEND_URL
-  try {
-    const raw = fs.readFileSync(path.join(REPO_ROOT, '.ai-runner', '.server-port'), 'utf8').trim()
-    if (/^\d+$/.test(raw)) return `http://127.0.0.1:${raw}`
-  } catch { /* 文件缺失即用默认 */ }
-  return 'http://127.0.0.1:5175'
+  return process.env.AIR_BACKEND_URL || 'http://127.0.0.1:5275'
 }
 const BACKEND = resolveBackend()
 
@@ -62,7 +55,7 @@ export default defineConfig({
     ],
   },
   server: {
-    port: 5174,
+    port: 5274,
     fs: { allow: [PKG_ROOT] },
     watch: {
       ignored: [

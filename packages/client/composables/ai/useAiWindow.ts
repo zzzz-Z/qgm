@@ -412,16 +412,27 @@ export async function openAiSession(opts?: {
   if (!win) return { win: null, fill: null }
   if (!p) return { win, fill: null }
   if (!preWin) {
-    // [ready-warn-v1] 接住就绪判定：未就绪仍继续（不阻断），但明确告警——帧大概率被丢弃
+    // [workspace-switch-nav-race-v1] 与新窗口分支同构：未就绪时不再尝试 fill（省掉注定失败的重试 + 误导性报错）。
+    // [WHY] 原实现「未就绪仍继续」会让 fill 落到加载中页面 → B3 弹「新开窗口的首问未送达」。
+    //   窗口已经开出来了，只是油猴还没注入；返回 fill:null 让调用方自行决定后续（用户可手动重试）。
     const ready = await waitWindowReady(preSid)
-    if (!ready) log.warn('[openAiSession] 新窗口 15s 内未就绪（可能被拦截/站点加载失败），规则可能未注入 sid=', preSid)
+    if (!ready) {
+      log.warn('[openAiSession] 新窗口 15s 内未就绪（可能被拦截 / 站点加载失败），跳过首问投递 sid=', preSid)
+      return { win, fill: null }
+    }
   } else if (win === preWin) {
-    // [reuse-nav-ready-v1] 复用同名窗口时 window.open 带新 URL 会导航重载 → 油猴重注入；
-    //   旧逻辑只看 preWin 存在就跳过等待，fill 落在加载中页面被丢弃（用户报告「新会话未带 SYSTEM.md」）。
-    //   复用场景油猴重启比新开窗快，用 5s 短超时兜住；超时仍继续（不阻断），与 ready-warn-v1 语义一致。
-    //   win === preWin 是「复用」的可靠判据：openSite 内 window.open 命中同名活窗口时返回同一对象。
-    const ready = await waitWindowReady(preSid, 5000)
-    if (!ready) log.warn('[openAiSession] 复用窗口 5s 内未就绪（可能未触发导航 / 站点加载慢），规则可能未注入 sid=', preSid)
+    // [workspace-switch-nav-race-v1] 复用同名窗口 + 带新 URL = 导航重载 → 油猴重注入，期间输入框不存在。
+    //   原实现只等 5s 且超时后仍继续 fill → 必然走到 B1 的 failed 分支弹「首问未送达」
+    //   （用户实测截图：切工作区同时弹「首问未送达」+「切换工作区失败」）。
+    //   [FIX] ① 等待窗口延长到 15s（与新开窗口一致——导航重载的耗时同级）；
+    //         ② 未就绪时**直接返回**，不再尝试 fill（省掉一次注定失败的重试与误导性报错）。
+    //   [CONSTRAINT] 返回 {win, fill: null}：窗口已导航成功，只是首问没发出去；
+    //     调用方（switchDeepSeekSession）不依赖 fill 结果，语义安全。
+    const ready = await waitWindowReady(preSid, 15000)
+    if (!ready) {
+      log.warn('[openAiSession] 复用窗口 15s 内未就绪（导航重载 / 站点加载慢），跳过首问投递 sid=', preSid)
+      return { win, fill: null }
+    }
   }
   const fill = await copyAndFill(p, { forceRules: opts?.forceRules, skipRules: opts?.skipRules })
   return { win, fill }

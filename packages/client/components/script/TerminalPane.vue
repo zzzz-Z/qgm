@@ -58,6 +58,8 @@ interface ScriptItem {
   //   与 desc 同属步骤属性而非输出；藏在展开区里等于要求用户逐行点开才能理解意图。
   //   空串表示无 why（旧事件 payload 无此字段）。
   why: string
+  // [card-duration-v1] 本轮执行耗时（ms）；终态事件才带值，运行中为 null
+  durationMs: number | null
   // [script-card-reason-v1] 失败原因：useRunner 的 error 分支会带 payload.reason
   //   （「未收到 summary 帧」/「已取消」/异常文本）。此前该字段存在但从未渲染，
   //   用户只能靠被截断的 stderr 尾去猜。空串表示无（成功态恒为空）。
@@ -284,6 +286,8 @@ const timelineItems = computed(() => {
       timeLabel,
       // [timeline-denoise-v1] 结果摘要：exit / 变更文件数随终态事件下发（useRunner.wrappedEmitStep）
       exit: typeof p.exit === 'number' ? p.exit : null,
+      // [card-duration-v1] 终态耗时（useRunner.wrappedEmitStep 注入）
+      durationMs: typeof p.durationMs === 'number' ? p.durationMs : null,
       changeCount: Number(p.changeCount || 0),
       stdoutText: outTail.text,
       stdoutHidden: outTail.hiddenLines,
@@ -297,6 +301,20 @@ const timelineItems = computed(() => {
   }
 
   return stabilizeCardRefs(out)
+})
+/**
+ * 最近一张 script 卡片的 key：只有它接 liveStdout（完整输出），历史卡片用自身 stdoutText 快照
+ * [WHY] 不得以 props.running 为闸门 —— useRunner 只在**下一轮** run() 开头清空 liveStdout，
+ *   跑到终态后 liveStdout 仍持本轮全量输出；若以 running 判定，卡片一进 done 就退回尾部快照，
+ *   用户跑完瞬间「完整输出面板」缩水成 TAIL 若干行，等于把已有能力丢掉。
+ * [CONSTRAINT] 仍只投喂「最后一张」script 卡 —— 保留旧实现的正确内核（防同一轮的全局输出串到历史卡片）
+ */
+const latestScriptKey = computed(() => {
+  for (let i = timelineItems.value.length - 1; i >= 0; i--) {
+    const it = timelineItems.value[i]
+    if (it.type === 'script') return it.key
+  }
+  return ''
 })
 
 // [deliver-window-v1] delivering 期同样算「等待」——扩展原 loading 时长，不新增文案。
@@ -480,6 +498,7 @@ function normalizeAskOptions(raw: unknown): Array<{ id: string, label: string }>
               v-else-if="card.type === 'script'"
               :key="card.key"
               :card="card"
+              :live-stdout="card.key === latestScriptKey ? liveStdout : ''"
               @preview="(p) => emit('preview', p)"
             />
             <RoundCard

@@ -13,8 +13,9 @@ import { fileURLToPath } from 'node:url'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.dirname(HERE)
 
-const BACKEND_BASE = Number(process.env.AIR_SERVER_PORT) || 5175
-const FRONTEND_BASE = Number(process.env.AIR_WEB_PORT) || 5174
+// [dev-port-isolation-v1] dev 默认用 5275/5274，与 prod(5175) 隔开，避免抢端口
+const BACKEND_BASE = Number(process.env.AIR_SERVER_PORT) || 5275
+const FRONTEND_BASE = Number(process.env.AIR_WEB_PORT) || 5274
 const MAX_KILL_TRIES = 5
 
 function tag(prefix, str) {

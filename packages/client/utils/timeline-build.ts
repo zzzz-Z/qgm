@@ -27,6 +27,8 @@ export interface ScriptItem {
   // [script-card-reason-v1] 失败原因（payload.reason）；须与 TerminalPane 的活构建路径同构，
   //   否则将来把卡构建切回本函数时 reason 会静默丢失。
   reason: string
+  // [card-duration-v1] 本轮执行耗时（ms）；须与 TerminalPane 活构建路径同构
+  durationMs: number | null
   // [script-card-changes-v1] 本次执行产生的变更文件（path + type）；空数组=无改动
   changes: Array<{ path: string, type: string }>
 }
@@ -154,6 +156,7 @@ export function buildOneCard(ev: { id: number, kind: string, ts: number, payload
     desc,
     timeLabel,
     exit: typeof p.exit === 'number' ? p.exit : null,
+    durationMs: typeof p.durationMs === 'number' ? p.durationMs : null,
     changeCount: Number(p.changeCount || 0),
     stdoutText: outTail.text,
     stdoutHidden: outTail.hiddenLines,

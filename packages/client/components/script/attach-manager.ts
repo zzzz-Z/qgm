@@ -1,5 +1,4 @@
 // [attach-manager-v1] 从 ScriptPanel.vue 抽出：附件簇（粘贴图片 / 拖文件 / 列表增删清）
-import { TOAST_MEDIUM } from '../../utils/toast-durations'
 import { readAsDataUrl } from './script-panel-utils'
 import type { Ref } from 'vue'
 import { uid } from '../../utils/id'
@@ -21,8 +20,13 @@ export interface AttachManagerDeps {
   fileSuccess: Ref<boolean>
 }
 
-/** 单文件上限：500KB */
-export const MAX_ATTACH_BYTES = 500 * 1024
+/**
+ * [attach-no-size-limit-v1] 单文件上限已移除（用户要求）。
+ * [WHY] 原 500KB 上限会把大图/大文件直接跳过（用户实测被拦）；但去掉后 base64 会成倍膨胀，
+ *   经 postMessage → 剪贴板链路发送，超大文件仍可能触发浏览器侧限制（不是本层能保证的）。
+ * [CONSTRAINT] 保留该常量供 UI 展示参考，实际判断不再拦截；若日后要恢复，改回数值判断即可。
+ */
+export const MAX_ATTACH_BYTES = Infinity
 
 /**
  * 创建附件管理器
@@ -32,14 +36,9 @@ export function createAttachManager(deps: AttachManagerDeps) {
   // [attach-timer-v1] 单个成功提示的 timer 句柄，连续触发时先清旧的
   let fileSuccessTimer: ReturnType<typeof setTimeout> | null = null
   const { attachedFiles, script, fileSuccess } = deps
-  const { toast } = useToast()
 
-  /** 添加一个文件：图片走 DataURL、文本走原文本；超限跳过 */
+  /** 添加一个文件：图片走 DataURL、文本走原文本 */
   async function addAttachedFile(file: File): Promise<void> {
-    if (file.size > MAX_ATTACH_BYTES) {
-      toast(`附件 ${file.name} 超 ${fmtSize(MAX_ATTACH_BYTES)}，已跳过`, 'warn', TOAST_MEDIUM)
-      return
-    }
     const isImage = file.type.startsWith('image/')
     try {
       const content = isImage ? await readAsDataUrl(file) : await readAsText(file)

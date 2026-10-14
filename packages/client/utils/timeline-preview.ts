@@ -123,27 +123,27 @@ const ANSI_RE = (() => {
   return new RegExp(`${ESC}\\[[0-9;?]*[A-HJKSTm]`, 'g')
 })()
 
-export function denoiseLog(raw: string, maxRepeat = 2): string {
-  const src = String(raw ?? '').replace(ANSI_RE, '').replace(/\r\n?/g, '\n')
+/** [output-denoise-v1] 仅剥离 ANSI 控制序列（保留 SGR 颜色码，供着色输出区降噪使用） */
+const CTRL_SEQ_RE = (() => {
+  const ESC = String.fromCharCode(27)
+  return new RegExp(`${ESC}\\[[0-9;?]*[A-HJKSTfnsu]`, 'g')
+})()
+
+/** 降噪核心：输入须已预处理（ANSI 处理 + 换行规范化） */
+function denoiseCore(src: string, maxRepeat: number): string {
   if (!src) return ''
   const SEP_RE = /^\s*(?:-{3,}|={3,}|#{3,}|\*{3,}|_{3,})\s*$/
-  // [denoise-ai-prefix-v1] __AI__.log 输出带 [AI] 前缀（runner 内部标记），剥离后保留内容
   const AI_PREFIX_RE = /^\[AI\]\s?/
   const out: string[] = []
   let lastLine = ''
   let repeat = 0
   for (const line of src.split('\n')) {
-    // ① 纯空行
     if (!line.trim()) continue
-    // ⑤ 剥离 [AI] 前缀（保留内容；纯 [AI] 行剥离后为空 → 按空行丢）
     const stripped = line.replace(AI_PREFIX_RE, '')
     if (!stripped.trim()) continue
-    // ② 纯分隔线
     if (SEP_RE.test(stripped)) continue
-    // ④ 进度回退符残留（去掉 \r 之前的内容后为纯空白）
     const tail = stripped.includes('\r') ? stripped.split('\r').pop() || '' : stripped
     if (!tail.trim() && stripped.includes('\r')) continue
-    // ③ 连续重复
     if (tail === lastLine) {
       repeat++
       if (repeat >= maxRepeat) continue
@@ -154,4 +154,13 @@ export function denoiseLog(raw: string, maxRepeat = 2): string {
     out.push(tail)
   }
   return out.join('\n')
+}
+
+export function denoiseLog(raw: string, maxRepeat = 2): string {
+  return denoiseCore(String(raw ?? '').replace(ANSI_RE, '').replace(/\r\n?/g, '\n'), maxRepeat)
+}
+
+/** [output-denoise-v1] 保留 SGR 的降噪：实时输出区既降噪又保色 */
+export function denoiseOutput(raw: string, maxRepeat = 2): string {
+  return denoiseCore(String(raw ?? '').replace(CTRL_SEQ_RE, '').replace(/\r\n?/g, '\n'), maxRepeat)
 }

@@ -36,6 +36,7 @@ export default defineConfig({
       include: ['packages/client/**/*.{ts,vue}', 'packages/core/src/**/*.ts'],
       exclude: ['**/*.d.ts', '**/node_modules/**', 'test/**', '**/*.test.ts', '**/*.node-test.ts'],
     },
+    setupFiles: ['./vitest.setup.ts'],
     globals: false,
     isolate: true,
     maxWorkers: MAX_WORKERS,

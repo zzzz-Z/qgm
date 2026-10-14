@@ -46,6 +46,7 @@ declare global {
   const TOAST_VERY_LONG: typeof import('./utils/toast-durations').TOAST_VERY_LONG
   const activeSessionId: typeof import('./composables/ui/useAppStorage').activeSessionId
   const aiWindowListCollapsed: typeof import('./composables/ui/useAiWindowListCollapse').aiWindowListCollapsed
+  const ansiToHtml: typeof import('./utils/ansi-render').ansiToHtml
   const applyToEditor: typeof import('./composables/runner/useScriptInbox').applyToEditor
   const askUser: typeof import('./composables/ui/useAsk').askUser
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
@@ -98,6 +99,7 @@ declare global {
   const defineAsyncComponent: typeof import('vue').defineAsyncComponent
   const defineComponent: typeof import('vue').defineComponent
   const denoiseLog: typeof import('./utils/timeline-preview').denoiseLog
+  const denoiseOutput: typeof import('./utils/timeline-preview').denoiseOutput
   const detectLang: typeof import('./utils/scriptMeta').detectLang
   const dismissToast: typeof import('./composables/ui/useToast').dismissToast
   const doneSummary: typeof import('./composables/runner/useRunner').doneSummary
@@ -657,6 +659,7 @@ declare module 'vue' {
     readonly TOAST_VERY_LONG: UnwrapRef<typeof import('./utils/toast-durations')['TOAST_VERY_LONG']>
     readonly activeSessionId: UnwrapRef<typeof import('./composables/ui/useAppStorage')['activeSessionId']>
     readonly aiWindowListCollapsed: UnwrapRef<typeof import('./composables/ui/useAiWindowListCollapse')['aiWindowListCollapsed']>
+    readonly ansiToHtml: UnwrapRef<typeof import('./utils/ansi-render')['ansiToHtml']>
     readonly applyToEditor: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['applyToEditor']>
     readonly askUser: UnwrapRef<typeof import('./composables/ui/useAsk')['askUser']>
     readonly asyncComputed: UnwrapRef<typeof import('@vueuse/core')['asyncComputed']>
@@ -709,6 +712,7 @@ declare module 'vue' {
     readonly defineAsyncComponent: UnwrapRef<typeof import('vue')['defineAsyncComponent']>
     readonly defineComponent: UnwrapRef<typeof import('vue')['defineComponent']>
     readonly denoiseLog: UnwrapRef<typeof import('./utils/timeline-preview')['denoiseLog']>
+    readonly denoiseOutput: UnwrapRef<typeof import('./utils/timeline-preview')['denoiseOutput']>
     readonly detectLang: UnwrapRef<typeof import('./utils/scriptMeta')['detectLang']>
     readonly dismissToast: UnwrapRef<typeof import('./composables/ui/useToast')['dismissToast']>
     readonly doneSummary: UnwrapRef<typeof import('./composables/runner/useRunner')['doneSummary']>
