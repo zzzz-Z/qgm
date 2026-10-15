@@ -133,23 +133,15 @@ async function onRemove(item: { id: string, label: string }): Promise<void> {
  * [CONSTRAINT] 使用 window.open 打开同源页面，不加 noopener（新窗口需要读 sessionStorage 上的位置信息）。
  */
 async function onOpenNewWindow(item: { id: string, label: string }): Promise<void> {
-  // [workspace-session-bind-v1] 用户确认 Q2：打开新会话 = 导航受控 DeepSeek 窗口到新会话，
-  //   而不是新开浏览器窗口（新开窗口不受工作台控制，source 校验会拒收其消息）。
-  // [CONSTRAINT] 先激活该工作区（原地切换 + 清会话上下文），再让站点导航到新会话 URL。
+  // [open-new-session-v1] 用户诉求：点击该按钮应「在该工作区的受控 AI 窗口里开新会话」。
+  // [WHY] 原实现直接 openAiSession({atUrl: bound.url})：bound.url 是旧会话 URL ⇒ 打开的还是旧对话。
+  //   改走 ws.activate(id, { newSession: true }) → switchDeepSeekSession(_, true) 会把目标 URL
+  //   折叠回站点首页（新对话），而不是继续沿用该工作区已绑定的旧会话。
+  // [CONSTRAINT] 不加 newSession=true 时按钮语义退化为「切工作区」，与「开新会话」不符；不带浏览器新窗口。
   try {
     const { useWorkspaces } = await import('../../composables/data/useWorkspaces')
-    const { openAiSession } = await import('../../composables/ai/useAiWindow')
-    const { currentSiteUrl, sidForUrl } = await import('../../composables/ai/useAiSite')
-    // [workspace-open-newwin-v1] 先激活该工作区（原地切换 + 清会话上下文），再开窗——
-    //   否则用户点 B 的开窗、视角仍停在 A（承重测试断言此为必要条件）。
     const ws = useWorkspaces()
-    if (item.id !== ws.activeId.value) await ws.activate(item.id)
-    // [multi-site-matrix-v1] 按**该工作区绑定的站点**开窗，而非全局 currentSiteUrl：
-    //   多站点并行下全局 modelId 只反映激活工作区，用它会给 B 工作区开错站点窗口。
-    const boundUrl = matrix.sessionByWs.value[item.id]?.url || currentSiteUrl()
-    const targetSid = sidForUrl(boundUrl)
-    // [first-prompt-once-v1] 只导航，不自动发首问（规则由 copyAndFill 按 sid 去重注入）。
-    await openAiSession({ atUrl: boundUrl, sid: targetSid })
+    await ws.activate(item.id, { newSession: true })
   } catch {
     toast('打开新会话失败，请检查站点窗口是否就绪', 'error', TOAST_MEDIUM)
   }

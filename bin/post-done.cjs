@@ -5,7 +5,7 @@
 // [CONSTRAINT] build+restart 必须 detached 后台：本脚本由 5175 自身的 hook 执行，
 //   同步 pm2 restart 会杀掉正在跑 hook 的进程 → DONE 回执与构建日志全丢（pm2-ecosystem-v1 已记录此风险）。
 // [CHANGE-IMPACT] 每次 DONE 都会在当前分支产生一个 checkpoint commit；restart 约 5-10s 后生效。
-const { execSync, spawn } = require('node:child_process')
+const { execSync, execFileSync, spawn } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
 
@@ -20,7 +20,9 @@ try {
   const raw = fs.readFileSync(0, 'utf8')
   const j = JSON.parse(raw)
   const s = String((j && j.payload && j.payload.doneSummary) || '')
-  doneSummary = s.split('\n')[0].replace(/"/g, '\'').slice(0, 120)
+  // [post-done-gate-v1] 客户端用 ' / ' 拼多行；剥离 markdown 标题前缀，取首个有意义片段
+  const first = s.split(' / ').map(x => x.replace(/^#+\s*/, '').trim()).find(x => x.length > 0) || ''
+  doneSummary = first.replace(/"/g, '\'').slice(0, 120)
 } catch { /* 无 stdin / 非法 JSON：回退时间戳 msg */ }
 
 function log(msg) {
@@ -44,7 +46,12 @@ if (status.trim()) {
   const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
   // [post-done-gate-v1] 有 DONE 摘要则用它作 subject（可读）；无则回退时间戳。
   const subject = doneSummary ? `chore(done): ${doneSummary}` : `chore(auto): DONE checkpoint ${ts}`
-  const c = run(`git commit -m "${subject}"`)
+  // [post-done-gate-v1] 数组参数走 execFileSync：subject 里的反引号/引号不被 shell 解析
+  //   （原 execSync(git commit -m "...") 遇反引号触发 command substitution → exit 2 → 从未产生 commit）
+  let c = null
+  try {
+    c = execFileSync('git', ['commit', '-m', subject], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (e) { log(`FAIL: git commit → exit ${e.status}`) }
   if (c === null) { log('commit failed (identity 未配置？)')
   }
   else { const h = run('git rev-parse --short HEAD'); log(`committed: ${(h || '').trim()}`) }

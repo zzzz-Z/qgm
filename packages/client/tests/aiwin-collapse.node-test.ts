@@ -147,8 +147,10 @@ test('[workspace-open-newwin-v1] 每项含「在新窗口打开」按钮，且�
   const fnIdx = raw.indexOf('function onOpenNewWindow')
   assert.ok(fnIdx > 0, '缺少 onOpenNewWindow 函数')
   const fnBody = raw.slice(fnIdx, fnIdx + 1200)
-  assert.match(fnBody, /openAiSession\(/, 'onOpenNewWindow 应调用 openAiSession（导航受控窗口，不新开浏览器窗口）')
-  assert.match(fnBody, /useWorkspaces/, 'onOpenNewWindow 应先切换工作区')
+  // [open-new-session-v1] 语义：按钮 = 「在受控 AI 窗口里开新会话」（非新开浏览器窗口）。
+  //   承重判据：必须调 activate(id, { newSession: true })——缺 newSession 会沿用旧会话 URL（用户实测进旧对话）。
+  assert.match(fnBody, /activate\([^)]*newSession\s*:\s*true/, 'onOpenNewWindow 应以 newSession:true 激活该工作区')
+  assert.ok(!/window\.open\(/.test(fnBody), 'onOpenNewWindow 不应新开浏览器窗口（那会同时打开新工作台页）')
   const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
   assert.ok(!/v-if="!w\.active"[^>]*class="awl-close"/.test(code), '删除按钮仍受 v-if="!w.active" 限制')
   assert.ok(!/<button[^>]*v-if="!w\.active"[^>]*>[\s\S]{0,200}?awl-close/.test(code), '删除按钮仍受 v-if="!w.active" 限制')

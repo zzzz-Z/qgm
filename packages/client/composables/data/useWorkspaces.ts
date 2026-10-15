@@ -149,7 +149,7 @@ async function load(): Promise<void> {
  *   导航到绑定 url（有绑定）或新建会话（无绑定），而不是新开窗口。
  * [CONSTRAINT] 服务端拒绝（404）时保留原 activeId；导航失败不阻断本地状态切换。
  */
-async function activate(id: string): Promise<{ ok: boolean, error?: string }> {
+async function activate(id: string, opts?: { newSession?: boolean }): Promise<{ ok: boolean, error?: string }> {
   try {
     const r = await fetch('/__ai/workspace/activate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) })
     const j = await r.json().catch(() => null) as { ok?: boolean, error?: string } | null
@@ -159,7 +159,7 @@ async function activate(id: string): Promise<{ ok: boolean, error?: string }> {
       // [workspace-epoch-v1] 服务端已 setRoot：通知依赖 root 的面板重拉（否则它们停在旧 root）
       bumpWorkspaceEpoch()
       await load()
-      await switchDeepSeekSession(id)
+      await switchDeepSeekSession(id, opts?.newSession)
       return { ok: true }
     }
     return { ok: false, error: j?.error || `HTTP ${r.status}` }
@@ -173,12 +173,24 @@ async function activate(id: string): Promise<{ ok: boolean, error?: string }> {
  * [WHY] 有绑定 → 导航到绑定 url（复用窗口）；无绑定 → 开新会话（这一次才新开/导航到新会话）。
  * [CONSTRAINT] 动态 import 避免 useWorkspaces ↔ useAiWindow 的模块级循环依赖；失败只告警不抛。
  */
-async function switchDeepSeekSession(id: string): Promise<void> {
+async function switchDeepSeekSession(id: string, newSession?: boolean): Promise<void> {
   try {
     const bound = await getSession(id)
     const { openAiSession } = await import('../ai/useAiWindow')
-    const { currentSiteUrl, sidForUrl } = await import('../ai/useAiSite')
-    const atUrl = bound?.url || currentSiteUrl()
+    const { currentSiteUrl, sidForUrl, MODELS } = await import('../ai/useAiSite')
+    // [open-new-session-v1] newSession=true 时导航到**站点首页**（新对话）：
+    //   原实现用 bound.url（旧会话 URL）会打开旧对话，用户报告「开新会话还是旧会话」。
+    //   从 bound.url 提取 host 找到对应站点首页；无绑定时回退全局 currentSiteUrl。
+    let atUrl: string
+    if (newSession && bound?.url) {
+      try {
+        const host = new URL(bound.url).host
+        const m = MODELS.find((x) => { try { return new URL(x.url).host === host } catch { return false } })
+        atUrl = m ? m.url : currentSiteUrl()
+      } catch { atUrl = currentSiteUrl() }
+    } else {
+      atUrl = bound?.url || currentSiteUrl()
+    }
     // [multi-site-parallel-v1] 按绑定 URL 推导 sid：两工作区绑不同站点 → 各自窗口槽位不串
     const targetSid = sidForUrl(atUrl)
     // [workspace-switch-no-first-prompt-v1] 切工作区只导航窗口，**不发首问**：
@@ -187,12 +199,12 @@ async function switchDeepSeekSession(id: string): Promise<void> {
     //   ③ 首问规则仍会在用户真正发起对话时由 copyAndFill 按 sid 去重注入。
     // [workspace-switch-no-first-prompt-v1] 只导航窗口，不发首问（无 initialPrompt 时 openAiSession 本就不发问）。
     await openAiSession({ atUrl, sid: targetSid })
-    // [认领语义] 无绑定时把新会话回写到该工作区，避免下次切换又新建
-    if (!bound) await setSession(id, { url: atUrl, sessionId: '' })
+    // [认领语义] 无绑定或强制新会话时把新会话回写到该工作区，避免下次切换又新建
+    if (!bound || newSession) await setSession(id, { url: atUrl, sessionId: '' })
     // [session-id-backfill-v1] 空 sessionId 窗口期：新建会话后轮询补全，
     //   油猴的 new-session-created / session-id 回写是异步的，可能晚于本次调用；
     //   补齐后再次切换即可导航到具体会话而非站点默认 URL。
-    if (!bound || !bound.sessionId) void backfillSessionId(id, atUrl)
+    if (!bound || newSession || !bound.sessionId) void backfillSessionId(id, atUrl)
   } catch { /* 未就绪 / 被拦截：不阻断切换 */ }
 }
 
