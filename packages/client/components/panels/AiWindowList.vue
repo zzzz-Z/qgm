@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { TOAST_LONG, TOAST_MEDIUM, TOAST_SHORT_MEDIUM } from '../../utils/toast-durations'
 import { aiWindowListCollapsed, aiWindowListCollapsed as collapsed } from '../../composables/ui/useAiWindowListCollapse'
 import { useToast } from '../../composables/ui/useToast'
 import { useWorkspaces } from '../../composables/data/useWorkspaces'
+// [multi-site-matrix-v1] 矩阵视图数据面：窗口状态 + 站点映射
+import { windowsTick } from '../../composables/ai/useAiWindowTable'
+import { useAiWindow } from '../../composables/ai/useAiWindow'
+import { modelIdFromSid, MODELS, sidForUrl } from '../../composables/ai/useAiSite'
 
 const adding = ref(false)
 // [trae-single-mode-v1] 只保留「目录」模式（用户明示删掉分支/克隆）：
@@ -12,19 +16,53 @@ const addMode = ref<'register'>('register')
 const pathInput = ref('')
 const busy = ref(false)
 const pickingRepo = ref(false)
+// [multi-site-matrix-v1] 每工作区绑定的站点会话（一次批量拉取，避免 N 次请求）
+const sessionByWs = ref<Record<string, { url: string, sessionId: string }>>({})
 
 const { toast } = useToast()
 const { workspaces, activeId, loading, load, activate, register, remove, pickPath } = useWorkspaces()
 
-const items = computed(() => workspaces.value.map(w => ({
-  id: w.id,
-  label: w.label,
-  root: w.root,
-  active: w.id === activeId.value,
-})))
+// [multi-site-matrix-v1] windowsTick 作响应式信号：窗口开关时列表自动重渲
+const openSids = computed(() => {
+  void windowsTick.value
+  const wins: Array<{ sid: string, url: string }> = useAiWindow().listWindows()
+  return new Set(wins.map(w => w.sid))
+})
+const items = computed(() => workspaces.value.map((w) => {
+  const sess = sessionByWs.value[w.id]
+  const siteId = sess?.url ? modelIdFromSid(sidForUrl(sess.url)) : ''
+  const sid = siteId ? `win_${siteId}` : ''
+  return {
+    id: w.id,
+    label: w.label,
+    root: w.root,
+    active: w.id === activeId.value,
+    siteLabel: siteId ? (MODELS.find(m => m.id === siteId)?.label || siteId) : '',
+    winOpen: sid ? openSids.value.has(sid) : false,
+  }
+}))
 
-onMounted(() => { void load() })
+// [multi-site-matrix-v1] 切工作区 / 注册表变更后刷新绑定
+watch(activeId, () => { void loadAllSessions() })
 
+onMounted(() => { void load(); void loadAllSessions() })
+
+/**
+ * [multi-site-matrix-v1] 批量拉取所有工作区的会话绑定（单请求，非按 ws 循环）。
+ * [CONSTRAINT] 失败静默保留现值：矩阵视图降级为「站点未知」而非报错。
+ */
+async function loadAllSessions(): Promise<void> {
+  try {
+    const r = await fetch('/__ai/workspace/session')
+    if (!r.ok) return
+    const j = await r.json().catch(() => null) as { sessions?: Record<string, { url?: string, sessionId?: string }> } | null
+    const out: Record<string, { url: string, sessionId: string }> = {}
+    for (const [wid, s] of Object.entries(j?.sessions || {})) {
+      if (s && typeof s.url === 'string') out[wid] = { url: s.url, sessionId: String(s.sessionId || '') }
+    }
+    sessionByWs.value = out
+  } catch { /* 服务端不可达：矩阵降级 */ }
+}
 async function onClick(item: { id: string, label: string, active: boolean }): Promise<void> {
   if (item.active) return
   if (busy.value) return
@@ -214,7 +252,15 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
         <span class="awl-dot" aria-hidden="true" />
         <div class="awl-meta">
           <span class="awl-label">{{ w.label }}</span>
-          <span class="awl-sub">{{ w.active ? '激活中' : w.root }}</span>
+          <span class="awl-sub">
+            <template v-if="w.siteLabel">
+              <span class="awl-site">{{ w.siteLabel }}</span>
+              <span class="awl-win" :class="{ open: w.winOpen }">{{ w.winOpen ? '● 已开窗' : '○ 未开窗' }}</span>
+            </template>
+            <template v-else>
+              <span class="awl-nosite">未绑定站点</span>
+            </template>
+          </span>
         </div>
         <button
           v-tooltip="'在该工作区开新会话'"
@@ -581,6 +627,23 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 .awl-close:hover {
   background: rgba(248, 81, 73, 0.14);
   color: var(--danger, #f85149);
+}
+
+/* [multi-site-matrix-v1] 工作区行内的站点标签 + 窗口状态（矩阵视图） */
+.awl-sub .awl-site {
+  color: var(--primary, #58a6ff);
+  font-weight: 500;
+}
+.awl-sub .awl-win {
+  margin-left: 6px;
+  color: var(--text-3);
+}
+.awl-sub .awl-win.open {
+  color: var(--success, #3fb950);
+}
+.awl-sub .awl-nosite {
+  color: var(--text-3);
+  opacity: 0.7;
 }
 
 .awl-empty {

@@ -172,6 +172,7 @@ declare global {
   const markWindowOpened: typeof import('./composables/ai/useAiWindowTable').markWindowOpened
   const matchSkills: typeof import('./composables/ai/skill-registry').matchSkills
   const migrateIfNeeded: typeof import('./composables/ui/useSitesStore').migrateIfNeeded
+  const modelIdFromSid: typeof import('./composables/ai/useAiSite').modelIdFromSid
   const moveTooltip: typeof import('./composables/ui/useTooltip').moveTooltip
   const nextTick: typeof import('vue').nextTick
   const normalizeAskOptions: typeof import('./utils/timeline-build').normalizeAskOptions
@@ -278,6 +279,7 @@ declare global {
   const shallowRef: typeof import('vue').shallowRef
   const shouldIncludeChanges: typeof import('./composables/runner/useRunFeedback').shouldIncludeChanges
   const showTooltip: typeof import('./composables/ui/useTooltip').showTooltip
+  const sidForUrl: typeof import('./composables/ai/useAiSite').sidForUrl
   const sidePaneRevealTick: typeof import('./composables/ui/useSidePaneTab').sidePaneRevealTick
   const sidePaneTab: typeof import('./composables/ui/useSidePaneTab').sidePaneTab
   const softPause: typeof import('./composables/ai/useAiWaiting').softPause
@@ -786,6 +788,7 @@ declare module 'vue' {
     readonly markWindowOpened: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['markWindowOpened']>
     readonly matchSkills: UnwrapRef<typeof import('./composables/ai/skill-registry')['matchSkills']>
     readonly migrateIfNeeded: UnwrapRef<typeof import('./composables/ui/useSitesStore')['migrateIfNeeded']>
+    readonly modelIdFromSid: UnwrapRef<typeof import('./composables/ai/useAiSite')['modelIdFromSid']>
     readonly moveTooltip: UnwrapRef<typeof import('./composables/ui/useTooltip')['moveTooltip']>
     readonly nextTick: UnwrapRef<typeof import('vue')['nextTick']>
     readonly normalizeAskOptions: UnwrapRef<typeof import('./utils/timeline-build')['normalizeAskOptions']>
@@ -892,6 +895,7 @@ declare module 'vue' {
     readonly shallowRef: UnwrapRef<typeof import('vue')['shallowRef']>
     readonly shouldIncludeChanges: UnwrapRef<typeof import('./composables/runner/useRunFeedback')['shouldIncludeChanges']>
     readonly showTooltip: UnwrapRef<typeof import('./composables/ui/useTooltip')['showTooltip']>
+    readonly sidForUrl: UnwrapRef<typeof import('./composables/ai/useAiSite')['sidForUrl']>
     readonly sidePaneRevealTick: UnwrapRef<typeof import('./composables/ui/useSidePaneTab')['sidePaneRevealTick']>
     readonly sidePaneTab: UnwrapRef<typeof import('./composables/ui/useSidePaneTab')['sidePaneTab']>
     readonly softPause: UnwrapRef<typeof import('./composables/ai/useAiWaiting')['softPause']>
