@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.7.8
+// @version      1.9.0
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -15,6 +15,7 @@
 // @match        *://*.aliyun.com/*
 // @match        *://*.tongyi.cn/*
 // @match        *://*.qianwen.cn/*
+// @match        https://chatglm.cn/*
 // @run-at       document-idle
 // @grant        none
 // @updateURL    http://127.0.0.1:5178/tampermonkey-session-id.user.js
@@ -36,7 +37,9 @@
     // WHY: 主域名切换至 qianwen.com，会话形如 /chat/{id} 或 /c/{id} 或 /q/{id}
     // CONSTRAINT: 域名锚定 qianwen.com，避免误匹配其他站点；顺序置末尾保留既有优先级
     // CHANGE-IMPACT: 影响 extractId() 返回；未命中返回 ''，不影响其他站点
-    { re: /(?:www\.)?qianwen\.com\/(?:chat|c|q)\/([\w-]+)/, n: 1 }
+    { re: /(?:www\.)?qianwen\.com\/(?:chat|c|q)\/([\w-]+)/, n: 1 },
+    // [chatglm-adapter-v1] 智普清言会话 URL：/main/detail/{id}
+    { re: /chatglm\.cn\/main\/detail\/([\w-]+)/, n: 1 }
   ]
 
   // [replay-buf] 缓存最近 N 条外发消息，供刷新后重放
@@ -114,6 +117,13 @@
     '.ds-assistant-message-main-content', // DeepSeek
     '[data-message-author-role="assistant"]', // ChatGPT
     '.chat-answers-card-wrap', // 千问 / 通义
+    // [chatglm-adapter-v2] 智普清言对话页：原 .conversation-item .answer-content 未实测（[chatglm-adapter-v1] 标注"真实 DOM 快照"来源不明），
+    //   实测症状「能发不能回」= 该选择器 miss → latestAssistantRoot 返回 null → bodySignature 退化为全页末 300 字符
+    //   （智谱页面末 300 字符 = 输入框 + 页脚，流式期间恒定）→ hash 恒定 → 永不 post。与 L111-113 注释记载的「签名恒定→永不回传」同根因。
+    //   改为三候选：保留原值 + answer-content 类名前缀变体 + answer-body 变体。
+    // [CONSTRAINT] 本条必须排在数组末位（顺序即优先级，latestAssistantRoot 取第一个非空命中）。
+    // [CHANGE-IMPACT] 若仍 miss，用户侧探针数字可继续收窄；不影响前三条站点选择器。
+    '.conversation-item .answer-content, [class*="answer-content"], [class*="answer-body"]',
   ]
   function latestAssistantRoot() {
     for (let i = 0; i < ASSISTANT_ROOT_SELECTORS.length; i++) {
@@ -772,6 +782,24 @@
         return
       }
 
+      // [generating-gate-v1] 流式输出未完，script/plain 一律等生成结束后再发
+      // [generating-gate-v2] 但「生成结束」本身常是非 DOM 事件（停止按钮变灰/消失、生成光标移除），
+      //   若无 childList/characterData 变更，原裸 return 会让通道陷入零定时器状态 → 回传卡死，
+      //   必须用户滚动/点击制造 DOM 变更才会被唤醒。故排单飞自检：每次到点若仍在生成则再挂一个，
+      //   生成一旦结束 → 下次到点放行 classifyAndPost 后自然停挂。seenHashes/lastBodySig 保证不重复推送。
+      //   [parity] headless-inject.ts startReplyPoll 以 800ms 轮询天然无此症，本补丁仅对齐回传及时性。
+      // [generating-gate-v3] 提到 stopped/limit 探针**之前**：避免 AI 正常生成时正文里自指命中停止/触顶关键词
+      //   （2026-10-15 实测：AI 讨论 SiteAdapter 改造时，在正文里复述了"已停止回答"等探针关键词 →
+      //   旧顺序下 stopped 探针先扫到 → 误推 stopped → 后续脚本被 stopped-window 闸门拦截）。
+      //   真 stopped（用户点停止/服务端中断）会让 isGenerating() 转 false（停止按钮消失/变灰），
+      //   generating gate 放行后 stopped 探针仍能正常命中。
+      if (isGenerating()) {
+        if (!genRetryTimer) {
+          genRetryTimer = setTimeout(() => { genRetryTimer = null; classifyAndPost() }, 600)
+        }
+        return
+      }
+
       // [stopped-detect-v1] 生成被中止感知（用户点停止/平台中断/内容截断）：
       // 残缺回复无 DONE 无完整脚本，按旧逻辑会被降级为 plain「等待下一轮」→ 前端无感知干等超时。
       // 标记计数较 fill/rotate 基线增长即推送 kind:'stopped'（更新基线保证只推一次），优先于 script/plain
@@ -826,19 +854,6 @@
           sessionId: extractSidFromHash(),
           text: limitMarkerText || 'AI 会话已达长度上限',
         })
-        return
-      }
-
-      // [generating-gate-v1] 流式输出未完，script/plain 一律等生成结束后再发
-      // [generating-gate-v2] 但「生成结束」本身常是非 DOM 事件（停止按钮变灰/消失、生成光标移除），
-      //   若无 childList/characterData 变更，原裸 return 会让通道陷入零定时器状态 → 回传卡死，
-      //   必须用户滚动/点击制造 DOM 变更才会被唤醒。故排单飞自检：每次到点若仍在生成则再挂一个，
-      //   生成一旦结束 → 下次到点放行 classifyAndPost 后自然停挂。seenHashes/lastBodySig 保证不重复推送。
-      //   [parity] headless-inject.ts startReplyPoll 以 800ms 轮询天然无此症，本补丁仅对齐回传及时性。
-      if (isGenerating()) {
-        if (!genRetryTimer) {
-          genRetryTimer = setTimeout(() => { genRetryTimer = null; classifyAndPost() }, 600)
-        }
         return
       }
 

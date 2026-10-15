@@ -10,12 +10,14 @@ export {
   getActiveWorkspaceId,
   getHasWorkspace,
   getRoot,
+  getWorkspaceFirstPromptSent,
   getWorkspaces,
   loadWorkspaceRegistry,
   persistWorkspace,
   PREFIX,
   ROOT,
   setRoot,
+  setWorkspaceFirstPromptSent,
 } from './config.js'
 
 export type { WorkspaceEntry } from './config.js'

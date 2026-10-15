@@ -11,6 +11,9 @@ interface ModelOption {
 export const MODELS: ModelOption[] = [
   { id: 'deepseek', label: 'DeepSeek', url: 'https://chat.deepseek.com/', sessionTemplate: 'https://chat.deepseek.com/a/chat/s/{id}' },
   { id: 'qianwen', label: '通义千问', url: 'https://www.qianwen.com/', sessionTemplate: 'https://www.qianwen.com/chat/{id}' },
+  // [chatglm-site-v1] 智谱清言：会话 URL 模板与油猴 RULES 中的 /main/detail/{id} 保持一致；
+  //   注意站点前置阿里云 WAF（滑块验证），首次访问需用户在浏览器里手动过验证
+  { id: 'chatglm', label: '智谱清言', url: 'https://chatglm.cn/', sessionTemplate: 'https://chatglm.cn/main/detail/{id}' },
 ]
 
 /** 标识 */
@@ -100,6 +103,35 @@ function setSessionId(next: string): void {
 export function currentSiteUrl(): string {
   const m = MODELS.find(x => x.id === modelId.value)
   return m ? m.url : DEFAULT_SITE_URL
+}
+
+// [等价性边界] 本文件的 sid/桶映射以「工作区:站点 = 1:1」为前提。
+// 若放开该边界（多工作区共享同一站点），sid 会撞 win_<modelId>、分桶会共享——需先扩展为 win_<modelId>_<wsId>。
+/**
+ * [multi-site-parallel-v1] 从站点 URL 反查其窗口槽位 sid。
+ * 与 useAiWindowTable.winSidOf 同构（`win_<modelId>`）——此处内联以避免 useAiSite ← useAiWindowTable 的循环依赖。
+ * @param u 站点 URL（可为会话 URL，按 host 匹配 MODELS）
+ * @returns 命中的 sid；未命中返回 `win_${DEFAULT_MODEL_ID}`（保守回退默认站点）
+ */
+/**
+ * [multi-site-parallel-v1] 由窗口槽位 sid 反推站点 modelId。
+ * 与 useAiWindowTable.winSidOf 互逆：sid = \`win_<modelId>\`。
+ * @param sid 窗口槽位 sid
+ * @returns 站点 modelId；未命中前缀返回 DEFAULT_MODEL_ID
+ */
+export function modelIdFromSid(sid: string): string {
+  const s = String(sid || '')
+  return s.startsWith('win_') ? s.slice(4) : DEFAULT_MODEL_ID
+}
+
+export function sidForUrl(u: string): string {
+  try {
+    const host = new URL(u).host
+    const m = MODELS.find((x) => { try { return new URL(x.url).host === host } catch { return false } })
+    return `win_${m ? m.id : DEFAULT_MODEL_ID}`
+  } catch {
+    return `win_${DEFAULT_MODEL_ID}`
+  }
 }
 
 /**

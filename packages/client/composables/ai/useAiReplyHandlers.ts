@@ -14,7 +14,7 @@ import { useScriptInbox } from '../runner/useScriptInbox'
 // [hooks-relocate-v1] runHook 已从 auto-loop/hooks.ts 迁至 loop-hooks.ts（P1b），供非循环 DONE 分支使用
 import { runHook } from './loop-hooks'
 import { useAutoTakeover } from './useAutoTakeover'
-import { useAiSite } from './useAiSite'
+import { modelIdFromSid, useAiSite } from './useAiSite'
 import { useAiWaiting } from './useAiWaiting'
 import { useAiWindow } from './useAiWindow'
 import { transportKind } from './useAiTransport'
@@ -361,6 +361,22 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   function handleNewSessionCreated(payload: MessageEvent['data']): void {
     const url = String(payload.url || '')
     const id = String(payload.id || '')
+    // [multi-site-parallel-v1] 由 frame sid 判定目标站点：非当前站点时直接写对应桶，
+    //   不碰 sessionHistory/activeSessionId/siteUrl——否则 A 窗口的回复会串进 B 的视图（G7）
+    const frameSid = String(payload.sessionId || '')
+    const targetModel = frameSid ? modelIdFromSid(frameSid) : ''
+    const isCurrentSite = !targetModel || targetModel === modelId.value
+    if (!isCurrentSite) {
+      if (url && id) {
+        const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        const entry = { id, url, title: `轮转 · ${hhmm}`, createdAt: Date.now() }
+        const existing = loadHistoryBySite(targetModel)
+        const updated = [entry, ...existing.filter(s => s.id !== id)].slice(0, 50)
+        saveHistoryBySite(targetModel, updated)
+        void persistSessionBinding(url, id)
+      }
+      return
+    }
     const oldId = activeSessionId.value
     if (oldId) {
       const i = sessionHistory.value.findIndex(x => x.id === oldId)
@@ -390,8 +406,12 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     try {
       if (!url) return
       const { useWorkspaces } = await import('../data/useWorkspaces')
+      const { sidForUrl } = await import('../ai/useAiSite')
       const ws = useWorkspaces()
-      const wid = ws.activeId.value
+      // [multi-site-parallel-v1] 由 url 反推 frame sid → 反查所属工作区；
+      //   原用 activeId：并行时窗口 A 的回写会落进当前激活的工作区 B（G6）
+      const frameSid = sidForUrl(url)
+      const wid = (await ws.findWorkspaceBySid(frameSid)) ?? ws.activeId.value
       if (!wid) return
       await ws.setSession(wid, { url, sessionId: String(sessionId || '') })
     } catch { /* 未就绪 / 网络失败：忽略 */ }
@@ -407,6 +427,10 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
 
   /** 处理 ai-runner:session-id 会话 ID 回写 */
   function handleSessionIdUpdate(payload: MessageEvent['data']): void {
+    // [multi-site-parallel-v1] frame sid 指向非当前站点时直接跳过——避免 A 窗口的 session-id
+    //   更新串改当前站点视图的 sessionHistory（G7 同类缺口）
+    const frameSid = String(payload.sessionId || '')
+    if (frameSid && modelIdFromSid(frameSid) !== modelId.value) return
     if (!activeSessionId.value) return
     const idx = sessionHistory.value.findIndex(x => x.id === activeSessionId.value)
     if (idx < 0) return

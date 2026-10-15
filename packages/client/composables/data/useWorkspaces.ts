@@ -53,6 +53,26 @@ async function resetSessionContext(): Promise<void> {
 }
 
 /**
+ * [multi-site-parallel-v1] 由窗口槽位 sid 反查所属工作区。
+ * [WHY] 回写链路只知 frame 的 sid；若用 activeId 会写错工作区（并行时 A 的回写落进 B）。
+ * [CONSTRAINT] 遍历服务端 sessions，用 sidForUrl 比对 URL host；未命中返回 null（调用方回退 activeId）。
+ */
+async function findWorkspaceBySid(sid: string): Promise<string | null> {
+  if (!sid) return null
+  try {
+    const r = await fetch('/__ai/workspace/session')
+    if (!r.ok) return null
+    const j = await r.json().catch(() => null) as { sessions?: Record<string, { url?: string }> } | null
+    const sessions = j?.sessions || {}
+    const { sidForUrl } = await import('../ai/useAiSite')
+    for (const [wid, s] of Object.entries(sessions)) {
+      if (s && typeof s.url === 'string' && sidForUrl(s.url) === sid) return wid
+    }
+    return null
+  } catch { return null }
+}
+
+/**
  * [workspace-session-bind-v1] 读某工作区的 DeepSeek 会话绑定；无则返回 null。
  * [CONSTRAINT] 服务端不可达 / 无绑定一律返回 null，由调用方决定「新建会话」。
  */
@@ -74,6 +94,30 @@ async function getSession(id: string): Promise<{ url: string, sessionId: string 
 async function setSession(id: string, session: { url: string, sessionId: string }): Promise<boolean> {
   try {
     const r = await fetch('/__ai/workspace/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, ...session }) })
+    return r.ok
+  } catch { return false }
+}
+
+/**
+ * [first-prompt-persist-v1] 读某工作区是否已发过带规则首问。
+ * [CONSTRAINT] 服务端不可达 / 未记录一律返回 false（保守：视为该发规则）。
+ */
+async function getFirstPromptSent(id: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/__ai/workspace/first-prompt?id=${encodeURIComponent(id)}`)
+    if (!r.ok) return false
+    const j = await r.json().catch(() => null) as { ok?: boolean, sent?: boolean } | null
+    return j?.sent === true
+  } catch { return false }
+}
+
+/**
+ * [first-prompt-persist-v1] 写某工作区首问状态。
+ * [CONSTRAINT] 失败静默（不阻断 copyAndFill）；服务端会在工作区不存在时返回 404。
+ */
+async function setFirstPromptSent(id: string, sent: boolean): Promise<boolean> {
+  try {
+    const r = await fetch('/__ai/workspace/first-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, sent }) })
     return r.ok
   } catch { return false }
 }
@@ -133,13 +177,16 @@ async function switchDeepSeekSession(id: string): Promise<void> {
   try {
     const bound = await getSession(id)
     const { openAiSession } = await import('../ai/useAiWindow')
-    const { currentSiteUrl } = await import('../ai/useAiSite')
+    const { currentSiteUrl, sidForUrl } = await import('../ai/useAiSite')
     const atUrl = bound?.url || currentSiteUrl()
+    // [multi-site-parallel-v1] 按绑定 URL 推导 sid：两工作区绑不同站点 → 各自窗口槽位不串
+    const targetSid = sidForUrl(atUrl)
     // [workspace-switch-no-first-prompt-v1] 切工作区只导航窗口，**不发首问**：
     //   ① 语义上「切工作区」不等于「开新会话」，用户没要求就给 AI 发消息属越权；
     //   ② 导航重载期间发首问必然撞上油猴未就绪（实测弹「首问未送达」）；
     //   ③ 首问规则仍会在用户真正发起对话时由 copyAndFill 按 sid 去重注入。
-    await openAiSession({ atUrl, forceRules: true })
+    // [workspace-switch-no-first-prompt-v1] 只导航窗口，不发首问（无 initialPrompt 时 openAiSession 本就不发问）。
+    await openAiSession({ atUrl, sid: targetSid })
     // [认领语义] 无绑定时把新会话回写到该工作区，避免下次切换又新建
     if (!bound) await setSession(id, { url: atUrl, sessionId: '' })
     // [session-id-backfill-v1] 空 sessionId 窗口期：新建会话后轮询补全，
@@ -279,5 +326,5 @@ async function listBranches(repoPath: string): Promise<{ ok: boolean, current?: 
 
 /** 工作区注册表组合式（模块级共享状态） */
 export function useWorkspaces() {
-  return { workspaces, activeId, loading, workspaceEpoch, load, activate, register, remove, create, pickPath, listBranches, getSession, setSession }
+  return { workspaces, activeId, loading, workspaceEpoch, load, activate, register, remove, create, pickPath, listBranches, getSession, setSession, getFirstPromptSent, setFirstPromptSent, findWorkspaceBySid }
 }

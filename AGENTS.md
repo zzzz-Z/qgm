@@ -69,6 +69,7 @@ docs/              USAGE.md / DOCS-INDEX.md / DESIGN.md
 - `verify-contract v1`：`packages/core/src/post-run/run-compliance.ts`
 - `verify-target-binding v1`：`packages/core/src/headless/discover-targets.ts` + `packages/core/src/headless/smoke.ts` + `packages/core/src/routes/selfcheck.ts` + `packages/core/src/post-run/run-compliance.ts`
 - `ai-guard-tokenize v2`：`packages/core/src/post-run/ai-guard.ts`
+- `post-done-gate v1`：`bin/post-done.cjs` + `.ai-runner/hooks.json`（BeforeDoneFinal）
 
 ## 自动循环子系统已退役（loop-consolidation P3e）
 
@@ -176,7 +177,8 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 
 ### 构建与工具链
 
-- **批量改文件前先落兜底，顺序固定为「git 优先」**：`pnpm git:archive -- --path <目标>`。有 git → 用临时索引存档到 `ai-archive` 分支（`git checkout ai-archive -- <path>` 取回）；非 git / 空仓库 → 自动改落 `.ai-runner/runs/archive-<ts>/`（`pnpm recover <runId>` 取回）。**不要再手写 tar 到 `.ai-runner/backup`**——那是两路都缺位时的遗留做法。AI 自动改动一律不进当前分支（方案 C），主分支只在用户显式 commit 时前进。
+- **批量改文件前先落兜底，顺序固定为「git 优先」**：`pnpm git:archive -- --path <目标>`。有 git → 用临时索引存档到 `ai-archive` 分支（`git checkout ai-archive -- <path>` 取回）；非 git / 空仓库 → 自动改落 `.ai-runner/runs/archive-<ts>/`（`pnpm recover <runId>` 取回）。**不要再手写 tar 到 `.ai-runner/backup`**——那是两路都缺位时的遗留做法。
+- **[post-done-gate-v1] DONE 后自动提交（2026-10-16 用户授权，推翻原「方案 C」）**：每次 DONE 由 `bin/post-done.cjs`（挂 `BeforeDoneFinal` hook，`onFail: warn`）自动 `git add -A && git commit` 到当前分支，随后 **detached 后台**执行 `pnpm build && pm2 restart ai-runner`。后台而非同步的原因：hook 由 5175 自身执行，同步 restart 会杀掉正在跑 hook 的进程 → DONE 回执与构建日志全丢（见 `pm2-ecosystem-v1` 注释）。`hooks.json` 在 `.ai-runner/`（gitignored）⇒ 此配置属本地运行态，新 clone / 新工作区需重建。
 - **auto-import 会掩盖导入错误**：`unplugin-auto-import` 覆盖 vue / `@vueuse/core` 及项目内 composables 与 utils（生成物 `auto-imports.d.ts`）。依赖它的显式 import 被删后 **app 仍能跑**，但 vitest 与 `tsc` 没有该插件 → `Cannot find name`。清理「未使用导入」前必须先确认该模块能在 vitest 下裸跑；**任何导入改动后必跑 `pnpm test:tsc`**。
 - **模板里不要对 auto-import 符号赋值**：会生成 `__unimport_xxx`，dev 不报错但 build 阶段抛 `Cannot assign to this expression`。需要可变就显式 import。
 - **内联常量必须同构**：headless 注入函数经 `page.evaluate` 序列化后在浏览器执行，不能引用模块级常量，所以同一份正则刻意多写一份。会话触顶正则 3 处（`headless-inject.ts` / `headless-inject-simple.ts` / `scripts/tampermonkey-session-id.user.js`，`limit-marker-guard` 守卫）；发送频控正则 3 处（同前两者 + `resetReplyDedupInPage` 基线，`rate-marker-guard` 守卫）。改一处必须全处同步。
@@ -200,7 +202,7 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 
 - **`scripts/anchors.json` 的 `file` 必须是相对仓库根的完整路径**：校验器只做 `path.join(ROOT, file)`，短路径直接 MISS（曾一次 44 条同时失败）。**全量 vitest 不覆盖锚点**（`anchors:verify` 是独立闸门）⇒ 交付前单跑 `pnpm anchors:verify` 或 `pnpm session:start`；vitest 全绿 ≠ preflight 全绿（实测删被锚点引用字串后 1380 passed 仍 2 条 MISS）。
 - **端口是契约，不再有端口文件**（port-contract-v1）：dev 前端 5274 / 后端 5275（dev-port-isolation-v1）、prod 恒 5175、userscript 分发 5178。`apps/standalone/src/server.ts` 遇 EADDRINUSE **拒绝自动漂移**（报错并给出处置命令），不落端口文件。`pnpm test:e2e` 报 ECONNREFUSED 时先确认 dev 进程是否真的在跑（`lsof -nP -iTCP:5275 -sTCP:LISTEN`），别去找端口文件；prod 探活 `curl 5175` 或 `pm2 jlist`。
-- **pm2 重启的授权例外**（instance-ownership-v1 边界）：用户显式授权时代执行 `pm2 restart` 须满足①授权来源可指②当轮回执如实记录（执行时刻 + 授权来源）；未获授权只写「产物已更新，请宿主侧重启」。**代执行当轮 `Failed to fetch` 属预期**（实例重启通道瞬断），下一轮探活即恢复，重试须**跨轮**。
+- **pm2 重启**（instance-ownership-v1 边界，2026-10-16 更新）：**本工作区已获用户显式授权**——DONE 后由 `bin/post-done.cjs` 自动 `pnpm build && pm2 restart ai-runner`（detached，见上「构建与工具链」段）。SYSTEM.md 的「重启归宿主侧」默认规则在本工作区不适用。手工 `pm2 restart` 仍须记录授权来源（①可指②回执如实）。**代执行当轮 `Failed to fetch` 属预期**（实例重启通道瞬断），下一轮探活即恢复，重试须**跨轮**。
 
 ### 输出与预算
 

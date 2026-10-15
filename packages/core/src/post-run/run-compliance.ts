@@ -67,3 +67,21 @@ export function computeSmokeReportCompliance(doneText: string, targets: VerifyTa
   })
   return { ok: true, missing }
 }
+
+/**
+ * [delivery-routing-v1] 交付路由校验：识别写进死信槽的交付物。
+ * [WHY] `.ai-runner/` 是 git 忽略区——写进那里等于永远不进仓库、不被 review、
+ *   不被后续会话读到。分析/评估类任务结论若落在那里，是一次静默的交付路由错误。
+ * [CONSTRAINT] 仅采集不拒收：纯读 changes 列表，不引入新启发式；触发后由调用方 emit 软告警。
+ * @param paths 待筛查的路径列表（通常为 claimMismatch.extra：实际写但未声明）
+ * @returns 命中的相对路径（去重、最多 10 条）；无命中返回空数组
+ */
+export function pickDeadLetterWrites(paths: string[]): string[] {
+  const hits = new Set<string>()
+  for (const raw of paths) {
+    const p = String(raw || '')
+    if (p.startsWith('.ai-runner/')) hits.add(p)
+    if (hits.size >= 10) break
+  }
+  return [...hits]
+}

@@ -24,6 +24,7 @@ import {
   parseClaimed,
   parseDecisionMarkers,
   parseScriptMeta,
+  pickDeadLetterWrites,
   pickLintTargets,
   pickTscTargets,
   readOverlayChanges,
@@ -283,6 +284,8 @@ runHono.post('/run', async (c) => {
           const claimed = parseClaimed(effectiveScript)
           const compliance = computeCompliance(effectiveScript, scriptMeta.desc)
           const claimMismatch: ClaimMismatch | null = computeClaimMismatch(claimed, changes)
+          // [delivery-routing-v1] 死信槽写入识别（消费 claimMismatch.extra：写了但没声明）
+          const deadLetterWrites = pickDeadLetterWrites(claimMismatch?.extra ?? [])
           const errorFiles = extractErrorFiles(`${result.stderr}\n${result.stdout}`)
           const fingerprints = fingerprintErrors(`${result.stderr}\n${result.stdout}`)
           let gitAfter: { ok: boolean, commit?: string, reason?: string } | null = null
@@ -374,7 +377,10 @@ runHono.post('/run', async (c) => {
             scriptSize: measureScriptSize(effectiveScript),
             stdoutTail: scriptMeta.ctx === 'full' ? result.stdout : (result.stdout.length > 2000 ? result.stdout.slice(-2000) : result.stdout),
             stderrTail: scriptMeta.ctx === 'full' ? result.stderr : (result.stderr.length > 4000 ? result.stderr.slice(-4000) : result.stderr),
-            notice: applyError ? `[overlay apply error] ${applyError}` : undefined,
+            notice: [
+              applyError ? `[overlay apply error] ${applyError}` : '',
+              deadLetterWrites.length ? `[delivery-routing-v1] 检测到写进 .ai-runner/（git 忽略区）的交付物：${deadLetterWrites.join(', ')}；如为最终交付，请改用 DONE 正文。` : '',
+            ].filter(Boolean).join(' ') || undefined,
             changes,
             lint,
             test,

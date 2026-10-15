@@ -10,11 +10,13 @@ import {
   getHasWorkspace,
   getRoot,
   getWorkspace,
+  getWorkspaceFirstPromptSent,
   getWorkspaces,
   getWorkspaceSession,
   getWorkspaceSessions,
   registerWorkspace,
   removeWorkspace,
+  setWorkspaceFirstPromptSent,
   setWorkspaceSession,
 } from '../config.js'
 import { execFile } from 'node:child_process'
@@ -285,6 +287,29 @@ workspaceHono.post('/workspace/session', async (c) => {
   const ok = setWorkspaceSession(id, { url, sessionId })
   if (!ok) return c.json({ ok: false, error: '工作区不存在' }, 404)
   return c.json({ ok: true, session: getWorkspaceSession(id) })
+})
+
+/**
+ * [first-prompt-persist-v1] GET /workspace/first-prompt?id=xxx —— 只读：该工作区是否已发过带规则首问。
+ * [CONSTRAINT] 未记录 / 工作区不存在一律返回 {ok:true, sent:false}（= 该发规则），不返回 404。
+ */
+workspaceHono.get('/workspace/first-prompt', (c) => {
+  const id = String(c.req.query('id') || '').trim()
+  if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
+  return c.json({ ok: true, sent: getWorkspaceFirstPromptSent(id) })
+})
+
+/**
+ * [first-prompt-persist-v1] POST /workspace/first-prompt {id, sent} —— 写某工作区首问状态。
+ * [CONSTRAINT] 目标工作区必须已注册（否则 404）；写后立即持久化。
+ */
+workspaceHono.post('/workspace/first-prompt', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { id?: string, sent?: boolean } | null
+  const id = String(body?.id || '').trim()
+  if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
+  const ok = setWorkspaceFirstPromptSent(id, body?.sent === true)
+  if (!ok) return c.json({ ok: false, error: '工作区不存在' }, 404)
+  return c.json({ ok: true, sent: getWorkspaceFirstPromptSent(id) })
 })
 
 /**

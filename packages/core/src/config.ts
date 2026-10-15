@@ -89,6 +89,12 @@ export interface WorkspaceSession {
 }
 /** 工作区 id → 会话绑定（内存权威态，落盘经 persistWorkspace） */
 const workspaceSessions = new Map<string, WorkspaceSession>()
+// [first-prompt-persist-v1] 工作区 id → 「首问是否已带过规则头」。
+// [WHY] 用户要求：切工作区不该重发 SYSTEM.md（会话上下文没变），只有「打开新窗口」才该重置。
+//   原实现的去重键是「窗口 sid:sessionId」，切工作区走 resetSession 换了 sessionId → 击穿去重 →
+//   下次提问重发规则（用户实测报告）。改为按工作区维度持久化：切工作区读同一份状态、不重发；
+//   openSite 新建窗口时清该工作区状态，下次提问重新注入。
+const workspaceFirstPromptSent = new Map<string, boolean>()
 // eslint-disable-next-line import/no-mutable-exports -- 可变绑定：activateWorkspace 会改写（与 ROOT 同理）
 export let activeWorkspaceId: string | null = null
 
@@ -108,6 +114,7 @@ export function persistWorkspace(): void {
       workspaces: [...workspaces.values()],
       activeId: activeWorkspaceId,
       sessions: Object.fromEntries(workspaceSessions),
+      firstPromptSent: Object.fromEntries(workspaceFirstPromptSent),
     }))
   } catch { /* ignore: 持久化失败不阻断主流程 */ }
 }
@@ -238,6 +245,27 @@ export function getWorkspaceSessions(): Record<string, WorkspaceSession> {
   return Object.fromEntries(workspaceSessions)
 }
 
+/**
+ * [first-prompt-persist-v1] 读某工作区「首问是否已带过规则头」。
+ * [CONSTRAINT] 未记录 / 工作区不存在一律视为 false（= 该发规则）。
+ */
+export function getWorkspaceFirstPromptSent(id: string): boolean {
+  return workspaceFirstPromptSent.get(id) === true
+}
+
+/**
+ * [first-prompt-persist-v1] 写某工作区首问状态（幂等覆盖）。
+ * [CONSTRAINT] 只接受已注册的工作区 id（防脏键）；写入后立即持久化。
+ * @returns 工作区不存在时返回 false
+ */
+export function setWorkspaceFirstPromptSent(id: string, sent: boolean): boolean {
+  if (!workspaces.has(id)) return false
+  if (sent) workspaceFirstPromptSent.set(id, true)
+  else workspaceFirstPromptSent.delete(id)
+  persistWorkspace()
+  return true
+}
+
 /** 当前活跃工作区 id；null = 未激活 */
 export function getActiveWorkspaceId(): string | null {
   return activeWorkspaceId
@@ -253,8 +281,14 @@ export function getActiveWorkspaceId(): string | null {
 export function loadWorkspaceRegistry(): string | null {
   try {
     const raw = fs.readFileSync(WORKSPACE_CONF_FILE, 'utf8')
-    const j = JSON.parse(raw) as { root?: string, workspaces?: WorkspaceEntry[], sessions?: Record<string, WorkspaceSession> }
+    const j = JSON.parse(raw) as { root?: string, workspaces?: WorkspaceEntry[], sessions?: Record<string, WorkspaceSession>, firstPromptSent?: Record<string, boolean> }
     const list = Array.isArray(j.workspaces) ? j.workspaces : []
+    // [first-prompt-persist-v1] 恢复首问标记（缺字段一律视为「未发」）
+    if (j && typeof j.firstPromptSent === 'object' && j.firstPromptSent) {
+      for (const [wid, v] of Object.entries(j.firstPromptSent as Record<string, unknown>)) {
+        if (typeof v === 'boolean') workspaceFirstPromptSent.set(wid, v)
+      }
+    }
     // [workspace-session-bind-v1] 恢复会话绑定（缺字段 / 类型不符一律跳过，不阻断注册表恢复）
     if (j.sessions && typeof j.sessions === 'object') {
       for (const [wid, s] of Object.entries(j.sessions)) {

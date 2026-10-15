@@ -113,11 +113,11 @@ export function createTampermonkeyTransport(): AiTransport {
       // [manual-fill-bypass-paused-v1] 不在传输层拦截 paused：自动续推（PLAN/ASK/multi/startLoop）
       // 各调用点已自行检查 loopPaused；此处再拦会误杀「用户在输入框主动发送」——
       // 而 loopPaused 持久化在 sessionStorage，异常循环残留 true 后刷新不清，手动消息全部静默丢失
-      return callDs('sendFill', payload)
+      return callDs('sendFillImpl', payload, sid)
     },
-    sendStop(sid) { void sid; return callDs('sendStop') },
-    sendRotate(sid, payload) { void sid; return callDs('sendRotate', payload) },
-    sendNewSession(sid, payload) { void sid; return callDs('sendNewSession', payload) },
+    sendStop(sid) { return callDs('sendStopImpl', sid) },
+    sendRotate(sid, payload) { return callDs('sendRotateImpl', payload, sid) },
+    sendNewSession(sid, payload) { return callDs('sendNewSessionImpl', payload, sid) },
     // [P3-1c] 油猴链路无服务端 ACK，立即返回 true（保持行为不变）
     waitAck: () => Promise.resolve(true),
     // 暂停时屏蔽消息接收（不移除监听，可 unMute 恢复）

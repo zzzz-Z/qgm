@@ -112,14 +112,14 @@ export function sendFillToImpl(sid: string, payload: FillPayloadImpl): boolean {
  * 向当前激活槽位发 fill；headless 时走 transport.sendFillImpl
  * [CONSTRAINT] headless 分支 fire-and-forget 恒返回 true；tampermonkey 分支返回实际发送结果
  */
-export function sendFillImpl(payload: FillPayloadImpl): boolean {
+export function sendFillImpl(payload: FillPayloadImpl, sid?: string): boolean {
   if (isHeadless()) {
-    headlessSend('sendFillImpl', getActiveWinSid(), payload)
-    traceSend({ sid: getActiveWinSid(), via: 'headless', source: payload.source || 'loop-round', prompt: payload.prompt, ok: true })
+    headlessSend('sendFillImpl', sid ?? getActiveWinSid(), payload)
+    traceSend({ sid: sid ?? getActiveWinSid(), via: 'headless', source: payload.source || 'loop-round', prompt: payload.prompt, ok: true })
     return true
   }
   // [send-trace-v1] 生产路径里 sendFillToImpl 的直接调用方只有 ds 桥（循环引擎），故此处显式标 loop-round
-  return sendFillToImpl(getActiveWinSid(), { source: 'loop-round', ...payload })
+  return sendFillToImpl(sid ?? getActiveWinSid(), { source: 'loop-round', ...payload })
 }
 
 /**
@@ -132,12 +132,14 @@ export function sendFillImpl(payload: FillPayloadImpl): boolean {
  * [CONSTRAINT] ackId 由本函数生成并随帧下发；只匹配自己的 ackId，避免并发 fill 串话
  * [CHANGE-IMPACT] 返回类型从二元改三态：调用方（useAiWindow.fillWithDegrade 与测试）需同步适配；
  *   循环轮次内路径仍用 sendFillToImpl（行为不变）
+ * [fail-reason-v1] 可选第 4 参 out 回传失败原因（no-input-box / no-window / no-origin / post-threw）：
+ *   返回值三态保持字符串不变以兼容既有断言；上层据此区分「暂时未就绪（可重试）」与真失败。
  */
-export function sendFillToAsync(sid: string, payload: FillPayloadImpl, timeoutMs = 5000): Promise<'sent' | 'failed' | 'unacked'> {
+export function sendFillToAsync(sid: string, payload: FillPayloadImpl, timeoutMs = 5000, out?: { reason?: string }): Promise<'sent' | 'failed' | 'unacked'> {
   const win = getWindowBySid(sid)
-  if (!win) { log.warn('[sendFillToAsync] win=null sid=', sid); return Promise.resolve('failed') }
+  if (!win) { if (out) out.reason = 'no-window'; log.warn('[sendFillToAsync] win=null sid=', sid); return Promise.resolve('failed') }
   const origin = targetOriginFor(sid)
-  if (!origin) { log.warn('[sendFillToAsync] origin="" sid=', sid); return Promise.resolve('failed') }
+  if (!origin) { if (out) out.reason = 'no-origin'; log.warn('[sendFillToAsync] origin="" sid=', sid); return Promise.resolve('failed') }
   const ackId = `fa_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
   return new Promise<'sent' | 'failed' | 'unacked'>((resolve) => {
     let done = false
@@ -150,9 +152,10 @@ export function sendFillToAsync(sid: string, payload: FillPayloadImpl, timeoutMs
     function onMsg(e: MessageEvent): void {
       const d = e && e.data
       if (!d || typeof d !== 'object') return
-      const m = d as { type?: string, ackId?: string, ok?: boolean }
+      const m = d as { type?: string, ackId?: string, ok?: boolean, reason?: string }
       if (m.type !== 'ai-runner:fill-ack') return
       if (String(m.ackId || '') !== ackId) return
+      if (out) out.reason = String(m.reason || '')
       finish(m.ok ? 'sent' : 'failed')
     }
     // [send-trace-v1] source 只服务留痕：剥掉后再上线，避免污染协议载荷
@@ -170,7 +173,7 @@ export function sendFillToAsync(sid: string, payload: FillPayloadImpl, timeoutMs
     traceSend({ sid, via: 'tm', source: traceSource || 'copyOutput', prompt: payload.prompt, ok: posted })
     // [post-throw-failed-v1] postMessage 抛错 = 帧确定未送出，不是「结果未知」：
     //   原判 unacked 会让上层降级为「已发送」，静默吞掉真实失败（与 N2 修复配套）
-    if (!posted) { finish('failed'); return }
+    if (!posted) { if (out) out.reason = 'post-threw'; finish('failed'); return }
     setTimeout(finish, timeoutMs, 'unacked')
   })
 }
@@ -189,9 +192,9 @@ export function sendStopToImpl(sid: string): boolean {
   }
 }
 /** 向当前激活槽位发 stop */
-export function sendStopImpl(): boolean {
-  if (isHeadless()) { headlessSend('sendStopImpl', getActiveWinSid()); return true }
-  return sendStopToImpl(getActiveWinSid())
+export function sendStopImpl(sid?: string): boolean {
+  if (isHeadless()) { headlessSend('sendStopImpl', sid ?? getActiveWinSid()); return true }
+  return sendStopToImpl(sid ?? getActiveWinSid())
 }
 
 /**
@@ -209,9 +212,9 @@ export function sendRotateToImpl(sid: string, payload: RotatePayloadImpl): boole
   } catch { return false }
 }
 /** 向当前激活槽位发 rotate */
-export function sendRotateImpl(payload: RotatePayloadImpl): boolean {
-  if (isHeadless()) { headlessSend('sendRotateImpl', getActiveWinSid(), payload); return true }
-  return sendRotateToImpl(getActiveWinSid(), payload)
+export function sendRotateImpl(payload: RotatePayloadImpl, sid?: string): boolean {
+  if (isHeadless()) { headlessSend('sendRotateImpl', sid ?? getActiveWinSid(), payload); return true }
+  return sendRotateToImpl(sid ?? getActiveWinSid(), payload)
 }
 
 /**
@@ -231,7 +234,7 @@ export function sendNewSessionToImpl(sid: string, payload: NewSessionPayloadImpl
   } catch { return false }
 }
 /** 向当前激活槽位发 new-session */
-export function sendNewSessionImpl(payload: NewSessionPayloadImpl): boolean {
-  if (isHeadless()) { headlessSend('sendNewSessionImpl', getActiveWinSid(), payload); return true }
-  return sendNewSessionToImpl(getActiveWinSid(), payload)
+export function sendNewSessionImpl(payload: NewSessionPayloadImpl, sid?: string): boolean {
+  if (isHeadless()) { headlessSend('sendNewSessionImpl', sid ?? getActiveWinSid(), payload); return true }
+  return sendNewSessionToImpl(sid ?? getActiveWinSid(), payload)
 }

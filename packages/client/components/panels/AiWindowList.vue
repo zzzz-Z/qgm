@@ -112,13 +112,10 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
     const { currentSiteUrl } = await import('../../composables/ai/useAiSite')
     const ws = useWorkspaces()
     if (item.id !== ws.activeId.value) await ws.activate(item.id)
-    // [workspace-open-new-session-v1] 两步走：先导航到新会话（不带首问），等窗口就绪后再发。
-    // [WHY] 一步到位时导航会让油猴重注入，首问落在加载中页面被静默丢弃
-    //   （openAiSession 现在未就绪即返回 fill:null，不再弹误导性报错，但首问确实没发出去）。
-    // [CONSTRAINT] 第二步依赖第一步的导航完成；fill 为 null 时说明未就绪，由用户手动重试。
-    await openAiSession({ atUrl: currentSiteUrl(), forceRules: true })
-    const { fill } = await openAiSession({ forceRules: true, initialPrompt: '请阅读已加载的 SYSTEM.md / AGENTS.md，准备执行任务。' })
-    if (fill === null) toast('新会话已打开；窗口尚未就绪，首问未发送，请稍后重试', 'warn', TOAST_MEDIUM)
+    // [first-prompt-once-v1] 打开新窗口 / 开新会话只导航，**不自动发首问**：
+    //   规则头只在用户真正发起第一次提问时经 copyAndFill 按工作区去重注入一次。
+    //   窗口就绪由用户在该会话内自行确认；不再弹「首问未送达」提示。
+    await openAiSession({ atUrl: currentSiteUrl() })
   } catch {
     toast('打开新会话失败，请检查站点窗口是否就绪', 'error', TOAST_MEDIUM)
   }

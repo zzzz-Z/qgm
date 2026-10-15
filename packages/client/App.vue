@@ -21,7 +21,7 @@ const absenceInfo = ref<{ daysAgo: number } | null>(null)
 /** 自动接管模式开关 */
 const autoTakeover = useAutoTakeover()
 const { resetSession, restoreFromStorage } = useSessionManager()
-const { modelId } = useAiSite()
+const { modelId, MODELS, setModel } = useAiSite()
 const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
 
 const { toast } = useToast()
@@ -164,6 +164,20 @@ async function activateWorkspaceFromQuery(): Promise<void> {
   } catch { /* 未就绪：忽略 */ }
 }
 
+/**
+ * [multi-site-switch-v1] 切换 AI 站点（DeepSeek / 通义千问 等）
+ * [WHY] composable 层早已具备多站点能力（MODELS + setModel，会重置 sessionId 与 url），
+ *   但 2026-10-11 左栏由「站点列表」改为「工作区列表」后 UI 入口一并消失，用户无法切换。
+ * [CONSTRAINT] 切站点会重置会话上下文与窗口 sid，必须 reload 让 App.vue 的 watch(modelId) 链路
+ *   （会话历史 / activeSessionId / winSid）与 SessionManager 从干净的存储重建——与 onTransportChange 同范式。
+ * [CHANGE-IMPACT] 依赖 useAiSite().setModel；失败仅 toast 不刷新。
+ */
+function onSiteChange(e: Event) {
+  const v = (e.target as HTMLSelectElement).value
+  if (!v || v === modelId.value) return
+  if (!setModel(v)) { toast('切换站点失败：未知的站点 id', 'error', TOAST_MEDIUM); return }
+  window.location.reload()
+}
 function onTransportChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
   // [use-storage-v1] ref 赋值即持久化，无需手动 setItem
@@ -216,6 +230,17 @@ function onLoginGui() {
           <!-- [hdr-transport-group-v1] 传输链路控组合一：把「油猴 / 无头」选择、无头引导登录、更新油猴脚本
            收进同一个分段控件（原先是三个各自描边的独立控件，视觉上零散且高度不一）。
            结构： [ 链路选择 ▾ | (无头时) 引导登录 | 更新脚本 ] -->
+          <select
+            class="site-select"
+            :value="modelId"
+            aria-label="AI 站点"
+            title="切换 AI 站点（会重置会话上下文）"
+            @change="onSiteChange"
+          >
+            <option v-for="m in MODELS" :key="m.id" :value="m.id">
+              {{ m.label }}
+            </option>
+          </select>
           <div class="transport-switch" role="group" aria-label="AI 传输链路（切换后自动刷新）" title="AI 传输链路（切换后自动刷新）">
             <select
               class="transport-select"

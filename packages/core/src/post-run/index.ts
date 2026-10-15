@@ -14,6 +14,8 @@ export { hasEslint, pickLintTargets, runEslint } from './lint.js'
 export { applyOverlay, readOverlayChanges } from './overlay.js'
 // [run-compliance] /run 合规校验辅助
 export { type ComplianceFlags, computeClaimMismatch, computeCompliance } from './run-compliance.js'
+// [delivery-routing-v1] 死信槽写入识别（消费方 run.ts）
+export { pickDeadLetterWrites } from './run-compliance.js'
 export { runScript } from './run-script.js'
 export type { RunResult } from './run-script.js'
 // [truncation-detect-v1] 截断识别与体积度量：把 §10 输出预算从文档规劝变成可观测信号

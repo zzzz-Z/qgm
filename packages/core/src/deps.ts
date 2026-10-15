@@ -48,6 +48,7 @@ export {
   type ComplianceFlags,
   computeClaimMismatch,
   computeCompliance,
+  pickDeadLetterWrites,
 } from './post-run/run-compliance.js'
 
 // 进程执行

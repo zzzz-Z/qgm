@@ -80,6 +80,8 @@ function readRulesInjected(): { set: Set<string>, order: string[] } {
 const _rulesInit = readRulesInjected()
 const _rulesInjectedSids = _rulesInit.set
 const _rulesInjectedOrder = _rulesInit.order
+/** [rules-pending-lock-v1] 并发锁：判定通过到投递结果之间的 await 窗口期占位，避免双调各注入一次 */
+const _rulesPendingSids = new Set<string>()
 function persistRulesInjected(): void {
   try {
     if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(LS_RULES_INJECTED, JSON.stringify(_rulesInjectedOrder))
@@ -93,6 +95,7 @@ function persistRulesInjected(): void {
  * [CONSTRAINT] 含 LRU 淘汰，Order 与 Set 必须同步增删。
  */
 function markRulesInjected(sid: string): void {
+  _rulesPendingSids.delete(sid)
   _rulesInjectedSids.add(sid)
   _rulesInjectedOrder.push(sid)
   while (_rulesInjectedOrder.length > RULES_INJECTED_MAX) {
@@ -100,6 +103,26 @@ function markRulesInjected(sid: string): void {
     if (old) _rulesInjectedSids.delete(old)
   }
   persistRulesInjected()
+  // [first-prompt-persist-v1] 同步持久化「该工作区已发过首问」：跨刷新 / 跨工作区切换后
+  //   不再重发规则；开新窗口时由 openSite 清掉本标记。fire-and-forget，失败不阻断发送。
+  void (async () => {
+    try {
+      const { useWorkspaces } = await import('../data/useWorkspaces')
+      const w = useWorkspaces()
+      // [first-prompt-persist-v1-fix] activeId 未就绪（首帧竞态 / 未登录）时补一次 load()：
+      //   原实现 if(wsId) 静默跳过 → 首问正常发出但工作区标记永不落库 → 切工作区重发
+      if (!w.activeId.value) {
+        try { await w.load() } catch { /* 拉取失败保持未就绪 */ }
+      }
+      const wsId = String(w.activeId.value || '')
+      if (wsId) {
+        const ok = await w.setFirstPromptSent(wsId, true)
+        if (!ok) log.warn('[markRulesInjected] firstPromptSent 写入失败 wsId=', wsId)
+      } else {
+        log.warn('[markRulesInjected] activeId 未就绪，工作区维度去重未登记')
+      }
+    } catch (e) { log.warn('[markRulesInjected] firstPromptSent 调用异常:', e) }
+  })()
 }
 
 /**
@@ -109,6 +132,7 @@ function markRulesInjected(sid: string): void {
  * [CONSTRAINT] 只在该 sid 确实已关闭时调用，避免误清导致重复注入。
  */
 function clearRulesForSid(sid: string): void {
+  _rulesPendingSids.delete(sid)
   if (!_rulesInjectedSids.has(sid)) return
   _rulesInjectedSids.delete(sid)
   const i = _rulesInjectedOrder.indexOf(sid)
@@ -149,7 +173,20 @@ export function openSite(atUrl?: string, sid?: string): Window | null {
     //   用户却看不到任何变化（还在盯自己手动开的那张孤儿页），只能判定为「没反应」。
     //   focus 属跨域白名单方法，跨域可调；被拒（无用户手势 / 休眠标签）只忽略，不影响已登记的引用。
     try { win.focus() } catch { /* 跨域或休眠标签页：忽略 */ }
-    if (preWin === win) log.info('[openSite] 复用已有同名窗口并激活 sid=', useSid)
+    if (preWin === win) {
+      log.info('[openSite] 复用已有同名窗口并激活 sid=', useSid)
+    } else {
+      // [first-prompt-persist-v1] 新建窗口（preWin 为 null 或与 win 不等）→ 重置该工作区首问状态：
+      //   新窗口是全新 AI 上下文，规则应重新注入；复用旧窗口则保持「已发」不重置。
+      void (async () => {
+        try {
+          const { useWorkspaces } = await import('../data/useWorkspaces')
+          const w = useWorkspaces()
+          const wsId = String(w.activeId.value || '')
+          if (wsId) await w.setFirstPromptSent(wsId, false)
+        } catch { /* 未就绪：忽略 */ }
+      })()
+    }
   }
   return win
 }
@@ -203,7 +240,16 @@ async function fillWithDegrade(sid: string, payload: { prompt: string, images?: 
   //   （站点发送按钮在上传完成前 disabled）。若仍按默认 5s 判 unacked，
   //   大图场景会在真正送达前就走降级分支，弹出「未回执」误导提示。
   const ackTimeout = payload.images?.length ? 60_000 : undefined
-  const r = await sendFillToAsync(sid, payload, ackTimeout)
+  const out: { reason?: string } = {}
+  let r = await sendFillToAsync(sid, payload, ackTimeout, out)
+  // [no-input-retry-v1] no-input-box = 该页输入框尚未渲染（导航 / 新会话切换后常见），
+  //   属「暂时未就绪」而非真失败：原实现直接判 failed → B1 弹误导性「首问未送达」。
+  //   重试一次即可覆盖绝大多数渲染延迟，避免用户被假错误驱赶去按 F5。
+  if (r === 'failed' && out.reason === 'no-input-box') {
+    log.warn('[copyAndFill] 输入框未就绪，800ms 后重试一次 sid=', sid)
+    await promiseTimeout(800)
+    r = await sendFillToAsync(sid, payload, ackTimeout, out)
+  }
   if (r !== 'unacked') return r
   log.warn('[copyAndFill] fill 未收到回执（该页可能未运行油猴脚本 / 油猴为旧版），降级按已发送处理 sid=', sid)
   if (!_unackedHintShown) {
@@ -237,15 +283,50 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     // [CHANGE-IMPACT] _rulesInjectedSids 内容格式变化；语义仍为「已注入规则头的会话标识」
     const sid = `${getActiveWinSid()}:${sessionId.value}`
     rulesKey = sid
+    // [first-prompt-persist-v1] 工作区维度闸门：切工作区走 resetSession 换了 sessionId，
+    //   窗口维度（sid 组合键）会失效 → 规则重发（用户报告）。改为按「工作区」持久化首问状态：
+    //   切工作区读同一份状态 → 不重发；仅「打开新窗口」时才重置（openSite 里做）。
+    // [CONSTRAINT] 动态 import 避免 useAiWindow ↔ useWorkspaces 模块级循环依赖。
+    // [first-prompt-persist-v1] 工作区维度闸门：
+    //   - 该工作区已发过 → wsSent=true，硬短路不注入（切工作区不重发规则，用户需求）
+    //   - 该工作区未发过 → wsSent 保持 false，走窗口维度判定
+    //   - 无活跃工作区（测试环境 / 未就绪）→ wsSent 保持 false，退化为窗口维度判定（保持既有行为）
+    let wsSent = false
+    try {
+      const { useWorkspaces } = await import('../data/useWorkspaces')
+      const w = useWorkspaces()
+      const wsId = String(w.activeId.value || '')
+      if (wsId) {
+        if (await w.getFirstPromptSent(wsId)) wsSent = true
+      }
+    } catch { /* 未就绪：wsSent=false，走窗口维度 */ }
     // [chat-first-no-rules-v1] skipRules=true 用于纯聊天首问（"开始聊天"）：不注入 SYSTEM.md，
     // [WHY] 携带三态契约会让 AI 按 SCRIPT 输出，无 @desc/@why 被 post-run 判 400；
     //       会话级纯聊天不需要规则头，规则仅在真正启动循环/接管任务时注入。
     // [CONSTRAINT] skipRules 不写入 _rulesInjectedSids：后续 startLoop 首次调用仍会正常注入。
-    if (sid && !opts?.skipRules && (opts?.forceRules || !_rulesInjectedSids.has(sid))) {
+    // [first-prompt-persist-v1] 双闸门：
+    //   ① opts.forceRules === true → 强制注入（既有语义）
+    //   ② 工作区未发（!wsSent）且窗口维度未登记 → 注入
+    //   工作区维度的「已发」是硬短路：切工作区不再重发规则（用户需求）。
+    // [first-prompt-persist-v1] 判据：
+    //   ① forceRules=true → 强制注入（既有语义）
+    //   ② 工作区未发（!wsSent）且窗口维度未登记 → 注入
+    //   ③ 工作区已发（wsSent=true）且非 forceRules → 不注入（硬短路）
+    // [rules-pending-lock-v1] 除已注入集合外，还须排除「正在 prepend 中」的 sid：
+    //   并发双调（同一秒内两次 copyAndFill）原判据都能通过，各自 prepend + 各自投递 → 双注入。
+    const shouldInject = opts?.forceRules === true || (!wsSent && !_rulesInjectedSids.has(sid) && !_rulesPendingSids.has(sid))
+    if (sid && !opts?.skipRules && shouldInject) {
       // [rules-add-order-v1] add 必须在 prepend 成功之后：原实现在 await 前登记，
       // 若 prepend 后续抛错，sid 会被永久标记为「已注入」，规则静默丢失
-      finalPrompt = await _prependFirstPromptRules(prompt)
-      pendingRulesKey = sid
+      // [rules-pending-lock-v1] prepend 前后都必须占位：否则同一微任务队列的第二次调用仍能通过判据
+      _rulesPendingSids.add(sid)
+      try {
+        finalPrompt = await _prependFirstPromptRules(prompt)
+        pendingRulesKey = sid
+      } catch (e) {
+        _rulesPendingSids.delete(sid)
+        throw e
+      }
     }
   } catch { /* ignore */ }
   // [track-original-prompt] 只记录原始 prompt：UI 展示不应包含自动携带的规则头
@@ -262,6 +343,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     // WS 发送失败时用户消息照样上屏+亮「思考中」，实际帧从未发出，表现为永久无响应
     const sent = tr.sendFill(getActiveWinSid(), { prompt: finalPrompt, ...imagePayload })
     if (sent && pendingRulesKey) markRulesInjected(pendingRulesKey)
+    else if (pendingRulesKey) _rulesPendingSids.delete(pendingRulesKey)
     return sent ? 'sent' : 'failed'
   }
 
@@ -279,6 +361,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
       //   ② 窗口是用户自己手动开的（无 opener/name，工作台根本没有它的引用）。
       //   两者都能靠「按 F5 / 用工作台按钮重开」解决，故把处置写进提示。
       toast('首问未送达：AI 窗口未就绪或未找到输入框。请在该窗口按 F5 重载后重试；若该窗口是自己手动打开的，请改用工作台按钮重开', 'error', TOAST_LONG)
+      if (pendingRulesKey) _rulesPendingSids.delete(pendingRulesKey)
     } else if (pendingRulesKey) {
       markRulesInjected(pendingRulesKey)
     }
@@ -303,6 +386,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
         // [FIX] 原实现传裸窗口 sid，与集合里的组合键不匹配 → 清除静默失效
         clearRulesForSid(rulesKey)
         if (rulesKey && !opts?.skipRules && pendingRulesKey === null) {
+          _rulesPendingSids.add(rulesKey)
           finalPrompt = await _prependFirstPromptRules(prompt)
           pendingRulesKey = rulesKey
         }
@@ -334,6 +418,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     // [first-fill-hint-v2] 这里是「新窗口已开出但 1.5s 后 fill 仍失败」：
     //   站点加载慢（页面里还没有油猴）是最常见成因，重载即可；不要只说「窗口未就绪」让用户无从下手。
     toast('新开窗口的首问未送达：站点可能还没加载好，或该页未运行油猴脚本。请在该窗口按 F5 重载后重新发送', 'error', TOAST_LONG)
+    if (pendingRulesKey) _rulesPendingSids.delete(pendingRulesKey)
     return 'failed'
   }
 
@@ -344,6 +429,7 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     urlValue: url.value,
     hint: '若 AI 窗口是手动打开的（非本工作台 openSite 开），请在左侧 AI 站点列表点击该站点重建引用',
   })
+  if (pendingRulesKey) _rulesPendingSids.delete(pendingRulesKey)
   return 'failed'
 }
 

@@ -215,6 +215,29 @@ describe('waitWindowReady 接线（结构性断言，与 fill-ack 闭环配套�
   })
 })
 
+describe('fill-ack reason 通道与 no-input-box 重试（fail-reason-v1 / no-input-retry-v1）', () => {
+  it('sendFillToAsync 必须支持 out.reason 回传，返回值三态字符串不变', () => {
+    const src = readFileSync(new URL('../composables/ai/useAiWindowSend.ts', import.meta.url), 'utf8')
+    assert.ok(
+      /timeoutMs = 5000, out\?: \{ reason\?: string \}/.test(src),
+      '第 4 参 out 缺失：上层无法区分「暂时未就绪」与真失败',
+    )
+    assert.ok(src.includes('out.reason = String(m.reason'), 'ack 帧 reason 未写入 out')
+    assert.ok(src.includes('out.reason = \'post-threw\''), 'postMessage 抛错原因未写入 out')
+    assert.ok(/Promise<'sent' \| 'failed' \| 'unacked'>/.test(src), '返回类型必须保持三态字符串（兼容既有断言）')
+  })
+
+  it('fillWithDegrade 对 no-input-box 必须短延迟重试一次再决定（否则误报首问未送达）', () => {
+    const src = readFileSync(new URL('../composables/ai/useAiWindow.ts', import.meta.url), 'utf8')
+    // 判据承重：删掉重试分支 / 改判据字符串 / 去掉第二次调用，本条均应变红
+    assert.ok(/out\.reason === 'no-input-box'/.test(src), '未按 no-input-box 分流')
+    assert.ok(/no-input-retry-v1/.test(src), '重试分支标记缺失')
+    assert.ok(
+      /await sendFillToAsync\(sid, payload, ackTimeout, out\)[\s\S]{0,600}?no-input-retry-v1[\s\S]{0,600}?r = await sendFillToAsync\(sid, payload, ackTimeout, out\)/.test(src),
+      '重试必须真的再调一次 sendFillToAsync（含同一 out 以刷新 reason）',
+    )
+  })
+})
 describe('复用窗口导航后必须重新等就绪（reuse-nav-ready-v1）', () => {
   it('openAiSession 复用分支（win === preWin）也必须 await waitWindowReady', () => {
     const src = readFileSync(new URL('../composables/ai/useAiWindow.ts', import.meta.url), 'utf8')

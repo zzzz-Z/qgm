@@ -311,6 +311,38 @@
   background: transparent;
 }
 
+/* [multi-site-switch-v1] 顶部站点切换 select：样式对齐 .transport-select，与传输链路控件同高、同底色 */
+.site-select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 26px;
+  padding: 0 22px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  outline: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 10px 10px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.site-select:hover {
+  color: var(--text);
+  border-color: var(--border-2);
+}
+.site-select:focus {
+  border-color: var(--primary);
+}
+.site-select option {
+  background: var(--surface);
+  color: var(--text);
+}
+
 .theme-toggle {
   cursor: pointer;
 }
