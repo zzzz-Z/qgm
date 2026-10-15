@@ -182,7 +182,21 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       //   （reply-handlers.ts:175 的注释自陈）。收敛后留存路径必须承接，否则等于减配。
       // [CONSTRAINT] hook 是 fail-open（runHook 网络失败返回 ok，见 loop-hooks.ts）；
       //   reject 仅告警不阻断 —— 非循环路径没有「循环可续」，AI 已声明 DONE，阻断只会让用户卡住。
-      void runHook('BeforeDoneFinal', { loopId: '', round: 0, startCommit: '', reason: 'retained-path' })
+      const doneText = String(payload.text || '')
+      // [reply-mark-v1] DONE 不再限定首行（倒装写法也合法）→ 按标记**行号**剥掉它，
+      //   而不是只剥行首前缀：否则「先总结后 DONE」时该行会原样留在总结卡里
+      const doneScan = scanReplyMarks(doneText)
+      const summary = (doneScan.done > 0
+        ? doneText.split(/\r?\n/).filter((_, i) => i !== doneScan.done - 1).join('\n')
+        : doneText).trim()
+      const firstLine = summary.split(/\r?\n/).find(l => l.trim().length > 0) || ''
+      const looksLikeScript = /^#!\s*\//.test(firstLine.trim())
+        || /^\s*(?:\/\/|#)\s*@(?:desc|why)\b/.test(firstLine)
+      const cleanSummary = summary && !looksLikeScript ? summary : ''
+      // [post-done-gate-v1] 把 DONE 摘要传给 hook，供 post-done.cjs 生成有意义的 commit msg。
+      //   取前 5 个非空行、截断 200 字符——commit subject 不宜过长。
+      const doneSummary = cleanSummary.split(/\r?\n/).filter(l => l.trim()).slice(0, 5).join(' / ').slice(0, 200)
+      void runHook('BeforeDoneFinal', { loopId: '', round: 0, startCommit: '', reason: 'retained-path', doneSummary })
         .then((gate) => {
           if (gate.action === 'reject') toast(`自检未通过：${gate.reason || 'hook rejected'}`, 'warn', TOAST_LONG)
         })
@@ -196,17 +210,6 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
           body: JSON.stringify({ mode: 'set', sid: doneSid, todo: [], done: [], clear: 'finish' }),
         }).catch(() => { /* fire-and-forget：失败不阻断 DONE 收尾 */ })
       }
-      const doneText = String(payload.text || '')
-      // [reply-mark-v1] DONE 不再限定首行（倒装写法也合法）→ 按标记**行号**剥掉它，
-      //   而不是只剥行首前缀：否则「先总结后 DONE」时该行会原样留在总结卡里
-      const doneScan = scanReplyMarks(doneText)
-      const summary = (doneScan.done > 0
-        ? doneText.split(/\r?\n/).filter((_, i) => i !== doneScan.done - 1).join('\n')
-        : doneText).trim()
-      const firstLine = summary.split(/\r?\n/).find(l => l.trim().length > 0) || ''
-      const looksLikeScript = /^#!\s*\//.test(firstLine.trim())
-        || /^\s*(?:\/\/|#)\s*@(?:desc|why)\b/.test(firstLine)
-      const cleanSummary = summary && !looksLikeScript ? summary : ''
       try {
         emitBus('ai:done', '任务完成 · 总结', { payload: { kind: 'done', text: cleanSummary } })
       } catch (err) { log.error('[done-emit] failed:', err) }

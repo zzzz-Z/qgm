@@ -10,6 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   discoverTargets,
+  isReservedPort,
   parseEnvPorts,
   parsePackagePort,
   probePort,
@@ -85,4 +86,12 @@ test('computeSmokeReportCompliance: DONE 未引用 app 目标 → 判为漏验(m
 test('computeSmokeReportCompliance: 无 app 目标 → 返回 null（不误伤）', () => {
   const targets = [{ tag: 'host', url: 'http://localhost:5175', source: 'host' as const }]
   assert.equal(computeSmokeReportCompliance('页面冒烟 ✓ /__ai/', targets), null)
+})
+
+// [macos-airplay-5000-v1] 承重判据：isReservedPort 必须识别系统保留端口，否则 macOS
+//   AirPlay(ControlCe) 会被误报为 [app:port-5000]（本仓滚动多轮的假目标）。
+test('isReservedPort 识别 macOS AirPlay 占用的 5000', () => {
+  assert.equal(isReservedPort(5000), true, '5000 应被列为系统保留端口')
+  assert.equal(isReservedPort(8091), false, '普通 dev 端口不应被误列')
+  assert.equal(isReservedPort(5175), false, '宿主端口由 isHostPort 管，不在保留集')
 })

@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
-import { beforeAll, beforeEach, expect, test } from 'vitest'
+import { beforeAll, beforeEach, expect, test, vi } from 'vitest'
 
 const ROOT = process.cwd()
 const LIST_REL = 'packages/client/components/panels/AiWindowList.vue'
@@ -43,6 +43,9 @@ function mountList() {
 
 beforeEach(() => {
   localStorage.clear()
+  // [multi-site-matrix-v1] 面板 onMounted 会 fetch /__ai/workspace/session 与 /workspace/registry；
+  //   happy-dom 无服务端 → ECONNREFUSED 噪音淹没真实失败。stub 为空响应即可（断言不依赖数据）。
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503, json: async () => ({}) })))
 })
 
 test('默认折叠：无任何存储时挂载即带 is-collapsed，且存储里不出现 expanded 键', () => {

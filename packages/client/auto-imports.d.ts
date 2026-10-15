@@ -457,6 +457,7 @@ declare global {
   const useSessionManager: typeof import('./composables/ai/useSessionManager').useSessionManager
   const useSessionStorage: typeof import('@vueuse/core').useSessionStorage
   const useShare: typeof import('@vueuse/core').useShare
+  const useSiteMatrix: typeof import('./composables/ai/useSiteMatrix').useSiteMatrix
   const useSlots: typeof import('vue').useSlots
   const useSorted: typeof import('@vueuse/core').useSorted
   const useSpeechRecognition: typeof import('@vueuse/core').useSpeechRecognition
@@ -560,6 +561,9 @@ declare global {
   // @ts-ignore
   export type { Message } from './composables/ai/useSessionManager'
   import('./composables/ai/useSessionManager')
+  // @ts-ignore
+  export type { WorkspaceMatrixItem } from './composables/ai/useSiteMatrix'
+  import('./composables/ai/useSiteMatrix')
   // @ts-ignore
   export type { WorkspaceItem } from './composables/data/useWorkspaces'
   import('./composables/data/useWorkspaces')
@@ -1073,6 +1077,7 @@ declare module 'vue' {
     readonly useSessionManager: UnwrapRef<typeof import('./composables/ai/useSessionManager')['useSessionManager']>
     readonly useSessionStorage: UnwrapRef<typeof import('@vueuse/core')['useSessionStorage']>
     readonly useShare: UnwrapRef<typeof import('@vueuse/core')['useShare']>
+    readonly useSiteMatrix: UnwrapRef<typeof import('./composables/ai/useSiteMatrix')['useSiteMatrix']>
     readonly useSlots: UnwrapRef<typeof import('vue')['useSlots']>
     readonly useSorted: UnwrapRef<typeof import('@vueuse/core')['useSorted']>
     readonly useSpeechRecognition: UnwrapRef<typeof import('@vueuse/core')['useSpeechRecognition']>

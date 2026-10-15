@@ -60,6 +60,19 @@ export function isHostPort(p: number): boolean {
 }
 
 /**
+ * [macos-airplay-5000-v1] 系统保留端口：虽在 COMMON_DEV_PORTS 中，但被 OS 服务常驻占用。
+ * [WHY] macOS 的 AirPlay Receiver（ControlCenter）默认监听 5000，探测到它会把
+ *   「系统服务」误报为 [app:port-5000]（冒烟持续 403，本仓滚动多轮未决）。
+ * [CONSTRAINT] 从探测候选剔除，但不从 COMMON_DEV_PORTS 删除——用户可能真在 5000 跑 Flask
+ *   （那时会经配置标注 app:<project> 或 APP_DEV_URL 显式纳入）。
+ */
+const SYSTEM_RESERVED_PORTS = new Set<number>([5000])
+
+export function isReservedPort(p: number): boolean {
+  return SYSTEM_RESERVED_PORTS.has(p)
+}
+
+/**
  * 探测单端口是否可连接（TCP 层，不等 HTTP）。
  * @param port 端口
  * @param timeoutMs 超时，默认 200ms
@@ -187,7 +200,7 @@ export async function discoverTargets(opts: DiscoverOpts = {}): Promise<VerifyTa
     // ④ 端口探测：常用端口 ∪ 配置端口，排除宿主区间
     const candidates = new Set<number>(COMMON_DEV_PORTS)
     for (const p of configMap.keys()) candidates.add(p)
-    const toProbe = [...candidates].filter(p => !isHostPort(p))
+    const toProbe = [...candidates].filter(p => !isHostPort(p) && !isReservedPort(p))
     let open: number[] = []
     try { open = await probePorts(toProbe) } catch { /* skip */ }
     for (const port of open) {
