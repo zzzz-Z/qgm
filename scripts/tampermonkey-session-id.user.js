@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.7.4
+// @version      1.7.8
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -682,12 +682,58 @@
   // WHY: 千问等站点流式输出（打字机），350ms 防抖间隙内脚本只出了一半；partial 的 hash 每次都变 → seenHashes 失效，连发多条残缺脚本
   // CONSTRAINT: 以「停止生成」按钮可见且可用为"仍在生成"信号；生成结束后按钮消失 → DOM 变化再触发 classifyAndPost，此时取到完整内容
   // CHANGE-IMPACT: script/plain 延迟到生成结束；DONE 整行匹配不受影响（流式中不会误出 DONE 首行）
+  // [stop-btn-widen-v1] 与 findSendButton 同构：把查询范围从 'button' 扩到
+  //   'button, div[role="button"]'，并纳入 data-testid。原实现只查 button，
+  //   若站点把「停止生成」渲染成 div[role=button] 则必然 miss ⇒ clickStopGenerating
+  //   的 Esc 兜底又未必被站点响应 ⇒ 用户实测「AI 端暂停没起作用」。
+  // [stop-btn-widen-v2] 无真实 DOM 时的最宽匹配：
+  //   范围扩到 button / div|span|a[role] / [role=switch|menuitem]（站点渲染成哪种都覆盖）；
+  //   属性加 class / data-state；正则补 cancel|abort|interrupt|halt|终止|取消|暂停。
+  //   误伤风险：class 含 stop 的普通容器可能被选中——故保留「必须可点击（非 disabled）」这一层。
+  const STOP_LABEL_RE = /停止生成|停止回答|停止输出|终止|取消生成|停止|中断|暂停生成|stop\s*generat|stop\s*stream|stop\s*response|stop\s*answer|stop\s*cancel|\bcancel\b|\babort\b|\binterrupt\b|\bhalt\b/i
+  function collectStopCandidates() {
+    const sel = 'button, div[role], span[role], a[role], [role="switch"], [role="menuitem"]'
+    const out = []
+    for (const el of document.querySelectorAll(sel)) {
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue
+      const lbl = [
+        el.getAttribute('aria-label'),
+        el.getAttribute('title'),
+        el.getAttribute('data-testid'),
+        el.getAttribute('data-state'),
+        el.getAttribute('class'),
+        el.textContent,
+      ].filter(Boolean).join(' ')
+      if (STOP_LABEL_RE.test(lbl)) out.push(el)
+    }
+    return out
+  }
+  // [stop-btn-deepseek-fallback-v1] DeepSeek 的「停止/发送」按钮实测无 aria-label/title/data-testid/textContent，
+  //   仅 <div role="button" class="ds-button ds-button--primary ds-button--filled ds-button--circle ..."> 可识别。
+  //   STOP_LABEL_RE 的文本匹配对它恒 miss ⇒ 必须补结构化兜底。
+  //   [WHY] 发送态与停止态共用同一元素（生成中即停止按钮），故「输入区内的圆形主按钮」此刻必然是停止按钮。
+  //   [CHANGE-IMPACT] 仅当标签匹配全 miss 时启用；对千问等已有 aria-label 的站点零影响。
+  function findStopGeneratingBtnStructural() {
+    const input = findInputBox()
+    if (!input) return null
+    let root = input.closest('form')
+    if (!root) {
+      let p = input.parentElement
+      for (let i = 0; i < 8 && p; i++) {
+        if (p.querySelector('[role="button"].ds-button--circle, button.ds-button--circle')) { root = p; break }
+        p = p.parentElement
+      }
+    }
+    const scope = root || document
+    const cand = scope.querySelectorAll('[role="button"].ds-button--circle, button.ds-button--circle')
+    for (const el of cand) {
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue
+      return el
+    }
+    return null
+  }
   function findStopGeneratingBtn() {
-    const all = Array.from(document.querySelectorAll('button'))
-    return all.find((b) => {
-      const lbl = `${b.getAttribute('aria-label') || ''} ${b.textContent || ''} ${b.getAttribute('title') || ''}`
-      return /停止生成|停止回答|停止输出|stop\s*generat|stop\s*stream|stop\s*response|stop\s*answer/i.test(lbl)
-    }) || null
+    return collectStopCandidates()[0] || null
   }
   function isGenerating() {
     const btn = findStopGeneratingBtn()
@@ -948,7 +994,9 @@
   // [CHANGE-IMPACT] 返回值语义不变（true=按钮命中）；stop 分支据此打日志
   function clickStopGenerating() {
     try {
-      const btn = findStopGeneratingBtn()
+      // [stop-btn-deepseek-fallback-v1] 仅在真正需要「停止」时才用结构化兜底：
+      //   此刻输入区的圆形主按钮必然是停止键（发送键已让位），不会误伤 generating-gate。
+      const btn = findStopGeneratingBtn() || findStopGeneratingBtnStructural()
       if (btn && !btn.disabled) {
         btn.click()
         return true
@@ -1187,27 +1235,35 @@
 
   // [send-ack-after-verify-v1] onResult 在复核完成后回调，取代原先 doSend 一返回就 ack：
   //   原实现 ackFill(true) 比 doSend 本身还早 300ms ⇒ 填字失败/按钮 miss/被频控都会回 ok:true
-  function doSend(box, onResult) {
-    const btn = findSendButton(box)
-    if (btn) {
-      try { btn.click() } catch (e) { sendEnter(box) }
-    } else {
-      sendEnter(box)
-    }
+  // [send-wait-upload-v1] opts.waitMs：验证窗口（默认 800ms，覆盖原 400+400 两次判定）。
+  // [WHY] 带图发送时站点会把发送按钮置 disabled 直到上传完成，输入框文本在此期间不消失；
+  //   旧的固定 400ms 窗口必然判 send-verify-failed，客户端把它当「发送失败」弹错
+  //   （用户报告：图片太大时网页还在解析，油猴发送失败）。
+  // [CONSTRAINT] 窗口内每 500ms 重试一次点击/Enter（按钮可能刚恢复可用）；文本消失即视为成功。
+  function doSend(box, onResult, opts) {
+    const waitMs = Math.max(0, Number((opts || {}).waitMs) || 0) || 800
     const done = (ok, reason) => { if (typeof onResult === 'function') onResult(ok, reason) }
-    setTimeout(() => {
-      const stillHas = (box.textContent || box.value || '').trim().length > 0
-      if (stillHas) {
-        console.warn('[ai-runner] 发送可能失败，补一次 Enter')
-        sendEnter(box)
-        setTimeout(() => {
-          const stillHas2 = (box.textContent || box.value || '').trim().length > 0
-          done(!stillHas2, stillHas2 ? 'send-verify-failed' : '')
-        }, 400)
-      } else {
-        done(true, '')
+    const tryClick = () => {
+      const btn = findSendButton(box)
+      if (btn) { try { btn.click() } catch (e) { sendEnter(box) } }
+      else { sendEnter(box)
       }
-    }, 400)
+    }
+    tryClick()
+    const started = Date.now()
+    const check = () => {
+      const stillHas = (box.textContent || box.value || '').trim().length > 0
+      if (!stillHas) { done(true, ''); return }
+      if (Date.now() - started >= waitMs) {
+        console.warn('[ai-runner] 发送可能失败（等待超时）')
+        done(false, 'send-verify-failed')
+        return
+      }
+      console.warn('[ai-runner] 文本仍在，重试发送')
+      tryClick()
+      setTimeout(check, 500)
+    }
+    setTimeout(check, 400)
   }
 
   window.addEventListener('message', (e) => {
@@ -1241,7 +1297,9 @@
       if (imgs.length) pasteImages(box, imgs)
       fillInput(box, prompt)
       // [send-ack-after-verify-v1] 复核完成后再 ack：工作台 sendFillToAsync 据此判定「已注入」
-      setTimeout(() => { doSend(box, (ok, reason) => ackFill(ok, reason, d.ackId)) }, 300)
+      // [send-wait-upload-v1] 带图时给上传留 60s 窗口：站点按钮在上传完成前是 disabled 的，
+      //   短窗口会把「正在上传」误判成「发送失败」（用户报告）。
+      setTimeout(() => { doSend(box, (ok, reason) => ackFill(ok, reason, d.ackId), imgs.length ? { waitMs: 60000 } : undefined) }, 300)
       // [url-updated] 发送后轮询 URL 变化并回传（最多 8s）
       let urlTries = 0
       const urlPoll = setInterval(() => {
@@ -1343,6 +1401,21 @@
       return
     }
     if (d.type === 'ai-runner:stop') {
+      // [stop-diag-v2] 诊断回传：无真实 DOM 时用它替代盲猜——
+      //   把候选按钮的数量与前 3 个的标签/属性摘要回传工作台。
+      try {
+        const cands = collectStopCandidates()
+        const brief = cands.slice(0, 3).map((el, i) => {
+          const tag = el.tagName.toLowerCase()
+          const al = el.getAttribute('aria-label') || ''
+          const ti = el.getAttribute('title') || ''
+          const cl = String(el.getAttribute('class') || '').slice(0, 40)
+          const tx = String(el.textContent || '').trim().slice(0, 20)
+          return `#${i + 1} <${tag}> aria="${al}" title="${ti}" class="${cl}" text="${tx}"`
+        }).join(' | ')
+        const src = (typeof e !== 'undefined' && e.source) || window.opener
+        if (src) src.postMessage({ type: 'ai-runner:stop-diag', count: cands.length, brief, ver: '1.7.7' }, '*')
+      } catch (err) { console.warn('[ai-runner] stop-diag failed', err) }
       // [stop-v2] 清缓冲 + 保留去重集 + disconnect
       // [WHY] replyObserver 常驻 body；清空 seenHashes/lastBodySig 会让旧回复被重判为新回复 post
       // [CONSTRAINT] 保留 seenHashes / seenDoneMarkers / lastBodySig；下次 fill/rotate 由 resumeReplyObserver 恢复

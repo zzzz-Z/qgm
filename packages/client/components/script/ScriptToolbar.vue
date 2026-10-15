@@ -3,7 +3,7 @@
 defineProps<{
   running: boolean
   autoTakeoverEnabled: boolean
-  // 循环暂停标志：按钮在「暂停 / 恢复」间切换
+  // [pause-really-stops-v1] 按钮文案已改「停止」；此 prop 保留仅为兼容「等待中」视觉
   loopPaused: boolean
   script: string
   attachedFilesCount: number
@@ -39,19 +39,14 @@ const emit = defineEmits<{
       </svg>
     </button>
 
-    <!-- [ctrl-btn-semantic-color-v2] 本按钮是循环的「控制键」，配色按**点击后会发生什么**分三态，
-         不再是一个颜色走天下（旧版运行中/已暂停共用 #f0abfc 粉紫：既说不出语义，
-         亮色主题下对比度只有 1.65:1 ≈ 看不见）：
-           未运行 → .takeover 蓝 --primary  = 「开始」
-           运行中 → .pause    琥珀 --warning = 「按住」
-           已暂停 → .resume   绿   --success = 「继续」
-         两个运行态必须可区分（图标之外多一重颜色通道），守卫见 tests/toolbar-ctrl-colors.node-test.ts -->
+    <!-- [pause-really-stops-v1] 两态：未运行 .takeover 蓝（开始）/ 运行中 .pause 琥珀（停止）。
+          守卫见 tests/toolbar-ctrl-colors.node-test.ts -->
     <button
-      v-if="running || autoTakeoverEnabled"
-      v-tooltip="loopPaused ? '恢复：继续等待 AI 回包' : '暂停：不取 AI 脚本、不接收工作台结果'"
-      :aria-label="loopPaused ? '恢复循环' : '暂停循环'"
-      class="primary-btn head-run"
-      :class="{ 'pause': !loopPaused, 'resume': loopPaused, 'is-waiting': aiWaiting || delivering }"
+      v-if="running || autoTakeoverEnabled || aiWaiting || delivering"
+      v-tooltip="'停止：终止后台脚本 + 暂停 AI 生成'"
+      aria-label="停止运行"
+      class="primary-btn pause head-run"
+      :class="{ 'is-waiting': aiWaiting || delivering }"
       :aria-busy="aiWaiting || delivering"
       @click="emit('pauseAll')"
     >
@@ -59,11 +54,7 @@ const emit = defineEmits<{
         class="ico ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
       >
-        <polygon v-if="loopPaused" points="6 4 20 12 6 20 6 4" />
-        <template v-else>
-          <line x1="9" y1="4" x2="9" y2="20" />
-          <line x1="15" y1="4" x2="15" y2="20" />
-        </template>
+        <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" />
       </svg>
     </button>
     <button
@@ -171,27 +162,15 @@ const emit = defineEmits<{
 }
 .tpl-bar button.primary-btn.pause {
   background: transparent;
-  border: 1px solid var(--warning);
-  color: var(--warning);
+  border: 1px solid var(--danger);
+  color: var(--danger);
   box-shadow: none;
 }
 .tpl-bar button.primary-btn.pause:hover:not(:disabled) {
-  background: var(--warning-bg);
-  border-color: var(--warning);
-  color: var(--warning);
-  box-shadow: 0 0 0 3px var(--warning-bg);
-}
-.tpl-bar button.primary-btn.resume {
-  background: transparent;
-  border: 1px solid var(--success);
-  color: var(--success);
-  box-shadow: none;
-}
-.tpl-bar button.primary-btn.resume:hover:not(:disabled) {
-  background: var(--success-bg);
-  border-color: var(--success);
-  color: var(--success);
-  box-shadow: 0 0 0 3px var(--success-bg);
+  background: var(--danger-bg);
+  border-color: var(--danger);
+  color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-bg);
 }
 .tpl-bar button.primary-btn.is-waiting > svg {
   display: none;
@@ -246,13 +225,12 @@ const emit = defineEmits<{
 .primary-btn.run:hover:not(:disabled) {
   filter: brightness(1.05);
 }
-/* [ctrl-btn-semantic-color-v2] 循环控制键配色的**唯一事实来源** = 上方两条
-   `.tpl-bar button.primary-btn.pause / .resume` + 未运行态的 `.takeover`（--primary 蓝）。
-   三态语义与色相一致：开始=蓝（发起）、暂停=琥珀（按住）、恢复=绿（继续）；
+/* [pause-really-stops-v1] 循环控制键配色的**唯一事实来源** = 上方两条：
+   未运行态 `.takeover`（--primary 蓝 = 开始）/ 运行中 `.pause`（--warning 琥珀 = 停止）。
    全部走语义令牌，亮/暗两套自动生效。
-   历史：旧版这两态共用硬编码 #f0abfc 粉紫（`[stop-btn-color-v1]`），
-   语义上说不通（粉紫既不是"暂停"也不是"恢复"），且亮色主题下对比度仅 1.65:1（白底几乎不可见）
-   —— 已按用户 2026-10-09 要求「结合实际语义修改」拆成两态两色。
+   历史：① 旧版两态共用硬编码 #f0abfc 粉紫（语义不清 + 亮色对比度 1.65:1）；
+   ② 2026-10-14 起「暂停」语义改为「真终止」（kill 脚本 + 停 AI 生成），
+   恢复态不再存在 ⇒ 由三态收敛为两态（删除 `.resume`）。
    [CONSTRAINT] 禁止再引入裸 hex 到这里；新增状态请复用 --primary/--warning/--success/--danger。 */
 .primary-btn .ico {
   font-size: var(--font-10);

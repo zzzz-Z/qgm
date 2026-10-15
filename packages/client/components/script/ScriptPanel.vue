@@ -220,6 +220,8 @@ const {
   scheduleAutoRun,
   run,
   startAiWaiting,
+  aiWaiting,
+  delivering,
   buildPromptWithAttachments,
 })
 
@@ -471,16 +473,6 @@ function onHtmlDrop(e: DragEvent) {
           <ScriptAttachBar :files="attachedFiles" @remove="removeAttach" />
         </template>
       </ScriptEditor>
-
-      <!-- [status-bar-v1] 执行状态条：statusText/statusClass/runningElapsed；耗时已移到每张卡片头部（[card-duration-v1]） -->
-      <div
-        v-if="statusText || runningElapsed"
-        class="status-bar text-11px px-12px py-4px flex gap-8px items-center"
-        :class="statusClass === 'err' ? 'text-red-400' : statusClass === 'ok' ? 'text-green-400' : 'text-[var(--text-3)]'"
-      >
-        <span v-if="statusText">{{ statusText }}</span>
-        <span v-if="runningElapsed" class="font-mono">{{ runningElapsed }}</span>
-      </div>
 
       <div v-if="fileSuccess" class="overlay success">
         <div class="overlay-card success">

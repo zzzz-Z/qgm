@@ -62,7 +62,7 @@ async function pruneOldPreRefs(currentRef: string): Promise<void> {
  *   这样「运行改动了原本干净的文件」也能回滚。
  * [CONSTRAINT] 全程 GIT_INDEX_FILE 隔离；`.` 路径刻意叠加 `:(exclude).ai-runner` ——
  *   `add -A` 只认 .gitignore，若工作区没忽略 `.ai-runner`，运行态（runs / logs，乃至
- *   cloakbrowser.tar.gz 这类大文件）会被卷进快照；排除由路径本身表达，不依赖仓库忽略规则。
+ *   大型二进制这类大文件）会被卷进快照；排除由路径本身表达，不依赖仓库忽略规则。
  *   空仓库退化为空树 + 无父提交。
  * [CHANGE-IMPACT] ref 失败时**不返回 ref** —— 调用方据此回落 `.before` 内容副本（见 saveSnapshot）。
  */

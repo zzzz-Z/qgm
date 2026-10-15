@@ -199,7 +199,11 @@ let _unackedHintShown = false
  * [CONSTRAINT] win=null / origin="" 的 failed 是「明知没有窗口」，不经过本函数降级
  */
 async function fillWithDegrade(sid: string, payload: { prompt: string, images?: string[] }): Promise<'sent' | 'failed'> {
-  const r = await sendFillToAsync(sid, payload)
+  // [send-wait-upload-v1] 带图时把 ack 超时放大到 60s：油猴侧同样给了 60s 上传窗口
+  //   （站点发送按钮在上传完成前 disabled）。若仍按默认 5s 判 unacked，
+  //   大图场景会在真正送达前就走降级分支，弹出「未回执」误导提示。
+  const ackTimeout = payload.images?.length ? 60_000 : undefined
+  const r = await sendFillToAsync(sid, payload, ackTimeout)
   if (r !== 'unacked') return r
   log.warn('[copyAndFill] fill 未收到回执（该页可能未运行油猴脚本 / 油猴为旧版），降级按已发送处理 sid=', sid)
   if (!_unackedHintShown) {

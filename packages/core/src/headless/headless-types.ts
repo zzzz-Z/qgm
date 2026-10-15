@@ -3,6 +3,7 @@
 // [CHANGE-IMPACT] ai-headless.ts 通过 re-export 保持对外 API 兼容。
 
 import type { TransportState } from '../server/protocol.js'
+import type { SiteAdapter } from './site-adapters/types.js'
 
 /** 无头浏览器会话：持有浏览器实例、上下文、页面及生命周期钩子 */
 export interface HeadlessSession {
@@ -17,7 +18,7 @@ export interface HeadlessSession {
 
 /** 无头浏览器启动配置：目标地址、超时、池大小、请求抖动等 */
 export interface HeadlessOptions {
-  engine?: 'playwright' | 'cloak'
+  engine?: 'playwright'
   userDataDir?: string
   defaultUrl?: string
   headless?: boolean
@@ -28,6 +29,8 @@ export interface HeadlessOptions {
   geoip?: boolean
   jitterMin?: number
   jitterMax?: number
+  // [site-adapter-v1] 站点适配器；留空时用 getDefaultAdapter()（deepseek 或 AI_SITE_ADAPTER 覆盖）
+  adapter?: SiteAdapter
 }
 
 /** 无头会话的单次回复：AI 文本、时间戳、是否已结束 */

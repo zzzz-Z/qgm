@@ -1,0 +1,628 @@
+/Users/apple/web-ai-qgm
+├── apps/
+│   ├── standalone/
+│   │   ├── bin/
+│   │   │   └── air-server.cjs
+│   │   ├── scripts/
+│   │   │   └── build.mjs
+│   │   ├── src/
+│   │   │   └── server.ts
+│   │   ├── package.json
+│   │   ├── README.md
+│   │   ├── tsconfig.json
+│   │   └── vite.config.ts
+│   └── vite-plugin/
+│       ├── src/
+│       │   ├── index.ts
+│       │   └── plugin.ts
+│       ├── package.json
+│       ├── README.md
+│       ├── tsconfig.json
+│       └── vite.config.ts
+├── assets/
+├── bin/
+│   ├── _logger-shim.cjs
+│   ├── check-regression.cjs
+│   ├── check-status.cjs
+│   ├── compliance-report.cjs
+│   ├── gen-notes.cjs
+│   ├── headless-cli.cjs
+│   ├── lessons-add.cjs
+│   ├── log-signal.cjs
+│   ├── recover.cjs
+│   ├── run-all.cjs
+│   └── selfcheck.cjs
+├── docs/
+│   ├── plan/
+│   │   └── plan-multi-workspace-2026-10-11.md
+│   ├── DESIGN.md
+│   ├── DOCS-INDEX.md
+│   └── USAGE.md
+├── packages/
+│   ├── client/
+│   │   ├── components/
+│   │   │   ├── diff/
+│   │   │   │   ├── DiffOverlay.vue
+│   │   │   │   ├── DiffViewer.vue
+│   │   │   │   └── FileContentOverlay.vue
+│   │   │   ├── feedback/
+│   │   │   │   ├── KeyboardHelp.vue
+│   │   │   │   ├── ToastHost.vue
+│   │   │   │   └── TooltipHost.vue
+│   │   │   ├── panels/
+│   │   │   │   ├── AiWindowList.vue
+│   │   │   │   ├── drag-controller.ts
+│   │   │   │   ├── file-tree-icons.ts
+│   │   │   │   ├── file-tree.scss
+│   │   │   │   ├── FileList.vue
+│   │   │   │   ├── FileTree.vue
+│   │   │   │   ├── KnowledgePanel.vue
+│   │   │   │   ├── SidePane.vue
+│   │   │   │   ├── TerminalPanel.vue
+│   │   │   │   ├── use-tree-expand.ts
+│   │   │   │   ├── VideoGenerationPanel.vue
+│   │   │   │   ├── worklog-commit.ts
+│   │   │   │   ├── worklog-git-actions.ts
+│   │   │   │   ├── worklog-pane.scss
+│   │   │   │   ├── worklog-svn.ts
+│   │   │   │   ├── WorklogPane.vue
+│   │   │   │   └── WorkspaceGuide.vue
+│   │   │   └── script/
+│   │   │       ├── attach-manager.ts
+│   │   │       ├── cmd-history.ts
+│   │   │       ├── exec-flow.ts
+│   │   │       ├── file-picker.ts
+│   │   │       ├── FoldToggle.vue
+│   │   │       ├── preview-manager.ts
+│   │   │       ├── prompt-builder.ts
+│   │   │       ├── RoundCard.vue
+│   │   │       ├── RoundDivider.vue
+│   │   │       ├── script-editor.scss
+│   │   │       ├── script-panel-actions.ts
+│   │   │       ├── script-panel-utils.ts
+│   │   │       ├── script-panel.scss
+│   │   │       ├── ScriptAttachBar.vue
+│   │   │       ├── ScriptCard.vue
+│   │   │       ├── ScriptEditor.vue
+│   │   │       ├── ScriptPanel.vue
+│   │   │       ├── ScriptToolbar.vue
+│   │   │       ├── side-resize.ts
+│   │   │       ├── TaskProgressPanel.vue
+│   │   │       ├── terminal-pane.scss
+│   │   │       ├── TerminalPane.vue
+│   │   │       └── tree-attach.ts
+│   │   ├── composables/
+│   │   │   ├── ai/
+│   │   │   │   ├── board-mirror.ts
+│   │   │   │   ├── first-prompt.ts
+│   │   │   │   ├── load-lessons.ts
+│   │   │   │   ├── load-rules.ts
+│   │   │   │   ├── loop-hooks.ts
+│   │   │   │   ├── send-trace.ts
+│   │   │   │   ├── skill-registry.ts
+│   │   │   │   ├── useAiReplyHandlers.ts
+│   │   │   │   ├── useAiSite.ts
+│   │   │   │   ├── useAiTransport.ts
+│   │   │   │   ├── useAiWaiting.ts
+│   │   │   │   ├── useAiWindow.ts
+│   │   │   │   ├── useAiWindowSend.ts
+│   │   │   │   ├── useAiWindowTable.ts
+│   │   │   │   ├── useAutoTakeover.ts
+│   │   │   │   ├── useRuntime.ts
+│   │   │   │   └── useSessionManager.ts
+│   │   │   ├── data/
+│   │   │   │   ├── useFileTree.ts
+│   │   │   │   └── useWorkspaces.ts
+│   │   │   ├── runner/
+│   │   │   │   ├── feedback-merge.ts
+│   │   │   │   ├── inbox-parse.ts
+│   │   │   │   ├── useCodeCleaner.ts
+│   │   │   │   ├── useRunFeedback.ts
+│   │   │   │   ├── useRunner.ts
+│   │   │   │   └── useScriptInbox.ts
+│   │   │   ├── ui/
+│   │   │   │   ├── drag-bus.ts
+│   │   │   │   ├── event-stream.ts
+│   │   │   │   ├── render-probe.ts
+│   │   │   │   ├── useAiWindowListCollapse.ts
+│   │   │   │   ├── useAppStartup.ts
+│   │   │   │   ├── useAppStorage.ts
+│   │   │   │   ├── useAsk.ts
+│   │   │   │   ├── useEventStream.ts
+│   │   │   │   ├── useFoldState.ts
+│   │   │   │   ├── useSidePaneTab.ts
+│   │   │   │   ├── useSitesStore.ts
+│   │   │   │   ├── useToast.ts
+│   │   │   │   ├── useTooltip.ts
+│   │   │   │   └── useUserscriptUpdate.ts
+│   │   │   ├── useFileContentHtml.ts
+│   │   │   ├── useHljs.ts
+│   │   │   └── useMarkdown.ts
+│   │   ├── e2e/
+│   │   │   ├── playwright-report/
+│   │   │   │   └── index.html
+│   │   │   ├── visual.spec.ts-snapshots/
+│   │   │   │   ├── 01-home-dark-chromium.png
+│   │   │   │   ├── 01-home-light-chromium.png
+│   │   │   │   ├── 02-changes-dark-chromium.png
+│   │   │   │   ├── 02-changes-light-chromium.png
+│   │   │   │   ├── 03-worklog-dark-chromium.png
+│   │   │   │   ├── 03-worklog-light-chromium.png
+│   │   │   │   ├── 04-editor-dark-chromium.png
+│   │   │   │   ├── 04-editor-light-chromium.png
+│   │   │   │   ├── 05-collapsed-dark-chromium.png
+│   │   │   │   ├── 05-collapsed-light-chromium.png
+│   │   │   │   ├── 06-script-dark-chromium.png
+│   │   │   │   └── 06-script-light-chromium.png
+│   │   │   ├── ai-runner.spec.ts
+│   │   │   ├── baseline-diff.spec.ts
+│   │   │   ├── fail-feedback-probe.spec.ts
+│   │   │   ├── headless-ws.spec.ts
+│   │   │   ├── noise-probe.spec.ts
+│   │   │   ├── render-probe.spec.ts
+│   │   │   ├── reply-link-probe.spec.ts
+│   │   │   ├── retained-path-probe.spec.ts
+│   │   │   ├── strip-script-blocks.spec.ts
+│   │   │   └── visual.spec.ts
+│   │   ├── styles/
+│   │   │   └── md-table.scss
+│   │   ├── test-results/
+│   │   ├── tests/
+│   │   │   ├── ai-win-open-reuse.node-test.ts
+│   │   │   ├── ai-window-sid-wiring.node-test.ts
+│   │   │   ├── aiwin-collapse.node-test.ts
+│   │   │   ├── ansi-render.node-test.ts
+│   │   │   ├── ask-card-wiring.node-test.ts
+│   │   │   ├── ask-parser.node-test.ts
+│   │   │   ├── ask-reply-no-rules.node-test.ts
+│   │   │   ├── auto-loop-hooks.node-test.ts
+│   │   │   ├── board-mirror.node-test.ts
+│   │   │   ├── budgetNotice.node-test.ts
+│   │   │   ├── codeCleaner.node-test.ts
+│   │   │   ├── component-binding-guard.node-test.ts
+│   │   │   ├── contextErrorLocations.node-test.ts
+│   │   │   ├── directive-tooltip.node-test.ts
+│   │   │   ├── feedback-merge.node-test.ts
+│   │   │   ├── firstPromptLessons.node-test.ts
+│   │   │   ├── format.node-test.ts
+│   │   │   ├── hash.node-test.ts
+│   │   │   ├── kb-sidepane-wiring.node-test.ts
+│   │   │   ├── knowledge-panel.node-test.ts
+│   │   │   ├── limit-notice.node-test.ts
+│   │   │   ├── load-rules-retry.node-test.ts
+│   │   │   ├── loop-feedback-authority.node-test.ts
+│   │   │   ├── loop-single-path.node-test.ts
+│   │   │   ├── markdown-table.node-test.ts
+│   │   │   ├── markdown-xss.node-test.ts
+│   │   │   ├── md-fence-unglue.node-test.ts
+│   │   │   ├── overflow-tip.node-test.ts
+│   │   │   ├── panel-resize-scroll.node-test.ts
+│   │   │   ├── preview-diff-render.node-test.ts
+│   │   │   ├── preview-diff.node-test.ts
+│   │   │   ├── promptBuilder.node-test.ts
+│   │   │   ├── refresh-same-session.node-test.ts
+│   │   │   ├── rescan-no-autorun.node-test.ts
+│   │   │   ├── retained-done-fixture.node-test.ts
+│   │   │   ├── round-changes-runid.node-test.ts
+│   │   │   ├── rules-rollback.node-test.ts
+│   │   │   ├── script-arrival-toast.node-test.ts
+│   │   │   ├── script-card-layout.node-test.ts
+│   │   │   ├── script-card-render.node-test.ts
+│   │   │   ├── script-panel-guards.node-test.ts
+│   │   │   ├── scriptInboxLogic.node-test.ts
+│   │   │   ├── scriptMeta.node-test.ts
+│   │   │   ├── send-fill-ack.node-test.ts
+│   │   │   ├── send-trace.node-test.ts
+│   │   │   ├── sessionManager.node-test.ts
+│   │   │   ├── siteIsolation.node-test.ts
+│   │   │   ├── stdout-lag-attribution.node-test.ts
+│   │   │   ├── stop-notice.node-test.ts
+│   │   │   ├── stopped-no-autorun.node-test.ts
+│   │   │   ├── stopped-plain-noise.node-test.ts
+│   │   │   ├── storage.node-test.ts
+│   │   │   ├── stream.node-test.ts
+│   │   │   ├── strip-script-blocks.node-test.ts
+│   │   │   ├── task-progress-panel.node-test.ts
+│   │   │   ├── timelinePreview.node-test.ts
+│   │   │   ├── toolbar-ctrl-colors.node-test.ts
+│   │   │   ├── truncationFeedback.node-test.ts
+│   │   │   ├── useAiSite.node-test.ts
+│   │   │   ├── useAiTransport-factory.node-test.ts
+│   │   │   ├── useAiTransport.node-test.ts
+│   │   │   ├── useAiWaiting.node-test.ts
+│   │   │   ├── useAutoTakeover.node-test.ts
+│   │   │   ├── useCodeCleaner.node-test.ts
+│   │   │   ├── useEventStream.node-test.ts
+│   │   │   ├── useFileTree.node-test.ts
+│   │   │   ├── useHljs.node-test.ts
+│   │   │   ├── userscriptUpdate.node-test.ts
+│   │   │   ├── useRunFeedback.node-test.ts
+│   │   │   ├── useRunner.node-test.ts
+│   │   │   ├── useRunnerCumulative.node-test.ts
+│   │   │   ├── useScriptInbox.node-test.ts
+│   │   │   ├── useSessionManager.node-test.ts
+│   │   │   ├── useToast.node-test.ts
+│   │   │   ├── useTooltip.node-test.ts
+│   │   │   └── visual-spec-guard.node-test.ts
+│   │   ├── utils/
+│   │   │   ├── ansi-render.ts
+│   │   │   ├── ask-parser.ts
+│   │   │   ├── codeCleaner.ts
+│   │   │   ├── context-error-locations.ts
+│   │   │   ├── contextBuilder.ts
+│   │   │   ├── format.ts
+│   │   │   ├── hash.ts
+│   │   │   ├── id.ts
+│   │   │   ├── limit-notice.ts
+│   │   │   ├── log.ts
+│   │   │   ├── panel-resize-scroll.ts
+│   │   │   ├── reply-mark.ts
+│   │   │   ├── scriptMeta.ts
+│   │   │   ├── stop-notice.ts
+│   │   │   ├── storage.ts
+│   │   │   ├── stream.ts
+│   │   │   ├── strip-script-blocks.ts
+│   │   │   ├── timeline-build.ts
+│   │   │   ├── timeline-preview.ts
+│   │   │   └── toast-durations.ts
+│   │   ├── App.scss
+│   │   ├── App.vue
+│   │   ├── auto-imports.d.ts
+│   │   ├── directive.ts
+│   │   ├── env.d.ts
+│   │   ├── index.html
+│   │   ├── main.ts
+│   │   ├── package.json
+│   │   ├── playwright.config.ts
+│   │   ├── README.md
+│   │   ├── style.css
+│   │   ├── types.ts
+│   │   ├── uno.config.ts
+│   │   └── vite.config.ts
+│   └── core/
+│       ├── scripts/
+│       │   └── copy-runtime.cjs
+│       ├── src/
+│       │   ├── headless/
+│       │   │   ├── ai-headless.ts
+│       │   │   ├── browser-engine.ts
+│       │   │   ├── discover-targets.ts
+│       │   │   ├── headless-constants.ts
+│       │   │   ├── headless-inject-simple.ts
+│       │   │   ├── headless-inject.ts
+│       │   │   ├── headless-scheduler.ts
+│       │   │   ├── headless-slot-queue.ts
+│       │   │   ├── headless-types.ts
+│       │   │   └── smoke.ts
+│       │   ├── helpers/
+│       │   │   ├── browser.cjs
+│       │   │   ├── fs.cjs
+│       │   │   ├── index.cjs
+│       │   │   ├── io.cjs
+│       │   │   ├── lessons.cjs
+│       │   │   ├── lint.cjs
+│       │   │   ├── misc.cjs
+│       │   │   ├── output.cjs
+│       │   │   ├── patch.cjs
+│       │   │   ├── search.cjs
+│       │   │   ├── shell.cjs
+│       │   │   ├── skill.cjs
+│       │   │   ├── state.cjs
+│       │   │   ├── tasks.cjs
+│       │   │   └── util.cjs
+│       │   ├── lessons/
+│       │   │   └── retriever.ts
+│       │   ├── post-run/
+│       │   │   ├── ai-guard.ts
+│       │   │   ├── compliance.ts
+│       │   │   ├── decision.ts
+│       │   │   ├── error-files.ts
+│       │   │   ├── index.ts
+│       │   │   ├── lesson-extract.ts
+│       │   │   ├── lesson-title-similarity.ts
+│       │   │   ├── lint-targets.ts
+│       │   │   ├── lint.ts
+│       │   │   ├── overlay.ts
+│       │   │   ├── run-compliance.ts
+│       │   │   ├── run-script-wrapper.ts
+│       │   │   ├── run-script.ts
+│       │   │   ├── script-check.ts
+│       │   │   ├── script-meta.ts
+│       │   │   ├── shebang.ts
+│       │   │   ├── test-targets.ts
+│       │   │   ├── test.ts
+│       │   │   ├── tool-log.ts
+│       │   │   ├── tsc-targets.ts
+│       │   │   ├── tsc.ts
+│       │   │   ├── types.ts
+│       │   │   └── worklog-markdown.ts
+│       │   ├── process/
+│       │   │   ├── bash-guard.ts
+│       │   │   ├── index.ts
+│       │   │   ├── proc.ts
+│       │   │   ├── repl-proc.ts
+│       │   │   ├── session-manager.ts
+│       │   │   └── timeouts.ts
+│       │   ├── retrieval/
+│       │   │   ├── bm25.ts
+│       │   │   └── docs-retriever.ts
+│       │   ├── routes/
+│       │   │   ├── arrive-log.ts
+│       │   │   ├── control-log.ts
+│       │   │   ├── exec.ts
+│       │   │   ├── files-read.ts
+│       │   │   ├── files.ts
+│       │   │   ├── git.ts
+│       │   │   ├── hooks.ts
+│       │   │   ├── index.ts
+│       │   │   ├── lessons.ts
+│       │   │   ├── logs.ts
+│       │   │   ├── preset.ts
+│       │   │   ├── reject-breaker.ts
+│       │   │   ├── restart.ts
+│       │   │   ├── rollback.ts
+│       │   │   ├── run.ts
+│       │   │   ├── script.ts
+│       │   │   ├── search.ts
+│       │   │   ├── selfcheck.ts
+│       │   │   ├── send-log.ts
+│       │   │   ├── session.ts
+│       │   │   ├── shell-log.ts
+│       │   │   ├── skills.ts
+│       │   │   ├── tasks.ts
+│       │   │   ├── userscript.ts
+│       │   │   ├── vcs.ts
+│       │   │   ├── video.ts
+│       │   │   ├── wiki.ts
+│       │   │   └── workspace.ts
+│       │   ├── selfcheck/
+│       │   │   ├── artifact-probe.ts
+│       │   │   ├── executor.ts
+│       │   │   ├── fullgate.ts
+│       │   │   ├── ledger.ts
+│       │   │   └── regression.ts
+│       │   ├── server/
+│       │   │   ├── attach-ws.ts
+│       │   │   ├── handle.ts
+│       │   │   ├── hono-app.ts
+│       │   │   ├── hono-bridge.ts
+│       │   │   ├── http.ts
+│       │   │   ├── launcher.ts
+│       │   │   ├── page.ts
+│       │   │   ├── protocol.ts
+│       │   │   └── router.ts
+│       │   ├── skills/
+│       │   │   ├── frontmatter.ts
+│       │   │   ├── installer.ts
+│       │   │   ├── registry.ts
+│       │   │   └── retriever.ts
+│       │   ├── state/
+│       │   │   ├── perf.ts
+│       │   │   ├── pipeline.ts
+│       │   │   ├── snapshot.ts
+│       │   │   ├── task-store.ts
+│       │   │   └── timeline.ts
+│       │   ├── utils/
+│       │   │   ├── error-fingerprint.ts
+│       │   │   ├── file-index.ts
+│       │   │   ├── hooks-config.ts
+│       │   │   ├── hooks.ts
+│       │   │   ├── index.ts
+│       │   │   ├── plan-parser.ts
+│       │   │   └── search.ts
+│       │   ├── video/
+│       │   │   ├── providers/
+│       │   │   ├── compositor.ts
+│       │   │   ├── config.ts
+│       │   │   ├── file-task-store.ts
+│       │   │   ├── orchestrator.ts
+│       │   │   ├── subtitle-whisper.ts
+│       │   │   ├── subtitle.ts
+│       │   │   └── types.ts
+│       │   ├── config.ts
+│       │   ├── deps.ts
+│       │   ├── git-runner.ts
+│       │   ├── git-worklog.ts
+│       │   ├── git.ts
+│       │   ├── helpers-io.cjs
+│       │   ├── helpers-shell.cjs
+│       │   ├── helpers.cjs
+│       │   ├── index.ts
+│       │   ├── interceptor.cjs
+│       │   ├── logger.cjs
+│       │   ├── repl-loop.cjs
+│       │   ├── vcs.ts
+│       │   └── workspace-scope.ts
+│       ├── tests/
+│       │   ├── fixtures/
+│       │   │   └── real-skills.ts
+│       │   ├── ai-guard.node-test.ts
+│       │   ├── api-surface-parity.node-test.ts
+│       │   ├── archive-branch-parity.node-test.ts
+│       │   ├── arrive-log.node-test.ts
+│       │   ├── attach-ws-upgrade-guard.node-test.ts
+│       │   ├── bash-whitelist.node-test.ts
+│       │   ├── board-pending.node-test.ts
+│       │   ├── board-reconcile.node-test.ts
+│       │   ├── board-unclosed.node-test.ts
+│       │   ├── control-log.node-test.ts
+│       │   ├── crash-recursion-guard.node-test.ts
+│       │   ├── crossfile-guard.node-test.ts
+│       │   ├── cumulative-baseline.node-test.ts
+│       │   ├── discover-targets.node-test.ts
+│       │   ├── docs-retrieval.node-test.ts
+│       │   ├── error-fingerprint.node-test.ts
+│       │   ├── fill-verify-guard.node-test.ts
+│       │   ├── git-discard.node-test.ts
+│       │   ├── git-porcelain-paths.node-test.ts
+│       │   ├── git-pre-snapshot.node-test.ts
+│       │   ├── git-worklog.node-test.ts
+│       │   ├── hclc-guard.node-test.ts
+│       │   ├── headless-completion-error.node-test.ts
+│       │   ├── helpers-exec-tool-log.node-test.ts
+│       │   ├── helpers-io.node-test.ts
+│       │   ├── helpers-shell-background.node-test.ts
+│       │   ├── helpers-shell-patch.node-test.ts
+│       │   ├── helpers-shell-stream.node-test.ts
+│       │   ├── helpers-tasks-api.node-test.ts
+│       │   ├── host-owned-write-guard.node-test.ts
+│       │   ├── inline-constants-parity.node-test.ts
+│       │   ├── interceptor.node-test.ts
+│       │   ├── lessons-add.node-test.ts
+│       │   ├── lessons-hygiene.node-test.ts
+│       │   ├── lessons-match-endpoint.node-test.ts
+│       │   ├── lessons-retrieval.node-test.ts
+│       │   ├── limit-marker-guard.node-test.ts
+│       │   ├── login-token-guard.node-test.ts
+│       │   ├── memory-budget.node-test.ts
+│       │   ├── module-size-ratchet.node-test.ts
+│       │   ├── multi-script-blocks.node-test.ts
+│       │   ├── non-git-fallback.node-test.ts
+│       │   ├── overlay-flush-and-lang-check.node-test.ts
+│       │   ├── patch-file-changelog.node-test.ts
+│       │   ├── perf.node-test.ts
+│       │   ├── pipeline.node-test.ts
+│       │   ├── port-drift-guard.node-test.ts
+│       │   ├── post-run-compliance.node-test.ts
+│       │   ├── post-run-decision.node-test.ts
+│       │   ├── post-run-error-files.node-test.ts
+│       │   ├── post-run-lesson-extract.node-test.ts
+│       │   ├── post-run-lint-targets.node-test.ts
+│       │   ├── post-run-overlay.node-test.ts
+│       │   ├── post-run-run-script-wrapper.node-test.ts
+│       │   ├── post-run-script-check.node-test.ts
+│       │   ├── post-run-script-meta.node-test.ts
+│       │   ├── post-run-shebang.node-test.ts
+│       │   ├── post-run-test-targets.node-test.ts
+│       │   ├── post-run-tool-log.node-test.ts
+│       │   ├── post-run-tsc-targets.node-test.ts
+│       │   ├── proc-resource-limit.node-test.ts
+│       │   ├── proc.node-test.ts
+│       │   ├── process-bash-guard.node-test.ts
+│       │   ├── process-proc-detect.node-test.ts
+│       │   ├── rate-marker-guard.node-test.ts
+│       │   ├── real-selfcheck-observe.node-test.ts
+│       │   ├── reject-breaker.node-test.ts
+│       │   ├── repl-loop-frame.node-test.ts
+│       │   ├── repl-loop.node-test.ts
+│       │   ├── repl-proc-onexit.node-test.ts
+│       │   ├── repl-proc.node-test.ts
+│       │   ├── reply-mark-parity.node-test.ts
+│       │   ├── reply-poll-stop.node-test.ts
+│       │   ├── round-changes.node-test.ts
+│       │   ├── routes-lessons.node-test.ts
+│       │   ├── routes-run-helpers.node-test.ts
+│       │   ├── rundir-traversal-guard.node-test.ts
+│       │   ├── runtime-cjs-copy.node-test.ts
+│       │   ├── script-closure-gate.node-test.ts
+│       │   ├── script-fence-gate.node-test.ts
+│       │   ├── selfcheck-executor.node-test.ts
+│       │   ├── selfcheck-l2.node-test.ts
+│       │   ├── selfcheck-shell-collect.node-test.ts
+│       │   ├── send-log.node-test.ts
+│       │   ├── server-bootstrap-guard.node-test.ts
+│       │   ├── session-manager-apply-overlay.node-test.ts
+│       │   ├── session-manager-degraded.node-test.ts
+│       │   ├── session-manager-idle-reclaim.node-test.ts
+│       │   ├── session-manager-sandbox.node-test.ts
+│       │   ├── signal-ladder.node-test.ts
+│       │   ├── skills-body-budget.node-test.ts
+│       │   ├── skills-frontmatter.node-test.ts
+│       │   ├── skills-install-local-first.node-test.ts
+│       │   ├── skills-recall-probe.node-test.ts
+│       │   ├── skills-registry.node-test.ts
+│       │   ├── skills-retriever-real.node-test.ts
+│       │   ├── skills-retriever.node-test.ts
+│       │   ├── ssot-boundary-guard.node-test.ts
+│       │   ├── state-snapshot.node-test.ts
+│       │   ├── static-stream-guard.node-test.ts
+│       │   ├── stopped-baseline-guard.node-test.ts
+│       │   ├── system-contract.node-test.ts
+│       │   ├── task-board-shape-parity.node-test.ts
+│       │   ├── task-store-items.node-test.ts
+│       │   ├── task-store-mutation.node-test.ts
+│       │   ├── timeline.node-test.ts
+│       │   ├── url-parse-guard.node-test.ts
+│       │   ├── userscript-idle-wake.node-test.ts
+│       │   ├── userscript-info.node-test.ts
+│       │   ├── utils-error-fingerprint.node-test.ts
+│       │   ├── utils-file-index.node-test.ts
+│       │   ├── utils-hooks-config.node-test.ts
+│       │   ├── utils-plan-parser.node-test.ts
+│       │   ├── vcs-svn-log.node-test.ts
+│       │   ├── wiki-proxy.node-test.ts
+│       │   ├── workspace-guard.node-test.ts
+│       │   └── workspace-registry.node-test.ts
+│       ├── package.json
+│       ├── README.md
+│       └── SYSTEM.md
+├── scripts/
+│   ├── lib/
+│   │   └── docs-scan.cjs
+│   ├── analyze-confidence.cjs
+│   ├── analyze-trust-evolution.cjs
+│   ├── anchors.json
+│   ├── artifact-freshness.cjs
+│   ├── board-hit-rate.cjs
+│   ├── board-m3.cjs
+│   ├── board-pending.cjs
+│   ├── board-unclosed.cjs
+│   ├── build-all.mjs
+│   ├── clean-ai-runner.mjs
+│   ├── copy-runtime.cjs
+│   ├── dev-all.mjs
+│   ├── dev-server.mjs
+│   ├── docker-deploy.mjs
+│   ├── fetch-ffmpeg.mjs
+│   ├── git-archive.mjs
+│   ├── handoff-gen.cjs
+│   ├── lessons-add-core.cjs
+│   ├── lessons-parse.cjs
+│   ├── lessons-status.cjs
+│   ├── screenshot-baseline.cjs
+│   ├── serve-userscript.mjs
+│   ├── session-start.cjs
+│   ├── sync-client-dist.mjs
+│   ├── tampermonkey-session-id.user.js
+│   ├── verify-anchors.cjs
+│   ├── verify-contracts.cjs
+│   ├── verify-crossfile.cjs
+│   └── verify-docs-index.cjs
+├── skills/
+│   ├── pm-agent/
+│   │   ├── references/
+│   │   │   ├── phases.md
+│   │   │   └── templates.md
+│   │   └── SKILL.md
+│   └── qa-agent/
+│       ├── references/
+│       │   ├── phases.md
+│       │   └── templates.md
+│       └── SKILL.md
+├── tmp/
+│   ├── mutate-taskboard.mjs
+│   ├── probe-idle-reclaim.mjs
+│   ├── probe-overlay-reclaim.mjs
+│   ├── probe-s6-verify.mjs
+│   ├── probe-touch.mjs
+│   ├── probe-ws-headless-list.mjs
+│   └── repair-lessons-titles.mjs
+├── AGENTS.md
+├── compose.yaml
+├── docker-entrypoint.sh
+├── Dockerfile
+├── ecosystem.config.cjs
+├── eslint.config.ts
+├── package.json
+├── pm-agent-usage-guide.md
+├── pnpm-lock.yaml
+├── pnpm-workspace.yaml
+├── qa-agent-generate.cjs
+├── qa-agent-usage-guide.md
+├── README.md
+├── tsconfig.apps.json
+├── tsconfig.client.json
+├── tsconfig.json
+├── tsconfig.test.json
+├── vitest.config.ts
+└── vitest.setup.ts

@@ -250,12 +250,16 @@ export function pushTerminalNotice(text: string, _opts?: { divider?: boolean }):
  * [CHANGE-IMPACT] 触发 readNdjson 抛出 AbortError → run 的 catch 走"已取消"分支
  */
 function stop() {
+  // [stop-finally-contract-v1] 不得递增 activeRunToken：
+  //   run() 的 catch/finally 都以 isStale()（myToken !== activeRunToken）决定是否收口。
+  //   stop 里 +1 会让进行中的这轮 run 被判 stale ⇒ finally 跳过「兜底 emit 终态 + running=false」
+  //   ⇒ 卡片永久停在 running phase（用户实测：点了停止、toast 也出了，但卡片不动）。
+  //   [CONSTRAINT] stop 只负责 abort，让 run 自己走 catch(已取消) → finally(收口)。
+  //   连续两次 run 的竞争由新 run 的 ++activeRunToken 天然隔离：新 run 起来后旧 run 才变 stale。
   if (abortController) {
     abortController.abort()
     abortController = null
   }
-  activeRunToken += 1
-  running.value = false
 }
 
 /**

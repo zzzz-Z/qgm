@@ -98,7 +98,6 @@
     "access": "public"
   },
   "optionalDependencies": {
-    "cloakbrowser": "^0.1.0",
     "playwright": "^1.63.0"
   },
   "devDependencies": {

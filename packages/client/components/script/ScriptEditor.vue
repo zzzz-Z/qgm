@@ -261,7 +261,7 @@ async function createEditor() {
         .of(m.EditorView.editable.of(true)),
       m.EditorView.theme({
         '&': {
-          height: '100%',
+          height: 'auto',
           fontSize: '13px',
           backgroundColor: 'var(--surface)',
           color: 'var(--text)',
@@ -388,7 +388,7 @@ defineExpose({ insertText })
           >
           <div id="file-picker-listbox" class="fp-list" role="listbox">
             <div
-              v-for="(it, i) in pickerFiltered" :id="`fp-opt-${i}`" :key="`${it.kind}:${it.value}`" class="fp-item"
+              v-for="(it, i) in pickerFiltered" :id="`fp-opt-${i}`" :key="`${it.kind}:${it.value}`" class="fp-item" :title="it.title"
               :class="{ active: i === pickerIndex }" role="option" :aria-selected="i === pickerIndex"
               @mousedown.prevent="pickerPick(it)"
             >

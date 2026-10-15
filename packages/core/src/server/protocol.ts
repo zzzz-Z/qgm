@@ -65,7 +65,7 @@ export type ClientMessage
   = | { t: 'headless:open', sid: string, url?: string }
     | { t: 'headless:close', sid: string }
     | { t: 'headless:list' }
-    | { t: 'headless:fill', sid: string, prompt: string, context?: string }
+    | { t: 'headless:fill', sid: string, prompt: string, context?: string, images?: string[] }
     | { t: 'headless:stop', sid: string }
     | { t: 'headless:rotate', sid: string, instruction: string }
     | { t: 'headless:new-session', sid: string, summary: string }
@@ -83,3 +83,8 @@ export type ServerMessage
     | { t: 'headless:summary', sid: string, text: string, degraded: boolean, replay?: boolean }
     | { t: 'headless:list', sessions: unknown[] }
     | { t: 'headless:error', error: string }
+    | { t: 'headless:stop-diag', sid: string, count: number, brief: string }
+    // [fill-ack-v1] 与油猴 ai-runner:fill-ack 对齐：工作台据此判定「已注入」而非靠 state 猜
+    | { t: 'headless:fill-ack', sid: string, ok: boolean, reason: string }
+    // [url-updated-v1] 与油猴 ai-runner:url-updated 对齐：发送后轮询 URL 变化（最多 8s）
+    | { t: 'headless:url-updated', sid: string, url: string }

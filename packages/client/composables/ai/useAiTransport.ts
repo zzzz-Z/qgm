@@ -24,6 +24,10 @@ export interface AiTransport {
   onSummary: (cb: (text: string, sid: string, degraded: boolean) => void) => () => void
   /** [headless-state-err-v1] 订阅服务端 headless:state，UI 侧据此显示 error（如未登录） */
   onState?: (cb: (state: string, detail: string, sid: string) => void) => () => void
+  /** [stop-diag-v1] 订阅 headless:stop-diag 诊断回传 */
+  onStopDiag?: (cb: (count: number, brief: string, sid: string) => void) => () => void
+  /** [url-updated-v1] 订阅 headless:url-updated URL 变化 */
+  onUrlUpdated?: (cb: (url: string, sid: string) => void) => () => void
   onNewSessionCreated: (cb: (url: string, id: string) => void) => () => void
   dispose: () => void
   /** [hardpause] 静音消息接收（暂停时不再接收油猴/AI 回包） */
@@ -140,6 +144,9 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   const newSidCbs = new Set<(url: string, id: string) => void>()
   // [headless-state-err-v1] 服务端 state 订阅（error 用于 UI 反馈）
   const stateCbs = new Set<(state: string, detail: string, sid: string) => void>()
+  // [stop-diag-v1] / [url-updated-v1] 与油猴同名帧对齐：诊断摘要与 URL 变化派发给 UI
+  const stopDiagCbs = new Set<(count: number, brief: string, sid: string) => void>()
+  const urlUpdatedCbs = new Set<(url: string, sid: string) => void>()
   let ws: WebSocket | null = null
   let muted = false
   const queue: string[] = []
@@ -204,7 +211,28 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
       const sid = String(msg.sid || '')
       // [replay-flag-v1] 重连重放帧带 replay:true；同标记透传给回调，App.vue 据此拒绝重入 auto-loop
       const replayed = Boolean(msg.replay)
-      if (msg.t === 'headless:reply') { for (const cb of replyCbs) cb(msg.reply, sid, replayed) }
+      // [fill-ack-v1] 与油猴 ai-runner:fill-ack 对齐：无头侧显式回执注入结果，唤醒 waitAck。
+      // 原实现只能靠 headless:state 间接推断，fill 失败时与成功同形。
+      if (msg.t === 'headless:fill-ack') {
+        const ackSid = String((msg as Record<string, unknown>).sid || '')
+        for (let i = ackWaiters.length - 1; i >= 0; i--) {
+          if (ackWaiters[i].sid === ackSid) {
+            const w = ackWaiters[i]
+            clearTimeout(w.timer)
+            w.resolve(Boolean((msg as Record<string, unknown>).ok))
+            ackWaiters.splice(i, 1)
+          }
+        }
+      }
+      else if (msg.t === 'headless:stop-diag') {
+        // [stop-diag-v1] 与油猴 stop-diag 对齐：stop 失败时把候选按钮摘要派发给 UI，供排查
+        for (const cb of stopDiagCbs) { try { cb(Number((msg as Record<string, unknown>).count || 0), String((msg as Record<string, unknown>).brief || ''), sid) } catch { /* swallow */ } }
+      }
+      else if (msg.t === 'headless:url-updated') {
+        // [url-updated-v1] 与油猴 ai-runner:url-updated 对齐：会话 URL 变化派发给 UI
+        for (const cb of urlUpdatedCbs) { try { cb(String((msg as Record<string, unknown>).url || ''), sid) } catch { /* swallow */ } }
+      }
+      else if (msg.t === 'headless:reply') { for (const cb of replyCbs) cb(msg.reply, sid, replayed) }
       else if (msg.t === 'headless:script') { for (const cb of replyCbs) cb({ kind: 'script', item: msg.item }, sid, replayed) }
       else if (msg.t === 'headless:summary') { for (const cb of summaryCbs) cb(String(msg.text || ''), sid, Boolean(msg.degraded)) }
       else if (msg.t === 'headless:new-session-created') { for (const cb of newSidCbs) cb(String(msg.url || ''), String(msg.id || '')) }
@@ -270,6 +298,8 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     onSummary(cb) { summaryCbs.add(cb); return () => { summaryCbs.delete(cb) } },
     onNewSessionCreated(cb) { newSidCbs.add(cb); return () => { newSidCbs.delete(cb) } },
     onState(cb) { stateCbs.add(cb); return () => { stateCbs.delete(cb) } },
+    onStopDiag(cb) { stopDiagCbs.add(cb); return () => { stopDiagCbs.delete(cb) } },
+    onUrlUpdated(cb) { urlUpdatedCbs.add(cb); return () => { urlUpdatedCbs.delete(cb) } },
     // [ws-reconnect-v1] disposed 阻断重连定时器；切换 transport 时旧连接彻底退役，不产生僵尸重连
     // [dispose-leak-v1] queue / ackWaiters 亦须清理：前者滞留字符串引用，后者悬挂 timer + Promise
     dispose() { disposed = true; muted = false; clearReconnect(); try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; queue.length = 0; for (const w of ackWaiters) { clearTimeout(w.timer); w.resolve(false) } ackWaiters.length = 0; replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear() },

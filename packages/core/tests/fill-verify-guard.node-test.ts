@@ -38,7 +38,16 @@ function extractFnBody(src: string, name: string): string {
   }
   assert.ok(at >= 0, `未找到函数 ${name}`)
   const parenAt = src.indexOf('(', at)
-  const braceAt = src.indexOf('{', parenAt)
+  // [site-adapter-v1] 从 parenAt 算括号深度，跳过默认值里的 `{}`（如 `cfg = {}`）
+  let parenDepth = 0
+  let sigEnd = -1
+  for (let i = parenAt; i < src.length; i++) {
+    if (src[i] === '(') parenDepth++
+    else if (src[i] === ')') { parenDepth--; if (parenDepth === 0) { sigEnd = i; break } }
+  }
+  assert.ok(sigEnd > 0, `${name} 函数签名不闭合`)
+  // 从签名闭合处之后找函数体的 `{`
+  const braceAt = src.indexOf('{', sigEnd)
   assert.ok(braceAt > 0, `${name} 缺少函数体`)
   let depth = 0
   for (let i = braceAt; i < src.length; i++) {
@@ -62,7 +71,7 @@ interface FakeDoc {
   body: { textContent: string }
 }
 interface VerifyResult { sent?: boolean, rateLimited?: boolean, reason?: string }
-type VerifyFn = () => VerifyResult
+type VerifyFn = (cfg?: Record<string, unknown>) => VerifyResult
 
 function userBubble(): FakeMsgEl {
   return { querySelector: () => null }
@@ -87,15 +96,16 @@ function makeDoc(opts: { msgs?: FakeMsgEl[], inputValue?: string | null, body?: 
   }
 }
 
-/** 编译出 verifyFillSentInPage 的**可执行**版本（源码即被测对象，改了源码这里立刻变红）。 */
+/** 编译出 verifyFillSentInPage 的**可执行**版本（源码即被测对象，改了源码这里立刻变红）。
+ *  [site-adapter-v1] extractFnBody 返回 `(cfg = {}) { ... }`（从开括号开始，不含 function 关键字），
+ *  所以 wrapper 拼成 `return function ${body}`。
+ *  用字符串拼接而非模板字符串——body 内含正则字面量和 .source 属性，模板字符串会把 `` ` `` 和 `${` 当插值。 */
 function buildVerify(): (doc: FakeDoc, win: Record<string, unknown>) => VerifyResult {
   const body = extractFnBody(read(INJECT_SIMPLE), 'verifyFillSentInPage')
   // 用 vm 而非 new Function：被测源码当数据处理，编译产物拿不到本测试的闭包与宿主作用域
-  const factory = vm.runInNewContext(
-    `(function (document, window) { return (function ${body}) })`,
-    {},
-  ) as (d: FakeDoc, w: Record<string, unknown>) => VerifyFn
-  return (doc, win) => factory(doc, win)()
+  const wrapper = '(function (document, window) { return function ' + body + ' })'
+  const factory = vm.runInNewContext(wrapper, {}) as (d: FakeDoc, w: Record<string, unknown>) => VerifyFn
+  return (doc, win) => factory(doc, win)({}) as VerifyResult
 }
 
 // ============ 行为断言：真跑判据 ============
@@ -168,15 +178,28 @@ test('fill-verify: ai-headless 必须走只读宽限轮询，不得再做单次�
   assert.ok(!/setTimeout\(r2,\s*600\)/.test(body), 'fillPrompt 仍保留旧的 600ms 单次采样')
 })
 
+test('fill-verify: resetReplyDedup 必须在 fill 之前（reply-baseline-fix-v1）', () => {
+  const src = read(ATTACH_WS)
+  const body = extractFnBody(src, 'handleFill')
+  // [reply-baseline-fix-v1] resetReplyDedup 记 `_baselineBlocks` / `_baselineLastHash` 作为本轮基线。
+  //   若放在 fill 之后，DeepSeek 已渲染 AI 空回复块 ⇒ 基线含新块 ⇒ poll 判据恒真 ⇒
+  //   前端收到 generating 后永远无 reply（无头静默丢回复）。故顺序守卫：reset 必须在 fill 之前。
+  const atReset = body.indexOf('await pool.resetReplyDedup(sid)')
+  const atFill = body.indexOf('await pool.fillPrompt(sid, prompt)')
+  assert.ok(atReset >= 0, 'handleFill 缺少 resetReplyDedup 调用')
+  assert.ok(atFill >= 0, 'handleFill 缺少 fillPrompt 调用')
+  assert.ok(atReset < atFill, `resetReplyDedup 必须在 fillPrompt 之前（实际 reset@${atReset} fill@${atFill}）`)
+})
+
 test('fill-verify: fill 失败时 handleFill 不得提前 return（否则回复被静默丢弃）', () => {
   const src = read(ATTACH_WS)
   const body = extractFnBody(src, 'handleFill')
   const at = body.indexOf('if (!ok) {')
   assert.ok(at >= 0, 'handleFill 缺少 fill 失败分支')
-  const next = body.indexOf('await pool.resetReplyDedup(sid)', at)
-  assert.ok(next > at, 'fill 失败分支之后应继续执行 resetReplyDedup')
-  // 只看代码：注释里说明性提到 return 不算（本守卫要抓的是控制流早退）
-  const between = body.slice(at, next)
+  // 分支体内不得出现 return；只看代码，注释里说明性提到 return 不算
+  const endOfBlock = body.indexOf('} else {', at)
+  assert.ok(endOfBlock > at, 'fill 失败分支缺少 else 收尾')
+  const between = body.slice(at, endOfBlock)
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '')
   assert.ok(!/\breturn\b/.test(between), 'fill 失败分支内出现 return → reply poll 不会被启动')

@@ -2,9 +2,10 @@
 
 > **本文件是项目索引**：这个仓库是什么、代码在哪、提交前跑什么。
 >
-> 它**不重述执行规则**。输出契约与状态机、运行时沙箱与 `__AI__` API、架构红线（HCLC）、
-> 注释与命名、重试预算、跨文件级联、输出预算、技能加载协议——这些的唯一来源（SSOT）是
+> 它**不重述执行规则**。输出契约与状态机、运行时沙箱与 `__AI__` API、架构红线的通用上限与拆分纪律
+> （HCLC）、注释与命名、重试预算、跨文件级联、输出预算、技能加载协议——这些的唯一来源（SSOT）是
 > [`packages/core/SYSTEM.md`](./packages/core/SYSTEM.md)，冲突时一律以它为准。
+> **例外**：本仓库的依赖方向与特化禁则由本文「monorepo 结构铁律」一节承载（工作区级内容，见该节说明）。
 >
 > 本文件缺失仅警告，不中断会话。
 
@@ -18,7 +19,7 @@
 pnpm session:start
 ```
 
-依次对账：锚点校验 → 文档索引 → 环境与包结构 → lessons → changelog → state → evidence。
+依次对账：锚点校验 → 文档索引 → 环境与包结构 → lessons → changelog → signals → state → evidence → skills → 运行态垃圾清理。
 **退出码 2 表示状态异常（如锚点与磁盘不一致），须先处理再动手。**
 
 ## 项目结构
@@ -33,7 +34,7 @@ apps/vite-plugin/  @qgm/vite-plugin   宿主①：Vite 插件形态
 apps/standalone/   @qgm/ai-runner     宿主②：独立 Web 应用（Node HTTP server + bin）
 bin/               CLI：check-regression / check-status / run-all / recover / headless-cli ...
 scripts/           构建 / dev / 校验 / 分析辅助脚本
-docs/              USAGE.md / DOCS-INDEX.md
+docs/              USAGE.md / DOCS-INDEX.md / DESIGN.md
 ```
 
 两级 workspace：`packages/*` 是能力层，`apps/*` 是装配层。
@@ -46,14 +47,15 @@ docs/              USAGE.md / DOCS-INDEX.md
 
 ## monorepo 结构铁律
 
-> **通用「依赖方向」原则**（`packages/*` 之间无编译期依赖等）见 `packages/core/SYSTEM.md` §4；本节只列本项目特化禁令与守卫文件。
+> **应用级通用红线**（行数 / import 上限、职责边界拆分纪律）见 `packages/core/SYSTEM.md` §4；
+> 本节承载**工作区级**的依赖方向与本项目特化禁则（2026-10-14 自 SYSTEM.md §4 迁入并去重——原两处各写一份，且违反 SYSTEM.md「不含工作区特定信息」的自我定位）。
 
 由 `packages/core/tests/workspace-guard.node-test.ts` 强制，违反即测试失败：
 
+- **依赖方向**：`packages/*` 之间无编译期依赖（`packages/client` 不得 import `packages/core`，跨包只经 HTTP/WebSocket 通信）；`packages/*` 不得依赖 `apps/*`；反向/循环引用视为架构缺陷，立即修复。
 - **本项目特化禁则**：`packages/*` 里禁止 `listen` / `createServer` / `import vite` / `@hono/node-server`。
   - 豁免：`vite.config.ts` / `uno.config.ts` 属构建配置。
   - 强制：宿主专属入口（`apps/standalone/src/server.ts` 等，含 `listen` / `createServer` 的装配代码）必须留在 `apps/`，不得回流 `packages/core`。
-- **依赖方向**（`packages/*` 不得依赖 `apps/*`、`packages/client` 不得 import `packages/core`）：同由该守卫强制，**原则见 `packages/core/SYSTEM.md` §4**（本节只列项目特化，不重述原则）。
 
 ## 自动循环子系统已退役（loop-consolidation P3e）
 
@@ -74,7 +76,7 @@ docs/              USAGE.md / DOCS-INDEX.md
 ## 常用命令
 
 ```bash
-pnpm dev                 # 起 dev 双进程：前端 http://localhost:5174/__ai/（/__ai/* 代理到后端 5175）
+pnpm dev                 # 起 dev 双进程：前端 http://localhost:5274/__ai/（/__ai/* 代理到后端 5275，与 prod 5175 隔离）
 pnpm build               # 全量构建：tsc + SPA + server SSR + copy-runtime
 pnpm verify              # 提交前一把梭（顺序见下）
 pnpm docker:deploy       # 容器化部署：构建 → up -d → 等 healthy（standalone 一体，工作台在 5175）
@@ -84,8 +86,7 @@ pnpm git:archive -- --path <目标>   # 改动兜底：有 git 存 ai-archive，
 pnpm handoff:gen         # 从 .ai-runner/ 生成会话交接 SESSION-HANDOFF.md
 ```
 
-dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` / `AIR_SERVER_PORT`，
-启动前会探活并 kill 占用进程）；`pnpm start` 与容器是 standalone 一体形态，只用 5175。
+dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` / `AIR_SERVER_PORT`，默认前端 5274 / 后端 5275——`[dev-port-isolation-v1]` 与 prod 隔离；启动前会探活并 kill 占用进程）；`pnpm start` 与容器是 standalone 一体形态，恒 5175。
 
 `pnpm verify` 顺序展开（实际定义以 `package.json` 为准）：`anchors:verify` → `docs:verify` → `crossfile:verify` → `typecheck`（展开为 `tsc` → `tsc:apps` → `tsc:client` → `test:tsc`）→ `lint` → `test:unit`。
 
@@ -108,7 +109,7 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 
 - **L1 差值基线（快闸门）**：`pnpm check-regression`（`bin/check-regression.cjs check`）—— 跑 `pnpm typecheck` + vitest（json reporter）+ eslint，与 `.ai-runner/baseline.json` 比**差值**；`dTsc`/`dTest`/`dLint` 任一 > 0 即 exit 1。判据是「不比基线更差」，不是「当前全绿」——**无基线文件 exit 2、vitest 报告解析不出（-1）直接阻断**，都不许当成通过。`init` 只在基线缺失或**统计口径变更**（如新增一套 tsc）时由宿主侧重建，**禁止为消红而 `init`**。
 - **L2 全量闸门（交付前）**：`pnpm verify`（展开顺序见「常用命令」）。四套 tsc 缺一不可——只跑 `pnpm tsc` 只覆盖 `packages/core/src`，前端与测试的类型错误会静默绕过。
-- **L3 契约 / e2e（真实装配）**：`pnpm test:e2e`（Playwright，`baseURL=http://localhost:5174/__ai/`，webServer 自动起 `pnpm dev:web`，`reuseExistingServer: true`）。改路由、状态码、NDJSON 帧结构、请求体契约时，**补一条 e2e 契约用例**（范式见 `e2e/baseline-diff.spec.ts`：先造真实 `runId`，再断言响应结构与错误码），不要只用单测把 transport mock 掉。
+- **L3 契约 / e2e（真实装配）**：`pnpm test:e2e`（Playwright，`baseURL=http://localhost:5274/__ai/`，webServer 自动起 `pnpm dev:web`，`reuseExistingServer: true`；webServer 只探活前端根路径，后端由具体 spec 的 `beforeAll` 独立拉起）。改路由、状态码、NDJSON 帧结构、请求体契约时，**补一条 e2e 契约用例**（范式见 `e2e/baseline-diff.spec.ts`：先造真实 `runId`，再断言响应结构与错误码），不要只用单测把 transport mock 掉。
 - **改哪层跑哪层**：逻辑/类型改动 → L1 + 受影响包单测；新增导出/改签名 → L2 并 grep 调用方；改路由/契约/装配 → L1 + L3；改 UI → L1 + L2 + 视觉回归（见下节）。
 - **命令名先与 `package.json` 对账**：文档与回执里写的脚本名必须真实存在（`web:dev` 从未存在、只因复用已运行实例而长期未暴露，是这类的前车之鉴）。
 - **批量删除保护是环境垫片误报**：宿主侧跑全量 vitest 若撞上（报错栈出现 `node-safe-delete-shim`，表现为「单跑绿、合跑红」），加 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 重跑，不是你引入的回归。
@@ -130,7 +131,7 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 - **重建唯一入口**：`pnpm test:e2e --update-snapshots`，由宿主/复核方执行。AI 侧 bash 通道 120s 硬超时 < Playwright 单用例 180s 预算 ⇒ **e2e 不在轮内自跑**；只能声明命令、预期与影响面，禁止在 DONE 写「已跑视觉回归」除非贴得出原始输出。
 - **合法更新路径**：先看 `.ai-runner/tmp/e2e-output/` 下的 diff / actual 图 → 确认差异范围 ≈ 预期改动范围 → 重建 → 在 DONE 记录「基线更新：视图 / 主题 / 变更原因 / 审查者」。
 - **跨轮次元素级基线**：`pnpm baseline`（`scripts/screenshot-baseline.cjs save|check|list|rm`）对单个选择器做跨轮像素对比；与全页 Playwright 基线互补，适合「只想钉住某个组件」的场景。
-- **dev 与 prod 的差异**：e2e 打的是 5174 的 dev（直读源码，dev 免 build）；prod 形态（5175）必须先 `pnpm build` 再由宿主侧重启才看得见——别拿 dev 截图承诺 prod 表现。
+- **dev 与 prod 的差异**：e2e 打的是 5274 的 dev（直读源码，dev 免 build）；prod 形态（5175）必须先 `pnpm build` 再由宿主侧重启才看得见——别拿 dev 截图承诺 prod 表现。
 - **平台约束**：`snapshotPathTemplate` 已去掉平台段，但这**不等于**跨平台通用——字体与抗锯齿不同，多平台须各自提交基线。
 - **遮罩选择器守卫**：由 `packages/client/tests/visual-spec-guard.node-test.ts` 双向守卫（剥掉 `<style>` 与 CSS 后仍须真实存在）。
 
@@ -165,7 +166,7 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   **不要再手写 tar 到 `.ai-runner/backup`**——那是两路都缺位时的遗留做法。
   AI 自动改动一律不进当前分支（方案 C），主分支只在用户显式 commit 时前进。
 - **auto-import 会掩盖导入错误**：`unplugin-auto-import` 覆盖 vue / `@vueuse/core`
-  及项目内 composables 与 utils（`auto-imports.d.ts` 约 486 项）。依赖它的显式 import
+  及项目内 composables 与 utils（生成物 `auto-imports.d.ts`，条目数随代码增长）。依赖它的显式 import
   被删后 **app 仍能跑**，但 vitest 与 `tsc` 没有该插件 → `Cannot find name`。
   故清理「未使用导入」前必须先确认该模块能在 vitest 下裸跑；
   **任何导入改动后必跑 `pnpm test:tsc`**。
@@ -204,9 +205,8 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   ① 授权来源可指（用户原话或工单明文），② 当轮回执如实记录（执行时刻 + 授权来源）。
   未获授权时不自行发起，只写「产物已更新，请宿主侧重启」。
 - **派给应用端（工作台里的 AI）的工单必须落 `docs/` 根并登记 `docs/DOCS-INDEX.md`**：
-  `docs/plan/**` 整目录被 `.gitignore` 忽略（`.gitignore:51`），且 `scripts/verify-docs-index.cjs`
-  的 `SKIP_PATHS` 又显式豁免它 —— 放在那里的工单既不进 git 变更、也不进索引，应用端开箱看不到
-  （2026-10-05 实测，该目录已积压 4 份 workorder）。草稿可留 `docs/plan/`，**派发前移到 `docs/`**；
+  `scripts/lib/docs-scan.cjs` 的 `SKIP_PATHS` 显式豁免 `docs/plan/**` —— 放在那里的工单
+  不进文档索引，应用端开箱看不到。草稿可留 `docs/plan/`，**派发前移到 `docs/`**；
   移入后 `pnpm docs:verify` 会双向守（实测把索引里的工单名改掉 → 报「悬空链接 + 未收录」exit 2）。
 - **新增 / 改名 `/__ai/*` HTTP 端点必须在本节登记**（`routes-registry-v1`）：SYSTEM.md §3.2 只教
   `__AI__.*` 沙箱方法；**`/__ai/*` 路由没有跨文件的注册清单** —— SYSTEM.md 只在 §11/§16 顺带提及
@@ -218,7 +218,26 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
     确属 svn 但读历史失败才 400。存在理由：`/git/worklog`、`/git/diff` 整链路以 `gitAvailable()`
     为前提，非 git 下直接 400 ⇒ SVN 工作副本拿不到任何历史。字段与实现以
     `packages/core/src/vcs.ts` 为 SSOT（本表不重抄）；消费方 `WorklogPane.vue`；
-    端口见 `.ai-runner/.server-port`（dev 侧走 5174 代理 `/__ai/*`）。
+    prod 端口恒 5175（dev 侧走 5274 代理 `/__ai/*`）。
+  - 已登记 **`POST /__ai/vcs/commit`**（vcs-svn-commit-v1）—— **写操作**，把工作副本的本地
+    改动提交到 SVN 仓库。**非 svn 工作副本返 200 + `ok:false`（正常探测结果，与 `/vcs/log` 同口径）**；
+    确属 svn 但提交失败才 400。body `{message: string, paths?: string[]}`（message 上限 4000 字符，
+    paths 缺省即提交 ROOT 下全部改动）。无变更时归一化为 `ok:true, revision:null`（幂等）；
+    路径白名单拒绝对路径与 `..` 穿越。字段与实现以 `packages/core/src/vcs.ts` 的 `svnCommit` 为 SSOT；
+    消费方 `WorklogPane.vue`（SVN 段提交输入框 + 提交按钮）。路由定义：`routes/vcs.ts`。
+  - 已登记 **`POST /__ai/vcs/revert`**（vcs-svn-revert-v1）—— **写操作**，撤销 SVN 工作副本的
+    本地改动（丢弃未提交的修改，等价于 `svn revert`）。**非 svn 工作副本返 200 + `ok:false`**（正常探测结果，
+    与 /vcs/log、/vcs/commit、/vcs/diff 同口径）；确属 svn 但撤销失败才 400。body `{paths?: string[]}`
+    （空/缺省 = 撤销整个工作副本）。返回 `{ok, reverted: string[]}`。路径白名单拒绝对路径与 `..` 穿越。
+    SSOT：`packages/core/src/vcs.ts` 的 `svnRevert`；消费方 `WorklogPane.vue`（SVN 变更列表行级/全部撤销）。
+    路由定义：`routes/vcs.ts`。
+  - 已登记 **`POST /__ai/vcs/diff`**（vcs-svn-diff-v1）—— **只读**，读 SVN 工作区改动
+    （文件清单 + unified diff），供生成 commit message 使用。**非 svn 工作副本返 200 + `ok:false`
+    （正常探测结果，与 `/vcs/log`、`/vcs/commit` 同口径）**；确属 svn 但读改动失败才 400。
+    空工作区（无改动）返 `ok:true` + 空 `files`/`diff`。body `{paths?: string[]}`（缺省即整个工作副本）；
+    diff 用 `svn diff --git` 取扩展格式（默认格式对新增文件是空 hunk），正文按 400KB 截断并显式标注。
+    字段与实现以 `packages/core/src/vcs.ts` 的 `svnDiff` 为 SSOT；消费方 `WorklogPane.vue`
+    （SVN 段「生成 commit message」按钮）。路由定义：`routes/vcs.ts`。
   - 已登记 **`GET /__ai/skills`** —— **只读**，扫描 `.ai-runner/skills/*/SKILL.md` 的 frontmatter
     （前 64 行）返回元数据列表 `{ok, skills:[{name, description, keywords?, path}], registry}`；
     **磁盘是「已装清单」的唯一事实来源**，registry 只是来源标注（由 `reconcileRegistry` 在读路径上
@@ -247,27 +266,45 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
     **只动工作区，不动索引/HEAD**；已暂存的改动须先 `/git/unstage` 才会被本端点丢弃。
     body `{paths: string[]}`；路径白名单拒绝对路径与 `..` 穿越。SSOT：`packages/core/src/git.ts` 的 `gitDiscard`；
     消费方 `WorklogPane.vue`（未暂存栏行级撤销 + 分组头「全部放弃」）。路由定义：`routes/git.ts`。
+  - 已登记 **`/__ai/video/*`**（video 域）—— 视频合成任务链：`POST /video/tasks`（建任务）、
+    `GET /video/tasks`（列任务）、`GET|DELETE /video/tasks/:id`、`POST /video/tasks/:id/script|terms`、
+    `GET /video/tasks/:id/download`、`GET|PUT /video/config`、`GET|POST /video/musics`、
+    `GET|POST /video/materials`、`POST /video/scripts`。SSOT：`packages/core/src/routes/video.ts`
+    （本表不重抄字段）；消费方 `VideoGenerationPanel.vue`（视频面板）。
   - 已登记 **`POST /__ai/run`**（既有端点增补）—— body 新增 `workspaceId?`：目标工作区缺省用活跃项；
     注册表外 id 返 404。执行链包在 `workspace-scope.ts` 的 ALS 作用域里，脚本 cwd / overlay /
     post-run tsc·lint / 快照 / 日志按目标工作区 root 解析（并发运行互不串台）；
     summary 帧新增 `workspaceId` 字段。SSOT：`routes/run.ts` + `workspace-scope.ts`。
 
-- **`pnpm test:e2e` 报 `ECONNREFUSED 127.0.0.1:<端口>` 时先读 `.ai-runner/.server-port`**（`[port-drift-file-v1]`）：
-  该文件会被历史运行残留旧端口值，vite 代理据此指向错误端口。后端实际端口看 `pm2 jlist` 或 `curl 5175`。
+- **端口是契约，不再有端口文件**（`[port-contract-v1]`，取代已废除的 `[port-drift-file-v1]`）：
+  dev 前端 5274 / 后端 5275（`[dev-port-isolation-v1]`，与 prod 隔离避免抢端口）、prod 恒 5175、
+  userscript 分发 5178（与 `userscript.ts` 的 `SERVE_PORT` 一致，改端口两处同步）。
+  `apps/standalone/src/server.ts` 遇 EADDRINUSE **拒绝自动漂移**（报错并给出处置命令），
+  也不再落 `.ai-runner/.server-port` 端口文件。`pnpm test:e2e` 报 `ECONNREFUSED 127.0.0.1:5274/5275`
+  时先确认 dev 进程是否真的在跑（`lsof -nP -iTCP:5275 -sTCP:LISTEN`），别去找端口文件；
+  prod 探活仍是 `curl 5175` 或 `pm2 jlist`。
 - **代执行 `pm2 restart` 的当轮脚本会返回 `Failed to fetch` 属预期**（实例重启导致 HTTP 通道瞬断）；
   下一轮探活（`curl 5175`）即恢复，重试须**跨轮**，不得在原轮判定为失败。
+
+- **改 `scripts/tampermonkey-session-id.user.js` 必须同步升 `@version`**（`[userscript-version-bump-v1]`）：
+  Tampermonkey 靠 `@version` 判定「服务端有没有新版本」，**内容改了但版本号不变 ⇒ 更新链路形同虚设**，
+  且无任何报错（用户以为更新过、实际跑的还是旧代码）。分发端点（`http://127.0.0.1:5178/tampermonkey-session-id.user.js`）
+  每次请求都重读磁盘、内容天然最新——**唯一的闸门就是 `@version`**。
+  实测指纹：`curl -sS http://127.0.0.1:5175/__ai/userscript/info` 返回 `version` 字段即当前磁盘版本。
 
 - **提优化建议 / 改 SSOT 前先读裁决单**（`[read-verdict-first-v1]`）：本仓库反复出现
   「陈旧上下文产出」——同一批建议被以不同形式重提，且不引用已有的裁决单（实测：同一批
   SYSTEM.md 建议在 13:xx 与 15:xx 各提一次，全文未引用 `workorder-app-system-md-review-verdict`）。
   提建议前必做两步：① `git diff -w`（本工作区写 md 会被格式化器重排整份 diff，不加 `-w`
-  无法看清真实改动）；② 读 `docs/workorder-app-*-verdict-*.md` / `-plan-*.md` 里已裁决/已驳回
-  的项，不重提、不改已驳回方案。
+  无法看清真实改动）；② 检索历史裁决——docs/ 下的裁决单文档已清理（曾存
+  `docs/workorder-app-*-verdict-*.md` 等，2026-10 全量归档后删除），改用
+  `git log --oneline --all -- docs/` 与 `git log -S <关键词> --all` 考古已裁决/已驳回的项，
+  不重提、不改已驳回方案。
 
 - **思考与脚本共享单轮输出预算**（`token-budget-v1`）：截断根因不是脚本太长，而是思考（T）与脚本（S）共占同一份输出预算（B）——`T + S ≤ B`。行数不是判据，token 才是（实测：89 行通过、20 行截断，差别全在当轮思考量）。详细规则见 `SYSTEM.md` §10。
 
 ## 详见
 
-- 执行规则（输出契约 / 沙箱 API / 架构红线 / 注释命名 / 重试预算 / 级联 / 输出预算 / 技能加载）→ [`packages/core/SYSTEM.md`](./packages/core/SYSTEM.md)
+- 执行规则（输出契约 / 沙箱 API / 架构红线通用上限与拆分纪律 / 注释命名 / 重试预算 / 级联 / 输出预算 / 技能加载）→ [`packages/core/SYSTEM.md`](./packages/core/SYSTEM.md)；依赖方向与本项目特化禁则 → 本文「monorepo 结构铁律」
 - 打包与部署 → [`docs/USAGE.md`](./docs/USAGE.md)
 - 文档索引 → [`docs/DOCS-INDEX.md`](./docs/DOCS-INDEX.md)

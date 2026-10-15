@@ -51,14 +51,14 @@ function resolveHeadlessCli() {
  * @param {string[]} args 参数
  * @returns {object} CLI 输出的 JSON 对象；解析失败返回 {ok:false, error}
  */
-function runCmd(cmd, args) {
+function runCmd(cmd, args, timeoutMs = 60_000) {
   const bin = resolveHeadlessCli()
   let raw = ''
   try {
     raw = execFileSync(process.execPath, [bin, cmd].concat(args), {
       cwd: process.cwd(),
       encoding: 'utf8',
-      timeout: 60_000,
+      timeout: timeoutMs,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
   } catch (e) {
@@ -92,4 +92,21 @@ function screenshot(url, selector, outPath, mask) {
   return runCmd('screenshot', args)
 }
 
-module.exports = { cssom, screenshot }
+/**
+ * [browser-run-v1] 在 playwright 托管的页面里执行 AI 传入的异步函数，开放完整端到端能力。
+ *
+ * [WHY] cssom / screenshot 只读快照够不着导航、点击、等待、求值、网络拦截；把用户函数
+ *       作为 argv 传给 CLI 子进程，在子进程内 vm 求值后驱动 playwright 全 API，
+ *       既不把 require 暴露进沙箱脚本，也绕开 overlay 写盘不可见问题。
+ *
+ * [CONSTRAINT] script 必须是函数表达式（async ({page,context,browser,pw}) => {...}），
+ *       不能是函数声明、不能带 import；返回值须 JSON 可序列化。
+ *
+ * @param {string} script
+ * @returns {Promise<object>} CLI 返回的 {ok, result} / {ok:false, error}
+ */
+async function run(script) {
+  return runCmd('run', [script], 300_000)
+}
+
+module.exports = { cssom, screenshot, run }

@@ -15,7 +15,9 @@ const emit = defineEmits<{ remove: [id: string] }>()
 // 附件多时避免模板内重复调用（每次重渲染都执行）。
 const rows = computed(() => props.files.map(f => ({
   id: f.id,
-  name: f.name,
+  // [attach-basename-v1] 芯片只展示文件名；全路径留在 title 悬停与发送逻辑里，
+  //   前者信息不丢，后者按 name 全路径读文件（tree-attach 依赖）。
+  name: f.name.split('/').pop() || f.name,
   kind: f.kind,
   content: f.content,
   title: tagTitle(f),

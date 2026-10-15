@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { resolveBrowserEngine } from './browser-engine.js'
-import { clickNewSessionInPage, detectLoginStateInPage, detectReplyInPage, fillPromptInPage, resetReplyDedupInPage, stopGeneratingInPage, verifyFillSentInPage } from './headless-inject.js'
+import { clickNewSessionInPage, detectLoginStateInPage, detectReplyInPage, resetReplyDedupInPage, stopGeneratingInPage, verifyFillSentInPage } from './headless-inject.js'
 
 // [headless-types-reexport-v1] 类型声明已抽到 headless-types.ts；此处 re-export 保持对外 API 兼容
 import type { HeadlessOptions, HeadlessPool, HeadlessReply, HeadlessSession } from './headless-types.js'
@@ -26,6 +26,8 @@ import {
   LOGIN_STABLE_MS,
 } from './headless-constants.js'
 import { createSlotQueue } from './headless-slot-queue.js'
+// [site-adapter-v1] 站点适配器：把所有站点相关硬编码抽成可切换的配置对象
+import { getDefaultAdapter } from './site-adapters/index.js'
 
 type Page = import('playwright').Page
 export { parseDeepSeekCompletionError } from './headless-scheduler.js'
@@ -43,11 +45,11 @@ const FILL_VERIFY_POLL_MS = 300
 /** verifyFillSentInPage 的页面侧返回结构 */
 interface FillVerifyResult { sent?: boolean, rateLimited?: boolean, reason?: string }
 
-async function verifyFillWithGrace(page: Page): Promise<FillVerifyResult | null> {
+async function verifyFillWithGrace(page: Page, cfg: Record<string, unknown>): Promise<FillVerifyResult | null> {
   const deadline = Date.now() + FILL_VERIFY_GRACE_MS
   let last: FillVerifyResult | null = null
   for (;;) {
-    last = await page.evaluate(verifyFillSentInPage).catch(() => null) as FillVerifyResult | null
+    last = await page.evaluate(verifyFillSentInPage, cfg).catch(() => null) as FillVerifyResult | null
     if (last && last.sent === true) return last
     if (last && last.rateLimited) return last
     if (Date.now() >= deadline) return last
@@ -81,7 +83,15 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   function userDataDirFor(sid: string): string {
     return sid === 'default' ? baseUserDataDir : path.join(baseUserDataDir, sid)
   }
-  const defaultUrl = opts.defaultUrl || DEFAULT_URL
+  // [site-adapter-v1] 站点适配器：所有站点相关硬编码从这里取
+  const adapter = opts.adapter || getDefaultAdapter()
+  // adapterCfg 是纯 JSON 对象（字符串字段），可被 page.evaluate(fn, cfg) 序列化进浏览器
+  const adapterCfg: Record<string, unknown> = {
+    selectors: adapter.selectors,
+    login: adapter.login,
+    textPatterns: adapter.textPatterns,
+  }
+  const defaultUrl = opts.defaultUrl || adapter.defaultUrl
   const headless = opts.headless !== false
   const poolLimit = opts.poolLimit || DEFAULT_POOL_LIMIT
   const queueTimeoutMs = opts.queueTimeoutMs || DEFAULT_QUEUE_TIMEOUT_MS
@@ -96,10 +106,12 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   function releaseSlot(): void { slotQueue.release() }
 
   function captureCompletionErrors(sid: string, page: Page): void {
+    const api = adapter.completionApi
+    if (!api) return
     page.on('response', (response) => {
       let responseUrl: URL
       try { responseUrl = new URL(response.url()) } catch { return }
-      if (responseUrl.hostname !== 'chat.deepseek.com' || responseUrl.pathname !== '/api/v0/chat/completion') return
+      if (responseUrl.hostname !== api.hostname || responseUrl.pathname !== api.pathname) return
       void response.text().then((raw) => {
         const error = parseDeepSeekCompletionError(raw)
         console.info(`[headless-sse] sid=${sid} bytes=${raw.length} error=${Boolean(error)}`)
@@ -119,7 +131,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   async function waitForLoginToken(page: Page, timeoutMs: number): Promise<boolean> {
     const deadline = Date.now() + timeoutMs
     for (;;) {
-      const raw = await page.evaluate(detectLoginStateInPage).catch(() => null)
+      const raw = await page.evaluate(detectLoginStateInPage, adapterCfg).catch(() => null)
       const st = raw as { tokenState?: 'yes' | 'no' | 'unknown' } | null | undefined
       if (!st || st.tokenState !== 'no') return true
       if (Date.now() >= deadline) return false
@@ -138,6 +150,10 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     fs.mkdirSync(userDataDir, { recursive: true })
     const launchOpts: Record<string, unknown> = {
       headless,
+      // [chromium-full-binary-v1] 用完整 chromium 二进制（非默认 headless_shell）：
+      //   headless_shell 与有头 chromium 对磁盘 cookie 的解密不兼容 —— 有头窗口登录成功后
+      //   headless_shell 打开同一 userDataDir 仍跳 /sign_in（2026-10-14 实测）。
+      channel: 'chromium',
       args: [
         '--disable-blink-features=AutomationControlled',
         '--no-first-run',
@@ -215,7 +231,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     const startedAt = Date.now()
     const timer = setInterval(() => {
       if (done) return
-      page.evaluate(detectLoginStateInPage)
+      page.evaluate(detectLoginStateInPage, adapterCfg)
         .then((raw) => {
           // headless-inject 为 @ts-nocheck 文件，evaluate 返回值推断为 unknown，按返回结构收窄
           const st = raw as { path: string, hasInput: boolean, tokenState?: 'yes' | 'no' | 'unknown' } | null | undefined
@@ -279,36 +295,41 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       const stopAutoclose = startLoginAutoclose(page, () => ctxLocal.close())
       let autoClosed: boolean
       try {
-        // [login-gui-max-ms-v1] 阻塞直到窗口关闭，但加 LOGIN_GUI_MAX_MS 硬上限：
-        //   [WHY] 实测过用户手动关窗而 Playwright 未触发 ctx.close 事件（窗口 vs context 语义差异），
-        //   会让 inflight 永久挂起、之后所有 open() 都被 login-gui-guard 拦下。
-        //   [CONSTRAINT] 上限只兜底，正常流程仍由 close 事件 / autoclose 触发。
+        // [login-gui-close-events-v2] macOS 上用户点窗口叉时 ctx.close 事件不触发（实测），
+        //   inflight 会挂到 LOGIN_GUI_MAX_MS(5min) 才清 → 用户看到「窗口没关」/再点只提示不弹窗。
+        //   三重感知：ctx.close / page.close / 无页面 2s 轮询；任一命中先主动 close 再 resolve——
+        //   不等 close 完成就 launch 会撞尚未释放的 profile 单实例锁。
         await new Promise<void>((resolve) => {
-          // [login-gui-max-ms-v1] 用外部变量持有 timer 句柄，onClose 只置标志 + resolve；
-          //   清理统一走 finally 的 clearTimeout，避免闭包引用在定义前。
           let settled = false
-          const fire = (fromTimeout: boolean): void => {
+          let closing: Promise<void> | null = null
+          let maxTimer: ReturnType<typeof setTimeout> | null = null
+          let pollTimer: ReturnType<typeof setInterval> | null = null
+          function closeCtxOnce(): Promise<void> {
+            if (!closing) closing = ctxLocal.close().catch(() => { /* swallow: 已关闭/进程已退 */ })
+            return closing
+          }
+          function fire(reason: 'ctx-close' | 'page-close' | 'no-pages' | 'timeout'): void {
             if (settled) return
             settled = true
-            if (fromTimeout) {
-              console.warn('[headless-login-gui] 超过 LOGIN_GUI_MAX_MS，强制关闭登录窗口')
-              void ctxLocal.close().catch(() => { /* swallow: 已关闭 */ })
-            }
-            resolve()
+            if (maxTimer) clearTimeout(maxTimer)
+            if (pollTimer) clearInterval(pollTimer)
+            if (reason === 'timeout') console.warn('[headless-login-gui] 超过 LOGIN_GUI_MAX_MS，强制关闭登录窗口')
+            // [login-gui-close-wait-v1] close() 在 Chromium 崩溃边缘可能永不 resolve（实测过同类），
+            //   会让 inflight 永久挂死、后续 open 全被 login-gui-guard 拦下。
+            //   与 3s 兜底竞速：谁先到都 resolve；超时后不再 await 残留 Promise（可能永不了结、挂引用阻止 GC）。
+            void Promise.race([
+              closeCtxOnce(),
+              new Promise<void>(r => setTimeout(r, 3000)),
+            ]).then(() => resolve())
           }
-          const maxTimer = setTimeout(fire, LOGIN_GUI_MAX_MS, true)
-          ctxLocal.on('close', () => fire(false))
-          // 通过 Promise 的 finally 挂清理钩子：resolve 后一定执行
-          void Promise.resolve().then(() => {
-            // noop：只是占位，真正清理在下方
-          })
-          // 用 settled 轮询清理 timer
-          const cleanupTimer = setInterval(() => {
-            if (settled) {
-              clearTimeout(maxTimer)
-              clearInterval(cleanupTimer)
-            }
-          }, 500)
+          maxTimer = setTimeout(fire, LOGIN_GUI_MAX_MS, 'timeout')
+          pollTimer = setInterval(() => {
+            if (settled) return
+            if (ctxLocal.pages().length === 0) fire('no-pages')
+          }, 2000)
+          ctxLocal.on('close', () => fire('ctx-close'))
+          for (const pg of ctxLocal.pages()) pg.on('close', () => fire('page-close'))
+          ctxLocal.on('page', pg => pg.on('close', () => fire('page-close')))
         })
       } finally {
         autoClosed = stopAutoclose()
@@ -373,8 +394,16 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       await jitterDelay(jitterMin * scale, jitterMax * scale)
       try {
         const ok = await withBackoff(async () => {
-          const r = await page.evaluate(fillPromptInPage, { prompt })
-          if (r !== true) throw new Error('fill 返回 false')
+          // [playwright-native-fill-v4] 用 Playwright 原生 API 填充并发送。
+          //   [WHY] 2026-10-14 对拍：page.evaluate 里 setter/execCommand/dispatchEvent
+          //   全部被 DeepSeek 的 React 受控组件丢弃（textarea.value 被同步回 ""）；
+          //   而 locator.fill() + keyboard.press() 走真实输入链路，实测 5s 内收到回复。
+          const selector = 'textarea:not([readonly]):not([disabled]), [contenteditable="true"]'
+          const locator = page.locator(selector).first()
+          if (await locator.count() === 0) throw new Error('fill 返回 false')
+          await locator.click()
+          await locator.fill(prompt)
+          await page.keyboard.press('Enter')
           // [fill-verify-v2] 发送验证：click/Enter 后若页面未产生用户气泡，说明上一条仍在生成中，
           // click 被静默忽略（DeepSeek 会阻止新消息但无错误提示）；或消息已发出但尚未渲染。
           // [WHY] attach-ws 里 fill 成功就推 generating 态；若实际未发送，后续 poll 永远收不到回复，前端卡死。
@@ -383,12 +412,12 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
           // [rate-retry-v1] verify 为结构返回：sent=false 时区分「上一条仍在生成」与「频控拒收」。
           // 频控拒收抛 cooldown 标记错误 → withBackoff 走 COOLDOWN_WAITS 长退避（15s→120s），
           // 冷却后在闭包内原样重发同一 prompt，上层调用方零感知
-          const v = await verifyFillWithGrace(page)
+          const v = await verifyFillWithGrace(page, adapterCfg)
           if (!v || v.sent !== true) {
             if (v && v.rateLimited) throw new Error(`rate-limit cooldown: ${v.reason || '消息发送过于频繁，请稍后重试'}`)
             throw new Error('fill 验证失败：消息未出现在对话中（可能上一条仍在生成）')
           }
-          return r
+          return true
         })
         recordRequest(false)
         return ok === true
@@ -403,7 +432,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
         return false
       }
       try {
-        const ok = await page.evaluate(stopGeneratingInPage)
+        const ok = await page.evaluate(stopGeneratingInPage, adapterCfg)
         return ok === true
       } catch { return false }
     },
@@ -462,7 +491,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       const page = _getPage(sid)
       if (!page) return
       try {
-        await page.evaluate(resetReplyDedupInPage)
+        await page.evaluate(resetReplyDedupInPage, adapterCfg)
       } catch { /* ignore */ }
     },
   }

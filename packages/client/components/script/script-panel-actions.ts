@@ -7,7 +7,7 @@
 import type { Ref } from 'vue'
 import { useToast } from '../../composables/ui/useToast'
 import { emit as emitBus } from '../../composables/ui/useEventStream'
-import { copyAndFill } from '../../composables/ai/useAiWindow'
+import { copyAndFill, sendStop } from '../../composables/ai/useAiWindow'
 import { useAutoTakeover } from '../../composables/ai/useAutoTakeover'
 import { useAiWaiting } from '../../composables/ai/useAiWaiting'
 import { useRunner } from '../../composables/runner/useRunner'
@@ -44,6 +44,9 @@ export interface ScriptPanelActionsDeps {
   result: Ref<RunResponse | null>
   changes: Ref<Change[]>
   running: Ref<boolean>
+  // [pause-any-phase-v1] AI 生成中 / 回传窗未收口 也应可终止（原先只看 running）
+  aiWaiting: Ref<boolean>
+  delivering: Ref<boolean>
   runningCommand: Ref<string>
   lastRunScript: Ref<string>
   stripComments: Ref<boolean>
@@ -63,6 +66,8 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
     result,
     changes,
     running,
+    aiWaiting,
+    delivering,
     runningCommand,
     lastRunScript,
     stripComments,
@@ -77,7 +82,7 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
   const { enable: enableAutoTakeover, disable: disableAutoTakeover, cancelAutoRun } = useAutoTakeover()
   // [loop-consolidation-P2] 摘除 isLoopActive（恒 false，无剩余使用点）
   // [loop-consolidation-P3b] softPause / loopPaused / clearSoftPause 已迁至 useAiWaiting（随 auto-loop 退役）
-  const { softPause, loopPaused, clearSoftPause } = useAiWaiting()
+  const { loopPaused, clearSoftPause, stopWaiting } = useAiWaiting()
   const { stop } = useRunner()
 
   /** 拼装 AI 回填 prompt（含失败源码 / 反馈摘要 / 变更列表 / 基线对比 / 原始输出） */
@@ -195,14 +200,27 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
    * 原实现 autoTakeoverEnabled 分支在前：发送路径后点暂停只关接管不暂停循环，需点两次才生效。
    */
   function pauseAll(): void {
+    // [pause-really-stops-v2] running 判定**必须最优先**：原实现把它放在 loopPaused 分支内，
+    //   而 exec-flow 在发送成功后即调 softPause() ⇒ 脚本一跑起来 loopPaused 就已是 true，
+    //   首次点击命中的是第一分支（只 clearSoftPause 就 return），stop() 永远执行不到 ⇒
+    //   用户实测「终止后任务状态没改变」（点击只清了标志，脚本照跑）。
+    //   [WHY] 三件事缺一不可：① abort /run 的 SSE 连接（服务端 ac.abort() → kill 脚本进程，
+    //   本轮 overlay 不落盘 = 丢弃）；② 通知站点停止生成；③ 复位「暂停 / 等待」标志。
+    // [pause-any-phase-v1] 三个「进行中」相位都要能终止：脚本在跑 / 等 AI 回包 / 回传窗未收口。
+    //   原判定只看 running ⇒ AI 已在生成但脚本已结束时，点停止不调 sendStop，站点继续吐字（用户报告）。
+    if (running.value || aiWaiting.value || delivering.value) {
+      // [stop-diagnostic-v1] 临时诊断：三态判定与 sendStop 返回值全部回显，
+      //   用于定位「AI 端停不了」的断点（分支没进 / 窗口引用丢 / origin 空 / 油猴旧版）。
+      const _phase = `running=${running.value} aiWaiting=${aiWaiting.value} delivering=${delivering.value}`
+      let _sent = 'n/a'
+      try { _sent = String(sendStop()) } catch (e) { _sent = `throw:${String(e).slice(0, 40)}` }
+      stop()
+      clearSoftPause()
+      stopWaiting()
+      toast(`已停止 [${_phase}] sendStop=${_sent}`, 'info', TOAST_LONG)
+      return
+    }
     if (loopPaused.value) {
-      // [loop-consolidation-P2] 摘除 isLoopActive 守卫（恒 false）；只剩 running 判断
-      if (running.value) {
-        // [loop-consolidation-P3b] resumeFromPause 是循环专用（依赖 LoopInstance）；
-        //   留存路径只需复位暂停标志
-        clearSoftPause()
-        return
-      }
       clearSoftPause()
       if (autoTakeoverEnabled.value) disableAutoTakeover()
       if (!script.value.trim()) {
@@ -212,12 +230,6 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
       enableAutoTakeover()
       toast('已开启自动接管：立即执行当前脚本 → 结果发 AI → AI 回填后自动执行', 'success', TOAST_LONG)
       void runSmart()
-      return
-    }
-    // [loop-consolidation-P2] 摘除 isLoopActive 守卫（恒 false）；只剩 running 判断
-    if (running.value) {
-      softPause()
-      toast('已暂停 · 再点一次恢复', 'info', TOAST_DEFAULT)
       return
     }
     if (autoTakeoverEnabled.value) {

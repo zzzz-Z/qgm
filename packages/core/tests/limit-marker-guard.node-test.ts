@@ -309,6 +309,8 @@ test('limit marker: 首问注入块不得含标记词表（无围栏注入 ⇒ �
 // 形态：冻结每个文件的调用点总数 + 逐个断言接收者。退化回整页 raw 读取有两种写法，
 //   两种都会被抓：① 经局部别名（如 limitText.match(...)）⇒ 接收者不在白名单；
 //   ② 直接内联（(...).match(...)）⇒ 落不进提取正则 ⇒ 计数下降。
+// [site-adapter-v1] 正则探针可写两种锚点形式：① 原字面量 `/xxx/gi`；② 锚点变量 `_XXX_ANCHOR`
+//   （SiteAdapter 引入后，守卫正则同时扫两种形态）
 const MARKER_SITE_COUNT: Record<string, number> = {
   'packages/core/src/headless/headless-inject.ts': 5, // busy / rate / stopped(冷启动) / stopped(主判定) / limit
   'packages/core/src/headless/headless-inject-simple.ts': 5, // verify.rate / reset.busy / reset.stopped / reset.limit / reset.rate
@@ -322,7 +324,8 @@ const MARKER_RECEIVER_ALLOWLIST = new Set(['scanText', 'scanBodyText()', 'tail']
 const RAW_EXCEPTION_RECEIVER = 'tail'
 
 test('body text 调用点: 标记探针一律读剥壳后的正文（冻结清单 ratchet）', () => {
-  const RE_SITE = /([\w$.]+(?:\(\))?)\.match\(\s*\/(?:server busy|\(\?:消息|当前问题已停止|\(\?:\(\?:达到)/g
+  // [site-adapter-v1] 正则锚点同时支持字面量 `/xxx/gi` 和锚点变量 `_XXX_ANCHOR` 两种形式
+  const RE_SITE = /([\w$.]+(?:\(\))?)\.match\(\s*(?:\/(?:server busy|\(\?:消息|当前问题已停止|\(\?:\(\?:达到)[\s\S]*?\/[gimsuy]*|_\w+_ANCHOR\w*)/g
   let rawExceptions = 0
   for (const rel of SOURCES) {
     const src = fs.readFileSync(path.join(ROOT, rel), 'utf8')

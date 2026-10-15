@@ -263,4 +263,131 @@ describe.skipIf(!SVN_TOOLS)('SVN 提交历史（真实仓库端到端）', () =>
       cfg.setRoot(prev)
     }
   })
+
+  test('[承重·svnCommit] 真实提交未跟踪文件：版本号递增且历史可读', async () => {
+    // [WHY] 承重判据须走真实 svn 仓库：mock 掉 svn 等于什么都没验。
+    //   把 svnCommit 的 runSvn 调用删掉 / 把 -m 参数去掉（会启编辑器阻塞）⇒ 本用例必红。
+    const before = await vcsMod.svnLog()
+    const beforeMax = before.entries[0]?.revision ?? 0
+
+    fs.writeFileSync(path.join(TMP, 'wc', 'committed.txt'), 'hello\n')
+    svnAt(path.join(TMP, 'wc'), ['add', 'committed.txt'])
+
+    const r = await vcsMod.svnCommit('feat: add committed.txt')
+    assert.equal(r.ok, true, `svnCommit 失败：${r.reason}`)
+    assert.ok((r.revision ?? 0) > beforeMax, `应返回递增版本号（before=${beforeMax}，got=${r.revision}）`)
+
+    const after = await vcsMod.svnLog()
+    assert.ok((after.entries[0]?.revision ?? 0) > beforeMax, '提交后历史应出现新版本')
+  })
+
+  test('[幂等] 无变更提交：归一化为 ok:true + revision:null', async () => {
+    // [WHY] svn 无变更时以非 0 退出，若不归一化会把「没东西可提」误报成失败。
+    const r = await vcsMod.svnCommit('chore: no-op')
+    assert.equal(r.ok, true, `无变更应归一化为成功，实得 ${r.reason}`)
+    assert.equal(r.revision, null, '无变更时 revision 应为 null')
+  })
+
+  test('[边界] 空消息拒绝；非法路径被过滤', async () => {
+    const r1 = await vcsMod.svnCommit('')
+    assert.equal(r1.ok, false)
+    assert.ok(/提交信息为空/.test(r1.reason || ''), `应报「提交信息为空」，实得 ${r1.reason}`)
+    const r2 = await vcsMod.svnCommit('test: bad paths', ['/etc/passwd', '../a'])
+    assert.equal(typeof r2.ok, 'boolean')
+  })
+
+  test('[端点] POST /vcs/commit 走真实 handler，空消息须 400', async () => {
+    const bad = await Promise.resolve(vcsHono.request('/vcs/commit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: '' }),
+    }))
+    assert.equal(bad.status, 400, '空消息应为 400')
+    const jb = await bad.json() as { ok: boolean, reason?: string }
+    assert.equal(jb.ok, false)
+
+    const ok = await Promise.resolve(vcsHono.request('/vcs/commit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'chore: endpoint smoke (no-op)' }),
+    }))
+    assert.equal(ok.status, 200, '无变更端点应 200（幂等语义）')
+    const jo = await ok.json() as { ok: boolean, vcs: string, revision: number | null }
+    assert.equal(jo.ok, true)
+    assert.equal(jo.vcs, 'svn')
+  })
+
+  test('[承重·svnDiff] 真实工作副本改动：status 清单 + unified diff 都拿到', async () => {
+    // [WHY] 生成 commit message 的输入是「文件清单 + diff」；任一为空 AI 就无米下锅。
+    //   把 svnDiff 的 status/diff 两次 runSvn 调用删掉任一 ⇒ 本用例必红。
+    // [CONSTRAINT] 复用 beforeAll 里已建好的 WC（此前的提交用例已弄干净工作区）。
+    const WC = path.join(TMP, 'wc')
+    fs.writeFileSync(path.join(WC, 'diff-probe.txt'), 'probe\n')
+    svnAt(WC, ['add', 'diff-probe.txt'])
+    fs.writeFileSync(path.join(WC, 'base.txt'), 'modified-for-diff\n')
+
+    const r = await vcsMod.svnDiff()
+    assert.equal(r.ok, true, `svnDiff 失败：${r.reason}`)
+    const paths = r.files.map(f => f.path)
+    // [vcs-svn-diff-v1] svn status --xml 的 entry@path 相对 cwd（与 svnLog 的仓库绝对 path 不同）
+    assert.ok(paths.includes('diff-probe.txt'), `清单应含新增文件，实得 ${JSON.stringify(paths)}`)
+    assert.ok(paths.includes('base.txt'), `清单应含被改文件，实得 ${JSON.stringify(paths)}`)
+    // diff 必须真带内容（--git 格式下新增文件不是空 hunk）
+    assert.ok(r.diff.includes('diff-probe.txt'), 'diff 应含新增文件')
+    assert.ok(r.diff.includes('+probe'), `diff 应含新增内容 +probe，实得长度 ${r.diff.length}`)
+
+    // 清场：撤回工作区改动，避免污染后续用例
+    svnAt(WC, ['revert', '-R', '.'])
+    try { fs.unlinkSync(path.join(WC, 'diff-probe.txt')) } catch { /* unversioned after revert */ }
+  })
+
+  test('[端点] POST /vcs/diff 走真实 handler 返 200 + ok + files/diff 字段', async () => {
+    const res = await Promise.resolve(vcsHono.request('/vcs/diff', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    }))
+    assert.equal(res.status, 200)
+    const j = await res.json() as { ok: boolean, vcs: string, files: unknown[], diff: string }
+    assert.equal(j.ok, true)
+    assert.equal(j.vcs, 'svn')
+    assert.ok(Array.isArray(j.files), 'files 必须是数组')
+    assert.equal(typeof j.diff, 'string', 'diff 必须是字符串')
+  })
+
+  test('[承重·svnRevert] 真实撤销：提交后改动被还原', async () => {
+    const WC = path.join(TMP, 'wc')
+    const rel = 'revert-probe.txt'
+    const abs = path.join(WC, rel)
+    fs.writeFileSync(abs, 'v1\n')
+    svnAt(WC, ['add', rel])
+    svnAt(WC, ['commit', '-m', 'test: add revert-probe'])
+    fs.writeFileSync(abs, 'v1\nv2\n')
+    const r = await vcsMod.svnRevert([rel])
+    assert.equal(r.ok, true, `svnRevert 失败：${r.reason}`)
+    assert.equal(fs.readFileSync(abs, 'utf8'), 'v1\n', '撤销后内容须还原到上次提交')
+    assert.deepEqual(r.reverted, [rel])
+  })
+
+  test('[边界·svnRevert] 非法路径被拒；空路径撤销工作副本根', async () => {
+    const r1 = await vcsMod.svnRevert(['/etc/passwd', '../a'])
+    assert.equal(r1.ok, false)
+    assert.ok(/路径不合法/.test(r1.reason || ''))
+    const r2 = await vcsMod.svnRevert([])
+    assert.equal(r2.ok, true)
+    assert.deepEqual(r2.reverted, ['.'])
+  })
+
+  test('[端点] POST /vcs/revert 走真实 handler 返 200 + ok + reverted', async () => {
+    const res = await Promise.resolve(vcsHono.request('/vcs/revert', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ paths: [] }),
+    }))
+    assert.equal(res.status, 200)
+    const j = await res.json() as { ok: boolean, vcs: string, reverted: string[] }
+    assert.equal(j.ok, true)
+    assert.equal(j.vcs, 'svn')
+    assert.ok(Array.isArray(j.reverted))
+  })
 })

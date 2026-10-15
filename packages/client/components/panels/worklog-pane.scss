@@ -307,10 +307,12 @@
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
 }
 .wl-name {
+  flex: 0 0 auto;
   min-width: 0;
   color: var(--text);
   overflow: hidden;
@@ -318,6 +320,7 @@
   white-space: nowrap;
 }
 .wl-dir {
+  flex: 1 1 auto;
   min-width: 0;
   color: var(--text-3);
   font-size: 11px;
@@ -468,23 +471,6 @@
 
 /* ── [vcs-svn-log-v1] SVN 工作副本：只读标识条 + 提交历史 ──
    配色复用 st-add/st-del/st-move/st-mod 的既有语义，避免同一面板出现两套颜色语言。 */
-.wl-vcs-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 2px;
-}
-
-.wl-vcs-hint {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  font-size: 11px;
-  color: var(--text-3);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .wl-svn-list {
   margin: 0;
   padding: 0;
@@ -548,6 +534,26 @@
 }
 
 /* 展开的路径列表：左缩进对齐到 commit 标题文字，动作字母等宽不跳动 */
+/* [vcs-svn-history-collapse-v1] 分组头可点击：cursor + hover 反馈，语义同按钮 */
+.wl-group-toggle {
+  cursor: pointer;
+}
+
+.wl-group-toggle:hover {
+  background: rgb(127 127 127 / 10%);
+}
+
+/* [vcs-svn-fullmsg-v1] 展开时的完整提交信息：多行展示（header 里的 msg 是单行省略的） */
+.wl-svn-fullmsg {
+  margin: 0;
+  padding: 6px 10px 2px 28px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .wl-svn-paths {
   margin: 0;
   padding: 0 0 4px 28px;
@@ -605,11 +611,14 @@
 }
 
 /* [git-stage-v1] 行内暂存/取消暂存按钮：默认隐藏，hover 时可见（VSCode 风格） */
+/* [wl-action-reserve-v1] 默认不占位（width 0 + margin 0），悬停时才腾出 18px 让位；
+   原先仅 opacity:0 仍占 18px+margin，会挤压长路径的显示空间 */
 .wl-row-action {
   flex: 0 0 auto;
-  margin-left: 4px;
-  width: 18px;
+  margin-left: 0;
+  width: 0;
   height: 18px;
+  overflow: hidden;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -630,6 +639,8 @@
 }
 .wl-item-head:hover .wl-row-action {
   opacity: 1;
+  margin-left: 4px;
+  width: 18px;
 }
 .wl-row-action:hover {
   color: var(--primary, #2563eb);

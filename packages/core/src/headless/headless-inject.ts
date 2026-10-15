@@ -10,24 +10,14 @@
 
 export {
   clickNewSessionInPage,
+  collectStopCandidatesInPage,
   detectLoginStateInPage,
   fillPromptInPage,
+  pasteImagesInPage,
   resetReplyDedupInPage,
   stopGeneratingInPage,
   verifyFillSentInPage,
 } from './headless-inject-simple.js'
-
-// [script-fence-gate-v1] 判定 SCRIPT 标记存在但本回复从未推出过有效 js 代码块（裸写无围栏 / 块未被识别为 js）。
-// 返回 'report'（首次报 error）| 'suppress'（已报过，抑制 plain 噪音）| 'none'（无需处理）。
-// [WHY] 旧逻辑让 SCRIPT+无有效块的回复落到 plain 分支 → 前端收一张只有"SCRIPT"文本或裸代码的卡 → 静默空转。
-// [CONSTRAINT] 纯函数、无 DOM/闭包依赖，可被 page.evaluate 序列化；headless 与油猴两通道同构调用（守卫测试 script-fence-gate）。
-// [CHANGE-IMPACT] 调用方负责"正文已稳定"前提（headless: _stableCount>=3；油猴: 已出 isGenerating 分支），本函数不重复判稳定。
-function decideScriptFence(scriptMarkPositive, seenHashesLen, alreadyReported) {
-  if (!scriptMarkPositive) return 'none'
-  if (seenHashesLen > 0) return 'none' // 已成功推过脚本：走噪音抑制，不报 fence
-  if (alreadyReported) return 'suppress'
-  return 'report'
-}
 
 /**
  * 检测 Reply In Page
@@ -182,7 +172,29 @@ export function detectReplyInPage() {
     }
   }
 
-  if (typeof dedup._baselineBlocks === 'number' && _baseBlocks.length > 0 && _baseBlocks.length <= dedup._baselineBlocks) return null
+  // [virtual-list-baseline-v1] 主判据：最后一条 assistant 消息内容 hash 是否与本轮基线不同。
+  // [WHY] DeepSeek 已切虚拟列表（.ds-virtual-list），生成新消息时会回收视口外旧消息 ⇒
+  //   实时 assistant 块数会下降（实测 3→1→2）⇒ 原计数判据 `_baseBlocks.length <= _baselineBlocks`
+  //   恒真 ⇒ 恒 return null ⇒ 无头静默丢回复（工作台报「AI 思考中」永不结束）。
+  //   hash 判据不受回收影响：新回复到达时「最后一条」内容必然变化。
+  // [CONSTRAINT] hash 算法必须与 resetReplyDedupInPage 中记录的 _baselineLastHash 逐字符一致（FNV-1a 32bit）。
+  // [CONSTRAINT] 哨兵 '' = 无基线（首轮/无 assistant），不拦截；无 assistant 时保守判「无新回复」。
+  function hashLastAssistant() {
+    const els = document.querySelectorAll('.ds-assistant-message-main-content')
+    if (els.length === 0) return ''
+    const t = (els[els.length - 1].textContent || '')
+    if (t.length === 0) return ''
+    let h = 0x811C9DC5
+    for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 0x1000193) >>> 0
+    return (h >>> 0).toString(16).padStart(8, '0')
+  }
+  if (typeof dedup._baselineLastHash === 'string') {
+    const _nowHash = hashLastAssistant()
+    if (dedup._baselineLastHash !== '' && (_nowHash === '' || _nowHash === dedup._baselineLastHash)) return null
+  } else if (typeof dedup._baselineBlocks === 'number' && _baseBlocks.length > 0 && _baseBlocks.length <= dedup._baselineBlocks) {
+    // 旧 reset 写入路径（无 _baselineLastHash）：保留计数判据兜底
+    return null
+  }
 
   function langFromText(text) {
     const t = String(text || '').trim().toLowerCase()
@@ -287,6 +299,20 @@ export function detectReplyInPage() {
     else if (/^HANDOFF$/.test(line)) out.handoff = head + 1
     else if (/^TEXT$/.test(line)) out.text = head + 1
     return out
+  }
+
+  // [script-fence-gate-v1] 判定 SCRIPT 标记存在但本回复从未推出过有效 js 代码块（裸写无围栏 / 块未被识别为 js）。
+  // 返回 'report'（首次报 error）| 'suppress'（已报过，抑制 plain 噪音）| 'none'（无需处理）。
+  // [WHY] 旧逻辑让 SCRIPT+无有效块的回复落到 plain 分支 → 前端收一张只有"SCRIPT"文本或裸代码的卡 → 静默空转。
+  // [CONSTRAINT] **必须内联在 detectReplyInPage 内部**：本函数经 page.evaluate 序列化到浏览器执行，
+  //   顶层引用会随模块边界丢失（ReferenceError: decideScriptFence is not defined，实测 2026-10-14），
+  //   与本文件内 hasUnclosedStructureJs / scanReplyMarks 的既有内联模式一致。
+  // [CHANGE-IMPACT] 调用方负责"正文已稳定"前提（headless: _stableCount>=3；油猴: 已出 isGenerating 分支），本函数不重复判稳定。
+  function decideScriptFence(scriptMarkPositive, seenHashesLen, alreadyReported) {
+    if (!scriptMarkPositive) return 'none'
+    if (seenHashesLen > 0) return 'none' // 已成功推过脚本：走噪音抑制，不报 fence
+    if (alreadyReported) return 'suppress'
+    return 'report'
   }
 
   function extractLatestScript() {

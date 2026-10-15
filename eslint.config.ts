@@ -98,8 +98,8 @@ const config: Promise<Linter.Config[]> = antfu({
   files: ['packages/client/utils/log.ts'],
   rules: { 'no-console': 'off' },
 }).append({
-  // [no-console-headless-exempt-v1] headless 是浏览器自动化引擎，其引擎选择（cloak/playwright）、
-  //   SSE 字节数等诊断输出是运维可见的固有手段，非生产副作用；它们没有可用的 logger（logger.cjs 是沙箱脚本专用）。
+  // [no-console-headless-exempt-v1] headless 是浏览器自动化引擎，其诊断输出（引擎启动、
+  //   SSE 字节数等）是运维可见的固有手段，非生产副作用；它们没有可用的 logger（logger.cjs 是沙箱脚本专用）。
   files: ['packages/core/src/headless/**'],
   rules: { 'no-console': 'off' },
 })

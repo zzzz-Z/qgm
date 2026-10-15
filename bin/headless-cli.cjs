@@ -6,18 +6,10 @@
 'use strict'
 const fs = require('node:fs')
 const path = require('node:path')
+const vm = require('node:vm')
 
 async function loadPw() {
-  // [browser-engine-align] 与 packages/core 的 resolveBrowserEngine 保持策略一致：
-  // linux-x64 上 cloak binary 已装则走 cloak 启动的 playwright 实例；否则回落 playwright。
-  if (process.platform === 'linux' && process.arch === 'x64') {
-    try {
-      const cloak = await import('cloakbrowser')
-      if (cloak.binaryInfo && cloak.binaryInfo().installed) {
-        return await import('playwright')
-      }
-    } catch { /* fallthrough: cloak 不可用，走 playwright */ }
-  }
+  // [browser-engine-align] 与 packages/core 的 resolveBrowserEngine 保持策略一致：恒用 playwright。
   try { return await import('playwright') } catch { return null }
 }
 
@@ -121,6 +113,35 @@ async function main() {
       fs.writeFileSync(diffOut, PNG.sync.write(diff))
     }
     process.stdout.write(JSON.stringify({ ok: true, result: { status, diffPercent, diffPixels, totalPixels, width, height, paths: { baseline, current, diff: diffOut } } }))
+    return
+  }
+  // [headless-cli-run-v1] 执行 AI 传入的 playwright 端到端脚本（CJS 模块导出 async 函数）。
+  if (cmd === 'run') {
+    const [raw] = args.slice(1)
+    if (!raw) throw new Error('usage: run <scriptSource>')
+    let src = raw
+    // [headless-cli-run-b64-compat-v1] 沙箱 __AI__ 读 dist/helpers.cjs，其 browser.run 传 base64；
+    //   此处自动解码，使 src 与 dist 两版调用方都可用。
+    if (/^[A-Z0-9+/=]+$/i.test(raw) && raw.length % 4 === 0) {
+      try { src = Buffer.from(raw, 'base64').toString('utf8') } catch { /* 非 base64，按源码处理 */ }
+    }
+    const fn = vm.runInThisContext(`(${src})`, { filename: 'browser-run.js' })
+    if (typeof fn !== 'function') throw new Error('script must be a function expression')
+    const pw = await loadPw()
+    if (!pw) throw new Error('playwright 未安装')
+    const browser = await pw.chromium.launch({ headless: true })
+    try {
+      const context = await browser.newContext()
+      try {
+        const page = await context.newPage()
+        const result = await fn({ pw, browser, context, page })
+        process.stdout.write(JSON.stringify({ ok: true, result }))
+      } finally {
+        await context.close()
+      }
+    } finally {
+      await browser.close()
+    }
     return
   }
   throw new Error(`unknown cmd: ${cmd}`)

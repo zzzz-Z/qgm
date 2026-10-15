@@ -72,8 +72,11 @@ function svnTlsArgs(): string[] {
 /**
  * 以项目根为 cwd 执行 svn 命令。
  * [CONSTRAINT] 不抛错 —— 失败通过返回结构的 code 表达（与 git-runner.run 同一约定）。
- * [WHY] 钉死 `LC_ALL=C`：`--xml` 的标签结构虽与语言无关，但 stderr 文案要被可判读地匹配
- *   （如 `No such revision`），且避免用户 locale 改变 svn 的输出编码。
+ * [WHY] 钉死 `LC_ALL=C.UTF-8`：`--xml` 的标签结构虽与语言无关，但 stderr 文案要被可判读地匹配
+ *   （如 `No such revision`）；C.UTF-8 同时提供英文消息与 UTF-8 编码能力。
+ *   [BUGFIX:svn-diff-utf8] 原用 `LC_ALL=C`，遇非 ASCII 路径时 svn diff 报
+ *   `E000022: Can't convert string from 'UTF-8' to native encoding` 并整体失败
+ *   （diff 正文为空）——status 走 XML 不受影响，故此前未暴露。
  *   另加 `--non-interactive`：服务端进程无 TTY，认证/证书提示会让 svn 阻塞到超时，
  *   改为立刻失败（真实原因仍由 stderr 带出，不丢信息）。
  * [CHANGE-IMPACT] 只被本模块消费；改签名不影响 git 路径。
@@ -82,7 +85,7 @@ async function runSvn(args: string[], timeoutMs = SVN_TIMEOUT_MS): Promise<{ cod
   const proc = await runProcess('svn', {
     args: ['--non-interactive', ...svnTlsArgs(), ...args],
     cwd: ROOT,
-    env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
+    env: { ...process.env, LC_ALL: 'C.UTF-8', LANG: 'C.UTF-8' },
     timeoutMs,
     timeoutLabel: 'svn 超时',
     maxOutputBytes: SVN_MAX_OUTPUT_BYTES,
@@ -210,6 +213,136 @@ export function parseSvnLogXml(xml: string): SvnLogEntry[] {
     })
   }
   return out
+}
+
+/** SVN 提交结果 */
+export interface SvnCommitResult {
+  ok: boolean
+  reason?: string
+  /** 成功时的提交版本号（从 svn 输出解析）；无法解析时为 null */
+  revision?: number | null
+}
+
+/**
+ * [vcs-svn-commit-v1] 把工作副本的本地改动提交到 SVN 仓库。
+ * [WHY] 面板此前对 SVN 是纯只读（提交历史），用户要求补上提交能力。
+ * [CONSTRAINT] 必须显式给 `-m`：不带 -m/-F 时 svn 会启动编辑器，服务端无 TTY 会阻塞到超时。
+ * [CONSTRAINT] 与 git 侧语义一致——只提交工作区，不碰任何历史重写；无变更时 svn 会报
+ *   「nothing to commit」并以非 0 退出，本函数将其归一化为 ok:true + revision:null（幂等）。
+ * [CONSTRAINT] 路径白名单与 gitDiscard 同口径：拒绝对路径与 `..` 穿越；paths 为空时提交
+ *   ROOT（svn 默认递归提交该目录下全部改动）。
+ */
+export async function svnCommit(message: string, paths: string[] = []): Promise<SvnCommitResult> {
+  if (!(await svnAvailable())) return { ok: false, reason: '非 svn 工作副本' }
+  const msg = String(message || '').trim()
+  if (!msg) return { ok: false, reason: '提交信息为空' }
+  const safe = paths
+    .map(p => String(p || '').replace(/\\/g, '/'))
+    .filter(p => p && !p.startsWith('/') && !p.split('/').includes('..'))
+
+  // 先探有无可提交项：svn commit 无变更时非 0 退出，归一化为幂等成功
+  const st = await runSvn(['status', ...(safe.length ? ['--', ...safe] : [])])
+  if (st.code === 0 && st.stdout.trim() === '') {
+    return { ok: true, revision: null }
+  }
+
+  const r = await runSvn(['commit', '-m', msg, ...(safe.length ? ['--', ...safe] : [])], 60_000)
+  if (r.code !== 0) {
+    return { ok: false, reason: `svn commit 失败: ${r.stderr.slice(-300) || r.stdout.slice(-300)}` }
+  }
+  const m = /Committed revision\s+(\d+)/i.exec(r.stdout)
+  return { ok: true, revision: m ? Number(m[1]) : null }
+}
+
+/** SVN 工作区单个变更条目 */
+export interface SvnChangeEntry {
+  /** 工作副本内绝对路径（含前导 /） */
+  path: string
+  /** wc-status 的 item 属性：modified / added / deleted / unversioned / missing / conflicted 等 */
+  status: string
+}
+
+/** SVN 工作区改动读取结果 */
+export interface SvnDiffResult {
+  ok: boolean
+  reason?: string
+  files: SvnChangeEntry[]
+  /** git 扩展格式的 unified diff 原文（受 SVN_DIFF_MAX_BYTES 截断） */
+  diff: string
+}
+
+/** diff 正文上限：AI 生成 commit message 只需看改动要点，超长 diff 反而污染 prompt */
+const SVN_DIFF_MAX_BYTES = 400_000
+
+/**
+ * [vcs-svn-diff-v1] 读取 SVN 工作区改动（文件清单 + unified diff）。
+ * [WHY] 生成 commit message 需要 diff 作为输入；git 侧有 /git/worklog 提供 markdown，
+ *   SVN 侧原本只有提交历史（/vcs/log），没有工作区改动读取能力。
+ * [CONSTRAINT] 用 `--git` 取扩展格式：默认 svn diff 对新增文件输出的是 `+0,-0` 空 hunk，
+ *   AI 拿不到内容；`--git` 输出 `new file mode` + 完整 hunk，与 git 侧输入对齐。
+ * [CONSTRAINT] 空工作区（无改动）返回 ok:true + 空 files/diff，不报错——这是正常探测结果。
+ * [CONSTRAINT] diff 正文按 SVN_DIFF_MAX_BYTES 截断并显式标注，避免超大改动撑爆 prompt。
+ */
+/** SVN 撤销（revert）结果 */
+export interface SvnRevertResult {
+  ok: boolean
+  reason?: string
+  /** 已撤销的相对路径（空 paths 时返回 ['.'] 代表整个工作副本） */
+  reverted: string[]
+}
+
+/**
+ * [vcs-svn-revert-v1] 撤销工作副本的本地改动（svn revert 语义）。
+ * [WHY] 面板此前对 SVN 只能读历史 / 提交，缺少「丢弃本地改动」能力；
+ *   git 侧有 /git/discard 对应（restore --worktree + clean），SVN 侧此前空白。
+ * [CONSTRAINT] `-R` 递归：目录路径必须递归，否则子文件改动不撤销。
+ * [CONSTRAINT] paths 为空时 revert 工作副本根 `.`（svn 默认递归整个 wc）。
+ * [CONSTRAINT] 路径白名单与 svnCommit / svnDiff 同口径：拒绝对路径与 `..` 穿越。
+ * [CONSTRAINT] 未纳管（unversioned）文件不在 revert 范围内，保持原样——
+ *   删除未纳管文件属不同语义（不可恢复），不在此端点职责内。
+ */
+export async function svnRevert(paths: string[] = []): Promise<SvnRevertResult> {
+  if (!(await svnAvailable())) return { ok: false, reason: '非 svn 工作副本', reverted: [] }
+  const safe = paths
+    .map(p => String(p || '').replace(/\\/g, '/'))
+    .filter(p => p && !p.startsWith('/') && !p.split('/').includes('..'))
+  if (paths.length > 0 && safe.length === 0) {
+    return { ok: false, reason: '路径不合法', reverted: [] }
+  }
+  const args = ['revert', '-R', ...(safe.length ? ['--', ...safe] : ['.'])]
+  const r = await runSvn(args, 60_000)
+  if (r.code !== 0) {
+    return { ok: false, reason: `svn revert 失败: ${r.stderr.slice(-300) || r.stdout.slice(-300)}`, reverted: [] }
+  }
+  return { ok: true, reverted: safe.length ? [...safe] : ['.'] }
+}
+export async function svnDiff(paths: string[] = []): Promise<SvnDiffResult> {
+  if (!(await svnAvailable())) return { ok: false, reason: '非 svn 工作副本', files: [], diff: '' }
+  const safe = paths
+    .map(p => String(p || '').replace(/\\/g, '/'))
+    .filter(p => p && !p.startsWith('/') && !p.split('/').includes('..'))
+
+  const st = await runSvn(['status', '--xml', ...(safe.length ? ['--', ...safe] : [])])
+  if (st.code !== 0) {
+    return { ok: false, reason: `svn status 失败: ${st.stderr.slice(-300)}`, files: [], diff: '' }
+  }
+
+  const files: SvnChangeEntry[] = []
+  const entryRe = /<entry\s+path="([^"]*)"\s*>([\s\S]*?)<\/entry>/g
+  let m: RegExpExecArray | null
+  while ((m = entryRe.exec(st.stdout)) !== null) {
+    const itemMatch = /<wc-status[^>]*\sitem="([^"]*)"/.exec(m[2])
+    files.push({ path: unescapeXml(m[1]), status: itemMatch ? itemMatch[1] : 'modified' })
+  }
+
+  const d = await runSvn(['diff', '--git', ...(safe.length ? ['--', ...safe] : [])], 60_000)
+  if (d.code !== 0) {
+    return { ok: false, reason: `svn diff 失败: ${d.stderr.slice(-300)}`, files, diff: '' }
+  }
+  const diff = d.stdout.length > SVN_DIFF_MAX_BYTES
+    ? `${d.stdout.slice(0, SVN_DIFF_MAX_BYTES)}\n... (diff 已截断，原始 ${d.stdout.length} 字节)\n`
+    : d.stdout
+  return { ok: true, files, diff }
 }
 
 /**

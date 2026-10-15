@@ -56,41 +56,38 @@ function inventedHexes(body: string): string[] {
   return found.filter(h => !/^#(?:fff|ffffff|000|000000)$/i.test(h))
 }
 
-// ── ① 三态 → 三种不同的语义令牌 ────────────────────────────────────────────
+// ── ① 两态 → 两种语义令牌（[pause-really-stops-v1]：2026-10-14 由三态收敛）─────
+// [WHY] 原三态「开始 / 暂停 / 恢复」中的「暂停」只置 softPause 标志（不 kill 脚本、不通知站点），
+//   用户实测「暂停按钮完全没用」。改为「运行中 = 真终止（kill 脚本 + 停 AI 生成）」后，
+//   恢复态不再存在 ⇒ 两态：未运行=--primary（开始）、运行中=--danger（停止）。
 
-it('三态配色各归其位，且三者互不相同：开始=--primary、暂停=--warning、恢复=--success', () => {
+it('两态配色各归其位，且互不相同：开始=--primary、停止=--danger', () => {
   const src = stripComments(read(TOOLBAR))
   const pick = (sel: string) => ruleBody(src, sel).match(/var\((--[\w-]+)/)?.[1]
   const takeover = pick('.tpl-bar button.primary-btn.takeover')
   const pause = pick('.tpl-bar button.primary-btn.pause')
-  const resume = pick('.tpl-bar button.primary-btn.resume')
 
-  // ① 语义归位：每个状态必须落在它该用的令牌上（「开始=发起」用主色、「暂停=按住」用警示、「恢复=继续」用成功色）
   assert.equal(takeover, '--primary', `「开始」态应绑 --primary，实际 ${takeover}`)
-  assert.equal(pause, '--warning', `「暂停」态应绑 --warning，实际 ${pause}`)
-  assert.equal(resume, '--success', `「恢复」态应绑 --success，实际 ${resume}`)
-  // ② 三者互不相同：否则又会退回「一个颜色走天下」——两个运行态只能靠图标区分
-  assert.equal(new Set([takeover, pause, resume]).size, 3, `三态颜色必须互不相同，实际 = ${[takeover, pause, resume].join(' / ')}`)
+  assert.equal(pause, '--danger', `「停止」态应绑 --danger，实际 ${pause}`)
+  assert.notEqual(takeover, pause, `两态颜色必须互不相同，实际 = ${takeover} / ${pause}`)
 })
 
-it('三态规则里不得出现自造颜色（防止旧粉紫或任意硬编码回归）', () => {
+it('两态规则里不得出现自造颜色（防止旧粉紫或任意硬编码回归）', () => {
   const src = stripComments(read(TOOLBAR))
-  for (const sel of ['.tpl-bar button.primary-btn.takeover', '.tpl-bar button.primary-btn.pause', '.tpl-bar button.primary-btn.resume']) {
+  for (const sel of ['.tpl-bar button.primary-btn.takeover', '.tpl-bar button.primary-btn.pause']) {
     const bad = inventedHexes(ruleBody(src, sel))
     assert.deepEqual(bad, [], `${sel} 里出现硬编码颜色 ${bad.join(', ')}（应改用语义令牌）`)
   }
-  // 旧粉紫的三种写法，在（已剥注释的）代码里全仓禁绝
   assert.doesNotMatch(src, /#f0abfc|#f5c6ff|rgb\(240 171 252/i, '旧的粉紫配色又回到代码里了（语义上说不通且亮色不可读）')
 })
 
 // ── ② 模板接线：状态 → 类名，且 e2e 依赖的 .head-run 不能丢 ─────────────────
 
-it('模板按 loopPaused 切换 pause / resume，且已无 .stop 残留', () => {
+it('运行中按钮挂 .pause（琥珀）且不再有 .resume 残留', () => {
   const src = stripComments(read(TOOLBAR))
-  assert.match(src, /class="primary-btn head-run"/, '循环控制键的基类变了')
-  assert.match(src, /['"]?pause['"]?\s*:\s*!loopPaused/, '未暂停时未挂 .pause 类 ⇒ 运行态拿不到琥珀配色')
-  assert.match(src, /['"]?resume['"]?\s*:\s*loopPaused/, '暂停时未挂 .resume 类 ⇒ 恢复态拿不到绿配色')
-  assert.doesNotMatch(src, /['"]stop['"]|primary-btn\.stop/, '仍残留 .stop（该按钮是暂停/恢复，不是停止）')
+  // [pause-really-stops-v1] 静态 class 挂 .pause（不再随 loopPaused 条件切换），因为只有两态
+  assert.match(src, /class="primary-btn pause head-run"/, '运行中按钮未挂 .pause（拿不到琥珀配色）')
+  assert.doesNotMatch(src, /['"]resume['"]|primary-btn\.resume/, '仍残留 .resume（恢复态已随两态收敛删除）')
 })
 
 it('e2e 依赖的 .primary-btn.head-run 选择器仍能命中', () => {
@@ -153,7 +150,7 @@ it('暂停/恢复两态的令牌在暗、亮两套主题下都可读（对比度
   const NON_TEXT_MIN = 3.0
   const TEXT_LIKE_MIN = 4.5
   for (const [name, v] of themes()) {
-    for (const tok of ['--warning', '--success']) {
+    for (const tok of ['--danger']) {
       const val = v[tok]
       assert.match(val || '', /^#[0-9a-f]{6}$/i, `${name}的 ${tok} 不是纯 hex（=${val}），本判据无法计算对比度`)
       for (const bg of ['--bg', '--surface']) {

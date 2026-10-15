@@ -26,9 +26,10 @@
   font-weight: 500;
 }
 .editor.card {
+  /* [editor-overlay-actions-v1] 操作条绝对定位到底部，卡片作为定位上下文 */
+  position: relative;
   flex: 0 0 auto;
   min-height: 104px;
-  max-height: 300px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -46,12 +47,6 @@
 }
 .editor.card.is-running {
   border-color: rgb(88 166 255 / 40%);
-}
-.editor.card:focus-within {
-  border-color: rgb(88 166 255 / 32%);
-  box-shadow:
-    0 1px 2px rgb(15 17 21 / 6%),
-    0 0 0 3px rgb(88 166 255 / 18%);
 }
 html[data-theme='dark'] .editor.card {
   background: rgb(127 127 127 / 8%);
@@ -71,6 +66,7 @@ html[data-theme='dark'] .editor.card {
   outline: none;
 }
 .editor :deep(.cm-scroller) {
+  max-height: 240px;
   font-family: inherit;
   line-height: 1.45;
   overflow-x: hidden;
@@ -92,7 +88,8 @@ html[data-theme='dark'] .editor.card {
 }
 .editor :deep(.cm-content) {
   min-height: 40px;
-  padding: 10px 16px;
+  /* [editor-overlay-actions-v1] 底部留出按钮浮动区，避免末行被压 */
+  padding: 10px 16px 44px;
   color: var(--text, inherit);
   font-size: 13px;
   line-height: 1.5;
@@ -140,7 +137,10 @@ html[data-theme='dark'] .editor.card {
 }
 .editor-actions {
   @apply flex justify-end items-center gap-1;
-  padding: 4px 16px 8px;
+  /* [editor-overlay-actions-v1] 浮动在输入区右下角，不参与布局 */
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
 }
 .editor-actions :deep(.ghost-btn),
 .editor-actions :deep(.primary-btn) {
@@ -199,13 +199,14 @@ html[data-theme='dark'] .editor.card {
   }
 }
 :deep(.cm-host) {
-  flex: 1 1 0;
+  flex: 0 1 auto;
   min-height: 0;
-  height: 100%;
+  height: auto;
   overflow: hidden;
 }
 .editor-body {
-  flex: 1 1 0;
+  /* [editor-overlay-actions-v1] 占满卡片剩余高度：操作条已脱离文档流 */
+  flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;

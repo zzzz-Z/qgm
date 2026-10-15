@@ -25,7 +25,6 @@
     "tsc": "tsc -p ../../tsconfig.json --noEmit"
   },
   "optionalDependencies": {
-    "cloakbrowser": "^0.1.0",
     "playwright": "^1.63.0"
   },
   "publishConfig": {

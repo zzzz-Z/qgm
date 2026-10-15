@@ -5,6 +5,8 @@ import type { Socket } from 'node:net'
 import type { Server as HttpServer, IncomingMessage } from 'node:http'
 import { PREFIX } from '../config.js'
 import { createHeadlessPool } from '../headless/ai-headless.js'
+// [stop-diag-v1] 与油猴 stop-diag 对齐：stop 失败时回传候选按钮摘要，使失败可诊断
+import { collectStopCandidatesInPage, pasteImagesInPage } from '../headless/headless-inject.js'
 // [lesson-autocapture-v1] DONE 总结中的踩坑记录自动落盘，见 post-run/lesson-extract.ts
 import { appendLessons, extractLessons } from '../post-run/lesson-extract.js'
 import { writeChannelLog } from '../state/snapshot.js'
@@ -92,9 +94,18 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
     const sid = String(msg.sid || 'default')
     const prompt = String(msg.prompt || '')
     if (!prompt) { send({ t: 'headless:state', sid, state: 'error', detail: 'prompt 为空' }); return }
+    // [image-paste-v3] 与油猴 ai-runner:fill 的 images 字段对齐：有图先注入，再填文本
+    const images = Array.isArray(msg.images) ? msg.images : []
     const prev = fillChains.get(sid) ?? Promise.resolve()
     const chain = prev.catch(() => {}).then(async () => {
       let sess = pool.get(sid)
+      // [pool-stale-session-v1] 池中会话若是 error 态（未登录 / 页面异常），
+      // 复用必然失败且永不重建 —— 每次提问都命中同一个坏会话，
+      // 用户侧表现为「发消息没回应 / 提示找不到输入框」。显式关闭后重新 open 打破死循环。
+      if (sess && sess.state === 'error') {
+        await pool.close(sid).catch(() => {})
+        sess = null
+      }
       if (!sess) {
         send({ t: 'headless:state', sid, state: 'filling' })
         sess = await pool.open(sid)
@@ -107,7 +118,29 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
       if (oldStop) { oldStop(); replyPollers.delete(sid) }
       send({ t: 'headless:state', sid, state: 'filling' })
       await pool.newSession(sid).catch(() => null)
+      // [reply-baseline-fix-v1] resetReplyDedup 必须在 fill 之前执行。
+      //   [WHY] 它的核心作用是记 `_baselineBlocks` = 当前 assistant 消息块数；poll 侧判据
+      //   `_baseBlocks.length <= _baselineBlocks → 无新回复`。若放在 fill 之后，DeepSeek 已渲染
+      //   AI 的空回复块，基线 = 含新块，poll 恒 return null → 前端收到 generating 后永远无 reply。
+      //   [CONSTRAINT] 必须在 fill 之前；顺序对调即回退至「无头静默丢回复」bug。
+      await pool.resetReplyDedup(sid)
+      // [image-paste-v3] 图片先于文本注入（与油猴同序）：上传多为异步，先占位避免文本覆盖图片区。
+      if (images.length) {
+        try {
+          const page = pool.getPage(sid) as { evaluate?: (fn: unknown, arg: unknown) => Promise<{ ok: boolean, reason: string }> } | null
+          if (page && typeof page.evaluate === 'function') {
+            const r = await page.evaluate(pasteImagesInPage, { images })
+            if (!r || !r.ok) send({ t: 'headless:state', sid, state: 'generating', detail: `图片注入失败: ${r ? r.reason : 'no-result'}` })
+          }
+        } catch { /* swallow: 图片注入失败不阻断文本发送 */ }
+      }
       const ok = await pool.fillPrompt(sid, prompt)
+      // [headless-trace-v1] 无头出站留痕：与页面通道的 send.jsonl 同构，
+      // 使「无头发了多少条提问 / 发成功了没有」可直接观测，无需再靠 arrive 反推。
+      try { writeChannelLog('headless', { kind: 'fill', sid, ok, promptBytes: prompt.length, promptHead: prompt.slice(0, 80) }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
+      // [fill-ack-v1] 与油猴 ai-runner:fill-ack 对齐：显式回执注入结果，
+      // 使工作台 sendFillToAsync 不再依赖 state 帧的间接推断。
+      send({ t: 'headless:fill-ack', sid, ok, reason: ok ? '' : 'fill-verify-failed' })
       if (!ok) {
         // [fill-verify-v2] 止血（AGENDA-10）：验证失败 ≠ 一定没发出去（页面改版 / 消息慢渲染都会误判）。
         // 旧实现在此 return → 对方真回复了也无人接收，整轮被静默丢弃。
@@ -117,9 +150,28 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
       } else {
         send({ t: 'headless:state', sid, state: 'generating' })
       }
-      await pool.resetReplyDedup(sid)
+      // [url-updated-v1] 与油猴 ai-runner:url-updated 对齐：发送后轮询 URL 变化（最多 8s，250ms 间隔）。
+      // 会话切换（新建/跳转）时工作台需同步 url，原实现无此通道。
+      const page = pool.getPage(sid) as { url?: () => string } | null
+      const prevUrl = page && typeof page.url === 'function' ? page.url() : ''
+      let urlTries = 0
+      const urlPoll = setInterval(async () => {
+        urlTries += 1
+        try {
+          const p = pool.getPage(sid) as { url?: () => string } | null
+          const cur = p && typeof p.url === 'function' ? p.url() : ''
+          if (cur && cur !== prevUrl) {
+            clearInterval(urlPoll)
+            send({ t: 'headless:url-updated', sid, url: cur })
+          }
+        } catch { /* swallow: 页面导航期间 url() 抛错，等下一拍 */ }
+        if (urlTries > 32) clearInterval(urlPoll)
+      }, 250)
       const stopReply = pool.startReplyPoll(sid, (reply) => {
         try {
+          // [headless-trace-v1] 无头回复留痕：记录每次 poll 命中的回复类型，
+          // 使「AI 回了没有 / 回的是什么 kind」与出站留痕成对，断链时可直接定位是发送端还是采集端。
+          try { writeChannelLog('headless', { kind: 'reply', sid, replyKind: reply.kind, hasCode: Boolean(reply.code), textLen: reply.text ? reply.text.length : 0 }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
           if (reply.closureRelease) {
             try { writeChannelLog('runner', { runId: 'closure-release', sid, closureTicks: reply.closureTicks, closureLen: reply.closureLen }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
           }
@@ -197,6 +249,17 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         const stopPoll = replyPollers.get(sid)
         if (stopPoll) { stopPoll(); replyPollers.delete(sid) }
         const ok = await pool.stopGenerating(sid)
+        // [stop-diag-v1] 与油猴 stop-diag 对齐：失败时回传候选按钮摘要，
+        // 使"为什么没点到停止键"可直接观测（原实现只给一句"未找到停止按钮"，无从定位）。
+        if (!ok) {
+          try {
+            const page = pool.getPage(sid) as { evaluate?: (fn: unknown) => Promise<{ count: number, brief: string }> } | null
+            if (page && typeof page.evaluate === 'function') {
+              const diag = await page.evaluate(collectStopCandidatesInPage)
+              if (diag) send({ t: 'headless:stop-diag', sid, count: diag.count, brief: diag.brief })
+            }
+          } catch { /* swallow: 诊断失败不影响 stop 结果语义 */ }
+        }
         send({ t: 'headless:state', sid, state: ok ? 'idle' : 'error', detail: ok ? undefined : 'stop 失败（未找到停止按钮）' })
         break
       }

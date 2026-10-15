@@ -21,6 +21,8 @@ export interface PickerItem {
   label: string
   /** 次展示文本（技能用 description 摘要，文件留空） */
   hint: string
+  /** 悬停 tooltip（原生 title 属性） */
+  title: string
 }
 
 interface UseFilePickerDeps {
@@ -61,9 +63,12 @@ export function useFilePicker(deps: UseFilePickerDeps) {
       value: p,
       label: p,
       hint: '',
+      title: p,
     }))
+    // [picker-skill-first-v1] 空 query 只列已装技能；输入后才并行搜文件与技能，
+    //   否则 200 条文件铺屏会把技能入口挤到看不见。
+    if (!q) return [...pickerSkills.value]
     const all = [...pickerSkills.value, ...fileItems]
-    if (!q) return [...pickerSkills.value, ...fileItems.slice(0, 200)]
     return all
       .filter(it => it.label.toLowerCase().includes(q) || it.hint.toLowerCase().includes(q))
       .slice(0, 200)
@@ -96,12 +101,17 @@ export function useFilePicker(deps: UseFilePickerDeps) {
     try {
       const res = await fetch('/__ai/skills', { headers: { accept: 'application/json' } })
       const data = await res.json() as { ok?: boolean, skills?: SkillMeta[] }
-      pickerSkills.value = (data.skills || []).map(s => ({
-        kind: 'skill' as const,
-        value: `${SKILL_PICK_PREFIX}${s.name}`,
-        label: s.name,
-        hint: String(s.description || '').replace(/\s+/g, ' ').slice(0, 120),
-      }))
+      pickerSkills.value = (data.skills || []).map((s) => {
+        const rel = s.path || `.ai-runner/skills/${s.name}/SKILL.md`
+        const desc = String(s.description || '').replace(/\s+/g, ' ').trim()
+        return {
+          kind: 'skill' as const,
+          value: `${SKILL_PICK_PREFIX}${s.name}`,
+          label: rel,
+          hint: desc.slice(0, 120),
+          title: `${s.name}${desc ? ` · ${desc}` : ''}\n${rel}`,
+        }
+      })
     } catch { pickerSkills.value = [] }
   }
 
@@ -143,6 +153,24 @@ export function useFilePicker(deps: UseFilePickerDeps) {
     pickerQuery.value = ''
     pickerIndex.value = 0
   }
+
+  // [picker-outside-close-v1] 点击 picker 外部关闭（Esc 之外的第二条出口）；capture 阶段先于
+  //   元素 onmousedown，命中列表项时 el.contains(target) 为真 → 不关，避免误杀选择动作。
+  function onDocMousedown(e: MouseEvent) {
+    const el = pickerRef.value
+    if (!el) return
+    const t = e.target as Node | null
+    if (t && el.contains(t)) return
+    pickerClose()
+  }
+  watch(pickerOpen, (v) => {
+    if (typeof document === 'undefined') return
+    if (v) document.addEventListener('mousedown', onDocMousedown, true)
+    else document.removeEventListener('mousedown', onDocMousedown, true)
+  })
+  onBeforeUnmount(() => {
+    if (typeof document !== 'undefined') document.removeEventListener('mousedown', onDocMousedown, true)
+  })
 
   function pickerMove(d: number) {
     const n = pickerFiltered.value.length

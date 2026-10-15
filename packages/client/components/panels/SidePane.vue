@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { sidePaneRevealTick, sidePaneTab } from '../../composables/ui/useSidePaneTab';
-import FileTree from './FileTree.vue';
-import FileList from './FileList.vue';
-import type { ChangeEntry } from '../../types';
+import { sidePaneRevealTick, sidePaneTab } from '../../composables/ui/useSidePaneTab'
+import FileTree from './FileTree.vue'
+import FileList from './FileList.vue'
+import type { ChangeEntry } from '../../types'
 
 /** 标签页类型：从 _tabAllowed 派生，保证与运行时白名单一致 */
 // [WHY] TS 类型别名编译期惰性求值，`typeof _tabAllowed` 引用后置 const 无 TDZ 风险
