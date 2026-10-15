@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..', '..')
-const IO = path.join(ROOT, 'packages', 'core', 'src', 'helpers-io.cjs')
+const IO = path.join(ROOT, 'packages', 'core', 'src', 'helpers', 'io.cjs')
 const require_ = createRequire(import.meta.url)
 const io = require_(IO)
 test('appendText: 追加不覆盖，两次调用内容累积', () => {

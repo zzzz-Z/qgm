@@ -10,6 +10,8 @@ import type { FileNode } from '../../types'
 import { useTreeExpand } from './use-tree-expand'
 // [workspace-epoch-v1] 显式 import 同上：watch(workspaceEpoch) 在 tsc/vitest 下需要真实绑定
 import { useWorkspaces } from '../../composables/data/useWorkspaces'
+// [fs-watch-v1] 订阅服务端 fs.watch 广播，改盘即增量刷新展开目录（不做全量重拉）
+import { useAiTransport } from '../../composables/ai/useAiTransport'
 import { isMarkdownPath, renderFileContent } from '../../composables/useFileContentHtml'
 
 defineOptions({ name: 'FileTree' })
@@ -41,13 +43,13 @@ interface FileReadResponse { files?: FileReadItem[] }
 // 通过 setup scope 在组件卸载时自动清理；因此必须定义在 setup 顶层而非函数内
 const _clipboard = useClipboard()
 
-const { tree, loading, copiedPath, load, loadChildren, getChildren, isChildrenLoading, copyPath } = useFileTree()
+const { tree, loading, copiedPath, load, loadChildren, getChildren, isChildrenLoading, copyPath, invalidateChildren, computeAffectedDirs } = useFileTree()
 
 // 从 localStorage 恢复展开态
 const fold = useFoldState('default', 'filetree')
 
 // [ui-p1c-tree-expand-wire-v1] V4：展开态 + 持久化 + 懒加载触发统一由 composable 承载
-const { toggle, isOpen, rehydrate } = useTreeExpand(fold, loadChildren)
+const { expanded, toggle, isOpen, rehydrate } = useTreeExpand(fold, loadChildren)
 
 // [file-dialog] 双击文件弹窗查看详情 + 复制
 /** 双击文件后的查看弹窗状态；null 表示未打开 */
@@ -84,6 +86,19 @@ if (props.root) {
   // 服务端已 setRoot；本组件因 v-show 保活不会重挂载，必须在此重拉，否则显示旧 root 内容。
   const { workspaceEpoch } = useWorkspaces()
   watch(workspaceEpoch, () => { void loadRoot() })
+
+  // [fs-watch-v1] 服务端 fs.watch 广播：对每个变更路径枚举祖先目录，凡当前已展开者失效并重拉。
+  // 不做全量 load()——那会清空 childrenCache 并重置所有已展开目录的滚动位置。
+  const { transport } = useAiTransport()
+  const offFilesChanged = transport.onFilesChanged?.((paths: string[]) => {
+    if (!paths.length) return
+    const affected = computeAffectedDirs(paths, d => expanded.has(d))
+    for (const dir of affected) {
+      invalidateChildren(dir)
+      void loadChildren(dir)
+    }
+  })
+  onUnmounted(() => { offFilesChanged?.() })
 }
 
 // 拖拽控制器（须在 getFileIcon/iconSvg/collectFilePathsAsync/toggle/copyPath 声明之后）

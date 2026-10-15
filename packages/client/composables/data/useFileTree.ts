@@ -2,6 +2,27 @@ import { ref } from 'vue'
 import type { FileNode, FilesResponse } from '../../types'
 
 // 模块级 children 缓存，所有 FileTree 递归实例共享
+/**
+ * [fs-watch-v1] 按变更路径枚举「已展开祖先目录」。
+ * [WHY] 服务端广播的是单个文件路径；前端只关心已展开目录是否需要重拉。
+ *   抽成纯函数便于单测：组件内嵌循环无法独立验证（变异验证会全绿）。
+ * [CONSTRAINT] 返回 Set 无序；调用方自行去重、按需 loadChildren。
+ * [CHANGE-IMPACT] FileTree.vue 的 files:changed 订阅依赖此枚举结果。
+ */
+export function computeAffectedDirs(paths: string[], isExpanded: (dir: string) => boolean): Set<string> {
+  const affected = new Set<string>()
+  for (const rel of paths) {
+    if (!rel) continue
+    const segs = rel.split('/')
+    for (let i = 1; i < segs.length; i++) {
+      const dir = segs.slice(0, i).join('/')
+      if (isExpanded(dir)) affected.add(dir)
+    }
+    if (isExpanded(rel)) affected.add(rel)
+  }
+  return affected
+}
+
 /** 文件树子节点缓存 */
 // [children-cache-lru-v1] 报告 §5.1.6：原 Map 无上限，长会话持续增长。
 // 改用 LRU 上限 200：命中时刷新顺序，超出淘汰最旧。
@@ -81,6 +102,14 @@ export function useFileTree() {
     }
   }
 
+  /**
+   * [fs-watch-v1] 使某目录的子节点缓存失效，由调用方随后调 loadChildren 重拉。
+   * [WHY] 让订阅方（FileTree.vue）决定「谁需要重拉」，缓存层只负责「失效」这一原子动作。
+   */
+  function invalidateChildren(path: string): void {
+    childrenCache.delete(path)
+  }
+
   function getChildren(path: string): FileNode[] {
     return cacheGet(path) || []
   }
@@ -108,6 +137,8 @@ export function useFileTree() {
     loadChildren,
     getChildren,
     isChildrenLoading,
+    invalidateChildren,
+    computeAffectedDirs,
     copyPath,
   }
 }

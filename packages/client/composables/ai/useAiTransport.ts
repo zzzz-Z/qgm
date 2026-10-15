@@ -28,6 +28,10 @@ export interface AiTransport {
   onStopDiag?: (cb: (count: number, brief: string, sid: string) => void) => () => void
   /** [url-updated-v1] 订阅 headless:url-updated URL 变化 */
   onUrlUpdated?: (cb: (url: string, sid: string) => void) => () => void
+  /** [fs-watch-v1] 订阅 files:changed（服务端 fs.watch 广播，全局帧无 sid） */
+  onFilesChanged?: (cb: (paths: string[]) => void) => () => void
+  /** [fs-watch-v1] 订阅 git:changed（.git/index / HEAD 变动） */
+  onGitChanged?: (cb: () => void) => () => void
   onNewSessionCreated: (cb: (url: string, id: string) => void) => () => void
   dispose: () => void
   /** [hardpause] 静音消息接收（暂停时不再接收油猴/AI 回包） */
@@ -144,6 +148,9 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   const newSidCbs = new Set<(url: string, id: string) => void>()
   // [headless-state-err-v1] 服务端 state 订阅（error 用于 UI 反馈）
   const stateCbs = new Set<(state: string, detail: string, sid: string) => void>()
+  // [fs-watch-v1] 全局帧（无 sid），与 headless:xxx 帧共享同一条 WS
+  const filesChangedCbs = new Set<(paths: string[]) => void>()
+  const gitChangedCbs = new Set<() => void>()
   // [stop-diag-v1] / [url-updated-v1] 与油猴同名帧对齐：诊断摘要与 URL 变化派发给 UI
   const stopDiagCbs = new Set<(count: number, brief: string, sid: string) => void>()
   const urlUpdatedCbs = new Set<(url: string, sid: string) => void>()
@@ -232,6 +239,15 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
         // [url-updated-v1] 与油猴 ai-runner:url-updated 对齐：会话 URL 变化派发给 UI
         for (const cb of urlUpdatedCbs) { try { cb(String((msg as Record<string, unknown>).url || ''), sid) } catch { /* swallow */ } }
       }
+      else if (msg.t === 'files:changed') {
+        // [fs-watch-v1] 服务端 fs.watch 广播；无 sid，直接派发路径数组
+        const paths = Array.isArray((msg as { paths?: unknown }).paths) ? (msg as { paths: unknown[] }).paths.map(String) : []
+        for (const cb of filesChangedCbs) { try { cb(paths) } catch { /* swallow: 单订阅者异常不阻断其他 */ } }
+      }
+      else if (msg.t === 'git:changed') {
+        // [fs-watch-v1] .git/index / HEAD 变动；无载荷
+        for (const cb of gitChangedCbs) { try { cb() } catch { /* swallow: 单订阅者异常不阻断其他 */ } }
+      }
       else if (msg.t === 'headless:reply') { for (const cb of replyCbs) cb(msg.reply, sid, replayed) }
       else if (msg.t === 'headless:script') { for (const cb of replyCbs) cb({ kind: 'script', item: msg.item }, sid, replayed) }
       else if (msg.t === 'headless:summary') { for (const cb of summaryCbs) cb(String(msg.text || ''), sid, Boolean(msg.degraded)) }
@@ -300,9 +316,11 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     onState(cb) { stateCbs.add(cb); return () => { stateCbs.delete(cb) } },
     onStopDiag(cb) { stopDiagCbs.add(cb); return () => { stopDiagCbs.delete(cb) } },
     onUrlUpdated(cb) { urlUpdatedCbs.add(cb); return () => { urlUpdatedCbs.delete(cb) } },
+    onFilesChanged(cb) { filesChangedCbs.add(cb); return () => { filesChangedCbs.delete(cb) } },
+    onGitChanged(cb) { gitChangedCbs.add(cb); return () => { gitChangedCbs.delete(cb) } },
     // [ws-reconnect-v1] disposed 阻断重连定时器；切换 transport 时旧连接彻底退役，不产生僵尸重连
     // [dispose-leak-v1] queue / ackWaiters 亦须清理：前者滞留字符串引用，后者悬挂 timer + Promise
-    dispose() { disposed = true; muted = false; clearReconnect(); try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; queue.length = 0; for (const w of ackWaiters) { clearTimeout(w.timer); w.resolve(false) } ackWaiters.length = 0; replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear() },
+    dispose() { disposed = true; muted = false; clearReconnect(); try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; queue.length = 0; for (const w of ackWaiters) { clearTimeout(w.timer); w.resolve(false) } ackWaiters.length = 0; replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear(); filesChangedCbs.clear(); gitChangedCbs.clear() },
     // [mute-flag-v1] 用 flag 静音；原实现清空回调集合不可恢复，unMute 后所有订阅者永久失联
     mute() { muted = true },
     unMute() { muted = false },

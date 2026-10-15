@@ -10,6 +10,7 @@
 - 让 AI 按规矩干活：[`packages/core/SYSTEM.md`](../packages/core/SYSTEM.md)（常驻规则，SSOT）
 - 打包后怎么跑：[`docs/USAGE.md`](USAGE.md)
 - 设计说明：[`docs/DESIGN.md`](DESIGN.md)
+- `docs/skills-guide.md`：PM-Agent / QA-Agent 技能使用指南——安装、触发、产物与续跑、排查（含源码与生成关系）。
 
 ## 根级入口
 
@@ -22,6 +23,8 @@
 - `docs/USAGE.md`：打包与部署指南。
 - `docs/DESIGN.md`：设计文档。
 - `docs/moneyprinter-turbo-port-plan.md`：MoneyPrinterTurbo 能力重写方案——五阶段视频生成流水线，剧本由 AI 生成脚本落盘、编排器读文件，ffmpeg 假设可用。
+- `docs/routes-registry.md`：`/__ai/*` HTTP 端点注册表——端点 → 语义 → 消费方 SSOT 导航；新增/改名端点必须同步登记。
+- `docs/workorder-docs-boundary-v3.md`：文档边界重构 v3 工单——SYSTEM.md / AGENTS.md 职责再划分的 7 步执行计划与进度。
 - `docs/plan/**`：计划草稿目录，被 `.gitignore` 忽略，不参与索引校验（`docs-scan.cjs` 的 `SKIP_PATHS` 显式豁免）。
 
 ## packages/
@@ -34,3 +37,12 @@
 
 - `apps/standalone/README.md`：宿主②——独立 Web 应用（Node HTTP server + bin）。
 - `apps/vite-plugin/README.md`：宿主①——Vite 插件形态。
+
+## skills/
+
+- `skills/pm-agent/SKILL.md`：PM-Agent 技能主文件（产品经理 Agent，仓库级产品分析）。
+- `skills/pm-agent/references/phases.md`：PM-Agent Phase 执行手册（§6–§8 按需加载）。
+- `skills/pm-agent/references/templates.md`：PM-Agent 知识库沉淀模板（§9 按需加载）。
+- `skills/qa-agent/SKILL.md`：QA-Agent 技能主文件（测试工程师 Agent，仓库级测试质量分析）。
+- `skills/qa-agent/references/phases.md`：QA-Agent Phase 执行手册（§6–§8 按需加载）。
+- `skills/qa-agent/references/templates.md`：QA-Agent 知识库沉淀模板（§9 按需加载）。

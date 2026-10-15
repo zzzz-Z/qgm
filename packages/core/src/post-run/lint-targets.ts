@@ -51,7 +51,7 @@ export const LINT_EXTS = new Set(['.ts', '.tsx', '.vue', '.js', '.jsx', '.mjs', 
  *   「packages 通配目录 / plan」路径）：它会**提前闭合块注释**，后半段注释被当成代码解析
  *   ⇒ `error TS2304: Cannot find name 'plan'`。2026-10-05 实测踩过一次。
  */
-const LINT_SKIP_SEGMENTS = new Set(['.ai-runner', 'node_modules', 'dist', 'coverage', 'test-results', 'playwright-report'])
+const LINT_SKIP_SEGMENTS = new Set(['.ai-runner', 'node_modules', 'dist', 'coverage', 'test-results', 'playwright-report', 'skills'])
 
 /**
  * 路径中是否含被跳过的目录段

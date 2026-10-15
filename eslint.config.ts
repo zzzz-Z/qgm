@@ -11,7 +11,7 @@ const config: Promise<Linter.Config[]> = antfu({
   // [lint-scope-v1] 排除运行态与产物目录
   // WHY: .ai-runner 下是 backup 源码副本 + 运行日志，dist/coverage 是构建产物；
   //   原先 `eslint .` 连它们一起 lint，error 数随运行态漂移，回归闸门失去可比性
-  ignores: ['.ai-runner/**', '**/dist/**', 'coverage/**', '**/playwright-report/**', '**/test-results/**'],
+  ignores: ['.ai-runner/**', '**/dist/**', 'coverage/**', '**/playwright-report/**', '**/test-results/**', 'skills/**'],
   rules: {
     // cjs
     'no-cond-assign': 'off',

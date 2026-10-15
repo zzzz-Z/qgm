@@ -42,7 +42,8 @@ function extractFnBody(src: string, name: string): string {
   let parenDepth = 0
   let sigEnd = -1
   for (let i = parenAt; i < src.length; i++) {
-    if (src[i] === '(') parenDepth++
+    if (src[i] === '(') { parenDepth++
+    }
     else if (src[i] === ')') { parenDepth--; if (parenDepth === 0) { sigEnd = i; break } }
   }
   assert.ok(sigEnd > 0, `${name} 函数签名不闭合`)
@@ -96,14 +97,16 @@ function makeDoc(opts: { msgs?: FakeMsgEl[], inputValue?: string | null, body?: 
   }
 }
 
-/** 编译出 verifyFillSentInPage 的**可执行**版本（源码即被测对象，改了源码这里立刻变红）。
+/**
+ * 编译出 verifyFillSentInPage 的**可执行**版本（源码即被测对象，改了源码这里立刻变红）。
  *  [site-adapter-v1] extractFnBody 返回 `(cfg = {}) { ... }`（从开括号开始，不含 function 关键字），
  *  所以 wrapper 拼成 `return function ${body}`。
- *  用字符串拼接而非模板字符串——body 内含正则字面量和 .source 属性，模板字符串会把 `` ` `` 和 `${` 当插值。 */
+ *  用字符串拼接而非模板字符串——body 内含正则字面量和 .source 属性，模板字符串会把 `` ` `` 和 `${` 当插值。
+ */
 function buildVerify(): (doc: FakeDoc, win: Record<string, unknown>) => VerifyResult {
   const body = extractFnBody(read(INJECT_SIMPLE), 'verifyFillSentInPage')
   // 用 vm 而非 new Function：被测源码当数据处理，编译产物拿不到本测试的闭包与宿主作用域
-  const wrapper = '(function (document, window) { return function ' + body + ' })'
+  const wrapper = `(function (document, window) { return function ${body} })`
   const factory = vm.runInNewContext(wrapper, {}) as (d: FakeDoc, w: Record<string, unknown>) => VerifyFn
   return (doc, win) => factory(doc, win)({}) as VerifyResult
 }

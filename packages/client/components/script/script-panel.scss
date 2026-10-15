@@ -178,3 +178,27 @@
   font-size: 13px;
   color: var(--text-2);
 }
+
+/* [status-bar-v1] 执行状态条：ScriptPanel 的 statusText / statusClass / runningElapsed 渲染出口。
+   v-show 控制显隐（有 statusText 或 runningElapsed 时出现）；:class 上色 ok/err。 */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  background: var(--surface-1);
+  flex-shrink: 0;
+}
+.status-bar.ok {
+  color: var(--success);
+}
+.status-bar.err {
+  color: var(--danger, var(--error, #e53e3e));
+}
+.status-bar .status-elapsed {
+  color: var(--text-3, var(--text-2));
+  font-variant-numeric: tabular-nums;
+}

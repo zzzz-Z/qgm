@@ -1,6 +1,6 @@
 # 多工作区方案（计划）
 
-- **性质**：应用端提案（待宿主 / 用户拍板），**未开工**。
+- **性质**：应用端提案（已实施）。**已实施（2026-10-15 复核）**：核心链路全部上线——注册表（config.ts）、/run 带 workspaceId、ALS root 作用域（workspace-scope.ts）、左栏工作区列表（AiWindowList.vue + useWorkspaces.ts）。本文件保留为决策与设计依据，实现见 workspace-scope.ts 及各消费点。
 - **实施状态（2026-10-11 更新）**：用户已拍板，分支 `feat/multi-workspace` 已落地
   **阶段 1 全部 + 阶段 2 核心链路**：工作区注册表（config.ts，幂等入册 / 激活 / 拒移活跃项）、
   `/run` 带 `workspaceId`（缺省活跃项，未知 id 404）、ALS root 作用域（`workspace-scope.ts`，

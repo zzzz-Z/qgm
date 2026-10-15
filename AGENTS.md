@@ -57,21 +57,24 @@ docs/              USAGE.md / DOCS-INDEX.md / DESIGN.md
   - 豁免：`vite.config.ts` / `uno.config.ts` 属构建配置。
   - 强制：宿主专属入口（`apps/standalone/src/server.ts` 等，含 `listen` / `createServer` 的装配代码）必须留在 `apps/`，不得回流 `packages/core`。
 
+## 宿主机制实现索引
+
+> SYSTEM.md §0.1 列宿主机制**语义**与「未运行时等效行为」（SSOT 在彼处）；本表只承载**实现文件对照**，源码改名时改这里、不改 SYSTEM.md。
+
+- `retained-done-gate v1`：`packages/client/composables/ai/useAiReplyHandlers.ts`
+- `selfcheck-l2 v1`：`packages/core/src/routes/selfcheck.ts` + `packages/core/src/selfcheck/fullgate.ts`
+- `overlay-atomic v1`：`packages/core/src/post-run/overlay.ts` + `packages/core/src/interceptor.cjs`
+- `skills-install v1`：`packages/core/src/skills/installer.ts`
+- `lang-whitelist v3`：`packages/core/src/headless/headless-inject.ts`（采集侧）+ `scripts/tampermonkey-session-id.user.js`（油猴同构）
+- `verify-contract v1`：`packages/core/src/post-run/run-compliance.ts`
+- `verify-target-binding v1`：`packages/core/src/headless/discover-targets.ts` + `packages/core/src/headless/smoke.ts` + `packages/core/src/routes/selfcheck.ts` + `packages/core/src/post-run/run-compliance.ts`
+- `ai-guard-tokenize v2`：`packages/core/src/post-run/ai-guard.ts`
+
 ## 自动循环子系统已退役（loop-consolidation P3e）
 
-`packages/client/composables/ai/auto-loop/` 目录与 `loopLogic.ts` **已整体删除**（含 LOOP_HARD_MAX_ROUNDS / LOOP_HARD_MAX_MS / PLAIN_STREAK_MAX 等常量，均为**历史名称、现已不存在**）。由 `packages/client/tests/loop-single-path.node-test.ts` 的 `PHASE_VALUE === 'B'` 判据承重——该文件断言 `auto-loop/` 目录不存在、`start-family.ts` 不存在，且全仓零 `startLoop` / `startTakeover` 调用点。
+`packages/client/composables/ai/auto-loop/` 与 `loopLogic.ts` **已整体删除，禁止据 git 历史恢复**（考古用 `git log -S startLoop --all`）。守卫：`packages/client/tests/loop-single-path.node-test.ts`（`PHASE_VALUE === 'B'`，断言目录不存在 + 全仓零调用点）。
 
-**当前形态（单路径）**：脚本到达 → `useAiReplyHandlers.ts` 分流 → `runner.run({ autoFeedback: true })`。**没有循环计数、没有硬轮上限、没有 `finish(inst, ...)` 终止**；一次脚本执行完即结束本轮，等待下一次 AI 回复。
-
-**仍生效的三条闸门**（详见 `SYSTEM.md` §0.1 与 §8）：
-
-- `retained-done-gate v1`（`useAiReplyHandlers.ts`）：非循环路径 DONE 接入 `BeforeDoneFinal` 自检 + 看板清桶；reject 仅 toast 告警，不阻断。
-- `stopped-no-autorun-v1` / `refresh-no-autorun-v1` / `dedup`（同文件）：脚本到达时的四条旁路守卫——stopped 窗口内不自动执行、刷新冷静期内不自动执行、同 hash 去重不重复入队、rescan 标记不执行。
-- `loopPaused`（`useAiWaiting.ts`）：模块级暂停标志，非循环路径发送前检查。
-
-**自动接管**仍存在（`useAutoTakeover.ts`），语义已收敛为「脚本到达即立即执行」，不再有 3-10s 随机延迟。
-
-> **状态机定义**（各状态的触发条件与输出格式）见 `packages/core/SYSTEM.md` §1；**熔断处置**见 §8。终止路径现为三条：`DONE` / `ASK` / 熔断冻结（`metaerror-fuse-v1`）。
+**当前形态（单路径）**：脚本到达 → `useAiReplyHandlers.ts` 分流 → `runner.run({ autoFeedback: true })`。无循环计数、无硬轮上限、无 `finish(inst, ...)` 终止。仍生效的三条闸门（`retained-done-gate` / `stopped·refresh·dedup` 守卫 / `loopPaused`）语义见 `SYSTEM.md` §0.1 与 §8。
 
 ## 常用命令
 
@@ -141,7 +144,18 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 
 ### 技能库
 
-- **目录**：`.ai-runner/skills/<name>/SKILL.md`（frontmatter 含 `name` + `description`）。
+- **目录（运行位）**：`.ai-runner/skills/<name>/SKILL.md`（frontmatter 含 `name` + `description`）。**`GET /__ai/skills` 只扫这里**——磁盘是「已装清单」的唯一事实来源。
+
+### 技能目录双层约定（skills-dual-layer-v1）
+
+- **源码位**：`skills/<name>/`（仓库根，入库、随 git 共享，供 review）。
+- **运行位**：`.ai-runner/skills/<name>/`（gitignore，宿主扫描的目录）。
+- **同步机制**：两者都是**生成物**，SSOT 是生成器脚本（`qa-agent-generate.cjs` 等）中的内容块；编辑只发生在那份脚本里，两处由重跑生成：
+  - 源码位：`node qa-agent-generate.cjs . --force --split`
+  - 运行位：`node qa-agent-generate.cjs .ai-runner --force --split`
+- **验证**：`curl -sS http://127.0.0.1:5175/__ai/skills` 能列出该技能即安装成功——**不看生成脚本 exit code**。
+- **判据**：运行位为空 = 宿主看不到 = `@` 选择器与 `/skills/match` 都命中不了（已实测：根 `skills/pm-agent`、`skills/qa-agent` 不在 `/__ai/skills` 返回列表中）。
+- **已知遗留**：`pm-agent-generate.cjs` 已删除，`skills/pm-agent/` 目前是唯一 SSOT（无生成器可重跑）。重生成前需恢复脚本，或与 QA 合并为单一 `agent-skills-generate.cjs`。
 - **已装清单唯一事实来源是磁盘**：`GET /__ai/skills` 扫前 64 行返回元数据；`.registry.json` 只是来源标注（服务端 `reconcileRegistry` 自动收敛，不手工编辑）。
 - **检索**：`POST /__ai/skills/match`（BM25，按任务文本）。消费方 `skill-registry.ts`。
 - **入口**：输入框 `@` 选择器（`file-picker.ts`，`@skill/<name>`）；该串不自动展开正文，由 AI 按需 `loadSkill`。
@@ -158,150 +172,39 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 
 ## 本项目独有约束
 
-这几条都是踩过坑后固化的，SYSTEM.md 里没有：
+这几条都是踩过坑后固化的，SYSTEM.md 里没有。按域分组，新增条目归入对应域。
 
-- **批量改文件前先落兜底，顺序固定为「git 优先」**：`pnpm git:archive -- --path <目标>`。
-  有 git → 用临时索引存档到 `ai-archive` 分支（`git checkout ai-archive -- <path>` 取回）；
-  非 git / 空仓库 → 自动改落 `.ai-runner/runs/archive-<ts>/`（`pnpm recover <runId>` 取回）。
-  **不要再手写 tar 到 `.ai-runner/backup`**——那是两路都缺位时的遗留做法。
-  AI 自动改动一律不进当前分支（方案 C），主分支只在用户显式 commit 时前进。
-- **auto-import 会掩盖导入错误**：`unplugin-auto-import` 覆盖 vue / `@vueuse/core`
-  及项目内 composables 与 utils（生成物 `auto-imports.d.ts`，条目数随代码增长）。依赖它的显式 import
-  被删后 **app 仍能跑**，但 vitest 与 `tsc` 没有该插件 → `Cannot find name`。
-  故清理「未使用导入」前必须先确认该模块能在 vitest 下裸跑；
-  **任何导入改动后必跑 `pnpm test:tsc`**。
-- **内联常量必须同构**：headless 注入函数经 `page.evaluate` 序列化后在浏览器执行，
-  不能引用模块级常量，所以同一份正则刻意多写一份。改一处必须全处同步：
-  - 会话触顶正则 3 处：`headless-inject.ts`（探测）、`headless-inject-simple.ts`（fill/rotate 记基线）、
-    `scripts/tampermonkey-session-id.user.js`（`countLimitMarkers`），由 `packages/core/tests/limit-marker-guard.node-test.ts` 守卫；
-  - 发送频控正则 3 处：`headless-inject.ts`（回复探测）、`headless-inject-simple.ts`
-    （`verifyFillSentInPage` 拒收判定 + `resetReplyDedupInPage` 基线），由 `packages/core/tests/rate-marker-guard.node-test.ts` 守卫。
-- **`.gitignore` 就是 eslint 的忽略清单**：`@antfu/eslint-config` 默认把 `.gitignore` 读进 `ignores`
-  （`eslint.config.ts` 里的显式 `ignores` 只是其中一层）⇒ 把一个文件从 gitignore 覆盖区**移出**，
-  等于同时把它拉进 `pnpm lint`。2026-10-05 对照实测：同一份未对齐表格的 md，放 `docs/plan/`
-  → `File ignored because of a matching ignore pattern`、exit 0；放 `docs/` 根 → 3 个
-  `format/prettier` error、exit 1。**跨区搬运后必须补 `npx eslint <file> --fix`。**
-- **`eslint --fix` 会重写正则**（`regexp/no-useless-non-capturing-group` 删冗余非捕获组），
-  fix 之后必须重跑上述三处一致性对比再提交。
-- **审查类文档的两条硬约束 + 一条收尾动作**：这类文档同样过 `format/prettier` 与 TS 解析，
-  但 `eslint.config.ts` 的 `[review-doc-exempt-v1]` **只关 `no-unused-vars`**，管不了另两类。
-  适用面是 `eslint.config.ts` 里的**两条** glob（大小写三态各写一遍，因 minimatch 大小写敏感）：
-  `docs/**/*{REVIEW,Review,review}*.md` 与 `docs/**/*{AUDIT,Audit,audit}*.md`。
-  - **节选/伪代码必须用 `text` 围栏**：标 `ts` 的块会被当**真实可解析的 TS** 解析，`{ ... }` 省略号、顶层裸对象字面量直接报 parsing error 卡红 `pnpm lint`/`pnpm verify`。只有能独立编译的示例才写 `ts`。
-  - **别用 markdown 表格，用列表**：prettier 要求每列按显示宽度补齐 ⇒ 手写 `| a | b |` 几乎必然报 `Replace … format/prettier`（实测单篇 13 error）。要矩阵对比用「每项一行 + `：`」。
-  - **交付前必跑 `npx eslint <file> --fix`**（本仓库反复复发：2026-10-05 两小时内两次，写入方都是并行 AI）。
+### 构建与工具链
 
-- **模板里不要对 auto-import 符号赋值**：会生成 `__unimport_xxx`，
-  dev 不报错但 build 阶段抛 `Cannot assign to this expression`。需要可变就显式 import。
-- **`scripts/anchors.json` 的 `file` 必须是相对仓库根的完整路径**：校验器只做
-  `path.join(ROOT, file)`，没有 base 解析。写成 `client/App.vue` 这类短路径会直接 MISS
-  （历史上曾一次 44 条同时失败）。新增锚点前先跑 `pnpm session:start` 确认全绿。
-  **反向同样会 MISS**：删除/改名「被锚点引用的字串」同样红，而**全量 vitest 不覆盖锚点**
-  （`anchors:verify` 是独立闸门）⇒ 交付前单跑 `pnpm anchors:verify` 或 `pnpm session:start`；
-  vitest 全绿 ≠ preflight 全绿（实测 2026-10-06：删 `useAppStartup.ts` 的 `ai-runner:request-replay`
-  后仍报 1380 passed，但锚点 2 条 MISS）。
-- **pm2 重启的授权例外**（`instance-ownership-v1` 的边界；默认禁则见 `SYSTEM.md` §1）：
-  用户显式授权时应用端可代执行 `pm2 restart`，须满足两条 ——
-  ① 授权来源可指（用户原话或工单明文），② 当轮回执如实记录（执行时刻 + 授权来源）。
-  未获授权时不自行发起，只写「产物已更新，请宿主侧重启」。
-- **派给应用端（工作台里的 AI）的工单必须落 `docs/` 根并登记 `docs/DOCS-INDEX.md`**：
-  `scripts/lib/docs-scan.cjs` 的 `SKIP_PATHS` 显式豁免 `docs/plan/**` —— 放在那里的工单
-  不进文档索引，应用端开箱看不到。草稿可留 `docs/plan/`，**派发前移到 `docs/`**；
-  移入后 `pnpm docs:verify` 会双向守（实测把索引里的工单名改掉 → 报「悬空链接 + 未收录」exit 2）。
-- **新增 / 改名 `/__ai/*` HTTP 端点必须在本节登记**（`routes-registry-v1`）：SYSTEM.md §3.2 只教
-  `__AI__.*` 沙箱方法；**`/__ai/*` 路由没有跨文件的注册清单** —— SYSTEM.md 只在 §11/§16 顺带提及
-  本仓用到的少数端点（`/__ai/skills/match` 等），没有「端点 → 消费者 → 契约文件」的完整表
-  ⇒ 新端点加完只有前端知道，工作台 AI 无从知晓。
-  约定：端点增删改时在本列表同步一行。
-  - 已登记 **`POST /__ai/vcs/log`** —— **只读**、与 VCS 类型无关的入口：读提交历史 + 每次提交
-    涉及的路径（现支持 SVN）。**非 svn 仓库返 200 + `ok:false`（那是正常探测结果，勿当故障）**；
-    确属 svn 但读历史失败才 400。存在理由：`/git/worklog`、`/git/diff` 整链路以 `gitAvailable()`
-    为前提，非 git 下直接 400 ⇒ SVN 工作副本拿不到任何历史。字段与实现以
-    `packages/core/src/vcs.ts` 为 SSOT（本表不重抄）；消费方 `WorklogPane.vue`；
-    prod 端口恒 5175（dev 侧走 5274 代理 `/__ai/*`）。
-  - 已登记 **`POST /__ai/vcs/commit`**（vcs-svn-commit-v1）—— **写操作**，把工作副本的本地
-    改动提交到 SVN 仓库。**非 svn 工作副本返 200 + `ok:false`（正常探测结果，与 `/vcs/log` 同口径）**；
-    确属 svn 但提交失败才 400。body `{message: string, paths?: string[]}`（message 上限 4000 字符，
-    paths 缺省即提交 ROOT 下全部改动）。无变更时归一化为 `ok:true, revision:null`（幂等）；
-    路径白名单拒绝对路径与 `..` 穿越。字段与实现以 `packages/core/src/vcs.ts` 的 `svnCommit` 为 SSOT；
-    消费方 `WorklogPane.vue`（SVN 段提交输入框 + 提交按钮）。路由定义：`routes/vcs.ts`。
-  - 已登记 **`POST /__ai/vcs/revert`**（vcs-svn-revert-v1）—— **写操作**，撤销 SVN 工作副本的
-    本地改动（丢弃未提交的修改，等价于 `svn revert`）。**非 svn 工作副本返 200 + `ok:false`**（正常探测结果，
-    与 /vcs/log、/vcs/commit、/vcs/diff 同口径）；确属 svn 但撤销失败才 400。body `{paths?: string[]}`
-    （空/缺省 = 撤销整个工作副本）。返回 `{ok, reverted: string[]}`。路径白名单拒绝对路径与 `..` 穿越。
-    SSOT：`packages/core/src/vcs.ts` 的 `svnRevert`；消费方 `WorklogPane.vue`（SVN 变更列表行级/全部撤销）。
-    路由定义：`routes/vcs.ts`。
-  - 已登记 **`POST /__ai/vcs/diff`**（vcs-svn-diff-v1）—— **只读**，读 SVN 工作区改动
-    （文件清单 + unified diff），供生成 commit message 使用。**非 svn 工作副本返 200 + `ok:false`
-    （正常探测结果，与 `/vcs/log`、`/vcs/commit` 同口径）**；确属 svn 但读改动失败才 400。
-    空工作区（无改动）返 `ok:true` + 空 `files`/`diff`。body `{paths?: string[]}`（缺省即整个工作副本）；
-    diff 用 `svn diff --git` 取扩展格式（默认格式对新增文件是空 hunk），正文按 400KB 截断并显式标注。
-    字段与实现以 `packages/core/src/vcs.ts` 的 `svnDiff` 为 SSOT；消费方 `WorklogPane.vue`
-    （SVN 段「生成 commit message」按钮）。路由定义：`routes/vcs.ts`。
-  - 已登记 **`GET /__ai/skills`** —— **只读**，扫描 `.ai-runner/skills/*/SKILL.md` 的 frontmatter
-    （前 64 行）返回元数据列表 `{ok, skills:[{name, description, keywords?, path}], registry}`；
-    **磁盘是「已装清单」的唯一事实来源**，registry 只是来源标注（由 `reconcileRegistry` 在读路径上
-    收敛到磁盘，幂等、集合无变化时不落盘）。**目录缺失或读取失败一律返回空数组，不返回 4xx** ——
-    首问与 `@` 选择器都不应因技能目录异常而中断。字段与实现以 `packages/core/src/routes/skills.ts`
-    为 SSOT（本表不重抄）；消费方 `file-picker.ts`（`@` 选择器技能源）。
-  - 已登记 **`POST /__ai/skills/match`** —— **只读**，按任务文本做 BM25 检索，返回命中技能元数据 +
-    正文截断（`BODY_MAX_LINES`/`BODY_MAX_CHARS`/`TOTAL_MAX_CHARS` 三常量共同决定注入体积）。
-    消费方 `skill-registry.ts`；**自 `first-prompt-rules-v2` 起首问不再自动调用它**（见下条）。
-  - 已登记 **`GET /__ai/workspace/registry`**（multi-workspace-v1）—— **只读**，返回工作区注册表
-    `{ok, workspaces:[{id, root, label, addedAt}], activeId}`。注册表内存权威态在
-    `packages/core/src/config.ts`（`loadWorkspaceRegistry` 启动恢复，落盘 ~/.ai-runner/workspace.json，
-    旧格式 `{root}` 自动迁移）；消费方 `useWorkspaces.ts` → `AiWindowList.vue`（左栏工作区列表）。
-  - 已登记 **`POST /__ai/workspace/register`** —— body `{path, activate?}`：把已有目录入册（幂等，
-    id 由路径派生）；`activate:true` 同时激活。旧入口 `/workspace/select`、`/workspace/pick`
-    现在也会自动入册并激活。SSOT 同上 `config.ts`。
-  - 已登记 **`POST /__ai/workspace/activate`** —— body `{id}`：切活跃工作区（= setRoot 切执行 root）；
-    未 id 返回 404。消费方 `useWorkspaces.ts`（激活成功后整页 reload，与 WorkspaceGuide 同约定）。
-  - 已登记 **`POST /__ai/workspace/remove`** —— body `{id}`：出册；**活跃工作区拒移（409）**防悬空 activeId。
-  - 已登记 **`POST /__ai/workspace/create`**（multi-workspace-create-v1）—— body `{mode, path, branch?, url?, baseRepo?, activate?}`：
-    新建工作区三种模式——`worktree`（`git worktree add -b <branch> <path>`，同仓库切新分支共享 .git）、
-    `clone`（`git clone <url> <path>`，独立仓库）；`register` 模式要求路径已存在（走 `/workspace/register`）。
-    目标路径已存在返 400；成功后自动入册（activate=true 时 setRoot + persist）。SSOT：`routes/workspace.ts`。
-  - 已登记 **`POST /__ai/git/discard`**（git-discard-v1）—— 丢弃指定路径的工作区改动
-    （VSCode「放弃更改」语义）：已跟踪走 `git restore --worktree`，未跟踪走 `git clean -f` 删除。
-    **只动工作区，不动索引/HEAD**；已暂存的改动须先 `/git/unstage` 才会被本端点丢弃。
-    body `{paths: string[]}`；路径白名单拒绝对路径与 `..` 穿越。SSOT：`packages/core/src/git.ts` 的 `gitDiscard`；
-    消费方 `WorklogPane.vue`（未暂存栏行级撤销 + 分组头「全部放弃」）。路由定义：`routes/git.ts`。
-  - 已登记 **`/__ai/video/*`**（video 域）—— 视频合成任务链：`POST /video/tasks`（建任务）、
-    `GET /video/tasks`（列任务）、`GET|DELETE /video/tasks/:id`、`POST /video/tasks/:id/script|terms`、
-    `GET /video/tasks/:id/download`、`GET|PUT /video/config`、`GET|POST /video/musics`、
-    `GET|POST /video/materials`、`POST /video/scripts`。SSOT：`packages/core/src/routes/video.ts`
-    （本表不重抄字段）；消费方 `VideoGenerationPanel.vue`（视频面板）。
-  - 已登记 **`POST /__ai/run`**（既有端点增补）—— body 新增 `workspaceId?`：目标工作区缺省用活跃项；
-    注册表外 id 返 404。执行链包在 `workspace-scope.ts` 的 ALS 作用域里，脚本 cwd / overlay /
-    post-run tsc·lint / 快照 / 日志按目标工作区 root 解析（并发运行互不串台）；
-    summary 帧新增 `workspaceId` 字段。SSOT：`routes/run.ts` + `workspace-scope.ts`。
+- **批量改文件前先落兜底，顺序固定为「git 优先」**：`pnpm git:archive -- --path <目标>`。有 git → 用临时索引存档到 `ai-archive` 分支（`git checkout ai-archive -- <path>` 取回）；非 git / 空仓库 → 自动改落 `.ai-runner/runs/archive-<ts>/`（`pnpm recover <runId>` 取回）。**不要再手写 tar 到 `.ai-runner/backup`**——那是两路都缺位时的遗留做法。AI 自动改动一律不进当前分支（方案 C），主分支只在用户显式 commit 时前进。
+- **auto-import 会掩盖导入错误**：`unplugin-auto-import` 覆盖 vue / `@vueuse/core` 及项目内 composables 与 utils（生成物 `auto-imports.d.ts`）。依赖它的显式 import 被删后 **app 仍能跑**，但 vitest 与 `tsc` 没有该插件 → `Cannot find name`。清理「未使用导入」前必须先确认该模块能在 vitest 下裸跑；**任何导入改动后必跑 `pnpm test:tsc`**。
+- **模板里不要对 auto-import 符号赋值**：会生成 `__unimport_xxx`，dev 不报错但 build 阶段抛 `Cannot assign to this expression`。需要可变就显式 import。
+- **内联常量必须同构**：headless 注入函数经 `page.evaluate` 序列化后在浏览器执行，不能引用模块级常量，所以同一份正则刻意多写一份。会话触顶正则 3 处（`headless-inject.ts` / `headless-inject-simple.ts` / `scripts/tampermonkey-session-id.user.js`，`limit-marker-guard` 守卫）；发送频控正则 3 处（同前两者 + `resetReplyDedupInPage` 基线，`rate-marker-guard` 守卫）。改一处必须全处同步。
+- **`.gitignore` 就是 eslint 的忽略清单**：`@antfu/eslint-config` 默认把 `.gitignore` 读进 ignores ⇒ 把文件从 gitignore 覆盖区**移出**等于同时拉进 lint（实测同一份 md 放 `docs/plan/` exit 0、放 `docs/` 根 3 error exit 1）。**跨区搬运后必须补 `npx eslint <file> --fix`**。
+- **`eslint --fix` 会重写正则**（删冗余非捕获组）：fix 之后必须重跑上述三处一致性对比再提交。
 
-- **端口是契约，不再有端口文件**（`[port-contract-v1]`，取代已废除的 `[port-drift-file-v1]`）：
-  dev 前端 5274 / 后端 5275（`[dev-port-isolation-v1]`，与 prod 隔离避免抢端口）、prod 恒 5175、
-  userscript 分发 5178（与 `userscript.ts` 的 `SERVE_PORT` 一致，改端口两处同步）。
-  `apps/standalone/src/server.ts` 遇 EADDRINUSE **拒绝自动漂移**（报错并给出处置命令），
-  也不再落 `.ai-runner/.server-port` 端口文件。`pnpm test:e2e` 报 `ECONNREFUSED 127.0.0.1:5274/5275`
-  时先确认 dev 进程是否真的在跑（`lsof -nP -iTCP:5275 -sTCP:LISTEN`），别去找端口文件；
-  prod 探活仍是 `curl 5175` 或 `pm2 jlist`。
-- **代执行 `pm2 restart` 的当轮脚本会返回 `Failed to fetch` 属预期**（实例重启导致 HTTP 通道瞬断）；
-  下一轮探活（`curl 5175`）即恢复，重试须**跨轮**，不得在原轮判定为失败。
+### 文档与规范
 
-- **改 `scripts/tampermonkey-session-id.user.js` 必须同步升 `@version`**（`[userscript-version-bump-v1]`）：
-  Tampermonkey 靠 `@version` 判定「服务端有没有新版本」，**内容改了但版本号不变 ⇒ 更新链路形同虚设**，
-  且无任何报错（用户以为更新过、实际跑的还是旧代码）。分发端点（`http://127.0.0.1:5178/tampermonkey-session-id.user.js`）
-  每次请求都重读磁盘、内容天然最新——**唯一的闸门就是 `@version`**。
-  实测指纹：`curl -sS http://127.0.0.1:5175/__ai/userscript/info` 返回 `version` 字段即当前磁盘版本。
+- **审查类文档两条硬约束 + 一条收尾动作**（`review-doc-exempt-v1` 只关 `no-unused-vars`，管不了另两类；适用面以 `eslint.config.ts` 的 glob 为 SSOT——文件名含 REVIEW/AUDIT 大小写三态，minimatch 大小写敏感）：① 节选/伪代码必须用 `text` 围栏——标 `ts` 的块会被当真实 TS 解析，`{ ... }` 省略号直接 parsing error 卡红 lint，只有能独立编译的示例才写 `ts`；② 别用 markdown 表格，用列表——prettier 要求每列按显示宽度补齐，手写表格几乎必报 format/prettier（实测单篇 13 error），要矩阵对比用「每项一行 + `：`」；③ **交付前必跑 `npx eslint <file> --fix`**（本仓反复复发，写入方都是并行 AI）。
+- **派给应用端（工作台里的 AI）的工单必须落 `docs/` 根并登记 `docs/DOCS-INDEX.md`**：`scripts/lib/docs-scan.cjs` 的 SKIP_PATHS 显式豁免 `docs/plan/` 子树——放那里的工单不进文档索引，应用端开箱看不到。草稿可留 `docs/plan/`，**派发前移到 `docs/`**；移入后 `pnpm docs:verify` 双向守。
+- **提优化建议 / 改 SSOT 前先读裁决单**（`read-verdict-first-v1`）：防「陈旧上下文产出」——同一批建议被以不同形式重提且不引用已有裁决（实测同一批建议两小时内各提一次）。必做两步：① `git diff -w`（写 md 会被格式化器重排整份 diff）；② 考古已裁决项：`git log --oneline --all -- docs/` 与 `git log -S <关键词> --all`，不重提、不改已驳回方案。
 
-- **提优化建议 / 改 SSOT 前先读裁决单**（`[read-verdict-first-v1]`）：本仓库反复出现
-  「陈旧上下文产出」——同一批建议被以不同形式重提，且不引用已有的裁决单（实测：同一批
-  SYSTEM.md 建议在 13:xx 与 15:xx 各提一次，全文未引用 `workorder-app-system-md-review-verdict`）。
-  提建议前必做两步：① `git diff -w`（本工作区写 md 会被格式化器重排整份 diff，不加 `-w`
-  无法看清真实改动）；② 检索历史裁决——docs/ 下的裁决单文档已清理（曾存
-  `docs/workorder-app-*-verdict-*.md` 等，2026-10 全量归档后删除），改用
-  `git log --oneline --all -- docs/` 与 `git log -S <关键词> --all` 考古已裁决/已驳回的项，
-  不重提、不改已驳回方案。
+### 端点与集成
 
-- **思考与脚本共享单轮输出预算**（`token-budget-v1`）：截断根因不是脚本太长，而是思考（T）与脚本（S）共占同一份输出预算（B）——`T + S ≤ B`。行数不是判据，token 才是（实测：89 行通过、20 行截断，差别全在当轮思考量）。详细规则见 `SYSTEM.md` §10。
+- **新增 / 改名 `/__ai/*` HTTP 端点必须登记 [`docs/routes-registry.md`](./docs/routes-registry.md)**（routes-registry-v1）：`/__ai/*` 路由没有跨文件注册清单，SYSTEM.md 只教沙箱方法——新端点加完只有前端知道，工作台 AI 无从知晓。
+- **通用语义**：vcs 族端点对非 svn 工作副本返 `200 + ok:false`——正常探测结果，勿当故障。
+- 完整清单（vcs×4 / skills×2 / workspace×5 / git discard / video 域 / run 增补）见注册表，本表不重抄。
+- **改 `scripts/tampermonkey-session-id.user.js` 必须同步升 `@version`**（userscript-version-bump-v1）：Tampermonkey 靠 `@version` 判更新，**内容改了版本号不变 ⇒ 更新链路形同虚设且无任何报错**。分发端点每次请求重读磁盘，唯一闸门就是 `@version`。指纹：`curl -sS http://127.0.0.1:5175/__ai/userscript/info` 的 `version` 字段。
+
+### 运维与运行时
+
+- **`scripts/anchors.json` 的 `file` 必须是相对仓库根的完整路径**：校验器只做 `path.join(ROOT, file)`，短路径直接 MISS（曾一次 44 条同时失败）。**全量 vitest 不覆盖锚点**（`anchors:verify` 是独立闸门）⇒ 交付前单跑 `pnpm anchors:verify` 或 `pnpm session:start`；vitest 全绿 ≠ preflight 全绿（实测删被锚点引用字串后 1380 passed 仍 2 条 MISS）。
+- **端口是契约，不再有端口文件**（port-contract-v1）：dev 前端 5274 / 后端 5275（dev-port-isolation-v1）、prod 恒 5175、userscript 分发 5178。`apps/standalone/src/server.ts` 遇 EADDRINUSE **拒绝自动漂移**（报错并给出处置命令），不落端口文件。`pnpm test:e2e` 报 ECONNREFUSED 时先确认 dev 进程是否真的在跑（`lsof -nP -iTCP:5275 -sTCP:LISTEN`），别去找端口文件；prod 探活 `curl 5175` 或 `pm2 jlist`。
+- **pm2 重启的授权例外**（instance-ownership-v1 边界）：用户显式授权时代执行 `pm2 restart` 须满足①授权来源可指②当轮回执如实记录（执行时刻 + 授权来源）；未获授权只写「产物已更新，请宿主侧重启」。**代执行当轮 `Failed to fetch` 属预期**（实例重启通道瞬断），下一轮探活即恢复，重试须**跨轮**。
+
+### 输出与预算
+
+- **思考与脚本共享单轮输出预算**（token-budget-v1）：T + S ≤ B，行数不是判据、token 才是（实测 89 行通过、20 行截断，差别全在当轮思考量）。详见 SYSTEM.md §10。
 
 ## 详见
 

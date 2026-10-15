@@ -434,6 +434,18 @@ function onHtmlDrop(e: DragEvent) {
       ref="mainRef" class="flex flex-col pane-main flex-1 min-w-0 overflow-hidden" :class="{ 'is-success': fileSuccess }"
       @dragover="onHtmlDragOver" @drop="onHtmlDrop"
     >
+      <!-- [status-bar-v1] 执行状态条：statusText / statusClass / runningElapsed 的渲染出口。
+           三个 ref 此前只有赋值、零渲染出口（script-panel-guards 守：防只写不读的死状态）。
+           视觉上仅在「有状态文本或运行中」时出现，通过 :class 上色（ok/err），无状态时 v-show 隐藏。 -->
+      <div
+        v-show="statusText || runningElapsed"
+        class="status-bar"
+        :class="statusClass"
+        aria-live="polite"
+      >
+        <span class="status-text">{{ statusText }}</span>
+        <span v-if="runningElapsed" class="status-elapsed">{{ runningElapsed }}</span>
+      </div>
       <!-- 终端 (上方) -->
       <TerminalPane
         :running="running"

@@ -6,6 +6,8 @@ import { useWorklogSvn } from './worklog-svn'
 import { useToast } from '../../composables/ui/useToast'
 // [workspace-epoch-v1] 显式 import：watch(workspaceEpoch) 在 vitest 下无 auto-import 兜底
 import { useWorkspaces } from '../../composables/data/useWorkspaces'
+// [fs-watch-v1] git:changed 订阅：改盘即刷新（仅当面板激活）
+import { useAiTransport } from '../../composables/ai/useAiTransport'
 import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
 
 // @desc VSCode 源码管理风格侧栏：提交框 + 变更文件列表 + 点击预览文件内容
@@ -195,6 +197,14 @@ watch(workspaceEpoch, () => {
   result.value = null
   error.value = ''
 })
+
+// [fs-watch-v1] 服务端 fs.watch 检测到 .git/index / HEAD 变动时广播 git:changed；
+// 面板未激活不预拉——切回 active 会走 watch(() => props.active) 的 load 分支。
+const { transport } = useAiTransport()
+const offGitChanged = transport.onGitChanged?.(() => {
+  if (props.active) void load()
+})
+onUnmounted(() => { offGitChanged?.() })
 
 onMounted(() => {
   try {

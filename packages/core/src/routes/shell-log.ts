@@ -31,10 +31,10 @@ const _require = createRequire(import.meta.url)
 /** 加载执行族模块；失败返回 null（路由降级为 503，不阻断服务） */
 function loadShellApi(): ShellLogApi | null {
   try {
-    return _require('../helpers-shell.cjs') as ShellLogApi
+    return _require('../helpers/shell.cjs') as ShellLogApi
   } catch {
     try {
-      return _require(`${getRoot()}/packages/core/dist/helpers-shell.cjs`) as ShellLogApi
+      return _require(`${getRoot()}/packages/core/dist/helpers/shell.cjs`) as ShellLogApi
     } catch {
       return null
     }
@@ -46,7 +46,7 @@ const shellApi = loadShellApi()
 export const shellLogHono = new Hono()
 
 shellLogHono.get('/shell-log', (c) => {
-  if (!shellApi) return c.json({ ok: false, error: 'helpers-shell.cjs 未加载（运行时文件缺失）' }, 503)
+  if (!shellApi) return c.json({ ok: false, error: 'helpers/shell.cjs 未加载（运行时文件缺失）' }, 503)
   const q = c.req.query()
   const id = String(q.id || '').trim()
   if (!id) return c.json({ ok: false, error: 'missing id' }, 400)

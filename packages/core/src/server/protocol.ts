@@ -88,3 +88,7 @@ export type ServerMessage
     | { t: 'headless:fill-ack', sid: string, ok: boolean, reason: string }
     // [url-updated-v1] 与油猴 ai-runner:url-updated 对齐：发送后轮询 URL 变化（最多 8s）
     | { t: 'headless:url-updated', sid: string, url: string }
+    // [fs-watch-v1] 文件树 / git 状态变化广播：由 server/fs-watch.ts 的 recursive watcher 触发；
+    // 不带 sid（全局事件，不进 replay 缓冲）——客户端按当前展开目录做增量刷新。
+    | { t: 'files:changed', paths: string[] }
+    | { t: 'git:changed' }

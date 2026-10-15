@@ -66,6 +66,7 @@ declare global {
   const clearProbeLog: typeof import('./composables/ui/render-probe').clearProbeLog
   const clearRulesCache: typeof import('./composables/ai/load-rules').clearRulesCache
   const clearSoftPause: typeof import('./composables/ai/useAiWaiting').clearSoftPause
+  const computeAffectedDirs: typeof import('./composables/data/useFileTree').computeAffectedDirs
   const computeCompensatedScrollTop: typeof import('./utils/panel-resize-scroll').computeCompensatedScrollTop
   const computed: typeof import('vue').computed
   const computedAsync: typeof import('@vueuse/core').computedAsync
@@ -679,6 +680,7 @@ declare module 'vue' {
     readonly clearProbeLog: UnwrapRef<typeof import('./composables/ui/render-probe')['clearProbeLog']>
     readonly clearRulesCache: UnwrapRef<typeof import('./composables/ai/load-rules')['clearRulesCache']>
     readonly clearSoftPause: UnwrapRef<typeof import('./composables/ai/useAiWaiting')['clearSoftPause']>
+    readonly computeAffectedDirs: UnwrapRef<typeof import('./composables/data/useFileTree')['computeAffectedDirs']>
     readonly computeCompensatedScrollTop: UnwrapRef<typeof import('./utils/panel-resize-scroll')['computeCompensatedScrollTop']>
     readonly computed: UnwrapRef<typeof import('vue')['computed']>
     readonly computedAsync: UnwrapRef<typeof import('@vueuse/core')['computedAsync']>

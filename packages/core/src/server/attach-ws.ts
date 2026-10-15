@@ -3,7 +3,9 @@ import { WebSocketServer } from 'ws'
 import type { WebSocket } from 'ws'
 import type { Socket } from 'node:net'
 import type { Server as HttpServer, IncomingMessage } from 'node:http'
-import { PREFIX } from '../config.js'
+import { getRoot, PREFIX } from '../config.js'
+// [fs-watch-v1] 文件树 / git 变更监听：改盘即广播，前端按展开目录增量刷新
+import { createFsWatcher } from './fs-watch.js'
 import { createHeadlessPool } from '../headless/ai-headless.js'
 // [stop-diag-v1] 与油猴 stop-diag 对齐：stop 失败时回传候选按钮摘要，使失败可诊断
 import { collectStopCandidatesInPage, pasteImagesInPage } from '../headless/headless-inject.js'
@@ -61,6 +63,17 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
   const _bufferOut = createBufferOut(_serverMsgBuf)
 
   const wss = new WebSocketServer({ noServer: true })
+
+  // [fs-watch-v1] 工作区文件 / git 监听；无 sid 的全局帧，不走 send/_bufferOut（那两条要求 sid）
+  const fsWatcher = createFsWatcher(getRoot())
+  const broadcast = (payload: ServerMessage) => {
+    const raw = JSON.stringify(payload)
+    for (const client of wss.clients) {
+      try { client.send(raw) } catch { /* swallow: 单条连接已断，不阻断其余 */ }
+    }
+  }
+  fsWatcher.onFilesChanged(paths => broadcast({ t: 'files:changed', paths }))
+  fsWatcher.onGitChanged(() => broadcast({ t: 'git:changed' }))
 
   const onUpgrade = (req: IncomingMessage, socket: Socket, head: Buffer) => {
     // [url-parse-guard-v2] 与 serveStatic（apps/standalone/src/server.ts）同族：req.url 是**任意字节串**，
@@ -330,6 +343,7 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
   //  - 清空 _serverMsgBuf（否则重放缓冲随 sid 单调增长）
   return () => {
     try { clearInterval(heartbeat) } catch { /* ignore */ }
+    try { fsWatcher.close() } catch { /* ignore */ }
     try { httpServer.off('upgrade', onUpgrade) } catch { /* ignore */ }
     for (const stop of replyPollers.values()) { try { stop() } catch { /* ignore */ } }
     replyPollers.clear()
