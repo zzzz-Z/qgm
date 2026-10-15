@@ -21,7 +21,9 @@ try {
   const j = JSON.parse(raw)
   const s = String((j && j.payload && j.payload.doneSummary) || '')
   // [post-done-gate-v1] 客户端用 ' / ' 拼多行；剥离 markdown 标题前缀，取首个有意义片段
-  const first = s.split(' / ').map(x => x.replace(/^#+\s*/, '').trim()).find(x => x.length > 0) || ''
+  const segs = s.split(' / ').map(x => x.trim()).filter(x => x.length > 0)
+  // [post-done-gate-v1] 优先取非标题片段（"## 结论" 剥 # 后只剩 "结论"，对 git log 无信息量）
+  const first = segs.find(x => !/^#/.test(x)) || (segs[0] || '').replace(/^#+\s*/, '')
   doneSummary = first.replace(/"/g, '\'').slice(0, 120)
 } catch { /* 无 stdin / 非法 JSON：回退时间戳 msg */ }
 
