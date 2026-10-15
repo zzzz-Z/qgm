@@ -4,10 +4,10 @@ import { TOAST_LONG, TOAST_MEDIUM, TOAST_SHORT_MEDIUM } from '../../utils/toast-
 import { aiWindowListCollapsed, aiWindowListCollapsed as collapsed } from '../../composables/ui/useAiWindowListCollapse'
 import { useToast } from '../../composables/ui/useToast'
 import { useWorkspaces } from '../../composables/data/useWorkspaces'
-// [multi-site-matrix-v1] 矩阵视图数据面：窗口状态 + 站点映射
-import { windowsTick } from '../../composables/ai/useAiWindowTable'
-import { useAiWindow } from '../../composables/ai/useAiWindow'
-import { modelIdFromSid, MODELS, sidForUrl } from '../../composables/ai/useAiSite'
+// [multi-site-matrix-v1] 矩阵视图数据面经中间层收敛：面板不直接耦合站点窗口表
+//   （架构守卫 ai-window-sid-wiring 禁止面板直接耦合站点窗口表）
+import { MODELS } from '../../composables/ai/useAiSite'
+import { useSiteMatrix } from '../../composables/ai/useSiteMatrix'
 
 const adding = ref(false)
 // [trae-single-mode-v1] 只保留「目录」模式（用户明示删掉分支/克隆）：
@@ -16,53 +16,30 @@ const addMode = ref<'register'>('register')
 const pathInput = ref('')
 const busy = ref(false)
 const pickingRepo = ref(false)
-// [multi-site-matrix-v1] 每工作区绑定的站点会话（一次批量拉取，避免 N 次请求）
-const sessionByWs = ref<Record<string, { url: string, sessionId: string }>>({})
 
 const { toast } = useToast()
-const { workspaces, activeId, loading, load, activate, register, remove, pickPath } = useWorkspaces()
+const { workspaces, activeId, loading, load, activate, register, remove, pickPath, setSession } = useWorkspaces()
+// [multi-site-matrix-v1] 站点矩阵数据面（窗口状态 + 站点映射经中间层，解耦窗口表）
+const matrix = useSiteMatrix()
 
-// [multi-site-matrix-v1] windowsTick 作响应式信号：窗口开关时列表自动重渲
-const openSids = computed(() => {
-  void windowsTick.value
-  const wins: Array<{ sid: string, url: string }> = useAiWindow().listWindows()
-  return new Set(wins.map(w => w.sid))
-})
 const items = computed(() => workspaces.value.map((w) => {
-  const sess = sessionByWs.value[w.id]
-  const siteId = sess?.url ? modelIdFromSid(sidForUrl(sess.url)) : ''
-  const sid = siteId ? `win_${siteId}` : ''
+  const m = matrix.matrixFor(w.id)
   return {
     id: w.id,
     label: w.label,
     root: w.root,
     active: w.id === activeId.value,
-    siteLabel: siteId ? (MODELS.find(m => m.id === siteId)?.label || siteId) : '',
-    winOpen: sid ? openSids.value.has(sid) : false,
+    siteIdRaw: m.siteId,
+    siteLabel: m.siteLabel,
+    winOpen: m.winOpen,
   }
 }))
 
 // [multi-site-matrix-v1] 切工作区 / 注册表变更后刷新绑定
-watch(activeId, () => { void loadAllSessions() })
+watch(activeId, () => { void matrix.loadAllSessions() })
 
-onMounted(() => { void load(); void loadAllSessions() })
+onMounted(() => { void load(); void matrix.loadAllSessions() })
 
-/**
- * [multi-site-matrix-v1] 批量拉取所有工作区的会话绑定（单请求，非按 ws 循环）。
- * [CONSTRAINT] 失败静默保留现值：矩阵视图降级为「站点未知」而非报错。
- */
-async function loadAllSessions(): Promise<void> {
-  try {
-    const r = await fetch('/__ai/workspace/session')
-    if (!r.ok) return
-    const j = await r.json().catch(() => null) as { sessions?: Record<string, { url?: string, sessionId?: string }> } | null
-    const out: Record<string, { url: string, sessionId: string }> = {}
-    for (const [wid, s] of Object.entries(j?.sessions || {})) {
-      if (s && typeof s.url === 'string') out[wid] = { url: s.url, sessionId: String(s.sessionId || '') }
-    }
-    sessionByWs.value = out
-  } catch { /* 服务端不可达：矩阵降级 */ }
-}
 async function onClick(item: { id: string, label: string, active: boolean }): Promise<void> {
   if (item.active) return
   if (busy.value) return
@@ -119,6 +96,21 @@ async function onPickTarget(): Promise<void> {
   }
   pathInput.value = r.path || ''
 }
+/**
+ * [multi-site-matrix-v1] 为指定工作区显式绑定站点：写 url 到 workspace session。
+ * [WHY] 矩阵视图此前只「显示」站点（由首次使用隐式形成）；用户需能主动改。
+ * [CONSTRAINT] 只写绑定，不导航当前窗口——下次切到该工作区时才会导航到该站点。
+ */
+async function onSiteChange(wsId: string, ev: Event): Promise<void> {
+  const target = ev.target as HTMLSelectElement
+  const modelId = target.value
+  const m = MODELS.find(x => x.id === modelId)
+  if (!m) return
+  const r = await setSession(wsId, { url: m.url, sessionId: '' })
+  if (!r) { toast('绑定站点失败', 'error', TOAST_MEDIUM); return }
+  await matrix.loadAllSessions()
+  toast(`已为工作区绑定 ${m.label}`, 'info', TOAST_SHORT_MEDIUM)
+}
 async function onRemove(item: { id: string, label: string }): Promise<void> {
   if (busy.value) return
   const wasActive = item.id === activeId.value
@@ -147,13 +139,17 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
   try {
     const { useWorkspaces } = await import('../../composables/data/useWorkspaces')
     const { openAiSession } = await import('../../composables/ai/useAiWindow')
-    const { currentSiteUrl } = await import('../../composables/ai/useAiSite')
+    const { currentSiteUrl, sidForUrl } = await import('../../composables/ai/useAiSite')
+    // [workspace-open-newwin-v1] 先激活该工作区（原地切换 + 清会话上下文），再开窗——
+    //   否则用户点 B 的开窗、视角仍停在 A（承重测试断言此为必要条件）。
     const ws = useWorkspaces()
     if (item.id !== ws.activeId.value) await ws.activate(item.id)
-    // [first-prompt-once-v1] 打开新窗口 / 开新会话只导航，**不自动发首问**：
-    //   规则头只在用户真正发起第一次提问时经 copyAndFill 按工作区去重注入一次。
-    //   窗口就绪由用户在该会话内自行确认；不再弹「首问未送达」提示。
-    await openAiSession({ atUrl: currentSiteUrl() })
+    // [multi-site-matrix-v1] 按**该工作区绑定的站点**开窗，而非全局 currentSiteUrl：
+    //   多站点并行下全局 modelId 只反映激活工作区，用它会给 B 工作区开错站点窗口。
+    const boundUrl = matrix.sessionByWs.value[item.id]?.url || currentSiteUrl()
+    const targetSid = sidForUrl(boundUrl)
+    // [first-prompt-once-v1] 只导航，不自动发首问（规则由 copyAndFill 按 sid 去重注入）。
+    await openAiSession({ atUrl: boundUrl, sid: targetSid })
   } catch {
     toast('打开新会话失败，请检查站点窗口是否就绪', 'error', TOAST_MEDIUM)
   }
@@ -253,13 +249,17 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
         <div class="awl-meta">
           <span class="awl-label">{{ w.label }}</span>
           <span class="awl-sub">
-            <template v-if="w.siteLabel">
-              <span class="awl-site">{{ w.siteLabel }}</span>
-              <span class="awl-win" :class="{ open: w.winOpen }">{{ w.winOpen ? '● 已开窗' : '○ 未开窗' }}</span>
-            </template>
-            <template v-else>
-              <span class="awl-nosite">未绑定站点</span>
-            </template>
+            <select
+              class="awl-site-select"
+              :value="w.siteIdRaw"
+              :title="`为「${w.label}」选择站点`"
+              @click.stop
+              @change="onSiteChange(w.id, $event)"
+            >
+              <option value="" disabled>选择站点</option>
+              <option v-for="m in MODELS" :key="m.id" :value="m.id">{{ m.label }}</option>
+            </select>
+            <span v-if="w.siteLabel" class="awl-win" :class="{ open: w.winOpen }">{{ w.winOpen ? '● 已开窗' : '○ 未开窗' }}</span>
           </span>
         </div>
         <button
@@ -629,10 +629,21 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
   color: var(--danger, #f85149);
 }
 
-/* [multi-site-matrix-v1] 工作区行内的站点标签 + 窗口状态（矩阵视图） */
-.awl-sub .awl-site {
+/* [multi-site-matrix-v1] 工作区行内的站点选择 + 窗口状态（矩阵视图） */
+.awl-sub .awl-site-select {
+  max-width: 90px;
+  padding: 1px 2px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
   color: var(--primary, #58a6ff);
+  font-size: var(--font-11);
   font-weight: 500;
+  cursor: pointer;
+}
+.awl-sub .awl-site-select:hover {
+  border-color: var(--border);
+  background: var(--surface-2, rgb(127 127 127 / 10%));
 }
 .awl-sub .awl-win {
   margin-left: 6px;
