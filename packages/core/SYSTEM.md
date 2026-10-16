@@ -197,8 +197,14 @@
   - 范围外：`scripts/` 不纳入（一次性 CLI 工具 + 油猴单文件模型，见 `module-size-ratchet` 的 `scripts-exempt-v1` 说明）。
 - **文件体积**：普通模块 ≤ 800 行，组件 ≤ 1000 行；**新文件**超限必须拆分。既有超限模块列入 `module-size-ratchet.node-test.ts` 冻结清单，**只减不增**（生成物如 `auto-imports.d.ts` 豁免）。
 - **拆分的唯一依据是职责边界，不是行数或 import**：单个功能默认**内聚在一个文件**。禁止为压低行数把同一功能的状态机、文案、接线拆到不同文件；禁止为少一条 `import` 语句改用内联 `typeof import()` 或经无关模块转出类型。触及阈值时先问「这里是不是两件事」——是就拆，不是就继续加。阈值数字与三处守卫常量的同值性由 `module-size-ratchet.node-test.ts` 守住。
-- **依赖方向**：`packages/*` 之间无编译期依赖（client 不得 import core，只经 HTTP/WebSocket 通信）；`packages/*` 不得依赖 `apps/*`；反向/循环引用视为架构缺陷，立即修复。
-- **本项目特化禁则**：`packages/*` 里禁止 `listen` / `createServer` / `import vite` / `@hono/node-server`（`vite.config.ts` / `uno.config.ts` 属构建配置豁免）；宿主专属入口（`apps/standalone/src/server.ts` 等装配代码）必须留在 `apps/`，不得回流 `packages/core`。由 `packages/core/tests/workspace-guard.node-test.ts` 强制。
+
+<!-- [ssot-boundary-v2] 2026-10-17：原「依赖方向」与「本项目特化禁则」两条已迁出本文件。
+     理由：二者是**工作区级**内容（跨包调用方式、装配层归属、依赖方向），
+     而本文件是**应用级**规则（所有工作区共用、每会话注入）。
+     本文件不引用项目索引（见文件头），故此处只声明「该类内容不属本文件」，
+     不指名具体工作区文件——由各工作区的项目索引自行承载。 -->
+
+- **依赖方向与工作区特化禁则**：属**工作区级**内容，由各工作区的项目索引承载；**本文件不重复声明、也不指名引用**——应用级规则不应含任何工作区特定信息。
 
 ---
 
