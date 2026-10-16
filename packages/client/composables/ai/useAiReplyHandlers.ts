@@ -28,12 +28,15 @@ import { log } from '../../utils/log'
 // [reply-toasts-v1] toast 相关 imports 已收口到 reply-toasts.ts（§4 单文件唯一 import ≤ 20）
 import {
   notifyLimit,
+  notifyResumeExhausted,
   notifySelfcheckReject,
   notifySiteError,
   notifyStopped,
   notifyStoppedScriptHint,
   notifyWaitTimeout,
 } from './reply-toasts'
+// [stop-resume-v1] 「停止→判定→续推」职责链的入站收口
+import { beginAutoResume, decideOnStopped, endAutoResume, MAX_AUTO_RESUME } from './stop-resume'
 
 type EventKindStr = 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary' | 'ai:ask' | 'ai:feedback' | 'ai:decision' | 'ai:need-files' | 'ai:stream'
 
@@ -138,6 +141,21 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       // [stopped-toast-quote-v1] 带上页面侧命中原文（口径同触顶的 formatLimitToast）：
       //   停止词表与我们自己的 UI 文案同形 ⇒ 误报几乎必然发生，不带原文就永远无从定位是哪段文本命中。
       notifyStopped(payload.text)
+      // [stop-resume-v1] 续推决策（stop-resume.ts 单一入口）：
+      //   用户主动停 ⇒ 不续推（尊重意图）；平台自动停 ⇒ 续推（帮用户恢复），上限 MAX_AUTO_RESUME 次。
+      const _d = decideOnStopped(sid)
+      if (_d.resume) {
+        beginAutoResume(sid)
+        // 延迟 1.5s：等站点按钮/输入框状态稳定（停止后立即 fill 会与状态切换竞争）
+        setTimeout(() => {
+          void aiWindow
+            .copyAndFill('继续', { skipRules: true })
+            .finally(() => endAutoResume(sid))
+        }, 1500)
+      } else if (_d.reason === 'max-reached') {
+        // 达上限：明确告知用户，不再静默
+        notifyResumeExhausted(MAX_AUTO_RESUME)
+      }
       return
     }
 

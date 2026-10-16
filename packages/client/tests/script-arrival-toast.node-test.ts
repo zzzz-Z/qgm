@@ -45,7 +45,8 @@ vi.mock('../composables/ui/useToast', () => ({
 }))
 vi.mock('../composables/ai/useAiSite', () => ({ useAiSite: () => ({ url: ref(''), setUrl: () => {}, modelId: ref('m'), MODELS: [] }) }))
 vi.mock('../composables/ai/useAiWaiting', () => ({ useAiWaiting: () => ({ stopWaiting: () => {} }) }))
-vi.mock('../composables/ai/useAiWindow', () => ({ useAiWindow: () => ({ listWindows: () => [], getWindowBySid: () => null }) }))
+// [stop-resume-v1] copyAndFill 为本会话新增的自动续推调用点所需；no-op 化避免 stopped 分支 TypeError
+vi.mock('../composables/ai/useAiWindow', () => ({ useAiWindow: () => ({ listWindows: () => [], getWindowBySid: () => null, copyAndFill: () => Promise.resolve() }) }))
 vi.mock('../composables/ai/useAiTransport', () => ({ transportKind: ref('tampermonkey') }))
 vi.mock('../composables/ui/useAppStorage', () => ({ activeSessionId: ref('s1') }))
 vi.mock('../composables/ui/useEventStream', () => ({ emit: () => {}, takePendingAskKey: () => '' }))

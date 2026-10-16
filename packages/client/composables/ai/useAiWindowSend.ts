@@ -5,6 +5,8 @@ import * as transportMod from './useAiTransport.js'
 import { getActiveWinSidImpl as getActiveWinSid, getWindowBySidImpl as getWindowBySid, targetOriginFor } from './useAiWindowTable'
 import { log } from '../../utils/log' // [restore-import-v1] 早前清理误删
 import { traceSend } from './send-trace' // [send-trace-v1] 出站留痕（P1-3）
+// [stop-resume-v1] 「停止→判定→续推」职责链的出站侧：停止打标记、新提问清配额
+import { isAutoResuming, markUserStop, resetResumeCount } from './stop-resume'
 
 /**
  * [fill-msgid-v1] 出站 fill 的唯一标识，供油猴侧 _seenInbound 去重。
@@ -102,6 +104,8 @@ export function sendFillToImpl(sid: string, payload: FillPayloadImpl): boolean {
     win.postMessage({ type: 'ai-runner:fill', ...wire, msgId: nextFillMsgId() }, origin)
     // [send-trace-v1] 出站留痕（P1-3）：逐条记 ts/sid/source/首部，供「发送间隔分布」与「同轮双发」定案
     traceSend({ sid, via: 'tm', source: traceSource || 'direct', prompt: payload.prompt, ok: true })
+    // [stop-resume-v1] 新提问已发出 ⇒ 清续推配额；但**自动续推自身**不清（否则续推一次配额就归零）
+    if (!isAutoResuming(sid)) resetResumeCount(sid)
     return true
   } catch (e) {
     log.warn('[sendFillToImpl] postMessage threw', e)
@@ -193,6 +197,8 @@ export function sendStopToImpl(sid: string): boolean {
   if (!origin) return false
   try {
     win.postMessage({ type: 'ai-runner:stop' }, origin)
+    // [stop-resume-v1] 用户主动停止：打标记供 stopped 分支消费（不续推）
+    markUserStop(sid)
     return true
   } catch {
     return false
@@ -200,7 +206,7 @@ export function sendStopToImpl(sid: string): boolean {
 }
 /** 向当前激活槽位发 stop */
 export function sendStopImpl(sid?: string): boolean {
-  if (isHeadless()) { headlessSend('sendStopImpl', sid ?? getActiveWinSid()); return true }
+  if (isHeadless()) { const _sid = sid ?? getActiveWinSid(); markUserStop(_sid); headlessSend('sendStopImpl', _sid); return true }
   return sendStopToImpl(sid ?? getActiveWinSid())
 }
 

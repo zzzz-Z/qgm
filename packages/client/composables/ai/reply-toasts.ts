@@ -39,3 +39,7 @@ export function notifyWaitTimeout(): void {
 export function notifySelfcheckReject(reason: string | undefined): void {
   toast(`自检未通过：${reason || 'hook rejected'}`, 'warn', TOAST_LONG)
 }
+/** [stop-resume-v1] 自动续推达上限：明确告知用户，不再静默（停手让用户处理） */
+export function notifyResumeExhausted(max: number): void {
+  toast(`平台中断后已自动续推 ${max} 次仍未完成，请手动处理`, 'warn', TOAST_LONG)
+}
