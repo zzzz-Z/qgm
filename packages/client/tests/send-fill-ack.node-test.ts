@@ -222,9 +222,20 @@ describe('fill-ack reason 通道与 no-input-box 重试（fail-reason-v1 / no-in
       /timeoutMs = 5000, out\?: \{ reason\?: string \}/.test(src),
       '第 4 参 out 缺失：上层无法区分「暂时未就绪」与真失败',
     )
-    assert.ok(src.includes('out.reason = String(m.reason'), 'ack 帧 reason 未写入 out')
+    assert.ok(/const _ackReason = String\(m\.reason \|\| ''\)/.test(src), 'ack 帧 reason 未被读取到局部变量')
+    assert.ok(/if \(out\) out\.reason = _ackReason/.test(src), 'ack 帧 reason 未写入 out')
     assert.ok(src.includes('out.reason = \'post-threw\''), 'postMessage 抛错原因未写入 out')
     assert.ok(/Promise<'sent' \| 'failed' \| 'unacked'>/.test(src), '返回类型必须保持三态字符串（兼容既有断言）')
+  })
+
+  it('send-verify-failed 必须归 unacked（否则长首问已填字却弹「首问未送达」误报）', () => {
+    const src = readFileSync(new URL('../composables/ai/useAiWindowSend.ts', import.meta.url), 'utf8')
+    // 判据承重：删掉该分支 / 改回硬判 failed，本条必须变红
+    assert.ok(/send-verify-failed-not-final-v1/.test(src), 'send-verify-failed 归并标记缺失')
+    assert.ok(
+      /_ackReason === 'send-verify-failed'[\s\S]{0,80}?finish\('unacked'\)/.test(src),
+      'send-verify-failed 必须 finish(\'unacked\') 而非 failed：油猴已把文本填入输入框，属「已投递未确认」',
+    )
   })
 
   it('fillWithDegrade 对 no-input-box 必须短延迟重试一次再决定（否则误报首问未送达）', () => {

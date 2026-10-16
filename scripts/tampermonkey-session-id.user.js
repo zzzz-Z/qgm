@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.0
+// @version      1.9.1
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -92,6 +92,10 @@
 
   let lastId = ''
   let lastSid = ''
+  // [session-boot-v1] 本油猴实例是否已报告过「启动」：
+  //   仅首次 send() 携带 boot:true，供客户端识别 AI 窗口刚加载（新上下文）；
+  //   F5 后新实例会重新置 false，站点内切会话触发的后续 send() 不带该标记。
+  let _bootSent = false
 
   function extractSidFromHash() {
     const m = location.hash.match(/(?:^#|&)sid=([\w.-]+)/)
@@ -140,9 +144,13 @@
     if (id && id !== lastId) { lastId = id; changed = true }
     if (sid !== lastSid) { lastSid = sid; changed = true }
     if (!changed) return
+    // [session-boot-v1] 首发行携带 boot 标记；无论 opener 是否就绪都置位，
+    //   避免 opener 未建立时反复被后续 send() 判为「首发」。
+    const _isBoot = !_bootSent
+    _bootSent = true
     try {
       if (window.opener && !window.opener.closed) {
-        post({ type: 'ai-runner:session-id', id, sessionId: extractSidFromHash() })
+        post({ type: 'ai-runner:session-id', id, sessionId: extractSidFromHash(), boot: _isBoot })
       }
     } catch {}
   }

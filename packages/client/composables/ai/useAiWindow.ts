@@ -141,6 +141,41 @@ function clearRulesForSid(sid: string): void {
 }
 
 /**
+ * [session-boot-v1] AI 窗口重载（F5）后，油猴首发的 session-id 带 boot:true 标记 →
+ *   该窗口是全新 AI 上下文，历史里没有 SYSTEM.md，必须清掉规则去重与工作区首问标记，
+ *   否则 sessionStorage 恢复的去重集合会命中，新上下文永久收不到首问规则（用户报告）。
+ * [CONSTRAINT] 只清该窗口 sid 前缀的组合键（`<winSid>:<sessionId>`），不影响并行窗口；
+ *   与 clearRulesForSid 的区别：后者按精确 sid 清（窗口已关场景），此处按前缀清全部会话键。
+ */
+export function resetRulesForSessionBoot(winSid: string): void {
+  if (!winSid) return
+  const prefix = `${winSid}:`
+  const hits: string[] = []
+  for (const k of _rulesInjectedSids) { if (k.startsWith(prefix)) hits.push(k)
+  }
+  for (const k of hits) {
+    _rulesInjectedSids.delete(k)
+    const i = _rulesInjectedOrder.indexOf(k)
+    if (i >= 0) _rulesInjectedOrder.splice(i, 1)
+  }
+  for (const k of Array.from(_rulesPendingSids)) { if (k.startsWith(prefix)) _rulesPendingSids.delete(k)
+  }
+  if (hits.length) {
+    persistRulesInjected()
+    log.info('[resetRulesForSessionBoot] 清去重 sid=', winSid, 'count=', hits.length)
+  }
+  void (async () => {
+    try {
+      const { useWorkspaces } = await import('../data/useWorkspaces')
+      const w = useWorkspaces()
+      if (!w.activeId.value) { try { await w.load() } catch { /* 拉取失败保持未就绪 */ } }
+      const wsId = String(w.activeId.value || '')
+      if (wsId) await w.setFirstPromptSent(wsId, false)
+    } catch (e) { log.warn('[resetRulesForSessionBoot] setFirstPromptSent 异常:', e) }
+  })()
+}
+
+/**
  * 打开 AI 站点窗口并按 sid 保存引用；headless 模式改走 WS
  * [WHY] 传入 sid 便于多会话并存；不传时沿用当前激活槽位
  * [CONSTRAINT] 无头模式返回 null（不产真实窗口）；被 popup blocker 拦截时也返回 null

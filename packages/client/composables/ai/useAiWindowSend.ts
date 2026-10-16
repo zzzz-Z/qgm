@@ -155,8 +155,15 @@ export function sendFillToAsync(sid: string, payload: FillPayloadImpl, timeoutMs
       const m = d as { type?: string, ackId?: string, ok?: boolean, reason?: string }
       if (m.type !== 'ai-runner:fill-ack') return
       if (String(m.ackId || '') !== ackId) return
-      if (out) out.reason = String(m.reason || '')
-      finish(m.ok ? 'sent' : 'failed')
+      const _ackReason = String(m.reason || '')
+      if (out) out.reason = _ackReason
+      // [send-verify-failed-not-final-v1] send-verify-failed 表示油猴已把文本填入输入框，
+      //   只是 800ms 验证窗口内发送按钮未生效（带长 SYSTEM.md 首问 / 慢站点常见）；
+      //   文本随后可能被站点或用户手动发出，属「已投递但未确认」而非「未送达」。
+      //   归入 unacked 走 fillWithDegrade 的降级路径，避免「提问实际已发却弹首问未送达」的误报。
+      // [CONSTRAINT] 与 unacked 分支共用同一次 _unackedHintShown 去重提示，不新增分支
+      if (!m.ok && _ackReason === 'send-verify-failed') finish('unacked')
+      else finish(m.ok ? 'sent' : 'failed')
     }
     // [send-trace-v1] source 只服务留痕：剥掉后再上线，避免污染协议载荷
     const { source: traceSource, ...wire } = payload

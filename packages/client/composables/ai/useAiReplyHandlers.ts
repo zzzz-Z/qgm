@@ -16,7 +16,7 @@ import { runHook } from './loop-hooks'
 import { useAutoTakeover } from './useAutoTakeover'
 import { modelIdFromSid, useAiSite } from './useAiSite'
 import { useAiWaiting } from './useAiWaiting'
-import { useAiWindow } from './useAiWindow'
+import { resetRulesForSessionBoot, useAiWindow } from './useAiWindow'
 import { transportKind } from './useAiTransport'
 import { activeSessionId } from '../ui/useAppStorage'
 import { emit as emitBus, takePendingAskKey } from '../ui/useEventStream'
@@ -430,6 +430,11 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
 
   /** 处理 ai-runner:session-id 会话 ID 回写 */
   function handleSessionIdUpdate(payload: MessageEvent['data']): void {
+    // [session-boot-v1] AI 窗口刚加载（油猴首发，boot:true）→ 全新 AI 上下文，
+    //   清规则去重 + 工作区首问标记，否则刷新恢复的集合会命中 → 新上下文永久漏注入 SYSTEM.md。
+    // [CONSTRAINT] 必须在 frameSid early-return 之前执行：清规则与该窗口是否属当前站点视图无关，
+    //   多站点并行时其他窗口重载同样需要清规则。
+    if (payload.boot === true) resetRulesForSessionBoot(String(payload.sessionId || ''))
     // [multi-site-parallel-v1] frame sid 指向非当前站点时直接跳过——避免 A 窗口的 session-id
     //   更新串改当前站点视图的 sessionHistory（G7 同类缺口）
     const frameSid = String(payload.sessionId || '')
