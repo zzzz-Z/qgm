@@ -29,6 +29,7 @@ import {
   pickTscTargets,
   readOverlayChanges,
   readToolLogWithRetry,
+  reapStaleTmp,
   recordReject,
   resetRejectStreak,
   runDir,
@@ -89,6 +90,8 @@ runHono.post('/run', async (c) => {
   return runWithWorkspace({ workspaceId: wsId || null, root: getWorkspace(wsId)?.root ?? getRoot() }, async () => {
     ensureDirs()
     fs.mkdirSync(path.join(getRoot(), '.ai-runner/tmp'), { recursive: true })
+    // [tmp-reaper-v1] 清理过期运行产物（默认 7 天）；触发点随 /run 入口，无定时器
+    reapStaleTmp()
     const sandboxRaw = String(body?.sandbox || 'read-only')
     let sandbox = ['read-only', 'workspace-write', 'full'].includes(sandboxRaw) ? sandboxRaw : 'read-only'
     const script = String(body?.script || '').trim()

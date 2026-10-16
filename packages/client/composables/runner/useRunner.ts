@@ -382,7 +382,15 @@ function guessDesc(code: string): string {
 async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boolean }): Promise<RunResponse | 'skipped' | null> {
   const code = (opts?.script ?? script.value).trim()
   // [run-skip-identifiable-v1] 被守卫吞掉时返回可辨识标记（R2）；调用方据此判定重试，不读 result
-  if (!code || running.value) return 'skipped'
+  if (!code) return 'skipped'
+  // [stale-run-abort-v2] 复检发现的真实死锁路径：原 abort 加在 try 内（L446 附近），
+  //   但 running 守卫在它之前 return 'skipped' ⇒ 悬挂的 fetch 永远到不了 abort，拖满 180s 才收口。
+  //   [WHY] 用户点第二次 run 通常期望「重跑」，中止旧轮正是期望行为；abort 后旧轮 finally 会
+  //   自行把 running 置 false（run2 未递增 token，旧轮的 !isStale() 为 true），用户可立即重试。
+  if (running.value) {
+    if (abortController) { try { abortController.abort() } catch { /* swallow: 旧轮可能已自行结束 */ } }
+    return 'skipped'
+  }
   // [auto-feedback-reset-v1] 每次 run() 开始重置该标志（R3）：杜绝跨轮漂移
   // [WHY] 上一次 autoFeedback 若未被消费（如被 ScriptPanel 分支遗漏），残留会误触发下一轮
   // [CONSTRAINT] 重置在前、置位在后 —— 保证「本轮想要」才算数
@@ -443,6 +451,7 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   }
 
   try {
+    // [stale-run-abort-v2] abort 已上移到 running 守卫之前（见 run() 开头）；此处仅新建 controller。
     abortController = new AbortController()
     // [stdout-lag-attrib-v1] 记录发送时刻（WO-20261007-03 段五补遗）：summary 帧带 runId，
     //   其前缀即服务端执行开始时刻，零协议改动即可跨轮归因（原「需 NDJSON seq」判断已作废）。

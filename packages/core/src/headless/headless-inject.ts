@@ -680,6 +680,20 @@ export function detectReplyInPage() {
   // script 需连续 2 次相同 hash 才推，避开流式中途残缺
   // [script-lang-whitelist-v2] 不再传 declared：语言白名单恒为 js/bash（见 extractLatestScript）
   const script = markedNonScript || stoppedThisRound ? null : extractLatestScript()
+  // [generating-gate-v1] 无头通道补「生成中门」（与油猴 350ms 防抖 + 生成中门 parity）。
+  // [WHY] 原判据是三层弱条件叠加——脚本块 2 帧同 hash + hasUnclosedStructureJs 结构闭合
+  //   + stillStreamingReply 用 body.length 判稳定。三者都是「必要不充分」却被当作充分条件，
+  //   AI 写完一个完整函数后停顿 >800ms（或进入思考阶段 body 长度不变 3 帧）即误推脚本。
+  //   油猴通道的生成中门是「停止按钮可见 ⇒ 一定在生成」的强信号，无头通道缺这道门。
+  // [CONSTRAINT] 只拦「有脚本块 + 生成中」；markedNonScript（DONE/ASK/TEXT）分支不受影响，
+  //   否则 DONE 首行写在生成中会被推迟（下游 plain 分支已有独立 stable 判据）。
+  // [CONSTRAINT] 清 _pendingScriptHash 避免生成完成后因 hash 相同直接跳过 2 帧判据。
+  // [CONSTRAINT] isGeneratingInPage 图签名失配 fail-open（不误判生成中），与 stopped 检测共用同一探针。
+  // [CHANGE-IMPACT] 站点改版致探针恒 false 时退化为原三层判据（非「永不放行」）。
+  if (script && isGeneratingInPage()) {
+    dedup._pendingScriptHash = null
+    return null
+  }
   if (script && !dedup.seenHashes.includes(script.hash)) {
     if (dedup._pendingScriptHash === script.hash) {
       dedup._pendingScriptHash = null

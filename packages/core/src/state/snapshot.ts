@@ -275,6 +275,34 @@ export function gcSnapshots(keep: number) {
 }
 
 /**
+ * [tmp-reaper-v1] 清理 .ai-runner/tmp 下过期的运行产物（overlay.json / tools.jsonl）。
+ * [WHY] /run 只 unlink 当前 runId 的 overlay，toolLog 作为自检证据刻意保留；
+ *   崩溃/SIGKILL 遗留的过期文件无人清理（实测累积 8444 个），目录单调增长。
+ * [CONSTRAINT] 只删两类带 runId 后缀的产物，不动用户手放的探针文件；
+ *   单文件 stat 失败视为不可用条目，跳过不报。
+ * [CONSTRAINT] 无定时器——触发点由调用方决定（当前仅 /run 入口），与
+ *   reclaimIdleSessions 同模式；需要定时回收时另开任务并同步注释。
+ * @param maxAgeMs 超过此 age 的文件删除；默认 7 天
+ * @returns 被删除的文件数（供测试断言）
+ */
+export function reapStaleTmp(maxAgeMs = 7 * 24 * 3600 * 1000): number {
+  let removed = 0
+  try {
+    const dir = path.join(getRoot(), '.ai-runner', 'tmp')
+    if (!fs.existsSync(dir)) return 0
+    const now = Date.now()
+    for (const name of fs.readdirSync(dir)) {
+      if (!/-overlay\.json$|-tools\.jsonl$/.test(name)) continue
+      const p = path.join(dir, name)
+      try {
+        if (now - fs.statSync(p).mtimeMs > maxAgeMs) { fs.rmSync(p, { force: true }); removed++ }
+      } catch { /* 单文件 stat 失败：跳过 */ }
+    }
+  } catch { /* 目录不可读：静默 */ }
+  return removed
+}
+
+/**
  * 保存变更前内容到快照目录，供 rollback 还原
  * [WHY] 只对 modified / deleted 文件落盘：added 无历史内容、其他类型无意义
  * [CONSTRAINT] before 缺失对应项时静默跳过（首次运行 / 快照被 GC 的边界）

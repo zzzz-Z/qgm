@@ -321,3 +321,22 @@ test('closure-gate: 油猴通道 fill/rotate 开新一轮时必须清掉门基�
     `油猴通道未在 fill / rotate 开新一轮时清门 ⇒ 上一轮 ticks=3 会带入新轮，首帧直接放行未闭合块（实测命中 ${hits} 次，期望 ≥ 2）`,
   )
 })
+// ============ ④ 生成中门（无头通道 parity）============
+// [generating-gate-v1] 原判据是三层弱条件叠加（脚本块 2 帧同 hash + 结构闭合 + body 长度稳定）；
+//   三者皆「必要不充分」却被当作充分条件 ⇒ AI 写完一个完整函数后停顿 >800ms（或进入思考期
+//   body 长度不变 3 帧）即误推脚本。油猴通道有「停止按钮可见 ⇒ 一定在生成」的强门，无头通道缺。
+//   [判据承重] 删掉门 / 挪到 seenHashes 去重之后 ⇒ 本用例必红。
+test('generating-gate: 无头通道必须在推送路径前挂生成中门（parity 油猴 350ms+生成中门）', () => {
+  const src = read(BROWSER_SRC)
+  assert.ok(/function\s+isGeneratingInPage\s*\(/.test(src), 'headless 缺 isGeneratingInPage 探针（与 stopped 检测共用）')
+  // 门的形态：script 分支内、清 _pendingScriptHash、return null
+  assert.ok(
+    /if\s*\(\s*script\s*&&\s*isGeneratingInPage\(\)\s*\)\s*\{[\s\S]{0,200}return null/.test(src),
+    '无头通道未挂生成中门 → 流式停顿 >800ms 即误推脚本（本门是修复的承重判据）',
+  )
+  // 位置断言：门必须在 seenHashes 去重判断之前（先拦生成中，再看去重）
+  const gateAt = src.search(/if\s*\(\s*script\s*&&\s*isGeneratingInPage\(\)/)
+  const seenAt = src.indexOf('if (script && !dedup.seenHashes.includes(script.hash))')
+  assert.ok(gateAt >= 0, '找不到生成中门调用点')
+  assert.ok(seenAt > gateAt, '生成中门必须在 seenHashes 去重判断之前（否则已推过的脚本会绕过门）')
+})

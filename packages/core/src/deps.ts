@@ -82,6 +82,7 @@ export {
   diffMeta,
   ensureDirs,
   gcSnapshots,
+  reapStaleTmp,
   runDir,
   saveSnapshot,
   scanMeta,
