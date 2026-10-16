@@ -33,7 +33,6 @@ import {
   notifySiteError,
   notifyStopped,
   notifyStoppedScriptHint,
-  notifyWaitTimeout,
 } from './reply-toasts'
 // [stop-resume-v1] 「停止→判定→续推」职责链的入站收口
 import { beginAutoResume, decideOnStopped, endAutoResume, MAX_AUTO_RESUME } from './stop-resume'
@@ -298,20 +297,13 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
         reportArrival('run')
         const runKey = takePendingAskKey() || uid('run')
         // [loop-consolidation-P2] 摘除 routedToLoop 的 if/else：只保留留存路径（原 else 分支）
-        const retryRun = async (attempt: number): Promise<void> => {
-          if (!runner.running.value) {
-            void runner.run({ script: code, runKey, autoFeedback: true })
-            return
-          }
-          if (attempt >= 20) {
-            notifyWaitTimeout()
-            return
-          }
-          await promiseTimeout(1000)
-          await retryRun(attempt + 1)
-        }
+
+        // [run-queue-v1] 上一轮未结束时排队等待（事件驱动），不再每秒轮询等超时。
+        //   [WHY] 原实现（retryRun 轮询 20 次 = 20s）超时后脚本滞留编辑器，而工作台无「执行编辑器内容」
+        //   入口 ⇒ 用户无从操作。排队方案：本轮 finally 里 dequeue 直接执行，无超时无滞留。
+        //   [CONSTRAINT] queueIfBusy 只影响「已 running」时的行为（排队而非 abort）；空闲时行为不变。
         autoTakeover.scheduleAutoRun(() => {
-          retryRun(0).catch(error => log.error('[retry-run] failed:', error))
+          void runner.run({ script: code, runKey, autoFeedback: true, queueIfBusy: true })
         })
       } else {
         // [arrive-log-v1] 去重命中（同归一化 hash 已入队）⇒ push 返回 null，此后全链路零痕迹
@@ -359,7 +351,8 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
           notifyStoppedScriptHint()
           return
         }
-        void runner.run({ script: code, runKey, autoFeedback: true })
+        // [run-queue-v1] 与 handleAiReply 路径同：上一轮未结束时排队，不轮询不等超时
+        void runner.run({ script: code, runKey, autoFeedback: true, queueIfBusy: true })
       }
     }
   }

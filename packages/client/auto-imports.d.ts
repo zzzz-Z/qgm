@@ -26,6 +26,7 @@ declare global {
   const LS_CMD_HISTORY_KEY: typeof import('./utils/storage').LS_CMD_HISTORY_KEY
   const LS_SIDE_WIDTH_KEY: typeof import('./utils/storage').LS_SIDE_WIDTH_KEY
   const MAX_AUTO_RESUME: typeof import('./composables/ai/stop-resume').MAX_AUTO_RESUME
+  const MAX_PENDING_RUNS: typeof import('./composables/runner/run-queue').MAX_PENDING_RUNS
   const MODELS: typeof import('./composables/ai/useAiSite').MODELS
   const PAGE_BOOT_TS: typeof import('./composables/ai/useAiReplyHandlers').PAGE_BOOT_TS
   const PHASE_DONE_CLASS: typeof import('./utils/timeline-build').PHASE_DONE_CLASS
@@ -97,6 +98,7 @@ declare global {
   const createReactiveFn: typeof import('@vueuse/core').createReactiveFn
   const createRef: typeof import('@vueuse/core').createRef
   const createReusableTemplate: typeof import('@vueuse/core').createReusableTemplate
+  const createRunQueue: typeof import('./composables/runner/run-queue').createRunQueue
   const createSharedComposable: typeof import('@vueuse/core').createSharedComposable
   const createTampermonkeyTransport: typeof import('./composables/ai/useAiTransport').createTampermonkeyTransport
   const createTemplatePromise: typeof import('@vueuse/core').createTemplatePromise
@@ -598,6 +600,9 @@ declare global {
   export type { FeedbackItem, FeedbackMergeOpts, FeedbackMerge } from './composables/runner/feedback-merge'
   import('./composables/runner/feedback-merge')
   // @ts-ignore
+  export type { RunQueueItem, RunQueue } from './composables/runner/run-queue'
+  import('./composables/runner/run-queue')
+  // @ts-ignore
   export type { InboxItem } from './composables/runner/useScriptInbox'
   import('./composables/runner/useScriptInbox')
   // @ts-ignore
@@ -673,6 +678,7 @@ declare module 'vue' {
     readonly LS_CMD_HISTORY_KEY: UnwrapRef<typeof import('./utils/storage')['LS_CMD_HISTORY_KEY']>
     readonly LS_SIDE_WIDTH_KEY: UnwrapRef<typeof import('./utils/storage')['LS_SIDE_WIDTH_KEY']>
     readonly MAX_AUTO_RESUME: UnwrapRef<typeof import('./composables/ai/stop-resume')['MAX_AUTO_RESUME']>
+    readonly MAX_PENDING_RUNS: UnwrapRef<typeof import('./composables/runner/run-queue')['MAX_PENDING_RUNS']>
     readonly MODELS: UnwrapRef<typeof import('./composables/ai/useAiSite')['MODELS']>
     readonly PAGE_BOOT_TS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['PAGE_BOOT_TS']>
     readonly PHASE_DONE_CLASS: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_DONE_CLASS']>
@@ -744,6 +750,7 @@ declare module 'vue' {
     readonly createReactiveFn: UnwrapRef<typeof import('@vueuse/core')['createReactiveFn']>
     readonly createRef: UnwrapRef<typeof import('@vueuse/core')['createRef']>
     readonly createReusableTemplate: UnwrapRef<typeof import('@vueuse/core')['createReusableTemplate']>
+    readonly createRunQueue: UnwrapRef<typeof import('./composables/runner/run-queue')['createRunQueue']>
     readonly createSharedComposable: UnwrapRef<typeof import('@vueuse/core')['createSharedComposable']>
     readonly createTampermonkeyTransport: UnwrapRef<typeof import('./composables/ai/useAiTransport')['createTampermonkeyTransport']>
     readonly createTemplatePromise: UnwrapRef<typeof import('@vueuse/core')['createTemplatePromise']>

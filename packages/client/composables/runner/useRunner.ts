@@ -12,6 +12,7 @@ import { log } from '../../utils/log'
 import { effectiveSessionId } from '../ui/useAppStorage'
 // [multi-workspace-v1] /run 携带目标工作区 id；缺省由服务端用活跃工作区
 import { useWorkspaces } from '../data/useWorkspaces'
+import { createRunQueue } from './run-queue'
 
 /** sessionStorage 键：脚本内容 */
 const STORAGE_KEY_SCRIPT = '__ai_runner_script'
@@ -47,6 +48,7 @@ try {
 const lastRunCode = ref('')
 /** 是否有运行中的脚本 */
 const running = ref(false)
+const runQueue = createRunQueue() // [run-queue-v1] 排队实现见 ./run-queue.ts
 /** 最近一次运行结果；[CONSTRAINT] 值置 null 时 useSessionStorage 会自动移除存储项 */
 const result = useSessionStorage<RunResponse | null>(STORAGE_KEY_RESULT, null)
 // [selfcheck-observed-cmds-v1] 本轮循环所有 runId 累积（供 DONE 时自检读 toolLog 对账）
@@ -254,12 +256,11 @@ export function pushTerminalNotice(text: string, _opts?: { divider?: boolean }):
  * [CHANGE-IMPACT] 触发 readNdjson 抛出 AbortError → run 的 catch 走"已取消"分支
  */
 function stop() {
-  // [stop-finally-contract-v1] 不得递增 activeRunToken：
-  //   run() 的 catch/finally 都以 isStale()（myToken !== activeRunToken）决定是否收口。
-  //   stop 里 +1 会让进行中的这轮 run 被判 stale ⇒ finally 跳过「兜底 emit 终态 + running=false」
-  //   ⇒ 卡片永久停在 running phase（用户实测：点了停止、toast 也出了，但卡片不动）。
-  //   [CONSTRAINT] stop 只负责 abort，让 run 自己走 catch(已取消) → finally(收口)。
-  //   连续两次 run 的竞争由新 run 的 ++activeRunToken 天然隔离：新 run 起来后旧 run 才变 stale。
+  // [stop-finally-contract-v1] 不得递增 activeRunToken：run() 的 catch/finally 都靠 isStale() 收口，
+  //   在 stop 里 +1 会让本轮被判 stale ⇒ 跳过「兜底 emit + running=false」⇒ 卡片停在 running。
+  //   [CONSTRAINT] stop 只负责 abort；连续两次 run 的竞争由新 run 的 ++activeRunToken 隔离。
+  // [run-queue-v1] 清空排队项：stop 语义是「立即停下」，不得在 finally 里继续 dequeue 执行。
+  runQueue.clear()
   if (abortController) {
     abortController.abort()
     abortController = null
@@ -383,15 +384,17 @@ function guessDesc(code: string): string {
  * [CHANGE-IMPACT] 会写 lastRunCode / running / result / changes，UI 状态依赖此路径；异常走 catch 置 error 帧
  * @param opts 选项对象；script 覆盖编辑器内容、runKey 聚合事件、autoFeedback 置位后本轮结束自动回传
  */
-async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boolean }): Promise<RunResponse | 'skipped' | null> {
+async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boolean, queueIfBusy?: boolean }): Promise<RunResponse | 'skipped' | 'queued' | null> {
   const code = (opts?.script ?? script.value).trim()
   // [run-skip-identifiable-v1] 被守卫吞掉时返回可辨识标记（R2）；调用方据此判定重试，不读 result
   if (!code) return 'skipped'
-  // [stale-run-abort-v2] 复检发现的真实死锁路径：原 abort 加在 try 内（L446 附近），
-  //   但 running 守卫在它之前 return 'skipped' ⇒ 悬挂的 fetch 永远到不了 abort，拖满 180s 才收口。
-  //   [WHY] 用户点第二次 run 通常期望「重跑」，中止旧轮正是期望行为；abort 后旧轮 finally 会
-  //   自行把 running 置 false（run2 未递增 token，旧轮的 !isStale() 为 true），用户可立即重试。
+  // [stale-run-abort-v2] abort 必须在 running 守卫前：原在 try 内被守卫拦截成死代码，旧 fetch 拖满 180s。
   if (running.value) {
+    // [run-queue-v1] queueIfBusy（AI 回填路径）排队等；手动重跑仍 abort 旧轮立即执行。
+    if (opts?.queueIfBusy) {
+      const ok = runQueue.enqueue({ script: code, runKey: opts.runKey, autoFeedback: opts.autoFeedback })
+      return ok ? 'queued' : 'skipped'
+    }
     if (abortController) { try { abortController.abort() } catch { /* swallow: 旧轮可能已自行结束 */ } }
     return 'skipped'
   }
@@ -455,7 +458,6 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   }
 
   try {
-    // [stale-run-abort-v2] abort 已上移到 running 守卫之前（见 run() 开头）；此处仅新建 controller。
     abortController = new AbortController()
     // [stdout-lag-attrib-v1] 记录发送时刻（WO-20261007-03 段五补遗）：summary 帧带 runId，
     //   其前缀即服务端执行开始时刻，零协议改动即可跨轮归因（原「需 NDJSON seq」判断已作废）。
@@ -653,6 +655,9 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         wrappedEmitStep(ok ? 'done' : 'error', { exit: result.value?.code, changeCount: changes.value.length, changes: changes.value.map(c => ({ path: c.path, type: c.type })), fallback: true })
       }
       running.value = false
+      // [run-queue-v1] 出队执行下一条（递归 run 形成串行链；结果进 feedbackMerge 合并回传）。
+      const _next = runQueue.dequeue()
+      if (_next) void run(_next)
     }
   }
   return result.value

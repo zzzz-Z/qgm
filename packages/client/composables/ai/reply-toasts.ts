@@ -30,9 +30,9 @@ export function notifyStoppedScriptHint(): void {
   toast(STOPPED_SCRIPT_HINT, 'warn', TOAST_LONG)
 }
 
-/** 等待执行超时：提示手动点击运行 */
+/** 等待当前轮结束超时：脚本已回填编辑器，需用户手动处理（工作台无「执行编辑器内容」按钮） */
 export function notifyWaitTimeout(): void {
-  toast('等待执行超时（20s），请手动点击运行', 'warn', TOAST_MEDIUM)
+  toast('当前轮持续未结束，脚本已回填编辑器；请等本轮结束后重新发送', 'warn', TOAST_LONG)
 }
 
 /** 非循环 DONE 路径的自检未通过告警（fail-open，不阻断） */
