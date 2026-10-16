@@ -274,10 +274,10 @@ export function useWorklogSvn(deps: WorklogSvnDeps) {
       const fileList = files.map(f => `${f.status}  ${f.path}`).join(NL)
       const prompt = [
         'ASK',
-        '请根据我提供的 SVN 变更，生成标准(中文) commit message。',
+        '请根据我提供的 SVN 变更，生成标准(中文内容) commit message。',
         `【重要】回复必须以哨兵前缀 ${Q}GITMSG:${Q} 开头（单独一行，冒号后直接跟 commit message），`,
         '  客户端靠这个前缀精确提取你的输出。例如：',
-        `  ${Q}GITMSG: feat(svn): add xxx${Q}`,
+        `  ${Q}GITMSG: feat(svn): 新增 xxx${Q}`,
         `  若有多行 body，则首行仍是 ${Q}GITMSG: <head>${Q}，后续行为 body。`,
         '【规则】',
         '1. 只输出 commit message 本身（带哨兵前缀），不要解释、不要 markdown 代码块。',

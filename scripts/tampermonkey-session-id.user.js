@@ -215,6 +215,15 @@
   // [stopped-plain-noise-v1] 本轮是否已推过 stopped：置位后 plain 分支不再补发半截回复
   // （与 headless-inject.ts 的 dedup._stoppedReported 同义；随 fill/rotate 轮次重置）
   let stopPosted = false
+  // [stopped-btn-v1] 按钮状态驱动的停止检测（替代全文关键词 countStopMarkers）：
+  //   不再扫描「已停止生成/回答/输出」等文本关键词（AI 讨论探针本身时会在正文里自指命中
+  //   → 误推 stopped → 后续脚本被 stopped-window 闸门拦截）。
+  //   改为追踪「停止按钮」状态变化：
+  //   - prevGenerating：上一轮 classifyAndPost 看到的按钮状态（true=存在且可点）
+  //   - genEnterRoots：进入 generating 状态时的 assistant 根数量
+  //   判据：prevGenerating===true + 当前!isGenerating + roots 未增长 = 真中断
+  let prevGenerating = false
+  let genEnterRoots = 0
   // [limit-posted-v1] 本轮是否已推过 limit：**存量兜底通道（limitStale）每轮恒真**，
   //   而「更新 limitMarkerBaseline」压不住它 —— 该通道不依赖计数增长，基线更新前后恒真
   //   ⇒ 每轮 classifyAndPost 都会再 post 一次 kind:'limit'（2026-10-10 15:07 用户实测：
@@ -802,30 +811,49 @@
       //   旧顺序下 stopped 探针先扫到 → 误推 stopped → 后续脚本被 stopped-window 闸门拦截）。
       //   真 stopped（用户点停止/服务端中断）会让 isGenerating() 转 false（停止按钮消失/变灰），
       //   generating gate 放行后 stopped 探针仍能正常命中。
-      if (isGenerating()) {
+      // [stopped-btn-v2] 同时承担按钮状态追踪：进入 generating 时记 roots、保持 prevGenerating 更新，
+      //   退出（放行）后 stopped 探针据此判定是中断还是正常 DONE。
+      const currGen = isGenerating()
+      if (currGen) {
+        if (!prevGenerating) genEnterRoots = countAssistantRoots() // 刚进入 generating → 记 roots
+        prevGenerating = currGen // 保持追踪，让下一轮 stopped 探针能感知「按钮从有到无」
         if (!genRetryTimer) {
           genRetryTimer = setTimeout(() => { genRetryTimer = null; classifyAndPost() }, 600)
         }
         return
       }
+      // generating gate 放行：同步 prevGenerating → 让下方 stopped 探针能看到「上一轮还在生成」
+      // （prevGenerating 在上面的 return 分支里已经保持为 true，此处若 currGen===false 则仍为上一次的 true）
+      // 不需要再更新：stopped 探针里用 prevGenerating（上一次的值）和 currGen（本次 false）的组合
+      // 就能判定「按钮从有到无」
 
-      // [stopped-detect-v1] 生成被中止感知（用户点停止/平台中断/内容截断）：
-      // 残缺回复无 DONE 无完整脚本，按旧逻辑会被降级为 plain「等待下一轮」→ 前端无感知干等超时。
-      // 标记计数较 fill/rotate 基线增长即推送 kind:'stopped'（更新基线保证只推一次），优先于 script/plain
-      const stopCount = countStopMarkers()
-      if (stopCount > stopMarkerBaseline) {
-        stopMarkerBaseline = stopCount
-        stopPosted = true
-        lastBodySig = bodySignature()
-        post({
-          type: 'ai-runner:reply',
-          kind: 'stopped',
-          site: location.origin,
-          sessionId: extractSidFromHash(),
-          // [stopped-toast-quote-v1] 带命中原文（缺失时退回分段拼接的兜底串，不引入新的自命中）
-          text: stopMarkerText || STOPPED_GENERIC,
-        })
-        return
+      // [stopped-btn-v1] 按钮状态驱动的停止检测：
+      //   判据：prevGenerating===true（上一轮按钮存在）+ currGen===false（本轮消失）
+      //         + rootsNow === genEnterRoots（进入生成时的 assistant 根数未增长）
+      //   真中断 = 按钮消失 + 没有新 assistant 消息；正常 DONE = 按钮消失 + roots 增长
+      //   不再扫描正文关键词（2026-10-15 实测：AI 讨论 SiteAdapter 改造时正文自指命中"已停止回答"
+      //   → 误推 stopped → 后续脚本被 stopped-window 闸门拦截）。
+      //   [WHY] 之前 generating gate 已经把 `currGen=true` 的情况 return 掉了，能走到这里必然 currGen=false，
+      //   所以条件只需 prevGenerating===true 即可（组合起来就是「按钮从有到无」）。
+      if (prevGenerating && !stopPosted) {
+        const rootsNow = countAssistantRoots()
+        const rootsFrozen = genEnterRoots > 0 && rootsNow === genEnterRoots
+        if (rootsFrozen) {
+          stopPosted = true
+          lastBodySig = bodySignature()
+          post({
+            type: 'ai-runner:reply',
+            kind: 'stopped',
+            site: location.origin,
+            sessionId: extractSidFromHash(),
+            text: STOPPED_GENERIC,
+          })
+          // 消费掉本次状态变化：后续 classifyAndPost 不会再命中此条件（prevGenerating 置 false）
+          prevGenerating = false
+          return
+        }
+        // roots 增长了 → 正常 DONE，不是中断；prevGenerating 保持 false
+        prevGenerating = false
       }
 
       // [limit-detect-v2] 会话长度上限感知：触顶后本会话继续提问不可能有产出，
@@ -1299,6 +1327,8 @@
       syncStopMarkerBaseline() // [stopped-detect-v1] 开新一轮：以当前「已停止」计数为新基线
       _roundBaselinesReady = true // [stopped-detect-v3] 自此冷启动守卫永久失效（本轮语义成立）
       stopPosted = false // [stopped-plain-noise-v1] 开新一轮：解除 plain 补发抑制
+      prevGenerating = false // [stopped-btn-v1] 开新一轮：重置按钮状态追踪
+      genEnterRoots = 0 // [stopped-btn-v1] 开新一轮：重置进入 generating 时的 roots 基线
       limitPosted = false // [limit-posted-v1] 开新一轮：解除触顶推送锁定（本轮允许再报一次）
       _scriptFenceReported = false // [script-fence-gate-v1] 开新一轮：重置 fence 报错去重
       syncLimitMarkerBaseline() // [limit-detect-v1] 开新一轮：以当前「上限」计数为新基线
@@ -1347,6 +1377,8 @@
       syncStopMarkerBaseline() // [stopped-detect-v1] 开新一轮：以当前「已停止」计数为新基线
       _roundBaselinesReady = true // [stopped-detect-v3] 自此冷启动守卫永久失效（本轮语义成立）
       stopPosted = false // [stopped-plain-noise-v1] 开新一轮：解除 plain 补发抑制
+      prevGenerating = false // [stopped-btn-v1] 开新一轮：重置按钮状态追踪
+      genEnterRoots = 0 // [stopped-btn-v1] 开新一轮：重置进入 generating 时的 roots 基线
       limitPosted = false // [limit-posted-v1] 开新一轮：解除触顶推送锁定（本轮允许再报一次）
       _scriptFenceReported = false // [script-fence-gate-v1] 开新一轮：重置 fence 报错去重
       syncLimitMarkerBaseline() // [limit-detect-v1] 开新一轮：以当前「上限」计数为新基线
