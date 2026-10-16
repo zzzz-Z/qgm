@@ -10,7 +10,9 @@ import TooltipHost from './components/feedback/TooltipHost.vue'
 import KeyboardHelp from './components/feedback/KeyboardHelp.vue'
 import type { SessionEntry } from './composables/ui/useAppStorage'
 import { theme } from './composables/ui/useAppStorage'
-import { setActiveWinSidImpl as setActiveWinSid, winSidOf } from './composables/ai/useAiWindowTable'
+// [site-switch-tab-follow-v1] getWindowBySidImpl 供 onSiteChange 探测「目标服务商窗口是否已开」；
+//   已开则只激活不导航（保留用户原会话），未开才新开。
+import { getWindowBySidImpl as getWindowBySid, setActiveWinSidImpl as setActiveWinSid, winSidOf } from './composables/ai/useAiWindowTable'
 
 const WorkspaceGuide = defineAsyncComponent(() => import('./components/panels/WorkspaceGuide.vue'))
 const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
@@ -168,27 +170,42 @@ async function activateWorkspaceFromQuery(): Promise<void> {
  * [multi-site-switch-v1] 切换 AI 站点（DeepSeek / 通义千问 等）
  * [WHY] composable 层早已具备多站点能力（MODELS + setModel，会重置 sessionId 与 url），
  *   但 2026-10-11 左栏由「站点列表」改为「工作区列表」后 UI 入口一并消失，用户无法切换。
- * [CONSTRAINT] 切站点会重置会话上下文与窗口 sid，必须 reload 让 App.vue 的 watch(modelId) 链路
- *   （会话历史 / activeSessionId / winSid）与 SessionManager 从干净的存储重建——与 onTransportChange 同范式。
- * [CHANGE-IMPACT] 依赖 useAiSite().setModel；失败仅 toast 不刷新。
+ * [site-switch-tab-follow-v1] 2026-10-16 起去整页 reload：watch(modelId) 已响应式接管
+ *   sessionHistory / activeSessionId / winSid 的切换，reload 只是为了「图省事清场」的历史包袱；
+ *   改为显式 resetSession() + 激活/新开目标站点 tab——tab 跟随需求得以满足，且不再闪屏丢工作台状态。
+ * [CHANGE-IMPACT] 依赖 useAiSite().setModel；失败仅 toast，不做任何切换。
  */
 async function onSiteChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
   if (!v || v === modelId.value) return
   if (!setModel(v)) { toast('切换站点失败：未知的站点 id', 'error', TOAST_MEDIUM); return }
   // [multi-site-switch-v1] 切站点 = 换 AI 服务商 = 全新 AI 上下文，SYSTEM.md 不在新上下文里。
-  //   必须清当前工作区「首问已发」标记；否则 wsSent=true 硬短路（useAiWindow.ts:317）→ 新站点永久不注入规则。
-  //   原实现只 reload，标记不清（openSite 新建窗口分支才清，且为 fire-and-forget，未必赶在首次发问前落库）。
+  //   必须清目标工作区「新站点」的首问标记；否则 wsSent=true 硬短路 → 新站点永久不注入规则。
   try {
     const { useWorkspaces } = await import('./composables/data/useWorkspaces')
     const w = useWorkspaces()
     const wsId = String(w.activeId.value || '')
-    // [key-composite-v1] 清「新站点」在该工作区下的首问键（而非当前站点）：
-    //   换服务商 = 新站点全新 AI 上下文，其首问应重发规则；旧站点的「已发」标记保留，
-    //   用户切回旧站点时不必重注入。
+    // [key-composite-v1] 清「新站点」在该工作区下的首问键（而非当前站点）。
     if (wsId) await w.setFirstPromptSent(wsId, v, false)
   } catch { /* 清标记失败不阻断；用户可点开窗按钮（新建窗口分支）兜底 */ }
-  window.location.reload()
+  // [site-switch-tab-follow-v1] 新站点 = 新会话上下文：显式重置 SessionManager，
+  //   让规则去重键（sid:sessionId）落到新 sessionId，与切站点前的记录隔离。
+  try { resetSession() } catch { /* 未就绪忽略 */ }
+  // [site-switch-tab-follow-v1] 切/开目标站点 tab：已开则只激活（保留用户原会话），未开才新开。
+  //   与「站点共用一个 tab」的既有命名空间一致：sid = win_<modelId>。
+  const sid = winSidOf(v)
+  try {
+    const existing = getWindowBySid(sid)
+    if (existing && !existing.closed) {
+      try { existing.focus() } catch { /* 跨域 / 休眠标签页：忽略 */ }
+    } else {
+      const m = MODELS.find(x => x.id === v)
+      if (m) {
+        const { openSite } = await import('./composables/ai/useAiWindow')
+        openSite(m.url, sid)
+      }
+    }
+  } catch { /* 开窗失败不阻断切换 */ }
 }
 function onTransportChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
