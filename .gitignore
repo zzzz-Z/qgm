@@ -4,7 +4,15 @@ dist/
 *.log
 .trae/
 .workbuddy/
-.ai-runner/
+# [knowledge-base-in-repo-v2] 知识库（lessons + skills）纳入版本库：
+#   CI 的 test:unit 依赖它们（lessons-hygiene 断言 lessons.md 存在；
+#   tests/fixtures/real-skills.ts 遍历 .ai-runner/skills/*/SKILL.md）。
+# [gitignore-dir-vs-content-v1] 必须忽略「内容」而不是目录本身——
+#   已在被排除目录之下的文件无法被 re-include。
+.ai-runner/*
+!.ai-runner/lessons.md
+!.ai-runner/skills/
+!.ai-runner/skills/**
 /tmp/
 packages/client/pnpm-lock.yaml
 packages/client/node_modules/

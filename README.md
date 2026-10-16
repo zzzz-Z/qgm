@@ -301,7 +301,7 @@ pnpm tsc:apps       # apps/*/src/**
 pnpm tsc:client     # packages/client/**（vue-tsc）
 pnpm test:tsc       # 各包 tests/**
 
-pnpm test:unit      # vitest（core 100 + client 61 个 node-test 文件）
+pnpm test:unit      # vitest（core 120 + client 82 个 node-test 文件）
 pnpm test:e2e       # Playwright（packages/client/e2e，需先起 dev server）
 pnpm lint           # ESLint flat config
 
