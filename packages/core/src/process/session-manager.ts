@@ -42,6 +42,9 @@ const sessions = new Map<string, SessionEntry>()
 // [CONSTRAINT] 缺省 10min —— 不要把 60s 作为默认：AI 思考 + 网页往返可能几分钟无帧，
 //   60s 会误杀在思考的会话（设计文档附问 4 的答案：用长阈值 + 帧端活跃刷新规避误杀）。
 const IDLE_MAX_MS = Number(process.env.AI_RUNNER_IDLE_MAX_MS) || 10 * 60 * 1000
+// [idle-max-trace-v1] 生产误设 AI_RUNNER_IDLE_MAX_MS 会静默改变会话回收阈值（过小误杀会话、
+//   过大内存不释放），排查时无从定位。启动打一行即可查；本身不阻断。
+if (process.env.AI_RUNNER_IDLE_MAX_MS) console.warn('[session] IDLE_MAX_MS 被 env 覆盖 =', IDLE_MAX_MS)
 
 let _seq = 0
 function newSid(): string {

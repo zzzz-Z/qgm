@@ -175,7 +175,10 @@ runHono.post('/run', async (c) => {
 
     const enc = new TextEncoder()
     const ac = new AbortController()
-    try { c.req.raw.signal.addEventListener('abort', () => ac.abort()) } catch { /* ignore */ }
+    // [abort-listener-trace-v1] 原为静默 catch：客户端断连时若 addEventListener 失败，
+    //   脚本仍会跑满 180s（ac.signal 永不被触发），且全程无日志可查「为什么断连没中止」。
+    try { c.req.raw.signal.addEventListener('abort', () => ac.abort()) }
+    catch (e) { console.warn('[run] abort listener 绑定失败（断连不会中止脚本）:', String(e)) }
     const url = new URL(c.req.url)
     const proto = url.protocol === 'https:' ? 'https' : 'http'
     const host = c.req.header('host') || 'localhost:5173'

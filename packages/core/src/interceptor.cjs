@@ -76,7 +76,8 @@ function logTool(op, p, size) {
     catch { return String(p) }
   })()
   const line = `${JSON.stringify({ ts: Date.now(), op, path: rel, size })}\n`
-  try { fs.writeSync(TOOL_FD, line) } catch {}
+  // [swallow] 工具日志写入失败（磁盘满 / FD 已关）不能反噬用户脚本，静默丢这条
+  try { fs.writeSync(TOOL_FD, line) } catch { /* swallow: 见上 */ }
 }
 
 // 读黑名单 —— 脚本可读源码，但不能读到项目密钥/凭证
@@ -598,7 +599,8 @@ function dump() {
   const s = JSON.stringify(out)
   if (s === _lastSnapshot) return
   _lastSnapshot = s
-  try { orig.writeFileSync(OVERLAY_FILE, s) } catch {}
+  // [swallow] overlay 落盘失败发生在 process 退出/异常路径上，此处抛错会覆盖真正的失败原因
+  try { orig.writeFileSync(OVERLAY_FILE, s) } catch { /* swallow: 见上 */ }
 }
 process.on('exit', () => { dump() })
 process.on('beforeExit', dump)

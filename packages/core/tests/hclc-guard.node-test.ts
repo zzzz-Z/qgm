@@ -22,8 +22,16 @@ const __dirname = path.dirname(__filename)
 // AIRUNNER-BATCH26-5-FIX-PATH-HCLC: 测试在 test/server/，源根在 ../../
 // [mig-path-v1] 测试从 test/server/ 迁到 packages/core/tests/，__dirname 深一级 → ROOT 需 3 级上溯
 const ROOT = path.resolve(__dirname, '..', '..', '..')
-const SRC = path.join(ROOT, 'packages', 'core', 'src')
+// [hclc-client-v1] 2026-10-17：扩范围至 packages/client。§4 原文「单文件唯一 import 模块数 > 20」
+//   未限定 core；实测 packages/client/composables/ai/useAiReplyHandlers.ts 曾达 21 越线，
+//   而原守卫只扫 packages/core/src ⇒ 该违规静默通过。先拆到 18 再扩，否则守卫一上即红。
+const SRC_ROOTS = [
+  path.join(ROOT, 'packages', 'core', 'src'),
+  path.join(ROOT, 'packages', 'client'),
+]
 const LIMIT = 20
+/** [hclc-skip-dirs] 遍历时跳过的目录：构建产物 / 运行态 / 测试与 e2e（后者不是业务代码） */
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.ai-runner', 'tests', 'e2e', '__tests__'])
 
 // AIRUNNER-HCLC-SKIP-BARRELS
 function isBarrel(file: string) {
@@ -35,27 +43,36 @@ function isBarrel(file: string) {
 
 function walk(dir: string, out: string[] = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === 'node_modules' || e.name === 'dist') continue
+    if (SKIP_DIRS.has(e.name)) continue
     const p = path.join(dir, e.name)
     if (e.isDirectory()) walk(p, out)
-    else if (e.name.endsWith('.ts') && !e.name.endsWith('.d.ts') && !isBarrel(p)) out.push(p)
+    else if ((e.name.endsWith('.ts') || e.name.endsWith('.vue')) && !e.name.endsWith('.d.ts') && !isBarrel(p)) out.push(p)
   }
   return out
 }
 
 function countImports(file: string) {
 // AIRUNNER-HCLC-UNIQ-MODULES
-  const src = fs.readFileSync(file, 'utf8')
+  let src = fs.readFileSync(file, 'utf8')
+  // [hclc-sfc-strip-v1] .vue 只数 <script> 内的 import：<template>/<style> 里的 `from "..."`
+  //   不是依赖声明（含 `` 代码示例 / CSS 属性值等）；用 SFC 块正则在扫描前剥离。
+  if (file.endsWith('.vue')) {
+    const m = src.match(/<script[^>]*>([\s\S]*?)<\/script>/)
+    src = m ? m[1] : ''
+  }
   const mods = new Set()
-  const re = /from\s+['"]([^'"]+)['"]/g
+  // [hclc-side-effect-import-v1] 2026-10-17 变异测试暴露：原正则只匹配 `from "x"` 形态，
+  //   `import "x"`（side-effect，无 from）整批漏数 ⇒ 加一条 import 分支；Set 天然去重。
+  const re = /(?:from|import)\s+['"]([^'"]+)['"]/g
   let m
   while ((m = re.exec(src)) !== null) mods.add(m[1])
   return mods.size
 }
 
-it('hCLC: src/ 每个 .ts 的唯一 import 模块数 ≤ 20（阻断阈值）', () => {
-  const files = walk(SRC)
-  assert.ok(files.length >= 40, `src/ 应至少有 40 个业务 .ts 文件（排除 barrel 后当前 ${files.length}）`)
+it('hCLC: 每个业务文件的唯一 import 模块数 ≤ 20（阻断阈值）', () => {
+  const files: string[] = []
+  for (const root of SRC_ROOTS) files.push(...walk(root))
+  assert.ok(files.length >= 100, `两个根目录应至少有 100 个业务文件（排除 barrel 后当前 ${files.length}）`)
 
   const bad = []
   for (const f of files) {

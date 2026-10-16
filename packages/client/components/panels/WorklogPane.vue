@@ -9,6 +9,8 @@ import { useWorkspaces } from '../../composables/data/useWorkspaces'
 // [fs-watch-v1] git:changed 订阅：改盘即刷新（仅当面板激活）
 import { useAiTransport } from '../../composables/ai/useAiTransport'
 import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
+// [worklog-pane-helpers-v1] 纯函数已抽出，降低单文件体积（§4 组件 ≤ 1000）
+import { rowsFor, splitPath } from './worklog-pane-helpers'
 
 // @desc VSCode 源码管理风格侧栏：提交框 + 变更文件列表 + 点击预览文件内容
 // @why 用户要求把工作日志从弹窗改为 SidePane tab，视觉参照 VSCode 源代码管理面板
@@ -178,9 +180,9 @@ const statByPath = computed(() => {
   return m
 })
 /** 已暂存栏（提交源） */
-const stagedRows = computed(() => rowsFor(stagingStatus.value, true))
+const stagedRows = computed(() => rowsFor(stagingStatus.value, true, statByPath.value))
 /** 未暂存栏 */
-const unstagedRows = computed(() => rowsFor(stagingStatus.value, false))
+const unstagedRows = computed(() => rowsFor(stagingStatus.value, false, statByPath.value))
 const changeCount = computed(() => stagedRows.value.length + unstagedRows.value.length)
 // [worklog-stat-v1] 汇总 +/-：分组头展示；数据源同 result.files，与每行数值一致
 const addTotal = computed(() => (result.value?.files || []).reduce((s, f) => s + (f.added || 0), 0))
@@ -260,72 +262,7 @@ onUnmounted(() => {
 
 onClickOutside(branchWrapRef, () => { branchesOpen.value = false })
 
-/**
- * [git-stage-v1] 根据 XY 位把文件按所属栏补齐展示字段。
- * [WHY] 一个文件可同时出现在两栏（MM 状态：部分改动已暂存、部分未暂存），与 VSCode 一致。
- * @param files status 源
- * @param wantStaged true=取已暂存栏，false=取未暂存栏
- */
-function rowsFor(files: GitStatusFile[], wantStaged: boolean): Array<{
-  path: string
-  status: string
-  name: string
-  dir: string
-  stCls: string
-  stLetter: string
-  added: number
-  removed: number
-  diff: string
-}> {
-  const stats = statByPath.value
-  const out: Array<{
-    path: string
-    status: string
-    name: string
-    dir: string
-    stCls: string
-    stLetter: string
-    added: number
-    removed: number
-    diff: string
-  }> = []
-  for (const f of files) {
-    const inThis = wantStaged ? f.staged : f.unstaged
-    if (!inThis) continue
-    const sp = splitPath(f.path)
-    const st = stats.get(f.path)
-    out.push({
-      path: f.path,
-      status: f.status,
-      name: sp.name,
-      dir: sp.dir,
-      stCls: statusClass(f.status),
-      stLetter: statusLetter(f.status),
-      added: st?.added || 0,
-      removed: st?.removed || 0,
-      diff: st?.diff || '',
-    })
-  }
-  return out
-}
-/** 状态字母与颜色分类：M=modified A=added D=deleted R=renamed C=copied */
-function statusLetter(s: string): string {
-  if (s === 'added') return 'A'
-  if (s === 'deleted') return 'D'
-  if (s === 'renamed') return 'R'
-  if (s === 'copied') return 'C'
-  return 'M'
-}
-function statusClass(s: string): string {
-  if (s === 'added') return 'st-add'
-  if (s === 'deleted') return 'st-del'
-  if (s === 'renamed' || s === 'copied') return 'st-move'
-  return 'st-mod'
-}
-function splitPath(p: string): { dir: string, name: string } {
-  const i = p.lastIndexOf('/')
-  return i < 0 ? { dir: '', name: p } : { dir: p.slice(0, i + 1), name: p.slice(i + 1) }
-}
+// [worklog-pane-helpers-v1] rowsFor / statusLetter / statusClass / splitPath 已抽到 ./worklog-pane-helpers
 /**
  * 打开文件内容预览。
  * [WHY] 取代原先的「点击展开行级 diff」：用户要的是看这个文件现在长什么样

@@ -68,7 +68,8 @@ function post(body) {
 async function main() {
   const raw = await readStdin()
   let payload = {}
-  try { payload = JSON.parse(raw) } catch {}
+  // [swallow] 空 stdin / 非 JSON：payload 保持 {}，端点按缺省字段处理，不阻断
+  try { payload = JSON.parse(raw) } catch { /* swallow: 见上 */ }
   const p = payload.payload || {}
   // [selfcheck-observed-cmds-v1] 汇总本循环 toolLog 的 exec 记录 → 端点命令对账
   const observedCommands = collectObservedCommands(p.runIds)

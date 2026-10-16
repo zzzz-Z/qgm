@@ -29,6 +29,12 @@ const MAX_MODULE_LINES = 800
 const MAX_COMPONENT_LINES = 1000
 
 const SCAN_ROOTS = ['packages', 'apps']
+// [scripts-exempt-v1] 2026-10-17 有意不纳入 scripts/：
+//   ① 那里是一次性 CLI 工具（analyze-*.cjs / board-*.cjs / verify-*.cjs），
+//      §4「模块 ≤ 800 行」的语义针对的是长期维护的业务模块，不是工具脚本；
+//   ② scripts/tampermonkey-session-id.user.js 受油猴**单文件注入模型**约束——
+//      油猴只安装一个 .user.js，无法拆分（1566 行，是已知且可接受的例外）。
+//   若未来 scripts/ 出现长期维护的模块化工具，应先把该工具迁至 packages/，再纳入本表。
 const EXTS = new Set(['.ts', '.tsx', '.vue', '.js', '.cjs', '.mjs'])
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.ai-runner', 'coverage', 'tmp'])
 

@@ -234,5 +234,35 @@ test('clearAutoFeedback 为函数', () => {
   assert.equal(typeof r.clearAutoFeedback, 'function')
 })
 
+// ============ [stale-run-abort-v2] 悬挂 fetch 中止 ============
+
+test('[stale-run-abort-v2] 第二次 run() 必须 abort 上一轮悬挂的 fetch', async () => {
+  const r = mod.useRunner()
+  const savedFetch = globalThis.fetch
+  let firstSignal: AbortSignal | null = null
+  try {
+    // 第一次 fetch：挂起直到 signal abort（模拟服务端执行 180s 未回）
+    globalThis.fetch = ((_url: unknown, init?: { signal?: AbortSignal }) => {
+      firstSignal = init && init.signal ? init.signal : null
+      return new Promise((_res, reject) => {
+        if (init && init.signal) init.signal.addEventListener('abort', () => reject(new Error('aborted')))
+      })
+    }) as unknown as typeof fetch
+    r.script.value = 'const a = 1'
+    void r.run()
+    await new Promise(res => setTimeout(res, 10))
+    assert.ok(firstSignal, '第一次 fetch 应已发起并暴露 signal')
+    assert.equal((firstSignal as AbortSignal).aborted, false, '第一次 signal 尚不该 abort')
+    assert.equal(r.running.value, true, '第一次 run 应处于 running')
+
+    // 第二次 run：running 守卫命中 ⇒ abort 旧 controller + 返回 skipped
+    const r2 = await r.run()
+    assert.equal(r2, 'skipped', 'running 中再次 run 应返回 skipped')
+    assert.equal((firstSignal as AbortSignal).aborted, true, '第二次 run() 必须 abort 上一轮悬挂的 fetch（修复前该断言恒 false）')
+  } finally {
+    globalThis.fetch = savedFetch
+  }
+})
+
 // 恢复 fetch（进程退出前）
 process.on('beforeExit', () => { globalThis.fetch = origFetch })

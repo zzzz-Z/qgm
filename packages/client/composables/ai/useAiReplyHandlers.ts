@@ -8,7 +8,6 @@
 
 import type { Ref } from 'vue'
 import type { SessionEntry } from '../ui/useAppStorage'
-import { useToast } from '../ui/useToast'
 import { pushTerminalNotice, useRunner } from '../runner/useRunner'
 import { useScriptInbox } from '../runner/useScriptInbox'
 // [hooks-relocate-v1] runHook 已从 auto-loop/hooks.ts 迁至 loop-hooks.ts（P1b），供非循环 DONE 分支使用
@@ -22,20 +21,19 @@ import { activeSessionId } from '../ui/useAppStorage'
 import { emit as emitBus, takePendingAskKey } from '../ui/useEventStream'
 import { askUser } from '../ui/useAsk'
 import { parseAsk } from '../../utils/ask-parser'
-import { formatLimitToast } from '../../utils/limit-notice'
-import {
-  formatStopToast,
-  STOPPED_SCRIPT_HINT,
-} from '../../utils/stop-notice'
 import { scanReplyMarks } from '../../utils/reply-mark'
 import { uid } from '../../utils/id'
 import { promiseTimeout } from '@vueuse/core'
 import { log } from '../../utils/log'
+// [reply-toasts-v1] toast 相关 imports 已收口到 reply-toasts.ts（§4 单文件唯一 import ≤ 20）
 import {
-  TOAST_LONG,
-  TOAST_LONGEST,
-  TOAST_MEDIUM,
-} from '../../utils/toast-durations'
+  notifyLimit,
+  notifySelfcheckReject,
+  notifySiteError,
+  notifyStopped,
+  notifyStoppedScriptHint,
+  notifyWaitTimeout,
+} from './reply-toasts'
 
 type EventKindStr = 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary' | 'ai:ask' | 'ai:feedback' | 'ai:decision' | 'ai:need-files' | 'ai:stream'
 
@@ -84,7 +82,7 @@ function inStoppedWindow(sid: string): boolean {
 /** 组装 AI 回复消息处理族（onSessionIdMessage 及 7 个 handler） */
 export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   const { sessionHistory, saveHistoryScoped, addSessionToHistory, isMockMode } = deps
-  const { toast } = useToast()
+  // [reply-toasts-v1] useToast 已收口到 reply-toasts.ts（本文件不再直接 toast）
   const runner = useRunner()
   const scriptInbox = useScriptInbox()
   const autoTakeover = useAutoTakeover()
@@ -131,7 +129,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     const kind = String(payload.kind || '')
 
     if (kind === 'error') {
-      toast(`DeepSeek 暂时无法回复：${String(payload.text || '站点返回错误')}`, 'error', TOAST_LONGEST)
+      notifySiteError(String(payload.text || ''))
       return
     }
 
@@ -139,7 +137,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       stoppedAtBySid.set(sid, Date.now()) // [stopped-plain-noise-v1] 记录时刻，窗口内 plain 一律丢弃
       // [stopped-toast-quote-v1] 带上页面侧命中原文（口径同触顶的 formatLimitToast）：
       //   停止词表与我们自己的 UI 文案同形 ⇒ 误报几乎必然发生，不带原文就永远无从定位是哪段文本命中。
-      toast(formatStopToast(payload.text), 'warn', TOAST_LONG)
+      notifyStopped(payload.text)
       return
     }
 
@@ -149,9 +147,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     //   侧栏常驻「开启新对话」按钮与正文拼接会造成假命中（页面无 banner 也弹）⇒
     //   不回显命中串就无法定位误报源。组装逻辑见 utils/limit-notice.ts（裸测 limit-notice.node-test.ts）
     if (kind === 'limit') {
-      toast(formatLimitToast(payload.text), 'warn', TOAST_LONGEST)
-
-      toast('请手动开启新会话后重试', 'info', TOAST_MEDIUM)
+      notifyLimit(payload.text)
       return
     }
 
@@ -198,7 +194,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       const doneSummary = cleanSummary.split(/\r?\n/).filter(l => l.trim()).slice(0, 5).join(' / ').slice(0, 200)
       void runHook('BeforeDoneFinal', { loopId: '', round: 0, startCommit: '', reason: 'retained-path', doneSummary })
         .then((gate) => {
-          if (gate.action === 'reject') toast(`自检未通过：${gate.reason || 'hook rejected'}`, 'warn', TOAST_LONG)
+          if (gate.action === 'reject') notifySelfcheckReject(gate.reason)
         })
         .catch(() => { /* runHook 自身 fail-open，此处兜底 */ })
       // [board-clear-on-done-v1] 看板清桶：sid 空则跳过（对齐 taskboard-sid-guard-v1 ——
@@ -277,7 +273,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
         //   [CHANGE-IMPACT] 已回填完毕（push 已发生）；用户确认无误后可手动点运行，路径不丢。
         if (inStoppedWindow(sid)) {
           reportArrival('stopped-window')
-          toast(STOPPED_SCRIPT_HINT, 'warn', TOAST_LONG)
+          notifyStoppedScriptHint()
           return
         }
         // [arrive-log-v1] 走到这里 = 已排入执行分流（下面的调度入口立即调用回调，无延迟、不过开关）
@@ -290,7 +286,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
             return
           }
           if (attempt >= 20) {
-            toast('等待执行超时（20s），请手动点击运行', 'warn', TOAST_MEDIUM)
+            notifyWaitTimeout()
             return
           }
           await promiseTimeout(1000)
@@ -342,7 +338,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
         // [stopped-no-autorun-v1] 窗口判据放在 await **之后**：本路径固有 3-7s 延迟，
         //   stopped 完全可能在等待期间到达并让循环 finish；若只在 await 前判，残余脚本照样被跑。
         if (inStoppedWindow(sid)) {
-          toast(STOPPED_SCRIPT_HINT, 'warn', TOAST_LONG)
+          notifyStoppedScriptHint()
           return
         }
         void runner.run({ script: code, runKey, autoFeedback: true })
