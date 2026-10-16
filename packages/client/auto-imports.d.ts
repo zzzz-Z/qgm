@@ -235,6 +235,7 @@ declare global {
   const renderFileContent: typeof import('./composables/useFileContentHtml').renderFileContent
   const renderMarkdown: typeof import('./composables/useMarkdown').renderMarkdown
   const resetBoardMirror: typeof import('./composables/ai/board-mirror').resetBoardMirror
+  const resetRulesForSessionBoot: typeof import('./composables/ai/useAiWindow').resetRulesForSessionBoot
   const resolveAsk: typeof import('./composables/ui/useAsk').resolveAsk
   const resolveComponent: typeof import('vue').resolveComponent
   const resolveConfirm: typeof import('./composables/ui/useToast').resolveConfirm
@@ -855,6 +856,7 @@ declare module 'vue' {
     readonly renderFileContent: UnwrapRef<typeof import('./composables/useFileContentHtml')['renderFileContent']>
     readonly renderMarkdown: UnwrapRef<typeof import('./composables/useMarkdown')['renderMarkdown']>
     readonly resetBoardMirror: UnwrapRef<typeof import('./composables/ai/board-mirror')['resetBoardMirror']>
+    readonly resetRulesForSessionBoot: UnwrapRef<typeof import('./composables/ai/useAiWindow')['resetRulesForSessionBoot']>
     readonly resolveAsk: UnwrapRef<typeof import('./composables/ui/useAsk')['resolveAsk']>
     readonly resolveComponent: UnwrapRef<typeof import('vue')['resolveComponent']>
     readonly resolveConfirm: UnwrapRef<typeof import('./composables/ui/useToast')['resolveConfirm']>
