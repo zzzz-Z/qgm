@@ -198,10 +198,12 @@ async function switchDeepSeekSession(id: string, newSession?: boolean): Promise<
     // [key-composite-v1] newSession=true = 站点内新建对话 = 全新 AI 上下文：
     //   显式重置该 (工作区, 新站点) 的首问键，否则复用同名窗口分支不会触发 openSite 的重置，
     //   新对话首次提问会漏注入 SYSTEM.md（用户报告的真实场景）。
+    // [site-from-sid-v1] 站点 id 直接从 targetSid 反推（winSidOf / sidForUrl 的互逆函数），
+    //   与 useAiWindow 侧口径一致；不再经 MODELS 反查 host（多一个失败分支且与 sid 语义漂移）。
     if (newSession) {
       try {
-        const m = MODELS.find((x) => { try { return new URL(x.url).host === new URL(atUrl).host } catch { return false } })
-        const modelForReset = m?.id || ''
+        const { modelIdFromSid } = await import('../ai/useAiSite')
+        const modelForReset = modelIdFromSid(targetSid)
         if (modelForReset) await setFirstPromptSent(id, modelForReset, false)
       } catch { /* 未就绪：下次切换会重试 */ }
     }

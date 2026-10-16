@@ -1,5 +1,7 @@
 import { promiseTimeout } from '@vueuse/core'
-import { currentSiteUrl, url } from './useAiSite'
+// [key-composite-v1] modelIdFromSid 用于把「当前激活窗口 sid」还原成站点 id，
+//   与 winSidOf 互逆；切工作区换 activeWinSid 时首问键必须按窗口实际站点记，不能再取全局 modelId。
+import { currentSiteUrl, modelIdFromSid, url } from './useAiSite'
 // [loop-consolidation-P3d] 拼装逻辑抽到 first-prompt.ts（独立职责 + 稳定测试落点）
 import { prependFirstPromptRules } from './first-prompt.js'
 // [restore-import-v1] log 早前按 auto-import 名单清理时误删（app 侧兜底可跑，但 tsc --noEmit / vitest 无该插件）
@@ -115,9 +117,10 @@ function markRulesInjected(sid: string): void {
         try { await w.load() } catch { /* 拉取失败保持未就绪 */ }
       }
       const wsId = String(w.activeId.value || '')
-      // [key-composite-v1] 首问标记按 (工作区, 服务商) 复合维度，切服务商读独立键，避免跨站串状态
-      const { useAiSite: _useAiSite } = await import('./useAiSite.js')
-      const curModel = _useAiSite().modelId.value
+      // [key-composite-v1] 首问标记按 (工作区, 站点) 复合维度。
+      // [site-from-sid-v1] 站点 id 从 activeWinSid 反推（本函数是窗口维度登记，modelId 必须与窗口一致）：
+      //   切工作区换 activeWinSid 后全局 modelId 可能仍是旧值 → 取全局会串键。
+      const curModel = modelIdFromSid(getActiveWinSid())
       if (wsId) {
         const ok = await w.setFirstPromptSent(wsId, curModel, true)
         if (!ok) log.warn('[markRulesInjected] firstPromptSent 写入失败 wsId=', wsId)
@@ -173,9 +176,9 @@ export function resetRulesForSessionBoot(winSid: string): void {
       const w = useWorkspaces()
       if (!w.activeId.value) { try { await w.load() } catch { /* 拉取失败保持未就绪 */ } }
       const wsId = String(w.activeId.value || '')
-      // [key-composite-v1] 只清「当前服务商」的首问键；切服务商读独立键，无需全局清
-      const { useAiSite: _useAiSiteBoot } = await import('./useAiSite.js')
-      const curModel = _useAiSiteBoot().modelId.value
+      // [key-composite-v1] 只清「本窗口站点」的首问键；切站点读独立键，无需全局清。
+      // [site-from-sid-v1] 该窗口 boot = 该窗口站点全新上下文；取 activeWinSid 反推避免串键。
+      const curModel = modelIdFromSid(winSid)
       if (wsId) await w.setFirstPromptSent(wsId, curModel, false)
     } catch (e) { log.warn('[resetRulesForSessionBoot] setFirstPromptSent 异常:', e) }
   })()
@@ -224,9 +227,9 @@ export function openSite(atUrl?: string, sid?: string): Window | null {
           const { useWorkspaces } = await import('../data/useWorkspaces')
           const w = useWorkspaces()
           const wsId = String(w.activeId.value || '')
-          // [key-composite-v1] 新窗口 = 全新 AI 上下文，清当前服务商的首问键
-          const { useAiSite: _useAiSiteOpen } = await import('./useAiSite.js')
-          const curModel = _useAiSiteOpen().modelId.value
+          // [key-composite-v1] 新窗口 = 全新 AI 上下文，清「该窗口站点」的首问键。
+          // [site-from-sid-v1] useSid 就是本次 openSite 的槽位，取它反推站点最直接。
+          const curModel = modelIdFromSid(useSid)
           if (wsId) await w.setFirstPromptSent(wsId, curModel, false)
         } catch { /* 未就绪：忽略 */ }
       })()
@@ -340,9 +343,9 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
       const { useWorkspaces } = await import('../data/useWorkspaces')
       const w = useWorkspaces()
       const wsId = String(w.activeId.value || '')
-      // [key-composite-v1] 复合键 (工作区, 服务商)：切服务商读独立键，不串状态
-      const { useAiSite: _useAiSiteRead } = await import('./useAiSite.js')
-      const curModel = _useAiSiteRead().modelId.value
+      // [key-composite-v1] 复合键 (工作区, 站点)。
+      // [site-from-sid-v1] 用 activeWinSid 反推：发问发生在「当前激活窗口」上，键必须与该窗口站点一致。
+      const curModel = modelIdFromSid(getActiveWinSid())
       if (wsId) {
         if (await w.getFirstPromptSent(wsId, curModel)) wsSent = true
       }

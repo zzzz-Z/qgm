@@ -37,14 +37,27 @@ test('site-switch-rules-reset: onSiteChange 清目标工作区首问标记，且
   assert.ok(!body.includes('window.location.reload()'), 'onSiteChange 不得回退为整页 reload（tab 无法跟随）')
 })
 
-// [key-composite-v1] useAiWindow 4 处 firstPromptSent 调用点必须带 model 参数（复合键）。
-// 判据承重：把任一处的 model 参去掉 → 本条必红。
-test('key-composite: useAiWindow 4 处 firstPromptSent 调用均带 modelId', () => {
+// [key-composite-v1] useAiWindow 4 处 firstPromptSent 调用点必须带站点参数（复合键）。
+// [site-from-sid-v1] 站点 id 从 activeWinSid / useSid / winSid 反推（modelIdFromSid），不取全局 modelId，
+//   否则切工作区换槽位后写的是旧站点的键。
+// 判据承重：把任一处的站点参去掉，或退回 _useAiSite().modelId.value，本条必红。
+test('key-composite: useAiWindow 4 处 firstPromptSent 调用均带站点参数', () => {
   const src = readSrc('packages/client/composables/ai/useAiWindow.ts')
+  // 3 处 set：写 true / false（第二参为 curModel，其定义为 modelIdFromSid(...)）
   const setHits = src.match(/setFirstPromptSent\(wsId, curModel, (?:true|false)\)/g) || []
+  // 1 处 get：读（第二参同样为 curModel）
   const getHits = src.match(/getFirstPromptSent\(wsId, curModel\)/g) || []
-  assert.equal(setHits.length, 3, `应有 3 处带 modelId 的 setFirstPromptSent，实际 ${setHits.length}`)
-  assert.equal(getHits.length, 1, `应有 1 处带 modelId 的 getFirstPromptSent，实际 ${getHits.length}`)
+  assert.equal(setHits.length, 3, `应有 3 处带站点参的 setFirstPromptSent，实际 ${setHits.length}`)
+  assert.equal(getHits.length, 1, `应有 1 处带站点参的 getFirstPromptSent，实际 ${getHits.length}`)
+  // [site-from-sid-v1] curModel 定义必须来自 modelIdFromSid（3 处 set + 1 处 get 各一次），
+  //   不得取全局 modelId —— 判据承重：把任一 curModel 定义改回全局取值，本条必红。
+  const defHits = src.match(/const curModel = modelIdFromSid\(/g) || []
+  assert.equal(defHits.length, 4, `应有 4 处 curModel = modelIdFromSid(...)，实际 ${defHits.length}`)
   assert.ok(!/setFirstPromptSent\(wsId, (?:true|false)\)/.test(src), '存在回退为两参的调用点')
   assert.ok(!/getFirstPromptSent\(wsId\)/.test(src), '存在回退为单参的调用点')
+  // [site-from-sid-v1] 不得回退为从全局 useAiSite().modelId 取站点（切工作区会串键）
+  assert.ok(!/_useAiSite\(\)\.modelId\.value/.test(src), '不得从全局 modelId 取站点：切工作区后串键')
+  assert.ok(!/_useAiSiteBoot\(\)\.modelId\.value/.test(src), '不得从全局 modelId 取站点：切工作区后串键')
+  assert.ok(!/_useAiSiteOpen\(\)\.modelId\.value/.test(src), '不得从全局 modelId 取站点：切工作区后串键')
+  assert.ok(!/_useAiSiteRead\(\)\.modelId\.value/.test(src), '不得从全局 modelId 取站点：切工作区后串键')
 })
