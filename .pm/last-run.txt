@@ -1,8 +1,0 @@
-{
-  "finished_at": "2026-10-16T04:14:21.827Z",
-  "total_rounds": 13,
-  "phase": "done",
-  "report_path": ".pm/final-report.md",
-  "issues_count": 0,
-  "proposals_count": 18
-}
