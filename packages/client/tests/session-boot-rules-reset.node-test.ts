@@ -17,8 +17,10 @@ describe('session-boot-v1：AI 窗口重载后清规则去重（防首问漏带 
     assert.ok(/export function resetRulesForSessionBoot\(/.test(src), '未导出 resetRulesForSessionBoot')
     assert.ok(/k\.startsWith\(prefix\)/.test(src), '未按 <winSid>: 前缀匹配：会漏清或误清其他窗口')
     assert.ok(/persistRulesInjected\(\)/.test(src), '未持久化：刷新后去重集复活')
-    // [CONSTRAINT] 工作区维度标记必须一并清，否则硬短路依然命中
-    assert.ok(/setFirstPromptSent\(wsId, false\)/.test(src), '未清工作区首问标记：硬短路继续生效')
+    // [CONSTRAINT] 工作区维度标记必须一并清，否则硬短路依然命中。
+    // [key-composite-v1] 只清当前服务商的键（三参：wsId, model, false），不再全局清。
+    assert.ok(/setFirstPromptSent\(wsId, curModel, false\)/.test(src), '未清当前服务商首问标记：硬短路继续生效')
+    assert.ok(/useAiSite/.test(src), '缺少 modelId 读取：无法按服务商维度清标记')
   })
 
   it('handleSessionIdUpdate 必须消费 boot 标记，且早于 frameSid early-return', () => {

@@ -89,12 +89,18 @@ export interface WorkspaceSession {
 }
 /** 工作区 id → 会话绑定（内存权威态，落盘经 persistWorkspace） */
 const workspaceSessions = new Map<string, WorkspaceSession>()
-// [first-prompt-persist-v1] 工作区 id → 「首问是否已带过规则头」。
-// [WHY] 用户要求：切工作区不该重发 SYSTEM.md（会话上下文没变），只有「打开新窗口」才该重置。
-//   原实现的去重键是「窗口 sid:sessionId」，切工作区走 resetSession 换了 sessionId → 击穿去重 →
-//   下次提问重发规则（用户实测报告）。改为按工作区维度持久化：切工作区读同一份状态、不重发；
-//   openSite 新建窗口时清该工作区状态，下次提问重新注入。
+// [first-prompt-persist-v1] 首问标记的键为复合键 `<wsId>::<modelId>`，不是裸 wsId。
+// [WHY] 用户要求：切工作区不该重发 SYSTEM.md（会话上下文没变）；同时「每个 AI 服务商的首问状态要隔离」。
+//   原实现键只有 wsId → 同一工作区切服务商后 wsSent 仍为 true，硬短路 → 新站点永不注入 SYSTEM.md。
+//   复合键后：切工作区读同一份（同站点）状态不重发；切到不同服务商读独立键，该发就发。
+// [CONSTRAINT] 旧版裸 wsId 键在加载时被丢弃（升级一次性重注入属预期代价，避免把「DeepSeek 已发」误当
+//   「千问也已发」）；持久化形态仍是 Record<string, boolean>，字段名不变，旧文件向后兼容读。
 const workspaceFirstPromptSent = new Map<string, boolean>()
+/** 复合键：`<wsId>::<modelId>`；modelId 为空时退化为裸 wsId（测试兜底路径） */
+function firstPromptKey(wsId: string, modelId?: string): string {
+  const m = String(modelId || '').trim()
+  return m ? `${wsId}::${m}` : wsId
+}
 // eslint-disable-next-line import/no-mutable-exports -- 可变绑定：activateWorkspace 会改写（与 ROOT 同理）
 export let activeWorkspaceId: string | null = null
 
@@ -179,6 +185,10 @@ export function removeWorkspace(id: string): { ok: boolean, reason?: string } {
   workspaces.delete(id)
   // [workspace-session-bind-v1] 工作区出册时同步清会话绑定，避免脏键累积
   workspaceSessions.delete(id)
+  // [first-prompt-persist-v1] 复合键下清该工作区的**全部**模型条目（前缀匹配）
+  for (const k of [...workspaceFirstPromptSent.keys()]) {
+    if (k === id || k.startsWith(`${id}::`)) workspaceFirstPromptSent.delete(k)
+  }
   if (wasActive) {
     const remaining = [...workspaces.values()].sort((a, b) => a.addedAt - b.addedAt)
     const next = remaining[0]
@@ -246,22 +256,28 @@ export function getWorkspaceSessions(): Record<string, WorkspaceSession> {
 }
 
 /**
- * [first-prompt-persist-v1] 读某工作区「首问是否已带过规则头」。
+ * [first-prompt-persist-v1] 读某工作区 + 服务商的「首问是否已带过规则头」。
  * [CONSTRAINT] 未记录 / 工作区不存在一律视为 false（= 该发规则）。
+ * @param id 工作区 id
+ * @param modelId 站点 modelId（如 'deepseek'/'qianwen'）；缺省时退化为裸 wsId 键（测试兜底）
  */
-export function getWorkspaceFirstPromptSent(id: string): boolean {
-  return workspaceFirstPromptSent.get(id) === true
+export function getWorkspaceFirstPromptSent(id: string, modelId?: string): boolean {
+  return workspaceFirstPromptSent.get(firstPromptKey(id, modelId)) === true
 }
 
 /**
- * [first-prompt-persist-v1] 写某工作区首问状态（幂等覆盖）。
+ * [first-prompt-persist-v1] 写某工作区 + 服务商的首问状态（幂等覆盖）。
  * [CONSTRAINT] 只接受已注册的工作区 id（防脏键）；写入后立即持久化。
+ * @param id 工作区 id
+ * @param modelId 站点 modelId；缺省时退化为裸 wsId 键
+ * @param sent 是否已发过首问
  * @returns 工作区不存在时返回 false
  */
-export function setWorkspaceFirstPromptSent(id: string, sent: boolean): boolean {
+export function setWorkspaceFirstPromptSent(id: string, modelId: string | undefined, sent: boolean): boolean {
   if (!workspaces.has(id)) return false
-  if (sent) workspaceFirstPromptSent.set(id, true)
-  else workspaceFirstPromptSent.delete(id)
+  const key = firstPromptKey(id, modelId)
+  if (sent) workspaceFirstPromptSent.set(key, true)
+  else workspaceFirstPromptSent.delete(key)
   persistWorkspace()
   return true
 }
@@ -283,10 +299,14 @@ export function loadWorkspaceRegistry(): string | null {
     const raw = fs.readFileSync(WORKSPACE_CONF_FILE, 'utf8')
     const j = JSON.parse(raw) as { root?: string, workspaces?: WorkspaceEntry[], sessions?: Record<string, WorkspaceSession>, firstPromptSent?: Record<string, boolean> }
     const list = Array.isArray(j.workspaces) ? j.workspaces : []
-    // [first-prompt-persist-v1] 恢复首问标记（缺字段一律视为「未发」）
+    // [first-prompt-persist-v1] 恢复首问标记（缺字段一律视为「未发」）。
+    // [key-composite-v1] 只恢复含 '::' 的复合键；旧版裸 wsId 键丢弃——升级后同一工作区切服务商
+    //   不会把上一个服务商的「已发」误当本服务商的「已发」（代价：升级后首问一次性重注入）。
     if (j && typeof j.firstPromptSent === 'object' && j.firstPromptSent) {
-      for (const [wid, v] of Object.entries(j.firstPromptSent as Record<string, unknown>)) {
-        if (typeof v === 'boolean') workspaceFirstPromptSent.set(wid, v)
+      for (const [k, v] of Object.entries(j.firstPromptSent as Record<string, unknown>)) {
+        if (typeof v !== 'boolean') continue
+        if (!k.includes('::')) continue
+        workspaceFirstPromptSent.set(k, v)
       }
     }
     // [workspace-session-bind-v1] 恢复会话绑定（缺字段 / 类型不符一律跳过，不阻断注册表恢复）

@@ -183,7 +183,10 @@ async function onSiteChange(e: Event) {
     const { useWorkspaces } = await import('./composables/data/useWorkspaces')
     const w = useWorkspaces()
     const wsId = String(w.activeId.value || '')
-    if (wsId) await w.setFirstPromptSent(wsId, false)
+    // [key-composite-v1] 清「新站点」在该工作区下的首问键（而非当前站点）：
+    //   换服务商 = 新站点全新 AI 上下文，其首问应重发规则；旧站点的「已发」标记保留，
+    //   用户切回旧站点时不必重注入。
+    if (wsId) await w.setFirstPromptSent(wsId, v, false)
   } catch { /* 清标记失败不阻断；用户可点开窗按钮（新建窗口分支）兜底 */ }
   window.location.reload()
 }

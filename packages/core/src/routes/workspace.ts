@@ -296,7 +296,9 @@ workspaceHono.post('/workspace/session', async (c) => {
 workspaceHono.get('/workspace/first-prompt', (c) => {
   const id = String(c.req.query('id') || '').trim()
   if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
-  return c.json({ ok: true, sent: getWorkspaceFirstPromptSent(id) })
+  // [key-composite-v1] model 可选：复合键 <wsId>::<modelId>；缺省时退化为裸 wsId（测试兜底）
+  const model = String(c.req.query('model') || '').trim()
+  return c.json({ ok: true, sent: getWorkspaceFirstPromptSent(id, model || undefined) })
 })
 
 /**
@@ -304,12 +306,14 @@ workspaceHono.get('/workspace/first-prompt', (c) => {
  * [CONSTRAINT] 目标工作区必须已注册（否则 404）；写后立即持久化。
  */
 workspaceHono.post('/workspace/first-prompt', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { id?: string, sent?: boolean } | null
+  const body = (await c.req.json().catch(() => null)) as { id?: string, model?: string, sent?: boolean } | null
   const id = String(body?.id || '').trim()
   if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
-  const ok = setWorkspaceFirstPromptSent(id, body?.sent === true)
+  // [key-composite-v1] model 可选：复合键 <wsId>::<modelId>
+  const model = String(body?.model || '').trim()
+  const ok = setWorkspaceFirstPromptSent(id, model || undefined, body?.sent === true)
   if (!ok) return c.json({ ok: false, error: '工作区不存在' }, 404)
-  return c.json({ ok: true, sent: getWorkspaceFirstPromptSent(id) })
+  return c.json({ ok: true, sent: getWorkspaceFirstPromptSent(id, model || undefined) })
 })
 
 /**

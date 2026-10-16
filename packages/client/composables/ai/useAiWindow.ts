@@ -115,8 +115,11 @@ function markRulesInjected(sid: string): void {
         try { await w.load() } catch { /* 拉取失败保持未就绪 */ }
       }
       const wsId = String(w.activeId.value || '')
+      // [key-composite-v1] 首问标记按 (工作区, 服务商) 复合维度，切服务商读独立键，避免跨站串状态
+      const { useAiSite: _useAiSite } = await import('./useAiSite.js')
+      const curModel = _useAiSite().modelId.value
       if (wsId) {
-        const ok = await w.setFirstPromptSent(wsId, true)
+        const ok = await w.setFirstPromptSent(wsId, curModel, true)
         if (!ok) log.warn('[markRulesInjected] firstPromptSent 写入失败 wsId=', wsId)
       } else {
         log.warn('[markRulesInjected] activeId 未就绪，工作区维度去重未登记')
@@ -170,7 +173,10 @@ export function resetRulesForSessionBoot(winSid: string): void {
       const w = useWorkspaces()
       if (!w.activeId.value) { try { await w.load() } catch { /* 拉取失败保持未就绪 */ } }
       const wsId = String(w.activeId.value || '')
-      if (wsId) await w.setFirstPromptSent(wsId, false)
+      // [key-composite-v1] 只清「当前服务商」的首问键；切服务商读独立键，无需全局清
+      const { useAiSite: _useAiSiteBoot } = await import('./useAiSite.js')
+      const curModel = _useAiSiteBoot().modelId.value
+      if (wsId) await w.setFirstPromptSent(wsId, curModel, false)
     } catch (e) { log.warn('[resetRulesForSessionBoot] setFirstPromptSent 异常:', e) }
   })()
 }
@@ -218,7 +224,10 @@ export function openSite(atUrl?: string, sid?: string): Window | null {
           const { useWorkspaces } = await import('../data/useWorkspaces')
           const w = useWorkspaces()
           const wsId = String(w.activeId.value || '')
-          if (wsId) await w.setFirstPromptSent(wsId, false)
+          // [key-composite-v1] 新窗口 = 全新 AI 上下文，清当前服务商的首问键
+          const { useAiSite: _useAiSiteOpen } = await import('./useAiSite.js')
+          const curModel = _useAiSiteOpen().modelId.value
+          if (wsId) await w.setFirstPromptSent(wsId, curModel, false)
         } catch { /* 未就绪：忽略 */ }
       })()
     }
@@ -331,8 +340,11 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
       const { useWorkspaces } = await import('../data/useWorkspaces')
       const w = useWorkspaces()
       const wsId = String(w.activeId.value || '')
+      // [key-composite-v1] 复合键 (工作区, 服务商)：切服务商读独立键，不串状态
+      const { useAiSite: _useAiSiteRead } = await import('./useAiSite.js')
+      const curModel = _useAiSiteRead().modelId.value
       if (wsId) {
-        if (await w.getFirstPromptSent(wsId)) wsSent = true
+        if (await w.getFirstPromptSent(wsId, curModel)) wsSent = true
       }
     } catch { /* 未就绪：wsSent=false，走窗口维度 */ }
     // [chat-first-no-rules-v1] skipRules=true 用于纯聊天首问（"开始聊天"）：不注入 SYSTEM.md，
