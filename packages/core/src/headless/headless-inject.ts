@@ -713,13 +713,7 @@ export function detectReplyInPage() {
 
   const doneMarker = findNewDone()
   if (doneMarker) {
-    // [done-stable-gate-v1] 内容还在变时延迟推送——根治「短内容 DONE 被推两次」。
-    // [WHY] marker = hash(`done-head|${full.slice(0,200)}`)：当 summary 总长 < 200 时，
-    //   前 200 字符 = 全文，流式中每帧内容变化 ⇒ marker 变化 ⇒ seenDoneMarkers 去重失效
-    //   ⇒ 同一 DONE 被推 N 次（2026-10-17 用户实测：先推「DONE + 前两行」，再推完整版）。
-    // [CONSTRAINT] 独立字段 _pendingDoneSig，不复用 _pendingScriptHash / lastBodySig——
-    //   三条分支各管各的稳定门，互不污染。
-    // [CONSTRAINT] 与 script 的 2 帧门同构，只延迟不丢弃：内容稳定后照推，不会静默丢 DONE。
+    // [done-stable-gate-v1] DONE 稳定门（与 script 2 帧门同构，只延迟不丢弃）：marker=hash(done-head|首200字) 在 summary<200 字时随流式每帧变 ⇒ 去重失效，根治短内容 DONE 被推两次（2026-10-17 实测）。
     const _doneSig = bodySignature()
     if (dedup._pendingDoneSig !== _doneSig) {
       dedup._pendingDoneSig = _doneSig
