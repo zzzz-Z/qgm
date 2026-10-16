@@ -118,6 +118,14 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 - **命令名先与 `package.json` 对账**：文档与回执里写的脚本名必须真实存在（`web:dev` 从未存在、只因复用已运行实例而长期未暴露，是这类的前车之鉴）。
 - **批量删除保护是环境垫片误报**：宿主侧跑全量 vitest 若撞上（报错栈出现 `node-safe-delete-shim`，表现为「单跑绿、合跑红」），加 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 重跑，不是你引入的回归。
 
+**本会话新增守卫（2026-10-17）**：
+
+- `packages/core/tests/tmp-reaper.node-test.ts`：`.ai-runner/tmp` 过期产物清理（3 过期 + 1 新鲜 → 剩 1）。改 `reapStaleTmp` 必跑。
+- `packages/core/tests/reply-extract-parity.node-test.ts`：`elToMd` / `extractReplyMd` 双通道（headless-inject.ts ↔ tampermonkey）tag 分支集与骨架一致性。改任一侧必跑。
+- `packages/core/tests/script-closure-gate.node-test.ts` 新增 `generating-gate` 用例：无头通道「生成中门」位置与形态断言。删门 / 挪位置即红。
+- `packages/client/tests/useRunner.node-test.ts` 新增 `stale-run-abort-v2` 用例：第二次 run 必须 abort 上一轮悬挂 fetch。
+- `packages/core/tests/hclc-guard.node-test.ts` 已扩至 `packages/client`：单文件 import ≤ 20 现在覆盖前端；`.vue` 剥 SFC 后只数 `<script>` 内 import；side-effect `import "x"` 形态亦计入。
+
 ### 验证目标绑定（verify-target-binding-v1）
 
 > 根因、DONE 契约与能力否定侦测见 `packages/core/SYSTEM.md` §13；本节只列本项目的命令、测试与文件。

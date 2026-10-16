@@ -183,6 +183,12 @@ declare global {
   const normalizeForHash: typeof import('./composables/runner/inbox-parse').normalizeForHash
   const normalizeLimitHit: typeof import('./utils/limit-notice').normalizeLimitHit
   const normalizeStopHit: typeof import('./utils/stop-notice').normalizeStopHit
+  const notifyLimit: typeof import('./composables/ai/reply-toasts').notifyLimit
+  const notifySelfcheckReject: typeof import('./composables/ai/reply-toasts').notifySelfcheckReject
+  const notifySiteError: typeof import('./composables/ai/reply-toasts').notifySiteError
+  const notifyStopped: typeof import('./composables/ai/reply-toasts').notifyStopped
+  const notifyStoppedScriptHint: typeof import('./composables/ai/reply-toasts').notifyStoppedScriptHint
+  const notifyWaitTimeout: typeof import('./composables/ai/reply-toasts').notifyWaitTimeout
   const onActivated: typeof import('vue').onActivated
   const onBeforeMount: typeof import('vue').onBeforeMount
   const onBeforeUnmount: typeof import('vue').onBeforeUnmount
@@ -292,6 +298,7 @@ declare global {
   const startWaiting: typeof import('./composables/ai/useAiWaiting').startWaiting
   const stripScriptBlocks: typeof import('./utils/strip-script-blocks').stripScriptBlocks
   const subscribeTreeDrop: typeof import('./composables/ui/drag-bus').subscribeTreeDrop
+  const summaryArrivalSeq: typeof import('./composables/runner/useRunner').summaryArrivalSeq
   const syncRef: typeof import('@vueuse/core').syncRef
   const syncRefs: typeof import('@vueuse/core').syncRefs
   const tailTextPreview: typeof import('./utils/timeline-preview').tailTextPreview
@@ -812,6 +819,12 @@ declare module 'vue' {
     readonly normalizeForHash: UnwrapRef<typeof import('./composables/runner/inbox-parse')['normalizeForHash']>
     readonly normalizeLimitHit: UnwrapRef<typeof import('./utils/limit-notice')['normalizeLimitHit']>
     readonly normalizeStopHit: UnwrapRef<typeof import('./utils/stop-notice')['normalizeStopHit']>
+    readonly notifyLimit: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifyLimit']>
+    readonly notifySelfcheckReject: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifySelfcheckReject']>
+    readonly notifySiteError: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifySiteError']>
+    readonly notifyStopped: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifyStopped']>
+    readonly notifyStoppedScriptHint: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifyStoppedScriptHint']>
+    readonly notifyWaitTimeout: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifyWaitTimeout']>
     readonly onActivated: UnwrapRef<typeof import('vue')['onActivated']>
     readonly onBeforeMount: UnwrapRef<typeof import('vue')['onBeforeMount']>
     readonly onBeforeUnmount: UnwrapRef<typeof import('vue')['onBeforeUnmount']>
@@ -921,6 +934,7 @@ declare module 'vue' {
     readonly startWaiting: UnwrapRef<typeof import('./composables/ai/useAiWaiting')['startWaiting']>
     readonly stripScriptBlocks: UnwrapRef<typeof import('./utils/strip-script-blocks')['stripScriptBlocks']>
     readonly subscribeTreeDrop: UnwrapRef<typeof import('./composables/ui/drag-bus')['subscribeTreeDrop']>
+    readonly summaryArrivalSeq: UnwrapRef<typeof import('./composables/runner/useRunner')['summaryArrivalSeq']>
     readonly syncRef: UnwrapRef<typeof import('@vueuse/core')['syncRef']>
     readonly syncRefs: UnwrapRef<typeof import('@vueuse/core')['syncRefs']>
     readonly tailTextPreview: UnwrapRef<typeof import('./utils/timeline-preview')['tailTextPreview']>
