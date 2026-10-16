@@ -22,9 +22,14 @@ const absenceInfo = ref<{ daysAgo: number } | null>(null)
 
 /** 自动接管模式开关 */
 const autoTakeover = useAutoTakeover()
-const { resetSession, restoreFromStorage } = useSessionManager()
+// [session-scope-per-site-v1] 会话上下文按站点分桶：switchSite 承担跨站点切换，
+//   不再需要 resetSession（切站点不再清空消息，改为「旧桶落盘 / 新桶恢复」）。
+const { restoreFromStorage, setSessionModelScope, switchSite } = useSessionManager()
 const { modelId, MODELS, setModel } = useAiSite()
 const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
+// [session-scope-per-site-v1] setup 顶层同步一次作用域：onMounted 的 restoreFromStorage
+//   才会从「当前站点」的桶里读，而不是默认桶。
+setSessionModelScope(String(modelId.value || 'default'))
 
 const { toast } = useToast()
 
@@ -50,6 +55,10 @@ useEventListener(window, 'keydown', onShiftQuestion)
 watch(modelId, (newId, oldId) => {
   if (!newId || newId === oldId) return
   try { setActiveModelId(newId) } catch { /* 未就绪不阻断 */ }
+  // [session-scope-per-site-v1] 会话上下文切桶：旧桶落盘 + 新桶恢复（无数据保持空态）。
+  //   [CONSTRAINT] 必须早于 saveActiveSessionIdBySite —— switchSite 内部会重置 SessionManager 的 sessionId，
+  //     与下方 activeSessionId（useAppStorage 侧的站点会话 id）互不干扰。
+  try { switchSite(String(newId), String(oldId ?? '')) } catch { /* 未就绪不阻断 */ }
   saveActiveSessionIdBySite(String(oldId ?? ''), activeSessionId.value)
   sessionHistory.value = loadHistoryBySite(newId)
   activeSessionId.value = loadActiveSessionIdBySite(newId)
@@ -75,8 +84,9 @@ onMounted(async () => {
   // [workspace-open-newwin-v1] 新窗口（?workspaceId=<id>）启动即切到目标工作区
   await activateWorkspaceFromQuery()
   await probeWorkspace()
-  // [refresh-same-session-v1] 普通刷新：从 sessionStorage 恢复会话上下文；
-  //   切项目路径的 reopenAfterSwitchProject 会先 resetSession 清掉，故顺序无副作用
+  // [refresh-same-session-v1] 普通刷新：从 sessionStorage 恢复会话上下文。
+  // [session-scope-per-site-v1] 恢复前再同步一次作用域：激活工作区/URL 参数可能改变 modelId 之外的路径。
+  try { setSessionModelScope(String(modelId.value || 'default')) } catch { /* 未就绪忽略 */ }
   try { restoreFromStorage() } catch { /* 未就绪时忽略 */ }
   maybeScheduleReopen()
   subscribeHeadlessReply()
@@ -188,9 +198,10 @@ async function onSiteChange(e: Event) {
     // [key-composite-v1] 清「新站点」在该工作区下的首问键（而非当前站点）。
     if (wsId) await w.setFirstPromptSent(wsId, v, false)
   } catch { /* 清标记失败不阻断；用户可点开窗按钮（新建窗口分支）兜底 */ }
-  // [site-switch-tab-follow-v1] 新站点 = 新会话上下文：显式重置 SessionManager，
-  //   让规则去重键（sid:sessionId）落到新 sessionId，与切站点前的记录隔离。
-  try { resetSession() } catch { /* 未就绪忽略 */ }
+  // [session-scope-per-site-v1] SessionManager 的作用域切换由 watch(modelId) → switchSite 统一承担：
+  //   此处不再显式 resetSession —— 分桶后切站点保留旧站点消息、恢复新站点消息，
+  //   若在此先清内存会覆盖 switchSite 落盘旧桶的时机（内存已空 → 落盘为空桶）。
+
   // [site-switch-tab-follow-v1] 切/开目标站点 tab：已开则只激活（保留用户原会话），未开才新开。
   //   与「站点共用一个 tab」的既有命名空间一致：sid = win_<modelId>。
   const sid = winSidOf(v)

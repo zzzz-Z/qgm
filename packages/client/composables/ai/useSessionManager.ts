@@ -13,8 +13,29 @@ export interface Message {
 // 在 setup 外反复构造会残留 listener；提升为模块级只注册一次
 const _clipboard = useClipboard()
 
-/** 存储键 */
+/** 存储键前缀；[session-scope-per-site-v1] 每站点一个桶：`<key>:<modelId>` */
 const STORAGE_KEY = 'ai_runner_session_ctx'
+
+/**
+ * [session-scope-per-site-v1] 当前会话上下文所属站点作用域。
+ * [WHY] 切服务商后工作台 messages / sessionId 应各自独立，不互相清空。
+ * [CONSTRAINT] 只决定 sessionStorage 桶名；内存态清空与恢复由 switchSite 承担。
+ */
+let _modelScope = 'default'
+
+/**
+ * [session-scope-per-site-v1] 设置会话上下文站点作用域。
+ * [CONSTRAINT] 仅改键名；不动内存数据。首次挂载前由 App.vue 顶层同步调用一次。
+ * @param id 站点 modelId；空串回退 'default'
+ */
+export function setSessionModelScope(id: string): void {
+  _modelScope = String(id || 'default')
+}
+
+/** 当前作用域对应的 sessionStorage 键 */
+function ctxKey(): string {
+  return `${STORAGE_KEY}:${_modelScope || 'default'}`
+}
 
 /**
  * 工作台侧会话上下文标识（形如 sess_xxx；sessionStorage 持久化，随标签页失效）。
@@ -58,7 +79,7 @@ function generateId(): string {
  */
 function saveToStorage(): void {
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+    sessionStorage.setItem(ctxKey(), JSON.stringify({
       sessionId: sessionId.value,
       sessionUrl: sessionUrl.value,
       messages: messages.value.slice(-100),
@@ -73,7 +94,7 @@ function saveToStorage(): void {
  */
 function restoreFromStorage(): void {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY)
+    const raw = sessionStorage.getItem(ctxKey())
     if (!raw) return
     const data = JSON.parse(raw)
     if (data.sessionId) sessionId.value = String(data.sessionId)
@@ -130,7 +151,7 @@ export function useSessionManager() {
     sessionId.value = generateId()
     sessionUrl.value = typeof window !== 'undefined' ? window.location.href : ''
     messages.value = []
-    try { sessionStorage.removeItem(STORAGE_KEY) } catch { /* swallow: 配额/隐私模式，内存态已清空 */ }
+    try { sessionStorage.removeItem(ctxKey()) } catch { /* swallow: 配额/隐私模式，内存态已清空 */ }
     toast('会话已重置', 'success')
   }
 
@@ -143,6 +164,34 @@ export function useSessionManager() {
     saveToStorage()
   }
 
+  /**
+   * [session-scope-per-site-v1] 切换会话上下文作用域到新站点。
+   * [WHY] 用户需求：切服务商时工作台消息各自独立，切回旧站点恢复旧消息，不再互相清空。
+   * [CONSTRAINT] ① 先落盘旧作用域的当前内存态；② 切作用域；③ 清内存；④ 从新作用域恢复。
+   *   新作用域无数据时保持空态（sessionId 换新）。全程不抛错——失败静默（配额 / 隐私模式）。
+   * @param newModelId 目标站点 modelId
+   * @param oldModelId 原站点 modelId；缺省时用当前 _modelScope
+   */
+  function switchSite(newModelId: string, oldModelId?: string): void {
+    const prev = String(oldModelId || _modelScope || 'default')
+    // 1) 落盘旧桶（保存旧站点当前内存态）
+    try {
+      sessionStorage.setItem(`${STORAGE_KEY}:${prev}`, JSON.stringify({
+        sessionId: sessionId.value,
+        sessionUrl: sessionUrl.value,
+        messages: messages.value.slice(-100),
+      }))
+    } catch { /* swallow: 配额 / 隐私模式 */ }
+    // 2) 切作用域
+    _modelScope = String(newModelId || 'default')
+    // 3) 清内存
+    sessionId.value = generateId()
+    sessionUrl.value = typeof window !== 'undefined' ? window.location.href : ''
+    messages.value = []
+    // 4) 从新桶恢复（无数据保持空态）
+    restoreFromStorage()
+  }
+
   return {
     sessionId,
     sessionUrl,
@@ -153,5 +202,7 @@ export function useSessionManager() {
     restoreFromStorage,
     generateHandoffSummary,
     updateSessionUrl,
+    setSessionModelScope,
+    switchSite,
   }
 }
