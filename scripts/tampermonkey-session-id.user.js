@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.2
+// @version      1.9.3
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -200,6 +200,10 @@
   const seenHashes = new Set()
   const seenDoneMarkers = new Set()
   let lastBodySig = ''
+  // [done-stable-gate-v1] DONE 分支的 2 帧稳定门（与 headless-inject.ts 同构）。
+  // [WHY] marker 是 hash(`done-head|${summary.slice(0,200)}`)；短内容时前 200 字随流式变化 ⇒
+  //   去重失效 ⇒ 同一 DONE 被推 N 次（2026-10-17 用户实测）。
+  let _pendingDoneSig = null
   let _scriptFenceReported = false
   // [stopped-btn-v1] stopped 分支的回传文案。[stopped-toast-quote-v1] 的「带命中原文」机制随
   //   全文关键词探针一起废止（按钮驱动后没有正文命中可带；原文通道的自指风险见该 tag 历史：
@@ -832,6 +836,13 @@
       const doneMarker = findNewDone()
 
       if (doneMarker) {
+        // [done-stable-gate-v1] 内容还在变时延迟推送（只延迟不丢弃）：与 headless 同构。
+        const _doneSig = bodySignature()
+        if (_pendingDoneSig !== _doneSig) {
+          _pendingDoneSig = _doneSig
+          return
+        }
+        _pendingDoneSig = null
         seenDoneMarkers.add(doneMarker.marker)
         post({
           type: 'ai-runner:reply',
@@ -840,7 +851,7 @@
           sessionId: extractSidFromHash(),
           text: doneMarker.text,
         })
-        lastBodySig = bodySignature()
+        lastBodySig = _doneSig
         return
       }
 

@@ -44,3 +44,37 @@ test('userscript @version 不得停留在 1.9.1（userscript-version-bump-v1）'
   assert.ok(m, '缺失 @version 字段')
   assert.notEqual(m![1], '1.9.1', '内容已改，@version 必须升（否则油猴不拉新脚本）')
 })
+// [done-stable-gate-v1] DONE 分支的 2 帧稳定门双通道同构守卫。
+// [WHY] DONE marker 是 hash(`done-head|${summary.slice(0,200)}`)；短内容时前 200 字随流式变化
+//   ⇒ 去重失效 ⇒ 同一 DONE 被推 N 次（2026-10-17 用户实测：先推前两行，再推完整版）。
+//   修法是给 DONE 分支加一层「body 签名连续 2 帧相同才推」的稳定门——与 script 分支的
+//   `_pendingScriptHash` 同构。两条通道（headless-inject.ts / tampermonkey.user.js）必须逐字对齐。
+// [判据承重] 删任一侧的稳定门、或把字段名改成另一侧没有的 ⇒ 本用例必红。
+test('done-stable-gate: 两侧都有 _pendingDoneSig 字段声明', () => {
+  for (const rel of [HEADLESS, USERSCRIPT]) {
+    const src = read(rel)
+    assert.ok(
+      /_pendingDoneSig/.test(src),
+      `${rel} 缺 _pendingDoneSig：DONE 无稳定门 ⇒ 短内容流式每帧推一次`,
+    )
+  }
+})
+
+test('done-stable-gate: 两侧门形态同构（if 不等 → 赋值 return，相等 → 清空推送）', () => {
+  for (const rel of [HEADLESS, USERSCRIPT]) {
+    const src = read(rel)
+    // 第一帧：不等则赋值并 return（延迟）
+    assert.ok(
+      /if \(\w*_pendingDoneSig !== \w*_doneSig\)/.test(src) || /_pendingDoneSig !== _doneSig/.test(src),
+      `${rel} 缺「首帧不等则延迟」的判定`,
+    )
+    assert.ok(
+      /_pendingDoneSig = _doneSig/.test(src),
+      `${rel} 缺「赋值 _pendingDoneSig = _doneSig」`,
+    )
+    assert.ok(
+      /_pendingDoneSig = null/.test(src),
+      `${rel} 缺「推送后清空 _pendingDoneSig」——不清会让下一轮 DONE 被误当同帧延迟`,
+    )
+  }
+})
