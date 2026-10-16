@@ -172,10 +172,19 @@ async function activateWorkspaceFromQuery(): Promise<void> {
  *   （会话历史 / activeSessionId / winSid）与 SessionManager 从干净的存储重建——与 onTransportChange 同范式。
  * [CHANGE-IMPACT] 依赖 useAiSite().setModel；失败仅 toast 不刷新。
  */
-function onSiteChange(e: Event) {
+async function onSiteChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
   if (!v || v === modelId.value) return
   if (!setModel(v)) { toast('切换站点失败：未知的站点 id', 'error', TOAST_MEDIUM); return }
+  // [multi-site-switch-v1] 切站点 = 换 AI 服务商 = 全新 AI 上下文，SYSTEM.md 不在新上下文里。
+  //   必须清当前工作区「首问已发」标记；否则 wsSent=true 硬短路（useAiWindow.ts:317）→ 新站点永久不注入规则。
+  //   原实现只 reload，标记不清（openSite 新建窗口分支才清，且为 fire-and-forget，未必赶在首次发问前落库）。
+  try {
+    const { useWorkspaces } = await import('./composables/data/useWorkspaces')
+    const w = useWorkspaces()
+    const wsId = String(w.activeId.value || '')
+    if (wsId) await w.setFirstPromptSent(wsId, false)
+  } catch { /* 清标记失败不阻断；用户可点开窗按钮（新建窗口分支）兜底 */ }
   window.location.reload()
 }
 function onTransportChange(e: Event) {
