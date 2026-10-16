@@ -273,6 +273,7 @@ declare global {
   const setActiveWinSidImpl: typeof import('./composables/ai/useAiWindowTable').setActiveWinSidImpl
   const setLastAutoFilled: typeof import('./composables/runner/useScriptInbox').setLastAutoFilled
   const setPendingAskKey: typeof import('./composables/ui/useEventStream').setPendingAskKey
+  const setSessionModelScope: typeof import('./composables/ai/useSessionManager').setSessionModelScope
   const setTransportKind: typeof import('./composables/ai/useAiTransport').setTransportKind
   const setWindowEntry: typeof import('./composables/ai/useAiWindowTable').setWindowEntry
   const shallowReactive: typeof import('vue').shallowReactive
@@ -894,6 +895,7 @@ declare module 'vue' {
     readonly setActiveWinSidImpl: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['setActiveWinSidImpl']>
     readonly setLastAutoFilled: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['setLastAutoFilled']>
     readonly setPendingAskKey: UnwrapRef<typeof import('./composables/ui/useEventStream')['setPendingAskKey']>
+    readonly setSessionModelScope: UnwrapRef<typeof import('./composables/ai/useSessionManager')['setSessionModelScope']>
     readonly setTransportKind: UnwrapRef<typeof import('./composables/ai/useAiTransport')['setTransportKind']>
     readonly setWindowEntry: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['setWindowEntry']>
     readonly shallowReactive: UnwrapRef<typeof import('vue')['shallowReactive']>

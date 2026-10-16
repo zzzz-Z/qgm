@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.1
+// @version      1.9.2
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -673,7 +673,8 @@
     //   （正文写「DONE 之后…」不会命中；首行不是标记就不是 done）
     // [CHANGE-IMPACT] 与 headless-inject 的 kind 分流同名同义，改一处必须同步三处
     if (summary && scanReplyMarks(summary).done > 0) {
-      const headMarker = hash32(`done-head|${summary.slice(0, 200)}|${summary.length}`)
+      // [done-marker-no-len-v1] 同无头：去掉 summary.length，防流式每帧变新 marker 重复推 DONE
+      const headMarker = hash32(`done-head|${summary.slice(0, 200)}`)
       if (!seenDoneMarkers.has(headMarker)) {
         return { marker: headMarker, text: summary }
       }

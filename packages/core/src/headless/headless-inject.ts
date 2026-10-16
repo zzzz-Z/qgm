@@ -556,7 +556,9 @@ export function detectReplyInPage() {
     const full = extractReplyMd(root)
     if (!full) return null
     if (scanReplyMarks(full).done < 0) return null
-    const marker = hash32(`done-head|${full.slice(0, 200)}|${full.length}`)
+    // [done-marker-no-len-v1] marker 不得掺 full.length：AI 流式追加时每帧长度都变 →
+    //   每次都是「新 marker」→ 同一 DONE 被推成 N 张卡（用户实测三份）。头部 200 字已足以去重。
+    const marker = hash32(`done-head|${full.slice(0, 200)}`)
     if (dedup.seenDoneMarkers.includes(marker)) return null
     return { marker, text: full }
   }
