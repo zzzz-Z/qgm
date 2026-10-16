@@ -78,3 +78,27 @@ test('done-stable-gate: 两侧门形态同构（if 不等 → 赋值 return，�
     )
   }
 })
+// [done-gate-v1] DONE 分支必须有「生成中门」——这是 2026-10-17 用户实测「总结被分两段」的真根因。
+// [WHY] 稳定门只延迟 2 帧；AI 在 DONE 首行后停顿 >2 帧（约 700ms-1.6s）再续写总结时，
+//   稳定门会误判「已稳定」并推送前半段 → 生成结束再推完整版 → 用户看到两段。
+//   生成中门是决定性判据：只要按钮显示「仍在生成」，DONE 一律不推。
+// [判据承重] 删掉任一侧的生成中门 ⇒ 本用例必红（变异已验证）。
+test('done-gate: 两侧 DONE 分支前都必须有生成中门', () => {
+  for (const rel of [HEADLESS, USERSCRIPT]) {
+    const src = read(rel)
+    const isGenFn = /function isGenerating(?:InPage)?\s*\(/.test(src)
+    assert.ok(isGenFn, `${rel} 缺 isGenerating 探针`)
+    // 门形态：DONE 分支内首句是生成中判断后 return
+    const m = src.match(/if \(doneMarker\) \{[\s\S]{0,400}?if \(isGenerating(?:InPage)?\(\)\) return/)
+    assert.ok(
+      m,
+      `${rel} 的 DONE 分支缺生成中门 ⇒ 流式中途出现的 DONE 首行会被推两次（用户实测「分两段」）`,
+    )
+    // 位置：生成中门必须在稳定门之前（先拦生成中，再看稳定性）
+    const gateAt = src.indexOf('if (doneMarker) {')
+    const genAt = src.indexOf('isGenerating', gateAt)
+    const stableAt = src.indexOf('_pendingDoneSig !== _doneSig', gateAt)
+    assert.ok(genAt > 0 && stableAt > 0, `${rel} 找不到门/稳定门`)
+    assert.ok(genAt < stableAt, `${rel} 生成中门必须在稳定门之前`)
+  }
+})

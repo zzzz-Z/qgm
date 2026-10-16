@@ -713,7 +713,8 @@ export function detectReplyInPage() {
 
   const doneMarker = findNewDone()
   if (doneMarker) {
-    // [done-stable-gate-v1] DONE 稳定门（与 script 2 帧门同构，只延迟不丢弃）：marker=hash(done-head|首200字) 在 summary<200 字时随流式每帧变 ⇒ 去重失效，根治短内容 DONE 被推两次（2026-10-17 实测）。
+    // [done-gate-v1] 生成中不推（首行 DONE 可能流式中途出现）+ 2 帧稳定门兜底（marker 在 summary<200 字时随流式变）。2026-10-17 实测「分两段」真根因是缺前门。
+    if (isGeneratingInPage()) return null
     const _doneSig = bodySignature()
     if (dedup._pendingDoneSig !== _doneSig) {
       dedup._pendingDoneSig = _doneSig
@@ -722,8 +723,7 @@ export function detectReplyInPage() {
     dedup._pendingDoneSig = null
     dedup.seenDoneMarkers.push(doneMarker.marker)
     dedup.lastBodySig = _doneSig
-    // [done-plain-v1] 不再要求 js 围栏：已允许纯 Markdown 总结
-    return { kind: 'done', text: doneMarker.text }
+    return { kind: 'done', text: doneMarker.text } // [done-plain-v1] 允许纯 Markdown 总结
   }
 
   // 文本稳定检测：连续 3 次 body 不变 → 生成结束，推 plain + text

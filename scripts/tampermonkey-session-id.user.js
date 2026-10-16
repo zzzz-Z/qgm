@@ -836,7 +836,8 @@
       const doneMarker = findNewDone()
 
       if (doneMarker) {
-        // [done-stable-gate-v1] 内容还在变时延迟推送（只延迟不丢弃）：与 headless 同构。
+        // [done-gate-v1] DONE 双门：生成中不推（首行可能流式中途出现）+ 2 帧稳定门兜底（与 headless 同构）。
+        if (isGenerating()) return
         const _doneSig = bodySignature()
         if (_pendingDoneSig !== _doneSig) {
           _pendingDoneSig = _doneSig
