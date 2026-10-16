@@ -1,0 +1,1264 @@
+{
+  "version": 1,
+  "writer_id": "pm-agent",
+  "updated_at": "2026-10-16T04:14:21.827Z",
+  "phase": "done",
+  "workspace_topology": "monorepo",
+  "repo_list": [],
+  "merge_status": "clean",
+  "conflicts": [],
+  "environment": {
+    "git": true,
+    "writable": true,
+    "network": true,
+    "repo_type": "monorepo",
+    "read_only": false,
+    "test_timeout": {
+      "single": 60,
+      "build": 300
+    }
+  },
+  "budget": {
+    "rounds_used": 13,
+    "rounds_max": 55,
+    "rounds_used_per_phase": {
+      "environment": 1,
+      "identity": 2,
+      "inventory": 2,
+      "benchmark": 2,
+      "gap": 2,
+      "proposal": 2,
+      "cost": 1,
+      "pre_done": 1,
+      "done": 1,
+      "reserve": 0
+    },
+    "allocation": {
+      "environment": 1,
+      "identity": 5,
+      "inventory": 11,
+      "benchmark": 10,
+      "gap": 8,
+      "proposal": 10,
+      "cost": 6,
+      "pre_done": 1,
+      "done": 1,
+      "reserve": 2
+    }
+  },
+  "identity": {
+    "product_type": {
+      "value": "内部工具 / 开发者工具（AI 编码工作台，本地优先）",
+      "source": "README.md:1-30 + 第 2-5 章",
+      "confidence": "高"
+    },
+    "core_user": {
+      "value": "使用 AI 站点（DeepSeek/千问）辅助编码的开发者（个人/小团队，本地优先）",
+      "evidence": [
+        "README.md:1-12 — 定位为「本地工作台」，驱动浏览器里的 AI 站点",
+        "README.md:第 2 章 — 两种宿主：vite 插件 / 独立应用，均面向开发者本地环境",
+        "README.md:5.9 — 工作区绑定系统原生目录选择器；持久化 ~/.ai-runner/workspace.json"
+      ]
+    },
+    "main_jobs": [
+      {
+        "job": "把 AI 产出的脚本在本地沙盒里执行，且可回滚",
+        "evidence": "README.md:5.1（overlay + 条件落盘）；packages/core/src/interceptor.cjs"
+      },
+      {
+        "job": "让脚本「看见」改完后的视图（overlay 读一致）",
+        "evidence": "README.md:5.1"
+      },
+      {
+        "job": "执行后自动体检（lint/tsc/test/smoke）+ 回传 AI",
+        "evidence": "README.md:5.5"
+      },
+      {
+        "job": "收尾自检（声称改动 ⊆ 实测改动）",
+        "evidence": "README.md:5.7"
+      },
+      {
+        "job": "多 AI 站点会话隔离 + 单激活 + 首问注入规则",
+        "evidence": "README.md:5.3；packages/client/composables/ai/*"
+      },
+      {
+        "job": "任务看板（跨轮待办）",
+        "evidence": "packages/core/src/routes/tasks.ts；packages/core/src/state/task-store.ts"
+      },
+      {
+        "job": "知识库（Skills + Lessons + LLM Wiki 代理）",
+        "evidence": "README.md:5.8"
+      },
+      {
+        "job": "视频生成（Agnes/CogVideoX 素材 + TTS + 字幕 + ffmpeg 合成）",
+        "evidence": "packages/core/src/video/**（1642 行）；packages/core/src/routes/video.ts"
+      },
+      {
+        "job": "持久 REPL 会话",
+        "evidence": "packages/core/src/routes/session.ts；packages/core/src/repl-loop.cjs"
+      },
+      {
+        "job": "工作区画像采集（框架/语言/工具位）",
+        "evidence": "README.md:5.9"
+      }
+    ],
+    "tech_stack": {
+      "frontend": "Vue 3 + unocss + vite (packages/client)",
+      "backend": "Node 22 + Hono + ws (packages/core / apps/standalone)",
+      "db": "无（本地 JSON 状态文件 + git 快照 + .ai-runner/ 运行态）",
+      "infra": "pnpm workspace monorepo / GitHub Actions / Docker / pm2",
+      "evidence": [
+        "README.md:第 2 章表格",
+        "pnpm-workspace.yaml",
+        "package.json",
+        ".github/workflows/ci.yml"
+      ]
+    },
+    "platforms": [
+      "macOS（osascript 工作区选择器）",
+      "Linux（zenity）",
+      "Windows（PowerShell）",
+      "Docker（compose.yaml / Dockerfile）"
+    ],
+    "team": {
+      "contributors_est": 1,
+      "active_recent": 1,
+      "velocity_commits_per_week": 35.54,
+      "frontend_count_est": 1,
+      "evidence": [
+        "90d 贡献者 1 人（375898312@qq.com）",
+        "90d 前端最近修改者 1 人",
+        "90d commits=457 / 12.86 周 ≈ 35.54"
+      ]
+    },
+    "release_cadence": {
+      "value": "无版本发布（tags=0，CHANGELOG 无）",
+      "evidence": "git tag | wc -l = 0；CHANGELOG.md 不存在"
+    },
+    "maturity": {
+      "value": "中 — 工程化门禁齐备（CI 8 项 blocking + 类型检查 4 套 + 1760 单测），但个人项目特征明显（无 tag/无 CHANGELOG/单作者/无 CODEOWNERS）",
+      "evidence": [
+        ".github/workflows/ci.yml — install/build/docs/anchors/typecheck×4/lint/test:unit 全 blocking",
+        "package.json — typecheck/verify/test:unit/test:e2e/lint 一应俱全",
+        "git tag = 0；无 CHANGELOG.md；无 CODEOWNERS"
+      ]
+    },
+    "market_hints": {
+      "lang": [
+        "zh"
+      ],
+      "i18n": false,
+      "compliance": []
+    },
+    "evidence": [
+      "package.json engines.node>=20.19.0",
+      "README.md:1-40 产品定位",
+      "package.json 只有 4 个 workspace 包（2 能力 + 2 装配）"
+    ]
+  },
+  "inventory": {
+    "features": [
+      {
+        "id": "F01",
+        "name": "脚本沙盒执行（overlay + 条件落盘）",
+        "state": "完整",
+        "anchor": "packages/core/src/interceptor.cjs:1-660; packages/core/src/routes/run.ts:1-427; README.md:5.1"
+      },
+      {
+        "id": "F02",
+        "name": "执行后工程化预检流水线（lint/tsc/test/smoke）",
+        "state": "完整",
+        "anchor": "packages/core/src/post-run/**; packages/core/src/routes/run.ts（流水线顺序）; README.md:5.5"
+      },
+      {
+        "id": "F03",
+        "name": "收尾自检闸门 L0/L1/L2（声称 ⊆ 实测）",
+        "state": "完整",
+        "anchor": "packages/core/src/selfcheck/**; packages/core/src/routes/selfcheck.ts:1-192; README.md:5.7"
+      },
+      {
+        "id": "F04",
+        "name": "快照 / 回滚 / 跨轮 diff",
+        "state": "完整",
+        "anchor": "packages/core/src/state/snapshot.ts; packages/core/src/routes/rollback.ts:1-95; README.md:5.6"
+      },
+      {
+        "id": "F05",
+        "name": "任务看板（todo/done 桶）",
+        "state": "完整",
+        "anchor": "packages/core/src/state/task-store.ts:1-733; packages/core/src/routes/tasks.ts:1-87"
+      },
+      {
+        "id": "F06",
+        "name": "双传输链路（油猴 postMessage / 无头 Playwright）",
+        "state": "完整",
+        "anchor": "packages/client/composables/ai/useAiTransport.ts; packages/core/src/headless/**; README.md:5.3"
+      },
+      {
+        "id": "F07",
+        "name": "多站点会话隔离（localStorage 分桶，上限 50）",
+        "state": "完整",
+        "anchor": "packages/client/composables/ai/useSessionManager.ts; README.md:5.3"
+      },
+      {
+        "id": "F08",
+        "name": "首问规则注入（SYSTEM.md/AGENTS.md/lessons 分档加载）",
+        "state": "完整",
+        "anchor": "packages/client/composables/ai/first-prompt.ts; packages/client/composables/ai/load-rules.ts; packages/client/composables/ai/load-lessons.ts"
+      },
+      {
+        "id": "F09",
+        "name": "脚本收件箱（fnv1a8 去重，容量 200）",
+        "state": "完整",
+        "anchor": "packages/client/composables/runner/useScriptInbox.ts; README.md:5.4"
+      },
+      {
+        "id": "F10",
+        "name": "ASK 提问卡（可点选，回填不阻塞）",
+        "state": "完整",
+        "anchor": "packages/client/composables/ui/useAsk.ts; packages/client/utils/ask-parser.ts"
+      },
+      {
+        "id": "F11",
+        "name": "回传合并窗（3000ms）",
+        "state": "完整",
+        "anchor": "packages/client/composables/runner/feedback-merge.ts; README.md:5.4"
+      },
+      {
+        "id": "F12",
+        "name": "Skills 技能库（三级短路安装 + BM25 匹配）",
+        "state": "完整",
+        "anchor": "packages/core/src/skills/**; packages/core/src/routes/skills.ts:1-173; README.md:5.8"
+      },
+      {
+        "id": "F13",
+        "name": "Lessons 踩坑库（DONE 自动入库 + 检索）",
+        "state": "完整",
+        "anchor": "packages/core/src/lessons/**; packages/core/src/routes/lessons.ts:1-77; README.md:5.8"
+      },
+      {
+        "id": "F14",
+        "name": "LLM Wiki 代理（token 只在服务端）",
+        "state": "完整",
+        "anchor": "packages/core/src/routes/wiki.ts:1-105; README.md:5.8"
+      },
+      {
+        "id": "F15",
+        "name": "工作区绑定与画像采集（12 个布尔位）",
+        "state": "完整",
+        "anchor": "packages/core/src/routes/workspace.ts; packages/client/components/panels/WorkspaceGuide.vue:1-141; README.md:5.9"
+      },
+      {
+        "id": "F16",
+        "name": "持久 REPL 会话",
+        "state": "完整",
+        "anchor": "packages/core/src/repl-loop.cjs; packages/core/src/routes/session.ts:1-75"
+      },
+      {
+        "id": "F17",
+        "name": "视频生成（Agnes/CogVideoX 素材 + Edge/Azure TTS + Whisper 字幕 + ffmpeg 合成）",
+        "state": "部分",
+        "anchor": "packages/core/src/video/**（1642 行）; packages/core/src/routes/video.ts:1-250; packages/client/components/panels/VideoGenerationPanel.vue:1-473"
+      },
+      {
+        "id": "F18",
+        "name": "无头模式引导登录（起有头窗口落 profile）",
+        "state": "完整",
+        "anchor": "packages/core/src/headless/**; README.md:5.3"
+      },
+      {
+        "id": "F19",
+        "name": "Worklog（VSCode 风格提交框 + 丢弃 + 内联分支）",
+        "state": "部分",
+        "anchor": "packages/client/components/panels/WorklogPane.vue:1-995; packages/core/src/routes/git.ts:1-133"
+      },
+      {
+        "id": "F20",
+        "name": "文件树 / 变更列表 / diff 预览",
+        "state": "完整",
+        "anchor": "packages/client/components/panels/FileTree.vue:1-392; packages/client/components/diff/**; packages/core/src/routes/files.ts:1-269"
+      }
+    ],
+    "ux_debt": [
+      {
+        "id": "D1",
+        "mark": "TODO/FIXME",
+        "file": "packages/core/src/headless/headless-inject-simple.ts",
+        "line": 101,
+        "note": "注释内容为 [guard-v1] 契约说明，非真实 TODO；实际 TODO/FIXME 仅 2 处且均为契约注释"
+      },
+      {
+        "id": "D2",
+        "mark": "硬编码中文",
+        "file": "packages/client/components/**（25 个 .vue）",
+        "line": 0,
+        "note": "25 个组件内文案为硬编码中文（无 i18n 层）；i18n=false 与 market_hints.lang=[zh] 一致，属有意取舍"
+      }
+    ],
+    "missing_basics": [
+      {
+        "id": "M1",
+        "name": "依赖漏洞扫描 / SAST",
+        "evidence": "package.json scripts 无 audit/SAST；.github/workflows/ci.yml 无对应步骤",
+        "source": "FACT"
+      },
+      {
+        "id": "M2",
+        "name": "覆盖率度量进入 CI",
+        "evidence": "vitest.config.ts 有 v8 coverage 配置；ci.yml 无 coverage 步骤",
+        "source": "FACT"
+      },
+      {
+        "id": "M3",
+        "name": "版本发布与 CHANGELOG",
+        "evidence": "git tag=0；CHANGELOG.md 不存在",
+        "source": "FACT"
+      },
+      {
+        "id": "M4",
+        "name": "多用户鉴权 / 登录",
+        "evidence": "README.md:十一「无登录/鉴权，假设只绑定本机」",
+        "source": "FACT"
+      },
+      {
+        "id": "M5",
+        "name": "前端 i18n",
+        "evidence": "packages/client 无 vue-i18n 依赖（package.json 未列）；文案硬编码中文",
+        "source": "FACT"
+      },
+      {
+        "id": "M6",
+        "name": "性能趋势基线",
+        "evidence": "packages/core/tests/perf.node-test.ts 单点，无历史趋势",
+        "source": "FACT"
+      }
+    ]
+  },
+  "benchmarks": [
+    {
+      "domain": "沙盒执行与可回滚落盘",
+      "ours": "内存 overlay，exit 0 才 flush；快照保留 20 次；git ref 固化",
+      "peer_practice": "同类工具普遍提供 diff 预览与撤销，但「默认不落盘、条件落盘」是较强设计",
+      "gap": "领先：默认零改动 + 强制快照是同类中少见的安全边界",
+      "source": "INFER",
+      "confidence": "中",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "本地优先架构为长期稳定共识"
+    },
+    {
+      "domain": "执行后自动体检",
+      "ours": "lint(--fix) → 定向 tsc → node --test → 可选 Playwright 冒烟，全部带超时",
+      "peer_practice": "多数同类工具只做 lint 或不做；全链路自动体检属少数",
+      "gap": "领先：体检链路完整且带预算控制",
+      "source": "INFER",
+      "confidence": "中",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "稳定"
+    },
+    {
+      "domain": "收尾自检（声称 ⊆ 实测）",
+      "ours": "L0 对账 + L1 回归基线 + L2 全量门，fail-closed 拦矛盾 / fail-open 放缺证据",
+      "peer_practice": "同类普遍无此闸门，AI 的完成声明直接采信",
+      "gap": "领先：这是本仓库最独特的能力",
+      "source": "INFER",
+      "confidence": "中",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "稳定"
+    },
+    {
+      "domain": "多 AI 站点接入",
+      "ours": "油猴（deepseek/qianwen 等 6+ 站点）+ 无头 Playwright 双链路",
+      "peer_practice": "同类多为单一模型 API 或单一 IDE 集成",
+      "gap": "领先：不绑定模型厂商，走浏览器网页",
+      "source": "INFER",
+      "confidence": "中",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "站点页面结构随时变化，需持续维护"
+    },
+    {
+      "domain": "跨会话记忆（踩坑库）",
+      "ours": "lessons.md 526 条 + 状态三态 + BM25 检索 + DONE 自动入库",
+      "peer_practice": "同类通常无持久项目记忆，或仅有对话历史",
+      "gap": "领先：自动入库 + 状态复核是完整闭环",
+      "source": "INFER",
+      "confidence": "中",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "稳定"
+    },
+    {
+      "domain": "技能库（可安装可检索）",
+      "ours": "本地三级短路安装 + BM25 + 名称/关键字权重",
+      "peer_practice": "同类多靠提示词模板或 IDE 插件市场",
+      "gap": "领先：磁盘为唯一事实来源 + 幂等安装",
+      "source": "INFER",
+      "confidence": "中",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "稳定"
+    },
+    {
+      "domain": "任务看板（跨轮待办）",
+      "ours": "todo/done 桶 + running 超时回退 + failed 独立数组",
+      "peer_practice": "同类普遍无跨轮任务持久化，AI 每轮失忆",
+      "gap": "领先：跨轮状态机完整",
+      "source": "INFER",
+      "confidence": "中",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "稳定"
+    },
+    {
+      "domain": "覆盖率度量与门禁",
+      "ours": "v8 provider 已配，CI 无上报无阈值",
+      "peer_practice": "成熟工程普遍在 CI 上报覆盖率并设最低阈值",
+      "gap": "落后：配置空转",
+      "source": "INFER",
+      "confidence": "高",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "稳定"
+    },
+    {
+      "domain": "E2E / 视觉回归纳入 CI",
+      "ours": "e2e 与视觉回归明确排除 CI（平台相关基线）",
+      "peer_practice": "成熟工程普遍在 CI 跑 e2e，或用容器化统一样式环境",
+      "gap": "落后：回归依赖开发者本机",
+      "source": "INFER",
+      "confidence": "高",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "Playwright 迭代快，建议年度复核"
+    },
+    {
+      "domain": "依赖漏洞扫描 / SAST",
+      "ours": "无 audit / 无 SAST；仅有自研 ai-guard 原生 API 黑名单",
+      "peer_practice": "成熟工程普遍有 npm audit（或 Dependabot/Snyk）+ 静态安全扫描",
+      "gap": "落后：外部依赖安全无护栏",
+      "source": "INFER",
+      "confidence": "高",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "稳定"
+    },
+    {
+      "domain": "发布与版本管理",
+      "ours": "无 tag / 无 CHANGELOG",
+      "peer_practice": "成熟工程普遍有语义化版本 tag + CHANGELOG 或自动生成 release notes",
+      "gap": "落后：无版本锚点，回滚只能靠 git 提交",
+      "source": "INFER",
+      "confidence": "高",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "稳定"
+    },
+    {
+      "domain": "用户鉴权与多用户",
+      "ours": "无鉴权，仅 loopback + CSRF 保护",
+      "peer_practice": "本地工具普遍也无鉴权（定位一致），但若对外暴露则必备",
+      "gap": "持平（本地工具定位下合理）；若未来多机部署则成阻塞",
+      "source": "INFER",
+      "confidence": "中",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "稳定"
+    },
+    {
+      "domain": "i18n / 多语言",
+      "ours": "无 vue-i18n，中文硬编码 25 个组件",
+      "peer_practice": "C 端必备；开发者工具普遍单一语言",
+      "gap": "持平（内部工具定位下合理）",
+      "source": "INFER",
+      "confidence": "中",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "稳定"
+    },
+    {
+      "domain": "性能基线与趋势",
+      "ours": "perf.node-test 单点，无趋势",
+      "peer_practice": "成熟工程有性能回归基准（如 vitest bench / benchmark CI）",
+      "gap": "落后：性能退化无感知",
+      "source": "INFER",
+      "confidence": "中",
+      "observed_at": "2026-10-16",
+      "version_observed": "—",
+      "staleness": "稳定"
+    }
+  ],
+  "gaps": [
+    {
+      "id": "G1",
+      "category": "能力缺失",
+      "domain": "质量度量与门禁",
+      "desc": "覆盖率已配 v8 provider 但 CI 无上报无阈值，度量空转；video 1642 行等高风险模块零覆盖",
+      "evidence": "vitest.config.ts:31-40 有 coverage 段；.github/workflows/ci.yml 无 coverage 步骤；packages/core/src/video/** 共 1642 行 grep 测试命中 0",
+      "source": "FACT",
+      "initial_severity": "P0",
+      "final_severity": "P1",
+      "related_proposals": [
+        "P1a",
+        "P1b"
+      ]
+    },
+    {
+      "id": "G2",
+      "category": "能力缺失",
+      "domain": "E2E 与视觉回归",
+      "desc": "e2e 与视觉回归明确排除 CI，回归仅依赖开发者本机；webServer.cwd 曾有宿主机复用导致从未真启动的坑（ci.yml 注释自陈）",
+      "evidence": ".github/workflows/ci.yml 注释「这里不跑 e2e」；vitest.config.ts exclude 排除 packages/client/e2e/**",
+      "source": "FACT",
+      "initial_severity": "P1",
+      "final_severity": "P2",
+      "related_proposals": [
+        "P6"
+      ]
+    },
+    {
+      "id": "G3",
+      "category": "能力缺失",
+      "domain": "依赖安全",
+      "desc": "无依赖漏洞扫描（npm audit / Dependabot）与静态安全扫描（SAST）；仅自研 ai-guard 拦原生 API",
+      "evidence": "package.json scripts 无 audit 相关；.github/workflows/ci.yml 无对应步骤",
+      "source": "FACT",
+      "initial_severity": "P1",
+      "final_severity": "P1",
+      "related_proposals": [
+        "P7"
+      ]
+    },
+    {
+      "id": "G4",
+      "category": "阻塞体验",
+      "domain": "视频生成（F17）",
+      "desc": "视频生成模块源码 1642 行、前端面板 473 行均无任何测试引用；编排器/provider 降级链无防护",
+      "evidence": "packages/core/src/video/*.ts 1642 行；grep video 在 core/tests 命中 0；grep VideoGenerationPanel 在 client/tests 命中 0",
+      "source": "FACT",
+      "initial_severity": "P0",
+      "final_severity": "P0",
+      "related_proposals": [
+        "P2a",
+        "P2b",
+        "P3",
+        "P4"
+      ]
+    },
+    {
+      "id": "G5",
+      "category": "阻塞体验",
+      "domain": "无头调度（F06/F18）",
+      "desc": "headless-scheduler / browser-engine / headless-slot-queue 无独立测试；无头链路是双传输链路之一，失效即整体不可用",
+      "evidence": "grep headless-scheduler|browser-engine|headless-slot-queue 在 packages/core/tests 命中 0（headless-inject 命中 10）",
+      "source": "FACT",
+      "initial_severity": "P0",
+      "final_severity": "P0",
+      "related_proposals": [
+        "P5a",
+        "P5b"
+      ]
+    },
+    {
+      "id": "G6",
+      "category": "能力缺失",
+      "domain": "版本与发布",
+      "desc": "git tag=0、无 CHANGELOG，回滚只能靠 git 提交而非版本锚点；用户升级无参照",
+      "evidence": "git tag | wc -l = 0；CHANGELOG.md 不存在；package.json version=0.1.0（仅根）",
+      "source": "FACT",
+      "initial_severity": "P1",
+      "final_severity": "P2",
+      "related_proposals": [
+        "P8"
+      ]
+    },
+    {
+      "id": "G7",
+      "category": "能力缺失",
+      "domain": "性能基线",
+      "desc": "perf.node-test 单点断言，无历史趋势与阈值告警；性能退化无感知",
+      "evidence": "packages/core/tests/perf.node-test.ts 单点；无 bench 目录、无阈值",
+      "source": "FACT",
+      "initial_severity": "P2",
+      "final_severity": "P2",
+      "related_proposals": [
+        "P11"
+      ]
+    },
+    {
+      "id": "G8",
+      "category": "锦上添花",
+      "domain": "Worklog（F19）",
+      "desc": "WorklogPane.vue 995 行接近组件红线，且「丢弃 / 内联分支切换」为部分态，交互细节无断言",
+      "evidence": "WorklogPane.vue:1-995；仅被 visual-spec-guard / preview-diff-render 间接引用",
+      "source": "FACT",
+      "initial_severity": "P2",
+      "final_severity": "P2",
+      "related_proposals": [
+        "P10"
+      ]
+    },
+    {
+      "id": "G9",
+      "category": "能力缺失",
+      "domain": "测试数据管理",
+      "desc": "各测试自造 fixture，无统一数据工厂，新增测试边际成本高",
+      "evidence": "无 test-data/factories 目录；各测试文件顶部各自造 fixture",
+      "source": "FACT",
+      "initial_severity": "P2",
+      "final_severity": "P1",
+      "related_proposals": [
+        "P9a",
+        "P9b"
+      ]
+    },
+    {
+      "id": "G10",
+      "category": "锦上添花",
+      "domain": "脚本生态",
+      "desc": "scripts/ 19 文件 + bin/ 20+ 文件无专属测试；构建/审计脚本失效无守卫",
+      "evidence": "scripts/ 下无 *.test.ts；apps/ 无测试文件",
+      "source": "FACT",
+      "initial_severity": "P2",
+      "final_severity": "P2",
+      "related_proposals": [
+        "P12"
+      ]
+    },
+    {
+      "id": "G11",
+      "category": "能力缺失",
+      "domain": "国际化",
+      "desc": "无 vue-i18n，25 个组件硬编码中文；若面向英文用户则阻塞",
+      "evidence": "package.json 无 vue-i18n 依赖；grep 中文命中 25 个 .vue",
+      "source": "FACT",
+      "initial_severity": "P2",
+      "final_severity": "P2",
+      "related_proposals": [
+        "P13"
+      ]
+    },
+    {
+      "id": "G12",
+      "category": "锦上添花",
+      "domain": "内部一致性",
+      "desc": "README 声称「core 100 + client 61 个 node-test 文件」，实测 core 120 + client 93 —— 文档与实际漂移",
+      "evidence": "README.md:七「core 100 + client 61」；实测 ls core/tests/*.node-test.ts = 120，client = 93",
+      "source": "FACT",
+      "initial_severity": "P2",
+      "final_severity": "P2",
+      "related_proposals": [
+        "P14"
+      ]
+    }
+  ],
+  "proposals": [
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 20.25,
+      "id": "P1a",
+      "from_gap": "G1",
+      "type": "引入覆盖率上报(v1-最小可用)",
+      "problem": "覆盖率配置空转",
+      "goal": "CI 上传 coverage artifact，观察期不设阈值",
+      "ref": "vitest.config.ts:31-40",
+      "severity": "待回填",
+      "cv": 3,
+      "fr": 3,
+      "pn": 3,
+      "confidence": "高",
+      "evidence": "vitest.config.ts 有 coverage 段；ci.yml 无步骤",
+      "deps": [],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 1,
+      "effort_optimistic": 0.5,
+      "effort_pessimistic": 2,
+      "confidence_weight": 1,
+      "cost": 1.414,
+      "score": 14.32,
+      "P0P1P2": "P1"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 27,
+      "id": "P1b",
+      "from_gap": "G1",
+      "type": "覆盖率门禁(v2-完整)",
+      "problem": "度量无门槛",
+      "goal": "设最低阈值并逐步提升；关键模块单独阈值",
+      "ref": "vitest.config.ts, ci.yml",
+      "severity": "待回填",
+      "cv": 3,
+      "fr": 3,
+      "pn": 4,
+      "confidence": "中",
+      "evidence": "需先有 P1a 的历史数据支撑阈值",
+      "deps": [
+        "P1a"
+      ],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 2,
+      "effort_optimistic": 1,
+      "effort_pessimistic": 3,
+      "confidence_weight": 0.7,
+      "cost": 1.732,
+      "score": 10.91,
+      "P0P1P2": "P1"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 27,
+      "id": "P2a",
+      "from_gap": "G4",
+      "type": "补集成测试(v1-最小可用)",
+      "problem": "video 编排器与 provider 降级链无任何测试",
+      "goal": "startTask 主流程 + provider 降级顺序断言（变异可验）",
+      "ref": "packages/core/src/video/orchestrator.ts:1-236",
+      "severity": "待回填",
+      "cv": 3,
+      "fr": 3,
+      "pn": 4,
+      "confidence": "高",
+      "evidence": "video/*.ts 1642 行，grep 测试命中 0",
+      "deps": [],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 2,
+      "effort_optimistic": 1,
+      "effort_pessimistic": 3,
+      "confidence_weight": 1,
+      "cost": 1.732,
+      "score": 15.59,
+      "P0P1P2": "P0"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 27,
+      "id": "P2b",
+      "from_gap": "G4",
+      "type": "补集成测试(v2-完整)",
+      "problem": "video 编排器与 provider 降级链无任何测试",
+      "goal": "startTask 主流程 + provider 降级顺序断言（变异可验）",
+      "ref": "packages/core/src/video/orchestrator.ts:1-236",
+      "severity": "待回填",
+      "cv": 3,
+      "fr": 3,
+      "pn": 4,
+      "confidence": "高",
+      "evidence": "video/*.ts 1642 行，grep 测试命中 0",
+      "deps": [],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 2.5,
+      "effort_optimistic": 1.5,
+      "effort_pessimistic": 3,
+      "confidence_weight": 1,
+      "cost": 1.732,
+      "score": 15.59,
+      "P0P1P2": "P1"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 13.5,
+      "id": "P3",
+      "from_gap": "G4",
+      "type": "补单元测试",
+      "problem": "7 个 provider 适配器无单测",
+      "goal": "逐 provider 接口契约 + 降级行为断言",
+      "ref": "packages/core/src/video/providers/*.ts",
+      "severity": "待回填",
+      "cv": 2,
+      "fr": 3,
+      "pn": 3,
+      "confidence": "高",
+      "evidence": "providers/ 7 文件无测试",
+      "deps": [
+        "P2"
+      ],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 2,
+      "effort_optimistic": 1,
+      "effort_pessimistic": 4,
+      "confidence_weight": 1,
+      "cost": 2,
+      "score": 6.75,
+      "P0P1P2": "P1"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 13.5,
+      "id": "P4",
+      "from_gap": "G4",
+      "type": "补单元测试",
+      "problem": "VideoGenerationPanel.vue 473 行无测试引用",
+      "goal": "挂载 + 表单校验 + 状态分支断言",
+      "ref": "packages/client/components/panels/VideoGenerationPanel.vue:1-473",
+      "severity": "待回填",
+      "cv": 3,
+      "fr": 3,
+      "pn": 2,
+      "confidence": "高",
+      "evidence": "grep VideoGenerationPanel 在 client/tests 命中 0",
+      "deps": [],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 2,
+      "effort_optimistic": 1,
+      "effort_pessimistic": 4,
+      "confidence_weight": 1,
+      "cost": 2,
+      "score": 6.75,
+      "P0P1P2": "P1"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 48,
+      "id": "P5a",
+      "from_gap": "G5",
+      "type": "补单元测试(v1-最小可用)",
+      "problem": "headless 调度器/slot queue/浏览器引擎无独立测试",
+      "goal": "并发分配 + 槽位排队超时 + 冷却退避状态机断言",
+      "ref": "packages/core/src/headless/{headless-scheduler,headless-slot-queue,browser-engine}.ts",
+      "severity": "待回填",
+      "cv": 4,
+      "fr": 4,
+      "pn": 4,
+      "confidence": "高",
+      "evidence": "grep 上述文件在 core/tests 命中 0",
+      "deps": [],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 2,
+      "effort_optimistic": 1,
+      "effort_pessimistic": 3,
+      "confidence_weight": 1,
+      "cost": 1.732,
+      "score": 27.71,
+      "P0P1P2": "P0"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 48,
+      "id": "P5b",
+      "from_gap": "G5",
+      "type": "补单元测试(v2-完整)",
+      "problem": "headless 调度器/slot queue/浏览器引擎无独立测试",
+      "goal": "并发分配 + 槽位排队超时 + 冷却退避状态机断言",
+      "ref": "packages/core/src/headless/{headless-scheduler,headless-slot-queue,browser-engine}.ts",
+      "severity": "待回填",
+      "cv": 4,
+      "fr": 4,
+      "pn": 4,
+      "confidence": "高",
+      "evidence": "grep 上述文件在 core/tests 命中 0",
+      "deps": [],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 2.5,
+      "effort_optimistic": 1.5,
+      "effort_pessimistic": 5,
+      "confidence_weight": 1,
+      "cost": 2.236,
+      "score": 21.47,
+      "P0P1P2": "P0"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 20.25,
+      "id": "P6",
+      "from_gap": "G2",
+      "type": "E2E 进 CI(v1-非视觉冒烟)",
+      "problem": "e2e 不进 CI",
+      "goal": "CI 只跑非视觉 spec（剔除 visual.spec），保留本机全量",
+      "ref": "packages/client/e2e/*.spec.ts（11 个，剔除 visual 后 10 个）",
+      "severity": "待回填",
+      "cv": 3,
+      "fr": 3,
+      "pn": 3,
+      "confidence": "中",
+      "evidence": "ci.yml 排除 e2e；vitest.config exclude 排除 e2e",
+      "deps": [],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 3,
+      "effort_optimistic": 2,
+      "effort_pessimistic": 5,
+      "confidence_weight": 0.7,
+      "cost": 2.236,
+      "score": 6.34,
+      "P0P1P2": "P2"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 18,
+      "id": "P7",
+      "from_gap": "G3",
+      "type": "CI 安全扫描",
+      "problem": "无依赖漏洞扫描与 SAST",
+      "goal": "CI 加 npm audit（high/critical 阻断）+ eslint 安全规则",
+      "ref": "package.json, .github/workflows/ci.yml",
+      "severity": "待回填",
+      "cv": 2,
+      "fr": 3,
+      "pn": 4,
+      "confidence": "中",
+      "evidence": "package.json 无 audit 脚本；ci.yml 无对应步骤",
+      "deps": [],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 1,
+      "effort_optimistic": 0.5,
+      "effort_pessimistic": 2,
+      "confidence_weight": 0.7,
+      "cost": 1.414,
+      "score": 8.91,
+      "P0P1P2": "P1"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 9,
+      "id": "P8",
+      "from_gap": "G6",
+      "type": "版本管理",
+      "problem": "无 tag 无 CHANGELOG",
+      "goal": "恢复语义化 tag + 用 git log 生成 CHANGELOG 或 release notes",
+      "ref": "package.json version / git tag",
+      "severity": "待回填",
+      "cv": 2,
+      "fr": 2,
+      "pn": 3,
+      "confidence": "中",
+      "evidence": "git tag=0；CHANGELOG.md 不存在",
+      "deps": [],
+      "gray": true,
+      "toggle": false,
+      "effort_default": 1,
+      "effort_optimistic": 0.5,
+      "effort_pessimistic": 2,
+      "confidence_weight": 0.7,
+      "cost": 1.414,
+      "score": 4.46,
+      "P0P1P2": "P2"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 20.25,
+      "id": "P9a",
+      "from_gap": "G9",
+      "type": "测试数据工厂(v1-最小可用)",
+      "problem": "无统一 fixture 工厂",
+      "goal": "建 fixtures/ 工厂供 video/headless 等测试共用",
+      "ref": "repo-wide",
+      "severity": "待回填",
+      "cv": 3,
+      "fr": 3,
+      "pn": 3,
+      "confidence": "中",
+      "evidence": "无 test-data/factories 目录",
+      "deps": [],
+      "gray": true,
+      "toggle": false,
+      "effort_default": 2,
+      "effort_optimistic": 1,
+      "effort_pessimistic": 3,
+      "confidence_weight": 0.7,
+      "cost": 1.732,
+      "score": 8.18,
+      "P0P1P2": "P1"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 20.25,
+      "id": "P9b",
+      "from_gap": "G9",
+      "type": "测试数据工厂(v2-完整)",
+      "problem": "无统一 fixture 工厂",
+      "goal": "建 fixtures/ 工厂供 video/headless 等测试共用",
+      "ref": "repo-wide",
+      "severity": "待回填",
+      "cv": 3,
+      "fr": 3,
+      "pn": 3,
+      "confidence": "中",
+      "evidence": "无 test-data/factories 目录",
+      "deps": [],
+      "gray": true,
+      "toggle": false,
+      "effort_default": 5.5,
+      "effort_optimistic": 3,
+      "effort_pessimistic": 8,
+      "confidence_weight": 0.7,
+      "cost": 2.828,
+      "score": 5.01,
+      "P0P1P2": "P2"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 20.25,
+      "id": "P10",
+      "from_gap": "G8",
+      "type": "补集成测试",
+      "problem": "WorklogPane 995 行交互无断言",
+      "goal": "丢弃 / 内联分支切换 / diff 预览关键路径断言",
+      "ref": "packages/client/components/panels/WorklogPane.vue:1-995",
+      "severity": "待回填",
+      "cv": 3,
+      "fr": 3,
+      "pn": 3,
+      "confidence": "中",
+      "evidence": "995 行；仅被 visual/preview-diff 间接引用",
+      "deps": [],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 3,
+      "effort_optimistic": 1.5,
+      "effort_pessimistic": 6,
+      "confidence_weight": 0.7,
+      "cost": 2.449,
+      "score": 5.79,
+      "P0P1P2": "P2"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 6,
+      "id": "P11",
+      "from_gap": "G7",
+      "type": "性能基线",
+      "problem": "无性能趋势",
+      "goal": "关键路径基线入库并趋势化",
+      "ref": "packages/core/tests/perf.node-test.ts",
+      "severity": "待回填",
+      "cv": 2,
+      "fr": 2,
+      "pn": 2,
+      "confidence": "中",
+      "evidence": "perf.node-test 单点",
+      "deps": [],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 2,
+      "effort_optimistic": 1,
+      "effort_pessimistic": 4,
+      "confidence_weight": 0.7,
+      "cost": 2,
+      "score": 2.1,
+      "P0P1P2": "P2"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 9,
+      "id": "P12",
+      "from_gap": "G10",
+      "type": "补单元测试",
+      "problem": "scripts/bin 无专属测试",
+      "goal": "关键脚本冒烟断言",
+      "ref": "scripts/*.cjs（19 文件）, bin/*.cjs",
+      "severity": "待回填",
+      "cv": 2,
+      "fr": 3,
+      "pn": 2,
+      "confidence": "中",
+      "evidence": "scripts/ 下无 *.test.ts",
+      "deps": [],
+      "gray": true,
+      "toggle": false,
+      "effort_default": 2,
+      "effort_optimistic": 1,
+      "effort_pessimistic": 4,
+      "confidence_weight": 0.7,
+      "cost": 2,
+      "score": 3.15,
+      "P0P1P2": "P2"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 6,
+      "id": "P13",
+      "from_gap": "G11",
+      "type": "i18n 改造(v1-词条抽取)",
+      "problem": "无 i18n 层",
+      "goal": "先抽词条不改行为（可只抽 25 个组件文案到 messages/zh.json）",
+      "ref": "packages/client/components/**",
+      "severity": "待回填",
+      "cv": 2,
+      "fr": 2,
+      "pn": 2,
+      "confidence": "中",
+      "evidence": "package.json 无 vue-i18n；25 个 .vue 硬编码中文",
+      "deps": [],
+      "gray": true,
+      "toggle": true,
+      "effort_default": 3,
+      "effort_optimistic": 2,
+      "effort_pessimistic": 5,
+      "confidence_weight": 0.7,
+      "cost": 2.236,
+      "score": 1.88,
+      "P0P1P2": "P2"
+    },
+    {
+      "project_type": "内部工具",
+      "w_c": 0.5,
+      "w_f": 1,
+      "w_p": 1.5,
+      "impact": 0.75,
+      "id": "P14",
+      "from_gap": "G12",
+      "type": "文档修正",
+      "problem": "README 声称的测试文件数与实测漂移",
+      "goal": "修正 README 数字或改为不写死",
+      "ref": "README.md:七",
+      "severity": "待回填",
+      "cv": 1,
+      "fr": 1,
+      "pn": 1,
+      "confidence": "高",
+      "evidence": "README 说 core 100 + client 61；实测 120 + 93",
+      "deps": [],
+      "gray": true,
+      "toggle": false,
+      "effort_default": 0.2,
+      "effort_optimistic": 0.1,
+      "effort_pessimistic": 0.5,
+      "confidence_weight": 1,
+      "cost": 0.707,
+      "score": 1.06,
+      "P0P1P2": "P2"
+    }
+  ],
+  "hypotheses": [],
+  "issues": [],
+  "saturated": [
+    {
+      "area": "core 路由（25 个 Hono 子应用）",
+      "note": "已普查，功能面覆盖完整"
+    },
+    {
+      "area": "client 组件（25 个 .vue，7473 行）",
+      "note": "已普查，行数分布已掌握"
+    },
+    {
+      "area": "体验债扫描（TODO/barecatch/console/any/empty）",
+      "note": "实测极干净：barecatch=0、console=1、any=1、empty_fn=1"
+    }
+  ],
+  "log": [
+    {
+      "round": 1,
+      "phase": "environment",
+      "action": "Pre-phase 0 完成：writable=true, monorepo, network=true",
+      "at": "2026-10-16T04:12:00.116Z"
+    },
+    {
+      "round": 3,
+      "phase": "identity",
+      "action": "identity 完成：内部工具/开发者工具；核心用户=用 AI 编码的开发者；1 人团队；无版本发布",
+      "at": "2026-10-16T04:12:25.416Z"
+    },
+    {
+      "round": 5,
+      "phase": "inventory",
+      "action": "features 20 条 + ux_debt 2 + missing_basics 6 + saturated 3 落盘",
+      "at": "2026-10-16T04:12:48.943Z"
+    },
+    {
+      "round": 7,
+      "phase": "benchmark",
+      "action": "benchmarks 14 域落盘（全部 INFER，未声称具体产品 URL）",
+      "at": "2026-10-16T04:13:03.852Z"
+    },
+    {
+      "round": 9,
+      "phase": "gap",
+      "action": "gaps 12 条落盘（P0=3, P1=3, P2=6）",
+      "at": "2026-10-16T04:13:15.728Z"
+    },
+    {
+      "round": 10,
+      "phase": "proposal",
+      "action": "proposals 第一批 8 条落盘",
+      "at": "2026-10-16T04:13:27.646Z"
+    },
+    {
+      "round": 11,
+      "phase": "proposal",
+      "action": "proposals 第二批 7 条落盘（合计 15）",
+      "at": "2026-10-16T04:13:38.435Z"
+    },
+    {
+      "round": 12,
+      "phase": "cost",
+      "action": "超阈值方案已拆 v1/v2；score 终算 + 分类 + gap 严重度回填完成",
+      "at": "2026-10-16T04:13:49.158Z"
+    },
+    {
+      "round": 13,
+      "phase": "done",
+      "action": "final-report.md 已写入，phase=done",
+      "at": "2026-10-16T04:14:21.827Z"
+    }
+  ],
+  "bandwidth": {
+    "headcount": 1,
+    "sprint_days": 10,
+    "focus_coeff": 0.7,
+    "available_person_days": 7,
+    "total_proposal_effort": 38.7
+  }
+}
