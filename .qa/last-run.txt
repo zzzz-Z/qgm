@@ -1,0 +1,8 @@
+{
+  "finished_at": "2026-10-16T04:06:25.971Z",
+  "total_rounds": 23,
+  "phase": "done",
+  "report_path": ".qa/final-report.md",
+  "issues_count": 0,
+  "proposals_count": 15
+}
