@@ -20,9 +20,11 @@
 
 - **GET /\__ai/workspace/registry** —— 只读，返回 `{ok, workspaces:[{id, root, label, addedAt}], activeId}`。注册表内存权威态在 `config.ts`（启动恢复，落盘 `~/.ai-runner/workspace.json`，旧格式自动迁移）。
 - **POST /\__ai/workspace/register** —— body `{path, activate?}`：把已有目录入册（幂等，id 由路径派生）；`activate:true` 同时激活。旧入口 `/workspace/select`、`/workspace/pick` 也会自动入册并激活。
-- **POST /\__ai/workspace/activate** —— body `{id}`：切活跃工作区（= setRoot 切执行 root）；未 id 返回 404。激活成功后整页 reload。
+- **POST /\__ai/workspace/activate** —— body `{id}`：切活跃工作区（= setRoot 切执行 root）；未 id 返回 404。激活成功后由客户端原地刷新（workspace-switch-inplace-v1 起不再整页 reload）。
 - **POST /\__ai/workspace/remove** —— body `{id}`：出册；活跃工作区拒移（409）防悬空 activeId。
 - **POST /\__ai/workspace/create**（multi-workspace-create-v1）—— body `{mode, path, branch?, url?, baseRepo?, activate?}`：`worktree`（同仓库切新分支共享 .git）/ `clone`（独立仓库）/ `register`（要求路径已存在，走 register）。目标路径已存在返 400；成功后自动入册。
+- **GET /\__ai/workspace/first-prompt**（first-prompt-persist-v1）—— 只读，返回 `{ok, sent}`。query `id`（工作区 id，必填）、`model`（站点 modelId，可选；key-composite-v1 起复合键 `<wsId>::<modelId>`，缺省时读裸 `wsId` 键）。消费方 `useWorkspaces.getFirstPromptSent` → `useAiWindow.copyAndFill` 决定是否注入 SYSTEM.md。
+- **POST /\__ai/workspace/first-prompt**（first-prompt-persist-v1）—— body `{id, model?, sent}`：写「该工作区 + 该服务商」的首问是否已带规则头。key-composite-v1 起 `model` 参与复合键；缺省时退化裸 wsId 键。工作区不存在返 404。消费方 `useWorkspaces.setFirstPromptSent`（useAiWindow 4 处调用 + App.vue onSiteChange + switchDeepSeekSession newSession 分支）。
 
 ## git（SSOT：`packages/core/src/git.ts`，路由定义 `routes/git.ts`，消费方 `WorklogPane.vue`）
 
