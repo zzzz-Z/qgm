@@ -61,7 +61,9 @@
     right: 12px;
     top: 50%;
     transform: translateY(-50%);
-    z-index: 35;
+    /* [side-drawer-z-v1] 提到 55：抽屉 aside 的 z-index 为 40，原先 35 被覆盖 ⇒
+       抽屉滑入后按钮位于 aside 之下，点击被 aside 吸收（用户报「点了关不掉」）。 */
+    z-index: 55;
     width: 36px;
     height: 36px;
     align-items: center;
@@ -72,6 +74,7 @@
     color: var(--text-2);
     cursor: pointer;
     box-shadow: 0 2px 8px rgb(0 0 0 / 20%);
+    transition: color 0.15s ease, background 0.15s ease;
   }
   .side-drawer-trigger:hover {
     color: var(--text);

@@ -4,6 +4,8 @@ import { promiseTimeout } from '@vueuse/core'
 import { currentSiteUrl, modelIdFromSid, url } from './useAiSite'
 // [loop-consolidation-P3d] 拼装逻辑抽到 first-prompt.ts（独立职责 + 稳定测试落点）
 import { prependFirstPromptRules } from './first-prompt.js'
+// [at-ref-expand-v1] @ 引用展开（编辑插标记 / 提交时展开）
+import { expandAtRefs } from './expand-at-refs.js'
 // [restore-import-v1] log 早前按 auto-import 名单清理时误删（app 侧兜底可跑，但 tsc --noEmit / vitest 无该插件）
 import { log } from '../../utils/log'
 import { useSessionManager } from './useSessionManager'
@@ -265,6 +267,25 @@ async function _prependFirstPromptRules(prompt: string): Promise<string> {
 }
 
 /**
+ * [at-ref-expand-v1] 供 expandAtRefs 读文件的依赖：走 /__ai/files/read。
+ * [CONSTRAINT] 失败/不存在一律返回 null（expandAtRefs 侧保留原文，不静默丢弃用户意图）。
+ */
+async function readFileForExpand(path: string): Promise<string | null> {
+  try {
+    const r = await fetch('/__ai/files/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: [path] }),
+    })
+    if (!r.ok) return null
+    const j = await r.json() as { files?: Array<{ path: string, content?: string, error?: string }> }
+    const ent = j?.files?.[0]
+    if (!ent || ent.error || typeof ent.content !== 'string') return null
+    return ent.content
+  } catch { return null }
+}
+
+/**
  * 发送 prompt 到 AI 窗口
  * [CONSTRAINT] 返回 'sent' 表示已注入运行中的窗口；'opened' 表示新开了窗口；'failed' 表示全失败
  * [CHANGE-IMPACT] 内部会改动 _rulesInjectedSids / sessionId 状态，多次调用同一 prompt 会去重
@@ -379,6 +400,17 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
       }
     }
   } catch { /* ignore */ }
+  // [at-ref-expand-v1] 提交时展开 @ 引用：编辑时只插标记（@skill/<name> 或 @<path>），
+  //   此处统一展开为 <file> 块。失败一律降级为原样发送（用户意图不丢）。
+  try {
+    const r = await expandAtRefs(finalPrompt, { readFile: readFileForExpand })
+    if (r.expanded.length || r.skipped.length) {
+      log.info('[copyAndFill] @ refs expanded=', r.expanded, 'skipped=', r.skipped)
+    }
+    finalPrompt = r.text
+  } catch (e) {
+    log.warn('[copyAndFill] @ 展开失败，按原样发送', e)
+  }
   // [track-original-prompt] 只记录原始 prompt：UI 展示不应包含自动携带的规则头
   // [WHY] 用户报告「打开新会话 发了两次 SYSTEM.md」实为 finalPrompt 上屏；
   //       语义上「用户消息」是原始输入，「规则头」是系统提示，不该混入用户消息卡

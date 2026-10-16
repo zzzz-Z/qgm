@@ -312,9 +312,9 @@ test('limit marker: 首问注入块不得含标记词表（无围栏注入 ⇒ �
 // [site-adapter-v1] 正则探针可写两种锚点形式：① 原字面量 `/xxx/gi`；② 锚点变量 `_XXX_ANCHOR`
 //   （SiteAdapter 引入后，守卫正则同时扫两种形态）
 const MARKER_SITE_COUNT: Record<string, number> = {
-  'packages/core/src/headless/headless-inject.ts': 5, // busy / rate / stopped(冷启动) / stopped(主判定) / limit
-  'packages/core/src/headless/headless-inject-simple.ts': 5, // verify.rate / reset.busy / reset.stopped / reset.limit / reset.rate
-  'scripts/tampermonkey-session-id.user.js': 2, // countStopMarkers / countLimitMarkers
+  'packages/core/src/headless/headless-inject.ts': 3, // busy / rate / limit（stopped 关键词探针 2026-10-16 移除：零真阳性 + 自指假阳性，改按钮驱动 isGeneratingInPage）
+  'packages/core/src/headless/headless-inject-simple.ts': 4, // verify.rate / reset.busy / reset.limit / reset.rate（reset.stopped 随关键词探针移除）
+  'scripts/tampermonkey-session-id.user.js': 1, // countLimitMarkers（stopped 探针 2026-10-16 起按钮驱动，关键词 countStopMarkers 已删）
 }
 // [allowlist] 唯一例外：verifyFillSentInPage 的频控探针读 tail（整页 raw 末 3000 字符）。
 // [WHY] 该正则每条分支都带转义（please\s+slow\s+down / rate\s+limit / too\s+many\s+requests），

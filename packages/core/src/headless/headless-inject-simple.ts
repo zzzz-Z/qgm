@@ -265,13 +265,15 @@ export function resetReplyDedupInPage(cfg = {}) {
   const _RATE_ANCHOR_RR = /(?:消息|发送|操作|请求|访问)过于频繁|过于频繁[，,\s]*请稍后重试|please\s+slow\s+down|too\s+many\s+requests|rate\s+limit/gi
   const _LIMIT_ANCHOR_RR = /(?:(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长))(?:[，,：:]\s*请?|请)(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length (?:is|of)\s*\d+|maximum context length\s+\d+\s*tokens/gi
   const _BUSY_ANCHOR_RR = /server busy, please try again later\.?|(?:服务器|服务)繁忙[^\n。！!]*[。！!]?/gi
-  const _STOPPED_ANCHOR_RR = /当前问题已停止|已停止生成|已停止回答/g
+  // [stopped-btn-v1] 原「已停止」关键词锚点变量（三个词的那条正则）随关键词 stopped 探针
+  //   一起移除：DeepSeek 真实角标零命中（bundle 实证）+ AI 正文自指假阳性。
+  //   stopped 判定改按钮状态驱动，detectReplyInPage 内 isGeneratingInPage 跨 poll 追踪，
+  //   无文本基线可重置——只需把「上一 poll 是否在生成」清成 false。
 
   const sel = cfg.selectors || {}
   const asstSel = sel.assistantMessage || '.ds-assistant-message-main-content'
   const tp = cfg.textPatterns || {}
   const busyRe = new RegExp(tp.serverBusy || _BUSY_ANCHOR_RR.source, 'gi')
-  const stoppedRe = new RegExp(tp.stopped || _STOPPED_ANCHOR_RR.source, 'gi')
   const limitRe = new RegExp(tp.contextLimit || _LIMIT_ANCHOR_RR.source, 'gi')
   const rateRe = new RegExp(tp.rateLimited || _RATE_ANCHOR_RR.source, 'gi')
 
@@ -300,7 +302,6 @@ export function resetReplyDedupInPage(cfg = {}) {
   const scanText = bodyText()
   // [guard-v1] 探针直接用锚点变量名（守卫 RE_SITE 扫 `_XXX_ANCHOR` 命名模式）
   const busyMessages = scanText.match(_BUSY_ANCHOR_RR) || []
-  const stoppedMessages = scanText.match(_STOPPED_ANCHOR_RR) || []
   const limitMessages = scanText.match(_LIMIT_ANCHOR_RR) || []
   const baselineBlocks = document.querySelectorAll(asstSel).length
   // [virtual-list-baseline-v1] 记录「最后一条 assistant 消息」的内容 hash 作为本轮基线。
@@ -320,7 +321,7 @@ export function resetReplyDedupInPage(cfg = {}) {
   })()
   // [rate-retry-v1] 频控基线：与 headless-inject detectReplyInPage、本文件 verifyFillSentInPage 三处同构（守卫测试 rate-marker-guard）
   const rateMessages = scanText.match(_RATE_ANCHOR_RR) || []
-  window.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: sig, _pendingScriptHash: null, _plainSentInCycle: false, _stableCount: 0, _seenGrowth: false, _baselineBlocks: baselineBlocks, _baselineLastHash: baselineLastHash, _busyErrorBaseline: busyMessages.length, _busyErrorReported: false, _scriptFenceReported: false, _stoppedBaseline: stoppedMessages.length, _stoppedReported: false, _limitBaseline: limitMessages.length, _limitReported: false, _rateBaseline: rateMessages.length, _rateReported: false }
+  window.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: sig, _pendingScriptHash: null, _plainSentInCycle: false, _stableCount: 0, _seenGrowth: false, _baselineBlocks: baselineBlocks, _baselineLastHash: baselineLastHash, _busyErrorBaseline: busyMessages.length, _busyErrorReported: false, _scriptFenceReported: false, _prevGenBtn: false, _stoppedReported: false, _limitBaseline: limitMessages.length, _limitReported: false, _rateBaseline: rateMessages.length, _rateReported: false }
   // [script-closure-gate-v1] 结构闭合门随轮次重置：上一轮遗留的门会拿旧长度当基线，
   //   让新回复第一帧就被判定为「已静止」→ 未闭合块提前放行（门本身见 headless-inject.ts）
   window.__aiRunnerClosureGate = null

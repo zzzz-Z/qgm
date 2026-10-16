@@ -329,7 +329,9 @@
   background-repeat: no-repeat;
   background-position: right 6px center;
   background-size: 10px 10px;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 .site-select:hover {
   color: var(--text);

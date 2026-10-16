@@ -141,7 +141,7 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 
 ## 知识库与技能
 
-> 通用加载协议（存放格式 / 加载时机 / 获取顺序 / 体积约束）见 `packages/core/SYSTEM.md` §11（技能）与 §16（知识库）。本节只列**项目路径、端点与检索链路**。
+> 通用管理协议（存放格式 / 引用展开 / 获取顺序 / 体积约束）见 `packages/core/SYSTEM.md` §11（技能）与 §16（知识库）。本节只列**项目路径、端点与检索链路**。
 
 ### 技能库
 
@@ -159,7 +159,7 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 - **已知遗留**：`pm-agent-generate.cjs` 已删除，`skills/pm-agent/` 目前是唯一 SSOT（无生成器可重跑）。重生成前需恢复脚本，或与 QA 合并为单一 `agent-skills-generate.cjs`。
 - **已装清单唯一事实来源是磁盘**：`GET /__ai/skills` 扫前 64 行返回元数据；`.registry.json` 只是来源标注（服务端 `reconcileRegistry` 自动收敛，不手工编辑）。
 - **检索**：`POST /__ai/skills/match`（BM25，按任务文本）。消费方 `skill-registry.ts`。
-- **入口**：输入框 `@` 选择器（`file-picker.ts`，`@skill/<name>`）；该串不自动展开正文，由 AI 按需 `loadSkill`。
+- **入口**：输入框 `@` 选择器（`file-picker.ts`，`@skill/<name>`）；编辑时插入标记，**提交时**由 `copyAndFill` 走 `expand-at-refs.ts` 展开为 `<file>` 块（AI 收到的 prompt 已含正文）。
 - **本仓库真实栈**：Vue 3 + TS + Vite + UnoCSS + Vitest + Hono + Playwright。找技能必须先用栈专属 query（如 `<依赖名> SKILL.md`），通用方法论 query 只可补足；完整协议见 `.ai-runner/skills/skill-discovery/SKILL.md`。
 
 ### 知识库（lessons）

@@ -9,6 +9,9 @@
 export {}
 declare global {
   const ACTIVE_SESSION_KEY: typeof import('./composables/ui/useAppStorage').ACTIVE_SESSION_KEY
+  const AT_FILE_MAX_BYTES: typeof import('./composables/ai/expand-at-refs').AT_FILE_MAX_BYTES
+  const AT_SKILL_PREFIX: typeof import('./composables/ai/expand-at-refs').AT_SKILL_PREFIX
+  const AT_TOTAL_MAX_BYTES: typeof import('./composables/ai/expand-at-refs').AT_TOTAL_MAX_BYTES
   const AUTO_FEEDBACK_MERGE_MS: typeof import('./composables/runner/feedback-merge').AUTO_FEEDBACK_MERGE_MS
   const BOARD_STALE_ROUNDS: typeof import('./composables/ai/board-mirror').BOARD_STALE_ROUNDS
   const DEFAULT_SITE_URL: typeof import('./composables/ai/useAiSite').DEFAULT_SITE_URL
@@ -111,6 +114,7 @@ declare global {
   const emitTreeDrop: typeof import('./composables/ui/drag-bus').emitTreeDrop
   const escapeHtml: typeof import('./composables/useHljs').escapeHtml
   const evaluateUserscriptInfo: typeof import('./composables/ui/useUserscriptUpdate').evaluateUserscriptInfo
+  const expandAtRefs: typeof import('./composables/ai/expand-at-refs').expandAtRefs
   const extendRef: typeof import('@vueuse/core').extendRef
   const fallbackSessionId: typeof import('./composables/ui/useAppStorage').fallbackSessionId
   const fetchBoardMirror: typeof import('./composables/ai/board-mirror').fetchBoardMirror
@@ -537,6 +541,9 @@ declare global {
   export type { BoardMirrorItem } from './composables/ai/board-mirror'
   import('./composables/ai/board-mirror')
   // @ts-ignore
+  export type { ExpandDeps, ExpandResult } from './composables/ai/expand-at-refs'
+  import('./composables/ai/expand-at-refs')
+  // @ts-ignore
   export type { HookEventImpl, HookResultImpl } from './composables/ai/loop-hooks'
   import('./composables/ai/loop-hooks')
   // @ts-ignore
@@ -631,6 +638,9 @@ declare module 'vue' {
   interface GlobalComponents {}
   interface ComponentCustomProperties {
     readonly ACTIVE_SESSION_KEY: UnwrapRef<typeof import('./composables/ui/useAppStorage')['ACTIVE_SESSION_KEY']>
+    readonly AT_FILE_MAX_BYTES: UnwrapRef<typeof import('./composables/ai/expand-at-refs')['AT_FILE_MAX_BYTES']>
+    readonly AT_SKILL_PREFIX: UnwrapRef<typeof import('./composables/ai/expand-at-refs')['AT_SKILL_PREFIX']>
+    readonly AT_TOTAL_MAX_BYTES: UnwrapRef<typeof import('./composables/ai/expand-at-refs')['AT_TOTAL_MAX_BYTES']>
     readonly AUTO_FEEDBACK_MERGE_MS: UnwrapRef<typeof import('./composables/runner/feedback-merge')['AUTO_FEEDBACK_MERGE_MS']>
     readonly BOARD_STALE_ROUNDS: UnwrapRef<typeof import('./composables/ai/board-mirror')['BOARD_STALE_ROUNDS']>
     readonly DEFAULT_SITE_URL: UnwrapRef<typeof import('./composables/ai/useAiSite')['DEFAULT_SITE_URL']>
@@ -733,6 +743,7 @@ declare module 'vue' {
     readonly emitTreeDrop: UnwrapRef<typeof import('./composables/ui/drag-bus')['emitTreeDrop']>
     readonly escapeHtml: UnwrapRef<typeof import('./composables/useHljs')['escapeHtml']>
     readonly evaluateUserscriptInfo: UnwrapRef<typeof import('./composables/ui/useUserscriptUpdate')['evaluateUserscriptInfo']>
+    readonly expandAtRefs: UnwrapRef<typeof import('./composables/ai/expand-at-refs')['expandAtRefs']>
     readonly extendRef: UnwrapRef<typeof import('@vueuse/core')['extendRef']>
     readonly fallbackSessionId: UnwrapRef<typeof import('./composables/ui/useAppStorage')['fallbackSessionId']>
     readonly fetchBoardMirror: UnwrapRef<typeof import('./composables/ai/board-mirror')['fetchBoardMirror']>

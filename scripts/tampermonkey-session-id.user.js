@@ -201,17 +201,11 @@
   const seenDoneMarkers = new Set()
   let lastBodySig = ''
   let _scriptFenceReported = false
-  // [stopped-detect-v1] 「已停止」标记基线：fill/rotate 开新一轮时记录当前出现次数，
-  // classifyAndPost 仅在计数增长时推送一次 kind:'stopped'（与 headless 侧 detectReplyInPage 同构）
-  let stopMarkerBaseline = 0
-  // [stopped-toast-quote-v1] 「停止」分支的命中原文：与触顶的 limitMarkerText 同一范式。
-  // [WHY] 停机态（`当前问题已停止` / `已停止生成` / `已停止回答`）与我们自己的 UI 文案**同形**
-  //   ⇒ 自指误报几乎必然发生（2026-10-10 14:14 实测：页面一切正常却弹出停止提示）。
-  //   而此处原本上报写死文案 ⇒ 事后**永远无从得知**命中了哪一段文本，只能靠日志旁证。
-  //   带上命中原文后，下一次误报当场可自证（客户端回显见 utils/stop-notice.ts 的 formatStopToast）。
-  // [CONSTRAINT] 兜底值也必须**分段拼接**：整句字面量会成为探针源码的自命中（同上自指通道）。
+  // [stopped-btn-v1] stopped 分支的回传文案。[stopped-toast-quote-v1] 的「带命中原文」机制随
+  //   全文关键词探针一起废止（按钮驱动后没有正文命中可带；原文通道的自指风险见该 tag 历史：
+  //   停机态文案与 UI 文案同形，2026-10-10 14:14 实测页面一切正常却弹停止提示）。
+  // [CONSTRAINT] 兜底值必须**分段拼接**：整句字面量会成为探针源码的自命中。
   const STOPPED_GENERIC = 'AI 网页' + '已停止' + '生成'
-  let stopMarkerText = ''
   // [stopped-plain-noise-v1] 本轮是否已推过 stopped：置位后 plain 分支不再补发半截回复
   // （与 headless-inject.ts 的 dedup._stoppedReported 同义；随 fill/rotate 轮次重置）
   let stopPosted = false
@@ -221,9 +215,11 @@
   //   改为追踪「停止按钮」状态变化：
   //   - prevGenerating：上一轮 classifyAndPost 看到的按钮状态（true=存在且可点）
   //   - genEnterRoots：进入 generating 状态时的 assistant 根数量
-  //   判据：prevGenerating===true + 当前!isGenerating + roots 未增长 = 真中断
+  //   - genEnterRootId：进入 generating 时最后一个 assistant 根的身份指纹（[stopped-btn-v2]）
+  //   判据：prevGenerating===true + 当前!isGenerating + roots 未增长且最后根身份未变 = 真中断
   let prevGenerating = false
   let genEnterRoots = 0
+  let genEnterRootId = '' // [stopped-btn-v2] 与 genEnterRoots 同时记录，见 rootsFrozenNow
   // [limit-posted-v1] 本轮是否已推过 limit：**存量兜底通道（limitStale）每轮恒真**，
   //   而「更新 limitMarkerBaseline」压不住它 —— 该通道不依赖计数增长，基线更新前后恒真
   //   ⇒ 每轮 classifyAndPost 都会再 post 一次 kind:'limit'（2026-10-10 15:07 用户实测：
@@ -234,15 +230,16 @@
   // [CONSTRAINT] **只压「存量兜底」通道**；「计数增长」通道自限、不 gate ——
   //   否则一次误报就把本轮后续的**真**触顶信号一起挡死。
   let limitPosted = false
-  // [stopped-detect-v3] 冷启动守卫：首个 fill/rotate 发生前，两个「本轮增量」探测器一律只记基线、不报。
+  // [stopped-detect-v3] 冷启动守卫：首个 fill/rotate 发生前，「本轮增量」探测器一律只记基线、不报。
   // [WHY] DeepSeek 的「已停止」角标会**永久留在历史消息下方**；页面刷新会清空本脚本全部运行态
   //   （基线归 0、stopPosted 归 false），而 replyObserver 在脚本注入即连接（见下方 resumeReplyObserver()
   //   的顶层调用）⇒ 历史恢复把旧角标带回 DOM 的那一刻，classifyAndPost 就把「存量」当成「本轮新增」
   //   ⇒ 误报 kind:'stopped'（2026-10-10 15:20 用户实测：刷新后立即弹「本轮不再等待」，页面命中原文）。
   //   headless 侧同一缺陷已在 [stopped-detect-v2] 修复（detectReplyInPage 冷启动基线 = 当前存量），
   //   油猴侧此前从未同步 —— 本守卫即补齐。
-  // [CONSTRAINT] 与 fill/rotate 的 syncStopMarkerBaseline/syncLimitMarkerBaseline 同口径：
-  //   基线只对「本轮新增」负责；首个 fill 之后本守卫永久失效。
+  // [stopped-btn-v1] stopped 探针 2026-10-16 起按钮驱动（不再扫文本、无基线）⇒ 本守卫现只覆盖 limit。
+  // [CONSTRAINT] 与 fill/rotate 的 syncLimitMarkerBaseline 同口径：基线只对「本轮新增」负责；
+  //   首个 fill 之后本守卫永久失效。
   let _roundBaselinesReady = false
   // [limit-scan-strip-v1] 触顶/停止两类标记探针只扫「正文」：剥掉代码块、输入框与可编辑区。
   // [WHY] 工作台把脚本 stdout 用 ``` 围栏回填进会话（prompt-builder appendRawOutputs）⇒ 页面里落成
@@ -272,18 +269,12 @@
     _scanText = bodyText()
     return _scanText
   }
-  function countStopMarkers() {
-    try {
-      // 接收者刻意写成 scanBodyText() 直调（不经局部别名）：便于守卫按「调用点接收者」判定
-      const m = scanBodyText().match(/当前问题已停止|已停止生成|已停止回答/g) || []
-      // [stopped-toast-quote-v1] 记录命中原文供回传定位（同 limitMarkerText 做法）
-      if (m.length) stopMarkerText = m[m.length - 1]
-      return m.length
-    } catch { return 0 }
-  }
-  function syncStopMarkerBaseline() {
-    stopMarkerBaseline = countStopMarkers()
-  }
+  // [stopped-btn-v1] 全文关键词 stopped 探针（countStopMarkers / syncStopMarkerBaseline /
+  //   stopMarkerBaseline / stopMarkerText）已于 2026-10-16 整体删除，勿复活：
+  //   AI 讨论探针本身时会在正文里复述「已停止回答」等词 ⇒ 计数增长 ⇒ 误推 kind:'stopped'
+  //   ⇒ 前端 stopped-window 闸门把 10s 内到达的真实脚本全部拦下（2026-10-15 实测）。
+  //   现行判据见 classifyAndPost 内 [stopped-btn-v1] 段（按钮状态 + roots 冻结），
+  //   守卫测试 packages/core/tests/stopped-btn-guard.node-test.ts 断言这些符号不得回潮。
   // [limit-detect-v3] 会话长度上限基线：与 headless 侧 detectReplyInPage 正则严格同构（改一处必须三处同步）。
   // 正则须覆盖「达到对话长度上限」（动词在前，DeepSeek 实际文案）与「对话长度已达上限」（名词在前）两种语序；
   // v3 起要求「上限」后必须自带动作子句（[，,：:]请? 或 请 + 开启/新建…新对话）：
@@ -315,6 +306,27 @@
   function syncLimitMarkerBaseline() {
     limitMarkerBaseline = countLimitMarkers()
     assistantRootBaseline = countAssistantRoots()
+  }
+  // [stopped-btn-v2] 最后一个 assistant 根的身份指纹（文本长度 + 首 64 字符）。
+  // [WHY] roots 冻结判据单看计数分不清三种「计数不变」：① 本轮没产出任何回复块（真停止）；
+  //   ② regenerate 原地替换（旧根删、新根添）；③ 虚拟列表回收旧根的同时挂上新根（DeepSeek
+  //   实测计数会 3→1→2 抖动）。②③ 的最后根身份必然变化，只有①原样不动——身份补上后
+  //   「冻结」才等价于「没产出」（2026-10-16 复检：regenerate 完成会误推 stopped）。
+  function assistantRootId() {
+    try {
+      const r = latestAssistantRoot()
+      if (!r) return ''
+      const t = String(r.textContent || '')
+      return `${t.length}:${t.slice(0, 64)}`
+    } catch { /* swallow: 取身份失败按空串处理（与 enterRootId='' 相等时不启用身份判据） */ return '' }
+  }
+  // [stopped-btn-v2] roots 冻结判据：进入 generating 时的 roots 计数与最后根身份均未变。
+  // [CONSTRAINT] enterCount>0 门槛保留：首轮无根时不予判定（无根站点的思考期停止不可判，
+  //   同 [KNOWN-LIMIT-1] 的挂载时序依赖）。
+  // [CHANGE-IMPACT] 判据收紧只会让 stopped 更少推（更保守），不会新增误推；
+  //   真停止（思考阶段被停）形态不变：最后根停在进入时的旧回复上。
+  function rootsFrozenNow(enterCount, enterRootId, nowCount, nowRootId) {
+    return enterCount > 0 && nowCount === enterCount && nowRootId === enterRootId
   }
 
   function langFromText(s) {
@@ -719,10 +731,27 @@
   //   属性加 class / data-state；正则补 cancel|abort|interrupt|halt|终止|取消|暂停。
   //   误伤风险：class 含 stop 的普通容器可能被选中——故保留「必须可点击（非 disabled）」这一层。
   const STOP_LABEL_RE = /停止生成|停止回答|停止输出|终止|取消生成|停止|中断|暂停生成|stop\s*generat|stop\s*stream|stop\s*response|stop\s*answer|stop\s*cancel|\bcancel\b|\babort\b|\binterrupt\b|\bhalt\b/i
+  // [stop-btn-scope-v1] collectStopCandidates 只搜「输入区」：页面上任何瞬态可点击元素，只要
+  //   文本/属性命中 STOP_LABEL_RE（上传 Cancel、对话框「取消生成」…），都会让 isGenerating()
+  //   假 true；其消失又伪造「按钮从有到无」+ roots 冻结 ⇒ 误推 kind:'stopped' 杀整个循环
+  //   （2026-10-16 复检实测：空闲页一个 <button>Cancel</button> 即可走通整条链）。
+  //   各站点的停止/发送按钮都位于输入区（与 findStopGeneratingBtnStructural 同 scope），
+  //   取不到输入框时退回 document（无输入框页面行为不变）。
+  // [RESIDUAL-RISK] 输入区**内部**的瞬态停止词元素（如附件预览里的 Cancel）仍会命中——
+  //   范围收敛把面从「整页」缩到「输入区」，未清零；DeepSeek 已由图签名兜底另辟通道
+  //   （[stop-btn-deepseek-icon-v1]），其余站点真清零仍需各自的发送/停止态可区分特征。
   function collectStopCandidates() {
     const sel = 'button, div[role], span[role], a[role], [role="switch"], [role="menuitem"]'
+    // scope 从 parentElement 起找（不用 input.closest：输入框自身 class 含 input 时会命中自己，
+    //   而 textarea 无子节点 ⇒ 停止按钮永远找不到 ⇒ generating gate 失效）
+    let scope = document
+    const box = findInputBox()
+    const pe = box ? box.parentElement : null
+    if (pe) {
+      scope = pe.closest('form, [class*="input"], [class*="composer"], [class*="chat-input"], [class*="input-area"], [class*="input-box"], [class*="input_wrap"], [class*="chat-foot"], [class*="dialog-footer"]') || pe
+    }
     const out = []
-    for (const el of document.querySelectorAll(sel)) {
+    for (const el of scope.querySelectorAll(sel)) {
       if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue
       const lbl = [
         el.getAttribute('aria-label'),
@@ -739,7 +768,8 @@
   // [stop-btn-deepseek-fallback-v1] DeepSeek 的「停止/发送」按钮实测无 aria-label/title/data-testid/textContent，
   //   仅 <div role="button" class="ds-button ds-button--primary ds-button--filled ds-button--circle ..."> 可识别。
   //   STOP_LABEL_RE 的文本匹配对它恒 miss ⇒ 必须补结构化兜底。
-  //   [WHY] 发送态与停止态共用同一元素（生成中即停止按钮），故「输入区内的圆形主按钮」此刻必然是停止按钮。
+  //   [WHY] 发送态与停止态共用同一元素，故仅凭「圆形按钮存在」**不能**判生成中（发送态恒真会把
+  //   generating gate 钉死）；区分两态要靠图标，见 [stop-btn-deepseek-icon-v1]。
   //   [CHANGE-IMPACT] 仅当标签匹配全 miss 时启用；对千问等已有 aria-label 的站点零影响。
   function findStopGeneratingBtnStructural() {
     const input = findInputBox()
@@ -760,12 +790,34 @@
     }
     return null
   }
+  // [stop-btn-deepseek-icon-v1] DeepSeek 发送/停止同元素且无标签（[stop-btn-deepseek-fallback-v1]），
+  //   但两态图标不同（bundle 实证：chat.deepseek.com main.a0ce88b684.js，commit-id fd5d6ec3）：
+  //   停止态 = 圆角方块（16x16，单 path，d 以 "M2 4.88C2 3.68009" 开头、含 "V11.12C14 12.3199"），
+  //   发送态 = 上箭头（d 以 "M8.3125 0.980206" 开头）。
+  //   判据：圆形按钮内 svg path 的 d 命中停止方块签名 ⇒ 生成中。
+  // [WHY] 不用「按钮存在」直接判：发送态同元素也存在 ⇒ 恒真会让 generating gate 永不释放、脚本全卡死。
+  // [FAIL-OPEN] 锚点是坐标字面量，DeepSeek 改版图标后本分支静默失效（退回修复前行为：该站点
+  //   isGenerating() 恒 false），**不会**误判生成中；锚点由 stopped-btn-guard.node-test.ts 假 DOM 钉住。
+  const DS_STOP_ICON_ANCHORS = ['M2 4.88C2 3.68009', 'V11.12C14 12.3199']
+  function hasDeepSeekStopIcon(btn) {
+    try {
+      const paths = btn.querySelectorAll('svg path')
+      for (let i = 0; i < paths.length; i++) {
+        const d = paths[i].getAttribute('d') || ''
+        if (DS_STOP_ICON_ANCHORS.some(a => d.includes(a))) return true
+      }
+    } catch { /* 假 DOM / 站点结构异常：按非停止态处理（fail-open） */ }
+    return false
+  }
   function findStopGeneratingBtn() {
     return collectStopCandidates()[0] || null
   }
   function isGenerating() {
     const btn = findStopGeneratingBtn()
-    return Boolean(btn && !btn.disabled)
+    if (btn && !btn.disabled) return true
+    // [stop-btn-deepseek-icon-v1] DeepSeek 圆形按钮无标签 ⇒ 标签匹配恒 miss，用停止方块图签名名兜底
+    const dsBtn = findStopGeneratingBtnStructural()
+    return Boolean(dsBtn && !dsBtn.disabled && hasDeepSeekStopIcon(dsBtn))
   }
 
   let observerDebounce = null
@@ -793,9 +845,8 @@
       }
 
       // [stopped-detect-v3] 冷启动守卫（说明见上方声明处）：尚无「本轮」⇒ 只把存量记为基线，不报。
-      //   不区分 stopped/limit 两个分支 —— 两者语义同为「相对本轮的增量」，fill 前都没有本轮。
+      //   [stopped-btn-v1] 起只覆盖 limit（stopped 按钮驱动、无文本基线）；fill 前同样没有本轮。
       if (!_roundBaselinesReady) {
-        stopMarkerBaseline = countStopMarkers()
         limitMarkerBaseline = countLimitMarkers()
         return
       }
@@ -815,7 +866,8 @@
       //   退出（放行）后 stopped 探针据此判定是中断还是正常 DONE。
       const currGen = isGenerating()
       if (currGen) {
-        if (!prevGenerating) genEnterRoots = countAssistantRoots() // 刚进入 generating → 记 roots
+        // [stopped-btn-v2] 刚进入 generating → 同时记 roots 计数与最后根身份（见 rootsFrozenNow）
+        if (!prevGenerating) { genEnterRoots = countAssistantRoots(); genEnterRootId = assistantRootId() }
         prevGenerating = currGen // 保持追踪，让下一轮 stopped 探针能感知「按钮从有到无」
         if (!genRetryTimer) {
           genRetryTimer = setTimeout(() => { genRetryTimer = null; classifyAndPost() }, 600)
@@ -829,15 +881,28 @@
 
       // [stopped-btn-v1] 按钮状态驱动的停止检测：
       //   判据：prevGenerating===true（上一轮按钮存在）+ currGen===false（本轮消失）
-      //         + rootsNow === genEnterRoots（进入生成时的 assistant 根数未增长）
-      //   真中断 = 按钮消失 + 没有新 assistant 消息；正常 DONE = 按钮消失 + roots 增长
+      //         + rootsFrozenNow（进入生成时的 assistant 根数与最后根身份均未变）
       //   不再扫描正文关键词（2026-10-15 实测：AI 讨论 SiteAdapter 改造时正文自指命中"已停止回答"
       //   → 误推 stopped → 后续脚本被 stopped-window 闸门拦截）。
-      //   [WHY] 之前 generating gate 已经把 `currGen=true` 的情况 return 掉了，能走到这里必然 currGen=false，
-      //   所以条件只需 prevGenerating===true 即可（组合起来就是「按钮从有到无」）。
+      //   [WHY] generating gate 已把 currGen=true 的情况 return 掉，能走到这里必然 currGen=false，
+      //   所以条件只需 prevGenerating===true（组合起来即「按钮从有到无」）。
+      // [stopped-btn-v2] 冻结判据从「计数未增长」收紧为「计数与最后根身份均未变」：
+      //   regenerate 原地替换与虚拟列表回收同样计数不变，但最后根身份已变 ⇒ 不再误推。
+      // [KNOWN-LIMIT-1] roots 冻结区分不了「正常完成」与「中途停止」，且依赖 assistant 根挂载时序：
+      //   · 根随请求/骨架早早挂载的站点：半截中断也判得出（根在进入生成时已计过、不再增长）；
+      //   · 根随首 token 才挂载的站点：有部分输出的中断 roots 已增长 ⇒ 漏判（静默放行，
+      //     表现为循环不 finish、残余脚本照常执行回传）；
+      //   · regenerate 流程 2026-10-16 起由根身份判据排除（旧根替换 ⇒ 身份变化），
+      //     不再误推 stopped；但「regenerate 后被停」仍按真停止处理（新根未产出内容）。
+      // [KNOWN-LIMIT-2] DeepSeek 的停止/发送按钮无任何可匹配标签（[stop-btn-deepseek-fallback-v1]），
+      //   标签通道对它恒 miss；已由 [stop-btn-deepseek-icon-v1] 图签名兜底补上，但锚点是线上 bundle
+      //   里的坐标字面量（commit fd5d6ec3 实证）⇒ 站点改版图标后 fail-open 静默退回「该站点
+      //   isGenerating() 恒 false」（探针失效但不误报）。失效的观测通道：[stop-diag-v3] 的
+      //   dsIcon 字段（stop 诊断回传里直接报 hit/miss）+ 锚点 ratchet 防篡改；若 DeepSeek
+      //   回传异常，先看 dsIcon 再核对锚点与线上 bundle。
       if (prevGenerating && !stopPosted) {
         const rootsNow = countAssistantRoots()
-        const rootsFrozen = genEnterRoots > 0 && rootsNow === genEnterRoots
+        const rootsFrozen = rootsFrozenNow(genEnterRoots, genEnterRootId, rootsNow, assistantRootId())
         if (rootsFrozen) {
           stopPosted = true
           lastBodySig = bodySignature()
@@ -852,7 +917,7 @@
           prevGenerating = false
           return
         }
-        // roots 增长了 → 正常 DONE，不是中断；prevGenerating 保持 false
+        // roots 增长了 / 最后根身份变了 → 正常完成（或 regenerate），不是中断；prevGenerating 保持 false
         prevGenerating = false
       }
 
@@ -950,13 +1015,13 @@
         //   直接不回传：等真实回复容器挂载后 sig 再变化，自然重新进入本分支。
         if (!_replyRoot) return
         // [stopped-plain-noise-v1] 本轮已推过 stopped ⇒ 之后的 plain 必为「已停止」半截回复的补发，跳过。
-        // [WHY] stopped 分支只推一次（计数基线已更新），而停止横幅插入/操作按钮态变化仍会驱动
+        // [WHY] stopped 分支只推一次（stopPosted 置位），而停止横幅插入/操作按钮态变化仍会驱动
         //   MutationObserver → bodySignature 变化 → plain 分支把这条半截回复的 DOM→Markdown
         //   反推全文（含流水式长段总结 + 残缺列表）整卡补发 ⇒ 前端时间线多出一张巨大 AI 文本卡
         //   （2026-10-08 截图实测）。[script-plain-noise-v1] 的 marks.script 守卫拦不住它：
         //   半截回复首行是普通文本，不是标记行。
-        // [CONSTRAINT] 轮次语义：stopPosted 随 fill/rotate 重置（与 syncStopMarkerBaseline 同点），
-        //   新一轮的真实 plain 回复不受影响。
+        // [CONSTRAINT] 轮次语义：stopPosted 随 fill/rotate 重置（与 [stopped-btn-v1] 的
+        //   prevGenerating/genEnterRoots 重置同点），新一轮的真实 plain 回复不受影响。
         // [parity] headless-inject.ts detectReplyInPage 的 plain 分支有同构守卫（dedup._stoppedReported）
         if (stopPosted) return
         // [script-plain-noise-v1] 首行 = SCRIPT 且本会话已成功推过脚本 ⇒ 此处 post plain 必为噪音，跳过。
@@ -1324,11 +1389,11 @@
 
     if (d.type === 'ai-runner:fill') {
       resumeReplyObserver() // [stop-v2] stop 后首次 fill 恢复回复监听
-      syncStopMarkerBaseline() // [stopped-detect-v1] 开新一轮：以当前「已停止」计数为新基线
       _roundBaselinesReady = true // [stopped-detect-v3] 自此冷启动守卫永久失效（本轮语义成立）
       stopPosted = false // [stopped-plain-noise-v1] 开新一轮：解除 plain 补发抑制
       prevGenerating = false // [stopped-btn-v1] 开新一轮：重置按钮状态追踪
       genEnterRoots = 0 // [stopped-btn-v1] 开新一轮：重置进入 generating 时的 roots 基线
+      genEnterRootId = '' // [stopped-btn-v2] 开新一轮：重置进入 generating 时的最后根身份
       limitPosted = false // [limit-posted-v1] 开新一轮：解除触顶推送锁定（本轮允许再报一次）
       _scriptFenceReported = false // [script-fence-gate-v1] 开新一轮：重置 fence 报错去重
       syncLimitMarkerBaseline() // [limit-detect-v1] 开新一轮：以当前「上限」计数为新基线
@@ -1374,11 +1439,11 @@
 
     if (d.type === 'ai-runner:rotate') {
       resumeReplyObserver() // [stop-v2] stop 后首次 rotate 恢复回复监听
-      syncStopMarkerBaseline() // [stopped-detect-v1] 开新一轮：以当前「已停止」计数为新基线
       _roundBaselinesReady = true // [stopped-detect-v3] 自此冷启动守卫永久失效（本轮语义成立）
       stopPosted = false // [stopped-plain-noise-v1] 开新一轮：解除 plain 补发抑制
       prevGenerating = false // [stopped-btn-v1] 开新一轮：重置按钮状态追踪
       genEnterRoots = 0 // [stopped-btn-v1] 开新一轮：重置进入 generating 时的 roots 基线
+      genEnterRootId = '' // [stopped-btn-v2] 开新一轮：重置进入 generating 时的最后根身份
       limitPosted = false // [limit-posted-v1] 开新一轮：解除触顶推送锁定（本轮允许再报一次）
       _scriptFenceReported = false // [script-fence-gate-v1] 开新一轮：重置 fence 报错去重
       syncLimitMarkerBaseline() // [limit-detect-v1] 开新一轮：以当前「上限」计数为新基线
@@ -1459,6 +1524,16 @@
     if (d.type === 'ai-runner:stop') {
       // [stop-diag-v2] 诊断回传：无真实 DOM 时用它替代盲猜——
       //   把候选按钮的数量与前 3 个的标签/属性摘要回传工作台。
+      // [stop-diag-v3] 追加 dsIcon：DeepSeek 图签名兜底（[stop-btn-deepseek-icon-v1]）的探针状态。
+      //   'hit'=圆钮内 svg path 命中停止方块锚点；'miss'=圆钮在但两锚点都未命中（站点改版 ⇒
+      //   该兜底已失效，isGenerating() 对该站点恒 false）；'na'=无圆钮可判。
+      //   [WHY] 锚点失配是静默 fail-open，无任何运行态信号；stop 诊断是操作员唯一会看的口径，
+      //   把 dsIcon 挂在这里让「锚点失效」从不可观测变成一看便知。
+      let dsIcon = 'na'
+      try {
+        const dsBtn = findStopGeneratingBtnStructural()
+        if (dsBtn) dsIcon = hasDeepSeekStopIcon(dsBtn) ? 'hit' : 'miss'
+      } catch { /* fail-open: 诊断异常不影响 stop 主流程 */ }
       try {
         const cands = collectStopCandidates()
         const brief = cands.slice(0, 3).map((el, i) => {
@@ -1470,7 +1545,7 @@
           return `#${i + 1} <${tag}> aria="${al}" title="${ti}" class="${cl}" text="${tx}"`
         }).join(' | ')
         const src = (typeof e !== 'undefined' && e.source) || window.opener
-        if (src) src.postMessage({ type: 'ai-runner:stop-diag', count: cands.length, brief, ver: '1.7.7' }, '*')
+        if (src) src.postMessage({ type: 'ai-runner:stop-diag', count: cands.length, brief, dsIcon, ver: '1.7.7' }, '*')
       } catch (err) { console.warn('[ai-runner] stop-diag failed', err) }
       // [stop-v2] 清缓冲 + 保留去重集 + disconnect
       // [WHY] replyObserver 常驻 body；清空 seenHashes/lastBodySig 会让旧回复被重判为新回复 post

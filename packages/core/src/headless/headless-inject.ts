@@ -64,20 +64,12 @@ export function detectReplyInPage() {
   // [script-closure-gate-v1] 结构闭合门的挂点（见 extractLatestScript）：跨轮不残留，
   //   依赖 stillStreamingReply 的「正文长度变化即重置」自愈，这里只保证键存在
   if (typeof w.__aiRunnerClosureGate === 'undefined') w.__aiRunnerClosureGate = null
-  // [stopped-detect-v2] 冷启动基线 = 当前存量标记数。页面刷新（F5 / rotate / 新开）会清空
-  //   __aiRunnerDedup，而 DeepSeek 的「已停止」角标会**永久留在历史消息下方**；旧逻辑冷启动
-  //   基线硬编码 0 → 首次 poll 就把历史角标当成「本轮被停止」误报 {kind:'stopped'}，
-  //   循环被判 ai-stopped 终止（表现为「探测一直已停止」，重进页面再犯）。与
-  //   resetReplyDedupInPage 的 fill 时基线同一口径：基线只对「本轮新增」负责。
-  // [stopped-detect-v2] 冷启动基线 = 当前存量标记数。页面刷新（F5 / rotate / 新开）会清空
-  //   __aiRunnerDedup，而 DeepSeek 的「已停止」角标会**永久留在历史消息下方**；旧逻辑冷启动
-  //   基线硬编码 0 → 首次 poll 就把历史角标当成「本轮被停止」误报 {kind:'stopped'}，
-  //   循环被判 ai-stopped 终止（表现为「探测一直已停止」，重进页面再犯）。与
-  //   resetReplyDedupInPage 的 fill 时基线同一口径：基线只对「本轮新增」负责。
-  if (typeof dedup._stoppedBaseline !== 'number') {
-    // [limit-scan-strip-v1] 与油猴 syncStopMarkerBaseline、resetReplyDedupInPage 同口径：基线取剥壳后计数
-    dedup._stoppedBaseline = (scanText.match(/当前问题已停止|已停止生成|已停止回答/g) || []).length
-  }
+  // [stopped-detect-v2] 关键词 stopped 探针（含冷启动基线 _stoppedBaseline）已于 2026-10-16
+  //   整体移除：那三个关键词（当前问题已停止|已停止生成|已停止回答）经线上 bundle 实证
+  //   （main.a0ce88b684.js，commit fd5d6ec3）在 DeepSeek 真实角标文案里零命中（实际是
+  //   已停止/思考已停止/搜索已停止）⇒ 只剩 AI 正文自指的假阳性通道。现行判据见下方
+  //   [stopped-btn-v1]（按钮状态驱动，与油猴 [stopped-btn-v1]/[stopped-btn-v2] parity）。
+  //   勿复活关键词匹配。
   if (typeof dedup._limitBaseline !== 'number') dedup._limitBaseline = 0 // [limit-detect-v1]
   if (typeof dedup._rateBaseline !== 'number') dedup._rateBaseline = 0 // [rate-retry-v1]
   if (!dedup._observerInstalled) {
@@ -127,17 +119,107 @@ export function detectReplyInPage() {
     }
   }
 
-  // [stopped-detect-v1] 「当前问题已停止」感知：生成被中止（用户点停止 / 平台中断 / 内容策略截断）时，
-  // 回复永远没有 DONE 也没有完整脚本，plain 分支又被 hasJsFence 门槛拦住 → 页面侧零推送，
-  // 前端干等 90s/180s 超时（表现为「AI 网页已停止，工作台还在转圈」）。
-  // [WHY] 独立于基线守卫：stop 标记可能出现在无新增 assistant 块的场景（生成刚开始就被停）
-  // [CONSTRAINT] 按出现次数 + 基线去重：历史消息里的旧「已停止」标记不触发；本轮只推一次
+  // [stopped-btn-v1] 按钮状态探针（parity：scripts/tampermonkey-session-id.user.js [stopped-btn-v1]
+  //   的 collectStopCandidates 输入区收敛 + findStopGeneratingBtn + findStopGeneratingBtnStructural
+  //   + hasDeepSeekStopIcon 图签名兜底，两级判定同构）。
+  // [CONSTRAINT] 必须内联在 detectReplyInPage 内部：本函数经 page.evaluate 序列化到浏览器执行，
+  //   顶层引用会随模块边界丢失（同 decideScriptFence，2026-10-14 实测 ReferenceError）。
+  // [CONSTRAINT] 与油猴侧逐语同构；改一侧必须同步另一侧（守卫 stopped-btn-guard 的 parity 段）。
+  function isGeneratingInPage() {
+    const STOP_LABEL_RE = /停止生成|停止回答|停止输出|终止|取消生成|停止|中断|暂停生成|stop\s*generat|stop\s*stream|stop\s*response|stop\s*answer|stop\s*cancel|\bcancel\b|\babort\b|\binterrupt\b|\bhalt\b/i
+    const sel = 'button, div[role], span[role], a[role], [role="switch"], [role="menuitem"]'
+    const circleSel = '[role="button"].ds-button--circle, button.ds-button--circle'
+    // [stop-btn-deepseek-icon-v1] 停止方块图签名锚点（与油猴 DS_STOP_ICON_ANCHORS 同值）
+    const dsAnchors = ['M2 4.88C2 3.68009', 'V11.12C14 12.3199']
+    function findInputBox() {
+      const qwen = document.querySelector('div[contenteditable="true"][role="textbox"]')
+      if (qwen) return qwen
+      const ta = document.querySelector('textarea:not([readonly]):not([disabled])')
+      if (ta) return ta
+      return document.querySelector('[contenteditable="true"]') || null
+    }
+    // 标签通道：只搜输入区（[stop-btn-scope-v1]，scope 解析与油猴 collectStopCandidates 一致：
+    //   从 parentElement 起 closest，不用 input.closest——输入框自身 class 含 input 会命中自己）
+    const box = findInputBox()
+    let scope = document
+    const pe = box ? box.parentElement : null
+    if (pe) {
+      scope = pe.closest('form, [class*="input"], [class*="composer"], [class*="chat-input"], [class*="input-area"], [class*="input-box"], [class*="input_wrap"], [class*="chat-foot"], [class*="dialog-footer"]') || pe
+    }
+    for (const el of scope.querySelectorAll(sel)) {
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue
+      const lbl = [
+        el.getAttribute('aria-label'),
+        el.getAttribute('title'),
+        el.getAttribute('data-testid'),
+        el.getAttribute('data-state'),
+        el.getAttribute('class'),
+        el.textContent,
+      ].filter(Boolean).join(' ')
+      if (STOP_LABEL_RE.test(lbl)) return true
+    }
+    // DeepSeek 圆形按钮无标签 ⇒ 结构化 + 图签名兜底（与油猴 findStopGeneratingBtnStructural 同构：
+    //   form 优先，否则从 parentElement 向上 8 层找含圆钮的根）
+    let root = null
+    if (box) {
+      root = box.closest('form')
+      if (!root) {
+        let p = box.parentElement
+        for (let i = 0; i < 8 && p; i++) {
+          if (p.querySelector(circleSel)) { root = p; break }
+          p = p.parentElement
+        }
+      }
+    }
+    let dsBtn = null
+    for (const el of (root || document).querySelectorAll(circleSel)) {
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue
+      dsBtn = el // 只认第一个可用圆钮（与油猴 findStopGeneratingBtnStructural 一致）
+      break
+    }
+    if (!dsBtn) return false
+    const paths = dsBtn.querySelectorAll('svg path')
+    for (let i = 0; i < paths.length; i++) {
+      const d = paths[i].getAttribute('d') || ''
+      if (dsAnchors.some(a => d.includes(a))) return true
+    }
+    // 圆钮在但图标两锚点均未命中 ⇒ fail-open 按非生成态（与油猴 hasDeepSeekStopIcon 同语义：
+    //   站点改版后静默失效，不误判生成中）
+    return false
+  }
+
+  // [stopped-btn-v1] 「本轮无新增 assistant 内容」判据（与油猴 rootsFrozenNow 的「计数与
+  //   最后根身份均未变」同义：生成没产出任何回复块）。
+  // [WHY] 独立成纯函数：detectReplyInPage 是 page.evaluate 序列化的巨型闭包、无 harness 先例，
+  //   判据提出来后可由守卫测试直接行为覆盖（stopped-baseline-guard 的 parity 段）。
+  // [CONSTRAINT] 基线为 '' 哨兵（空会话/未 fill）时恒 false：无基线可比时保守不推 stopped。
+  function noNewAssistantContent(baselineHash, nowHash) {
+    return typeof baselineHash === 'string'
+      && baselineHash !== ''
+      && (nowHash === '' || nowHash === baselineHash)
+  }
+
+  // [stopped-btn-v1] 按钮状态驱动的 stopped 检测（parity：scripts/tampermonkey-session-id.user.js
+  //   [stopped-btn-v1] / [stopped-btn-v2] 的「按钮从有到无 + 无新产出」判据）。
+  // [WHY] 原关键词直判的三个词在 DeepSeek 真实角标里零命中（bundle 实证，见上方墓碑注释）⇒
+  //   零真阳性；而 AI 正文自指复述即误推（2026-10-15 实测同根因）⇒ 纯假阳性通道。按钮状态是
+  //   两态都可判的事实信号，取代之。
+  // [判据] 上一 poll 停止按钮可见 + 本 poll 不可见（按钮从有到无）+ 本轮无新增 assistant 内容
+  //   （最后一条消息 hash 仍等于 fill 时基线）⇒ 生成没产出任何回复块（思考阶段被停/平台中断）。
+  // [CONSTRAINT] 冷启动首 poll 无 _prevGenBtn 历史 ⇒ 不当成过渡（注入瞬间不误报）；
+  //   有新增内容时交由下方 done/script/plain 分发（正常完成）——半截回复的噪音由
+  //   [stopped-plain-noise-v1] 与 closure gate 各自处理，与油猴放行后的流向一致。
+  // [CONSTRAINT] 位置须在基线 hash 守卫**之前**：「没产出任何块」正是该守卫会 return null 的形态，
+  //   挪到其后则思考期被停的场景永远推不出 stopped（旧关键词判定同此位置，勿回退）。
   if (!dedup._stoppedReported) {
-    const stopMessages = scanText.match(/当前问题已停止|已停止生成|已停止回答/g) || []
-    const stopBaseline = typeof dedup._stoppedBaseline === 'number' ? dedup._stoppedBaseline : 0
-    if (stopMessages.length > stopBaseline) {
+    const currGen = isGeneratingInPage()
+    const wasGen = dedup._prevGenBtn === true
+    dedup._prevGenBtn = currGen
+    if (wasGen && !currGen && noNewAssistantContent(dedup._baselineLastHash, hashLastAssistant())) {
       dedup._stoppedReported = true
-      return { kind: 'stopped', text: stopMessages[stopMessages.length - 1] }
+      // [stopped-toast-quote-v1] 文案分段拼接：整句字面量会成为探针源码的自命中
+      // （本文件会被工作台 dump 进会话，同 limit 探针的自指教训）
+      return { kind: 'stopped', text: 'AI 网页' + '已停止' + '生成' }
     }
   }
 

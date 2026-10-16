@@ -419,14 +419,18 @@ function onHtmlDrop(e: DragEvent) {
          把右侧面板从文档流列变为可滑入浮层，修复窄屏主区被挤成细条（F1）。
          此前 sideDrawerOpen 是**死状态**（声明后零写入）。 -->
     <button
+      v-tooltip="sideDrawerOpen ? '收起右侧面板' : '打开右侧面板'"
       type="button"
       class="side-drawer-trigger"
-      aria-label="打开右侧面板"
+      :aria-label="sideDrawerOpen ? '收起右侧面板' : '打开右侧面板'"
       :aria-expanded="sideDrawerOpen"
       @click="sideDrawerOpen = !sideDrawerOpen"
     >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <svg v-if="!sideDrawerOpen" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" />
+      </svg>
+      <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="6" y1="6" x2="18" y2="18" /><line x1="6" y1="18" x2="18" y2="6" />
       </svg>
     </button>
     <!-- 左侧主区域 -->
