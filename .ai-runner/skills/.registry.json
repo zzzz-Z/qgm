@@ -122,6 +122,11 @@
       "url": "https://github.com/obra/superpowers/blob/HEAD/skills/verification-before-completion/SKILL.md"
     },
     {
+      "name": "video-generate",
+      "source": "(unknown)",
+      "url": "(unknown)"
+    },
+    {
       "name": "vite",
       "source": "antfu/skills",
       "url": "https://github.com/antfu/skills/blob/HEAD/skills/vite/SKILL.md"
