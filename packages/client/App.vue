@@ -4,7 +4,7 @@ import ScriptPanel from './components/script/ScriptPanel.vue'
 import AiWindowList from './components/panels/AiWindowList.vue'
 import { useAiReplyHandlers } from './composables/ai/useAiReplyHandlers'
 import { useAppStartup } from './composables/ui/useAppStartup'
-import { updateUserscript } from './composables/ui/useUserscriptUpdate'
+import { updateUserscript, useUserscriptUpdateWatcher } from './composables/ui/useUserscriptUpdate'
 import ToastHost from './components/feedback/ToastHost.vue'
 import TooltipHost from './components/feedback/TooltipHost.vue'
 import KeyboardHelp from './components/feedback/KeyboardHelp.vue'
@@ -32,6 +32,8 @@ const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
 setSessionModelScope(String(modelId.value || 'default'))
 
 const { toast } = useToast()
+/** [userscript-update-v1] 版本角标：脚本改完 build 后自动递增版本，这里轮询比对给出可点提示 */
+const userscriptBadge = useUserscriptUpdateWatcher()
 
 const { onSessionIdMessage } = useAiReplyHandlers({
   sessionHistory,
@@ -130,7 +132,7 @@ function addSessionToHistory(id: string, url: string, title: string) {
  */
 function onUpdateUserscript() {
   // [CONSTRAINT] 不必 await：失败原因由该函数内部 toast 呈现，这里不做二段处理
-  void updateUserscript()
+  void updateUserscript().then(() => userscriptBadge.markSeen())
 }
 /**
  * 全局键盘快捷键：Shift+? 开关快捷键帮助、Escape 关闭
@@ -312,9 +314,12 @@ function onLoginGui() {
             <!-- [userscript-update-v1] 安装 / 更新油猴脚本：打开本地分发端点，Tampermonkey 拦截并弹更新页 -->
             <button
               v-tooltip="'安装 / 更新油猴脚本（打开本地分发端点，Tampermonkey 会弹出安装或更新确认）'"
-              aria-label="更新油猴脚本" class="userscript-toggle"
+              :aria-label="userscriptBadge.hasUpdate.value ? '油猴脚本有新版本，点击更新' : '更新油猴脚本'"
+              class="userscript-toggle"
+              :class="{ 'has-update': userscriptBadge.hasUpdate.value }"
               @click="onUpdateUserscript"
             >
+              <span v-if="userscriptBadge.hasUpdate.value" class="userscript-dot" aria-hidden="true" />
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
             </button>
           </div>

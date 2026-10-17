@@ -640,3 +640,19 @@
 .main {
   padding: 8px 10px !important;
 }
+
+/* [userscript-update-v1] 有新版本时的角标：小圆点，绝对定位在按钮右上角 */
+.userscript-toggle {
+  position: relative;
+}
+
+.userscript-toggle .userscript-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f56c6c;
+  pointer-events: none;
+}

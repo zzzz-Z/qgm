@@ -101,3 +101,73 @@ export async function updateUserscript(): Promise<UserscriptDecision> {
   toast(decision.message, type, decision.action === 'error' ? TOAST_MEDIUM : TOAST_LONGEST)
   return decision
 }
+
+/** localStorage 键：用户已确认过的油猴脚本版本 */
+const SEEN_VERSION_KEY = '__ai_userscript_seen_version'
+
+/**
+ * 比较两个版本号，判断 latest 是否比 seen 新。
+ * [WHY] 版本现由构建自动递增（[userscript-version-inject-v1]），前端只需判断「有没有新东西」；
+ *   用语义化版本逐段数字比较而非字符串比较：字符串比较会把 1.9.10 判成小于 1.9.9。
+ * [CONSTRAINT] seen 为空视为有新版本：首次使用时应提示一次，让用户完成首装。
+ * @param latest 服务端返回的当前版本
+ * @param seen 本地记录的已确认版本
+ */
+export function isNewerVersion(latest: string | null | undefined, seen: string | null | undefined): boolean {
+  if (!latest) return false
+  if (!seen) return true
+  if (latest === seen) return false
+  const a = String(latest).split('.')
+  const b = String(seen).split('.')
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = Number(a[i] ?? 0)
+    const y = Number(b[i] ?? 0)
+    if (Number.isNaN(x) || Number.isNaN(y)) return String(latest) !== String(seen)
+    if (x !== y) return x > y
+  }
+  return false
+}
+
+/** 读已确认版本；隐私模式下 localStorage 可能抛错，返回 null 即「从未确认」 */
+function readSeenVersion(): string | null {
+  try { return window.localStorage.getItem(SEEN_VERSION_KEY) } catch { return null }
+}
+
+/**
+ * 轮询 /userscript/info，判断是否有新版油猴脚本可更新。
+ * [WHY] 脚本更新是静默的（Tampermonkey 不会通知当前页面），用户唯一的感知渠道就是工作台这个角标。
+ *   轮询而非 SSE：端点本身是「读磁盘元信息」的廉价操作，无需为它开长连接。
+ * [CONSTRAINT] 默认 60s：油猴脚本更新是人工操作（改代码 → build），分钟级足够，过快只会白耗请求。
+ *   请求失败静默忽略——本功能是辅助提示，不得因网络抖动给用户报错。
+ * @param intervalMs 轮询间隔（毫秒）
+ */
+export function useUserscriptUpdateWatcher(intervalMs = 60000) {
+  const hasUpdate = ref(false)
+  const latestVersion = ref<string | null>(null)
+  const seenVersion = ref<string | null>(readSeenVersion())
+
+  /** 拉一次元信息并刷新角标状态 */
+  async function refresh(): Promise<void> {
+    try {
+      const res = await fetch('/__ai/userscript/info', { headers: { accept: 'application/json' }, cache: 'no-store' })
+      const info = await res.json() as UserscriptInfo
+      if (info?.ok !== true || !info.exists) { hasUpdate.value = false; return }
+      latestVersion.value = info.version ?? null
+      hasUpdate.value = isNewerVersion(info.version, seenVersion.value)
+    } catch { /* 端点不可达：保持现状，不打断用户 */ }
+  }
+
+  /** 用户完成一次更新动作后调用：把当前最新版记为「已确认」，角标随即消失 */
+  function markSeen(): void {
+    const v = latestVersion.value
+    if (!v) return
+    seenVersion.value = v
+    hasUpdate.value = false
+    try { window.localStorage.setItem(SEEN_VERSION_KEY, v) } catch { /* 存不了就下次再提示 */ }
+  }
+
+  onMounted(() => { void refresh() })
+  useIntervalFn(() => { void refresh() }, intervalMs)
+
+  return { hasUpdate, latestVersion, seenVersion, refresh, markSeen }
+}

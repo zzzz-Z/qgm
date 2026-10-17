@@ -15,7 +15,7 @@ import process from 'node:process'
 
 import { it } from 'vitest'
 
-import { evaluateUserscriptInfo } from '../composables/ui/useUserscriptUpdate.js'
+import { evaluateUserscriptInfo, isNewerVersion } from '../composables/ui/useUserscriptUpdate.js'
 
 const ROOT = process.cwd()
 const APP_VUE = 'packages/client/App.vue'
@@ -105,12 +105,37 @@ it('存活但地址为空：error（拿到了「可以打开」却没有地址�
   assert.equal(d.url, undefined)
 })
 
+// ── 版本比较（[userscript-update-v1] 版本角标的判据）────────────────────────
+// [WHY] 构建会自动递增版本（[userscript-version-inject-v1]），前端靠这个函数决定要不要亮角标。
+//   最容易写错的是「按字符串比较」：那样 1.9.10 会被判成小于 1.9.9，角标永远不亮。
+
+it('版本比较：逐段数字比较，1.9.10 比 1.9.9 新（字符串比较会判反）', () => {
+  assert.equal(isNewerVersion('1.9.10', '1.9.9'), true)
+  assert.equal(isNewerVersion('1.9.9', '1.9.10'), false)
+})
+
+it('版本比较：主次位递增也算新', () => {
+  assert.equal(isNewerVersion('1.10.0', '1.9.11'), true)
+  assert.equal(isNewerVersion('2.0.0', '1.99.99'), true)
+})
+
+it('版本比较：相同或本地没有记录/服务端无版本时不得误报', () => {
+  assert.equal(isNewerVersion('1.9.11', '1.9.11'), false)
+  assert.equal(isNewerVersion(null, '1.9.11'), false)
+  assert.equal(isNewerVersion(undefined, '1.9.11'), false)
+})
+
+it('版本比较：本地从未记录过 ⇒ 视为有新版本（首次使用应提示一次）', () => {
+  assert.equal(isNewerVersion('1.9.11', null), true)
+  assert.equal(isNewerVersion('1.9.11', ''), true)
+})
 // ── 接线结构断言：防「函数写了但按钮没接上」──────────────────────────────────
 
 it('wiring: App.vue 的按钮绑到 onUpdateUserscript，且该函数转发给 updateUserscript', () => {
   const src = read(APP_VUE)
   assert.match(src, /@click="onUpdateUserscript"/, '按钮未绑定 handler')
-  assert.match(src, /import \{ updateUserscript \} from '\.\/composables\/ui\/useUserscriptUpdate'/, '未显式导入更新函数')
+  // 导入行可同时含 watcher（[userscript-update-v1] 版本角标），故只要求「从该模块导入且带 updateUserscript」
+  assert.match(src, /import \{[^}]*\bupdateUserscript\b[^}]*\} from '\.\/composables\/ui\/useUserscriptUpdate'/, '未显式导入更新函数')
   assert.match(src, /function onUpdateUserscript\(\)[\s\S]{0,300}?updateUserscript\(\)/, 'handler 未转发到 updateUserscript')
   assert.match(src, /class="userscript-toggle"/, '按钮缺少样式类')
 })
