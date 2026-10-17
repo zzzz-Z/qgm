@@ -2965,3 +2965,7 @@ restart 轮失败 → 下一轮探活恢复。
 ## `pm2 jlist | node -e` 解析空输出
 
 本轮第一次取启动时间时该管道返回空（`pm2 jlist` 输出体量大且含控制字符），改用 `pm2 describe ai-runner --no-color | grep` 才拿到 `created at`。取证时优先用 `describe`。
+
+## 文档互相"证伪"时，命令名必须先与 `package.json` 对账。v2 用「AGENTS.md §三无此脚本」证伪了真实存在的 `pnpm typecheck`，同时自己引用了不存在的 `pnpm lint:eslint`。这与 AGENTS.md 里「web:dev 前车之鉴」是同一类错误
+
+断言"某命令不存在"比断言"某命令存在"更容易出错，因为前者没有反面证据。
