@@ -2903,3 +2903,7 @@ Teleport 到 body 的模板内容仍携带组件的 `data-v-xxx` 属性，因此
 ## 代执行 `pm2 restart` 当轮 fetch 必然失败：`Failed to fetch` 属预期（重启导致 HTTP 通道瞬断），不是脚本 bug。按 `AGENTS.md` 记载：重试须跨轮，不得在原轮判定为失败。本会话本轮已实测
 
 restart 轮失败 → 下一轮探活恢复。
+
+## `patchFile` 同步抛异常，`await ...catch()` 挡不住：本轮用 `await __AI__.patchFile(p, '@@TAIL@@', tail).catch(...)` 兜底失败，结果 `patchFile` 在 `await` 之前就同步抛出 `ANCHOR_NOT_FOUND`，`.catch` 根本没接住，直接 exit 7。正确做法：整写场景一律用 `readText` + `writeText` 拼接，不要用「锚点 + catch 兜底」这种混合形态。附带教训
+
+`@@TAIL@@` 这类短标记（8 字符）会触发 `ANCHOR_TOO_SHORT`，锚点必须用唯一整行或带上下文的片段。
