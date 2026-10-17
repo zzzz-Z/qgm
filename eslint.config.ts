@@ -1,5 +1,6 @@
 import antfu from '@antfu/eslint-config'
 import type { Linter } from 'eslint'
+// @ts-expect-error eslint-vue-setup-rules 未提供类型声明（既有问题，本文件不属任何 tsconfig include，改动后才被增量检查拉入）
 import vueSetupRules from 'eslint-vue-setup-rules'
 
 const config: Promise<Linter.Config[]> = antfu({
@@ -11,7 +12,11 @@ const config: Promise<Linter.Config[]> = antfu({
   // [lint-scope-v1] 排除运行态与产物目录
   // WHY: .ai-runner 下是 backup 源码副本 + 运行日志，dist/coverage 是构建产物；
   //   原先 `eslint .` 连它们一起 lint，error 数随运行态漂移，回归闸门失去可比性
-  ignores: ['.ai-runner/**', '**/dist/**', 'coverage/**', '**/playwright-report/**', '**/test-results/**', 'skills/**'],
+  // [tampermonkey-fragment-v1] packages/core/src/tampermonkey/ 是 IIFE 的物理切分，
+  //   不是独立模块：每个文件是单份用户脚本的一段，拼回（pnpm userscript:build）后才是完整程序。
+  //   单独解析必然报 no-undef（引用其它片段的函数）与 parsing error（顶层 return / 未闭合块）。
+  //   [CONSTRAINT] 校验不因此缺位——产物 scripts/tampermonkey-session-id.user.js 仍受全部守卫覆盖。
+  ignores: ['.ai-runner/**', '**/dist/**', 'coverage/**', '**/playwright-report/**', '**/test-results/**', 'skills/**', 'packages/core/src/tampermonkey/**'],
   rules: {
     // cjs
     'no-cond-assign': 'off',

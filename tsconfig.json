@@ -35,6 +35,7 @@
     "dist",
     "client",
     "**/*.node-test.ts",
-    "**/*.test.cjs"
+    "**/*.test.cjs",
+    "packages/core/src/tampermonkey/**/*.ts"
   ]
 }

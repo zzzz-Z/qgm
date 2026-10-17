@@ -199,12 +199,12 @@
   }
   const seenHashes = new Set()
   const seenDoneMarkers = new Set()
-  let lastBodySig = ''
+  const lastBodySig = ''
   // [done-stable-gate-v1] DONE 分支的 2 帧稳定门（与 headless-inject.ts 同构）。
   // [WHY] marker 是 hash(`done-head|${summary.slice(0,200)}`)；短内容时前 200 字随流式变化 ⇒
   //   去重失效 ⇒ 同一 DONE 被推 N 次（2026-10-17 用户实测）。
-  let _pendingDoneSig = null
-  let _scriptFenceReported = false
+  const _pendingDoneSig = null
+  const _scriptFenceReported = false
   // [stopped-btn-v1] stopped 分支的回传文案。[stopped-toast-quote-v1] 的「带命中原文」机制随
   //   全文关键词探针一起废止（按钮驱动后没有正文命中可带；原文通道的自指风险见该 tag 历史：
   //   停机态文案与 UI 文案同形，2026-10-10 14:14 实测页面一切正常却弹停止提示）。
@@ -212,7 +212,7 @@
   const STOPPED_GENERIC = 'AI 网页' + '已停止' + '生成'
   // [stopped-plain-noise-v1] 本轮是否已推过 stopped：置位后 plain 分支不再补发半截回复
   // （与 headless-inject.ts 的 dedup._stoppedReported 同义；随 fill/rotate 轮次重置）
-  let stopPosted = false
+  const stopPosted = false
   // [stopped-btn-v1] 按钮状态驱动的停止检测（替代全文关键词 countStopMarkers）：
   //   不再扫描「已停止生成/回答/输出」等文本关键词（AI 讨论探针本身时会在正文里自指命中
   //   → 误推 stopped → 后续脚本被 stopped-window 闸门拦截）。
@@ -221,9 +221,9 @@
   //   - genEnterRoots：进入 generating 状态时的 assistant 根数量
   //   - genEnterRootId：进入 generating 时最后一个 assistant 根的身份指纹（[stopped-btn-v2]）
   //   判据：prevGenerating===true + 当前!isGenerating + roots 未增长且最后根身份未变 = 真中断
-  let prevGenerating = false
-  let genEnterRoots = 0
-  let genEnterRootId = '' // [stopped-btn-v2] 与 genEnterRoots 同时记录，见 rootsFrozenNow
+  const prevGenerating = false
+  const genEnterRoots = 0
+  const genEnterRootId = '' // [stopped-btn-v2] 与 genEnterRoots 同时记录，见 rootsFrozenNow
   // [limit-posted-v1] 本轮是否已推过 limit：**存量兜底通道（limitStale）每轮恒真**，
   //   而「更新 limitMarkerBaseline」压不住它 —— 该通道不依赖计数增长，基线更新前后恒真
   //   ⇒ 每轮 classifyAndPost 都会再 post 一次 kind:'limit'（2026-10-10 15:07 用户实测：
@@ -233,7 +233,7 @@
   //   这是 2026-10-10 同一天内第三次撞上「headless 有、油猴没有」（前两次：回传命中原文、冷启动基线）。
   // [CONSTRAINT] **只压「存量兜底」通道**；「计数增长」通道自限、不 gate ——
   //   否则一次误报就把本轮后续的**真**触顶信号一起挡死。
-  let limitPosted = false
+  const limitPosted = false
   // [stopped-detect-v3] 冷启动守卫：首个 fill/rotate 发生前，「本轮增量」探测器一律只记基线、不报。
   // [WHY] DeepSeek 的「已停止」角标会**永久留在历史消息下方**；页面刷新会清空本脚本全部运行态
   //   （基线归 0、stopPosted 归 false），而 replyObserver 在脚本注入即连接（见下方 resumeReplyObserver()
@@ -244,7 +244,7 @@
   // [stopped-btn-v1] stopped 探针 2026-10-16 起按钮驱动（不再扫文本、无基线）⇒ 本守卫现只覆盖 limit。
   // [CONSTRAINT] 与 fill/rotate 的 syncLimitMarkerBaseline 同口径：基线只对「本轮新增」负责；
   //   首个 fill 之后本守卫永久失效。
-  let _roundBaselinesReady = false
+  const _roundBaselinesReady = false
   // [limit-scan-strip-v1] 触顶/停止两类标记探针只扫「正文」：剥掉代码块、输入框与可编辑区。
   // [WHY] 工作台把脚本 stdout 用 ``` 围栏回填进会话（prompt-builder appendRawOutputs）⇒ 页面里落成
   //   <pre><code>，而源码/文档里含探针自己的词表（如 headless-inject-simple.ts 的
@@ -400,23 +400,23 @@
   }
 
   function extractLatestScript() {
-    // [script-closure-gate-v1] 结构闭合门 —— 未闭合的块**不当作完整脚本推送**。
-    // [WHY] 在此之前，「不把流式半截块推出去」的唯一屏障是调用方的稳定判据
-    //   （内置通道 = 「连续 2 帧同 hash」即 800ms 无变化；油猴通道 = 350ms 防抖 + 生成中门）。
-    //   两者都只要求「这段时间内文本没变」，**都不要求块本身闭合**，于是：
-    //   · 流式中途任何一次超过该窗口的停顿（网络抖动 / 站点渲染卡顿 / 模型思考）都会让半截块被判为完整；
-    //   · 油猴通道另有一处：站点把回复切成「已停止」后「停止生成」按钮消失 ⇒ isGenerating() 转 false，
-    //     而代码块并未闭合，半截块被当作完整脚本 post 出去。
-    //   两者都让 /run 报 `Unexpected end of input` + 结构未闭合 ⇒ 与上游 max_tokens 截断的报错**完全同形**，
-    //   应用端只能读成「脚本被截断」，于是反复拆小重发、白烧轮次。
-    //   （[multi-script-v1] 记的是接收侧「只取最后一块」那一种成因；本条是接收侧的第三种。）
-    // [CONSTRAINT] **只延迟、不丢弃**：正文长度连续 CLOSURE_ACCEPT_TICKS 次不变仍未闭合 ⇒
-    //   判定为「上游真截断」，照旧放行（下游 400 会给「拆小重发」提示，补救路径不变）。
-    //   故对正常脚本零影响（闭合块直接跳过本段）；含正则字面量等扫描器识别不了的形态最多延迟 ~2.4s。
-    // [CONSTRAINT] 门状态挂在 window 上（不用 dedup）⇒ 内置通道与油猴通道本段**逐字同构**；
-    //   本函数经 page.evaluate 序列化执行，禁止引用外部闭包变量。
-    // [CONSTRAINT] 扫描器语义必须与 packages/core/src/post-run/script-check.ts 的 hasUnclosedStructure
-    //   一致（那边是服务端判据），由 script-closure-gate 用例做语料对拍
+  // [script-closure-gate-v1] 结构闭合门 —— 未闭合的块**不当作完整脚本推送**。
+  // [WHY] 在此之前，「不把流式半截块推出去」的唯一屏障是调用方的稳定判据
+  //   （内置通道 = 「连续 2 帧同 hash」即 800ms 无变化；油猴通道 = 350ms 防抖 + 生成中门）。
+  //   两者都只要求「这段时间内文本没变」，**都不要求块本身闭合**，于是：
+  //   · 流式中途任何一次超过该窗口的停顿（网络抖动 / 站点渲染卡顿 / 模型思考）都会让半截块被判为完整；
+  //   · 油猴通道另有一处：站点把回复切成「已停止」后「停止生成」按钮消失 ⇒ isGenerating() 转 false，
+  //     而代码块并未闭合，半截块被当作完整脚本 post 出去。
+  //   两者都让 /run 报 `Unexpected end of input` + 结构未闭合 ⇒ 与上游 max_tokens 截断的报错**完全同形**，
+  //   应用端只能读成「脚本被截断」，于是反复拆小重发、白烧轮次。
+  //   （[multi-script-v1] 记的是接收侧「只取最后一块」那一种成因；本条是接收侧的第三种。）
+  // [CONSTRAINT] **只延迟、不丢弃**：正文长度连续 CLOSURE_ACCEPT_TICKS 次不变仍未闭合 ⇒
+  //   判定为「上游真截断」，照旧放行（下游 400 会给「拆小重发」提示，补救路径不变）。
+  //   故对正常脚本零影响（闭合块直接跳过本段）；含正则字面量等扫描器识别不了的形态最多延迟 ~2.4s。
+  // [CONSTRAINT] 门状态挂在 window 上（不用 dedup）⇒ 内置通道与油猴通道本段**逐字同构**；
+  //   本函数经 page.evaluate 序列化执行，禁止引用外部闭包变量。
+  // [CONSTRAINT] 扫描器语义必须与 packages/core/src/post-run/script-check.ts 的 hasUnclosedStructure
+  //   一致（那边是服务端判据），由 script-closure-gate 用例做语料对拍
     function hasUnclosedStructureJs(src) {
       const stack = []
       let state = 'code'
@@ -497,9 +497,9 @@
     // [fragment-guard-v1] 同 headless-inject.ts：本回复内存在任意标记块时，无标记块视为片段不推。
     let hasAnyMarked = false
     for (const pre of pres) {
-      // [code-text-clean-v1] 优先从 <pre><code> 取文本，避开代码块头的语言标签与「复制/下载」按钮文字
-      // [WHY] pre.textContent 会把头部按钮文字并入首行，污染后 #! 锚点失配、语言判定失败导致整块跳过
-      // [CONSTRAINT] 无 code 子元素时回退 pre 本身；去首尾空行逻辑保持原样
+    // [code-text-clean-v1] 优先从 <pre><code> 取文本，避开代码块头的语言标签与「复制/下载」按钮文字
+    // [WHY] pre.textContent 会把头部按钮文字并入首行，污染后 #! 锚点失配、语言判定失败导致整块跳过
+    // [CONSTRAINT] 无 code 子元素时回退 pre 本身；去首尾空行逻辑保持原样
       const codeEl = pre.querySelector('code') || pre
       const text = codeTextOf(codeEl)
       if (!text) continue
@@ -564,7 +564,7 @@
   // CHANGE-IMPACT: 与 extractLatestScript 互补，先 DOM 后 Markdown，不重复发送（hash 去重）
   function extractScriptFromMarkdown() {
     try {
-      // [no-root-no-reply-v1] 容器缺失 ⇒ 无 Markdown 可提，整页反推会把侧栏/用户消息扫进来
+    // [no-root-no-reply-v1] 容器缺失 ⇒ 无 Markdown 可提，整页反推会把侧栏/用户消息扫进来
       const root = latestAssistantRoot()
       if (!root) return null
       const md = extractReplyMd(root)
@@ -597,14 +597,14 @@
 
   // [fix-undef] 从页面取最新一条回复的纯文本（排除 pre 代码块，用于 handoff 总结判定）
   function extractLatestReplyText() {
-    // [ask-full-text-v1] 返回最后一条 assistant 容器的完整 Markdown（含段落换行）
-    // [WHY] 原实现只取全局最后一个叶子节点 → 多段回复被截成末段，标记行前缀丢失
-    // [CONSTRAINT] 复用 extractReplyMd（DOM→Markdown 反推）；容器缺失时回退 document
+  // [ask-full-text-v1] 返回最后一条 assistant 容器的完整 Markdown（含段落换行）
+  // [WHY] 原实现只取全局最后一个叶子节点 → 多段回复被截成末段，标记行前缀丢失
+  // [CONSTRAINT] 复用 extractReplyMd（DOM→Markdown 反推）；容器缺失时回退 document
     try {
-      // [no-root-no-reply-v1] 容器缺失返回空串，不再整页反推：
-      //   新会话首轮「已思考/搜索」阶段无 assistant 容器，整页 elToMd 会把侧栏历史会话标题
-      //   （未知标签递归 inner() 拼成连体乱文）+ 用户首条消息卡（SYSTEM.md）拼成「回复」
-      //   （2026-10-08 18:53 截图两张噪音卡的正文形态）。
+    // [no-root-no-reply-v1] 容器缺失返回空串，不再整页反推：
+    //   新会话首轮「已思考/搜索」阶段无 assistant 容器，整页 elToMd 会把侧栏历史会话标题
+    //   （未知标签递归 inner() 拼成连体乱文）+ 用户首条消息卡（SYSTEM.md）拼成「回复」
+    //   （2026-10-08 18:53 截图两张噪音卡的正文形态）。
       const _root = latestAssistantRoot()
       if (!_root) return ''
       return extractReplyMd(_root)
@@ -688,7 +688,7 @@
   }
 
   function findNewDone() {
-    // [no-root-no-reply-v1] 容器缺失 ⇒ 无 DONE 可言；整页反推会把用户首条消息（含 SYSTEM.md 卡）扫进来
+  // [no-root-no-reply-v1] 容器缺失 ⇒ 无 DONE 可言；整页反推会把用户首条消息（含 SYSTEM.md 卡）扫进来
     const _root = latestAssistantRoot()
     if (!_root) return null
     // [done-md-reconstruct-v1] 用 DOM→Markdown 反推替代 textContent（保留换行与结构）
@@ -698,7 +698,7 @@
     //   （正文写「DONE 之后…」不会命中；首行不是标记就不是 done）
     // [CHANGE-IMPACT] 与 headless-inject 的 kind 分流同名同义，改一处必须同步三处
     if (summary && scanReplyMarks(summary).done > 0) {
-      // [done-marker-no-len-v1] 同无头：去掉 summary.length，防流式每帧变新 marker 重复推 DONE
+    // [done-marker-no-len-v1] 同无头：去掉 summary.length，防流式每帧变新 marker 重复推 DONE
       const headMarker = hash32(`done-head|${summary.slice(0, 200)}`)
       if (!seenDoneMarkers.has(headMarker)) {
         return { marker: headMarker, text: summary }
@@ -1099,14 +1099,14 @@
   function resumeReplyObserver() {
     if (_replyObserving) return
     try {
-      // [wake-attrs-v1] 追加 attributes 监听：使「停止生成」按钮的态变（class/disabled/aria-label/data-state）
-      //   也能唤醒 classifyAndPost，作为「生成结束」的兜底唤醒源（与 [generating-gate-v2] 互补）。
-      //   [WHY] 仅 childList/characterData 时，按钮消失/置灰这类纯属性变更无法触发 observer，
-      //   若又逢 DOM 静止就只剩用户滚动才能唤醒（2026-10-09 实测：回传延迟 54~65s，滚动后秒推）。
-      // [wake-attrs-v2] 给 observer 加 attributes 监听，让「停止生成」按钮的态变也能唤醒回传。
-      //   attributeFilter 刻意不含 'class'：流式渲染/光标动画下 class 变更极高频，会制造 observer
-      //   回调风暴；停止生成按钮的态变通常走 disabled / aria-label / data-state，这三个足够覆盖，
-      //   且变更频次低，350ms 防抖 + 单飞即可挡住推送风暴（[generating-gate-v2] 单飞自检兜底）。
+    // [wake-attrs-v1] 追加 attributes 监听：使「停止生成」按钮的态变（class/disabled/aria-label/data-state）
+    //   也能唤醒 classifyAndPost，作为「生成结束」的兜底唤醒源（与 [generating-gate-v2] 互补）。
+    //   [WHY] 仅 childList/characterData 时，按钮消失/置灰这类纯属性变更无法触发 observer，
+    //   若又逢 DOM 静止就只剩用户滚动才能唤醒（2026-10-09 实测：回传延迟 54~65s，滚动后秒推）。
+    // [wake-attrs-v2] 给 observer 加 attributes 监听，让「停止生成」按钮的态变也能唤醒回传。
+    //   attributeFilter 刻意不含 'class'：流式渲染/光标动画下 class 变更极高频，会制造 observer
+    //   回调风暴；停止生成按钮的态变通常走 disabled / aria-label / data-state，这三个足够覆盖，
+    //   且变更频次低，350ms 防抖 + 单飞即可挡住推送风暴（[generating-gate-v2] 单飞自检兜底）。
       replyObserver.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['disabled', 'aria-label', 'data-state'] })
       _replyObserving = true
     } catch { /* body 未就绪，下次 fill/rotate 再试 */ }
@@ -1129,14 +1129,15 @@
       classifyAndPost()
     } catch { /* swallow: 页面导航/关闭时忽略 */ }
   }, 800)
+
   // ===== fill / rotate / new-session / stop =====
   // [stop-v3] 按钮未命中时以 Esc 键盘事件兜底（站点改文案/图标按钮漏配时仍有概率阻断）
   // [WHY] 纯文案匹配脆弱：DeepSeek/千问按钮改版即静默失效，AI 继续流式生成
   // [CHANGE-IMPACT] 返回值语义不变（true=按钮命中）；stop 分支据此打日志
   function clickStopGenerating() {
     try {
-      // [stop-btn-deepseek-fallback-v1] 仅在真正需要「停止」时才用结构化兜底：
-      //   此刻输入区的圆形主按钮必然是停止键（发送键已让位），不会误伤 generating-gate。
+    // [stop-btn-deepseek-fallback-v1] 仅在真正需要「停止」时才用结构化兜底：
+    //   此刻输入区的圆形主按钮必然是停止键（发送键已让位），不会误伤 generating-gate。
       const btn = findStopGeneratingBtn() || findStopGeneratingBtnStructural()
       if (btn && !btn.disabled) {
         btn.click()
@@ -1381,6 +1382,7 @@
   //   旧的固定 400ms 窗口必然判 send-verify-failed，客户端把它当「发送失败」弹错
   //   （用户报告：图片太大时网页还在解析，油猴发送失败）。
   // [CONSTRAINT] 窗口内每 500ms 重试一次点击/Enter（按钮可能刚恢复可用）；文本消失即视为成功。
+
   function doSend(box, onResult, opts) {
     const waitMs = Math.max(0, Number((opts || {}).waitMs) || 0) || 800
     const done = (ok, reason) => { if (typeof onResult === 'function') onResult(ok, reason) }
