@@ -67,7 +67,17 @@
       "url": "https://github.com/stablyai/agent-skills/blob/HEAD/skills/playwright-test-data-isolation/SKILL.md"
     },
     {
+      "name": "pm-agent",
+      "source": "(unknown)",
+      "url": "(unknown)"
+    },
+    {
       "name": "pnpm",
+      "source": "(unknown)",
+      "url": "(unknown)"
+    },
+    {
+      "name": "qa-agent",
       "source": "(unknown)",
       "url": "(unknown)"
     },

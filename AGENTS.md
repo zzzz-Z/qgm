@@ -159,12 +159,12 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 
 - **源码位**：`skills/<name>/`（仓库根，入库、随 git 共享，供 review）。
 - **运行位**：`.ai-runner/skills/<name>/`（gitignore，宿主扫描的目录）。
-- **同步机制**：两者都是**生成物**，SSOT 是生成器脚本（`qa-agent-generate.cjs` 等）中的内容块；编辑只发生在那份脚本里，两处由重跑生成：
-  - 源码位：`node qa-agent-generate.cjs . --force --split`
-  - 运行位：`node qa-agent-generate.cjs .ai-runner --force --split`
+- **同步机制**：`skills/<name>/` 是 SSOT（手写、随 git review），`.ai-runner/skills/<name>/` 是它的同步副本，由**唯一入口** `scripts/agent-skills-generate.cjs` 复制：
+  - 同步：`pnpm skills:gen`（幂等：逐文件比对，一致则不动；源码位删掉的文件会从运行位一并清理）
+  - 校验：`pnpm skills:check`（不一致 exit 2，供守卫与 CI 调用）
 - **验证**：`curl -sS http://127.0.0.1:5175/__ai/skills` 能列出该技能即安装成功——**不看生成脚本 exit code**。
-- **判据**：运行位为空 = 宿主看不到 = `@` 选择器与 `/skills/match` 都命中不了（已实测：根 `skills/pm-agent`、`skills/qa-agent` 不在 `/__ai/skills` 返回列表中）。
-- **已知遗留**：`pm-agent-generate.cjs` 已删除，`skills/pm-agent/` 目前是唯一 SSOT（无生成器可重跑）。重生成前需恢复脚本，或与 QA 合并为单一 `agent-skills-generate.cjs`。
+- **判据**：运行位为空 = 宿主看不到 = `@` 选择器与 `/skills/match` 都命中不了（2026-10-17 实测：补运行位前 `match` 返回 `matches: []`，补后 pm-agent score 41.4 / qa-agent 20.9 均命中）。
+- **历史**：早期用 `pm-agent-generate.cjs` / `qa-agent-generate.cjs` 以「内容块拼字符串」方式生成，改一次要跑两次、两处必然漂移，两个脚本均已删除；现行方案只复制不生成。
 - **已装清单唯一事实来源是磁盘**：`GET /__ai/skills` 扫前 64 行返回元数据；`.registry.json` 只是来源标注（服务端 `reconcileRegistry` 自动收敛，不手工编辑）。
 - **检索**：`POST /__ai/skills/match`（BM25，按任务文本）。消费方 `skill-registry.ts`。
 - **入口**：输入框 `@` 选择器（`file-picker.ts`，`@skill/<name>`）；编辑时插入标记，**提交时**由 `copyAndFill` 走 `expand-at-refs.ts` 展开为 `<file>` 块（AI 收到的 prompt 已含正文）。

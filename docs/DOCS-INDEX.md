@@ -32,6 +32,7 @@
 - `packages/core/SYSTEM.md`：执行规则唯一来源（输出契约 / 沙箱 API / 架构红线 / 注释命名 / 重试预算 / 级联 / 输出预算 / 技能加载）。
 - `packages/core/README.md`：`@qgm/core` 宿主无关能力层说明。
 - `packages/client/README.md`：`@qgm/client` Vue 3 工作台说明。
+- `packages/core/src/tampermonkey/ORDER.md`：油猴脚本 TS 片段的拼接顺序与命名对照——22 段片段按序组装成 `scripts/tampermonkey-session-id.user.js`，顺序错了首发上报会拿到空 ID。
 
 ## apps/
 

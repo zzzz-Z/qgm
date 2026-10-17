@@ -7,7 +7,7 @@
 
 - **技能源码**：`skills/pm-agent/` 与 `skills/qa-agent/`（入 git，唯一源码）。每个技能的 `references/` 目录相对该技能目录；绝对路径从 `GET /__ai/skills` 返回的 `path` 字段获得。
 - **本指南**：手工维护文档，**不由任何脚本生成**——更新时直接编辑本文件，无生成/回写链路。
-- **生成器**：`pm-agent-generate.cjs` 已丢失、不再找回；`qa-agent-generate.cjs` 保留仅用于重新生成 `skills/qa-agent/` 输出（不再产出使用指南）。
+- **同步器**：`scripts/agent-skills-generate.cjs`（`pnpm skills:gen` / `pnpm skills:check`）。早期两个 `*-generate.cjs` 已删除——它们用「内容块拼字符串」方式生成，改一次要跑两次、两处必然漂移；现行方案只把 `skills/<name>/` 原样复制到运行位，不生成任何内容。
 - **运行位安装**：`GET /__ai/skills` 只扫 `.ai-runner/skills/`；把 `skills/<name>/` 整个目录放到该路径下（或走安装端点）后，`@` 选择器与 `/skills/match` 才能命中。验证：`curl -sS http://127.0.0.1:5175/__ai/skills` 能列出该技能即安装成功。
 
 ---
@@ -122,7 +122,7 @@
 **QA-Agent**：
 
 ```text
-1. node qa-agent-generate.cjs <目标目录> --split  # 重新生成 skills/qa-agent/（可选）
+1. pnpm skills:gen                              # 同步 skills/qa-agent/ 到运行位（可选）
 2. 将 skills/qa-agent/ 放到平台技能目录（见 §1）
 3. 触发运行，等 Phase 6 DONE                    # 约 55 轮内
 4. 阅读 .qa/final-report.md                     # 核心产出
