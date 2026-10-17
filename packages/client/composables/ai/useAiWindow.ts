@@ -86,6 +86,24 @@ const _rulesInjectedSids = _rulesInit.set
 const _rulesInjectedOrder = _rulesInit.order
 /** [rules-pending-lock-v1] 并发锁：判定通过到投递结果之间的 await 窗口期占位，避免双调各注入一次 */
 const _rulesPendingSids = new Set<string>()
+/**
+ * [programmatic-nav-boot-guard-v1] 编程式导航（切工作区）触发的 boot 帧不视为全新 AI 上下文：
+ *  目标工作区回到同一会话 URL，聊天历史里仍有 SYSTEM.md；误清首问闸门会让用户切回后再提问重带一次规则。
+ *  TTL 兜底（5s）防泄漏；同时只有一个活跃工作区槽位，Map 规模天然有界。
+ */
+const _programmaticNavUntil = new Map<string, number>()
+// [CONSTRAINT] 必须覆盖 waitWindowReady 的 15s 预算：慢站点导航重载后油猴首次 send 才带 boot，
+//   窗口期短于该预算会让守卫提前失效，重注入照旧发生。
+const PROGRAMMATIC_NAV_TTL_MS = 30000
+export function markProgrammaticNav(sid: string): void {
+  if (sid) _programmaticNavUntil.set(sid, Date.now() + PROGRAMMATIC_NAV_TTL_MS)
+}
+function isProgrammaticNav(sid: string): boolean {
+  const until = _programmaticNavUntil.get(sid)
+  if (until === undefined) return false
+  if (Date.now() >= until) { _programmaticNavUntil.delete(sid); return false }
+  return true
+}
 function persistRulesInjected(): void {
   try {
     if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(LS_RULES_INJECTED, JSON.stringify(_rulesInjectedOrder))
@@ -156,6 +174,10 @@ function clearRulesForSid(sid: string): void {
  *   与 clearRulesForSid 的区别：后者按精确 sid 清（窗口已关场景），此处按前缀清全部会话键。
  */
 export function resetRulesForSessionBoot(winSid: string): void {
+  if (isProgrammaticNav(winSid)) {
+    log.info('[resetRulesForSessionBoot] 跳过：本次 boot 来自编程式导航（切工作区），保留首问闸门 sid=', winSid)
+    return
+  }
   if (!winSid) return
   const prefix = `${winSid}:`
   const hits: string[] = []

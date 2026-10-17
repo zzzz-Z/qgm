@@ -44,6 +44,39 @@ describe('session-boot-v1：AI 窗口重载后清规则去重（防首问漏带 
   })
 })
 
+// [programmatic-nav-boot-guard-v1] 切工作区导航触发的 boot:true 不等于「全新 AI 上下文」：
+//   目标回到该工作区同一会话，历史里仍有 SYSTEM.md。误清首问闸门 → 切回后再提问重带一次规则（用户报告）。
+//   判据承重：删任一侧（导出 / 早退 / 调用点 / TTL 预算）本条必变红。
+describe('programmatic-nav-boot-guard-v1：切工作区导航的 boot 帧不清首问闸门', () => {
+  it('useAiWindow 必须导出 markProgrammaticNav，且 resetRulesForSessionBoot 在函数体首部早退', () => {
+    const src = winSrc()
+    assert.ok(/export function markProgrammaticNav\(sid: string\): void \{/.test(src), '未导出 markProgrammaticNav')
+    assert.ok(/function isProgrammaticNav\(sid: string\): boolean \{/.test(src), '缺少 isProgrammaticNav 判定')
+    // [承重] 位置：守卫必须在函数体第一条语句，早于任何去重集清理与 setFirstPromptSent
+    const fnIdx = src.indexOf('export function resetRulesForSessionBoot(winSid: string): void {')
+    assert.ok(fnIdx > 0, '未找到 resetRulesForSessionBoot')
+    const body = src.slice(fnIdx, fnIdx + 400)
+    assert.ok(/\{\s*if \(isProgrammaticNav\(winSid\)\)\s*\{[\s\S]{0,120}?return\s*\}/.test(body), '守卫未作为函数体首条语句早退')
+  })
+
+  it('switchDeepSeekSession 必须在 openAiSession 之前调用 markProgrammaticNav', () => {
+    const src = readFileSync(new URL('../composables/data/useWorkspaces.ts', import.meta.url), 'utf8')
+    assert.ok(/\{[^}]*markProgrammaticNav[^}]*openAiSession[^}]*\} = await import\('\.\.\/ai\/useAiWindow'\)/.test(src), '未从 useAiWindow 导入 markProgrammaticNav')
+    const markIdx = src.indexOf('    markProgrammaticNav(targetSid)')
+    const navIdx = src.indexOf('    await openAiSession({ atUrl, sid: targetSid })')
+    assert.ok(markIdx > 0, '未调用 markProgrammaticNav(targetSid)')
+    assert.ok(navIdx > markIdx, 'markProgrammaticNav 必须在 openAiSession 之前：晚于导航则守卫不命中')
+  })
+
+  it('PROGRAMMATIC_NAV_TTL_MS 必须覆盖 waitWindowReady 的 15s 预算', () => {
+    const src = winSrc()
+    const m = src.match(/const PROGRAMMATIC_NAV_TTL_MS = (\d+)/)
+    assert.ok(m, '缺少 PROGRAMMATIC_NAV_TTL_MS')
+    const ttl = Number(m[1])
+    assert.ok(ttl >= 15000, `TTL ${ttl}ms < waitWindowReady 15s 预算：慢站点导航后守卫提前失效`)
+  })
+})
+
 describe('send-verify-failed-not-final-v1：长首问「已填字却报未送达」误报修复', () => {
   it('sendFillToAsync 必须把 send-verify-failed 归 unacked（而非 failed）', () => {
     const src = readFileSync(new URL('../composables/ai/useAiWindowSend.ts', import.meta.url), 'utf8')

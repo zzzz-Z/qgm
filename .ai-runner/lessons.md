@@ -3015,3 +3015,7 @@ vitest 配置已 `exclude: ['**/*.spec.ts']`，但外部 runner（如直接 `nod
 ## `pm2 restart` 必须放在 `pnpm build` 之后，且后台跑
 
 本轮用 `{background:true}` detached 起 `pnpm build && pm2 restart ai-runner --update-env`——同步执行会让正在服务本轮的 5175 进程被 `restart` 杀掉，DONE 回执丢失。这与 `AGENTS.md` 里 `post-done-gate-v1` 记录的行为一致。
+
+## `__AI__.tasks.push` 返回形状不是 `{todo:[{id}]}`
+
+按 SYSTEM.md §2 的描述以为 `todo` 是任务对象数组，实际写成 `(pushed.todo || []).map(x => x.id)` 时抛 `TypeError: .map is not a function` —— 脚本整体 exit 7，overlay 全部丢弃（当轮 patch 白做）。取 id 前先打印 `typeof pushed.todo` 与首元素形状，别照文档猜字段结构；拿不准就用 `tasks.list()` 反查。

@@ -274,7 +274,7 @@ export function pickNavUrl(p: { sessionUrl: string, homeUrl: string, newSession:
 async function switchDeepSeekSession(id: string, newSession?: boolean): Promise<void> {
   try {
     const bound = await getSession(id)
-    const { openAiSession } = await import('../ai/useAiWindow')
+    const { markProgrammaticNav, openAiSession } = await import('../ai/useAiWindow')
     const { currentSiteUrl, sidForUrl } = await import('../ai/useAiSite')
     // [workspace-schema-v2] 导航目标由 pickNavUrl 单点决定（newSession / sessionUrl / homeUrl / 回退）
     const atUrl = pickNavUrl({
@@ -302,6 +302,10 @@ async function switchDeepSeekSession(id: string, newSession?: boolean): Promise<
     //   ② 导航重载期间发首问必然撞上油猴未就绪（实测弹「首问未送达」）；
     //   ③ 首问规则仍会在用户真正发起对话时由 copyAndFill 按 sid 去重注入。
     // [workspace-switch-no-first-prompt-v1] 只导航窗口，不发首问（无 initialPrompt 时 openAiSession 本就不发问）。
+    // [programmatic-nav-boot-guard-v1] 本次导航由工作台发起（切工作区），导航后油猴会带 boot:true：
+    //   目标仍回到该工作区的同一会话（历史里有 SYSTEM.md），不得当作「全新 AI 上下文」清首问闸门；
+    //   不标记则切回原工作区再提问会重复携带 SYSTEM.md（用户报告）。
+    markProgrammaticNav(targetSid)
     await openAiSession({ atUrl, sid: targetSid })
     // [workspace-nav-confirm-v1] 导航后挂确认超时：目标 URL 若是已失效的会话路径，
     //   站点会静默重定向回首页，用户看到「又新建了」而没有任何提示。
