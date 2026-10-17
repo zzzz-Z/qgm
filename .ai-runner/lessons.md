@@ -2957,3 +2957,11 @@ restart 轮失败 → 下一轮探活恢复。
 ## 重试后必须重挂看门狗
 
 否则第二轮失败无人发现，自愈链条在第一跳就断了。守卫里专门断言了 `armResumeWatchdog(sid)` 出现在 retry 分支内。
+
+## 同步执行 `pm2 restart` 会杀掉正在跑本轮的进程
+
+`/run` 由 5175 自身承载，同步重启会切断回执通道，导致本轮输出与后续验证全部丢失。本轮改用 `{background:true}` 起 `sleep 1; pm2 restart`，重启在后台脱离 `/run` 生命周期，回执正常返回。
+
+## `pm2 jlist | node -e` 解析空输出
+
+本轮第一次取启动时间时该管道返回空（`pm2 jlist` 输出体量大且含控制字符），改用 `pm2 describe ai-runner --no-color | grep` 才拿到 `created at`。取证时优先用 `describe`。

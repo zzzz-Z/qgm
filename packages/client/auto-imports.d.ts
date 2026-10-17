@@ -108,6 +108,7 @@ declare global {
   const customRef: typeof import('vue').customRef
   const debouncedRef: typeof import('@vueuse/core').debouncedRef
   const debouncedWatch: typeof import('@vueuse/core').debouncedWatch
+  const decideOnResumeTimeout: typeof import('./composables/ai/stop-resume').decideOnResumeTimeout
   const decideOnStopped: typeof import('./composables/ai/stop-resume').decideOnStopped
   const defineAsyncComponent: typeof import('vue').defineAsyncComponent
   const defineComponent: typeof import('vue').defineComponent
@@ -762,6 +763,7 @@ declare module 'vue' {
     readonly customRef: UnwrapRef<typeof import('vue')['customRef']>
     readonly debouncedRef: UnwrapRef<typeof import('@vueuse/core')['debouncedRef']>
     readonly debouncedWatch: UnwrapRef<typeof import('@vueuse/core')['debouncedWatch']>
+    readonly decideOnResumeTimeout: UnwrapRef<typeof import('./composables/ai/stop-resume')['decideOnResumeTimeout']>
     readonly decideOnStopped: UnwrapRef<typeof import('./composables/ai/stop-resume')['decideOnStopped']>
     readonly defineAsyncComponent: UnwrapRef<typeof import('vue')['defineAsyncComponent']>
     readonly defineComponent: UnwrapRef<typeof import('vue')['defineComponent']>
