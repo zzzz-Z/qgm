@@ -37,7 +37,7 @@ function bumpWorkspaceEpoch(): void {
  *   这正是切 root 的语义：新 root 的 SYSTEM.md 首问不应与旧会话消息混在一起。
  * [CONSTRAINT] 清上下文失败必须静默降级（模块未就绪 / sessionStorage 不可用），不得阻断切换。
  */
-async function resetSessionContext(): Promise<void> {
+async function applyRootChanged(): Promise<void> {
   try {
     const { useSessionManager } = await import('../ai/useSessionManager')
     useSessionManager().resetSession()
@@ -56,6 +56,8 @@ async function resetSessionContext(): Promise<void> {
     const { clearRulesCache } = await import('../ai/load-rules')
     clearRulesCache()
   } catch { /* 未就绪：忽略 */ }
+  // [workspace-epoch-v1] root 已变更 ⇒ 通知依赖 root 的面板重拉（否则它们停在旧 root）
+  bumpWorkspaceEpoch()
 }
 
 /**
@@ -163,9 +165,7 @@ async function activate(id: string, opts?: { newSession?: boolean }): Promise<{ 
     const j = await r.json().catch(() => null) as { ok?: boolean, error?: string } | null
     if (r.ok && j?.ok) {
       activeId.value = id
-      await resetSessionContext()
-      // [workspace-epoch-v1] 服务端已 setRoot：通知依赖 root 的面板重拉（否则它们停在旧 root）
-      bumpWorkspaceEpoch()
+      await applyRootChanged()
       await load()
       await switchDeepSeekSession(id, opts?.newSession)
       return { ok: true }
@@ -252,9 +252,7 @@ async function register(path: string, activate = false): Promise<{ ok: boolean, 
       if (activate) {
         const entry = (j as { workspace?: WorkspaceItem }).workspace
         if (entry?.id) activeId.value = entry.id
-        await resetSessionContext()
-        // [workspace-epoch-v1] activate=true 时服务端已 setRoot → 面板需重拉
-        bumpWorkspaceEpoch()
+        await applyRootChanged()
       }
       await load()
       return { ok: true }
@@ -280,9 +278,7 @@ async function remove(id: string): Promise<{ ok: boolean, error?: string }> {
       await load()
       if (wasActive) {
         if (j.activeId === null) activeId.value = null
-        await resetSessionContext()
-        // [workspace-epoch-v1] 移除活跃项 ⇒ 服务端回退到另一 root（或置空）→ 面板需重拉
-        bumpWorkspaceEpoch()
+        await applyRootChanged()
       }
       return { ok: true }
     }
@@ -308,9 +304,7 @@ async function create(opts: {
       if (opts.activate) {
         const entry = (j as { workspace?: WorkspaceItem }).workspace
         if (entry?.id) activeId.value = entry.id
-        await resetSessionContext()
-        // [workspace-epoch-v1] 新建并激活 = 服务端 setRoot 到新目录 → 面板需重拉
-        bumpWorkspaceEpoch()
+        await applyRootChanged()
       }
       await load()
       return { ok: true }

@@ -2921,3 +2921,11 @@ restart 轮失败 → 下一轮探活恢复。
 ## 模块级 Promise 缓存必须显式随「上下文维度」失效
 
 `load-rules.ts` 注释写的是「单次会话内内容视为稳定」，但实际生命周期是整个页面——一旦引入多工作区，缓存 key 里缺 root 维度就会串。凡在 `composables/**` 里写模块级 `let _xxxPromise` / `ref(...)` 单例，都要同步问一句「它的作用域是页面还是上下文」。
+
+## 跨轮累积变更里的「非本轮文件」要先核对 mtime 再下结论：本轮中途 `git status` 冒出未跟踪的 `docs/plan/workspace-config-inline-plan-2026-10-17-v3.md`（mtime 12
+
+53，正是我跑变异验证的时刻），既非本轮创建也非本轮修改。不经核对就写进「变更文件表」会构成 selfcheck 造假；擅自删除则违反「不重构 @changes 清单之外的文件」。正确做法是 `ls -l` + `head` 取证后在 DONE 里显式说明归属。
+
+## 改名 + 收敛副作用必须用 sed 真盘做变异验证
+
+`patchFile` 走 overlay，`sed -i` 走真盘，两者混用时要 `cp` 备份 → 改坏 → 跑 → `cp` 恢复 → `grep` 复核恢复干净，四步缺一都会在后续轮留下脏文件。
