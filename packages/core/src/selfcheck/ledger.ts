@@ -4,6 +4,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { getRoot } from '../config.js'
+import { appendJsonlCapped } from '../state/snapshot.js'
 
 /**
  * 单条自检台账记录
@@ -29,7 +30,8 @@ function ledgerPath(): string {
 /** 追加一行；写失败仅告警，不抛出（不阻塞主流程） */
 export function appendLedger(entry: LedgerEntry): void {
   try {
-    fs.appendFileSync(ledgerPath(), `${JSON.stringify(entry)}\n`, 'utf8')
+    // [log-rotate-v1] 走统一轮转：selfcheck.jsonl 逐轮 append，长跑会持续增长
+    appendJsonlCapped(ledgerPath(), JSON.stringify(entry))
   } catch (e) {
     console.warn('[selfcheck-ledger] 写失败:', (e as Error).message)
   }

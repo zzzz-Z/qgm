@@ -377,6 +377,13 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       sessions.delete(sid)
       // [completion-error-leak-v1] 会话销毁时须同步清理该 sid 的错误缓存，否则 Map 随 sid 单调增长
       completionErrors.delete(sid)
+      // [profile-gc-v1] per-sid profile 目录同样要删：每个新 sid 建一个几十 MB 的 Chromium
+      //   profile，原实现只删内存条目不删磁盘 ⇒ 实测残留 3 个孤儿目录共 45MB 且只增不减。
+      //   [CONSTRAINT] 绝不删 `default`（那是共享登录态，路径等于 baseUserDataDir 本身）；
+      //   删除失败（Windows 文件占用 / 只读 fs）静默忽略，不能因清理失败阻断 close。
+      if (sid !== 'default') {
+        try { fs.rmSync(userDataDirFor(sid), { recursive: true, force: true }) } catch { /* 清理失败不阻断 close */ }
+      }
       releaseSlot()
     },
     get(sid) { return sessions.get(sid) || null },

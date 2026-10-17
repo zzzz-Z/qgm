@@ -367,6 +367,31 @@ export function readManifest(runId: string): Manifest | null {
 // [channel-log-v1] PLAN 7.D2 三通道结构化日志（runner/pipeline/decisions）
 /** 日志通道枚举：runner / pipeline / decisions 等 */
 /**
+ * [log-rotate-v1] 单文件 jsonl 体积上限（默认 8MB，env 可覆盖）。
+ * [WHY] runner.jsonl / send.jsonl / arrive.jsonl / compliance.jsonl 都是「追加写、永不轮转」——
+ *   实测 runner.jsonl 已 19MB 且持续增长，容器长跑会无限膨胀。按日分片的 writeRunLog 不受影响，
+ *   但通道日志没有日期维度，只能按体积滚动。
+ */
+const LOG_MAX_BYTES = (Number(process.env.AIR_RUNNER_LOG_MAX_MB) || 8) * 1024 * 1024
+
+/**
+ * 追加一行 jsonl；写前若文件已超上限，先滚动到 `<file>.1`（覆盖上一份滚动副本）。
+ * [CONSTRAINT] 只保留一份滚动副本：日志是排查辅助，不是审计凭证（审计走 compliance/git）；
+ *   保留 N 份会让磁盘占用翻 N 倍，与「限制增长」的目标相悖。
+ * [CONSTRAINT] 滚动失败（只读 fs / 并发 rename 竞争）时退化为直接追加，不阻断写入。
+ * @param file 目标 jsonl 绝对路径
+ * @param line 单行内容（不含换行符）
+ */
+export function appendJsonlCapped(file: string, line: string): void {
+  try {
+    try {
+      if (fs.statSync(file).size > LOG_MAX_BYTES) fs.renameSync(file, `${file}.1`)
+    } catch { /* 文件不存在或 rename 失败：直接追加 */ }
+    fs.appendFileSync(file, `${line}\n`)
+  } catch { /* ignore */ }
+}
+
+/**
  * 追加一条三通道结构化日志到 logs/{channel}.jsonl
  * [CONSTRAINT] 自动注入 ts 字段，调用方 entry 若含 ts 会被覆盖；单行 JSON 便于后续流式解析
  * [CHANGE-IMPACT] 每行必须单行（不得含换行符），否则 jsonl 结构破坏
@@ -382,7 +407,7 @@ export function writeChannelLog<T extends object>(channel: LogChannel, entry: T)
     fs.mkdirSync(getLogsDir(), { recursive: true })
     const file = path.join(getLogsDir(), `${channel}.jsonl`)
     const payload = { ts: Date.now(), ...entry }
-    fs.appendFileSync(file, `${JSON.stringify(payload)}\n`)
+    appendJsonlCapped(file, JSON.stringify(payload))
   } catch { /* ignore */ }
 }
 /**
@@ -395,6 +420,6 @@ export function writeRunLog(entry: RunLogEntry) {
     fs.mkdirSync(getLogsDir(), { recursive: true })
     const date = new Date().toISOString().slice(0, 10)
     const file = path.join(getLogsDir(), `${date}.jsonl`)
-    fs.appendFileSync(file, `${JSON.stringify(entry)}\n`)
+    appendJsonlCapped(file, JSON.stringify(entry))
   } catch { /* ignore */ }
 }

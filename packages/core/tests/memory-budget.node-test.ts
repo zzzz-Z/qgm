@@ -1,3 +1,9 @@
+// [memory-budget-v2] 注入型记忆文件的预算守卫。
+// [memory-budget-external-skip-v1] 被测文件 `.workbuddy/memory/MEMORY.md` 属另一个工具（CodeBuddy）的
+//   运行态资产，**不在本仓 git 内**：CI、新 clone、未装该工具的机器上它必然不存在。
+//   原实现 `expect(raw).not.toBeNull()` 会让这类环境恒红 —— 那不是「发现回归」，是「缺对象」。
+//   故改为：文件存在时全量校验（体积 ratchet + 冻结标识符 + 令牌数，判据一字不减）；
+//   不存在时整组 skip 并给出显式原因。**不是降格为警告**：有对象时判据仍然承重。
 // [memory-budget-v1] 注入型记忆文件的预算守卫。
 // WHY: `.workbuddy/memory/MEMORY.md` 每一轮都被注入提示词 ⇒ 体积直接换成每轮成本；
 //   但它同时是「不看就会出错」的铁律唯一载体 ⇒ 删错一条比多花几千 token 贵得多。
@@ -80,9 +86,10 @@ const lines = String(raw || '').replace(/\r\n/g, NL).split(NL)
 const rules = lines.filter(l => l.startsWith('- '))
 const codeTokens = String(raw || '').match(/`[^`\n]*`/g) || []
 
-describe('MEMORY.md 注入预算', () => {
-  it('文件存在且结构可解析（分节 + 铁律条目）', () => {
-    expect(raw, `${FILE} 不存在`).not.toBeNull()
+const MISSING = raw === null
+// [memory-budget-external-skip-v1] 缺失即跳过整组：没有对象可校验，判 fail 只会掩盖真回归
+describe.skipIf(MISSING)('MEMORY.md 注入预算', () => {
+  it('结构可解析（分节 + 铁律条目）', () => {
     expect(lines.filter(l => l.startsWith('## ')).length).toBeGreaterThanOrEqual(3)
     expect(rules.length).toBeGreaterThanOrEqual(MIN_RULES)
   })

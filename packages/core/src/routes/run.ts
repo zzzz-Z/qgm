@@ -54,7 +54,7 @@ import { createPipeline, markFailed, markOk, markRunning } from '../state/pipeli
 // [control-log-v1] 前置拒收留痕（详见 routes/control-log.ts）；
 // [hclc-fix] buildRejectEntry 经 deps barrel 引入——直连会使本文件唯一模块数达 9（>8 阻断）
 import { hashScript, writeRoundSnapshot } from '../state/timeline.js'
-import { writeChannelLog } from '../state/snapshot.js'
+import { appendJsonlCapped, writeChannelLog } from '../state/snapshot.js'
 import { checkSlow, deserialize, recordSample, serialize } from '../state/perf.js'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -356,8 +356,8 @@ runHono.post('/run', async (c) => {
           try {
             const cpFile = path.join(getRoot(), '.ai-runner/compliance.jsonl')
             const cpRec = { ...compliance, rulesHash: rv, runId, ts: Date.now() } // [drop-codeBlocks-v1]
-            const nl = String.fromCharCode(10)
-            fs.appendFileSync(cpFile, JSON.stringify(cpRec) + nl)
+            // [log-rotate-v1] 走统一轮转：compliance.jsonl 实测 3MB 且持续增长
+            appendJsonlCapped(cpFile, JSON.stringify(cpRec))
           } catch { /* ignore */ }
           writeFrame({
             type: 'summary',

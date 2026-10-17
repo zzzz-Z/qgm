@@ -39,6 +39,10 @@ function emit(base) {
   logs = []
   if (typeof globalThis.__AI_FLUSH_OVERLAY === 'function') { try { globalThis.__AI_FLUSH_OVERLAY() } catch { /* flush 失败不阻断帧 */ } }
   OUT(frame)
+  // [repl-overlay-reset-v1] 帧已发出、快照已落盘后再清内存 overlay：
+  //   REPL 进程不退出，不清则 read-only 会话每帧的「应丢弃写入」永久留在 Map 里。
+  //   顺序不可颠倒——reset 会清掉 dump 的数据源，必须先 flush 再 reset。
+  if (typeof globalThis.__AI_RESET_OVERLAY === 'function') { try { globalThis.__AI_RESET_OVERLAY() } catch { /* reset 失败不阻断帧 */ } }
 }
 
 let buf = ''

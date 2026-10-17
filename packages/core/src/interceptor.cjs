@@ -660,3 +660,12 @@ function applyNow() {
   return { ok: failed.length === 0, applied, failed }
 }
 globalThis.__AI_APPLY_OVERLAY = applyNow
+
+// [repl-overlay-reset-v1] 帧末重置：REPL 进程不退出，overlay 只增不减 ⇒ read-only 会话每帧的
+// 「应丢弃写入」会永久留在内存里（实测 overlay 只有 set/delete，无任何 clear 路径）。
+// 由 repl-loop 在 dump 之后调用：dump 已把当前快照写进 OVERLAY_FILE，服务端随后 applyOverlay
+// 读的是文件而非内存，故清空 Map 不影响本轮落盘；重置 _lastSnapshot 保证下一帧照常写出。
+globalThis.__AI_RESET_OVERLAY = () => {
+  overlay.clear()
+  _lastSnapshot = ''
+}

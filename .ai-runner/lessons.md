@@ -3196,6 +3196,8 @@ TS 版把 `marked` 判定抽成顶层 `hasScriptHead`，沙箱只抽了 `extract
 
 修法：凡是「写完源码 → 立刻用 shell 跑 lint/tsc/测试」的验证轮，脚本第一步就 `await __AI__.flush()`。
 
+补充（2026-10-17）：`writeText` 只进 overlay，`node scripts/xxx.mjs` 起的是真子进程读真盘。改完 clean 脚本立刻跑，验证的是上一版——首次实测「tmp 待清理 0 项」就是这个原因。
+
 ## 大文件批量改名必须按「函数块」而不是「变量名」替换
 
 `git.ts` 里 `const r = await run(...)` 出现 13 次，语义各异（restore / rev-parse / reset / status / add / commit / checkout …）。若用 `t.split('r').join('xxx')` 之类按名替换，13 处会被改成同一个名字，且会误伤 `restore`/`reset`/`refs` 等单词里的字母 `r`。
@@ -3219,3 +3221,11 @@ TS 版把 `marked` 判定抽成顶层 `hasScriptHead`，沙箱只抽了 `extract
 `clean-ai-runner.mjs` 有 `if (!doomed.length) { console.log('[skip] 无可清理项'); return }`。首轮把体积块插在它后面的 `console.log` 锚点处，条目为 0 时整块被跳过，实测输出只有 `[skip]`。
 
 修法：新增的「诊断/告警」逻辑必须放在所有 early-return 之前；锚点选择要看控制流，不能只看文本位置。
+
+## `SingletonLock` 是符号链接，`readFile` 读不到
+
+Chromium 的 `SingletonLock` 形如 `hostname-pid` 的软链。用 `readFile(lockPath, 'utf8')` 会对悬空软链抛 ENOENT，被 `catch { continue }` 吞掉 ⇒ 判定规则永不命中（实测输出为空，误以为「没有孤儿」）。必须 `readlink()` 取目标字符串再解析 pid。
+
+## 大文件锚点在注释空格上有微小差异就会反复失配
+
+`clean-ai-runner.mjs` 的 profile 判定块，多行锚点连续两次未命中，原因是我记忆里的注释空格与磁盘实际不同。改用行号切片（先校验目标行内容再 splice）是确定性做法，比继续猜锚点可靠。
