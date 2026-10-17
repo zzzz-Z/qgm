@@ -186,6 +186,7 @@ declare global {
   const log: typeof import('./utils/log').log
   const loopPaused: typeof import('./composables/ai/useAiWaiting').loopPaused
   const makeDestructurable: typeof import('@vueuse/core').makeDestructurable
+  const markProgrammaticNav: typeof import('./composables/ai/useAiWindow').markProgrammaticNav
   const markRaw: typeof import('vue').markRaw
   const markUserStop: typeof import('./composables/ai/stop-resume').markUserStop
   const markWindowOpened: typeof import('./composables/ai/useAiWindowTable').markWindowOpened
@@ -846,6 +847,7 @@ declare module 'vue' {
     readonly log: UnwrapRef<typeof import('./utils/log')['log']>
     readonly loopPaused: UnwrapRef<typeof import('./composables/ai/useAiWaiting')['loopPaused']>
     readonly makeDestructurable: UnwrapRef<typeof import('@vueuse/core')['makeDestructurable']>
+    readonly markProgrammaticNav: UnwrapRef<typeof import('./composables/ai/useAiWindow')['markProgrammaticNav']>
     readonly markRaw: UnwrapRef<typeof import('vue')['markRaw']>
     readonly markUserStop: UnwrapRef<typeof import('./composables/ai/stop-resume')['markUserStop']>
     readonly markWindowOpened: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['markWindowOpened']>
