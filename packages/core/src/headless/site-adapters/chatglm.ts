@@ -17,8 +17,10 @@ export const chatglmAdapter: SiteAdapter = {
     userMessage: '[class*="message"], [class*="bubble"]',
     // 待登录态 DOM 快照确认（暂用通用对话容器）
     assistantMessage: '[class*="message"], [class*="bubble"], .conversation-inner',
-    // 待侦察补充
-    stopButton: '[role="button"]',
+    // [chatglm-selectors-v2] 真实 DOM 快照：生成中发送键变停止键并带 searching 类（纯图标无文本）
+    stopButton: '.enter.is-main-chat.searching',
+    // 站点专属生成中信号：命中即判生成中（headless 通道经 siteCfg 消费）
+    generatingSelector: '.enter.is-main-chat.searching',
     newChatButton: 'button, a, [role="button"], .enter.is-main-chat',
   },
 

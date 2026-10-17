@@ -22,7 +22,7 @@ export {
 /**
  * 检测 Reply In Page
  */
-export function detectReplyInPage() {
+export function detectReplyInPage(siteCfg = {}) {
   const w = window
   if (!w.__aiRunnerDedup) {
     w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '', _pendingScriptHash: null, _pendingDoneSig: null, _plainSentInCycle: false } // [fix-reply-dedup] [fix-plain-once]
@@ -158,6 +158,9 @@ export function detectReplyInPage() {
       ].filter(Boolean).join(' ')
       if (STOP_LABEL_RE.test(lbl)) return true
     }
+    // [site-generating-selector-v1] 站点专属生成中信号（智谱 .searching 类）：与 DeepSeek 图签名通道隔离，
+    //   仅当适配器显式声明 generatingSelector 时生效，未声明的站点（DeepSeek 等）行为零变化
+    if (siteCfg && siteCfg.generatingSelector && document.querySelector(siteCfg.generatingSelector)) return true
     // [generating-gate-v3] 全文档兜底：智谱等站点的停止按钮可能不在输入框 scope 内，导致漏判生成中
     if (!box || scope !== document) {
       const docBtns = document.querySelectorAll('button, div[role="button"], span[role="button"]')

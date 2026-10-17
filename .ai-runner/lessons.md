@@ -947,6 +947,8 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 [同族并入 · 原条「`patchFile` 锚点须来自同轮 `readText`」]
 本轮一次 `exit 2 锚点失配` 即因锚点取自历史记忆（文件已被前序改动）。`same-round-read-v1` 不是形式要求。
 
+补充（2026-10-17）：连续两轮凭记忆构造锚点直接 exit 2，白烧两轮；同轮 dump 后取锚点一次命中。
+
 ## `/run` 沙箱三档语义：落盘是「整轮原子」，同轮验证必验旧盘
 
 [VERIFIED]（2026-10-06 宿主侧实证：变异脚本跨轮生效、单轮不透传子进程）——本条为沙箱语义 SSOT，
@@ -3027,3 +3029,11 @@ vitest 配置已 `exclude: ['**/*.spec.ts']`，但外部 runner（如直接 `nod
 ## 顺手修复 lint 报错
 
 `script-panel.scss` 的历史遗留问题只在全量 lint 时暴露，如果你只在本地跑部分单测不会发现。需要定期 `pnpm verify` 兜底。
+
+## 判据不能全局叠加，必须按站点分发
+
+给 `isGenerating()` 无条件加一条站点信号，会让判据与站点强耦合并影响其它站点；正确做法是「适配器声明 → 通道消费」，未声明站点零变化。
+
+## `page.evaluate` 序列化约束决定接线位置
+
+新增的站点配置必须以纯字符串放进 `siteCfg` 参数传入，不能在注入函数里引用模块级常量（否则 ReferenceError）。

@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.4
+// @version      1.9.5
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -828,6 +828,9 @@
   function isGenerating() {
     const btn = findStopGeneratingBtn()
     if (btn && !btn.disabled) return true
+    // [site-generating-selector-v1] 智谱：生成中发送键带 .searching 类（纯图标无文本，标签通道恒 miss）；
+    //   仅 chatglm.cn 命中，DeepSeek 分支（下方图签名）保持原样不受影响
+    if (typeof location !== 'undefined' && /chatglm\.cn$/.test(location.hostname) && document.querySelector('.enter.is-main-chat.searching')) return true
     // [stop-btn-deepseek-icon-v1] DeepSeek 圆形按钮无标签 ⇒ 标签匹配恒 miss，用停止方块图签名名兜底
     const dsBtn = findStopGeneratingBtnStructural()
     return Boolean(dsBtn && !dsBtn.disabled && hasDeepSeekStopIcon(dsBtn))

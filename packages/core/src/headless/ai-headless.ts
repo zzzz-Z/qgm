@@ -473,7 +473,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
           const streamError = completionErrors.get(sid)
           const reply = streamError
             ? (completionErrors.delete(sid), { kind: 'error', text: streamError })
-            : await page.evaluate(detectReplyInPage)
+            : await page.evaluate(detectReplyInPage, { generatingSelector: adapter.selectors.generatingSelector })
           if (!stopped && reply && typeof reply === 'object' && (reply as { kind?: string }).kind) {
             cb(reply as HeadlessReply)
           }

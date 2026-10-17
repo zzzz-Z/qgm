@@ -22,6 +22,11 @@ export interface SiteAdapter {
     assistantMessage: string
     /** 停止生成按钮（结构化兜底用） */
     stopButton: string
+    /**
+     * 站点专属「生成中」信号选择器（如智谱 .enter.is-main-chat.searching）。
+     * 未声明的站点保持既有通用逻辑（标签通道 + DeepSeek 圆钮图签名），行为零变化。
+     */
+    generatingSelector?: string
     /** 新建会话按钮（clickNewSessionInPage 用） */
     newChatButton: string
   }
