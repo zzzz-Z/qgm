@@ -3249,3 +3249,13 @@ Chromium 的 `SingletonLock` 形如 `hostname-pid` 的软链。用 `readFile(loc
 `tampermonkey-split` 断言「产物 === buildUserscript(片段)」。改完 `stop.ts` 后直接跑守卫会红——因为守卫 `read(USERSCRIPT)` 读的是 `scripts/tampermonkey-session-id.user.js`，而它还没重新组装。
 
 修法：任何片段源改动后，先 `node scripts/assemble-userscript.mjs`（它会自动 bump `@version` 并写 `tampermonkey-version.json`），再跑守卫。
+
+## 构建与重启都必须走 background
+
+`pnpm build` 耗时约 15 秒、`pm2 restart` 会切断当前会话的 WS 通道。两者若用前台 `shell`，前者可能触碰 180s 预算、后者会直接让本轮回执丢失（`post-done-gate-v1` 的注释记录过这个坑：hook 由 5175 自身执行，同步 restart 会杀掉正在跑 hook 的进程）。
+
+做法：两处都 `{ background: true }`，拿 `BG_ID` 后轮询 `shellStatus` 收口。重启后第一轮回执可能 `Failed to fetch`，属预期——下一轮探活即恢复。
+
+## 「探活 200」不等于「新产物生效」
+
+服务重启后旧产物也可能返回 200（进程起来了但加载的是旧代码）。必须比对进程启动时间与产物 mtime：进程晚于产物才算加载了新版。本轮 `07:41:14 > 07:39:14`，判据成立。
