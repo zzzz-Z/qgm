@@ -212,6 +212,23 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 - **端口是契约，不再有端口文件**（port-contract-v1）：dev 前端 5274 / 后端 5275（dev-port-isolation-v1）、prod 恒 5175、userscript 分发 5178。`apps/standalone/src/server.ts` 遇 EADDRINUSE **拒绝自动漂移**（报错并给出处置命令），不落端口文件。`pnpm test:e2e` 报 ECONNREFUSED 时先确认 dev 进程是否真的在跑（`lsof -nP -iTCP:5275 -sTCP:LISTEN`），别去找端口文件；prod 探活 `curl 5175` 或 `pm2 jlist`。
 - **pm2 重启**（instance-ownership-v1 边界，2026-10-16 更新）：**本工作区已获用户显式授权**——DONE 后由 `bin/post-done.cjs` 自动 `pnpm build && pm2 restart ai-runner`（detached，见上「构建与工具链」段）。SYSTEM.md 的「重启归宿主侧」默认规则在本工作区不适用。手工 `pm2 restart` 仍须记录授权来源（①可指②回执如实）。**代执行当轮 `Failed to fetch` 属预期**（实例重启通道瞬断），下一轮探活即恢复，重试须**跨轮**。
 
+### 状态与副作用收敛（workspace-root-single-exit-v1）
+
+- **执行 root 变更后的前端副作用只有一个出口：`useWorkspaces.applyRootChanged()`**。它依次清会话上下文 / 时间线事件 / 脚本收件箱 / **`load-rules` 的 Promise 缓存**，并自增 `workspaceEpoch`。`activate` / `register(activate)` / `remove(active)` / `create(activate)` 四个入口各自只写一行 `await applyRootChanged()`。
+  - **为什么**：这五项原先散在四个入口各写一遍，任何新增切换路径只要漏抄一项就静默漏配。实测过的形态就是 `load-rules` 的规则缓存跨工作区泄漏——新工作区首问仍带上一个工作区的 `AGENTS.md`。
+  - **新增需要随 root 失效的模块级状态时，加在 `applyRootChanged` 里，不要加在调用方**。
+  - 守卫：`packages/client/tests/rules-cache-invalidate.node-test.ts`（断言四路入口各命中一次、函数体内不得内联 `bumpWorkspaceEpoch`、不得残留旧名）。
+
+- **`load-rules` 的 Promise 缓存是模块级单例，与 root 无关**（`rules-promise-cache-v1`）：它只在加载失败时清缓存重试，**不会因切工作区而失效**，必须显式调 `clearRulesCache()`。凡在 `composables/**` 里写模块级 `let _xxxPromise` / 顶层 `ref()` 单例，都要先问「它的作用域是页面还是上下文」；作用域是上下文的，就必须挂进 `applyRootChanged`。
+
+- **切工作区禁止整页 `window.location.reload()`**（`workspace-switch-inplace-v1` / `workspace-guide-inplace-v1`）：reload 靠重建组件树「暴力兜住」所有模块级缓存，看起来能用，实则让单一出口形同虚设——一旦缓存项增加就会漏，且 reload 会触发启动期的自动开窗。引导页（`WorkspaceGuide.vue`）已改为原地 `register(path, true)`，成功后 `emit('ready')` 让 `App.vue` 翻转 `hasWorkspace`，**不要靠刷新让引导页消失**。
+
+- **`/workspace/pick` 与 `/workspace/pick-path` 语义不同，别混用**：`pick` 服务端内部就 `registerWorkspace(path, true)`（**自行 setRoot**，绕开前端清理）；`pick-path` 只返回路径、不入册不激活。需要「选完再决定」一律用 `pick-path`。
+
+- **`sessionStorage` 的 `__ai_switch_project` 是死键**：全仓只有 `getItem` / `removeItem`，没有任何 `setItem`。原 `useAppStartup.reopenAfterSwitchProject` / `maybeScheduleReopen` 因此已删除——它们是切 root 清理的第三份残缺实现（漏 `clearInbox` / 规则缓存 / epoch）。**不要重新引入基于该键的启动期清理**。
+
+- **收尾 residual 断言必须排除注释行**：改造中常用 `if (/旧标识符/.test(全文)) exit(2)` 做防残留，但若当轮刚在注释里复述了该标识符，断言会自绊，白烧一轮。要么断言前剥注释，要么注释里不复述标识符。
+
 ### 输出与预算
 
 - **思考与脚本共享单轮输出预算**（token-budget-v1）：T + S ≤ B，行数不是判据、token 才是（实测 89 行通过、20 行截断，差别全在当轮思考量）。详见 SYSTEM.md §10。
