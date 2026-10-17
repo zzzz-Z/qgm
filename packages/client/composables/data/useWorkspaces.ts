@@ -31,11 +31,12 @@ function bumpWorkspaceEpoch(): void {
 }
 
 /**
- * [workspace-switch-inplace-v1] 切工作区不再整页 reload：原地清会话上下文 + 刷新本地注册表。
- * [WHY] reload 会在启动期触发 useAppStartup.maybeScheduleReopen → openAiSession 自动开新 AI 站点窗口，
- *   与「切换不打开新窗口」的诉求冲突（用户报告）。改为原地切换后，副作用只剩「清空当前会话」——
- *   这正是切 root 的语义：新 root 的 SYSTEM.md 首问不应与旧会话消息混在一起。
- * [CONSTRAINT] 清上下文失败必须静默降级（模块未就绪 / sessionStorage 不可用），不得阻断切换。
+ * [workspace-root-single-exit-v1] 执行 root 变更后的**全部**前端副作用，唯一出口。
+ * [WHY] 原先 activate / register / remove / create 四个入口各写一遍清理，
+ *   任何新增切换路径只要漏抄就会让模块级缓存（load-rules 的 Promise 缓存）跨工作区泄漏；
+ *   收敛到本函数后，入口只需 await 一次，判据由 rules-cache-invalidate.node-test.ts 守住。
+ * [CONSTRAINT] 各步失败必须静默降级（模块未就绪 / storage 不可用），不得阻断切换；
+ *   新增需要随 root 失效的模块级状态时，加在这里而不是调用方。
  */
 async function applyRootChanged(): Promise<void> {
   try {

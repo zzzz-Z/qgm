@@ -1,8 +1,12 @@
 // [use-app-startup-v1] 从 App.vue 抽出的启动族。
 // [WHY] App.vue 超 §4 组件 500 行红线；启动探测/切项目重开/无头 reply 订阅自成体系。
 // [CONSTRAINT] 只注入外部状态（hasWorkspace / sessionHistory / siteUrl 等）；其余走模块级 composable。
-// [CHANGE-IMPACT] App.vue 中 probeWorkspace / reopenAfterSwitchProject / maybeScheduleReopen /
-//                 subscribeHeadlessReply / reconnectAfterRefresh + onUnmounted 全部下沉到本模块。
+// [workspace-root-single-exit-v1] 原 reopenAfterSwitchProject / maybeScheduleReopen 已删：
+//   它们靠 sessionStorage 键 __ai_switch_project 触发，但全仓无任何 setItem 写入方（死路径），
+//   且是本项目「切 root 清理」的第三份残缺实现（漏 clearInbox / 规则缓存 / epoch）。
+//   切 root 的唯一副作用出口已收敛到 useWorkspaces.applyRootChanged。
+// [CHANGE-IMPACT] App.vue 中 probeWorkspace / subscribeHeadlessReply /
+//                 reconnectAfterRefresh + onUnmounted 下沉到本模块。
 
 import type { Ref } from 'vue'
 import { nextTick, onUnmounted } from 'vue'
@@ -12,7 +16,6 @@ import { activeSessionId, loadActiveSessionIdBySite } from './useAppStorage'
 import { useToast } from './useToast'
 import { clearEvents } from './useEventStream'
 import { clearInbox } from '../runner/useScriptInbox'
-import { useSessionManager } from '../ai/useSessionManager'
 import { useAiWindow } from '../ai/useAiWindow'
 import { getTransport, transportKind } from '../ai/useAiTransport'
 import { useAiSite } from '../ai/useAiSite'
@@ -43,7 +46,6 @@ let _offHeadlessState: (() => void) | null = null
 export function useAppStartup(deps: AppStartupDeps) {
   const { hasWorkspace, sessionHistory, onSessionIdMessage } = deps
   const { toast } = useToast()
-  const { resetSession } = useSessionManager()
   const aiWin = useAiWindow()
   const { url: siteUrl, setUrl: setSiteUrl } = useAiSite()
 
@@ -55,31 +57,6 @@ export function useAppStartup(deps: AppStartupDeps) {
       const data = await response.json() as { hasWorkspace?: boolean }
       hasWorkspace.value = data.hasWorkspace !== false
     } catch { /* ignore: 探测失败保持默认放行 */ }
-  }
-
-  /**
-   * [workspace-switch-no-window-v1] 切项目后：清本地状态，**不再自动开 AI 站点窗口**。
-   * [WHY] 用户要求「切换工作区时不打开新窗口」——原实现在此调 openAiSession 自动开新站点窗口。
-   *   原地切换已由 useWorkspaces.activate 完成本地状态刷新；这里只保留清残留会话上下文的语义。
-   * [CONSTRAINT] 保留函数名与导出，避免其它调用点连锁改动。
-   */
-  async function reopenAfterSwitchProject(): Promise<void> {
-    try { resetSession() } catch { /* 未就绪时忽略 */ }
-    try { clearEvents() } catch { /* 未就绪时忽略 */ }
-  }
-
-  /** 从 sessionStorage 读取切项目标志；命中则 fire-and-forget 触发 reopen */
-  function maybeScheduleReopen(): void {
-    let flag: string | null
-    let timestamp = 0
-    try {
-      flag = sessionStorage.getItem('__ai_switch_project')
-      timestamp = Number(sessionStorage.getItem('__ai_switch_project_at')) || 0
-      sessionStorage.removeItem('__ai_switch_project')
-      sessionStorage.removeItem('__ai_switch_project_at')
-    } catch { return /* sessionStorage 不可用时静默 */ }
-    if (flag !== '1' || Date.now() - timestamp >= 15000) return
-    void reopenAfterSwitchProject()
   }
 
   /** [headless-reply] 无头模式：订阅 transport.onReply，转成 MessageEvent 喂给 onSessionIdMessage */
@@ -147,5 +124,5 @@ export function useAppStartup(deps: AppStartupDeps) {
     lastVisit.value = Date.now()
   }
 
-  return { probeWorkspace, reopenAfterSwitchProject, maybeScheduleReopen, subscribeHeadlessReply, reconnectAfterRefresh, syncActiveSessionFromSite, migrateLastVisit }
+  return { probeWorkspace, subscribeHeadlessReply, reconnectAfterRefresh, syncActiveSessionFromSite, migrateLastVisit }
 }

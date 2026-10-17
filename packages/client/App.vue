@@ -42,7 +42,6 @@ const { onSessionIdMessage } = useAiReplyHandlers({
 
 const {
   probeWorkspace,
-  maybeScheduleReopen,
   subscribeHeadlessReply,
   reconnectAfterRefresh,
   syncActiveSessionFromSite,
@@ -88,7 +87,8 @@ onMounted(async () => {
   // [session-scope-per-site-v1] 恢复前再同步一次作用域：激活工作区/URL 参数可能改变 modelId 之外的路径。
   try { setSessionModelScope(String(modelId.value || 'default')) } catch { /* 未就绪忽略 */ }
   try { restoreFromStorage() } catch { /* 未就绪时忽略 */ }
-  maybeScheduleReopen()
+  // [workspace-root-single-exit-v1] 切 root 的清理已收敛到 useWorkspaces.applyRootChanged，
+  //   启动期不再读取 sessionStorage 的切项目标志（该标志全仓无写入方，属死路径）。
   subscribeHeadlessReply()
   // [loop-consolidation-P3e] 原 setActiveSessionIdGetter 注入（供 loop 启动读 sid）随 P3
   //   删除 useAutoLoop 一并移除：无消费者；循环 sid 由 useRuntime 直接承载
@@ -252,7 +252,8 @@ function onLoginGui() {
 
 <template>
   <div v-if="!hasWorkspace" class="app-shell-empty">
-    <WorkspaceGuide />
+    <!-- [workspace-guide-inplace-v1] 选定目录后原地翻转，不再整页 reload -->
+    <WorkspaceGuide @ready="hasWorkspace = true" />
   </div>
   <div v-else class="app-shell">
     <AiWindowList />
