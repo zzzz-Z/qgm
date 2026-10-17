@@ -190,11 +190,11 @@
     },
     {
       "file": "packages/core/src/headless/headless-inject.ts",
-      "contains": "if (lang !== 'js' && lang !== 'bash') continue"
+      "contains": "if (lang !== 'js' && lang !== 'bash')"
     },
     {
       "file": "scripts/tampermonkey-session-id.user.js",
-      "contains": "if (lang !== 'js' && lang !== 'bash') continue"
+      "contains": "if (lang !== 'js' && lang !== 'bash')"
     },
     {
       "file": "packages/core/tests/reply-mark-parity.node-test.ts",

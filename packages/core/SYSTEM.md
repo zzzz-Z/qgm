@@ -392,50 +392,90 @@
 
 ---
 
+## §17 硬约束速查（按违规后果索引）
+
+- 承重：`packages/core/tests/system-md-coherence.node-test.ts`（A1–A4：结构一致性 + 索引完整性）
+
+> 本节**只做索引，不复制规则**：每条给后果与出处，细节一律回原文。按后果分级而非按章节，
+> 因为出错时人想知道的是「我这条违反了会怎样」，而不是「它属于第几节」。
+
+**A · 立即中断本论**（有明确错误码，重发即可）
+
+- SCRIPT 块缺 `js` 围栏 → `MISSING_DESC` / 整轮丢弃（§1）
+- 契约头缺 `// @desc`、`// @why` → `MISSING_DESC`（§1）
+- 发 `bash` 块 → `BASH_CHANNEL_REMOVED`，改 js（§1）
+- 危险命令（`rm -rf` / `git reset --hard` 等）→ `SECURITY_BLOCKED`（§3.2）
+- 脚本语法错（非截断）→ 前置 400，磁盘零改动（§10）
+
+**B · 静默失效**（不报错，最难自查，优先级最高）
+
+- 子进程读真盘 → 看不见本轮写入，须先 `flush()`（`overlay-blind-v1`，§3.2）
+- `patchFile` 锚点凭记忆 → 失配抛异常，锚点必须同轮读取（`same-round-read-v1`，§2）
+- 编辑后不 `grep` 同名符号 → 拼回后重复声明，TS2393 连环报错（§1）
+- 改产物不重建 → 分发仍是旧脚本，无任何报错（构建链已接 `assemble`，§0.1 同类）
+- 失败轮假设「已写一半」→ overlay 全丢弃，必须重新产出完整改动（`overlay-atomic-v1`，§9）
+- 用 `exit 0` / 构建成功 / 「我已重启」当生效证据 → 必须用进程时间 × 产物 mtime 或活端点（`runtime-vs-source-v2`，§13）
+
+**C · DONE 被拒收**（对账不符）
+
+- 「变更文件」表与 `git` 实测不符 / 验证结果列了没跑过的命令 → 造假拒收（`selfcheck-gate-v1`，§1）
+- `[BUG]` 出现在 DONE 的遗留风险里 → 违规（`risk-class-v1`，§1）
+- 确定做不成的任务留在待办不 `fail` → 整批任务永久挂起（`board-fail-explicit-v1`，§2）
+- 空口声称「沙箱无法 X」而无探针输出 → 能力否定侦测（§13）
+
+**D · 让人类返工**（成本最高的误用）
+
+- 把决策成本转嫁给人（「你没说要哪个方案」「我不确定」）→ `ASK` 滥用（`autonomy-first-v1`，§1）
+- 同因第 3 次失败仍自动重放（换锚点/换策略/缩量都算）→ 熔断冻结，改 `TEXT` 播报（`metaerror-fuse v1`，§8）
+- 无证据的时序承诺（「此后全自动」）→ 须同轮实测支撑（§13）
+
+---
+
 ## 附录 A · 契约名注册表
 
 > 集中索引：`-vN` 后缀是**契约名**，不是版本号，不指示降级路径。语义以「详见」章节为权威。
 > 新增契约名时**必须**在此登记（§0.1 宿主机制表登记宿主侧，本表登记全局）。
 
-| 契约名                                     | 一句话定义                                                  | 详见      |
-| ------------------------------------------ | ----------------------------------------------------------- | --------- |
-| batch-read-only-v1                         | 无副作用只读步骤可合并单脚本批量执行                        | §0        |
-| autonomy-first-v1                          | ASK 仅限人类权威/物理不可为两类；三问门槛 + 滥用清单        | §0 / §1   |
-| js-only-channel-v1                         | 执行通道唯一：js\|cjs → /run 沙箱；bash 已下线              | §1        |
-| script-discipline-v1                       | 禁顶层 await、单块完整、非脚本不入围栏、防重复定义          | §1        |
-| verify-contract v1                         | DONE 前验证命令采集（宿主，观测期）                         | §1        |
-| verify-lang-matrix-v1                      | 按语言选验证工具：js/cjs→syntaxCheck，其余→lint/typeCheck   | §1        |
-| selfcheck-gate-v1                          | DONE 两表与 git/磁盘实测对账，谎称拒收                      | §1 / §13  |
-| selfcheck-l2 v1                            | 首次 DONE 交付级全量终验（宿主）                            | §1        |
-| retained-done-gate v1                      | 非循环 DONE 终检 + 看板清桶，reject 不阻断（宿主）          | §0.1      |
-| overlay-atomic v1                          | 仅 exit 0 落盘；失败轮全部丢弃（宿主）                      | §0.1 / §9 |
-| skills-install v1                          | 技能获取本地→本地库→远端强制分层（宿主）                    | §11       |
-| lang-whitelist v3                          | 语言白名单 js\|cjs + bash 教学式拒收（宿主）                | §0.1      |
-| verify-target-binding v1                   | 验证目标自动发现 + DONE 逐目标契约（宿主）                  | §13       |
-| ai-guard-tokenize v2                       | 词法剥离后黑名单匹配，字符串内容不拦（宿主）                | §3.1      |
-| instance-ownership v1                      | 实例启动/重启/端口归宿主侧，AI 只报告                       | §1        |
-| same-round-read v1                         | patchFile 锚点必须来自同轮读取                              | §2        |
-| task-board-v2 / board-trigger-v1           | 复杂任务先登记看板，粒度可独立验证                          | §2        |
-| board-id-direct-v1                         | 看板操作一律传 list() 的 id                                 | §2        |
-| board-fail-explicit-v1                     | 做不成必须 fail 收尾，禁止沉默待办                          | §2        |
-| board-read-all-states-v1                   | failed/expiredRunning 是独立数组，核板必读                  | §2        |
-| fg-stream-v1                               | shell 前台流式，仍受 180s 限制                              | §3.2      |
-| overlay-blind-v1                           | 子进程读真盘看不见本轮写入，先 flush 再验                   | §3.2      |
-| metaerror-fuse v1                          | 同因第 3 次失败熔断冻结，TEXT 播报不上报 ASK                | §8        |
-| patchFile-budget-v1                        | find/replace 计入输出体积，超限拆分                         | §10       |
-| first-prompt-rules-v2                      | 首问不自动注入技能；@ 引用由提交链路自动展开                | §11       |
-| runtime-vs-source-v2                       | 判生效唯二判据：进程时间×产物 mtime / 活端点                | §13       |
-| risk-class-v1                              | 遗留风险三分类 [BUG]/[DECIDE]/[ACCEPTED]                    | §1        |
-| functional-regression v1                   | 三层回归闸门，跑错层等于没跑                                | §14       |
-| visual-regression v1 / visual-invariant-v1 | 视觉回归原则与三条不变式                                    | §15       |
-| lessons-ondemand v1                        | 遇问题先查台账，禁止记忆重建                                | §16       |
-| token-budget-v1                            | 思考与脚本共享单轮输出预算 T+S≤B                            | §10       |
-| `delivery-routing-v1`                      | 分析类任务结论默认走 DONE 正文，不落盘到忽略区              | §1        |
-| generating-gate-v1                         | 无头通道补「生成中门」，与油猴 parity（脚本推送前判生成中） | §1        |
-| stale-run-abort-v2                         | 第二次 run 主动 abort 上一轮悬挂 fetch（running 守卫前置）  | §1 / §13  |
-| cross-host-fallback-v1                     | 跨机时钟退化路径：到达序配对（时钟异常时启用）              | §13       |
-| tmp-reaper-v1                              | .ai-runner/tmp 过期产物按 mtime 清理（/run 入口触发）       | §9        |
-| run-refs-bounded-v1                        | runIds/sendTimestamps 有界，防跨会话无界累积                | §10       |
+| 契约名                           | 一句话定义                                                  | 详见      |
+| -------------------------------- | ----------------------------------------------------------- | --------- |
+| batch-read-only-v1               | 无副作用只读步骤可合并单脚本批量执行                        | §0        |
+| autonomy-first-v1                | ASK 仅限人类权威/物理不可为两类；三问门槛 + 滥用清单        | §0 / §1   |
+| js-only-channel-v1               | 执行通道唯一：js\|cjs → /run 沙箱；bash 已下线              | §1        |
+| script-discipline-v1             | 禁顶层 await、单块完整、非脚本不入围栏、防重复定义          | §1        |
+| verify-contract v1               | DONE 前验证命令采集（宿主，观测期）                         | §1        |
+| verify-lang-matrix-v1            | 按语言选验证工具：js/cjs→syntaxCheck，其余→lint/typeCheck   | §1        |
+| selfcheck-gate-v1                | DONE 两表与 git/磁盘实测对账，谎称拒收                      | §1 / §13  |
+| selfcheck-l2 v1                  | 首次 DONE 交付级全量终验（宿主）                            | §1        |
+| retained-done-gate v1            | 非循环 DONE 终检 + 看板清桶，reject 不阻断（宿主）          | §0.1      |
+| overlay-atomic v1                | 仅 exit 0 落盘；失败轮全部丢弃（宿主）                      | §0.1 / §9 |
+| skills-install v1                | 技能获取本地→本地库→远端强制分层（宿主）                    | §11       |
+| lang-whitelist v3                | 语言白名单 js\|cjs + bash 教学式拒收（宿主）                | §0.1      |
+| verify-target-binding v1         | 验证目标自动发现 + DONE 逐目标契约（宿主）                  | §13       |
+| ai-guard-tokenize v2             | 词法剥离后黑名单匹配，字符串内容不拦（宿主）                | §3.1      |
+| instance-ownership v1            | 实例启动/重启/端口归宿主侧，AI 只报告                       | §1        |
+| same-round-read v1               | patchFile 锚点必须来自同轮读取                              | §2        |
+| task-board-v2 / board-trigger-v1 | 复杂任务先登记看板，粒度可独立验证                          | §2        |
+| board-id-direct-v1               | 看板操作一律传 list() 的 id                                 | §2        |
+| board-fail-explicit-v1           | 做不成必须 fail 收尾，禁止沉默待办                          | §2        |
+| board-read-all-states-v1         | failed/expiredRunning 是独立数组，核板必读                  | §2        |
+| fg-stream-v1                     | shell 前台流式，仍受 180s 限制                              | §3.2      |
+| overlay-blind-v1                 | 子进程读真盘看不见本轮写入，先 flush 再验                   | §3.2      |
+| metaerror-fuse v1                | 同因第 3 次失败熔断冻结，TEXT 播报不上报 ASK                | §8        |
+| patchFile-budget-v1              | find/replace 计入输出体积，超限拆分                         | §10       |
+| first-prompt-rules-v2            | 首问不自动注入技能；@ 引用由提交链路自动展开                | §11       |
+| runtime-vs-source-v2             | 判生效唯二判据：进程时间×产物 mtime / 活端点                | §13       |
+| risk-class-v1                    | 遗留风险三分类 [BUG]/[DECIDE]/[ACCEPTED]                    | §1        |
+| functional-regression v1         | 三层回归闸门，跑错层等于没跑                                | §14       |
+| visual-regression v1             | §15                                                         |
+| visual-invariant-v1              | §15                                                         |
+| lessons-ondemand v1              | 遇问题先查台账，禁止记忆重建                                | §16       |
+| token-budget-v1                  | 思考与脚本共享单轮输出预算 T+S≤B                            | §10       |
+| `delivery-routing-v1`            | 分析类任务结论默认走 DONE 正文，不落盘到忽略区              | §1        |
+| generating-gate-v1               | 无头通道补「生成中门」，与油猴 parity（脚本推送前判生成中） | §1        |
+| stale-run-abort-v2               | 第二次 run 主动 abort 上一轮悬挂 fetch（running 守卫前置）  | §1 / §13  |
+| cross-host-fallback-v1           | 跨机时钟退化路径：到达序配对（时钟异常时启用）              | §13       |
+| tmp-reaper-v1                    | .ai-runner/tmp 过期产物按 mtime 清理（/run 入口触发）       | §9        |
+| run-refs-bounded-v1              | runIds/sendTimestamps 有界，防跨会话无界累积                | §10       |
 
 ---
 
