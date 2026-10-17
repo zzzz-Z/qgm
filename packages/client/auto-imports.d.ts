@@ -28,6 +28,7 @@ declare global {
   const MAX_AUTO_RESUME: typeof import('./composables/ai/stop-resume').MAX_AUTO_RESUME
   const MAX_PENDING_RUNS: typeof import('./composables/runner/run-queue').MAX_PENDING_RUNS
   const MODELS: typeof import('./composables/ai/useAiSite').MODELS
+  const NAV_CONFIRM_TIMEOUT_MS: typeof import('./composables/data/useWorkspaces').NAV_CONFIRM_TIMEOUT_MS
   const PAGE_BOOT_TS: typeof import('./composables/ai/useAiReplyHandlers').PAGE_BOOT_TS
   const PHASE_DONE_CLASS: typeof import('./utils/timeline-build').PHASE_DONE_CLASS
   const PHASE_ERROR_CLASS: typeof import('./utils/timeline-build').PHASE_ERROR_CLASS
@@ -84,6 +85,7 @@ declare global {
   const computedInject: typeof import('@vueuse/core').computedInject
   const computedWithControl: typeof import('@vueuse/core').computedWithControl
   const confirmDialog: typeof import('./composables/ui/useToast').confirmDialog
+  const confirmNav: typeof import('./composables/data/useWorkspaces').confirmNav
   const consume: typeof import('./composables/runner/useScriptInbox').consume
   const consumeById: typeof import('./composables/runner/useScriptInbox').consumeById
   const controlledComputed: typeof import('@vueuse/core').controlledComputed
@@ -229,9 +231,11 @@ declare global {
   const parseErrorLocations: typeof import('./utils/contextBuilder').parseErrorLocations
   const parseMeta: typeof import('./composables/runner/inbox-parse').parseMeta
   const parseScriptMeta: typeof import('./utils/scriptMeta').parseScriptMeta
+  const parseSessionUrl: typeof import('./composables/ai/useAiReplyHandlers').parseSessionUrl
   const pausableWatch: typeof import('@vueuse/core').pausableWatch
   const peekAll: typeof import('./composables/runner/useScriptInbox').peekAll
   const peekPendingAskKey: typeof import('./composables/ui/useEventStream').peekPendingAskKey
+  const pickNavUrl: typeof import('./composables/data/useWorkspaces').pickNavUrl
   const prependFirstPromptRules: typeof import('./composables/ai/first-prompt').prependFirstPromptRules
   const probeRender: typeof import('./composables/ui/render-probe').probeRender
   const probeWindowBySid: typeof import('./composables/ai/useAiWindowTable').probeWindowBySid
@@ -597,7 +601,7 @@ declare global {
   export type { WorkspaceMatrixItem } from './composables/ai/useSiteMatrix'
   import('./composables/ai/useSiteMatrix')
   // @ts-ignore
-  export type { WorkspaceItem } from './composables/data/useWorkspaces'
+  export type { WorkspaceSessionInline, WorkspaceItem, SetSessionPayload } from './composables/data/useWorkspaces'
   import('./composables/data/useWorkspaces')
   // @ts-ignore
   export type { FeedbackItem, FeedbackMergeOpts, FeedbackMerge } from './composables/runner/feedback-merge'
@@ -683,6 +687,7 @@ declare module 'vue' {
     readonly MAX_AUTO_RESUME: UnwrapRef<typeof import('./composables/ai/stop-resume')['MAX_AUTO_RESUME']>
     readonly MAX_PENDING_RUNS: UnwrapRef<typeof import('./composables/runner/run-queue')['MAX_PENDING_RUNS']>
     readonly MODELS: UnwrapRef<typeof import('./composables/ai/useAiSite')['MODELS']>
+    readonly NAV_CONFIRM_TIMEOUT_MS: UnwrapRef<typeof import('./composables/data/useWorkspaces')['NAV_CONFIRM_TIMEOUT_MS']>
     readonly PAGE_BOOT_TS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['PAGE_BOOT_TS']>
     readonly PHASE_DONE_CLASS: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_DONE_CLASS']>
     readonly PHASE_ERROR_CLASS: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_ERROR_CLASS']>
@@ -739,6 +744,7 @@ declare module 'vue' {
     readonly computedInject: UnwrapRef<typeof import('@vueuse/core')['computedInject']>
     readonly computedWithControl: UnwrapRef<typeof import('@vueuse/core')['computedWithControl']>
     readonly confirmDialog: UnwrapRef<typeof import('./composables/ui/useToast')['confirmDialog']>
+    readonly confirmNav: UnwrapRef<typeof import('./composables/data/useWorkspaces')['confirmNav']>
     readonly consume: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['consume']>
     readonly consumeById: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['consumeById']>
     readonly controlledComputed: UnwrapRef<typeof import('@vueuse/core')['controlledComputed']>
@@ -884,9 +890,11 @@ declare module 'vue' {
     readonly parseErrorLocations: UnwrapRef<typeof import('./utils/contextBuilder')['parseErrorLocations']>
     readonly parseMeta: UnwrapRef<typeof import('./composables/runner/inbox-parse')['parseMeta']>
     readonly parseScriptMeta: UnwrapRef<typeof import('./utils/scriptMeta')['parseScriptMeta']>
+    readonly parseSessionUrl: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['parseSessionUrl']>
     readonly pausableWatch: UnwrapRef<typeof import('@vueuse/core')['pausableWatch']>
     readonly peekAll: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['peekAll']>
     readonly peekPendingAskKey: UnwrapRef<typeof import('./composables/ui/useEventStream')['peekPendingAskKey']>
+    readonly pickNavUrl: UnwrapRef<typeof import('./composables/data/useWorkspaces')['pickNavUrl']>
     readonly prependFirstPromptRules: UnwrapRef<typeof import('./composables/ai/first-prompt')['prependFirstPromptRules']>
     readonly probeRender: UnwrapRef<typeof import('./composables/ui/render-probe')['probeRender']>
     readonly probeWindowBySid: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['probeWindowBySid']>

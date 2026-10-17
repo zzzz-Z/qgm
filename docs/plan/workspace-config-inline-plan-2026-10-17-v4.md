@@ -5,6 +5,29 @@
 > `AiWindowList.vue` / `workspace-registry.node-test.ts` / 实数据 `~/.ai-runner/workspace.json` /
 > `package.json` scripts，并实跑 `pnpm typecheck`（exit 0，四套全绿）。
 
+## 实施状态：已全部落地（2026-10-17）
+
+阶段 0–6、D3（顶层派生键删除）与 D2（导航确认超时）均已完成，验收结果：
+
+- **D2 落地**：`switchDeepSeekSession` 导航后挂 8s 确认定时器（`pendingNavBySid`），
+  `handleUrlUpdated` 收到任意 URL 变更即 `confirmNav(sidForUrl(u))`——**放在反解 return 之前**，
+  因为会话 URL 失效时站点会静默重定向回首页，此时反解必失败，若确认放在其后会误报超时。
+  超时只 `console.warn` 不改数据（纠正仍由 `url-updated` 回写负责，不做主动 HEAD 探测）。
+  守卫：`packages/client/tests/workspace-nav-confirm.node-test.ts`（6 例，含「定时器必须是行首独立语句」）。
+
+- `pnpm typecheck` 四套全绿；`pnpm test:unit` 216 文件 / 1851 用例通过；`pnpm docs:verify` 通过；改动文件 `eslint` 零告警。
+- 真实 `~/.ai-runner/workspace.json` 已迁移为 `schemaVersion: 2`，三个工作区条目内联字段完整，**零丢失**；
+  其中一条旧数据是「有 `sessionUrl`、无 `sessionId`、无 `homeUrl`」，验证了迁移三分支判定的必要性
+  （若按「`sessionId` 为空即当首页」处理，会把真实会话 URL 降级成首页）。
+- D3 后 `persistWorkspace` 不再写出顶层 `sessions`/`firstPromptSent`；触发一次写盘后文件 keys 由 7 个降为 5 个。
+- 端点契约 curl 实测（临时工作区，已清理）：`kind:'site'` / `kind:'session'` / 缺省推断两向 /
+  `GET /workspace/session` 派生 `url = sessionUrl || homeUrl` / registry 条目内联字段，全部符合预期。
+- 实例已重启生效（`pm2 restart ai-runner`，进程启动晚于产物 mtime）。
+
+回滚锚点：`~/.ai-runner/workspace.json.v1.bak`（一次性，勿覆盖）。
+
+> **注**：`docs/plan/**` 被 `.gitignore` 忽略且不参与 `docs:verify` 索引校验，本文件为过程记录，不作交付物。
+
 ---
 
 ## 一、三轮计划的裁决

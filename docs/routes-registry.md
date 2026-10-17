@@ -31,6 +31,12 @@
   （推断规则在 `config.setWorkspaceSession` 单一实现）。工作区不存在返 404。
   响应 `{ok, session}`，`session` 为上述派生旧形状。
 - **POST /\__ai/workspace/create**（multi-workspace-create-v1）—— body `{mode, path, branch?, url?, baseRepo?, activate?}`：`worktree`（同仓库切新分支共享 .git）/ `clone`（独立仓库）/ `register`（要求路径已存在，走 register）。目标路径已存在返 400；成功后自动入册。
+- **GET /\__ai/workspace** —— 只读，返回 `{root, hasWorkspace}`：UI 据此判定是否渲染「选择工作区」引导页。
+- **POST /\__ai/workspace/clear** —— 退出工作区：`clearWorkspace()` + `clearPersistedWorkspace()`，返回 `{ok, hasWorkspace}`。UI 随即回到引导页。
+- **GET /\__ai/workspace/list?path=** —— 只读，列目录下的子目录名（跳过点开头项）。`path` 缺省取当前 root；相对路径按 root 解析。非目录 / 不存在返 400。
+- **POST /\__ai/workspace/pick** —— 系统原生目录选择器，**选完即入册并激活**（内部 `registerWorkspace(path, true)`，自行 setRoot）。取消返 204，平台不支持返 501。需要「只取路径不入册」时用 `pick-path`。
+- **POST /\__ai/workspace/pick-path**（trae-new-workspace-v1）—— 系统原生目录选择器，**只返回路径**，不入册不激活。取消 204 / 不支持 501 与 `pick` 一致。「新建工作区」表单用它选基仓库。
+- **POST /\__ai/workspace/select** —— body `{path}`：选目录并入册激活（multi-workspace-v1 前的旧入口，等价 `register` + activate）；现在前端已改走 `register`，保留兼容。
 - **GET /\__ai/workspace/first-prompt**（first-prompt-persist-v1）—— 只读，返回 `{ok, sent}`。query `id`（工作区 id，必填）、`model`（站点 modelId，可选；key-composite-v1 起复合键 `<wsId>::<modelId>`，缺省时读裸 `wsId` 键）。消费方 `useWorkspaces.getFirstPromptSent` → `useAiWindow.copyAndFill` 决定是否注入 SYSTEM.md。
 - **POST /\__ai/workspace/first-prompt**（first-prompt-persist-v1）—— body `{id, model?, sent}`：写「该工作区 + 该服务商」的首问是否已带规则头。key-composite-v1 起 `model` 参与复合键；缺省时退化裸 wsId 键。工作区不存在返 404。消费方 `useWorkspaces.setFirstPromptSent`（useAiWindow 4 处调用 + App.vue onSiteChange + switchDeepSeekSession newSession 分支）。
 

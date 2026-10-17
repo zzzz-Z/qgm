@@ -203,7 +203,7 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 
 - **新增 / 改名 `/__ai/*` HTTP 端点必须登记 [`docs/routes-registry.md`](./docs/routes-registry.md)**（routes-registry-v1）：`/__ai/*` 路由没有跨文件注册清单，SYSTEM.md 只教沙箱方法——新端点加完只有前端知道，工作台 AI 无从知晓。
 - **通用语义**：vcs 族端点对非 svn 工作副本返 `200 + ok:false`——正常探测结果，勿当故障。
-- 完整清单（vcs×4 / skills×2 / workspace×5 / git discard / video 域 / run 增补）见注册表，本表不重抄。
+- 完整清单（vcs×4 / skills×2 / workspace×12 / git discard / video 域 / run 增补）见注册表，本表不重抄。
 - **改 `scripts/tampermonkey-session-id.user.js` 必须同步升 `@version`**（userscript-version-bump-v1）：Tampermonkey 靠 `@version` 判更新，**内容改了版本号不变 ⇒ 更新链路形同虚设且无任何报错**。分发端点每次请求重读磁盘，唯一闸门就是 `@version`。指纹：`curl -sS http://127.0.0.1:5175/__ai/userscript/info` 的 `version` 字段。
 
 ### 运维与运行时

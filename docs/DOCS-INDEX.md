@@ -25,7 +25,7 @@
 - `docs/moneyprinter-turbo-port-plan.md`：MoneyPrinterTurbo 能力重写方案——五阶段视频生成流水线，剧本由 AI 生成脚本落盘、编排器读文件，ffmpeg 假设可用。
 - `docs/routes-registry.md`：`/__ai/*` HTTP 端点注册表——端点 → 语义 → 消费方 SSOT 导航；新增/改名端点必须同步登记。
 - `docs/workorder-docs-boundary-v3.md`：文档边界重构 v3 工单——SYSTEM.md / AGENTS.md 职责再划分的 7 步执行计划与进度。
-- `docs/plan/**`：计划草稿目录，被 `.gitignore` 忽略，不参与索引校验（`docs-scan.cjs` 的 `SKIP_PATHS` 显式豁免）。
+- `docs/plan/**`：计划草稿目录，**参与 git 跟踪**（`.gitignore` 未忽略），但不参与 `docs:verify` 索引校验——`scripts/lib/docs-scan.cjs` 的 `SKIP_PATHS` 显式豁免该子树。派发工单前需移到 `docs/` 根并登记索引，否则应用端开箱看不到。
 
 ## packages/
 

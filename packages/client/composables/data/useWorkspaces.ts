@@ -26,6 +26,21 @@ export interface WorkspaceItem {
   firstPromptSent?: Record<string, boolean>
 }
 
+// [workspace-nav-confirm-v1] 导航确认：切换工作区导航到 sessionUrl 后，若 8s 内没收到该站点的
+//   url-updated 帧，说明绑定的会话 URL 可能已失效（站点会重定向回首页）。只 warn 不改数据——
+//   纠正仍由 url-updated 回写负责（D2：被动纠正 + 本地超时兜底，不做主动 HEAD 探测）。
+export const NAV_CONFIRM_TIMEOUT_MS = 8_000
+const pendingNavBySid = new Map<string, ReturnType<typeof setTimeout>>()
+
+/** [workspace-nav-confirm-v1] 导航已确认（收到该 sid 的 url-updated）；幂等 */
+export function confirmNav(sid: string): void {
+  if (!sid) return
+  const t = pendingNavBySid.get(sid)
+  if (t === undefined) return
+  clearTimeout(t)
+  pendingNavBySid.delete(sid)
+}
+
 const workspaces = ref<WorkspaceItem[]>([])
 const activeId = ref<string | null>(null)
 const loading = ref(false)
@@ -259,6 +274,14 @@ async function switchDeepSeekSession(id: string, newSession?: boolean): Promise<
     //   ③ 首问规则仍会在用户真正发起对话时由 copyAndFill 按 sid 去重注入。
     // [workspace-switch-no-first-prompt-v1] 只导航窗口，不发首问（无 initialPrompt 时 openAiSession 本就不发问）。
     await openAiSession({ atUrl, sid: targetSid })
+    // [workspace-nav-confirm-v1] 导航后挂确认超时：目标 URL 若是已失效的会话路径，
+    //   站点会静默重定向回首页，用户看到「又新建了」而没有任何提示。
+    //   收到任一 url-updated 即视为导航成功（不只是命中该 URL——站点重定向也算一次导航完成）。
+    confirmNav(targetSid)
+    pendingNavBySid.set(targetSid, setTimeout(() => {
+      pendingNavBySid.delete(targetSid)
+      console.warn('[useWorkspaces] 导航后 8s 未收到 URL 变更，绑定的会话可能已失效：', { id, atUrl, sid: targetSid })
+    }, NAV_CONFIRM_TIMEOUT_MS))
     // [认领语义] 无绑定或强制新会话时把新会话回写到该工作区，避免下次切换又新建。
     // [workspace-schema-v2] 新建会话时只认领站点首页（kind:'site'），具体会话 URL 由回写链路补
     if (!bound || newSession) await setSession(id, { kind: 'site', homeUrl: atUrl })

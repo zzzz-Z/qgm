@@ -167,10 +167,12 @@ it('v1→v2 迁移：顶层 sessions / firstPromptSent 并入条目，脏键丢�
   // 迁移后立即落盘为 v2，且顶层派生键保留一轮
   const after = JSON.parse(fs.readFileSync(path.join(confDir, 'workspace.json'), 'utf8'))
   assert.equal(after.schemaVersion, 2, '迁移后必须写 schemaVersion')
-  assert.ok(after.sessions?.[wid], '顶层派生键应保留一轮（旧读方兼容）')
+  // [D3] 顶层派生键不再写出；读侧仍兼容旧文件（迁移分支照旧工作）
+  assert.equal(after.sessions, undefined, 'D3 后顶层 sessions 不应再写出')
+  assert.equal(after.firstPromptSent, undefined, 'D3 后顶层 firstPromptSent 不应再写出')
   assert.ok(after.workspaces?.[0]?.session, '条目必须内联 session')
   assert.equal(after.workspaces[0].firstPromptSent.deepseek, true)
-  assert.ok(!after.sessions['orphan-id'], '脏键必须丢弃')
+  assert.ok(!after.sessions?.['orphan-id'], '脏键必须丢弃')
   assert.ok(!after.firstPromptSent?.['orphan::qianwen'], '脏首问键必须丢弃')
 })
 

@@ -115,24 +115,15 @@ export let activeWorkspaceId: string | null = null
 export function persistWorkspace(): void {
   try {
     fs.mkdirSync(WORKSPACE_CONF_DIR, { recursive: true })
-    // [workspace-schema-v2] 顶层 sessions / firstPromptSent 为**派生兼容键**（旧读方一轮），由条目算出
-    const sessions: Record<string, WorkspaceSession> = {}
-    const firstPromptSent: Record<string, boolean> = {}
-    for (const e of workspaces.values()) {
-      if (e.session) sessions[e.id] = { url: e.session.sessionUrl || e.session.homeUrl, sessionId: e.session.sessionId, updatedAt: e.session.updatedAt }
-      if (e.firstPromptSent) {
-        for (const [m, v] of Object.entries(e.firstPromptSent)) { if (v) firstPromptSent[`${e.id}::${m}`] = true
-        }
-      }
-    }
+    // [workspace-schema-v2][D3] 顶层 sessions / firstPromptSent 已删除：
+    //   恢复循环（loadWorkspaceRegistry）已携带内联字段，并经一个完整重启周期验证；
+    //   旧读方所需的派生键不再写出。**读侧仍兼容**：迁移分支照旧从旧文件的顶层键迁移。
     const body = JSON.stringify({
       schemaVersion: 2,
       root: ROOT,
       at: Date.now(),
       workspaces: [...workspaces.values()],
       activeId: activeWorkspaceId,
-      sessions,
-      firstPromptSent,
     })
     // [workspace-atomic-write-v1] 先写 .tmp 再 rename：迁移整文件重写中途崩溃不留半截文件
     const tmp = `${WORKSPACE_CONF_FILE}.tmp`

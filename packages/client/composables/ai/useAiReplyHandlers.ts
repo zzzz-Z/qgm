@@ -13,7 +13,7 @@ import { useScriptInbox } from '../runner/useScriptInbox'
 // [hooks-relocate-v1] runHook 已从 auto-loop/hooks.ts 迁至 loop-hooks.ts（P1b），供非循环 DONE 分支使用
 import { runHook } from './loop-hooks'
 import { useAutoTakeover } from './useAutoTakeover'
-import { modelIdFromSid, useAiSite } from './useAiSite'
+import { modelIdFromSid, sidForUrl, useAiSite } from './useAiSite'
 import { useAiWaiting } from './useAiWaiting'
 import { resetRulesForSessionBoot, useAiWindow } from './useAiWindow'
 import { transportKind } from './useAiTransport'
@@ -37,6 +37,8 @@ import {
 } from './reply-toasts'
 // [stop-resume-v1] 「停止→判定→续推」职责链的入站收口
 import { beginAutoResume, decideOnResumeTimeout, decideOnStopped, endAutoResume, MAX_AUTO_RESUME } from './stop-resume'
+// [workspace-nav-confirm-v1] 导航确认：收到任意 url-updated 即视为「导航已落地」
+import { confirmNav } from '../data/useWorkspaces'
 
 type EventKindStr = 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary' | 'ai:ask' | 'ai:feedback' | 'ai:decision' | 'ai:need-files' | 'ai:stream'
 
@@ -515,6 +517,10 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   function handleUrlUpdated(payload: MessageEvent['data']): void {
     const u = String(payload.url || '')
     if (u && u !== siteUrl.value) setSiteUrl(u)
+    // [workspace-nav-confirm-v1] 收到 URL 变更即视为「导航已落地」，**必须在反解 return 之前**：
+    //   会话 URL 失效时站点会静默重定向回首页，此时反解必失败——若把确认放在反解之后，
+    //   这种「导航其实完成了但落到首页」的情形会误报超时。
+    if (u) confirmNav(sidForUrl(u))
     // [workspace-schema-v2] 两条硬约束：
     //   ① 不得回退 activeSessionId（P4）：两条发帧链路都不带会话 id，回退会把 B 的 id 写到 A 的绑定上；
     //   ② 反解失败必须**跳过持久化**（Q2）：用户只是浏览到首页也会触发本帧，写空会话会用首页覆盖好绑定。
