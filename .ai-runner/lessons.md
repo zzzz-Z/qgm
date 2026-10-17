@@ -341,6 +341,8 @@ ESM 测试文件里 `require.resolve` 的相对基准是**测试文件自身**�
 
 补充（2026-10-09）：传该参数会报 `Failed to load custom Reporter from basic`，栈里全是 `RunnerError`，极易误判为测试代码问题。正确做法是走项目根配置 `npx vitest run --config vitest.config.ts <file>`，不加 reporter 参数。
 
+补充（2026-10-17）：传了会在 Startup Error 里报 `Failed to load custom Reporter from basic`，看起来像测试失败，其实测试一个都没跑。默认 reporter 即可。
+
 ## 全仓 eslint 的闸门判据：对 baseline 只拦新增 + 排除运行态目录
 
 [VERIFIED] 2026-10-05 A · `fullgate.ts` 的 `lintErrorsReal` 实测参数含 `--ignore-pattern .workbuddy/** --ignore-pattern .ai-runner/**`；且现为 `eslint .`（全仓）+ baseline 判据，不再接受变更集路径
@@ -2915,3 +2917,7 @@ restart 轮失败 → 下一轮探活恢复。
 ## 主目录不是禁区
 
 `SYSTEM.md` 的 `READ_BLACKLIST`（`interceptor.cjs:71-82`）只拦 `.env` / `.credentials` / `.pem` / `.key` / `id_rsa` / `.npmrc` 等敏感文件，不拦 `.dsh` 这类普通目录。上一轮「沙箱无法访问主目录」的推断没有任何依据，属于典型的 `capability-negation-guard` 违规（未经探针验证的能力否定）。
+
+## 模块级 Promise 缓存必须显式随「上下文维度」失效
+
+`load-rules.ts` 注释写的是「单次会话内内容视为稳定」，但实际生命周期是整个页面——一旦引入多工作区，缓存 key 里缺 root 维度就会串。凡在 `composables/**` 里写模块级 `let _xxxPromise` / `ref(...)` 单例，都要同步问一句「它的作用域是页面还是上下文」。

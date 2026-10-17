@@ -50,6 +50,12 @@ async function resetSessionContext(): Promise<void> {
     const { clearInbox } = await import('../runner/useScriptInbox')
     clearInbox()
   } catch { /* 未就绪：忽略 */ }
+  // [rules-cache-invalidate-v1] 切/建/删工作区必须失效 SYSTEM.md / AGENTS.md 的 Promise 缓存：
+  //   load-rules 的缓存是模块级单例、与 root 无关，不失效则新工作区首问仍带上一工作区的规则。
+  try {
+    const { clearRulesCache } = await import('../ai/load-rules')
+    clearRulesCache()
+  } catch { /* 未就绪：忽略 */ }
 }
 
 /**
