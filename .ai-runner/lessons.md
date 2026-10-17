@@ -3011,3 +3011,7 @@ vitest 配置已 `exclude: ['**/*.spec.ts']`，但外部 runner（如直接 `nod
 ## 源码断言测试：断言前必须剥行注释
 
 注释里写了「一旦有 `await`（网络请求）」→ `indexOf('await ')` 命中注释而非代码，测试假红/假绿。剥离方式：逐行 `l.slice(0, l.indexOf('//'))`（本仓 `SYSTEM.md` §16 台账「残差断言必须排除注释行」的同类陷阱，已在 `AGENTS.md` 的踩坑记录里记过，这次又踩了）。
+
+## `pm2 restart` 必须放在 `pnpm build` 之后，且后台跑
+
+本轮用 `{background:true}` detached 起 `pnpm build && pm2 restart ai-runner --update-env`——同步执行会让正在服务本轮的 5175 进程被 `restart` 杀掉，DONE 回执丢失。这与 `AGENTS.md` 里 `post-done-gate-v1` 记录的行为一致。
