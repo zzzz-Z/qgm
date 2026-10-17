@@ -12,7 +12,7 @@ import process from 'node:process'
 import vm from 'node:vm'
 
 const ROOT = process.cwd()
-const INJECT_SIMPLE = 'packages/core/src/headless/headless-inject-simple.ts'
+const INJECT_SIMPLE = 'packages/core/src/headless/headless-fill.ts'
 const AI_HEADLESS = 'packages/core/src/headless/ai-headless.ts'
 const ATTACH_WS = 'packages/core/src/server/attach-ws.ts'
 

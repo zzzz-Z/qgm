@@ -1,14 +1,13 @@
 // [arch-hono/workspace-v1] workspace 路由 Hono 版（fetch handler，不绑 Node 专有 API）
-import { Hono } from 'hono'
-import fs from 'node:fs'
-import path from 'node:path'
+import {
+  clearWorkspace,
+  getHasWorkspace,
+  getRoot,
+} from '../config.js'
 import {
   activateWorkspace,
   clearPersistedWorkspace,
-  clearWorkspace,
   getActiveWorkspaceId,
-  getHasWorkspace,
-  getRoot,
   getWorkspace,
   getWorkspaceFirstPromptSent,
   getWorkspaces,
@@ -18,10 +17,12 @@ import {
   removeWorkspace,
   setWorkspaceFirstPromptSent,
   setWorkspaceSession,
-} from '../config.js'
+} from '../workspace-store.js'
+import { Hono } from 'hono'
+import fs from 'node:fs'
+import path from 'node:path'
 import { execFile } from 'node:child_process'
 
-/** workspace 路由的 Hono 实例 */
 /** [workspace-project-info-v1] 项目画像：切换项目时采集的新项目关键信息 */
 export interface ProjectInfo {
   name: string

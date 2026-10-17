@@ -11,6 +11,8 @@ import { useAiTransport } from '../../composables/ai/useAiTransport'
 import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
 // [worklog-pane-helpers-v1] 纯函数已抽出，降低单文件体积（§4 组件 ≤ 1000）
 import { rowsFor, splitPath } from './worklog-pane-helpers'
+// [worklog-git-browse-v1] 提交历史 / 提交详情 / 分支下拉三簇外提（职责：只读查询与展示）
+import { fmtCommitDate, useGitBrowse } from './worklog-git-browse'
 
 // @desc VSCode 源码管理风格侧栏：提交框 + 变更文件列表 + 点击预览文件内容
 // @why 用户要求把工作日志从弹窗改为 SidePane tab，视觉参照 VSCode 源代码管理面板
@@ -84,30 +86,9 @@ const committing = ref(false)
 const headRef = ref('')
 // [git-branch-display-v1] 当前分支名（顶部展示，对齐 VSCode 源控面板）
 const branchRef = ref('')
-// [git-history-dialog-v1] 提交历史弹窗：按钮触发，拉 /__ai/git/commits
-const commitsOpen = ref(false)
-const commitsLoading = ref(false)
-const commitsData = ref<Array<{ sha: string, short: string, author: string, date: string, subject: string }>>([])
-// [git-switch-branch-v1] 分支切换弹窗
-const branchesOpen = ref(false)
-const branchesLoading = ref(false)
-const branchesList = ref<string[]>([])
-const switchingBranch = ref(false)
+// 提交历史 / 分支下拉状态见 useGitBrowse（下方装配）
 // [git-branch-dropdown-v1] 下拉容器 ref：点击外部关闭（弹窗已改为就地下拉）
 const branchWrapRef = ref<HTMLElement | null>(null)
-// [git-commit-detail-v1] 提交详情弹窗
-const detailOpen = ref(false)
-const detailLoading = ref(false)
-const detailData = ref<{
-  sha: string
-  short: string
-  author: string
-  email: string
-  date: string
-  subject: string
-  body: string
-  files: Array<{ status: string, path: string }>
-} | null>(null)
 // [git-stage-v1] 从 /__ai/git/status 拉到的 XY 状态；提交/暂存操作后刷新
 const stagingStatus = ref<GitStatusFile[]>([])
 
@@ -116,7 +97,6 @@ const { toast } = useToast()
 const {
   aiGenerating,
   aiCommitMsg,
-  aiError,
   pendingCommitRequest,
   pendingCommitSid,
   waitingSince,
@@ -259,8 +239,6 @@ onUnmounted(() => {
   if (unsubscribeReply) { try { unsubscribeReply() } catch { /* ignore */ } unsubscribeReply = null }
   cleanupWorklogCommit()
 })
-
-onClickOutside(branchWrapRef, () => { branchesOpen.value = false })
 
 // [worklog-pane-helpers-v1] rowsFor / statusLetter / statusClass / splitPath 已抽到 ./worklog-pane-helpers
 /**
@@ -422,82 +400,33 @@ async function doCommit(): Promise<void> {
     committing.value = false
   }
 }
-/** [git-switch-branch-v1] 点击分支按钮：已展开则收起，未展开则展开并刷新列表 */
-function toggleBranches(): void {
-  if (branchesOpen.value) { branchesOpen.value = false; return }
-  void openBranches()
-}
-/** [git-switch-branch-v1] 拉分支列表并展开下拉；每次打开都刷新（分支可能已变） */
-async function openBranches(): Promise<void> {
-  branchesOpen.value = true
-  branchesLoading.value = true
-  try {
-    const r = await fetch('/__ai/git/branches', { cache: 'no-store' })
-    const j = await r.json().catch(() => ({})) as { ok?: boolean, current?: string, list?: string[], reason?: string }
-    if (!r.ok || !j.ok) { toast(j.reason || `加载分支失败（HTTP ${r.status}）`, 'error', TOAST_LONG); return }
-    branchesList.value = Array.isArray(j.list) ? j.list : []
-  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
-  finally { branchesLoading.value = false }
-}
-/** [git-switch-branch-v1] 切换分支（dirty 保护由后端强制） */
-async function switchBranch(b: string): Promise<void> {
-  if (switchingBranch.value || b === branchRef.value) return
-  switchingBranch.value = true
-  try {
-    const r = await fetch('/__ai/git/checkout', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ branch: b }),
-    })
-    const j = await r.json().catch(() => ({})) as { ok?: boolean, branch?: string, dirty?: boolean, reason?: string }
-    if (!r.ok || !j.ok) { toast(j.reason || `切换失败（HTTP ${r.status}）`, 'error', TOAST_LONG); return }
-    toast(`已切到 ${j.branch}`, 'success', TOAST_MEDIUM)
-    branchesOpen.value = false
-    // 切完刷新所有：分支名、HEAD、状态
-    commitsData.value = []
-    await load()
-  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
-  finally { switchingBranch.value = false }
-}
-/** [git-commit-detail-v1] 打开提交详情弹窗 */
-async function openDetail(sha: string): Promise<void> {
-  detailOpen.value = true
-  detailLoading.value = true
-  detailData.value = null
-  try {
-    const r = await fetch(`/__ai/git/commit-detail?sha=${encodeURIComponent(sha)}`, { cache: 'no-store' })
-    const j = await r.json().catch(() => ({})) as { ok?: boolean, detail?: typeof detailData.value, reason?: string }
-    if (!r.ok || !j.ok || !j.detail) { toast(j.reason || `加载详情失败（HTTP ${r.status}）`, 'error', TOAST_LONG); return }
-    detailData.value = j.detail
-  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
-  finally { detailLoading.value = false }
-}
-function closeDetail(): void { detailOpen.value = false }
-/**
- * [git-history-dialog-v1] 打开提交历史弹窗；懒加载，只拉一次。
- * [WHY] 底部常驻列表已删除；用户需要时才拉，避免开 tab 就打 log。
- */
-async function openCommits(): Promise<void> {
-  commitsOpen.value = true
-  if (commitsData.value.length || commitsLoading.value) return
-  commitsLoading.value = true
-  try {
-    const r = await fetch('/__ai/git/commits?limit=100', { cache: 'no-store' })
-    const j = await r.json().catch(() => ({})) as { ok?: boolean, commits?: Array<{ sha: string, short: string, author: string, date: string, subject: string }>, reason?: string }
-    if (!r.ok || !j.ok) { toast(j.reason || `加载提交历史失败（HTTP ${r.status}）`, 'error', TOAST_LONG); return }
-    commitsData.value = Array.isArray(j.commits) ? j.commits : []
-  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error', TOAST_LONG) }
-  finally { commitsLoading.value = false }
-}
-/** [git-history-dialog-v1] 关闭弹窗（不清空数据，二次打开免请求） */
-function closeCommits(): void { commitsOpen.value = false }
-/** [git-history-dialog-v1] ISO8601 → 本地易读时间 */
-function fmtCommitDate(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso || ''
-  const p = (n: number): string => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
+// [worklog-git-browse-v1] 提交历史 / 详情 / 分支下拉簇（只读查询，模板专用状态）
+const {
+  commitsOpen,
+  commitsLoading,
+  commitsData,
+  detailOpen,
+  detailLoading,
+  detailData,
+  branchesOpen,
+  branchesLoading,
+  branchesList,
+  switchingBranch,
+  openCommits,
+  closeCommits,
+  openDetail,
+  closeDetail,
+  toggleBranches,
+  switchBranch,
+} = useGitBrowse({
+  toast,
+  load,
+  branchRef,
+  toastLong: TOAST_LONG,
+  toastMedium: TOAST_MEDIUM,
+})
+// 分支下拉点击外部关闭：须在 branchesOpen 定义之后注册
+onClickOutside(branchWrapRef, () => { branchesOpen.value = false })
 // [worklog-git-actions-v1] git 动作簇外提到同目录模块（§4 组件 1000 行红线）
 const { stageFiles, unstageFiles, stageAll, unstageAll, discardFiles, discardAll } = createGitActions({
   toast,

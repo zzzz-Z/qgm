@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.14
+// @version      1.9.15
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -421,7 +421,7 @@ let _scanRaw = null;
 let _scanText = '';
 /**
  * 剥掉代码块、输入框与可编辑区后的正文文本。
- * [CONSTRAINT] 实现体与 headless-inject.ts / headless-inject-simple.ts 两处同构
+ * [CONSTRAINT] 实现体与 headless-inject.ts / headless-fill.ts 两处同构
  *   （守卫测试 limit-marker-guard 的 body-text parity 用例对拍）。
  */
 function bodyText() {
@@ -453,7 +453,7 @@ function scanBodyText() {
  *   与「对话长度已达上限」（名词在前）；且「上限」后必须自带动作子句，
  *   否则正文自指 + 侧栏常驻「开启新对话」按钮的拼接会造成假命中。
  * [CONSTRAINT] 英文分支必须邻近 token 数：裸 matching `maximum context length` 会被
- *   回填进会话的源码行自指命中。三处（本文件 / headless-inject / headless-inject-simple）
+ *   回填进会话的源码行自指命中。三处（本文件 / headless-inject / headless-fill）
  *   必须严格同构，守卫测试 limit-marker-guard 对拍。
  */
 function countLimitMarkers() {

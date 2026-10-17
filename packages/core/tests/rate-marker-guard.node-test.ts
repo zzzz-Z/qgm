@@ -12,7 +12,7 @@ import process from 'node:process'
 const ROOT = process.cwd()
 
 const INJECT = 'packages/core/src/headless/headless-inject.ts'
-const INJECT_SIMPLE = 'packages/core/src/headless/headless-inject-simple.ts'
+const INJECT_SIMPLE = 'packages/core/src/headless/headless-fill.ts'
 
 // [CONSTRAINT] 提取锚点：三处正则均为 /(?:消息|发送|操作|请求|访问)过于频繁 …… /gi 形式的字面量；锚点若变，本守卫须同步
 const RE_LITERAL = /\/\(\?:消息\|发送\|操作\|请求\|访问\)过于频繁[\s\S]*?\/gi/g

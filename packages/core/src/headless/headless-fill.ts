@@ -1,7 +1,7 @@
 /* eslint-disable ts/ban-ts-comment -- 需禁用整文件类型检查 */
 // @ts-nocheck
 
-// [headless-inject-simple-v1] 从 headless-inject.ts 抽出的短小 page.evaluate 目标函数。
+// [headless-fill-v1] 从 headless-inject.ts 抽出的短小 page.evaluate 目标函数。
 // [WHY] headless-inject.ts 超 §4 模块 400 行；这些函数无共享状态依赖（detectReplyInPage 与 resetReplyDedup 除外），可独立。
 // [CONSTRAINT] 函数体经 page.evaluate 序列化传入浏览器执行；禁止引用外部闭包变量。
 // [CHANGE-IMPACT] headless-inject.ts 通过 re-export 保持对外 API 兼容。

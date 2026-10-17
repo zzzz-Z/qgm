@@ -340,7 +340,7 @@ test('closure-gate: 油猴通道必须为被延迟的块排复查（否则块永
 })
 
 test('closure-gate: 内置通道的轮次重置必须清掉门基线', () => {
-  const src = read('packages/core/src/headless/headless-inject-simple.ts')
+  const src = read('packages/core/src/headless/headless-fill.ts')
   assert.ok(
     src.includes('window.__aiRunnerClosureGate = null'),
     'resetReplyDedupInPage 未清门 ⇒ 上一轮的长度基线会让新回复第一帧就被判「已静止」，未闭合块提前放行',

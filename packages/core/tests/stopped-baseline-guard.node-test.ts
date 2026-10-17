@@ -27,7 +27,7 @@ import vm from 'node:vm'
 const ROOT = process.cwd()
 const USERSCRIPT = 'scripts/tampermonkey-session-id.user.js'
 const INJECT = 'packages/core/src/headless/headless-inject.ts'
-const INJECT_SIMPLE = 'packages/core/src/headless/headless-inject-simple.ts'
+const INJECT_SIMPLE = 'packages/core/src/headless/headless-fill.ts'
 
 function read(rel: string): string {
   return fs.readFileSync(path.join(ROOT, rel), 'utf8')
@@ -173,7 +173,7 @@ test('stopped parity: 关键词 stopped 代码形态两通道均不得回潮', (
   ]
   for (const form of HL_FORMS) {
     assert.ok(!hl.includes(form), `headless 关键词 stopped 代码形态 ${form} 不得回潮`)
-    assert.ok(!simple.includes(form), `headless-inject-simple 关键词 stopped 代码形态 ${form} 不得回潮`)
+    assert.ok(!simple.includes(form), `headless-fill 关键词 stopped 代码形态 ${form} 不得回潮`)
   }
   // 油猴侧死码形态由 stopped-btn-guard 的专用例守（countStopMarkers 等 7 种），此处不重复
   assert.ok(!us.includes('scanText.match(/当前问题已停止'), '油猴侧关键词 stopped 不得回潮')

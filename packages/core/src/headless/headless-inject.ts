@@ -6,7 +6,7 @@
 // 从 scripts/tampermonkey-session-id.user.js 移植（findInputBox / fillInput / findSendButton / sendEnter / clickStopGenerating / clickNewSession）。
 // 约束：纯函数、无外部闭包引用 —— 序列化后代码结构必须完整。
 
-// [headless-inject-simple-wired-v1] 6 个短函数已抽到 headless-inject-simple.ts
+// [headless-fill-wired-v1] 6 个短函数已抽到 headless-fill.ts
 
 export {
   clickNewSessionInPage,
@@ -17,7 +17,7 @@ export {
   resetReplyDedupInPage,
   stopGeneratingInPage,
   verifyFillSentInPage,
-} from './headless-inject-simple.js'
+} from './headless-fill.js'
 
 /**
  * 检测 Reply In Page
@@ -31,10 +31,10 @@ export function detectReplyInPage(siteCfg = {}) {
 
   // [limit-scan-strip-v1] 触顶/停止/busy/频控四类标记探针只扫「正文」：剥掉代码块、输入框与可编辑区。
   // [WHY] 工作台把脚本 stdout 用 ``` 围栏回填进会话（prompt-builder appendRawOutputs）⇒ 页面里落成
-  //   <pre><code>，而源码/文档里含探针自己的词表（如本目录 headless-inject-simple.ts 的
+  //   <pre><code>，而源码/文档里含探针自己的词表（如本目录 headless-fill.ts 的
   //   `maximum context length`）⇒ 整页 textContent 自指命中，误报「已达长度上限」并掐掉一整轮
   //   （2026-10-10 12:02 实测；复现脚本 .ai-runner/tmp/limit-fp-repro.cjs，剥壳后 1 → 0）。
-  // [CONSTRAINT] 实现体与 headless-inject-simple.ts、scripts/tampermonkey-session-id.user.js 两处
+  // [CONSTRAINT] 实现体与 headless-fill.ts、scripts/tampermonkey-session-id.user.js 两处
   //   逐字符同构（守卫测试 limit-marker-guard 的 body-text parity 用例）。
   // [CONSTRAINT] **篇幅/增长类**读取点（bodySignature / stillStreamingReply）不得改走本函数——
   //   代码块属于回复正文，剥掉会让「正文是否仍在增长」的判据失真。
@@ -108,7 +108,7 @@ export function detectReplyInPage(siteCfg = {}) {
   // [rate-retry-v1] 频控感知：发送被站点「消息发送过于频繁」拒收时本轮不可能有回复，
   // 立即推 error 让前端 toast 告知原因（复用 busy 通道），而不是干等 90s/180s 超时。
   // [CONSTRAINT] 按出现次数 + 基线去重：历史消息里的旧频控文案不触发；本轮只推一次；
-  //              正则与 headless-inject-simple.ts 的 verifyFillSentInPage / resetReplyDedupInPage 两处内联同构
+  //              正则与 headless-fill.ts 的 verifyFillSentInPage / resetReplyDedupInPage 两处内联同构
   //              （守卫测试 rate-marker-guard.node-test.ts）
   if (!dedup._rateReported) {
     const rateMessages = scanText.match(/(?:消息|发送|操作|请求|访问)过于频繁|过于频繁[，,\s]*请稍后重试|please\s+slow\s+down|too\s+many\s+requests|rate\s+limit/gi) || []
@@ -247,7 +247,7 @@ export function detectReplyInPage(siteCfg = {}) {
   //       （工作台自身的任务文案作为 AI 回复落进会话 DOM）；② 正文与侧栏常驻按钮「开启新对话」
   //       在 textContent 里相接（v2 的「请」是 `请?` 可缺省）。故中文触顶**必须自带动作子句**才算数。
   // [CONSTRAINT] 基线去重仍保留：只在「计数增长」时推送，排除历史消息里的旧标记。
-  // [CONSTRAINT] 正则须与 headless-inject-simple.ts 基线、油猴 countLimitMarkers 三处严格同构，改一处必同步
+  // [CONSTRAINT] 正则须与 headless-fill.ts 基线、油猴 countLimitMarkers 三处严格同构，改一处必同步
   // [limit-en-branch-v1] 英文分支收紧：`maximum context length` 原先**裸匹配**（无任何上下文要求），
   //   而「被工作台 dump 进会话的源码/文档行」里恰好有探针自己的这条词表 ⇒ 自指命中（2026-10-10 12:02 实锤）。
   //   改为必须邻近 token 数：`(?:is|of)\s*\d+` 或后随 `\d+\s*tokens`；真实 API 错文

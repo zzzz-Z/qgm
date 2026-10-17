@@ -3177,3 +3177,21 @@ TS 版把 `marked` 判定抽成顶层 `hasScriptHead`，沙箱只抽了 `extract
 ## 守卫不能复用被测脚本的实现
 
 `skills-dual-layer.node-test.ts` 自己实现了一遍 `walk`，没有 import 生成器的函数——若复用，生成器写坏了守卫会跟着坏，等于没判据。
+
+## 批量改写 import 块时贪婪正则吞掉相邻语句
+
+拆分 `routes/workspace.ts` 的 import 时用 `/<import \{[\s\S]*?\} from '\.\.\/config\.js'/` 匹配替换，非贪婪仍从第一个 `import {` 起算，把 `hono` / `node:fs` / `node:path` 三条导入与 `new Hono()` 声明行一起吞掉。tsc 报出 60+ 条 `Cannot find name 'fs'/'path'/'Hono'`。
+
+修法：改 import 块时锚点必须包含前一行上下文（如 `import { execFile } from 'node:child_process'\n\n/** 注释`），或直接按行号切片重建，不要用「从第一个 `import {` 到目标 `from`」的跨度正则。
+
+## 拆分后 barrel 与测试是漏网的两类消费方
+
+`config.ts` 拆分后 `pnpm tsc` 立刻报 `index.ts` 与 `deps.ts` 找不到符号——它们不是普通调用点，而是 re-export 层，grep `from '...config.js'` 的常规做法会看到它们但容易误判为「正常引用」。
+
+修法：拆分公共模块后，除调用方外必须单独核查三类：① 包根 barrel（`index.ts`）② `deps.ts` 之类的依赖聚合层 ③ 测试里的动态 `await import()`（静态 grep 抓不到符号使用，需先取变量名再按 `var.symbol` 逐行扫描重定向）。
+
+## 子进程验证必须紧接 flush
+
+`writeText` 只进 overlay，`__AI__.shell` 起的 eslint/tsc 读真盘。清完 `aiError` 后立即跑 eslint 仍报同一条 warning，误以为改错了位置；`flush()` 后 grep 确认文件里已无该符号，重跑即通过。
+
+修法：凡是「写完源码 → 立刻用 shell 跑 lint/tsc/测试」的验证轮，脚本第一步就 `await __AI__.flush()`。

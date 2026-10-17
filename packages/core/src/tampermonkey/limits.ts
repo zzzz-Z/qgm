@@ -17,7 +17,7 @@ let _scanText = ''
 
 /**
  * 剥掉代码块、输入框与可编辑区后的正文文本。
- * [CONSTRAINT] 实现体与 headless-inject.ts / headless-inject-simple.ts 两处同构
+ * [CONSTRAINT] 实现体与 headless-inject.ts / headless-fill.ts 两处同构
  *   （守卫测试 limit-marker-guard 的 body-text parity 用例对拍）。
  */
 function bodyText(): string {
@@ -48,7 +48,7 @@ function scanBodyText(): string {
  *   与「对话长度已达上限」（名词在前）；且「上限」后必须自带动作子句，
  *   否则正文自指 + 侧栏常驻「开启新对话」按钮的拼接会造成假命中。
  * [CONSTRAINT] 英文分支必须邻近 token 数：裸 matching `maximum context length` 会被
- *   回填进会话的源码行自指命中。三处（本文件 / headless-inject / headless-inject-simple）
+ *   回填进会话的源码行自指命中。三处（本文件 / headless-inject / headless-fill）
  *   必须严格同构，守卫测试 limit-marker-guard 对拍。
  */
 function countLimitMarkers(): number {

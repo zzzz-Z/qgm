@@ -17,7 +17,7 @@
 // 历史教训 ③（误报，2026-10-10 实测，[limit-scan-strip-v1] 的动因）：上述「整页 textContent」口径还有
 // **自指**通道——工作台把脚本 stdout 用 ``` 围栏回填进会话（prompt-builder appendRawOutputs）⇒ 页面里
 // 落成 <pre><code>，而源码/文档里含探针自己的词表（`maximum context length` 就在
-// headless-inject-simple.ts 的触顶正则里）⇒ 命中并误报「已达长度上限」，掐掉一整轮（12:02:58 实测）。
+// headless-fill.ts 的触顶正则里）⇒ 命中并误报「已达长度上限」，掐掉一整轮（12:02:58 实测）。
 // 修法是三处探针统一只扫「剥壳后的正文」：新增局部 bodyText()（同样只能内联 3 份）。
 // 故本守卫同时断言：④ 三处 bodyText() 实现体一致；⑤ 剥壳后案例 1/3 归零、真 banner（案例 4/5）不回归；
 // ⑥ 未围栏的可命中文本（案例 2）用 ratchet 锁住。
@@ -42,7 +42,7 @@ const ROOT = process.cwd()
 
 const SOURCES = [
   'packages/core/src/headless/headless-inject.ts',
-  'packages/core/src/headless/headless-inject-simple.ts',
+  'packages/core/src/headless/headless-fill.ts',
   'scripts/tampermonkey-session-id.user.js',
 ]
 
@@ -74,7 +74,7 @@ function buildRe(): RegExp {
 
 test('limit marker parity: 三处触顶正则逐字符一致', () => {
   const [a, b, c] = extractRegexes()
-  assert.equal(b, a, 'headless-inject-simple 与 headless-inject 正则不一致（内联常量分叉）')
+  assert.equal(b, a, 'headless-fill 与 headless-inject 正则不一致（内联常量分叉）')
   assert.equal(c, a, 'userscript 与 headless-inject 正则不一致（内联常量分叉）')
 })
 
@@ -164,7 +164,7 @@ test('body text parity: 三处剥离实现体一致，且确实走 clone + remov
   assert.ok(a.includes('.remove()'), '实现体必须移除命中节点')
   // 归一化后比较：油猴侧是 tsc 转译产物（加分号、if 体拆行），语义相同即通过
   const norm = (x: string) => x.replace(/[;\s]+/g, '')
-  assert.equal(norm(b), norm(a), 'headless-inject-simple 与 headless-inject 的 bodyText 不一致（内联常量分叉）')
+  assert.equal(norm(b), norm(a), 'headless-fill 与 headless-inject 的 bodyText 不一致（内联常量分叉）')
   assert.equal(norm(c), norm(a), 'userscript 与 headless-inject 的 bodyText 不一致（内联常量分叉）')
 })
 
@@ -315,7 +315,7 @@ test('limit marker: 首问注入块不得含标记词表（无围栏注入 ⇒ �
 //   （SiteAdapter 引入后，守卫正则同时扫两种形态）
 const MARKER_SITE_COUNT: Record<string, number> = {
   'packages/core/src/headless/headless-inject.ts': 3, // busy / rate / limit（stopped 关键词探针 2026-10-16 移除：零真阳性 + 自指假阳性，改按钮驱动 isGeneratingInPage）
-  'packages/core/src/headless/headless-inject-simple.ts': 4, // verify.rate / reset.busy / reset.limit / reset.rate（reset.stopped 随关键词探针移除）
+  'packages/core/src/headless/headless-fill.ts': 4, // verify.rate / reset.busy / reset.limit / reset.rate（reset.stopped 随关键词探针移除）
   'scripts/tampermonkey-session-id.user.js': 1, // countLimitMarkers（stopped 探针 2026-10-16 起按钮驱动，关键词 countStopMarkers 已删）
 }
 // [allowlist] 唯一例外：verifyFillSentInPage 的频控探针读 tail（整页 raw 末 3000 字符）。
@@ -401,7 +401,7 @@ test('裸串 census: 英文触顶整串不得在源码里连写（dump 进会话
 // [CONSTRAINT] 只锁结构不锁实现：headless 用 dedup 对象属性、油猴用闭包变量，形态本就不同。
 const LIMIT_FLAG_SITES = {
   headlessInject: 'packages/core/src/headless/headless-inject.ts',
-  headlessSimple: 'packages/core/src/headless/headless-inject-simple.ts',
+  headlessSimple: 'packages/core/src/headless/headless-fill.ts',
   userscript: 'scripts/tampermonkey-session-id.user.js',
 }
 
