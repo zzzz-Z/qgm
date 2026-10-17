@@ -74,7 +74,9 @@
     color: var(--text-2);
     cursor: pointer;
     box-shadow: 0 2px 8px rgb(0 0 0 / 20%);
-    transition: color 0.15s ease, background 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease;
   }
   .side-drawer-trigger:hover {
     color: var(--text);

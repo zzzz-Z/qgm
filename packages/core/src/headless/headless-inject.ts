@@ -158,6 +158,15 @@ export function detectReplyInPage() {
       ].filter(Boolean).join(' ')
       if (STOP_LABEL_RE.test(lbl)) return true
     }
+    // [generating-gate-v3] 全文档兜底：智谱等站点的停止按钮可能不在输入框 scope 内，导致漏判生成中
+    if (!box || scope !== document) {
+      const docBtns = document.querySelectorAll('button, div[role="button"], span[role="button"]')
+      for (const el of docBtns) {
+        if (el.offsetParent === null) continue
+        const txt = (el.getAttribute('aria-label') || '') + (el.getAttribute('title') || '') + (el.textContent || '')
+        if (/停止生成|停止回答|停止输出/.test(txt)) return true
+      }
+    }
     // DeepSeek 圆形按钮无标签 ⇒ 结构化 + 图签名兜底（与油猴 findStopGeneratingBtnStructural 同构：
     //   form 优先，否则从 parentElement 向上 8 层找含圆钮的根）
     let root = null

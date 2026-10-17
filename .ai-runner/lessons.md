@@ -3019,3 +3019,11 @@ vitest 配置已 `exclude: ['**/*.spec.ts']`，但外部 runner（如直接 `nod
 ## `__AI__.tasks.push` 返回形状不是 `{todo:[{id}]}`
 
 按 SYSTEM.md §2 的描述以为 `todo` 是任务对象数组，实际写成 `(pushed.todo || []).map(x => x.id)` 时抛 `TypeError: .map is not a function` —— 脚本整体 exit 7，overlay 全部丢弃（当轮 patch 白做）。取 id 前先打印 `typeof pushed.todo` 与首元素形状，别照文档猜字段结构；拿不准就用 `tasks.list()` 反查。
+
+## 智谱停止按钮不在输入框 scope 内
+
+`findInputBox()` 从 `textarea` 向上找 `closest('form, [class*="input"], ...')`，但智谱的停止按钮挂载在页面级固定定位容器上，不在该 scope 中，因此原标签匹配全 miss。已用「`scope` 内无命中时全文档扫描可见按钮」兜底。
+
+## 顺手修复 lint 报错
+
+`script-panel.scss` 的历史遗留问题只在全量 lint 时暴露，如果你只在本地跑部分单测不会发现。需要定期 `pnpm verify` 兜底。

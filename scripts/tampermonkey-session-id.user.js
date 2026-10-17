@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.3
+// @version      1.9.4
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -766,6 +766,15 @@
         el.textContent,
       ].filter(Boolean).join(' ')
       if (STOP_LABEL_RE.test(lbl)) out.push(el)
+    }
+    // [generating-gate-v3] 全文档兜底：智谱等站点的停止按钮可能不在输入框 scope 内，导致漏判生成中
+    if (out.length === 0) {
+      const docBtns = document.querySelectorAll('button, div[role="button"], span[role="button"]')
+      for (const el of docBtns) {
+        if (el.offsetParent === null) continue
+        const txt = (el.getAttribute('aria-label') || '') + (el.getAttribute('title') || '') + (el.textContent || '')
+        if (/停止生成|停止回答|停止输出/.test(txt)) out.push(el)
+      }
     }
     return out
   }
