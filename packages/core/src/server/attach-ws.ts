@@ -22,15 +22,30 @@ type AnyHttpServer = Pick<import('node:events').EventEmitter, 'on' | 'off'>
 type AliveWs = WebSocket & { isAlive?: boolean }
 const HEARTBEAT_MS = 30000
 
-/** [attach-ws-buffer-factory-v1] 外发消息缓冲：仅记录可重放的业务帧，上限 30 条 */
+/**
+ * [attach-ws-buffer-factory-v1] 外发消息缓冲：仅记录可重放的业务帧，单 sid 上限 30 条。
+ * [attach-ws-buffer-sid-cap-v1] sid 数量同样有上限：原实现 key 只在 dispose 时 clear，
+ *   而 sid 随浏览器标签页 / 刷新 / 重连单调增加 ⇒ Map 无界增长，每个 key 还各留最多 30 条
+ *   reply（含完整脚本正文）。达上限时淘汰最旧 key（Map 保插入序，取首个即最久未新增者），
+ *   与 LRU 近义：仍在活跃推送的 sid 每帧都会先 delete 再 set 重新入队尾。
+ * [CONSTRAINT] 淘汰只丢「重放能力」，不影响在线会话：会话本身的浏览器上下文由 pool 持有。
+ */
 const _SRV_BUF_MAX = 30
+const _SRV_SID_MAX = 64
 function createBufferOut(buf: Map<string, unknown[]>): (sid: string, payload: unknown) => void {
   return (sid, payload) => {
     if (!sid) return
     const t = (payload as { t?: string }).t || ''
     if (t !== 'headless:reply' && t !== 'headless:script' && t !== 'headless:summary' && t !== 'headless:new-session-created') return
     let arr = buf.get(sid)
-    if (!arr) { arr = []; buf.set(sid, arr) }
+    if (!arr) {
+      if (buf.size >= _SRV_SID_MAX) {
+        const oldest = buf.keys().next()
+        if (!oldest.done) buf.delete(oldest.value)
+      }
+      arr = []
+      buf.set(sid, arr)
+    }
     arr.push(payload)
     if (arr.length > _SRV_BUF_MAX) arr.shift()
   }
@@ -243,6 +258,8 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         const sid = String(msg.sid || 'default')
         const stop = replyPollers.get(sid)
         if (stop) { stop(); replyPollers.delete(sid) }
+        // [attach-ws-buffer-sid-cap-v1] sid 已关闭即无重放需求：同步删缓冲，与 replyPollers 同生命周期
+        _serverMsgBuf.delete(sid)
         await pool.close(sid)
         send({ t: 'headless:state', sid, state: 'idle', detail: 'closed' })
         break

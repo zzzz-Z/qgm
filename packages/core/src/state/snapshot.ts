@@ -275,11 +275,21 @@ export function gcSnapshots(keep: number) {
 }
 
 /**
- * [tmp-reaper-v1] 清理 .ai-runner/tmp 下过期的运行产物（overlay.json / tools.jsonl）。
+ * [tmp-reaper-runid-v2] runId 前缀：13 位时间戳 + 4 位 base36 + 连字符（如 1792247404191-hl83-）。
+ * [WHY] 用前缀而非后缀识别「本轮运行的产物」：产物类型会增长（现有 overlay.json /
+ *   tools.jsonl，将来还可能有别的），按后缀枚举必然漏掉新类型，而漏掉的产物会永久滞留
+ *   —— 这正是本次修复要解决的成因。
+ */
+const RUN_ID_PREFIX_RE = /^\d{13}-[a-z0-9]{4}-/
+
+/**
+ * [tmp-reaper-v1] 清理 .ai-runner/tmp 下过期的运行产物。
+ * [tmp-reaper-runid-v2] 选择器扩为「runId 前缀 或 旧后缀白名单」：runId 前缀兜住所有本轮
+ *   产物（含未来新增类型），旧后缀白名单兼容历史命名。
  * [WHY] /run 只 unlink 当前 runId 的 overlay，toolLog 作为自检证据刻意保留；
  *   崩溃/SIGKILL 遗留的过期文件无人清理（实测累积 8444 个），目录单调增长。
- * [CONSTRAINT] 只删两类带 runId 后缀的产物，不动用户手放的探针文件；
- *   单文件 stat 失败视为不可用条目，跳过不报。
+ * [CONSTRAINT] 用户手放的探针文件与下载的工具二进制（probe.json、moli.tar.gz、ffbin 等）
+ *   不匹配 runId 前缀 ⇒ 不会被误删；单文件 stat 失败视为不可用条目，跳过不报。
  * [CONSTRAINT] 无定时器——触发点由调用方决定（当前仅 /run 入口），与
  *   reclaimIdleSessions 同模式；需要定时回收时另开任务并同步注释。
  * @param maxAgeMs 超过此 age 的文件删除；默认 7 天
@@ -292,7 +302,7 @@ export function reapStaleTmp(maxAgeMs = 7 * 24 * 3600 * 1000): number {
     if (!fs.existsSync(dir)) return 0
     const now = Date.now()
     for (const name of fs.readdirSync(dir)) {
-      if (!/-overlay\.json$|-tools\.jsonl$/.test(name)) continue
+      if (!RUN_ID_PREFIX_RE.test(name) && !/-overlay\.json$|-tools\.jsonl$/.test(name)) continue
       const p = path.join(dir, name)
       try {
         if (now - fs.statSync(p).mtimeMs > maxAgeMs) { fs.rmSync(p, { force: true }); removed++ }

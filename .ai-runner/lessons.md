@@ -3207,3 +3207,15 @@ TS 版把 `marked` 判定抽成顶层 `hasScriptHead`，沙箱只抽了 `extract
 `routes/workspace.ts` 里 `/workspace/pick` 与 `/workspace/pick-path` 两个端点各有一份 `const r = await nativePick()`。首轮替换只命中了第一份的前半段，`r.path` 在后续 4 行仍被引用，tsc 报 4 条 `Cannot find name 'r'`——这是「改了一半」的典型形态，且前半段改名成功让错误信息看起来像另一处的问题。
 
 修法：每个端点按「声明 → 所有使用点」整段读回、整段替换；替换后用 `grep -n` 扫该变量名残留，为空才收工。
+
+## `execFileSync` 起的子进程看不见本轮 overlay 写入
+
+给 `session-start.cjs` 加完体积告警后立即跑它，输出仍是旧的「无待清理项」——因为 `writeText` 只进 overlay，`execFileSync` 读真盘。必须先 `await __AI__.flush()` 再跑，否则会误判「改了没生效」并重复修同一处。
+
+修法：任何「改脚本 → 立刻用 shell 跑该脚本验证」的轮次，脚本开头就 `flush()`。这是 `overlay-blind-v1` 在脚本自验场景的实例。
+
+## 体积检查块插在 early-return 之后等于没插
+
+`clean-ai-runner.mjs` 有 `if (!doomed.length) { console.log('[skip] 无可清理项'); return }`。首轮把体积块插在它后面的 `console.log` 锚点处，条目为 0 时整块被跳过，实测输出只有 `[skip]`。
+
+修法：新增的「诊断/告警」逻辑必须放在所有 early-return 之前；锚点选择要看控制流，不能只看文本位置。

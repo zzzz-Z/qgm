@@ -93,6 +93,48 @@ async function main() {
   }
 
   console.log(`test-* 目录 ${testDirs.length} 个（保留 ${KEEP}）| 待清理共 ${doomed.length} 项 | 陈旧阈值 ${DAYS} 天`)
+  // [ai-runner-size-v1] 体积可见性：原实现只数条目，145MB 单目录只算 1 项 ⇒ 永远触发不了告警。
+  // 逐目录递归求大小，超阈值时显式列出 TOP5，并单独点名疑似遗留备份（.bak-*）。
+  const SIZE_WARN_BYTES = (Number(process.env.AIR_RUNNER_SIZE_WARN_MB) || 500) * 1024 * 1024
+  async function sizeOf(p) {
+    let total = 0
+    const stack = [p]
+    while (stack.length) {
+      const cur = stack.pop()
+      let st
+      try { st = await stat(cur) } catch { continue }
+      if (st.isFile()) { total += st.size; continue }
+      if (!st.isDirectory()) continue
+      let names = []
+      try { names = await readdir(cur) } catch { continue }
+      for (const n of names) stack.push(join(cur, n))
+    }
+    return total
+  }
+  const dirSizes = []
+  let totalBytes = 0
+  for (const e of entries) {
+    const fp = join(ROOT, e.name)
+    let st
+    try { st = await stat(fp) } catch { continue }
+    const bytes = st.isDirectory() ? await sizeOf(fp) : st.size
+    totalBytes += bytes
+    if (st.isDirectory()) dirSizes.push({ name: e.name, bytes })
+  }
+  dirSizes.sort((a, b) => b.bytes - a.bytes)
+  const mb = n => (n / 1024 / 1024).toFixed(0)
+  if (totalBytes > SIZE_WARN_BYTES) {
+    console.log(`体积 [warn] .ai-runner 总计 ${mb(totalBytes)}MB（阈值 ${mb(SIZE_WARN_BYTES)}MB）`)
+    console.log(`  TOP: ${dirSizes.slice(0, 5).map(d => `${d.name}=${mb(d.bytes)}MB`).join(', ')}`)
+    for (const d of dirSizes) {
+      if (d.name.includes('.bak-') && d.bytes > 10 * 1024 * 1024) {
+        console.log(`  [hint] 疑似遗留备份 ${d.name}（${mb(d.bytes)}MB）—— 确认后手工删除`)
+      }
+    }
+  } else {
+    console.log(`体积 ok：.ai-runner 总计 ${mb(totalBytes)}MB`)
+  }
+
   if (!doomed.length) { console.log('[skip] 无可清理项'); return }
 
   for (const d of doomed.slice(0, 15)) console.log(`  ${APPLY ? '删除' : '将删除'} [${d.kind}] ${d.name}`)

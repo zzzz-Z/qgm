@@ -181,12 +181,21 @@ logHead('8.5 .ai-runner 垃圾')
 // CONSTRAINT: 只读不 block——垃圾不挡开发；跑不起来也只 warn。
 try {
   const out = execFileSync('node', ['scripts/clean-ai-runner.mjs'], { cwd: ROOT, encoding: 'utf8' })
-  const countMatch = out.match(/待清理共 (\d+) 项/)
-  const staleCount = countMatch ? Number(countMatch[1]) : 0
+  const countMatch = out.match(/待清理共 (?<n>\d+) 项/)
+  const staleCount = countMatch ? Number(countMatch.groups.n) : 0
   if (staleCount > 0) {
     logWarn(`${staleCount} 项待清理 —— 跑 pnpm clean:ai-runner --apply（dry-run 见 pnpm clean:ai-runner）`)
     out.trim().split(NL).slice(0, 4).forEach((l) => { if (l.trim()) console.log(`      ${l.trim()}`) })
   } else { logOk('无待清理项') }
+  // [ai-runner-size-v1] 体积独立播报：条目数为 0 也可能已累积数百 MB（单目录只算 1 项），
+  //   故体积与条目数分开判定，两者都可能单独触发告警。
+  const sizeLine = out.split(NL).find(l => l.includes('体积 [warn]'))
+  if (sizeLine) {
+    logWarn(sizeLine.replace(/^\s*/, ''))
+    for (const l of out.split(NL)) {
+      if (/^\s+(?:TOP:|\[hint\])/.test(l)) console.log(`      ${l.trim()}`)
+    }
+  }
 } catch (e) { logWarn(`clean dry-run 失败: ${String(e.message || e).slice(0, 80)}`) }
 
 logHead('9. conclusion')
