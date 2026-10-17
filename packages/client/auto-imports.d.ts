@@ -165,6 +165,7 @@ declare global {
   const isDefined: typeof import('@vueuse/core').isDefined
   const isHeadless: typeof import('./composables/ai/useAiWindowSend').isHeadless
   const isMarkdownPath: typeof import('./composables/useFileContentHtml').isMarkdownPath
+  const isNewerVersion: typeof import('./composables/ui/useUserscriptUpdate').isNewerVersion
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
   const isReadonly: typeof import('vue').isReadonly
@@ -527,6 +528,7 @@ declare global {
   const useTransition: typeof import('@vueuse/core').useTransition
   const useUrlSearchParams: typeof import('@vueuse/core').useUrlSearchParams
   const useUserMedia: typeof import('@vueuse/core').useUserMedia
+  const useUserscriptUpdateWatcher: typeof import('./composables/ui/useUserscriptUpdate').useUserscriptUpdateWatcher
   const useVModel: typeof import('@vueuse/core').useVModel
   const useVModels: typeof import('@vueuse/core').useVModels
   const useVibrate: typeof import('@vueuse/core').useVibrate
@@ -826,6 +828,7 @@ declare module 'vue' {
     readonly isDefined: UnwrapRef<typeof import('@vueuse/core')['isDefined']>
     readonly isHeadless: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['isHeadless']>
     readonly isMarkdownPath: UnwrapRef<typeof import('./composables/useFileContentHtml')['isMarkdownPath']>
+    readonly isNewerVersion: UnwrapRef<typeof import('./composables/ui/useUserscriptUpdate')['isNewerVersion']>
     readonly isProxy: UnwrapRef<typeof import('vue')['isProxy']>
     readonly isReactive: UnwrapRef<typeof import('vue')['isReactive']>
     readonly isReadonly: UnwrapRef<typeof import('vue')['isReadonly']>
@@ -1188,6 +1191,7 @@ declare module 'vue' {
     readonly useTransition: UnwrapRef<typeof import('@vueuse/core')['useTransition']>
     readonly useUrlSearchParams: UnwrapRef<typeof import('@vueuse/core')['useUrlSearchParams']>
     readonly useUserMedia: UnwrapRef<typeof import('@vueuse/core')['useUserMedia']>
+    readonly useUserscriptUpdateWatcher: UnwrapRef<typeof import('./composables/ui/useUserscriptUpdate')['useUserscriptUpdateWatcher']>
     readonly useVModel: UnwrapRef<typeof import('@vueuse/core')['useVModel']>
     readonly useVModels: UnwrapRef<typeof import('@vueuse/core')['useVModels']>
     readonly useVibrate: UnwrapRef<typeof import('@vueuse/core')['useVibrate']>

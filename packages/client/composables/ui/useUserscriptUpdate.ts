@@ -134,14 +134,14 @@ function readSeenVersion(): string | null {
 }
 
 /**
- * 轮询 /userscript/info，判断是否有新版油猴脚本可更新。
+ * 页面加载时拉一次 /userscript/info，判断是否有新版油猴脚本可更新。
  * [WHY] 脚本更新是静默的（Tampermonkey 不会通知当前页面），用户唯一的感知渠道就是工作台这个角标。
- *   轮询而非 SSE：端点本身是「读磁盘元信息」的廉价操作，无需为它开长连接。
- * [CONSTRAINT] 默认 60s：油猴脚本更新是人工操作（改代码 → build），分钟级足够，过快只会白耗请求。
+ * [CONSTRAINT] **只在加载时查一次，不做定时轮询**：油猴脚本更新是人工操作
+ *   （改代码 → build → 刷新工作台），轮询只会持续白耗请求，而刷新页面本就是用户的自然动作。
+ *   需要主动重查时调返回的 refresh()（例如更新动作完成后）。
  *   请求失败静默忽略——本功能是辅助提示，不得因网络抖动给用户报错。
- * @param intervalMs 轮询间隔（毫秒）
  */
-export function useUserscriptUpdateWatcher(intervalMs = 60000) {
+export function useUserscriptUpdateWatcher() {
   const hasUpdate = ref(false)
   const latestVersion = ref<string | null>(null)
   const seenVersion = ref<string | null>(readSeenVersion())
@@ -167,7 +167,6 @@ export function useUserscriptUpdateWatcher(intervalMs = 60000) {
   }
 
   onMounted(() => { void refresh() })
-  useIntervalFn(() => { void refresh() }, intervalMs)
 
   return { hasUpdate, latestVersion, seenVersion, refresh, markSeen }
 }
