@@ -65,6 +65,28 @@ export function decideOnStopped(sid: string): { resume: boolean, reason: 'user-s
   return { resume: true, reason: 'auto' }
 }
 
+/**
+ * [resume-watchdog-v1] 续推看门狗超时后的重试决策（单一入口）。
+ * [WHY] 续推发出后 45s 无任何真实回复，多半是页面探针静默失效或回复被吞；
+ *   与其只提示用户手动发，不如在配额内自动再试一次——但必须两条硬约束：
+ *   ① 用户最近主动停过 ⇒ 绝不自动重发（尊重意图，且主动停不该被机器覆盖）；
+ *   ② 总重试次数仍受 MAX_AUTO_RESUME 约束（与 stopped 决策共用同一计数器，防无限重试）。
+ * [CONSTRAINT] 只读用户停止标记（不像 decideOnStopped 那样消费）——该标记仍须留给
+ *   真正的 stopped 到达时判定，否则自动重试会把「用户停过」这一事实抹掉。
+ */
+export function decideOnResumeTimeout(sid: string): { retry: boolean, reason: 'user-stop' | 'max-reached' | 'auto' } {
+  if (!sid) return { retry: false, reason: 'user-stop' }
+  const t = userStopAtBySid.get(sid)
+  if (t !== undefined) {
+    if (Date.now() - t <= USER_STOP_TTL_MS) return { retry: false, reason: 'user-stop' }
+    userStopAtBySid.delete(sid)
+  }
+  const n = resumeCountBySid.get(sid) || 0
+  if (n >= MAX_AUTO_RESUME) return { retry: false, reason: 'max-reached' }
+  resumeCountBySid.set(sid, n + 1)
+  return { retry: true, reason: 'auto' }
+}
+
 /** 新一轮 fill/rotate 时重置续推计数（新提问不该继承上一轮的配额） */
 export function resetResumeCount(sid: string): void {
   if (sid) resumeCountBySid.delete(sid)

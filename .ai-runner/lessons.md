@@ -2949,3 +2949,11 @@ restart 轮失败 → 下一轮探活恢复。
 ## 守卫测试里的字符串引号
 
 `it('... copyAndFill('继续') ...')` 内层单引号会提前闭合字符串，tsc/eslint 同时报 `Parsing error`。标题里不要放未转义的引号。
+
+## 自动重试不能消费「用户主动停」标记
+
+`decideOnStopped` 会 `delete` 该标记，若看门狗决策也照做，一次自动重试就会把「用户停过」这一事实抹掉，后续 stopped 到达时会被误判为平台中断而继续续推。故 `decideOnResumeTimeout` 只读不删（TTL 过期才清）。
+
+## 重试后必须重挂看门狗
+
+否则第二轮失败无人发现，自愈链条在第一跳就断了。守卫里专门断言了 `armResumeWatchdog(sid)` 出现在 retry 分支内。

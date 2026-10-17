@@ -33,6 +33,7 @@ declare global {
   const PHASE_ERROR_CLASS: typeof import('./utils/timeline-build').PHASE_ERROR_CLASS
   const PHASE_LABEL: typeof import('./utils/timeline-build').PHASE_LABEL
   const REFRESH_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').REFRESH_GUARD_MS
+  const RESUME_WATCHDOG_MS: typeof import('./composables/ai/useAiReplyHandlers').RESUME_WATCHDOG_MS
   const STOPPED_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').STOPPED_GUARD_MS
   const STOPPED_HEAD: typeof import('./utils/stop-notice').STOPPED_HEAD
   const STOPPED_PLAIN_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').STOPPED_PLAIN_GUARD_MS
@@ -196,6 +197,7 @@ declare global {
   const normalizeStopHit: typeof import('./utils/stop-notice').normalizeStopHit
   const notifyLimit: typeof import('./composables/ai/reply-toasts').notifyLimit
   const notifyResumeExhausted: typeof import('./composables/ai/reply-toasts').notifyResumeExhausted
+  const notifyResumeTimeout: typeof import('./composables/ai/reply-toasts').notifyResumeTimeout
   const notifySelfcheckReject: typeof import('./composables/ai/reply-toasts').notifySelfcheckReject
   const notifySiteError: typeof import('./composables/ai/reply-toasts').notifySiteError
   const notifyStopped: typeof import('./composables/ai/reply-toasts').notifyStopped
@@ -685,6 +687,7 @@ declare module 'vue' {
     readonly PHASE_ERROR_CLASS: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_ERROR_CLASS']>
     readonly PHASE_LABEL: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_LABEL']>
     readonly REFRESH_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['REFRESH_GUARD_MS']>
+    readonly RESUME_WATCHDOG_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['RESUME_WATCHDOG_MS']>
     readonly STOPPED_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['STOPPED_GUARD_MS']>
     readonly STOPPED_HEAD: UnwrapRef<typeof import('./utils/stop-notice')['STOPPED_HEAD']>
     readonly STOPPED_PLAIN_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['STOPPED_PLAIN_GUARD_MS']>
@@ -848,6 +851,7 @@ declare module 'vue' {
     readonly normalizeStopHit: UnwrapRef<typeof import('./utils/stop-notice')['normalizeStopHit']>
     readonly notifyLimit: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifyLimit']>
     readonly notifyResumeExhausted: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifyResumeExhausted']>
+    readonly notifyResumeTimeout: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifyResumeTimeout']>
     readonly notifySelfcheckReject: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifySelfcheckReject']>
     readonly notifySiteError: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifySiteError']>
     readonly notifyStopped: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifyStopped']>

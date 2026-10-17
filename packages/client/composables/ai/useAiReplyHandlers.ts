@@ -36,7 +36,7 @@ import {
   notifyStoppedScriptHint,
 } from './reply-toasts'
 // [stop-resume-v1] 「停止→判定→续推」职责链的入站收口
-import { beginAutoResume, decideOnStopped, endAutoResume, MAX_AUTO_RESUME } from './stop-resume'
+import { beginAutoResume, decideOnResumeTimeout, decideOnStopped, endAutoResume, MAX_AUTO_RESUME } from './stop-resume'
 
 type EventKindStr = 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary' | 'ai:ask' | 'ai:feedback' | 'ai:decision' | 'ai:need-files' | 'ai:stream'
 
@@ -127,16 +127,34 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   }
 
   /**
-   * [resume-watchdog-v1] 续推看门狗：发出「继续」后 N 秒内没收到任何真实回复就提示。
+   * [resume-watchdog-v1] 续推看门狗：发出「继续」后 N 秒内没收到任何真实回复。
    * [WHY] 续推链路的失败是静默的（回复被抑制窗口吞掉 / 探针静默失效），用户只看到页面不动。
+   * [resume-watchdog-retry-v1] 超时后先按配额自动再推一次（最多到 MAX_AUTO_RESUME，与 stopped 决策
+   *   共用同一计数器）；用户最近主动停过或配额耗尽才提示。这样「探针偶发失效」能自愈，
+   *   而「用户明确停过」绝不会被机器覆盖。
    * [CONSTRAINT] 任何 kind 的真实回复到达即解除；sid 维度隔离，不跨窗口误报。
+   *   重试走同一条 setTimeout 延迟路径，避免与站点按钮状态切换竞争。
    */
   function armResumeWatchdog(sid: string): void {
     if (!sid) return
     disarmResumeWatchdog(sid)
     resumeWatchdogBySid.set(sid, setTimeout(() => {
       resumeWatchdogBySid.delete(sid)
-      try { notifyResumeTimeout(Math.round(RESUME_WATCHDOG_MS / 1000)) } catch { /* swallow: toast 未就绪 */ }
+      const d = decideOnResumeTimeout(sid)
+      if (d.retry) {
+        beginAutoResume(sid)
+        setTimeout(() => {
+          void aiWindow
+            .copyAndFill('继续', { skipRules: true })
+            .finally(() => endAutoResume(sid))
+          armResumeWatchdog(sid)
+        }, 1500)
+        return
+      }
+      try {
+        if (d.reason === 'max-reached') notifyResumeExhausted(MAX_AUTO_RESUME)
+        else notifyResumeTimeout(Math.round(RESUME_WATCHDOG_MS / 1000))
+      } catch { /* swallow: toast 未就绪 */ }
     }, RESUME_WATCHDOG_MS))
   }
 
