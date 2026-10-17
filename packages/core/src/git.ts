@@ -129,8 +129,8 @@ export async function gitRestoreFile(ref: string, file: string): Promise<{ ok: b
     return { ok: false, reason: '非法路径' }
   }
   if (!(await gitAvailable())) return { ok: false, reason: '非 git 仓库' }
-  const r = await run('git', ['restore', '--source', safeRef, '--worktree', '--', safeFile])
-  if (r.code !== 0) return { ok: false, reason: r.stderr.trim() || `git restore 退出码 ${r.code}` }
+  const restoreResult = await run('git', ['restore', '--source', safeRef, '--worktree', '--', safeFile])
+  if (restoreResult.code !== 0) return { ok: false, reason: restoreResult.stderr.trim() || `git restore 退出码 ${restoreResult.code}` }
   return { ok: true }
 }
 
@@ -304,8 +304,8 @@ export async function gitCommitAfter(
  */
 export async function gitHead(): Promise<string | null> {
   if (!(await gitAvailable())) return null
-  const r = await run('git', ['rev-parse', 'HEAD'])
-  return r.code === 0 ? r.stdout.trim().slice(0, 12) : null
+  const headResult = await run('git', ['rev-parse', 'HEAD'])
+  return headResult.code === 0 ? headResult.stdout.trim().slice(0, 12) : null
 }
 
 /**
@@ -382,8 +382,8 @@ export async function gitResetHard(ref: string): Promise<{ ok: boolean, reason?:
   // [F3] 祖先链校验
   const anc = await run('git', ['merge-base', '--is-ancestor', safeRef, 'HEAD'])
   if (anc.code !== 0) return { ok: false, reason: '非当前分支祖先，拒绝 reset（防止误回滚到未合并分支）' }
-  const r = await run('git', ['reset', '--hard', safeRef])
-  if (r.code !== 0) return { ok: false, reason: `git reset 失败: ${r.stderr}` }
+  const resetResult = await run('git', ['reset', '--hard', safeRef])
+  if (resetResult.code !== 0) return { ok: false, reason: `git reset 失败: ${resetResult.stderr}` }
   return { ok: true }
 }
 
@@ -405,20 +405,20 @@ export interface GitStatusFile {
 
 export async function gitStatusDetailed(): Promise<{ ok: boolean, files: GitStatusFile[], reason?: string }> {
   if (!(await gitAvailable())) return { ok: false, files: [], reason: '非 git 仓库' }
-  const r = await run('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
-  if (r.code !== 0) return { ok: false, files: [], reason: `git status 失败: ${r.stderr}` }
-  const parts = r.stdout.split('\u0000').filter(Boolean)
+  const statusResult = await run('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
+  if (statusResult.code !== 0) return { ok: false, files: [], reason: `git status 失败: ${statusResult.stderr}` }
+  const parts = statusResult.stdout.split('\u0000').filter(Boolean)
   const files: GitStatusFile[] = []
   for (let i = 0; i < parts.length; i++) {
     const entry = parts[i]
     if (entry.length < 4) continue
-    const x = entry[0]
-    const y = entry[1]
-    const p = entry.slice(3)
+    const indexStatus = entry[0]
+    const worktreeStatus = entry[1]
+    const filePath = entry.slice(3)
     // 重命名条目的新路径在 entry 里，旧路径作为下一段独立元素——跳过
-    const isRename = x === 'R' || y === 'R' || x === 'C' || y === 'C'
+    const isRename = indexStatus === 'R' || worktreeStatus === 'R' || indexStatus === 'C' || worktreeStatus === 'C'
     if (isRename && i + 1 < parts.length) i++
-    const flag = x !== ' ' ? x : y
+    const flag = indexStatus !== ' ' ? indexStatus : worktreeStatus
     const status = flag === 'A'
       ? 'added'
       : flag === 'D'
@@ -430,7 +430,7 @@ export async function gitStatusDetailed(): Promise<{ ok: boolean, files: GitStat
             : flag === '?'
               ? 'untracked'
               : 'modified'
-    files.push({ path: p, status, staged: x !== ' ' && x !== '?', unstaged: y !== ' ' || x === '?' })
+    files.push({ path: filePath, status, staged: indexStatus !== ' ' && indexStatus !== '?', unstaged: worktreeStatus !== ' ' || indexStatus === '?' })
   }
   return { ok: true, files }
 }
@@ -442,8 +442,8 @@ export async function gitStatusDetailed(): Promise<{ ok: boolean, files: GitStat
 export async function gitStage(paths: string[]): Promise<{ ok: boolean, reason?: string }> {
   if (!(await gitAvailable())) return { ok: false, reason: '非 git 仓库' }
   if (paths.length === 0) return { ok: true }
-  const r = await run('git', ['add', '-A', '--', ...paths])
-  if (r.code !== 0) return { ok: false, reason: r.stderr.trim() || `git add 退出码 ${r.code}` }
+  const addResult = await run('git', ['add', '-A', '--', ...paths])
+  if (addResult.code !== 0) return { ok: false, reason: addResult.stderr.trim() || `git add 退出码 ${addResult.code}` }
   return { ok: true }
 }
 
@@ -454,10 +454,11 @@ export async function gitStage(paths: string[]): Promise<{ ok: boolean, reason?:
 export async function gitUnstage(paths: string[]): Promise<{ ok: boolean, reason?: string }> {
   if (!(await gitAvailable())) return { ok: false, reason: '非 git 仓库' }
   if (paths.length === 0) return { ok: true }
-  const r = await run('git', ['restore', '--staged', '--', ...paths])
-  if (r.code === 0) return { ok: true }
-  const r2 = await run('git', ['reset', '-q', 'HEAD', '--', ...paths])
-  if (r2.code !== 0) return { ok: false, reason: r.stderr.trim() || `git restore --staged 退出码 ${r.code}` }
+  const restoreResult = await run('git', ['restore', '--staged', '--', ...paths])
+  if (restoreResult.code === 0) return { ok: true }
+  // 旧版 git 无 restore --staged，回落 reset HEAD
+  const resetResult = await run('git', ['reset', '-q', 'HEAD', '--', ...paths])
+  if (resetResult.code !== 0) return { ok: false, reason: restoreResult.stderr.trim() || `git restore --staged 退出码 ${restoreResult.code}` }
   return { ok: true }
 }
 
@@ -471,8 +472,8 @@ export async function gitUnstage(paths: string[]): Promise<{ ok: boolean, reason
 export async function gitDiscard(paths: string[]): Promise<{ ok: boolean, discarded: string[], reason?: string }> {
   if (!(await gitAvailable())) return { ok: false, discarded: [], reason: '非 git 仓库' }
   const safe = paths
-    .map(p => String(p || '').replace(/\\/g, '/'))
-    .filter(p => p && !p.startsWith('/') && !p.split('/').includes('..'))
+    .map(filePath => String(filePath || '').replace(/\\/g, '/'))
+    .filter(filePath => filePath && !filePath.startsWith('/') && !filePath.split('/').includes('..'))
   if (safe.length === 0) return { ok: true, discarded: [] }
 
   // 未跟踪文件：git restore 对其无效，须单独 git clean -f
@@ -483,19 +484,20 @@ export async function gitDiscard(paths: string[]): Promise<{ ok: boolean, discar
       if (entry.length >= 4 && entry[0] === '?' && entry[1] === '?') untracked.add(entry.slice(3))
     }
   }
-  const tracked = safe.filter(p => !untracked.has(p))
-  const untrackedHit = safe.filter(p => untracked.has(p))
+  const tracked = safe.filter(filePath => !untracked.has(filePath))
+  const untrackedHit = safe.filter(filePath => untracked.has(filePath))
 
   if (tracked.length > 0) {
-    const r = await run('git', ['restore', '--worktree', '--', ...tracked])
-    if (r.code !== 0) {
-      const r2 = await run('git', ['checkout', '--', ...tracked])
-      if (r2.code !== 0) return { ok: false, discarded: [], reason: r.stderr.trim() || `git restore 退出码 ${r.code}` }
+    const restoreResult = await run('git', ['restore', '--worktree', '--', ...tracked])
+    if (restoreResult.code !== 0) {
+      // 旧版 git 无 restore --worktree，回落 checkout --
+      const checkoutResult = await run('git', ['checkout', '--', ...tracked])
+      if (checkoutResult.code !== 0) return { ok: false, discarded: [], reason: restoreResult.stderr.trim() || `git restore 退出码 ${restoreResult.code}` }
     }
   }
   if (untrackedHit.length > 0) {
-    const r = await run('git', ['clean', '-f', '--', ...untrackedHit])
-    if (r.code !== 0) return { ok: false, discarded: tracked, reason: r.stderr.trim() || `git clean 退出码 ${r.code}` }
+    const cleanResult = await run('git', ['clean', '-f', '--', ...untrackedHit])
+    if (cleanResult.code !== 0) return { ok: false, discarded: tracked, reason: cleanResult.stderr.trim() || `git clean 退出码 ${cleanResult.code}` }
   }
   return { ok: true, discarded: safe }
 }
@@ -511,17 +513,17 @@ export async function gitCommitStaged(message: string): Promise<{ ok: boolean, c
   if (diff.code === 0) return { ok: true, empty: true }
   const safeMsg = String(message).slice(0, 2000)
   if (!safeMsg.trim()) return { ok: false, reason: '提交信息为空' }
-  const r = await run('git', ['commit', '-m', safeMsg], 60_000)
-  if (r.code !== 0) return { ok: false, reason: r.stderr.trim() || `git commit 退出码 ${r.code}` }
-  const head = await run('git', ['rev-parse', 'HEAD'])
-  return { ok: true, commit: head.stdout.trim().slice(0, 12) }
+  const commitResult = await run('git', ['commit', '-m', safeMsg], 60_000)
+  if (commitResult.code !== 0) return { ok: false, reason: commitResult.stderr.trim() || `git commit 退出码 ${commitResult.code}` }
+  const headResult = await run('git', ['rev-parse', 'HEAD'])
+  return { ok: true, commit: headResult.stdout.trim().slice(0, 12) }
 }
 
 /** [git-branch-v1] 当前分支名（detached 时返回 HEAD 字面量）。 */
 export async function gitBranch(): Promise<string | null> {
   if (!(await gitAvailable())) return null
-  const r = await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
-  return r.code === 0 ? r.stdout.trim() : null
+  const branchResult = await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
+  return branchResult.code === 0 ? branchResult.stdout.trim() : null
 }
 
 /** [git-history-v1] 单条提交记录 */
@@ -544,12 +546,12 @@ export interface GitCommit {
  */
 export async function gitCommitHistory(limit = 50): Promise<{ ok: boolean, commits: GitCommit[], reason?: string }> {
   if (!(await gitAvailable())) return { ok: false, commits: [], reason: '非 git 仓库' }
-  const n = Math.max(1, Math.min(200, Number(limit) || 50))
+  const maxCount = Math.max(1, Math.min(200, Number(limit) || 50))
   const fmt = '%H%x09%h%x09%an%x09%aI%x09%s'
-  const r = await run('git', ['--no-pager', 'log', `-n${n}`, `--pretty=format:${fmt}`])
-  if (r.code !== 0) return { ok: false, commits: [], reason: r.stderr.trim() }
+  const logResult = await run('git', ['--no-pager', 'log', `-n${maxCount}`, `--pretty=format:${fmt}`])
+  if (logResult.code !== 0) return { ok: false, commits: [], reason: logResult.stderr.trim() }
   const commits: GitCommit[] = []
-  for (const line of r.stdout.split('\n')) {
+  for (const line of logResult.stdout.split('\n')) {
     if (!line.trim()) continue
     const parts = line.split('\t')
     if (parts.length < 5) continue
@@ -574,12 +576,12 @@ export async function gitCommitHistory(limit = 50): Promise<{ ok: boolean, commi
 export async function gitBranches(repoPath?: string): Promise<{ ok: boolean, current: string, list: string[], reason?: string }> {
   const withC = (args: string[]): string[] => (repoPath ? ['-C', repoPath, ...args] : args)
   if (!repoPath && !(await gitAvailable())) return { ok: false, current: '', list: [], reason: '非 git 仓库' }
-  const cur = await run('git', withC(['rev-parse', '--abbrev-ref', 'HEAD']))
-  if (cur.code !== 0) return { ok: false, current: '', list: [], reason: cur.stderr.trim() }
-  const r = await run('git', withC(['for-each-ref', '--format=%(refname:short)', 'refs/heads/']))
-  if (r.code !== 0) return { ok: false, current: '', list: [], reason: r.stderr.trim() }
-  const list = r.stdout.split('\n').map(s => s.trim()).filter(Boolean)
-  return { ok: true, current: cur.stdout.trim(), list }
+  const currentResult = await run('git', withC(['rev-parse', '--abbrev-ref', 'HEAD']))
+  if (currentResult.code !== 0) return { ok: false, current: '', list: [], reason: currentResult.stderr.trim() }
+  const refsResult = await run('git', withC(['for-each-ref', '--format=%(refname:short)', 'refs/heads/']))
+  if (refsResult.code !== 0) return { ok: false, current: '', list: [], reason: refsResult.stderr.trim() }
+  const list = refsResult.stdout.split('\n').map(name => name.trim()).filter(Boolean)
+  return { ok: true, current: currentResult.stdout.trim(), list }
 }
 
 /**
@@ -600,8 +602,8 @@ export async function gitCheckout(branch: string): Promise<{ ok: boolean, branch
   const status = await run('git', ['status', '--porcelain'])
   if (status.code !== 0) return { ok: false, reason: status.stderr.trim() }
   if (status.stdout.trim()) return { ok: false, dirty: true, reason: '工作区有未提交改动，请先 commit 或 stash' }
-  const r = await run('git', ['checkout', target], 30_000)
-  if (r.code !== 0) return { ok: false, reason: r.stderr.trim() || `git checkout 退出码 ${r.code}` }
+  const checkoutResult = await run('git', ['checkout', target], 30_000)
+  if (checkoutResult.code !== 0) return { ok: false, reason: checkoutResult.stderr.trim() || `git checkout 退出码 ${checkoutResult.code}` }
   return { ok: true, branch: target }
 }
 
@@ -631,9 +633,9 @@ export async function gitCommitDetail(sha: string): Promise<{ ok: boolean, detai
   const files: Array<{ status: string, path: string }> = []
   if (ns.code === 0) {
     for (const line of ns.stdout.split('\n')) {
-      const t = line.trim()
-      if (!t) continue
-      const cols = t.split('\t')
+      const nameStatusLine = line.trim()
+      if (!nameStatusLine) continue
+      const cols = nameStatusLine.split('\t')
       if (cols.length < 2) continue
       files.push({ status: cols[0], path: cols.slice(1).join('\t') })
     }

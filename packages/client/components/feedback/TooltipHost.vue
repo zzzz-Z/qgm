@@ -26,15 +26,15 @@ const { state } = useTooltip()
  */
 const referenceRef = ref<VirtualElement>({
   getBoundingClientRect() {
-    const x = state.value.x
-    const y = state.value.y
+    const cursorX = state.value.x
+    const cursorY = state.value.y
     return {
-      x,
-      y,
-      top: y,
-      left: x,
-      right: x,
-      bottom: y,
+      x: cursorX,
+      y: cursorY,
+      top: cursorY,
+      left: cursorX,
+      right: cursorX,
+      bottom: cursorY,
       width: 0,
       height: 0,
     }

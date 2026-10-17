@@ -29,9 +29,9 @@ export function parsePlanTodo(planPath?: string): PlanTask[] {
   // [root-env-align-v1] 与 config.setRoot 对齐：setRoot 写 AI_RUNNER_ROOT，原实现只读 AIR_ROOT
   // 导致 standalone 切换工作区后 PLAN.md 仍从启动 cwd 读取（隐藏 bug）
   const base = resolveScopedRoot()
-  const p = planPath || path.join(base, 'PLAN.md')
+  const resolvedPlanPath = planPath || path.join(base, 'PLAN.md')
   let src = ''
-  try { src = fs.readFileSync(p, 'utf8') } catch { return [] }
+  try { src = fs.readFileSync(resolvedPlanPath, 'utf8') } catch { return [] }
   const lines = src.split('\n')
 
   // 定位「## 二、待办」到下一个「## 」之间
@@ -50,10 +50,10 @@ export function parsePlanTodo(planPath?: string): PlanTask[] {
 
   let currentSection = ''
   for (let i = secStart + 1; i < secEnd; i++) {
-    const l = lines[i]
-    const secM = l.match(SECTION_RE)
+    const line = lines[i]
+    const secM = line.match(SECTION_RE)
     if (secM) { currentSection = secM[1].trim(); continue }
-    const numM = l.match(NUM_RE)
+    const numM = line.match(NUM_RE)
     if (numM) {
       const title = numM[1].trim()
       const desc = (numM[2] || '').trim()
@@ -61,7 +61,7 @@ export function parsePlanTodo(planPath?: string): PlanTask[] {
       out.push({ title: text, done: false, section: currentSection })
       continue
     }
-    const chkM = l.match(CHECK_RE)
+    const chkM = line.match(CHECK_RE)
     if (chkM) {
       out.push({ title: chkM[2].trim(), done: /x/i.test(chkM[1]), section: currentSection })
     }

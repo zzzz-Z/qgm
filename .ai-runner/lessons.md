@@ -3195,3 +3195,15 @@ TS 版把 `marked` 判定抽成顶层 `hasScriptHead`，沙箱只抽了 `extract
 `writeText` 只进 overlay，`__AI__.shell` 起的 eslint/tsc 读真盘。清完 `aiError` 后立即跑 eslint 仍报同一条 warning，误以为改错了位置；`flush()` 后 grep 确认文件里已无该符号，重跑即通过。
 
 修法：凡是「写完源码 → 立刻用 shell 跑 lint/tsc/测试」的验证轮，脚本第一步就 `await __AI__.flush()`。
+
+## 大文件批量改名必须按「函数块」而不是「变量名」替换
+
+`git.ts` 里 `const r = await run(...)` 出现 13 次，语义各异（restore / rev-parse / reset / status / add / commit / checkout …）。若用 `t.split('r').join('xxx')` 之类按名替换，13 处会被改成同一个名字，且会误伤 `restore`/`reset`/`refs` 等单词里的字母 `r`。
+
+修法：先用 `^function` 正则建立函数边界表，把每个单字母声明归属到具体函数，再以整段代码块（含 `r.code`/`r.stderr`/`r.stdout` 全部使用点）为锚点做唯一性校验替换。锚点命中数 ≠ 1 时立即 `exit(2)`。
+
+## 替换后必须扫描「同形不同义」的残留
+
+`routes/workspace.ts` 里 `/workspace/pick` 与 `/workspace/pick-path` 两个端点各有一份 `const r = await nativePick()`。首轮替换只命中了第一份的前半段，`r.path` 在后续 4 行仍被引用，tsc 报 4 条 `Cannot find name 'r'`——这是「改了一半」的典型形态，且前半段改名成功让错误信息看起来像另一处的问题。
+
+修法：每个端点按「声明 → 所有使用点」整段读回、整段替换；替换后用 `grep -n` 扫该变量名残留，为空才收工。

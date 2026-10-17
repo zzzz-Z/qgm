@@ -117,13 +117,13 @@ export function isNewerVersion(latest: string | null | undefined, seen: string |
   if (!latest) return false
   if (!seen) return true
   if (latest === seen) return false
-  const a = String(latest).split('.')
-  const b = String(seen).split('.')
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const x = Number(a[i] ?? 0)
-    const y = Number(b[i] ?? 0)
-    if (Number.isNaN(x) || Number.isNaN(y)) return String(latest) !== String(seen)
-    if (x !== y) return x > y
+  const latestParts = String(latest).split('.')
+  const seenParts = String(seen).split('.')
+  for (let i = 0; i < Math.max(latestParts.length, seenParts.length); i++) {
+    const latestPart = Number(latestParts[i] ?? 0)
+    const seenPart = Number(seenParts[i] ?? 0)
+    if (Number.isNaN(latestPart) || Number.isNaN(seenPart)) return String(latest) !== String(seen)
+    if (latestPart !== seenPart) return latestPart > seenPart
   }
   return false
 }
@@ -159,11 +159,11 @@ export function useUserscriptUpdateWatcher() {
 
   /** 用户完成一次更新动作后调用：把当前最新版记为「已确认」，角标随即消失 */
   function markSeen(): void {
-    const v = latestVersion.value
-    if (!v) return
-    seenVersion.value = v
+    const confirmedVersion = latestVersion.value
+    if (!confirmedVersion) return
+    seenVersion.value = confirmedVersion
     hasUpdate.value = false
-    try { window.localStorage.setItem(SEEN_VERSION_KEY, v) } catch { /* 存不了就下次再提示 */ }
+    try { window.localStorage.setItem(SEEN_VERSION_KEY, confirmedVersion) } catch { /* 存不了就下次再提示 */ }
   }
 
   onMounted(() => { void refresh() })

@@ -37,9 +37,9 @@ function sleepSync(ms) {
 
 // 执行外部命令；capture=true 时捕获输出，否则继承 stdio 让构建/启动进度直接可见
 function run(cmd, args, capture = false) {
-  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8', stdio: capture ? 'pipe' : 'inherit' })
-  if (r.error) return { code: 127, out: '', err: String(r.error.message) }
-  return { code: r.status ?? 1, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() }
+  const child = spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8', stdio: capture ? 'pipe' : 'inherit' })
+  if (child.error) return { code: 127, out: '', err: String(child.error.message) }
+  return { code: child.status ?? 1, out: (child.stdout || '').trim(), err: (child.stderr || '').trim() }
 }
 
 // 解析 CLI 参数：支持 --build / --no-build / --down / --logs / --timeout=N / --help
@@ -61,12 +61,12 @@ function parseArgs(argv) {
 // 环境自检：docker CLI / compose 插件 / 守护进程任一不可用即退出，避免后续报错难懂
 function preflight() {
   for (const [label, args] of [['docker CLI', ['--version']], ['docker compose', ['compose', 'version']]]) {
-    const r = run('docker', args, true)
-    if (r.code !== 0) {
+    const versionResult = run('docker', args, true)
+    if (versionResult.code !== 0) {
       say('[XX]', `未检测到 ${label}。请先安装并启动 Docker Desktop / dockerd。`)
       process.exit(1)
     }
-    say('[ok]', `${label}: ${r.out.split(NL)[0]}`)
+    say('[ok]', `${label}: ${versionResult.out.split(NL)[0]}`)
   }
   if (run('docker', ['info'], true).code !== 0) {
     say('[XX]', 'Docker 守护进程未运行（docker info 失败）。启动 Docker Desktop 后重试。')
@@ -90,7 +90,7 @@ function buildImage() {
 }
 
 // 启动服务（detached）；与 compose.yaml 的 restart: unless-stopped 叠加，重启宿主会自动拉起
-function up() {
+function composeUp() {
   if (run('docker', ['compose', 'up', '-d']).code !== 0) {
     say('[XX]', '启动失败。若为端口占用，请先释放 5175 / 6080，或用 pnpm docker:down 清理旧容器。')
     process.exit(1)
@@ -103,15 +103,15 @@ function containerId() {
 }
 
 // 读容器健康状态：healthy / starting / unhealthy；无 healthcheck 时返回空串
-function healthOf(cid) {
-  const r = run('docker', ['inspect', '--format', '{{if .State.Health}}{{.State.Health.Status}}{{end}}', cid], true)
-  return r.code === 0 ? r.out.trim() : ''
+function healthOf(containerId) {
+  const inspectResult = run('docker', ['inspect', '--format', '{{if .State.Health}}{{.State.Health.Status}}{{end}}', containerId], true)
+  return inspectResult.code === 0 ? inspectResult.out.trim() : ''
 }
 
 // 工作台 HTTP 探活：健康检查之外的二次确认，能响应 200 才算真的可用
 function httpOk(url) {
-  const js = `fetch(${JSON.stringify(url)}).then(x=>process.exit(x.ok?0:1)).catch(()=>process.exit(1))`
-  return run('node', ['-e', js], true).code === 0
+  const probeScript = `fetch(${JSON.stringify(url)}).then(res=>process.exit(res.ok?0:1)).catch(()=>process.exit(1))`
+  return run('node', ['-e', probeScript], true).code === 0
 }
 
 // 轮询等待健康；[WHY] compose healthcheck 有 90s start_period，首次启动 Xvfb + 服务就绪通常 30~90s
@@ -119,11 +119,11 @@ function waitHealthy(cid, timeoutSec) {
   const deadline = Date.now() + timeoutSec * 1000
   let last = ''
   while (Date.now() < deadline) {
-    const h = healthOf(cid) || 'no-healthcheck'
-    if (h !== last) { say('[..]', `健康状态：${h}`); last = h }
-    if (h === 'healthy') return true
-    if (h === 'unhealthy') return false
-    if (h === 'no-healthcheck' && httpOk(WORKBENCH_URL)) return true
+    const health = healthOf(cid) || 'no-healthcheck'
+    if (health !== last) { say('[..]', `健康状态：${health}`); last = health }
+    if (health === 'healthy') return true
+    if (health === 'unhealthy') return false
+    if (health === 'no-healthcheck' && httpOk(WORKBENCH_URL)) return true
     sleepSync(3000)
   }
   return false
@@ -186,7 +186,7 @@ if (flags.prune) {
 if (flags.build || (!flags.noBuild && !imageExists())) buildImage()
 else say('[ok]', `镜像已存在，跳过构建（强制重建用 --build）：${IMAGE}`)
 
-up()
+composeUp()
 const cid = containerId()
 if (!cid) {
   say('[XX]', '容器未创建成功，请检查 compose.yaml 与上方输出。')

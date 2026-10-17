@@ -98,8 +98,8 @@ export const workspaceHono = new Hono()
 workspaceHono.get('/workspace', c => c.json({ root: getRoot(), hasWorkspace: getHasWorkspace() }))
 
 workspaceHono.get('/workspace/list', (c) => {
-  const q = c.req.query('path') || getRoot()
-  let abs = q
+  const requestedPath = c.req.query('path') || getRoot()
+  let abs = requestedPath
   try {
     if (!abs.startsWith('/')) abs = path.resolve(getRoot(), abs)
     const stat = fs.statSync(abs)
@@ -162,28 +162,28 @@ async function nativePick(): Promise<{ ok: true, path: string } | { ok: false, e
   const platform = process.platform
   if (platform === 'darwin') {
     const script = 'POSIX path of (choose folder with prompt "选择工作区目录")'
-    const r = await execCmd('osascript', ['-e', script], 120000)
-    if (r.code === 0) {
-      const p = r.stdout.trim().replace(/\/$/, '')
-      if (p) return { ok: true, path: p }
+    const picked = await execCmd('osascript', ['-e', script], 120000)
+    if (picked.code === 0) {
+      const pickedPath = picked.stdout.trim().replace(/\/$/, '')
+      if (pickedPath) return { ok: true, path: pickedPath }
     }
-    if (/User canceled|-128/.test(r.stderr)) return { ok: false, error: 'canceled' }
-    return { ok: false, error: r.stderr.trim() || 'osascript failed' }
+    if (/User canceled|-128/.test(picked.stderr)) return { ok: false, error: 'canceled' }
+    return { ok: false, error: picked.stderr.trim() || 'osascript failed' }
   }
   if (platform === 'linux') {
     // 优先 zenity，其次 kdialog
-    const z = await execCmd('zenity', ['--file-selection', '--directory', '--title=选择工作区目录'], 120000)
-    if (z.code === 0) { const p = z.stdout.trim(); if (p) return { ok: true, path: p } }
-    const k = await execCmd('kdialog', ['--getexistingdirectory', process.env.HOME || '/'], 120000)
-    if (k.code === 0) { const p = k.stdout.trim(); if (p) return { ok: true, path: p } }
-    if (/canceled|not found|ENOENT/i.test(z.stderr + k.stderr)) return { ok: false, error: 'unsupported', unsupported: true }
-    return { ok: false, error: z.stderr.trim() || k.stderr.trim() || 'no picker available', unsupported: true }
+    const zenityResult = await execCmd('zenity', ['--file-selection', '--directory', '--title=选择工作区目录'], 120000)
+    if (zenityResult.code === 0) { const zenityPath = zenityResult.stdout.trim(); if (zenityPath) return { ok: true, path: zenityPath } }
+    const kdialogResult = await execCmd('kdialog', ['--getexistingdirectory', process.env.HOME || '/'], 120000)
+    if (kdialogResult.code === 0) { const kdialogPath = kdialogResult.stdout.trim(); if (kdialogPath) return { ok: true, path: kdialogPath } }
+    if (/canceled|not found|ENOENT/i.test(zenityResult.stderr + kdialogResult.stderr)) return { ok: false, error: 'unsupported', unsupported: true }
+    return { ok: false, error: zenityResult.stderr.trim() || kdialogResult.stderr.trim() || 'no picker available', unsupported: true }
   }
   if (platform === 'win32') {
     const ps = 'Add-Type -AssemblyName System.windows.forms; $f=New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description=\"选择工作区目录\"; if($f.ShowDialog() -eq \"OK\"){Write-Output $f.SelectedPath}'
-    const r = await execCmd('powershell', ['-NoProfile', '-Command', ps], 120000)
-    if (r.code === 0) { const p = r.stdout.trim(); if (p) return { ok: true, path: p } }
-    return { ok: false, error: r.stderr.trim() || 'powershell failed' }
+    const picked = await execCmd('powershell', ['-NoProfile', '-Command', ps], 120000)
+    if (picked.code === 0) { const pickedPath = picked.stdout.trim(); if (pickedPath) return { ok: true, path: pickedPath } }
+    return { ok: false, error: picked.stderr.trim() || 'powershell failed' }
   }
   return { ok: false, error: 'unsupported platform', unsupported: true }
 }
@@ -196,23 +196,23 @@ workspaceHono.post('/workspace/clear', (c) => {
 })
 
 workspaceHono.post('/workspace/pick', async (c) => {
-  const r = await nativePick()
-  if (!r.ok) {
+  const picked = await nativePick()
+  if (!picked.ok) {
     // [pick-cancel-204] 取消：直接 204 无 body（前端只判状态码，不再解析 body）
-    if (r.error === 'canceled') return c.body(null, 204)
-    const status = r.unsupported ? 501 : 500
-    return c.json({ ok: false, error: r.error, unsupported: Boolean(r.unsupported) }, status as 400)
+    if (picked.error === 'canceled') return c.body(null, 204)
+    const status = picked.unsupported ? 501 : 500
+    return c.json({ ok: false, error: picked.error, unsupported: Boolean(picked.unsupported) }, status as 400)
   }
   // 校验目录存在
   try {
-    const st = fs.statSync(r.path)
-    if (!st.isDirectory()) return c.json({ ok: false, error: '不是目录' }, 400)
+    const pickedStat = fs.statSync(picked.path)
+    if (!pickedStat.isDirectory()) return c.json({ ok: false, error: '不是目录' }, 400)
   } catch { return c.json({ ok: false, error: '路径不存在' }, 400) }
   // [multi-workspace-v1] 系统选择器路径同样入册并激活
-  const entry = registerWorkspace(r.path, true)
+  const entry = registerWorkspace(picked.path, true)
   // [workspace-project-info-v1] 系统选择器切换后同样采集画像
-  const project = collectProjectInfo(r.path)
-  return c.json({ ok: true, path: r.path, root: getRoot(), id: entry.id, project })
+  const project = collectProjectInfo(picked.path)
+  return c.json({ ok: true, path: picked.path, root: getRoot(), id: entry.id, project })
 })
 
 /**
@@ -222,17 +222,17 @@ workspaceHono.post('/workspace/pick', async (c) => {
  * [CONSTRAINT] 与 /workspace/pick 共用 nativePick；取消 204 / 不支持 501 语义保持一致。
  */
 workspaceHono.post('/workspace/pick-path', async (c) => {
-  const r = await nativePick()
-  if (!r.ok) {
-    if (r.error === 'canceled') return c.body(null, 204)
-    const status = r.unsupported ? 501 : 500
-    return c.json({ ok: false, error: r.error, unsupported: Boolean(r.unsupported) }, status as 400)
+  const picked = await nativePick()
+  if (!picked.ok) {
+    if (picked.error === 'canceled') return c.body(null, 204)
+    const status = picked.unsupported ? 501 : 500
+    return c.json({ ok: false, error: picked.error, unsupported: Boolean(picked.unsupported) }, status as 400)
   }
   try {
-    const st = fs.statSync(r.path)
-    if (!st.isDirectory()) return c.json({ ok: false, error: '不是目录' }, 400)
+    const pickedStat = fs.statSync(picked.path)
+    if (!pickedStat.isDirectory()) return c.json({ ok: false, error: '不是目录' }, 400)
   } catch { return c.json({ ok: false, error: '路径不存在' }, 400) }
-  return c.json({ ok: true, path: r.path })
+  return c.json({ ok: true, path: picked.path })
 })
 
 // [multi-workspace-v1] 多工作区注册表端点（登记于 AGENTS.md routes-registry-v1）：
@@ -260,8 +260,8 @@ workspaceHono.post('/workspace/activate', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { id?: string } | null
   const id = String(body?.id || '').trim()
   if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
-  const r = activateWorkspace(id)
-  if (!r.ok) return c.json({ ok: false, error: r.reason }, 404)
+  const activated = activateWorkspace(id)
+  if (!activated.ok) return c.json({ ok: false, error: activated.reason }, 404)
   const entry = getWorkspace(id)
   return c.json({ ok: true, root: getRoot(), workspace: entry })
 })
@@ -341,8 +341,8 @@ workspaceHono.post('/workspace/remove', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { id?: string } | null
   const id = String(body?.id || '').trim()
   if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
-  const r = removeWorkspace(id)
-  if (!r.ok) return c.json({ ok: false, error: r.reason }, 404)
+  const removed = removeWorkspace(id)
+  if (!removed.ok) return c.json({ ok: false, error: removed.reason }, 404)
   return c.json({ ok: true, workspaces: getWorkspaces(), activeId: getActiveWorkspaceId() })
 })
 
@@ -380,14 +380,14 @@ workspaceHono.post('/workspace/create', async (c) => {
     const baseRepo = String(body?.baseRepo || '').trim() || getRoot()
     if (!fs.existsSync(path.join(baseRepo, '.git'))) return c.json({ ok: false, error: 'baseRepo 不是 git 仓库' }, 400)
     // git worktree add -b <branch> <path>：在 baseRepo 下为新分支建独立工作树
-    const r = await execCmd('git', ['-C', baseRepo, 'worktree', 'add', '-b', branch, target], 120000)
-    if (r.code !== 0) return c.json({ ok: false, error: r.stderr.trim() || `git worktree 失败 (exit ${r.code})` }, 400)
+    const worktreeAdd = await execCmd('git', ['-C', baseRepo, 'worktree', 'add', '-b', branch, target], 120000)
+    if (worktreeAdd.code !== 0) return c.json({ ok: false, error: worktreeAdd.stderr.trim() || `git worktree 失败 (exit ${worktreeAdd.code})` }, 400)
   }
   else if (mode === 'clone') {
     const url = String(body?.url || '').trim()
     if (!url) return c.json({ ok: false, error: 'url 为空' }, 400)
-    const r = await execCmd('git', ['clone', url, target], 300000)
-    if (r.code !== 0) return c.json({ ok: false, error: r.stderr.trim() || `git clone 失败 (exit ${r.code})` }, 400)
+    const cloned = await execCmd('git', ['clone', url, target], 300000)
+    if (cloned.code !== 0) return c.json({ ok: false, error: cloned.stderr.trim() || `git clone 失败 (exit ${cloned.code})` }, 400)
   }
   else {
     return c.json({ ok: false, error: `未知 mode: ${mode}` }, 400)
