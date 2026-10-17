@@ -2825,6 +2825,8 @@ TypeScript 控制流分析把 `const` 字面量收窄为 `'A'`，于是 `if (PHA
 - 想验"磁盘上真没了" → 先 `flush()` 再 shell 复核
 - 本轮两次 `shell` 复核间隔了一次 `flush()` 后，第二次 `find` 已是 0——印证了"flush 后才一致"
 
+补充（2026-10-17）：改完测试文件立刻在同一脚本里跑 `pnpm test:unit` 会读到旧文件，必须先 `await __AI__.flush()`。
+
 ## `eslint --format json` 的 stdout 会被大体积 JSON 淹没
 
 `npx eslint packages scripts bin apps --format json | head -c 30000` 直接 `JSON.parse` 必失败——`head -c` 截断后不是合法 JSON。正确做法是先 `> .ai-runner/tmp/eslint.json` 落盘，再 `readJSON` 读文件，用 `jq`/对象遍历筛 `severity===1`。这与 §10「避免内嵌大字符串」同源：大体积工具输出走文件不走内存截断。
@@ -3079,3 +3081,19 @@ vitest 配置已 `exclude: ['**/*.spec.ts']`，但外部 runner（如直接 `nod
 ## `eslint` 对生成物是零容忍的
 
 转译产物带 tsc 风格（分号 + 4 空格缩进），逐条满足仓库 antfu 规则会产生 1700+ error，且无意义。生成物必须进 `ignores`。
+
+## 产物由 tsc 转译后，所有「单行文本精确匹配」的守卫都会假红
+
+`if (x) return` 被拆成两行、语句尾加分号、`'\''` 写成 `"'"`。改断言的正确姿势是「正则容忍换行分号」或「归一化后比较」，而不是把产物改回单行写法（改不干净，且扭曲实现去迎合断言）。
+
+## `extractInner` 抽函数 + `vm.runInNewContext` 的沙箱必须显式注入全部被调符号
+
+TS 版把 `marked` 判定抽成顶层 `hasScriptHead`，沙箱只抽了 `extractLatestScript` ⇒ 10 条 `ReferenceError`。用「文本抽取 helper 源码」的路径不可靠（插值层数极易写错），直接 deps 注入等价实现更稳。
+
+## `LINT_SKIP_SEGMENTS` 是段名集合，不是路径集合
+
+`hasSkippedSegment` 按 `/` 切段比较，所以 eslint `ignores` 里的文件条目（如 `scripts/xxx.user.js`）不该参与同步校验，只有目录型（`a/**`）才需要。
+
+## `module-size-ratchet` 的冻结清单必须是实测行数
+
+随手写 812 而实际 811，会触发「基线不得虚高」的 ratchet 反向断言。

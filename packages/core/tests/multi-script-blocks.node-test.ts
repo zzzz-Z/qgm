@@ -91,8 +91,9 @@ function liveSeen(seen: string[]): LiveSeen {
  * 用被测源码真跑一次 extractLatestScript
  * [CONSTRAINT] hash32 用恒等函数，保证不同文本一定得到不同 hash（测试里无需抗碰撞）
  */
-function buildPicker(rel: string, seen: string[], doc: unknown): () => Item | null {
+function buildPicker(rel: string, seen: string[], doc: unknown, win: Record<string, unknown> = {}): () => Item | null {
   const inner = extractInner(read(rel), 'extractLatestScript')
+
   const body = `return function (deps) {
   var document = deps.document
   var dedup = deps.dedup
@@ -102,6 +103,10 @@ function buildPicker(rel: string, seen: string[], doc: unknown): () => Item | nu
   var guessLangFromContent = deps.guessLangFromContent
   var hash32 = deps.hash32
   var codeTextOf = deps.codeTextOf
+  var hasScriptHead = deps.hasScriptHead
+  var hasUnclosedStructureJs = deps.hasUnclosedStructureJs
+  var hasExecutableContent = deps.hasExecutableContent
+  var stillStreamingReply = deps.stillStreamingReply
   var latestAssistantRoot = deps.latestAssistantRoot
   function extractLatestScript() { ${inner} }
   return extractLatestScript()
@@ -117,6 +122,51 @@ function buildPicker(rel: string, seen: string[], doc: unknown): () => Item | nu
     guessLangFromDom: () => null,
     guessLangFromContent: () => null,
     hash32: (s: string) => s,
+    hasScriptHead: (t: string) => /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(t) || /^\s*\/\/\s*@desc\b/m.test(t) || /^\s*#\s*@desc\b/m.test(t),
+    hasUnclosedStructureJs: (src: string) => {
+      const stack: string[] = []
+      let state = 'code'
+      for (let i = 0; i < src.length; i++) {
+        const ch = src[i]
+        const nx = src[i + 1]
+        if (state === 'line-comment') { if (ch === '\n' || ch === '\r') state = 'code'; continue }
+        if (state === 'block-comment') { if (ch === '*' && nx === '/') { state = 'code'; i++ } continue }
+        if (state === 'single' || state === 'double' || state === 'template') {
+          const q = state === 'single' ? '\'' : state === 'double' ? '"' : '`'
+          if (ch === '\\') { i++; continue }
+          if (ch === q) state = 'code'
+          continue
+        }
+        if (ch === '/' && nx === '/') { state = 'line-comment'; i++; continue }
+        if (ch === '/' && nx === '*') { state = 'block-comment'; i++; continue }
+        if (ch === '\'') { state = 'single'; continue }
+        if (ch === '"') { state = 'double'; continue }
+        if (ch === '`') { state = 'template'; continue }
+        if (ch === '{' || ch === '(' || ch === '[') { stack.push(ch); continue }
+        if (ch === '}' || ch === ')' || ch === ']') {
+          const want = ch === '}' ? '{' : ch === ')' ? '(' : '['
+          if (stack.length === 0 || stack[stack.length - 1] !== want) return true
+          stack.pop()
+        }
+      }
+      if (state === 'single' || state === 'double' || state === 'template' || state === 'block-comment') return true
+      return stack.length > 0
+    },
+    hasExecutableContent: (src: string) => String(src || '').split('\n').map(l => l.trim()).filter((l) => {
+      if (!l) return false
+      if (l.startsWith('#!')) return false
+      if (l.startsWith('//')) return false
+      if (l.startsWith('#')) return false
+      return true
+    }).join('').length > 0,
+    stillStreamingReply: () => {
+      const body = String((doc && (doc as any).body && (doc as any).body.textContent) || '')
+      const w = (win || {}) as Record<string, unknown>
+      const gate = w.__aiRunnerClosureGate as { len: number, ticks: number } | undefined
+      if (!gate || gate.len !== body.length) { w.__aiRunnerClosureGate = { len: body.length, ticks: 0 }; return true }
+      gate.ticks++
+      return gate.ticks < 3
+    },
     codeTextOf: (el: { textContent?: string }) => String((el && el.textContent) || '').replace(/^\n+|\n+$/g, ''),
     // [no-root-no-reply-v1] 油猴侧 extractLatestScript 经 latestAssistantRoot() 取容器
     //   （假 DOM 已实现 .ds-assistant-message-main-content 路径，两条取值路径都能命中）
@@ -223,11 +273,11 @@ test('multi-script: 两处实现都不得保留 lastMarked || last 的旧语义'
     // [fragment-guard-v1] 语义已收紧：存在任意标记块时，无标记块视为片段不推（WO-20261007-03 段一）。
     // 守意图：不得退回「无条件兜底 firstUnseen」——那会把说明性片段当脚本推。
     assert.ok(
-      src.includes('if (firstUnseenMarked) return firstUnseenMarked'),
+      /if \(firstUnseenMarked\)\s*return firstUnseenMarked;?/.test(src),
       `${rel} 缺少「标记块优先返回」分支`,
     )
     assert.ok(
-      src.includes('if (hasAnyMarked) return null'),
+      /if \(hasAnyMarked\)\s*return null;?/.test(src),
       `${rel} 缺少「本回复已有标记块则不兜底片段」判据 → 说明性片段会被当脚本推（回归）`,
     )
     assert.ok(
@@ -235,7 +285,7 @@ test('multi-script: 两处实现都不得保留 lastMarked || last 的旧语义'
       `${rel} 缺少「整条回复无标记块时保留兜底」分支（AI 漏写头的自纠回路）`,
     )
     assert.ok(
-      src.includes('if (!firstUnseen) firstUnseen = item'),
+      /if \(!firstUnseen\)\s*firstUnseen = item;?/.test(src),
       `${rel} 缺少 firstUnseen 记录（结构改动被回退？）`,
     )
   }
@@ -252,13 +302,14 @@ test('multi-script: 油猴通道推送后必须主动再跑一次分类', () => 
   const src = read(TAMPERMONKEY_SRC)
   assert.ok(src.includes('function hasMoreUnseenBlocks'), '缺少 hasMoreUnseenBlocks（否则第 2、3 块永远不会被推送）')
   assert.ok(
-    src.includes('if (hasMoreUnseenBlocks()) setTimeout(classifyAndPost, 80)'),
+    /if \(hasMoreUnseenBlocks\(\)\)\s*setTimeout\(classifyAndPost, 80\);?/.test(src),
     '推完一块后未唤醒分类 → DOM 已静止，observer 不再触发，后续块永久滞留',
   )
   // [stopped-no-autorun-v1] 停止轮同样不得再推脚本（残余块会落到「循环外自动执行」旁路）：
   //   判据与「标记让位」共用同一处三元表达式，两条语义必须**同时**在位
   assert.ok(
-    /const s = \(markedNonScript \|\| stopPosted\) \? null : \(extractLatestScript/.test(src),
+    /const s = \(markedNonScript \|\| stopPosted\) \? null : \(extractLatestScript/.test(src)
+    || /if \(!markedNonScript && !stopPosted\) \{/.test(src),
     '脚本分类仍须让位于首行标记，且停止轮须停推脚本',
   )
   // [fragment-guard-text-v1] WO-20261007-06 段〇：TEXT 标记的回复，其代码块不得进 script 分支。
@@ -281,7 +332,7 @@ test('idle-wake-poll: 油猴通道必须有 DOM 静止后的轮询兜底（obser
   assert.ok(src.includes('[idle-wake-poll-v1]'), '缺少轮询兜底（DOM 静止后脚本块会永久滞留，只能靠用户滚动唤醒）')
   assert.ok(/setInterval\(\(\) => \{[\s\S]{0,600}classifyAndPost\(\)/.test(src), 'setInterval 内必须调用 classifyAndPost')
   assert.ok(src.includes('document.hidden'), '缺 document.hidden 检查 ⇒ 后台标签页会持续空转')
-  assert.ok(src.includes('if (!latestAssistantRoot()) return'), '缺容器前置检查 ⇒ 无 assistant 容器时误跑')
-  assert.ok(src.includes('if (observerDebounce) return'), '缺 observerDebounce 抢跑门 ⇒ 与 350ms 防抖互相干扰')
+  assert.ok(/if \(!latestAssistantRoot\(\)\)\s*return;?/.test(src), '缺容器前置检查 ⇒ 无 assistant 容器时误跑')
+  assert.ok(/if \(observerDebounce\)\s*return;?/.test(src), '缺 observerDebounce 抢跑门 ⇒ 与 350ms 防抖互相干扰')
   assert.ok(/\}, 800\)/.test(src), '轮询间隔须为 800（对齐 headless startReplyPoll）')
 })

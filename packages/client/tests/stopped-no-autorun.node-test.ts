@@ -116,7 +116,7 @@ test('④ 反例：窗口外的脚本 ⇒ 照常自动执行（新一轮真实�
 test('⑤ [parity] 三处守卫同源且均 anchored 到同一 tag', () => {
   const um = readFileSync('scripts/tampermonkey-session-id.user.js', 'utf8')
   assert.ok(um.includes('[stopped-no-autorun-v1]'), '油猴缺 script 分支守卫')
-  assert.ok(/const s = \(markedNonScript \|\| stopPosted\)/.test(um), '油猴 script 分支未串入 stopPosted')
+  assert.ok(/if \(!markedNonScript && !stopPosted\)/.test(um), '油猴 script 分支未串入 stopPosted（tsc 转译后为 if 取反块）')
 
   const hj = readFileSync('packages/core/src/headless/headless-inject.ts', 'utf8')
   assert.ok(hj.includes('[stopped-no-autorun-v1]'), 'headless 缺 script 分支守卫')

@@ -386,25 +386,16 @@ test('stopped 探针结构: fill/rotate 两处轮次重置齐全', () => {
   const src = read(USERSCRIPT_REL)
   // 重置行带 [stopped-btn-v1] tag；声明行（let prevGenerating = false / let genEnterRoots = 0）
   // 与 stopped 分支的消费行（prevGenerating = false）不带 tag，不会被计入。
-  assert.equal(
-    src.split('prevGenerating = false // [stopped-btn-v1]').length - 1,
-    2,
-    'prevGenerating 必须在 fill/rotate 两处重置（漏改会让上一轮的按钮状态跨轮次误判）',
-  )
-  assert.equal(
-    src.split('genEnterRoots = 0 // [stopped-btn-v1]').length - 1,
-    2,
-    'genEnterRoots 必须在 fill/rotate 两处重置',
-  )
+  // 轮次重置已集中进 resetRoundState（fill / rotate 各调一次），故按「调用点计数 + 重置语句在位」判
+  const resetCalls = (src.match(/resetRoundState\(\)/g) || []).length
+  assert.ok(resetCalls >= 3, 'resetRoundState 必须在声明处 + fill + rotate 三处被调用（漏一处即漏配）')
+  assert.ok(src.includes('prevGenerating = false'), 'prevGenerating 重置必须在 resetRoundState 内')
+  assert.ok(src.includes('genEnterRoots = 0'), 'genEnterRoots 重置必须在 resetRoundState 内')
   // [stopped-btn-v2] 根身份与 genEnterRoots 同生共死：漏改会让上一轮的最后根身份跨轮次残留，
   //   新一轮「身份未变」恒真 ⇒ 冻结判据失真。
   // [CONSTRAINT] split 模式带「开新一轮」后缀：声明行（let genEnterRootId = ''）的注释
   //   不含该后缀，不会被计入（同 prevGenerating 例的处理）。
-  assert.equal(
-    src.split('genEnterRootId = \'\' // [stopped-btn-v2] 开新一轮').length - 1,
-    2,
-    'genEnterRootId 必须在 fill/rotate 两处重置',
-  )
+  assert.ok(src.includes('genEnterRootId = \'\''), 'genEnterRootId 重置必须在 resetRoundState 内')
   assert.ok(
     src.includes('genEnterRootId = assistantRootId()'),
     '进入 generating 必须同时记录最后根身份（只记计数会退回 [stopped-btn-v2] 修复前的误推）',

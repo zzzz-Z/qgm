@@ -60,7 +60,7 @@ test('elToMd: 双通道的 tag 分支集合一致', () => {
 test('extractReplyMd: 双通道骨架一致（非空守卫 → nodeType===9 取 body → elToMd → 折叠 → trim）', () => {
   for (const rel of [HEADLESS, USERSCRIPT]) {
     const inner = extractInner(read(rel), 'extractReplyMd')
-    assert.ok(/if \(!root\) return ''/.test(inner), `${rel}: 缺 root 空守卫`)
+    assert.ok(/if \(!root\)\s*return '';?/.test(inner), `${rel}: 缺 root 空守卫`)
     assert.ok(/nodeType === 9/.test(inner), `${rel}: 缺 document 特判（取 body）`)
     assert.ok(/elToMd\(node\)/.test(inner), `${rel}: 未调用 elToMd`)
     assert.ok(/replace\(\/\\n\{3,\}\/g, '\\n\\n'\)/.test(inner), `${rel}: 缺多空行折叠`)

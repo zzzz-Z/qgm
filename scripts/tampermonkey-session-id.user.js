@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.6
+// @version      1.9.8
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -1107,12 +1107,14 @@ function classifyAndPost() {
         // 生成中门：流式未结束时 script/plain 一律推迟
         const currGen = isGenerating();
         if (currGen) {
+            // [stopped-btn-v1] 进入 generating 时记录 roots 计数与最后根身份
             if (!prevGenerating) {
                 genEnterRoots = countAssistantRoots();
                 genEnterRootId = assistantRootId();
             }
             prevGenerating = currGen;
             // 「生成结束」常非 DOM 事件（按钮变灰/光标移除），若无后续 DOM 变更就再也没人唤醒它
+            // [generating-gate-v2] 生成结束常非 DOM 事件：单飞自巡检定时器兜底唤醒
             if (!genRetryTimer) {
                 genRetryTimer = setTimeout(() => { genRetryTimer = null; classifyAndPost(); }, 600);
             }
@@ -1122,7 +1124,8 @@ function classifyAndPost() {
         // stopped：上一轮在生成 + 本轮按钮消失 + 本轮没产出任何回复块
         if (prevGenerating && !stopPosted) {
             const rootsNow = countAssistantRoots();
-            if (rootsFrozenNow(genEnterRoots, genEnterRootId, rootsNow, assistantRootId())) {
+            const rootsFrozen = rootsFrozenNow(genEnterRoots, genEnterRootId, rootsNow, assistantRootId());
+            if (rootsFrozen) {
                 stopPosted = true;
                 lastBodySig = bodySignature();
                 post({
@@ -1169,6 +1172,7 @@ function classifyAndPost() {
         }
         // 结构未闭合的块被延迟后，DOM 若不再变动就再没人叫它，需主动排一次复查。
         // 只在门仍处等待期（ticks < 3）且无在途定时器时排，避免释放后空转
+        // [script-closure-gate-v1] 未闭合块被延迟后主动排复查，否则 DOM 静止则无人唤醒
         const closureGate = window.__aiRunnerClosureGate;
         if (closureGate && closureGate.ticks < 3 && !closureRetryTimer) {
             closureRetryTimer = setTimeout(() => { closureRetryTimer = null; classifyAndPost(); }, 400);
@@ -1179,7 +1183,9 @@ function classifyAndPost() {
         const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0;
         // script：标记行为非脚本类时整轮不走脚本分类（否则带示例代码块的 DONE 总结会被当脚本执行）
         // stopped 后残余块一律不推：前端已 finish 循环，此时推出去会形成「循环外自动执行」旁路
+        // [stopped-no-autorun-v1] 停止轮不再推脚本：残余块会落到「循环外自动执行」旁路
         if (!markedNonScript && !stopPosted) {
+            // [multi-script-v1] 一条回复可带多块：只放行首个未推送块，推完再跑一次分类
             const item = extractLatestScript() || extractScriptFromMarkdown();
             if (item && emitScript(item)) {
                 // 同一回复里还有未推送的块 ⇒ 主动再跑一次（observer 此时已静止）
@@ -1196,6 +1202,7 @@ function classifyAndPost() {
         // 容器缺失 ⇒ 变化来自思考面板/搜索卡的流式抖动，此时整页反推会产出噪音卡
         if (!replyRoot)
             return;
+        // [stopped-plain-noise-v1] 已推过 stopped ⇒ 之后的 plain 必为半截回复的补发
         if (stopPosted)
             return;
         // 首行是 SCRIPT 且脚本已推成功 ⇒ 此处 plain 必为 DOM 抖动引起的重复补发
@@ -1279,6 +1286,7 @@ resumeReplyObserver();
  *   无 assistant 容器不跑 —— 此时变化只可能是思考面板抖动，classifyAndPost 也会自行返回。
  *   classifyAndPost 自身以 seenHashes / lastBodySig 幂等，即便误唤醒也不会重复推送。
  */
+// [idle-wake-poll-v1] 空转唤醒兜底：DOM 静止后 observer 不再触发，轮询保证未推送的块不滞留
 setInterval(() => {
     try {
         if (typeof document !== 'undefined' && document.hidden)

@@ -65,11 +65,11 @@ test('done-stable-gate: 两侧门形态同构（if 不等 → 赋值 return，�
     const src = read(rel)
     // 第一帧：不等则赋值并 return（延迟）
     assert.ok(
-      /if \(\w*_pendingDoneSig !== \w*_doneSig\)/.test(src) || /_pendingDoneSig !== _doneSig/.test(src),
+      /if \([\w.]*_pendingDoneSig !== \w*doneSig\)/.test(src),
       `${rel} 缺「首帧不等则延迟」的判定`,
     )
     assert.ok(
-      /_pendingDoneSig = _doneSig/.test(src),
+      /_pendingDoneSig = \w*doneSig/.test(src),
       `${rel} 缺「赋值 _pendingDoneSig = _doneSig」`,
     )
     assert.ok(
@@ -89,7 +89,7 @@ test('done-gate: 两侧 DONE 分支前都必须有生成中门', () => {
     const isGenFn = /function isGenerating(?:InPage)?\s*\(/.test(src)
     assert.ok(isGenFn, `${rel} 缺 isGenerating 探针`)
     // 门形态：DONE 分支内首句是生成中判断后 return
-    const m = src.match(/if \(doneMarker\) \{[\s\S]{0,400}?if \(isGenerating(?:InPage)?\(\)\) return/)
+    const m = src.match(/if \(doneMarker\) \{[\s\S]{0,400}?if \(isGenerating(?:InPage)?\(\)\)\s*return/)
     assert.ok(
       m,
       `${rel} 的 DONE 分支缺生成中门 ⇒ 流式中途出现的 DONE 首行会被推两次（用户实测「分两段」）`,
@@ -97,7 +97,8 @@ test('done-gate: 两侧 DONE 分支前都必须有生成中门', () => {
     // 位置：生成中门必须在稳定门之前（先拦生成中，再看稳定性）
     const gateAt = src.indexOf('if (doneMarker) {')
     const genAt = src.indexOf('isGenerating', gateAt)
-    const stableAt = src.indexOf('_pendingDoneSig !== _doneSig', gateAt)
+    const stableMatch = /_pendingDoneSig !== \w*doneSig/.exec(src.slice(gateAt))
+    const stableAt = stableMatch ? gateAt + stableMatch.index : -1
     assert.ok(genAt > 0 && stableAt > 0, `${rel} 找不到门/稳定门`)
     assert.ok(genAt < stableAt, `${rel} 生成中门必须在稳定门之前`)
   }

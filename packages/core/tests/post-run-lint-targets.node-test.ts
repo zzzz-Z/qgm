@@ -86,11 +86,14 @@ test('[承重] 跳过集合与 eslint.config.ts 的 ignores 不漂移', () => {
   assert.ok(m, 'eslint.config.ts 里必须能解析出 ignores 数组')
   const entries = [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1])
   assert.ok(entries.length >= 4, `ignores 条目数异常：${entries.length}`)
-  // 目录型条目（`a/**` 或 `**/a/**`）⇒ 其目录名必须出现在 LINT_SKIP_SEGMENTS 里
+  // 仅**目录型**条目（`a/**` 或 `**/a/**`）需同步；单文件条目（如某个 .user.js）不构成目录段
   const dirs = entries
+    .filter(e => /(?:^|\/)\*\*$/.test(e))
     .map(e => e.replace(/^\*\*\//, '').replace(/\/\*\*$/, ''))
     .filter(d => d && !d.includes('*'))
   for (const d of dirs) {
-    assert.ok(LINT_SKIP_SEGMENTS.has(d), `eslint ignores 里的 \`${d}\` 未同步进 LINT_SKIP_SEGMENTS`)
+    // LINT_SKIP_SEGMENTS 是段名集合（hasSkippedSegment 按 / 切段比较），故取路径最后一段
+    const seg = d.split('/').filter(Boolean).pop() as string
+    assert.ok(LINT_SKIP_SEGMENTS.has(seg), `eslint ignores 里的 \`${d}\`（段 \`${seg}\`）未同步进 LINT_SKIP_SEGMENTS`)
   }
 })

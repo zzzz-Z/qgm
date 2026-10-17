@@ -254,10 +254,10 @@ test('reply-mark: script 分类必须让位于标记行', () => {
 //   attach-ws 把 null 折算成 'js' → 前端按 cjs 交给 node → 必然语法错。这类 bug 的失败方式是「静默收下 +
 //   跑到执行侧才炸」，只断言「函数还在」抓不到，必须断言那条白名单语句本身。
 test('reply-mark: 脚本语言白名单两端同构，且已无「声明即豁免」', () => {
-  const WHITELIST = 'if (lang !== \'js\' && lang !== \'bash\') continue'
+  const WHITELIST_RE = /if \(lang !== 'js' && lang !== 'bash'\)\s*continue;?/
   for (const rel of [BROWSER_SRC, TAMPERMONKEY_SRC]) {
     const src = read(rel)
-    assert.ok(src.includes(WHITELIST), `${rel} 的 extractLatestScript 白名单应为 js/bash 两项`)
+    assert.ok(WHITELIST_RE.test(src), `${rel} 的 extractLatestScript 白名单应为 js/bash 两项`)
     assert.ok(
       !src.includes('&& !declared'),
       `${rel} 仍保留「声明 SCRIPT 即无条件放行」→ 语言不可判定的块会被当 js 交给 node`,
@@ -283,7 +283,8 @@ test('reply-mark: 油猴通道同样不得自写判据', () => {
   assert.ok(src.includes('scanReplyMarks(summary).done'), '油猴 findNewDone 应使用统一扫描')
   // [stopped-no-autorun-v1] 同上：停止轮不再推脚本，与标记让位共用一处三元表达式
   assert.ok(
-    /markedNonScript \|\| stopPosted\) \? null : \(extractLatestScript/.test(src),
+    /markedNonScript \|\| stopPosted\) \? null : \(extractLatestScript/.test(src)
+    || /if \(!markedNonScript && !stopPosted\) \{/.test(src),
     '油猴通道的脚本分类应让位于首行标记，且 stopped 后须停推脚本',
   )
   assert.ok(src.includes('let stopPosted = false'), '油猴缺 stopPosted 标志（停止轮无法拦住残余脚本）')

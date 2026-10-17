@@ -68,6 +68,7 @@ resumeReplyObserver()
  *   无 assistant 容器不跑 —— 此时变化只可能是思考面板抖动，classifyAndPost 也会自行返回。
  *   classifyAndPost 自身以 seenHashes / lastBodySig 幂等，即便误唤醒也不会重复推送。
  */
+// [idle-wake-poll-v1] 空转唤醒兜底：DOM 静止后 observer 不再触发，轮询保证未推送的块不滞留
 setInterval(() => {
   try {
     if (typeof document !== 'undefined' && document.hidden) return

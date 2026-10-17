@@ -93,8 +93,9 @@ test('③ 无 stopped 前置的 plain ⇒ 照常渲染（守卫不改变正常�
 test('④ [parity] 三层守卫同源：油猴 stopPosted / headless _stoppedReported / 前端窗口守卫均在位', () => {
   const um = readFileSync('scripts/tampermonkey-session-id.user.js', 'utf8')
   assert.ok(um.includes('[stopped-plain-noise-v1]'), '油猴缺 [stopped-plain-noise-v1] 守卫')
-  assert.ok(um.includes('if (stopPosted) return'), '油猴 plain 分支缺 stopPosted 早退')
-  assert.ok(um.match(/^\s*stopPosted = false/gm)?.length === 2, '油猴 fill/rotate 两处必须重置 stopPosted')
+  assert.ok(/if \(stopPosted\)\s*return;?/.test(um), '油猴 plain 分支缺 stopPosted 早退')
+  assert.ok(um.includes('stopPosted = false'), '油猴必须重置 stopPosted')
+  assert.ok((um.match(/resetRoundState\(\)/g) || []).length >= 3, '油猴 fill/rotate 两处必须重置 stopPosted（经 resetRoundState）')
 
   const hj = readFileSync('packages/core/src/headless/headless-inject.ts', 'utf8')
   assert.ok(hj.includes('[stopped-plain-noise-v1]'), 'headless 缺 [stopped-plain-noise-v1] 守卫')

@@ -162,8 +162,10 @@ test('body text parity: 三处剥离实现体一致，且确实走 clone + remov
   assert.ok(a.includes('cloneNode(true)'), '实现体必须克隆后再剥；直接读 document.body.textContent 等于没修')
   assert.ok(a.includes(`'${STRIP_SELECTOR}'`), '剥离选择器与约定不符（代码块/输入框/可编辑区）')
   assert.ok(a.includes('.remove()'), '实现体必须移除命中节点')
-  assert.equal(b, a, 'headless-inject-simple 与 headless-inject 的 bodyText 不一致（内联常量分叉）')
-  assert.equal(c, a, 'userscript 与 headless-inject 的 bodyText 不一致（内联常量分叉）')
+  // 归一化后比较：油猴侧是 tsc 转译产物（加分号、if 体拆行），语义相同即通过
+  const norm = (x: string) => x.replace(/[;\s]+/g, '')
+  assert.equal(norm(b), norm(a), 'headless-inject-simple 与 headless-inject 的 bodyText 不一致（内联常量分叉）')
+  assert.equal(norm(c), norm(a), 'userscript 与 headless-inject 的 bodyText 不一致（内联常量分叉）')
 })
 
 // ── DOM 级行为判据：页面形态取自复现脚本 .ai-runner/tmp/limit-fp-repro.cjs ──
@@ -418,6 +420,8 @@ test('limit 推送去重: headless _limitReported 与油猴 limitPosted 四处�
   // 油猴：声明 1；置位 2（增长通道 + 存量通道各一）；复位 3（声明 + fill + rotate）；门 1
   assert.equal(n(us, /let limitPosted = false/g), 1, '油猴 limitPosted 声明应恰 1 处')
   assert.ok(n(us, /limitPosted = true/g) >= 2, '油猴 limitPosted 置位应 ≥2（增长通道 + 存量通道各一处）')
-  assert.ok(n(us, /limitPosted = false/g) >= 3, '油猴 limitPosted 复位应 ≥3（声明 + fill + rotate）')
+  // 复位已集中进 resetRoundState：声明 1 处 + resetRoundState 内 1 处，再由 fill/rotate 三处调用保障
+  assert.ok(n(us, /limitPosted = false/g) >= 2, '油猴 limitPosted 复位应 ≥2（声明 + resetRoundState）')
+  assert.ok(n(us, /resetRoundState\(\)/g) >= 3, 'resetRoundState 必须在声明处 + fill + rotate 三处被调用')
   assert.equal(n(us, /if \(!limitPosted && limitStale\)/g), 1, '油猴存量兜底通道缺 limitPosted 门')
 })
