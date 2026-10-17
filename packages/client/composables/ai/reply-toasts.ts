@@ -39,6 +39,15 @@ export function notifyWaitTimeout(): void {
 export function notifySelfcheckReject(reason: string | undefined): void {
   toast(`自检未通过：${reason || 'hook rejected'}`, 'warn', TOAST_LONG)
 }
+/**
+ * [resume-watchdog-v1] 续推后迟迟无真实回复：可能再次中断，或页面探针静默失效。
+ * [WHY] 这条链路的失败默认是静默的（回复被抑制窗口吞 / 探针选择器改版），
+ *   不给提示用户只能看到页面不动，无从判断该等还是该手动继续。
+ */
+export function notifyResumeTimeout(seconds: number): void {
+  toast(`自动续推后 ${seconds} 秒未收到回复，可能已再次中断或页面探针失效，请手动继续`, 'warn', TOAST_LONG)
+}
+
 /** [stop-resume-v1] 自动续推达上限：明确告知用户，不再静默（停手让用户处理） */
 export function notifyResumeExhausted(max: number): void {
   toast(`平台中断后已自动续推 ${max} 次仍未完成，请手动处理`, 'warn', TOAST_LONG)

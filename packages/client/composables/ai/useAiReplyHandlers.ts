@@ -29,6 +29,7 @@ import { log } from '../../utils/log'
 import {
   notifyLimit,
   notifyResumeExhausted,
+  notifyResumeTimeout,
   notifySelfcheckReject,
   notifySiteError,
   notifyStopped,
@@ -64,6 +65,10 @@ export const STOPPED_PLAIN_GUARD_MS = 10_000
 /** [stopped-no-autorun-v1] 与 plain 抑制共用的停止后窗口（导出供测试推进时间） */
 export const STOPPED_GUARD_MS = STOPPED_PLAIN_GUARD_MS
 const stoppedAtBySid = new Map<string, number>()
+/** [resume-watchdog-v1] 续推看门狗句柄：sid → timer；收到任意真实回复即解除 */
+const resumeWatchdogBySid = new Map<string, ReturnType<typeof setTimeout>>()
+/** [resume-watchdog-v1] 续推后等待真实回复的上限；超过即提示用户手动继续 */
+export const RESUME_WATCHDOG_MS = 45_000
 
 /**
  * [stopped-no-autorun-v1] 该 sid 是否处于「刚收到 stopped」窗口内
@@ -121,10 +126,34 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     return true
   }
 
+  /**
+   * [resume-watchdog-v1] 续推看门狗：发出「继续」后 N 秒内没收到任何真实回复就提示。
+   * [WHY] 续推链路的失败是静默的（回复被抑制窗口吞掉 / 探针静默失效），用户只看到页面不动。
+   * [CONSTRAINT] 任何 kind 的真实回复到达即解除；sid 维度隔离，不跨窗口误报。
+   */
+  function armResumeWatchdog(sid: string): void {
+    if (!sid) return
+    disarmResumeWatchdog(sid)
+    resumeWatchdogBySid.set(sid, setTimeout(() => {
+      resumeWatchdogBySid.delete(sid)
+      try { notifyResumeTimeout(Math.round(RESUME_WATCHDOG_MS / 1000)) } catch { /* swallow: toast 未就绪 */ }
+    }, RESUME_WATCHDOG_MS))
+  }
+
+  /** [resume-watchdog-v1] 解除续推看门狗；幂等 */
+  function disarmResumeWatchdog(sid: string): void {
+    const t = resumeWatchdogBySid.get(sid)
+    if (t === undefined) return
+    clearTimeout(t)
+    resumeWatchdogBySid.delete(sid)
+  }
+
   /** 处理统一回复通道 ai-runner:reply */
   function handleAiReply(payload: MessageEvent['data'], e: MessageEvent): void {
     if (!isFromActiveAiSite(e)) return
     stopAiWaiting()
+    // [resume-watchdog-v1] 任何非 stopped 的真实回复都说明续推已被响应
+    if (String(payload.kind || '') !== 'stopped') disarmResumeWatchdog(String(payload.sessionId || ''))
     const sid = String(payload.sessionId || '')
     // [loop-consolidation-P2] 摘除 routedToLoop：auto-loop 子系统零调用点，判定恒 false，
     //   分支已无意义（详见 docs/plan/loop-consolidation.md 段五 P2）。
@@ -150,6 +179,12 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
           void aiWindow
             .copyAndFill('继续', { skipRules: true })
             .finally(() => endAutoResume(sid))
+          // [resume-watchdog-v1] 续推后迟迟无任何回复 ⇒ 明确告知，不再静默干等。
+          // [WHY] 续推的回复若落进 stopped 抑制窗口、或探针静默失效（选择器改版），
+          //   用户看到的是「自动续推后页面毫无反应」；没有兜底提示就完全无从判断。
+          // [CONSTRAINT] 只提示不改抑制逻辑——放行续推的 plain 会让「停止前发出、
+          //   停止后到达」的残余脚本一起逃逸（stopped-no-autorun 守卫判据）。
+          armResumeWatchdog(sid)
         }, 1500)
       } else if (_d.reason === 'max-reached') {
         // 达上限：明确告知用户，不再静默

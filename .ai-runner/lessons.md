@@ -2937,3 +2937,15 @@ restart 轮失败 → 下一轮探活恢复。
 ## 服务端端点可能自带副作用，前端改造要看对端
 
 `/workspace/pick` 名字像「只选路径」，实际服务端内部就 setRoot 了。只改前端 reload 而不改端点，旁路依然存在。
+
+## 「让被吞的东西通过」和「让残余脚本不执行」是同一个开关的两面
+
+`inStoppedWindow` 既拦停止后的残余补发，也拦续推的合法回复。想放宽前者必然放开后者，而后者是刻意为之的安全设计（防止循环外自动执行）。正确做法是不动拦截语义，改用外部提示兜底。
+
+## `useAiReplyHandlers.ts` 已把 toast 收口到 `reply-toasts.ts`（§4 import ≤ 20 的产物）
+
+在该文件直接调 `toast(...)` 在 vitest 下会因 auto-import 不生效而报错。新增提示必须加到 `reply-toasts.ts`。
+
+## 守卫测试里的字符串引号
+
+`it('... copyAndFill('继续') ...')` 内层单引号会提前闭合字符串，tsc/eslint 同时报 `Parsing error`。标题里不要放未转义的引号。
