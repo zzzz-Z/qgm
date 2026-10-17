@@ -36,6 +36,22 @@ describe('tampermonkey-split', () => {
     expect(read(OUT_FILE)).toBe(buildUserscript(SRC_DIR))
   })
 
+  // [userscript-version-inject-v1] 版本号不在片段里，由 scripts/tampermonkey-version.json 注入。
+  // [WHY] 两个新失效模式此前无判据：① 注入没生效 → 产物留占位符，油猴拿它当版本比较，更新链路静默失效；
+  //   ② 有人把版本写回片段 → 与版本文件分叉，构建再也无法自动递增（比对恒为「有变」而无限 bump）。
+  test('版本注入：产物无占位符、版本文件与产物一致、片段里不写死版本', () => {
+    const out = read(OUT_FILE)
+    expect(out).not.toContain('__TM_VERSION__')
+    const ver = JSON.parse(read(join(ROOT, 'scripts/tampermonkey-version.json'))).version as string
+    expect(out.includes(`// @version      ${ver}`), '产物 @version 必须等于版本文件的值').toBe(true)
+    for (const name of SEGMENTS) {
+      if (name === 'header') continue
+      expect(read(join(SRC_DIR, `${name}.ts`)), `${name}.ts 不应出现 @version 声明`).not.toMatch(/^\/\/ @version/m)
+    }
+    const hd = read(join(SRC_DIR, 'header.ts'))
+    expect(hd).toContain('__TM_VERSION__')
+    expect(hd).not.toMatch(/^\/\/ @version\s+\d/m)
+  })
   test('每个片段都非空', () => {
     for (const name of SEGMENTS) {
       expect(read(join(SRC_DIR, `${name}.ts`)).length, `${name}.ts 为空`).toBeGreaterThan(0)
