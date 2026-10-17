@@ -236,6 +236,7 @@ declare global {
   const peekAll: typeof import('./composables/runner/useScriptInbox').peekAll
   const peekPendingAskKey: typeof import('./composables/ui/useEventStream').peekPendingAskKey
   const pickNavUrl: typeof import('./composables/data/useWorkspaces').pickNavUrl
+  const pickWorkspaceBySid: typeof import('./composables/data/useWorkspaces').pickWorkspaceBySid
   const prependFirstPromptRules: typeof import('./composables/ai/first-prompt').prependFirstPromptRules
   const probeRender: typeof import('./composables/ui/render-probe').probeRender
   const probeWindowBySid: typeof import('./composables/ai/useAiWindowTable').probeWindowBySid
@@ -895,6 +896,7 @@ declare module 'vue' {
     readonly peekAll: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['peekAll']>
     readonly peekPendingAskKey: UnwrapRef<typeof import('./composables/ui/useEventStream')['peekPendingAskKey']>
     readonly pickNavUrl: UnwrapRef<typeof import('./composables/data/useWorkspaces')['pickNavUrl']>
+    readonly pickWorkspaceBySid: UnwrapRef<typeof import('./composables/data/useWorkspaces')['pickWorkspaceBySid']>
     readonly prependFirstPromptRules: UnwrapRef<typeof import('./composables/ai/first-prompt')['prependFirstPromptRules']>
     readonly probeRender: UnwrapRef<typeof import('./composables/ui/render-probe')['probeRender']>
     readonly probeWindowBySid: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['probeWindowBySid']>

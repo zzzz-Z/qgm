@@ -5,6 +5,8 @@
 //   服务端不可达时面板显示空态而非抛未处理 rejection（承重测试在 happy-dom 下无后端）。
 
 import { ref } from 'vue'
+import { sidForUrl } from '../ai/useAiSite'
+import { getActiveWinSidImpl, getWindowBySidImpl } from '../ai/useAiWindowTable'
 
 /** [workspace-schema-v2] 内联会话绑定（homeUrl 与 sessionUrl 分离） */
 export interface WorkspaceSessionInline {
@@ -229,6 +231,19 @@ async function load(): Promise<void> {
  * [CONSTRAINT] 服务端拒绝（404）时保留原 activeId；导航失败不阻断本地状态切换。
  */
 async function activate(id: string, opts?: { newSession?: boolean }): Promise<{ ok: boolean, error?: string }> {
+  // [workspace-switch-focus-v1] 在任何 await 之前同步聚焦受控 AI 窗口：
+  //   user activation 只在同步栈内有效——一旦有 await（网络请求），浏览器会拒绝跨域 focus，
+  //   表现为「切了工作区但 AI 窗口没到前台」（openSite 里的 win.focus() 在多个 await 之后，救不回来）。
+  // [CONSTRAINT] 目标 sid 从本地 workspaces 快照（上次 load 结果）推导，不必 await 网络——
+  //   跨站点切换（DeepSeek → 千问）时目标 sid 与当前 activeWinSid 不同，必须按绑定推导才能聚焦对的那一个；
+  //   本地快照缺失（首次激活前未 load）时回退当前激活窗口，仍好过「什么都没发生」。
+  try {
+    const bound = workspaces.value.find(w => w.id === id)?.session
+    const targetUrl = bound?.sessionUrl || bound?.homeUrl || ''
+    const targetSid = targetUrl ? sidForUrl(targetUrl) : getActiveWinSidImpl()
+    const win = getWindowBySidImpl(targetSid) ?? getWindowBySidImpl(getActiveWinSidImpl())
+    win?.focus()
+  } catch { /* 跨域 / 休眠标签页：忽略 */ }
   try {
     const r = await fetch('/__ai/workspace/activate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) })
     const j = await r.json().catch(() => null) as { ok?: boolean, error?: string } | null

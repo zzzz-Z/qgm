@@ -2677,6 +2677,8 @@ TypeScript 控制流分析把 `const` 字面量收窄为 `'A'`，于是 `if (PHA
 
 `verify-anchors.cjs` 是真子进程读真盘，看不见本轮 overlay 内的 `anchors.json` 写入。改完锚点当轮跑校验会继续报旧错，必须先 `await __AI__.flush()` 再验。这是该陷阱在 `lint`/`typeCheck` 之外的第四个实例。
 
+补充（2026-10-17）：同轮 `patchFile` 改测试文件后同轮 `npx vitest run`，子进程读的是真盘上的旧版本——overlay 里的新内容看不见。表现：patch 显示成功，vitest 仍然报旧断言错误。修法：改测试与跑测试分两轮；或同轮 `await __AI__.flush()` 后再跑。
+
 ## SSOT 改了标题，内容锚点要同步
 
 [VERIFIED] 2026-10-11 `pnpm anchors:verify` 独立闸门；改文档标题会命中 `scripts/anchors.json` 的 `(file, contains)` 内容锚点
@@ -3001,3 +3003,11 @@ vitest 配置已 `exclude: ['**/*.spec.ts']`，但外部 runner（如直接 `nod
 ## 报告「测试已跑通」前必须看总账，不看 TAP 片段
 
 `npx vitest run <单文件>` 在 `No test suite` 时依然会输出 TAP 帧（5 pass），后续 `tail` 截取时极易误读为「全绿」。判据：结尾必须是 `Test Files  1 passed` / `Tests  5 passed`，只出现 `# tests 5 / # pass 5` 不构成通过。
+
+## 源码断言测试：`bodyOf` 必须跳过签名里的类型字面量
+
+`async function activate(id: string, opts?: { newSession?: boolean }): Promise<{ ok: boolean, error?: string }> {` 有 3 个 `{`，从 name 起首个 `{` 开始计深度会立刻配对错位。判据：`{` 后（允许空白）紧跟换行才是函数体起始。
+
+## 源码断言测试：断言前必须剥行注释
+
+注释里写了「一旦有 `await`（网络请求）」→ `indexOf('await ')` 命中注释而非代码，测试假红/假绿。剥离方式：逐行 `l.slice(0, l.indexOf('//'))`（本仓 `SYSTEM.md` §16 台账「残差断言必须排除注释行」的同类陷阱，已在 `AGENTS.md` 的踩坑记录里记过，这次又踩了）。
