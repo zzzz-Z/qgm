@@ -68,6 +68,19 @@ for (const s of ['scripts/copy-runtime.cjs', 'packages/core/scripts/copy-runtime
     console.error(`[build-all] ${s} failed:`, e && e.message ? e.message : e)
   }
 }
+// [userscript-assemble-in-build-v1] 油猴脚本产物随 build 重建。
+// [WHY] 源是 packages/core/src/tampermonkey/*.ts 的 22 个片段，产物是 scripts/tampermonkey-session-id.user.js；
+//   此前只有手动跑 assemble-userscript.mjs 才会重建，改完片段忘重建 = 分发端点仍发旧脚本，且无任何报错。
+// [CONSTRAINT] assemble 自身幂等（产物无变化则不写盘），故接进 build 不会污染 git status；
+//   失败只告警不中断（产物是分发资产，不影响 server 启动）。
+// [CONSTRAINT] @version 必须由人递增：脚本会打印提醒，但不会替人改版本号（改了会让语义失真）。
+// CHANGE-IMPACT: 删此段 → 改片段后 build 不再重建产物，需手动跑 assemble。
+console.log('[build-all] step 5: assemble userscript')
+try {
+  execFileSync(process.execPath, ['scripts/assemble-userscript.mjs'], { cwd: ROOT, stdio: 'inherit' })
+} catch (e) {
+  console.error('[build-all] assemble-userscript failed:', e && e.message ? e.message : e)
+}
 console.log('[build-all] done')
 
 // [AIRUNNER-BUILD-WATCH-V1] --watch 常驻：src/ 变更 → 自动重建 server + 拷贝 runtime
@@ -91,6 +104,9 @@ if (process.argv.includes('--watch')) {
         configFile: path.join(ROOT, 'apps/standalone/vite.config.ts'),
         logLevel: 'warn',
       })
+      try {
+        execFileSync(process.execPath, ['scripts/assemble-userscript.mjs'], { cwd: ROOT, stdio: 'inherit' })
+      } catch { /* 产物重建失败不阻断 watch */ }
       console.log('[build-all:watch] ✓ 重建完成，请重启 air-server 使新 dist 生效')
     } catch (e) {
       console.error('[build-all:watch] ✗ 重建失败：', e && e.message ? e.message : e)

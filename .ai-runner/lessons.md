@@ -3097,3 +3097,11 @@ TS 版把 `marked` 判定抽成顶层 `hasScriptHead`，沙箱只抽了 `extract
 ## `module-size-ratchet` 的冻结清单必须是实测行数
 
 随手写 812 而实际 811，会触发「基线不得虚高」的 ratchet 反向断言。
+
+## 接入构建链必须实跑一次 build 看日志
+
+`node --check` 只证明语法合法，证明不了「这段代码会被执行到」。真正的证据是构建日志里出现 `step 5: assemble userscript`。改构建脚本时，把「日志里能看到」当作验收标准，而不是「文件里能搜到」。
+
+## `assemble-userscript.mjs` 的幂等性是接进 build 的前提
+
+它先读旧产物比对，相同则跳过写入。若它无条件覆写，接进 build 会让每次 `pnpm build` 都产生一个 git 改动，`git status` 永远不干净，最终逼人去 `git checkout` 掉——反而掩盖真实变更。
