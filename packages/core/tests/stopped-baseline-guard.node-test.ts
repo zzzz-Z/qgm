@@ -106,18 +106,26 @@ test('stopped parity: 两侧探针常量逐值一致（标签正则 / 可点击�
   assert.ok(hlClosest, 'headless 侧未找到 scope closest 列表')
   assert.equal(hlClosest[1], usClosest[1], 'scope closest 列表两通道不一致')
 
-  // [stopped-continue-btn-v1] 油猴侧同构：判据必须是「根冻结 || 继续按钮」
+  // [stopped-marker-v2] 油猴侧同构：判据必须是「根冻结 || 继续按钮 || 已停止角标」
   assert.ok(
     us.includes('const stoppedByBtn = hasContinueBtn()'),
-    '油猴侧必须探测「继续生成」按钮（已产出内容后自停的唯一可靠信号）',
+    '油猴侧必须探测「继续生成」按钮（已产出内容后自停的信号之一）',
   )
   assert.ok(
-    us.includes('if (rootsFrozen || stoppedByBtn)'),
-    '油猴 stopped 判据必须为「根冻结 或 继续按钮」，只保留根冻结会漏判已产出内容的自停',
+    us.includes('const stoppedByLabel = hasStoppedLabel()'),
+    '油猴侧必须探测「已停止」角标：有产出 + 无继续按钮的形态只能靠它识别',
+  )
+  assert.ok(
+    us.includes('if (rootsFrozen || stoppedByBtn || stoppedByLabel)'),
+    '油猴 stopped 判据必须三通道齐全，只保留前两条会漏判「仅已停止角标」的形态',
   )
   assert.ok(
     us.includes('function hasContinueBtn()'),
-    '油猴侧必须定义 hasContinueBtn（与 headless hasContinueBtnInPage 同构）',
+    '油猴侧必须定义 hasContinueBtn（与 headless detectStoppedMarkersInPage 的 byBtn 同构）',
+  )
+  assert.ok(
+    us.includes('function hasStoppedLabel()'),
+    '油猴侧必须定义 hasStoppedLabel（精确等值 + 排除正文 + 要求 svg）',
   )
 })
 
@@ -128,21 +136,20 @@ test('stopped parity: headless 判定结构在位（isGeneratingInPage + 按钮�
   assert.ok(hl.includes('dedup._prevGenBtn = currGen'), '必须每 poll 更新按钮状态供下一 poll 判过渡')
   // [CONSTRAINT] 断言**消费点整串**（不只是声明）：只钉 `const wasGen = ...` 而漏掉 if 条件里的
   //   `wasGen &&`，变异删掉过渡条件后测试仍绿（2026-10-16 变异实测存活过一次，补此断言）。
-  // [stopped-continue-btn-v1] 判据有两条分支，缺任一即漏判某类平台自停：
-  //   ① 按钮从有到无 + 无新增内容（思考期被停）
-  //   ② 「继续生成」按钮存在（已产出部分内容后被中断 —— 2026-10-18 用户实测的形态）
-  // [判据承重] 删掉 `|| stoppedByBtn` 分支 ⇒ 下方断言必红；只保留 ① 会漏判「已产出内容后自停」。
+  // [stopped-marker-v2] 判据有三条分支，缺任一即漏判某类平台自停：
+  //   ① 按钮从有到无 + 无新增内容（思考期被停）② 继续按钮 ③ 已停止角标（无继续按钮时的唯一信号）
+  // [判据承重] 删掉任一分支 ⇒ 下方断言必红。
   assert.ok(
-    hl.includes('(wasGen && !currGen && noNewAssistantContent(dedup._baselineLastHash, hashLastAssistant())) || stoppedByBtn'),
-    'stopped 必须同时保留「按钮从有到无 + 无新增内容」并新增「继续按钮」分支，缺一即漏判',
+    hl.includes('|| markers.byBtn || markers.byLabel'),
+    'stopped 必须三通道齐全（按钮过渡 + 继续按钮 + 已停止角标），缺一即漏判一类平台自停',
   )
   assert.ok(
     hl.includes('noNewAssistantContent(dedup._baselineLastHash, hashLastAssistant())'),
     'stopped 必须要求「本轮无新增 assistant 内容」（与油猴 rootsFrozenNow 同义），且经 noNewAssistantContent 纯函数判定',
   )
   assert.ok(
-    hl.includes('function hasContinueBtnInPage()'),
-    'headless 必须内联「继续生成」按钮探针（page.evaluate 序列化约束，不能引用外部模块）',
+    hl.includes('function detectStoppedMarkersInPage()'),
+    'headless 必须内联合并探针（page.evaluate 序列化约束，一次扫出 byBtn 与 byLabel）',
   )
   // 文案正则必须非捕获组：捕获组会触发 regexp/no-unused-capturing-group（实际挂过 lint）
   assert.ok(

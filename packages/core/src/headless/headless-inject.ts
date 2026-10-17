@@ -211,14 +211,28 @@ export function detectReplyInPage(siteCfg = {}) {
       && (nowHash === '' || nowHash === baselineHash)
   }
 
-  // [stopped-continue-btn-v1] 「继续生成」按钮存在 ⇒ 平台自停（与油猴 hasContinueBtn 同值，改一侧必同步）。
-  function hasContinueBtnInPage() {
-    const RE = /^(?:继续生成|继续回答|继续输出|Continue generating)$/i
+  // [stopped-marker-v2] 平台自停的两类页面信号，一次扫出（与油猴 hasContinueBtn/hasStoppedLabel 同构）：
+  //   ① byBtn：「继续生成」按钮存在（已产出部分内容后被中断）
+  //   ② byLabel：当前轮回复区出现「已停止」角标（无继续按钮时的唯一信号，社区 dsh-continuechat 实证）
+  function detectStoppedMarkersInPage() {
+    const out = { byBtn: false, byLabel: false }
+    const BTN_RE = /^(?:继续生成|继续回答|继续输出|Continue generating)$/i
     for (const el of document.querySelectorAll('button, div[role="button"], [role="button"]')) {
       const label = String(el.getAttribute('aria-label') || el.textContent || '').trim()
-      if (label && RE.test(label)) return true
+      if (label && BTN_RE.test(label)) { out.byBtn = true; break }
     }
-    return false
+    // [CONSTRAINT] 「已停止」扫描三重保险：精确等值 + 排除正文容器 + 要求同容器有 svg
+    //   （正文复述「已停止」时父元素 textContent 是整段话，不会恰好等于三个字）
+    const scope = document.querySelectorAll('.ds-assistant-message-main-content')
+    const root = scope.length ? scope[scope.length - 1] : null
+    if (root) {
+      for (const el of root.querySelectorAll('span, div')) {
+        if (el.closest('.ds-markdown, pre, code')) continue
+        if (String(el.textContent || '').trim() !== '已停止') continue
+        if (el.querySelector('svg') || el.parentElement?.querySelector('svg')) { out.byLabel = true; break }
+      }
+    }
+    return out
   }
 
   // [stopped-btn-v1] ① 按钮从有到无 + 无新产出（思考期被停）② 继续按钮存在（[stopped-continue-btn-v1]）。
@@ -227,9 +241,9 @@ export function detectReplyInPage(siteCfg = {}) {
     const currGen = isGeneratingInPage()
     const wasGen = dedup._prevGenBtn === true
     dedup._prevGenBtn = currGen
-    // [stopped-continue-btn-v1] ① 按钮从有到无且无新增 ② 继续按钮存在，任一即自停
-    const stoppedByBtn = hasContinueBtnInPage()
-    if ((wasGen && !currGen && noNewAssistantContent(dedup._baselineLastHash, hashLastAssistant())) || stoppedByBtn) {
+    // [stopped-marker-v2] 三条判据任一成立即自停：①按钮从有到无+无新增 ②继续按钮 ③已停止角标
+    const markers = detectStoppedMarkersInPage()
+    if ((wasGen && !currGen && noNewAssistantContent(dedup._baselineLastHash, hashLastAssistant())) || markers.byBtn || markers.byLabel) {
       dedup._stoppedReported = true
       // [stopped-toast-quote-v1] 文案分段拼接：整句字面量会成为探针源码的自命中
       // （本文件会被工作台 dump 进会话，同 limit 探针的自指教训）
@@ -237,21 +251,14 @@ export function detectReplyInPage(siteCfg = {}) {
     }
   }
 
-  // [limit-detect-v3] 会话长度上限感知：触顶后继续在本会话提问不可能有产出，与「已停止」同构——
-  // 无 DONE 无完整脚本、plain 被 hasJsFence 拦 → 前端无感知干等超时。
-  // [WHY] DeepSeek 实际文案是「达到对话长度上限」+「请开启新对话」——动词在前的语序；
-  // [CONSTRAINT] 引述真文案**必须分成两段引号**：连写成一行会被本探针自己的正则命中 ⇒ 该文件被
-  //   工作台 dump 进会话即自指误报（与 2026-10-10 那条同根因：探针扫到了自己的工作语言）。
-  //   守卫 `limit marker: 探针源码库零自命中` 会拦下任何此类回退。
-  //       v1 只写名词在前的「对话…已达上限」→ 真实提示漏匹配；v3 收紧为中文触顶**必须自带动作子句**
-  //       （v2 允许裸标记命中，实测正文自指 + 侧栏常驻「开启新对话」在 textContent 相接会假命中）。
-  // [CONSTRAINT] 基线去重仍保留：只在「计数增长」时推送，排除历史消息里的旧标记。
-  // [CONSTRAINT] 正则须与 headless-fill.ts 基线、油猴 countLimitMarkers 三处严格同构，改一处必同步
-  // [limit-en-branch-v1] 英文分支收紧：`maximum context length` 原先**裸匹配**（无任何上下文要求），
-  //   而「被工作台 dump 进会话的源码/文档行」里恰好有探针自己的这条词表 ⇒ 自指命中（2026-10-10 12:02 实锤）。
-  //   改为必须邻近 token 数：`(?:is|of)\s*\d+` 或后随 `\d+\s*tokens`；真实 API 错文
-  //   `maximum context length is <N> tokens` 形态仍命中（守卫正例；此处**不写真数字**，否则本行自命中）。
-  //   `context length (?:limit|exceeded|too long)` 保持原样：它带 `(?:` 前缀，源码文本无法自匹配。
+  // [limit-detect-v3] 会话长度上限感知：触顶后继续提问不可能有产出，与「已停止」同构——
+  // 无 DONE、无完整脚本、plain 被 hasJsFence 拦 → 前端无感知干等超时。
+  // [WHY] DeepSeek 实际文案是「达到对话长度上限」+「请开启新对话」（动词在前）。
+  // [CONSTRAINT] 引述真文案必须分两段引号：连写成一行会被本探针自己的正则命中 ⇒ 工作台 dump 该文件即自指误报。
+  //   中文触顶必须自带动作子句（v2 允许裸标记命中，实测正文自指 + 侧栏「开启新对话」在 textContent 相接会假命中）。
+  // [CONSTRAINT] 基线去重保留：只在计数增长时推送，排除历史旧标记；正则须与 headless-fill.ts、油猴三处同构。
+  // [limit-en-branch-v1] 英文 `maximum context length` 原裸匹配 ⇒ 被 dump 的源码自指命中；
+  //   改为必须邻近 token 数（`(?:is|of)\s*\d+` 或后随 `\d+\s*tokens`），真实 API 错文仍命中（此处不写真数字）。
   if (!dedup._limitReported) {
     const limitMessages = scanText.match(/(?:(?:达到|已达|超出|超过)\s*(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?\s*(?:已达|已达到|达到|超出|超过)\s*(?:上限|最大长度|超限|过长)|(?:对话|会话|上下文)(?:长度)?超限|(?:对话|会话|上下文)(?:长度)?\s*(?:上限|最大长度|过长))(?:[，,：:]\s*请?|请)(?:开启|开始|新建|创建)(?:一个)?新(?:对话|会话)|context length (?:limit|exceeded|too long)|maximum context length (?:is|of)\s*\d+|maximum context length\s+\d+\s*tokens/gi) || []
     const limitBaseline = typeof dedup._limitBaseline === 'number' ? dedup._limitBaseline : 0
@@ -409,23 +416,14 @@ export function detectReplyInPage(siteCfg = {}) {
   }
 
   function extractLatestScript() {
-    // [script-closure-gate-v1] 结构闭合门 —— 未闭合的块**不当作完整脚本推送**。
-    // [WHY] 在此之前，「不把流式半截块推出去」的唯一屏障是调用方的稳定判据
-    //   （内置通道 = 「连续 2 帧同 hash」即 800ms 无变化；油猴通道 = 350ms 防抖 + 生成中门）。
-    //   两者都只要求「这段时间内文本没变」，**都不要求块本身闭合**，于是：
-    //   · 流式中途任何一次超过该窗口的停顿（网络抖动 / 站点渲染卡顿 / 模型思考）都会让半截块被判为完整；
-    //   · 油猴通道另有一处：站点把回复切成「已停止」后「停止生成」按钮消失 ⇒ isGenerating() 转 false，
-    //     而代码块并未闭合，半截块被当作完整脚本 post 出去。
-    //   两者都让 /run 报 `Unexpected end of input` + 结构未闭合 ⇒ 与上游 max_tokens 截断的报错**完全同形**，
-    //   应用端只能读成「脚本被截断」，于是反复拆小重发、白烧轮次。
-    //   （[multi-script-v1] 记的是接收侧「只取最后一块」那一种成因；本条是接收侧的第三种。）
-    // [CONSTRAINT] **只延迟、不丢弃**：正文长度连续 CLOSURE_ACCEPT_TICKS 次不变仍未闭合 ⇒
-    //   判定为「上游真截断」，照旧放行（下游 400 会给「拆小重发」提示，补救路径不变）。
-    //   故对正常脚本零影响（闭合块直接跳过本段）；含正则字面量等扫描器识别不了的形态最多延迟 ~2.4s。
-    // [CONSTRAINT] 门状态挂在 window 上（不用 dedup）⇒ 内置通道与油猴通道本段**逐字同构**；
-    //   本函数经 page.evaluate 序列化执行，禁止引用外部闭包变量。
-    // [CONSTRAINT] 扫描器语义必须与 packages/core/src/post-run/script-check.ts 的 hasUnclosedStructure
-    //   一致（那边是服务端判据），由 script-closure-gate 用例做语料对拍
+    // [script-closure-gate-v1] 结构闭合门 —— 未闭合的块不当作完整脚本推送。
+    // [WHY] 此前唯一屏障是调用方的稳定判据（内置 2 帧同 hash / 油猴 350ms 防抖 + 生成中门），
+    //   两者都只要求「文本没变」、不要求块闭合 ⇒ 任何超窗停顿都让半截块被判完整，
+    //   下游报 `Unexpected end of input`，与上游 max_tokens 截断完全同形，应用端只能反复拆小重发。
+    // [CONSTRAINT] 只延迟、不丢弃：连续 CLOSURE_ACCEPT_TICKS 次不变仍未闭合 ⇒ 判为真截断，照旧放行。
+    // [CONSTRAINT] 门状态挂 window（不用 dedup）⇒ 双通道逐字同构；本函数经 page.evaluate 序列化，禁引用外部闭包。
+    // [CONSTRAINT] 扫描器语义须与 packages/core/src/post-run/script-check.ts 的 hasUnclosedStructure 一致
+    //   （那边是服务端判据），由 script-closure-gate 用例做语料对拍
     function hasUnclosedStructureJs(src) {
       const stack = []
       let state = 'code'

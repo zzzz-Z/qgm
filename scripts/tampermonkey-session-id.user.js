@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.15
+// @version      1.9.16
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -700,6 +700,35 @@ function hasContinueBtn() {
     catch { /* 站点结构异常：按无按钮处理（fail-open，宁可不判也不误判） */ }
     return false;
 }
+/**
+ * [stopped-label-v1] 当前轮回复区出现「已停止」状态角标 ⇒ 平台自停。
+ * [WHY] 第三种中断形态：有产出 + 显示「已停止」+ **无**「继续生成」按钮。
+ *   社区实现 dsh-continuechat 记录：turn 提前结束时「leaves nothing behind but a stopped
+ *   marker」——此时 rootsFrozen 恒 false（已有产出）、hasContinueBtn 也恒 false。
+ * [CONSTRAINT] 三重保险防空：① 文本**精确等值**（正文复述时父元素 textContent 是整段话）
+ *   ② 排除 .ds-markdown / pre / code（[stopped-toast-quote-v1] 的自指教训）
+ *   ③ 要求同容器内有 svg（状态角标必带图标，孤立文本节点不算）。
+ * [CONSTRAINT] 不硬编码 hash 类名（DeepSeek 类名随版本变化）；只依赖文本 + 图标结构。
+ *   与 headless-inject.ts 的 hasStoppedLabelInPage 同构，改一处必须同步另一处。
+ */
+const STOPPED_LABEL_TEXT = '已停止';
+function hasStoppedLabel() {
+    const scope = latestAssistantRoot();
+    if (!scope)
+        return false;
+    try {
+        for (const el of scope.querySelectorAll('span, div')) {
+            if (el.closest('.ds-markdown, pre, code'))
+                continue;
+            if (String(el.textContent || '').trim() !== STOPPED_LABEL_TEXT)
+                continue;
+            if (el.querySelector('svg') || el.parentElement?.querySelector('svg'))
+                return true;
+        }
+    }
+    catch { /* 站点结构异常：按无标记处理（fail-open，宁可不判也不误判） */ }
+    return false;
+}
 
 /**
  * 脚本块提取 —— 从最后一条 AI 回复里挑出「首个尚未推送的合格代码块」。
@@ -1144,23 +1173,25 @@ function classifyAndPost() {
             return;
         }
         // ---------- ② 探针 ----------
-        // stopped：两条判据任一成立即认定平台自停
+        // stopped：三条判据任一成立即认定平台自停
         //   ① 上一轮在生成 + 本轮按钮消失 + 本轮没产出任何回复块（思考期被停）
-        //   ② 「继续生成」按钮存在（已产出部分内容后被中断 —— 2026-10-18 用户实测形态）
-        // [stopped-continue-btn-v1] 判据 ② 是本次修复的核心：只保留 ① 会漏判「已产出内容后自停」。
+        //   ② 「继续生成」按钮存在（[stopped-continue-btn-v1]）
+        //   ③ 当前轮回复区出现「已停止」角标（[stopped-label-v1]，无继续按钮时的唯一信号）
         if (prevGenerating && !stopPosted) {
             const rootsNow = countAssistantRoots();
             const rootsFrozen = rootsFrozenNow(genEnterRoots, genEnterRootId, rootsNow, assistantRootId());
             const stoppedByBtn = hasContinueBtn();
-            if (rootsFrozen || stoppedByBtn) {
+            const stoppedByLabel = hasStoppedLabel();
+            if (rootsFrozen || stoppedByBtn || stoppedByLabel) {
                 stopPosted = true;
                 lastBodySig = bodySignature();
+                const reasonSuffix = stoppedByBtn ? '（继续生成按钮）' : stoppedByLabel ? '（已停止角标）' : '';
                 post({
                     type: 'ai-runner:reply',
                     kind: 'stopped',
                     site: location.origin,
                     sessionId: extractSidFromHash(),
-                    text: stoppedByBtn ? `${STOPPED_GENERIC}（继续生成按钮）` : STOPPED_GENERIC,
+                    text: `${STOPPED_GENERIC}${reasonSuffix}`,
                 });
                 prevGenerating = false;
                 return;

@@ -49,7 +49,7 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.ai-runner', 'covera
 // [cohesion-over-budget-v1] helpers.cjs 已于 2026-10-07 拆分（helpers-io.cjs），实测 796 < 800。
 //   清单空置后，ratchet 非真空性由「新文件不得越线」断言继续保证（见下方）。
 const FROZEN: Record<string, number> = {
-  'packages/core/src/headless/headless-inject.ts': 810,
+  'packages/core/src/headless/headless-inject.ts': 808,
 }
 
 const EXEMPT = new Set(['packages/client/auto-imports.d.ts'])

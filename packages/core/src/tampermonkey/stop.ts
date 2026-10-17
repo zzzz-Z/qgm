@@ -146,3 +146,28 @@ function hasContinueBtn(): boolean {
   } catch { /* 站点结构异常：按无按钮处理（fail-open，宁可不判也不误判） */ }
   return false
 }
+
+/**
+ * [stopped-label-v1] 当前轮回复区出现「已停止」状态角标 ⇒ 平台自停。
+ * [WHY] 第三种中断形态：有产出 + 显示「已停止」+ **无**「继续生成」按钮。
+ *   社区实现 dsh-continuechat 记录：turn 提前结束时「leaves nothing behind but a stopped
+ *   marker」——此时 rootsFrozen 恒 false（已有产出）、hasContinueBtn 也恒 false。
+ * [CONSTRAINT] 三重保险防空：① 文本**精确等值**（正文复述时父元素 textContent 是整段话）
+ *   ② 排除 .ds-markdown / pre / code（[stopped-toast-quote-v1] 的自指教训）
+ *   ③ 要求同容器内有 svg（状态角标必带图标，孤立文本节点不算）。
+ * [CONSTRAINT] 不硬编码 hash 类名（DeepSeek 类名随版本变化）；只依赖文本 + 图标结构。
+ *   与 headless-inject.ts 的 hasStoppedLabelInPage 同构，改一处必须同步另一处。
+ */
+const STOPPED_LABEL_TEXT = '已停止'
+function hasStoppedLabel(): boolean {
+  const scope = latestAssistantRoot()
+  if (!scope) return false
+  try {
+    for (const el of scope.querySelectorAll('span, div')) {
+      if (el.closest('.ds-markdown, pre, code')) continue
+      if (String(el.textContent || '').trim() !== STOPPED_LABEL_TEXT) continue
+      if (el.querySelector('svg') || el.parentElement?.querySelector('svg')) return true
+    }
+  } catch { /* 站点结构异常：按无标记处理（fail-open，宁可不判也不误判） */ }
+  return false
+}

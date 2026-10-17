@@ -3237,3 +3237,15 @@ Chromium 的 `SingletonLock` 形如 `hostname-pid` 的软链。用 `readFile(loc
 ## 守卫里的 `[KNOWN-GAP]` 不是免责声明，是待办
 
 `stopped-btn-guard.node-test.ts` 头部早就写明「根随首 token 才挂载的站点，有部分输出的中断 roots 已增长 ⇒ 漏判」。这条缺口存在了三天，直到用户实际遇到才被翻出来。写进守卫注释的已知缺口应该当成 TODO 跟踪，而不是当成"已知可接受"。
+
+## 守卫文件的多段 splice 必须用内容定位而非硬编码行号
+
+改 `stopped-baseline-guard.node-test.ts` 时按行号 `splice` 连续改三处，前一处改动会让后续行号整体偏移，导致断言写到错误位置、甚至产生悬空 `assert.ok(` 造成 TS1005。
+
+修法：先 `findIndex` 按内容找到每段的首行与收尾 `)`，算出区间再 splice；多处修改从后往前做。硬编码行号只在「单点替换」时可接受。
+
+## 片段源改了不组装，守卫读的还是旧产物
+
+`tampermonkey-split` 断言「产物 === buildUserscript(片段)」。改完 `stop.ts` 后直接跑守卫会红——因为守卫 `read(USERSCRIPT)` 读的是 `scripts/tampermonkey-session-id.user.js`，而它还没重新组装。
+
+修法：任何片段源改动后，先 `node scripts/assemble-userscript.mjs`（它会自动 bump `@version` 并写 `tampermonkey-version.json`），再跑守卫。

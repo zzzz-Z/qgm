@@ -65,23 +65,25 @@ function classifyAndPost(): void {
 
     // ---------- ② 探针 ----------
 
-    // stopped：两条判据任一成立即认定平台自停
+    // stopped：三条判据任一成立即认定平台自停
     //   ① 上一轮在生成 + 本轮按钮消失 + 本轮没产出任何回复块（思考期被停）
-    //   ② 「继续生成」按钮存在（已产出部分内容后被中断 —— 2026-10-18 用户实测形态）
-    // [stopped-continue-btn-v1] 判据 ② 是本次修复的核心：只保留 ① 会漏判「已产出内容后自停」。
+    //   ② 「继续生成」按钮存在（[stopped-continue-btn-v1]）
+    //   ③ 当前轮回复区出现「已停止」角标（[stopped-label-v1]，无继续按钮时的唯一信号）
     if (prevGenerating && !stopPosted) {
       const rootsNow = countAssistantRoots()
       const rootsFrozen = rootsFrozenNow(genEnterRoots, genEnterRootId, rootsNow, assistantRootId())
       const stoppedByBtn = hasContinueBtn()
-      if (rootsFrozen || stoppedByBtn) {
+      const stoppedByLabel = hasStoppedLabel()
+      if (rootsFrozen || stoppedByBtn || stoppedByLabel) {
         stopPosted = true
         lastBodySig = bodySignature()
+        const reasonSuffix = stoppedByBtn ? '（继续生成按钮）' : stoppedByLabel ? '（已停止角标）' : ''
         post({
           type: 'ai-runner:reply',
           kind: 'stopped',
           site: location.origin,
           sessionId: extractSidFromHash(),
-          text: stoppedByBtn ? `${STOPPED_GENERIC}（继续生成按钮）` : STOPPED_GENERIC,
+          text: `${STOPPED_GENERIC}${reasonSuffix}`,
         })
         prevGenerating = false
         return
