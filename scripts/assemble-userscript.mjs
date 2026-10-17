@@ -32,8 +32,17 @@ if (rendered.includes(VERSION_PLACEHOLDER)) {
 }
 
 const strip = s => (s === null ? null : s.replace(VERSION_LINE_RE, ''))
-if (strip(prev) === strip(rendered)) {
+const prevVersion = prev === null ? null : (prev.match(VERSION_LINE_RE) || [''])[0].replace(/^\/\/ @version\s+/, '')
+const contentSame = strip(prev) === strip(rendered)
+
+if (contentSame && prevVersion === version) {
   console.log(`[userscript] 内容无变化（版本 ${version}），跳过写入`)
+} else if (contentSame) {
+  // [userscript-version-manual-v1] 手改版本文件（内容没变）：按版本文件重建，不 bump。
+  // [WHY] 比对忽略版本行是为了「只改版本不触发再次 bump」，但这也让手改版本失效；
+  //   补一条分支：内容相同而版本不同 ⇒ 尊重版本文件，直接重建产物。
+  writeFileSync(OUT_FILE, rendered)
+  console.log(`[userscript] 版本手动变更 ${prevVersion} → ${version}，已重建产物（${SEGMENTS.length} 段 → ${rendered.length} B）`)
 } else {
   const next = bumpPatch(version)
   writeVersion(next)

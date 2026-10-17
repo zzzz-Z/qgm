@@ -30,7 +30,7 @@
  *
  * [CONSTRAINT] Tampermonkey 只认文件头部的 ==UserScript== 块，前面出现任何非注释内容
  *   都会让脚本不被识别为可用脚本。故本段所有代码都写在元数据**之后**。
- * [CONSTRAINT] @version 的真实值不在本文件：这里是 __TM_VERSION__ 占位符，
+ * [CONSTRAINT] @version 的真实值不在本文件：这里是版本占位符，
  *   由 scripts/tampermonkey-version.json 提供、buildUserscript 注入（[userscript-version-inject-v1]）。
  *   理由：版本号是发布元数据而非脚本逻辑；放在构建输入里，构建才能在内容变化时自动递增。
  * [CONSTRAINT] @version 只在此处声明一次：Tampermonkey 靠它判断更新，
