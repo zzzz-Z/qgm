@@ -2907,3 +2907,11 @@ restart 轮失败 → 下一轮探活恢复。
 ## `patchFile` 同步抛异常，`await ...catch()` 挡不住：本轮用 `await __AI__.patchFile(p, '@@TAIL@@', tail).catch(...)` 兜底失败，结果 `patchFile` 在 `await` 之前就同步抛出 `ANCHOR_NOT_FOUND`，`.catch` 根本没接住，直接 exit 7。正确做法：整写场景一律用 `readText` + `writeText` 拼接，不要用「锚点 + catch 兜底」这种混合形态。附带教训
 
 `@@TAIL@@` 这类短标记（8 字符）会触发 `ANCHOR_TOO_SHORT`，锚点必须用唯一整行或带上下文的片段。
+
+## `__AI__.readText` 是同步返回字符串，不是 Promise
+
+`await __AI__.readText(p).catch(...)` 会抛 `TypeError: catch is not a function`（`helpers-io` 未提供 Promise 形态）。读取不确定存在的文件应改为 `try { await __AI__.readText(p) } catch (e) {}`，或在读之前先 `await __AI__.exists(p)`（本轮已按后者修复）。
+
+## 主目录不是禁区
+
+`SYSTEM.md` 的 `READ_BLACKLIST`（`interceptor.cjs:71-82`）只拦 `.env` / `.credentials` / `.pem` / `.key` / `id_rsa` / `.npmrc` 等敏感文件，不拦 `.dsh` 这类普通目录。上一轮「沙箱无法访问主目录」的推断没有任何依据，属于典型的 `capability-negation-guard` 违规（未经探针验证的能力否定）。
