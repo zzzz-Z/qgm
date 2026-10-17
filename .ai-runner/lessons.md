@@ -3229,3 +3229,11 @@ Chromium 的 `SingletonLock` 形如 `hostname-pid` 的软链。用 `readFile(loc
 ## 大文件锚点在注释空格上有微小差异就会反复失配
 
 `clean-ai-runner.mjs` 的 profile 判定块，多行锚点连续两次未命中，原因是我记忆里的注释空格与磁盘实际不同。改用行号切片（先校验目标行内容再 splice）是确定性做法，比继续猜锚点可靠。
+
+## 用户脚本有两份，产物是生成物
+
+`packages/core/src/tampermonkey/*.ts` 是片段源，`scripts/tampermonkey-session-id.user.js` 是 `scripts/assemble-userscript.mjs` 拼出来的产物。`tampermonkey-split` 测试断言两者严格相等——直接改产物会当场变红，且下次组装即被覆盖。改油猴必须先改片段再 `node scripts/assemble-userscript.mjs`（它会自动 bump `@version` 并写 `tampermonkey-version.json`）。
+
+## 守卫里的 `[KNOWN-GAP]` 不是免责声明，是待办
+
+`stopped-btn-guard.node-test.ts` 头部早就写明「根随首 token 才挂载的站点，有部分输出的中断 roots 已增长 ⇒ 漏判」。这条缺口存在了三天，直到用户实际遇到才被翻出来。写进守卫注释的已知缺口应该当成 TODO 跟踪，而不是当成"已知可接受"。

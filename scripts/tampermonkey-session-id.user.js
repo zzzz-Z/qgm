@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.14
+// @version      1.9.15
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -680,6 +680,26 @@ function isGenerating() {
     const dsBtn = findStopGeneratingBtnStructural();
     return Boolean(dsBtn && !dsBtn.disabled && hasDeepSeekStopIcon(dsBtn));
 }
+/**
+ * [stopped-continue-btn-v1] 「继续生成」按钮存在 ⇒ 平台自停。
+ * [WHY] 原判据只认「assistant 根数冻结」，但平台自停的典型形态是**已产出部分回复后中断**
+ *   —— 此时根已经增长，rootsFrozen 恒为 false，被误判成「正常完成」，stopped 永不推送，
+ *   前端的自动续推（stop-resume）因此永不触发（用户实测：DeepSeek 显示「已停止」+「继续生成」，应用毫无反应）。
+ * [CONSTRAINT] 文案匹配保守（仅四种精确文案），不匹配裸「继续」以防命中正文；
+ *   与 headless-inject.ts 的 hasContinueBtnInPage 同值，改一处必须同步另一处。
+ */
+const CONTINUE_BTN_RE = /^(?:继续生成|继续回答|继续输出|Continue generating)$/i;
+function hasContinueBtn() {
+    try {
+        for (const el of document.querySelectorAll('button, div[role="button"], [role="button"]')) {
+            const label = String(el.getAttribute('aria-label') || el.textContent || '').trim();
+            if (label && CONTINUE_BTN_RE.test(label))
+                return true;
+        }
+    }
+    catch { /* 站点结构异常：按无按钮处理（fail-open，宁可不判也不误判） */ }
+    return false;
+}
 
 /**
  * 脚本块提取 —— 从最后一条 AI 回复里挑出「首个尚未推送的合格代码块」。
@@ -1124,11 +1144,15 @@ function classifyAndPost() {
             return;
         }
         // ---------- ② 探针 ----------
-        // stopped：上一轮在生成 + 本轮按钮消失 + 本轮没产出任何回复块
+        // stopped：两条判据任一成立即认定平台自停
+        //   ① 上一轮在生成 + 本轮按钮消失 + 本轮没产出任何回复块（思考期被停）
+        //   ② 「继续生成」按钮存在（已产出部分内容后被中断 —— 2026-10-18 用户实测形态）
+        // [stopped-continue-btn-v1] 判据 ② 是本次修复的核心：只保留 ① 会漏判「已产出内容后自停」。
         if (prevGenerating && !stopPosted) {
             const rootsNow = countAssistantRoots();
             const rootsFrozen = rootsFrozenNow(genEnterRoots, genEnterRootId, rootsNow, assistantRootId());
-            if (rootsFrozen) {
+            const stoppedByBtn = hasContinueBtn();
+            if (rootsFrozen || stoppedByBtn) {
                 stopPosted = true;
                 lastBodySig = bodySignature();
                 post({
@@ -1136,7 +1160,7 @@ function classifyAndPost() {
                     kind: 'stopped',
                     site: location.origin,
                     sessionId: extractSidFromHash(),
-                    text: STOPPED_GENERIC,
+                    text: stoppedByBtn ? `${STOPPED_GENERIC}（继续生成按钮）` : STOPPED_GENERIC,
                 });
                 prevGenerating = false;
                 return;

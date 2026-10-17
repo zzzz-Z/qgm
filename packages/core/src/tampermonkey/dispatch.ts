@@ -65,11 +65,15 @@ function classifyAndPost(): void {
 
     // ---------- ② 探针 ----------
 
-    // stopped：上一轮在生成 + 本轮按钮消失 + 本轮没产出任何回复块
+    // stopped：两条判据任一成立即认定平台自停
+    //   ① 上一轮在生成 + 本轮按钮消失 + 本轮没产出任何回复块（思考期被停）
+    //   ② 「继续生成」按钮存在（已产出部分内容后被中断 —— 2026-10-18 用户实测形态）
+    // [stopped-continue-btn-v1] 判据 ② 是本次修复的核心：只保留 ① 会漏判「已产出内容后自停」。
     if (prevGenerating && !stopPosted) {
       const rootsNow = countAssistantRoots()
       const rootsFrozen = rootsFrozenNow(genEnterRoots, genEnterRootId, rootsNow, assistantRootId())
-      if (rootsFrozen) {
+      const stoppedByBtn = hasContinueBtn()
+      if (rootsFrozen || stoppedByBtn) {
         stopPosted = true
         lastBodySig = bodySignature()
         post({
@@ -77,7 +81,7 @@ function classifyAndPost(): void {
           kind: 'stopped',
           site: location.origin,
           sessionId: extractSidFromHash(),
-          text: STOPPED_GENERIC,
+          text: stoppedByBtn ? `${STOPPED_GENERIC}（继续生成按钮）` : STOPPED_GENERIC,
         })
         prevGenerating = false
         return

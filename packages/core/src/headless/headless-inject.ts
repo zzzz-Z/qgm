@@ -211,23 +211,25 @@ export function detectReplyInPage(siteCfg = {}) {
       && (nowHash === '' || nowHash === baselineHash)
   }
 
-  // [stopped-btn-v1] 按钮状态驱动的 stopped 检测（parity：scripts/tampermonkey-session-id.user.js
-  //   [stopped-btn-v1] / [stopped-btn-v2] 的「按钮从有到无 + 无新产出」判据）。
-  // [WHY] 原关键词直判的三个词在 DeepSeek 真实角标里零命中（bundle 实证，见上方墓碑注释）⇒
-  //   零真阳性；而 AI 正文自指复述即误推（2026-10-15 实测同根因）⇒ 纯假阳性通道。按钮状态是
-  //   两态都可判的事实信号，取代之。
-  // [判据] 上一 poll 停止按钮可见 + 本 poll 不可见（按钮从有到无）+ 本轮无新增 assistant 内容
-  //   （最后一条消息 hash 仍等于 fill 时基线）⇒ 生成没产出任何回复块（思考阶段被停/平台中断）。
-  // [CONSTRAINT] 冷启动首 poll 无 _prevGenBtn 历史 ⇒ 不当成过渡（注入瞬间不误报）；
-  //   有新增内容时交由下方 done/script/plain 分发（正常完成）——半截回复的噪音由
-  //   [stopped-plain-noise-v1] 与 closure gate 各自处理，与油猴放行后的流向一致。
-  // [CONSTRAINT] 位置须在基线 hash 守卫**之前**：「没产出任何块」正是该守卫会 return null 的形态，
-  //   挪到其后则思考期被停的场景永远推不出 stopped（旧关键词判定同此位置，勿回退）。
+  // [stopped-continue-btn-v1] 「继续生成」按钮存在 ⇒ 平台自停（与油猴 hasContinueBtn 同值，改一侧必同步）。
+  function hasContinueBtnInPage() {
+    const RE = /^(?:继续生成|继续回答|继续输出|Continue generating)$/i
+    for (const el of document.querySelectorAll('button, div[role="button"], [role="button"]')) {
+      const label = String(el.getAttribute('aria-label') || el.textContent || '').trim()
+      if (label && RE.test(label)) return true
+    }
+    return false
+  }
+
+  // [stopped-btn-v1] ① 按钮从有到无 + 无新产出（思考期被停）② 继续按钮存在（[stopped-continue-btn-v1]）。
+  // [CONSTRAINT] 位置须在基线 hash 守卫之前：挪后则思考期被停永远推不出 stopped（勿回退）。
   if (!dedup._stoppedReported) {
     const currGen = isGeneratingInPage()
     const wasGen = dedup._prevGenBtn === true
     dedup._prevGenBtn = currGen
-    if (wasGen && !currGen && noNewAssistantContent(dedup._baselineLastHash, hashLastAssistant())) {
+    // [stopped-continue-btn-v1] ① 按钮从有到无且无新增 ② 继续按钮存在，任一即自停
+    const stoppedByBtn = hasContinueBtnInPage()
+    if ((wasGen && !currGen && noNewAssistantContent(dedup._baselineLastHash, hashLastAssistant())) || stoppedByBtn) {
       dedup._stoppedReported = true
       // [stopped-toast-quote-v1] 文案分段拼接：整句字面量会成为探针源码的自命中
       // （本文件会被工作台 dump 进会话，同 limit 探针的自指教训）
@@ -241,11 +243,8 @@ export function detectReplyInPage(siteCfg = {}) {
   // [CONSTRAINT] 引述真文案**必须分成两段引号**：连写成一行会被本探针自己的正则命中 ⇒ 该文件被
   //   工作台 dump 进会话即自指误报（与 2026-10-10 那条同根因：探针扫到了自己的工作语言）。
   //   守卫 `limit marker: 探针源码库零自命中` 会拦下任何此类回退。
-  //       v1 只写了「对话…已达上限」的名词在前形式 → 真实提示完全漏匹配（线上表现为仍在干等）。
-  //       v3 追加收紧：v2 允许**裸标记**命中，但本探针扫的是**整页** textContent，
-  //       实测两类假命中（页面根本没有 banner 却弹 toast）：① 正文自指「会话长度达到上限」
-  //       （工作台自身的任务文案作为 AI 回复落进会话 DOM）；② 正文与侧栏常驻按钮「开启新对话」
-  //       在 textContent 里相接（v2 的「请」是 `请?` 可缺省）。故中文触顶**必须自带动作子句**才算数。
+  //       v1 只写名词在前的「对话…已达上限」→ 真实提示漏匹配；v3 收紧为中文触顶**必须自带动作子句**
+  //       （v2 允许裸标记命中，实测正文自指 + 侧栏常驻「开启新对话」在 textContent 相接会假命中）。
   // [CONSTRAINT] 基线去重仍保留：只在「计数增长」时推送，排除历史消息里的旧标记。
   // [CONSTRAINT] 正则须与 headless-fill.ts 基线、油猴 countLimitMarkers 三处严格同构，改一处必同步
   // [limit-en-branch-v1] 英文分支收紧：`maximum context length` 原先**裸匹配**（无任何上下文要求），

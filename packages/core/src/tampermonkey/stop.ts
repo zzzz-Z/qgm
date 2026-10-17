@@ -127,3 +127,22 @@ function isGenerating(): boolean {
   const dsBtn = findStopGeneratingBtnStructural()
   return Boolean(dsBtn && !(dsBtn as HTMLButtonElement).disabled && hasDeepSeekStopIcon(dsBtn))
 }
+
+/**
+ * [stopped-continue-btn-v1] 「继续生成」按钮存在 ⇒ 平台自停。
+ * [WHY] 原判据只认「assistant 根数冻结」，但平台自停的典型形态是**已产出部分回复后中断**
+ *   —— 此时根已经增长，rootsFrozen 恒为 false，被误判成「正常完成」，stopped 永不推送，
+ *   前端的自动续推（stop-resume）因此永不触发（用户实测：DeepSeek 显示「已停止」+「继续生成」，应用毫无反应）。
+ * [CONSTRAINT] 文案匹配保守（仅四种精确文案），不匹配裸「继续」以防命中正文；
+ *   与 headless-inject.ts 的 hasContinueBtnInPage 同值，改一处必须同步另一处。
+ */
+const CONTINUE_BTN_RE = /^(?:继续生成|继续回答|继续输出|Continue generating)$/i
+function hasContinueBtn(): boolean {
+  try {
+    for (const el of document.querySelectorAll('button, div[role="button"], [role="button"]')) {
+      const label = String(el.getAttribute('aria-label') || el.textContent || '').trim()
+      if (label && CONTINUE_BTN_RE.test(label)) return true
+    }
+  } catch { /* 站点结构异常：按无按钮处理（fail-open，宁可不判也不误判） */ }
+  return false
+}
