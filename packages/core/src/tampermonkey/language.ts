@@ -70,7 +70,7 @@ function guessLangFromContent(text: string): string | null {
   if (/\bJSON\.(?:parse|stringify)\s*\(/.test(head)) return 'js'
   if (/^(?:const|let)\s+\w+\s*=/.test(head)) return 'js'
   if (/^(?:echo|cd\s|ls\s|mkdir|git\s|pnpm\s|npm\s|yarn\s|rm\s)/m.test(head)) return 'bash'
-  if (/\bif\s+\[\s/.test(head) || /\bfi\b/.test(head) || /\$(/.test(head)) return 'bash'
+  if (/\bif\s+\[\s/.test(head) || /\bfi\b/.test(head) || /\$\(/.test(head)) return 'bash'
   return null
 }
 

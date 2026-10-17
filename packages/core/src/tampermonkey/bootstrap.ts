@@ -59,3 +59,4 @@ setInterval(() => {
 // 前进/后退与 hash 变更同样会切换会话，且这两个事件比轮询更及时
 window.addEventListener('popstate', send)
 window.addEventListener('hashchange', send)
+

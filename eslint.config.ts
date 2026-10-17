@@ -16,7 +16,7 @@ const config: Promise<Linter.Config[]> = antfu({
   //   不是独立模块：每个文件是单份用户脚本的一段，拼回（pnpm userscript:build）后才是完整程序。
   //   单独解析必然报 no-undef（引用其它片段的函数）与 parsing error（顶层 return / 未闭合块）。
   //   [CONSTRAINT] 校验不因此缺位——产物 scripts/tampermonkey-session-id.user.js 仍受全部守卫覆盖。
-  ignores: ['.ai-runner/**', '**/dist/**', 'coverage/**', '**/playwright-report/**', '**/test-results/**', 'skills/**', 'packages/core/src/tampermonkey/**'],
+  ignores: ['.ai-runner/**', '**/dist/**', 'coverage/**', '**/playwright-report/**', '**/test-results/**', 'skills/**', 'packages/core/src/tampermonkey/**', 'scripts/tampermonkey-session-id.user.js'],
   rules: {
     // cjs
     'no-cond-assign': 'off',
