@@ -106,7 +106,8 @@ async function onSiteChange(wsId: string, ev: Event): Promise<void> {
   const modelId = target.value
   const m = MODELS.find(x => x.id === modelId)
   if (!m) return
-  const r = await setSession(wsId, { url: m.url, sessionId: '' })
+  // [workspace-schema-v2] 换绑站点 = 旧会话失效：显式 kind:'site' 写 homeUrl 并清 sessionUrl/sessionId
+  const r = await setSession(wsId, { kind: 'site', homeUrl: m.url })
   if (!r) { toast('绑定站点失败', 'error', TOAST_MEDIUM); return }
   await matrix.loadAllSessions()
   toast(`已为工作区绑定 ${m.label}`, 'info', TOAST_SHORT_MEDIUM)

@@ -138,6 +138,72 @@ it('旧格式迁移：workspace.json 只有 {root} 时自动转为单条注册�
   assert.equal(cfg.getActiveWorkspaceId(), cfg.getWorkspaces()[0]?.id)
 })
 
+// ── [workspace-schema-v2] 内联 schema 的迁移与往返 ──
+
+it('v1→v2 迁移：顶层 sessions / firstPromptSent 并入条目，脏键丢弃，activeId 不变', async () => {
+  const cfg0 = await import('../src/config.js')
+  const a = cfg0.registerWorkspace(tmpRoot, true)
+  const wid = a.id
+  // 手写 v1 文件：无 schemaVersion、条目无内联字段、关联数据在顶层
+  fs.writeFileSync(path.join(confDir, 'workspace.json'), JSON.stringify({
+    root: path.resolve(tmpRoot),
+    at: 1,
+    workspaces: [{ id: wid, root: path.resolve(tmpRoot), label: 'ws', addedAt: 1 }],
+    activeId: wid,
+    sessions: {
+      [wid]: { url: 'https://chat.deepseek.com/a/chat/s/xyz', sessionId: 'xyz', updatedAt: 1 },
+      'orphan-id': { url: 'https://x/', sessionId: '', updatedAt: 1 },
+    },
+    firstPromptSent: { [`${wid}::deepseek`]: true, 'orphan::qianwen': true },
+  }))
+  vi.resetModules()
+  const cfg = await import('../src/config.js')
+  assert.equal(cfg.loadWorkspaceRegistry(), path.resolve(tmpRoot))
+  assert.equal(cfg.getActiveWorkspaceId(), wid, 'activeId 必须保持不变')
+  const s = cfg.getWorkspaceSession(wid)
+  assert.equal(s?.url, 'https://chat.deepseek.com/a/chat/s/xyz', '会话 URL 必须迁进条目')
+  assert.equal(s?.sessionId, 'xyz')
+  assert.equal(cfg.getWorkspaceFirstPromptSent(wid, 'deepseek'), true, '首问标记必须迁进条目')
+  // 迁移后立即落盘为 v2，且顶层派生键保留一轮
+  const after = JSON.parse(fs.readFileSync(path.join(confDir, 'workspace.json'), 'utf8'))
+  assert.equal(after.schemaVersion, 2, '迁移后必须写 schemaVersion')
+  assert.ok(after.sessions?.[wid], '顶层派生键应保留一轮（旧读方兼容）')
+  assert.ok(after.workspaces?.[0]?.session, '条目必须内联 session')
+  assert.equal(after.workspaces[0].firstPromptSent.deepseek, true)
+  assert.ok(!after.sessions['orphan-id'], '脏键必须丢弃')
+  assert.ok(!after.firstPromptSent?.['orphan::qianwen'], '脏首问键必须丢弃')
+})
+
+it('v2 round-trip：重启后条目内联字段仍在（Q1 承重）', async () => {
+  const cfg0 = await import('../src/config.js')
+  const a = cfg0.registerWorkspace(tmpRoot, true)
+  cfg0.setWorkspaceSession(a.id, { kind: 'session', sessionUrl: 'https://chat.deepseek.com/a/chat/s/rt', sessionId: 'rt' })
+  cfg0.setWorkspaceFirstPromptSent(a.id, 'deepseek', true)
+  vi.resetModules()
+  const cfg = await import('../src/config.js')
+  cfg.loadWorkspaceRegistry()
+  const s = cfg.getWorkspaceSession(a.id)
+  assert.equal(s?.sessionId, 'rt', '重启后内联会话必须仍在：恢复循环若不解构 session 即丢失')
+  assert.equal(s?.url, 'https://chat.deepseek.com/a/chat/s/rt')
+  assert.equal(cfg.getWorkspaceFirstPromptSent(a.id, 'deepseek'), true, '重启后内联首问标记必须仍在')
+})
+
+it('迁移幂等：已是 v2 的文件再 load 不重复迁移，内容不变', async () => {
+  const cfg0 = await import('../src/config.js')
+  const a = cfg0.registerWorkspace(tmpRoot, true)
+  cfg0.setWorkspaceSession(a.id, { kind: 'session', sessionUrl: 'https://chat.deepseek.com/a/chat/s/idem', sessionId: 'idem' })
+  const before = fs.readFileSync(path.join(confDir, 'workspace.json'), 'utf8')
+  vi.resetModules()
+  const cfg = await import('../src/config.js')
+  cfg.loadWorkspaceRegistry()
+  const after = fs.readFileSync(path.join(confDir, 'workspace.json'), 'utf8')
+  const bj = JSON.parse(before)
+  const aj = JSON.parse(after)
+  assert.equal(aj.schemaVersion, 2)
+  assert.deepEqual(aj.workspaces[0].session, bj.workspaces[0].session, '幂等：内联字段不得被改写')
+  assert.equal(cfg.getWorkspaceSession(a.id)?.sessionId, 'idem')
+})
+
 it('损坏与缺失：workspace.json 缺失/损坏时 loadWorkspaceRegistry 返回 null 且不抛错', async () => {
   vi.resetModules()
   const cfg = await import('../src/config.js')

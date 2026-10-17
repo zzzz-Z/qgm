@@ -81,6 +81,31 @@ export const RESUME_WATCHDOG_MS = 45_000
  *   只拦「停止后的残余产物」：新一轮经 fill/rotate 重开后的真实回复不在窗口内。
  * [WARNING] 锚点测试用 indexOf 定位该调度调用点 ⇒ 本文件注释**一律不得**逐字写出「对象.成员」全名。
  */
+/**
+ * [workspace-schema-v2] 从会话 URL 反解 (modelId, sessionId)。
+ * [WHY] url-updated 帧只带 url 不带会话 id；旧实现回退 activeSessionId 会把 B 的 id 写到 A 的绑定上（P4）。
+ *   反解失败（首页 / 陌生 URL）返回 null —— 调用方据此**跳过持久化**，避免首页覆盖既有好绑定（Q2）。
+ * [CONSTRAINT] 模板形如 `https://host/path/{id}`：按 `{id}` 切成前后缀，URL 必须同时以两者包夹。
+ */
+export function parseSessionUrl(u: string, models: { id: string, url: string, sessionTemplate?: string }[]): { modelId: string, sessionId: string } | null {
+  if (!u) return null
+  for (const m of models) {
+    const tpl = m.sessionTemplate
+    if (!tpl) continue
+    const at = tpl.indexOf('{id}')
+    if (at < 0) continue
+    const head = tpl.slice(0, at)
+    const tail = tpl.slice(at + 4)
+    if (!u.startsWith(head) || !u.endsWith(tail)) continue
+    const mid = u.slice(head.length, u.length - tail.length)
+    if (!mid) continue
+    let sessionId = mid
+    try { sessionId = decodeURIComponent(mid) } catch { /* 非编码串：原样使用 */ }
+    return { modelId: m.id, sessionId }
+  }
+  return null
+}
+
 function inStoppedWindow(sid: string): boolean {
   const t = stoppedAtBySid.get(sid)
   return t !== undefined && Date.now() - t < STOPPED_PLAIN_GUARD_MS
@@ -474,18 +499,28 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       // [multi-site-parallel-v1] 由 url 反推 frame sid → 反查所属工作区；
       //   原用 activeId：并行时窗口 A 的回写会落进当前激活的工作区 B（G6）
       const frameSid = sidForUrl(url)
-      const wid = (await ws.findWorkspaceBySid(frameSid)) ?? ws.activeId.value
-      if (!wid) return
-      await ws.setSession(wid, { url, sessionId: String(sessionId || '') })
-    } catch { /* 未就绪 / 网络失败：忽略 */ }
+      // [workspace-schema-v2] 精确 URL 优先（同站点多工作区可唯一定位）
+      const wid = (await ws.findWorkspaceBySid(frameSid, url)) ?? ws.activeId.value
+      if (!wid) {
+        // [workspace-bind-visibility-v1] 不再全静默：回写落空是「绑定不生效」的首要可观测信号
+        log.warn('[workspace-bind] 回写找不到工作区，已跳过：url=', url, 'sid=', frameSid)
+        return
+      }
+      const ok = await ws.setSession(wid, { kind: 'session', sessionUrl: url, sessionId: String(sessionId || '') })
+      if (!ok) log.warn('[workspace-bind] 服务端拒绝写入（工作区可能已出册）：wid=', wid, 'url=', url)
+    } catch (e) { log.warn('[workspace-bind] 回写异常：', e) }
   }
 
   /** 处理 ai-runner:url-updated URL 回写 */
   function handleUrlUpdated(payload: MessageEvent['data']): void {
     const u = String(payload.url || '')
     if (u && u !== siteUrl.value) setSiteUrl(u)
-    // [workspace-session-bind-v1] 回写绑定：站点里切会话 → 落盘到活跃工作区
-    void persistSessionBinding(u, String(payload.sessionId || activeSessionId.value || ''))
+    // [workspace-schema-v2] 两条硬约束：
+    //   ① 不得回退 activeSessionId（P4）：两条发帧链路都不带会话 id，回退会把 B 的 id 写到 A 的绑定上；
+    //   ② 反解失败必须**跳过持久化**（Q2）：用户只是浏览到首页也会触发本帧，写空会话会用首页覆盖好绑定。
+    const parsed = parseSessionUrl(u, MODELS)
+    if (!parsed) return
+    void persistSessionBinding(u, parsed.sessionId)
   }
 
   /** 处理 ai-runner:session-id 会话 ID 回写 */

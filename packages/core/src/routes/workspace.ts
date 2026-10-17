@@ -275,16 +275,31 @@ workspaceHono.get('/workspace/session', (c) => {
 })
 
 /**
- * [workspace-session-bind-v1] POST /workspace/session {id, url, sessionId} —— 写某工作区的会话绑定。
+ * [workspace-session-bind-v1] POST /workspace/session {id, kind?, url, sessionId, homeUrl?, sessionUrl?}
+ *   —— 写某工作区的会话绑定。
+ * [workspace-schema-v2] kind 选填：'site' 写 homeUrl 并清 sessionUrl/sessionId；'session' 写 sessionUrl/sessionId。
+ *   缺省按「sessionId 非空 → session，否则 → site」推断（推断规则在 config.setWorkspaceSession 单一实现）。
  * [CONSTRAINT] 目标工作区必须已注册（否则 404）；写后立即持久化（config.setWorkspaceSession 内落盘）。
  */
 workspaceHono.post('/workspace/session', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { id?: string, url?: string, sessionId?: string } | null
+  const body = (await c.req.json().catch(() => null)) as {
+    id?: string
+    kind?: 'site' | 'session'
+    url?: string
+    sessionId?: string
+    homeUrl?: string
+    sessionUrl?: string
+  } | null
   const id = String(body?.id || '').trim()
   if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
-  const url = String(body?.url || '')
-  const sessionId = String(body?.sessionId || '')
-  const ok = setWorkspaceSession(id, { url, sessionId })
+  const kind = body?.kind === 'site' || body?.kind === 'session' ? body.kind : undefined
+  const ok = setWorkspaceSession(id, {
+    kind,
+    url: body?.url === undefined ? undefined : String(body.url || ''),
+    sessionId: body?.sessionId === undefined ? undefined : String(body.sessionId || ''),
+    homeUrl: body?.homeUrl === undefined ? undefined : String(body.homeUrl || ''),
+    sessionUrl: body?.sessionUrl === undefined ? undefined : String(body.sessionUrl || ''),
+  })
   if (!ok) return c.json({ ok: false, error: '工作区不存在' }, 404)
   return c.json({ ok: true, session: getWorkspaceSession(id) })
 })

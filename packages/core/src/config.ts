@@ -87,20 +87,22 @@ export interface WorkspaceSession {
   sessionId: string
   updatedAt: number
 }
-/** 工作区 id → 会话绑定（内存权威态，落盘经 persistWorkspace） */
-const workspaceSessions = new Map<string, WorkspaceSession>()
+/** [workspace-schema-v2] 内联会话绑定：homeUrl（站点首页）/ sessionUrl（具体会话）分离，消灭「首页冒充会话 URL」 */
+export interface WorkspaceSessionInline {
+  homeUrl: string
+  sessionUrl: string
+  sessionId: string
+  updatedAt: number
+}
+// [workspace-schema-v2] 会话绑定内联到 entry.session；顶层 Map 已删除
 // [first-prompt-persist-v1] 首问标记的键为复合键 `<wsId>::<modelId>`，不是裸 wsId。
 // [WHY] 用户要求：切工作区不该重发 SYSTEM.md（会话上下文没变）；同时「每个 AI 服务商的首问状态要隔离」。
 //   原实现键只有 wsId → 同一工作区切服务商后 wsSent 仍为 true，硬短路 → 新站点永不注入 SYSTEM.md。
 //   复合键后：切工作区读同一份（同站点）状态不重发；切到不同服务商读独立键，该发就发。
 // [CONSTRAINT] 旧版裸 wsId 键在加载时被丢弃（升级一次性重注入属预期代价，避免把「DeepSeek 已发」误当
 //   「千问也已发」）；持久化形态仍是 Record<string, boolean>，字段名不变，旧文件向后兼容读。
-const workspaceFirstPromptSent = new Map<string, boolean>()
-/** 复合键：`<wsId>::<modelId>`；modelId 为空时退化为裸 wsId（测试兜底路径） */
-function firstPromptKey(wsId: string, modelId?: string): string {
-  const m = String(modelId || '').trim()
-  return m ? `${wsId}::${m}` : wsId
-}
+// [workspace-schema-v2] 首问标记内联到 entry.firstPromptSent?.[modelId]；顶层 Map 已删除
+// [workspace-schema-v2] firstPromptKey 退役：复合键仅存在于派生的顶层对象里
 // eslint-disable-next-line import/no-mutable-exports -- 可变绑定：activateWorkspace 会改写（与 ROOT 同理）
 export let activeWorkspaceId: string | null = null
 
@@ -113,15 +115,34 @@ export let activeWorkspaceId: string | null = null
 export function persistWorkspace(): void {
   try {
     fs.mkdirSync(WORKSPACE_CONF_DIR, { recursive: true })
-    // [multi-workspace-v1] root 字段保留（旧版客户端/脚本只读它）；注册表与活跃 id 是新增字段
-    fs.writeFileSync(WORKSPACE_CONF_FILE, JSON.stringify({
+    // [workspace-schema-v2] 顶层 sessions / firstPromptSent 为**派生兼容键**（旧读方一轮），由条目算出
+    const sessions: Record<string, WorkspaceSession> = {}
+    const firstPromptSent: Record<string, boolean> = {}
+    for (const e of workspaces.values()) {
+      if (e.session) sessions[e.id] = { url: e.session.sessionUrl || e.session.homeUrl, sessionId: e.session.sessionId, updatedAt: e.session.updatedAt }
+      if (e.firstPromptSent) {
+        for (const [m, v] of Object.entries(e.firstPromptSent)) { if (v) firstPromptSent[`${e.id}::${m}`] = true
+        }
+      }
+    }
+    const body = JSON.stringify({
+      schemaVersion: 2,
       root: ROOT,
       at: Date.now(),
       workspaces: [...workspaces.values()],
       activeId: activeWorkspaceId,
-      sessions: Object.fromEntries(workspaceSessions),
-      firstPromptSent: Object.fromEntries(workspaceFirstPromptSent),
-    }))
+      sessions,
+      firstPromptSent,
+    })
+    // [workspace-atomic-write-v1] 先写 .tmp 再 rename：迁移整文件重写中途崩溃不留半截文件
+    const tmp = `${WORKSPACE_CONF_FILE}.tmp`
+    try {
+      fs.writeFileSync(tmp, body)
+      fs.renameSync(tmp, WORKSPACE_CONF_FILE)
+    } catch {
+      try { fs.rmSync(tmp, { force: true }) } catch { /* ignore */ }
+      fs.writeFileSync(WORKSPACE_CONF_FILE, body)
+    }
   } catch { /* ignore: 持久化失败不阻断主流程 */ }
 }
 
@@ -139,12 +160,16 @@ export function clearPersistedWorkspace(): void {
 //   setRoot 原语，103 处 getRoot() 消费点语义不变；阶段 2 的按 id 并行执行由 workspace-scope 承担。
 // [CONSTRAINT] id 由解析后路径确定性派生（同路径重复注册幂等）；移除活跃工作区被拒绝（避免悬空 activeId）。
 
-/** 注册表条目：确定性 id、root 绝对路径、展示名（root 基名）、入库时刻 */
+/** 注册表条目：确定性 id、root 绝对路径、展示名、入库时刻；[workspace-schema-v2] 内联关联数据 */
 export interface WorkspaceEntry {
   id: string
   root: string
   label: string
   addedAt: number
+  /** [workspace-schema-v2] 内联会话绑定（homeUrl/sessionUrl 分离） */
+  session?: WorkspaceSessionInline
+  /** [workspace-schema-v2] 内联首问标记（按 modelId 维度） */
+  firstPromptSent?: Record<string, boolean>
 }
 
 /** 由 root 绝对路径派生确定性工作区 id（同路径幂等） */
@@ -182,13 +207,8 @@ export function registerWorkspace(root: string, activate?: boolean): WorkspaceEn
 export function removeWorkspace(id: string): { ok: boolean, reason?: string } {
   if (!workspaces.has(id)) return { ok: false, reason: `工作区不存在：${id}` }
   const wasActive = id === activeWorkspaceId
+  // [workspace-schema-v2] 关联数据内联在条目上，delete 即全部消失（不再需要手工清 Map）
   workspaces.delete(id)
-  // [workspace-session-bind-v1] 工作区出册时同步清会话绑定，避免脏键累积
-  workspaceSessions.delete(id)
-  // [first-prompt-persist-v1] 复合键下清该工作区的**全部**模型条目（前缀匹配）
-  for (const k of [...workspaceFirstPromptSent.keys()]) {
-    if (k === id || k.startsWith(`${id}::`)) workspaceFirstPromptSent.delete(k)
-  }
   if (wasActive) {
     const remaining = [...workspaces.values()].sort((a, b) => a.addedAt - b.addedAt)
     const next = remaining[0]
@@ -233,7 +253,10 @@ export function getWorkspaces(): WorkspaceEntry[] {
  * [CONSTRAINT] 只读，不触发持久化；调用方按需决定是否回退到「新建会话」。
  */
 export function getWorkspaceSession(id: string): WorkspaceSession | null {
-  return workspaceSessions.get(id) ?? null
+  // [workspace-schema-v2] 条目为权威：派生旧形状 url = sessionUrl || homeUrl，routes 与既有测试零改动
+  const s = workspaces.get(id)?.session
+  if (!s) return null
+  return { url: s.sessionUrl || s.homeUrl, sessionId: s.sessionId, updatedAt: s.updatedAt }
 }
 
 /**
@@ -241,9 +264,28 @@ export function getWorkspaceSession(id: string): WorkspaceSession | null {
  * [CONSTRAINT] 只接受已注册的工作区 id（防止脏键累积）；写入后立即持久化。
  * @returns 工作区不存在时返回 false，调用方据此提示
  */
-export function setWorkspaceSession(id: string, session: { url: string, sessionId: string }): boolean {
-  if (!workspaces.has(id)) return false
-  workspaceSessions.set(id, { url: String(session.url || ''), sessionId: String(session.sessionId || ''), updatedAt: Date.now() })
+export function setWorkspaceSession(
+  id: string,
+  session: { url?: string, sessionId?: string, kind?: 'site' | 'session', homeUrl?: string, sessionUrl?: string },
+): boolean {
+  const entry = workspaces.get(id)
+  if (!entry) return false
+  // [workspace-schema-v2] kind 缺省推断：sessionId 非空 → session，否则 → site（兼容旧两参调用）
+  const kind = session.kind || (String(session.sessionId || '') ? 'session' : 'site')
+  const prev = entry.session
+  const now = Date.now()
+  if (kind === 'site') {
+    const homeUrl = String(session.homeUrl ?? session.url ?? '')
+    entry.session = { homeUrl, sessionUrl: '', sessionId: '', updatedAt: now }
+  } else {
+    const sessionUrl = String(session.sessionUrl ?? session.url ?? '')
+    entry.session = {
+      homeUrl: String(session.homeUrl ?? prev?.homeUrl ?? ''),
+      sessionUrl,
+      sessionId: String(session.sessionId || ''),
+      updatedAt: now,
+    }
+  }
   persistWorkspace()
   return true
 }
@@ -252,7 +294,13 @@ export function setWorkspaceSession(id: string, session: { url: string, sessionI
  * [workspace-session-bind-v1] 会话绑定全量快照（端点 GET 用）。
  */
 export function getWorkspaceSessions(): Record<string, WorkspaceSession> {
-  return Object.fromEntries(workspaceSessions)
+  // [workspace-schema-v2] 仅含有 session 的条目；url 派生规则与 getWorkspaceSession 一致
+  const out: Record<string, WorkspaceSession> = {}
+  for (const e of workspaces.values()) {
+    if (!e.session) continue
+    out[e.id] = { url: e.session.sessionUrl || e.session.homeUrl, sessionId: e.session.sessionId, updatedAt: e.session.updatedAt }
+  }
+  return out
 }
 
 /**
@@ -262,7 +310,9 @@ export function getWorkspaceSessions(): Record<string, WorkspaceSession> {
  * @param modelId 站点 modelId（如 'deepseek'/'qianwen'）；缺省时退化为裸 wsId 键（测试兜底）
  */
 export function getWorkspaceFirstPromptSent(id: string, modelId?: string): boolean {
-  return workspaceFirstPromptSent.get(firstPromptKey(id, modelId)) === true
+  const m = String(modelId || '').trim()
+  if (!m) return false
+  return workspaces.get(id)?.firstPromptSent?.[m] === true
 }
 
 /**
@@ -274,10 +324,19 @@ export function getWorkspaceFirstPromptSent(id: string, modelId?: string): boole
  * @returns 工作区不存在时返回 false
  */
 export function setWorkspaceFirstPromptSent(id: string, modelId: string | undefined, sent: boolean): boolean {
-  if (!workspaces.has(id)) return false
-  const key = firstPromptKey(id, modelId)
-  if (sent) workspaceFirstPromptSent.set(key, true)
-  else workspaceFirstPromptSent.delete(key)
+  const entry = workspaces.get(id)
+  if (!entry) return false
+  const m = String(modelId || '').trim()
+  if (!m) return false
+  const prev = entry.firstPromptSent?.[m] === true
+  const next = Boolean(sent)
+  // [workspace-write-skip-v1] 值未变时不落盘：newSession 分支每次切换都会调本函数
+  if (prev === next) return true
+  if (next) {
+    entry.firstPromptSent = { ...(entry.firstPromptSent || {}), [m]: true }
+  } else if (entry.firstPromptSent) {
+    delete entry.firstPromptSent[m]
+  }
   persistWorkspace()
   return true
 }
@@ -285,6 +344,54 @@ export function setWorkspaceFirstPromptSent(id: string, modelId: string | undefi
 /** 当前活跃工作区 id；null = 未激活 */
 export function getActiveWorkspaceId(): string | null {
   return activeWorkspaceId
+}
+
+/**
+ * [workspace-schema-v2] v1 → v2 迁移：把顶层 sessions / firstPromptSent 并入条目内联字段。
+ * [WHY] 旧文件把关联数据放在顶层键、条目上没有内联字段；不迁移则 v2 读路径取不到任何绑定。
+ * [CONSTRAINT] 键匹配一律用 workspaceIdFor(path.resolve(root)) **重算**——写入侧（setWorkspaceSession）
+ *   用的就是调用方传入的 id，而恢复侧历史上也是重算；用条目自带 id 匹配会丢掉全部绑定（P3）。
+ *   脏键（归属不到任何条目）丢弃并 warn 一条，不静默吞掉。
+ * @returns 是否发生了实际迁移（决定是否立即落盘）
+ */
+function migrateV1ToV2(j: {
+  sessions?: Record<string, { url?: string, sessionId?: string, updatedAt?: number }>
+  firstPromptSent?: Record<string, boolean>
+}): boolean {
+  let touched = false
+  const byId = new Map<string, WorkspaceEntry>()
+  for (const e of workspaces.values()) byId.set(e.id, e)
+  // ① sessions → entry.session
+  for (const [wid, s] of Object.entries(j.sessions || {})) {
+    const e = byId.get(wid)
+    if (!e) { console.warn(`[workspace-migrate] 顶层 sessions 键无对应工作区，已丢弃：${wid}`); continue }
+    if (!s || typeof s.url !== 'string') continue
+    if (e.session) continue
+    const url = s.url
+    const sid = String(s.sessionId || '')
+    // 站点根判定不依赖 MODELS：URL 路径为 '/' 即视为首页
+    let pathname = '/'
+    try { pathname = new URL(url).pathname || '/' } catch { pathname = '/' }
+    if (sid) e.session = { homeUrl: '', sessionUrl: url, sessionId: sid, updatedAt: Number(s.updatedAt) || 0 }
+    else if (pathname === '/') e.session = { homeUrl: url, sessionUrl: '', sessionId: '', updatedAt: Number(s.updatedAt) || 0 }
+    else e.session = { homeUrl: '', sessionUrl: url, sessionId: '', updatedAt: Number(s.updatedAt) || 0 }
+    touched = true
+  }
+  // ② firstPromptSent（复合键 wsId::modelId）→ entry.firstPromptSent[modelId]
+  for (const [k, v] of Object.entries(j.firstPromptSent || {})) {
+    if (v !== true) continue
+    const at = k.indexOf('::')
+    if (at <= 0) { console.warn(`[workspace-migrate] 非复合键首问标记已丢弃：${k}`); continue }
+    const wid = k.slice(0, at)
+    const model = k.slice(at + 2)
+    const e = byId.get(wid)
+    if (!e) { console.warn(`[workspace-migrate] 首问标记键无对应工作区，已丢弃：${k}`); continue }
+    if (!model) continue
+    if (e.firstPromptSent?.[model] === true) continue
+    e.firstPromptSent = { ...(e.firstPromptSent || {}), [model]: true }
+    touched = true
+  }
+  return touched
 }
 
 /**
@@ -297,31 +404,44 @@ export function getActiveWorkspaceId(): string | null {
 export function loadWorkspaceRegistry(): string | null {
   try {
     const raw = fs.readFileSync(WORKSPACE_CONF_FILE, 'utf8')
-    const j = JSON.parse(raw) as { root?: string, workspaces?: WorkspaceEntry[], sessions?: Record<string, WorkspaceSession>, firstPromptSent?: Record<string, boolean> }
+    const j = JSON.parse(raw) as {
+      schemaVersion?: number
+      root?: string
+      workspaces?: WorkspaceEntry[]
+      sessions?: Record<string, { url?: string, sessionId?: string, updatedAt?: number }>
+      firstPromptSent?: Record<string, boolean>
+    }
     const list = Array.isArray(j.workspaces) ? j.workspaces : []
-    // [first-prompt-persist-v1] 恢复首问标记（缺字段一律视为「未发」）。
-    // [key-composite-v1] 只恢复含 '::' 的复合键；旧版裸 wsId 键丢弃——升级后同一工作区切服务商
-    //   不会把上一个服务商的「已发」误当本服务商的「已发」（代价：升级后首问一次性重注入）。
-    if (j && typeof j.firstPromptSent === 'object' && j.firstPromptSent) {
-      for (const [k, v] of Object.entries(j.firstPromptSent as Record<string, unknown>)) {
-        if (typeof v !== 'boolean') continue
-        if (!k.includes('::')) continue
-        workspaceFirstPromptSent.set(k, v)
-      }
-    }
-    // [workspace-session-bind-v1] 恢复会话绑定（缺字段 / 类型不符一律跳过，不阻断注册表恢复）
-    if (j.sessions && typeof j.sessions === 'object') {
-      for (const [wid, s] of Object.entries(j.sessions)) {
-        if (!s || typeof s.url !== 'string' || typeof s.sessionId !== 'string') continue
-        workspaceSessions.set(wid, { url: s.url, sessionId: s.sessionId, updatedAt: Number(s.updatedAt) || 0 })
-      }
-    }
+    // [workspace-schema-v2] 恢复循环**携带内联字段**（Q1 修复核心）：
+    //   重建条目时若不解构 session / firstPromptSent，重启即把内联数据剥掉，
+    //   一切「条目为权威」都成幻觉（v2 计划在此自相矛盾）。
     for (const e of list) {
       if (!e || typeof e.root !== 'string' || !fs.existsSync(e.root) || !fs.statSync(e.root).isDirectory()) continue
       const id = workspaceIdFor(path.resolve(e.root))
-      if (!workspaces.has(id)) {
-        workspaces.set(id, { id, root: path.resolve(e.root), label: String(e.label || path.basename(e.root) || e.root), addedAt: Number(e.addedAt) || Date.now() })
+      if (workspaces.has(id)) continue
+      const entry: WorkspaceEntry = {
+        id,
+        root: path.resolve(e.root),
+        label: String(e.label || path.basename(e.root) || e.root),
+        addedAt: Number(e.addedAt) || Date.now(),
       }
+      const s = e.session
+      if (s && typeof s.homeUrl === 'string' && typeof s.sessionUrl === 'string' && typeof s.sessionId === 'string') {
+        entry.session = { homeUrl: s.homeUrl, sessionUrl: s.sessionUrl, sessionId: s.sessionId, updatedAt: Number(s.updatedAt) || 0 }
+      }
+      const fp = e.firstPromptSent
+      if (fp && typeof fp === 'object') {
+        const keep: Record<string, boolean> = {}
+        for (const [m, v] of Object.entries(fp)) { if (v === true) keep[m] = true }
+        if (Object.keys(keep).length) entry.firstPromptSent = keep
+      }
+      workspaces.set(id, entry)
+    }
+    // [workspace-schema-v2] v1 → v2 迁移：旧文件把关联数据放在顶层键，且条目上没有内联字段。
+    // [CONSTRAINT] 旧格式分支（workspaces 空 + j.root）在其后仍走 registerWorkspace，二者不互斥。
+    if (j.schemaVersion !== 2) {
+      const migrated = migrateV1ToV2(j)
+      if (migrated) persistWorkspace()
     }
     // 旧格式迁移：只有 root 没有 workspaces 数组
     if (workspaces.size === 0 && j.root && fs.existsSync(j.root) && fs.statSync(j.root).isDirectory()) {

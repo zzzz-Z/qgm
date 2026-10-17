@@ -2981,3 +2981,15 @@ v2 的致命缺陷就藏在 `config.ts:319-325` 那 7 行解构里——只要�
 ## 超 12 KB 的文档必须分段写
 
 本文件 16.1 KB，分三轮写盘（4.0 + 4.9 + 5.3 KB），每轮远低于预算。一次性写会在尾部被截断且触发 §8 熔断。
+
+## `patchFile` 的锚点若落在 JSDoc 注释中间，替换会把注释劈成两半
+
+`/**` 被保留、正文被换走、结尾 `*/` 落在新代码之后 → 后续整段变成语法错误。改注释时锚点必须包含完整的 `/** ... */` 边界。
+
+## 多属性对象字面量逐行拼装必须显式写逗号
+
+本轮 `setWorkspaceSession({...})` 的四个属性漏了尾逗号，tsc/eslint 同时报 `',' expected`。拼接时宁可给每行都加逗号（ESLint 会自动去掉最后一个）。
+
+## `.spec.ts` 不进 vitest
+
+vitest 配置已 `exclude: ['**/*.spec.ts']`，但外部 runner（如直接 `node --test`）会硬 import。新增 e2e 后若看到 `Playwright Test did not expect test() to be called here`，那是外部 runner 越界，不是文件写错。

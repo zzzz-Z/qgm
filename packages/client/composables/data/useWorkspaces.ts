@@ -6,12 +6,24 @@
 
 import { ref } from 'vue'
 
+/** [workspace-schema-v2] 内联会话绑定（homeUrl 与 sessionUrl 分离） */
+export interface WorkspaceSessionInline {
+  homeUrl: string
+  sessionUrl: string
+  sessionId: string
+  updatedAt: number
+}
+
 /** 注册表条目（与 core 的 WorkspaceEntry 同构） */
 export interface WorkspaceItem {
   id: string
   root: string
   label: string
   addedAt: number
+  /** [workspace-schema-v2] 内联会话绑定；无绑定则 undefined */
+  session?: WorkspaceSessionInline
+  /** [workspace-schema-v2] 内联首问标记（按 modelId） */
+  firstPromptSent?: Record<string, boolean>
 }
 
 const workspaces = ref<WorkspaceItem[]>([])
@@ -66,7 +78,7 @@ async function applyRootChanged(): Promise<void> {
  * [WHY] 回写链路只知 frame 的 sid；若用 activeId 会写错工作区（并行时 A 的回写落进 B）。
  * [CONSTRAINT] 遍历服务端 sessions，用 sidForUrl 比对 URL host；未命中返回 null（调用方回退 activeId）。
  */
-async function findWorkspaceBySid(sid: string): Promise<string | null> {
+async function findWorkspaceBySid(sid: string, targetUrl = ''): Promise<string | null> {
   if (!sid) return null
   try {
     const r = await fetch('/__ai/workspace/session')
@@ -74,33 +86,60 @@ async function findWorkspaceBySid(sid: string): Promise<string | null> {
     const j = await r.json().catch(() => null) as { sessions?: Record<string, { url?: string }> } | null
     const sessions = j?.sessions || {}
     const { sidForUrl } = await import('../ai/useAiSite')
-    for (const [wid, s] of Object.entries(sessions)) {
-      if (s && typeof s.url === 'string' && sidForUrl(s.url) === sid) return wid
+    // [workspace-schema-v2] 精确 URL 命中优先：同站点多工作区（退化配置）下 host 比对会撞车，
+    //   而 sessionUrl 非空的条目能唯一定位。全部未命中才回落 host 比对。
+    const entries = Object.entries(sessions)
+    for (const [wid, s] of entries) {
+      if (!s || typeof s.url !== 'string' || !s.url) continue
+      if (s.url === targetUrl) return wid
     }
-    return null
+    let ambiguous = 0
+    let hit: string | null = null
+    for (const [wid, s] of entries) {
+      if (!s || typeof s.url !== 'string' || !s.url) continue
+      if (sidForUrl(s.url) === sid) { ambiguous += 1; hit = wid }
+    }
+    if (ambiguous > 1) {
+      console.warn(`[useWorkspaces] findWorkspaceBySid 按 host 命中 ${ambiguous} 个工作区（同站点多工作区为退化配置），取其一：${hit}`)
+    }
+    return hit
   } catch { return null }
 }
 
 /**
- * [workspace-session-bind-v1] 读某工作区的 DeepSeek 会话绑定；无则返回 null。
+ * [workspace-session-bind-v1] 读某工作区的会话绑定；无则返回 null。
+ * [workspace-session-source-v1] 数据源是 registry 条目内联的 session，**不是** /workspace/session。
+ * [WHY] 该端点返回合并形状 `url = sessionUrl || homeUrl`，前端无法区分「首页」与「具体会话」；
+ *   本计划要按 sessionUrl 是否为空分支导航，必须拿到分离字段。
  * [CONSTRAINT] 服务端不可达 / 无绑定一律返回 null，由调用方决定「新建会话」。
  */
-async function getSession(id: string): Promise<{ url: string, sessionId: string } | null> {
+async function getSession(id: string): Promise<WorkspaceSessionInline | null> {
   try {
-    const r = await fetch('/__ai/workspace/session')
+    const r = await fetch('/__ai/workspace/registry')
     if (!r.ok) return null
-    const j = await r.json().catch(() => null) as { ok?: boolean, sessions?: Record<string, { url?: string, sessionId?: string }> } | null
-    const s = j?.sessions?.[id]
-    if (!s || typeof s.url !== 'string' || !s.url) return null
-    return { url: s.url, sessionId: String(s.sessionId || '') }
+    const j = await r.json().catch(() => null) as { workspaces?: WorkspaceItem[] } | null
+    const e = (j?.workspaces || []).find(w => w && w.id === id)
+    const s = e?.session
+    if (!s || typeof s.homeUrl !== 'string' || typeof s.sessionUrl !== 'string') return null
+    return { homeUrl: s.homeUrl, sessionUrl: s.sessionUrl, sessionId: String(s.sessionId || ''), updatedAt: Number(s.updatedAt) || 0 }
   } catch { return null }
+}
+
+/** [workspace-schema-v2] 写入形状：kind 显式区分「绑站点」与「绑会话」，缺省由服务端推断 */
+export interface SetSessionPayload {
+  kind?: 'site' | 'session'
+  homeUrl?: string
+  sessionUrl?: string
+  sessionId?: string
+  /** @deprecated 旧两参兼容：kind 缺省时按 sessionId 是否非空推断 */
+  url?: string
 }
 
 /**
  * [workspace-session-bind-v1] 写某工作区的 DeepSeek 会话绑定。
- * [CONSTRAINT] 失败静默（不阻断切换）；由回写链路（useAiReplyHandlers）主动调用。
+ * [CONSTRAINT] 失败静默（不阻断切换）；由回写链路与切换链路主动调用。
  */
-async function setSession(id: string, session: { url: string, sessionId: string }): Promise<boolean> {
+async function setSession(id: string, session: SetSessionPayload): Promise<boolean> {
   try {
     const r = await fetch('/__ai/workspace/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, ...session }) })
     return r.ok
@@ -177,6 +216,12 @@ async function activate(id: string, opts?: { newSession?: boolean }): Promise<{ 
   }
 }
 
+/** [workspace-schema-v2] 导航目标选择（纯函数，供守卫测试直接覆盖） */
+export function pickNavUrl(p: { sessionUrl: string, homeUrl: string, newSession: boolean, fallbackUrl: string }): string {
+  if (p.newSession) return p.homeUrl || p.fallbackUrl
+  return p.sessionUrl || p.homeUrl || p.fallbackUrl
+}
+
 /**
  * [workspace-session-bind-v1] 把受控 DeepSeek 窗口切到指定工作区的会话。
  * [WHY] 有绑定 → 导航到绑定 url（复用窗口）；无绑定 → 开新会话（这一次才新开/导航到新会话）。
@@ -186,20 +231,14 @@ async function switchDeepSeekSession(id: string, newSession?: boolean): Promise<
   try {
     const bound = await getSession(id)
     const { openAiSession } = await import('../ai/useAiWindow')
-    const { currentSiteUrl, sidForUrl, MODELS } = await import('../ai/useAiSite')
-    // [open-new-session-v1] newSession=true 时导航到**站点首页**（新对话）：
-    //   原实现用 bound.url（旧会话 URL）会打开旧对话，用户报告「开新会话还是旧会话」。
-    //   从 bound.url 提取 host 找到对应站点首页；无绑定时回退全局 currentSiteUrl。
-    let atUrl: string
-    if (newSession && bound?.url) {
-      try {
-        const host = new URL(bound.url).host
-        const m = MODELS.find((x) => { try { return new URL(x.url).host === host } catch { return false } })
-        atUrl = m ? m.url : currentSiteUrl()
-      } catch { atUrl = currentSiteUrl() }
-    } else {
-      atUrl = bound?.url || currentSiteUrl()
-    }
+    const { currentSiteUrl, sidForUrl } = await import('../ai/useAiSite')
+    // [workspace-schema-v2] 导航目标由 pickNavUrl 单点决定（newSession / sessionUrl / homeUrl / 回退）
+    const atUrl = pickNavUrl({
+      sessionUrl: bound?.sessionUrl || '',
+      homeUrl: bound?.homeUrl || '',
+      newSession: Boolean(newSession),
+      fallbackUrl: currentSiteUrl(),
+    })
     // [multi-site-parallel-v1] 按绑定 URL 推导 sid：两工作区绑不同站点 → 各自窗口槽位不串
     const targetSid = sidForUrl(atUrl)
     // [key-composite-v1] newSession=true = 站点内新建对话 = 全新 AI 上下文：
@@ -220,8 +259,9 @@ async function switchDeepSeekSession(id: string, newSession?: boolean): Promise<
     //   ③ 首问规则仍会在用户真正发起对话时由 copyAndFill 按 sid 去重注入。
     // [workspace-switch-no-first-prompt-v1] 只导航窗口，不发首问（无 initialPrompt 时 openAiSession 本就不发问）。
     await openAiSession({ atUrl, sid: targetSid })
-    // [认领语义] 无绑定或强制新会话时把新会话回写到该工作区，避免下次切换又新建
-    if (!bound || newSession) await setSession(id, { url: atUrl, sessionId: '' })
+    // [认领语义] 无绑定或强制新会话时把新会话回写到该工作区，避免下次切换又新建。
+    // [workspace-schema-v2] 新建会话时只认领站点首页（kind:'site'），具体会话 URL 由回写链路补
+    if (!bound || newSession) await setSession(id, { kind: 'site', homeUrl: atUrl })
     // [session-id-backfill-v1] 空 sessionId 窗口期：新建会话后轮询补全，
     //   油猴的 new-session-created / session-id 回写是异步的，可能晚于本次调用；
     //   补齐后再次切换即可导航到具体会话而非站点默认 URL。
@@ -238,10 +278,13 @@ async function backfillSessionId(id: string, fallbackUrl: string): Promise<void>
   for (let i = 0; i < 8; i++) {
     await new Promise(r => setTimeout(r, 1000))
     const cur = await getSession(id)
-    if (cur && cur.sessionId) return
-    // 兜底：若绑定丢失（服务端重启 / 被清），把当前已知 url 重新写回
-    if (!cur) await setSession(id, { url: fallbackUrl, sessionId: '' })
+    // [workspace-schema-v2] 判据含 sessionUrl：只补到 sessionId 但 URL 仍是首页时，导航会回到首页
+    if (cur && (cur.sessionUrl || cur.sessionId)) return
+    // 兜底：绑定丢失（服务端重启 / 被清）时把已知首页写回
+    if (!cur) await setSession(id, { kind: 'site', homeUrl: fallbackUrl })
   }
+  // [session-id-backfill-v1] 超时不再静默：这是「切换后仍停在首页」的主要可观测信号
+  console.warn('[useWorkspaces] backfillSessionId 超时未拿到会话绑定，工作区', id)
 }
 
 /** 入册已有目录；activate=true 时同时激活并刷新 */

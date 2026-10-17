@@ -18,10 +18,18 @@
 
 ## workspace（multi-workspace，SSOT：`packages/core/src/config.ts`，消费方 `useWorkspaces.ts` → `AiWindowList.vue`）
 
-- **GET /\__ai/workspace/registry** —— 只读，返回 `{ok, workspaces:[{id, root, label, addedAt}], activeId}`。注册表内存权威态在 `config.ts`（启动恢复，落盘 `~/.ai-runner/workspace.json`，旧格式自动迁移）。
+- **GET /\__ai/workspace/registry** —— 只读，返回 `{ok, workspaces:[{id, root, label, addedAt, session?, firstPromptSent?}], activeId}`。`session` 为 `{homeUrl, sessionUrl, sessionId, updatedAt}`（workspace-schema-v2 起内联，`homeUrl` 与 `sessionUrl` 分离），`firstPromptSent` 为按 modelId 的布尔表。注册表内存权威态在 `config.ts`（启动恢复，落盘 `~/.ai-runner/workspace.json`；v1 文件在读入时自动迁移为 v2 并落盘，`schemaVersion: 2` 为幂等判据）。
 - **POST /\__ai/workspace/register** —— body `{path, activate?}`：把已有目录入册（幂等，id 由路径派生）；`activate:true` 同时激活。旧入口 `/workspace/select`、`/workspace/pick` 也会自动入册并激活。
 - **POST /\__ai/workspace/activate** —— body `{id}`：切活跃工作区（= setRoot 切执行 root）；未 id 返回 404。激活成功后由客户端原地刷新（workspace-switch-inplace-v1 起不再整页 reload）。
-- **POST /\__ai/workspace/remove** —— body `{id}`：出册；活跃工作区拒移（409）防悬空 activeId。
+- **POST /\__ai/workspace/remove** —— body `{id}`：出册（workspace-remove-active-v1 起**允许移除活跃工作区**，服务端自动回退到剩余项中最早入册的一个，无剩余则清空并回到引导页）。条目内联的 `session` / `firstPromptSent` 随之消失。
+- **GET /\__ai/workspace/session** —— 只读，返回 `{ok, sessions: Record<workspaceId, {url, sessionId, updatedAt}>}`。
+  `url` 为**派生值** `sessionUrl || homeUrl`（workspace-schema-v2：条目内两字段分离，端点形状保持不变以兼容
+  `useSiteMatrix.ts` 等既有消费方）。无绑定的工作区不出现在结果里。
+- **POST /\__ai/workspace/session** —— body `{id, kind?, url?, sessionId?, homeUrl?, sessionUrl?}`：写某工作区的会话绑定。
+  `kind` 选填：`'site'` 写 `homeUrl` 并清 `sessionUrl`/`sessionId`（换绑站点＝旧会话失效）；
+  `'session'` 写 `sessionUrl`/`sessionId`（`homeUrl` 不动）。缺省按「`sessionId` 非空 → session，否则 → site」推断
+  （推断规则在 `config.setWorkspaceSession` 单一实现）。工作区不存在返 404。
+  响应 `{ok, session}`，`session` 为上述派生旧形状。
 - **POST /\__ai/workspace/create**（multi-workspace-create-v1）—— body `{mode, path, branch?, url?, baseRepo?, activate?}`：`worktree`（同仓库切新分支共享 .git）/ `clone`（独立仓库）/ `register`（要求路径已存在，走 register）。目标路径已存在返 400；成功后自动入册。
 - **GET /\__ai/workspace/first-prompt**（first-prompt-persist-v1）—— 只读，返回 `{ok, sent}`。query `id`（工作区 id，必填）、`model`（站点 modelId，可选；key-composite-v1 起复合键 `<wsId>::<modelId>`，缺省时读裸 `wsId` 键）。消费方 `useWorkspaces.getFirstPromptSent` → `useAiWindow.copyAndFill` 决定是否注入 SYSTEM.md。
 - **POST /\__ai/workspace/first-prompt**（first-prompt-persist-v1）—— body `{id, model?, sent}`：写「该工作区 + 该服务商」的首问是否已带规则头。key-composite-v1 起 `model` 参与复合键；缺省时退化裸 wsId 键。工作区不存在返 404。消费方 `useWorkspaces.setFirstPromptSent`（useAiWindow 4 处调用 + App.vue onSiteChange + switchDeepSeekSession newSession 分支）。
