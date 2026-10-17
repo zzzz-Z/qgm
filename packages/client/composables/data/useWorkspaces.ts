@@ -89,9 +89,40 @@ async function applyRootChanged(): Promise<void> {
 }
 
 /**
- * [multi-site-parallel-v1] 由窗口槽位 sid 反查所属工作区。
+ * [workspace-sid-ambiguity-v1] 由 sessions 快照与目标 URL/sid 反查工作区（纯函数，可单测）。
+ * [WHY] 原实现 host 多命中时取最后一个（对象遍历顺序不稳定）——实测把 admin-template 写进 web-ai-qgm 的会话数据。
+ *   多命中即无法唯一定位，必须显式放弃，由调用方回退 activeId（用户当前操作的工作区）。
+ * [CONSTRAINT] 精确 URL 命中优先（同站点多工作区时唯一）；host 多命中返回 null，不得取其一。
+ */
+export function pickWorkspaceBySid(
+  sessions: Record<string, { url?: string } | undefined>,
+  sid: string,
+  targetUrl: string,
+  sidOf: (u: string) => string,
+): string | null {
+  if (!sid) return null
+  const entries = Object.entries(sessions)
+  for (const [wid, s] of entries) {
+    if (!s || typeof s.url !== 'string' || !s.url) continue
+    if (s.url === targetUrl) return wid
+  }
+  let ambiguous = 0
+  let hit: string | null = null
+  for (const [wid, s] of entries) {
+    if (!s || typeof s.url !== 'string' || !s.url) continue
+    if (sidOf(s.url) === sid) { ambiguous += 1; hit = wid }
+  }
+  if (ambiguous > 1) {
+    console.warn(`[useWorkspaces] pickWorkspaceBySid 按 host 命中 ${ambiguous} 个工作区（同站点多工作区为退化配置），已放弃以免写错：sid=${sid}`)
+    return null
+  }
+  return hit
+}
+
+/**
+ * [multi-site-parallel-v1] 由窗口槽位 sid 反查所属工作区（读 /workspace/session 快照后交给纯函数）。
  * [WHY] 回写链路只知 frame 的 sid；若用 activeId 会写错工作区（并行时 A 的回写落进 B）。
- * [CONSTRAINT] 遍历服务端 sessions，用 sidForUrl 比对 URL host；未命中返回 null（调用方回退 activeId）。
+ * [CONSTRAINT] 多命中一律返回 null，调用方回退 activeId；不得任取其一（见 pickWorkspaceBySid）。
  */
 async function findWorkspaceBySid(sid: string, targetUrl = ''): Promise<string | null> {
   if (!sid) return null
@@ -99,25 +130,8 @@ async function findWorkspaceBySid(sid: string, targetUrl = ''): Promise<string |
     const r = await fetch('/__ai/workspace/session')
     if (!r.ok) return null
     const j = await r.json().catch(() => null) as { sessions?: Record<string, { url?: string }> } | null
-    const sessions = j?.sessions || {}
     const { sidForUrl } = await import('../ai/useAiSite')
-    // [workspace-schema-v2] 精确 URL 命中优先：同站点多工作区（退化配置）下 host 比对会撞车，
-    //   而 sessionUrl 非空的条目能唯一定位。全部未命中才回落 host 比对。
-    const entries = Object.entries(sessions)
-    for (const [wid, s] of entries) {
-      if (!s || typeof s.url !== 'string' || !s.url) continue
-      if (s.url === targetUrl) return wid
-    }
-    let ambiguous = 0
-    let hit: string | null = null
-    for (const [wid, s] of entries) {
-      if (!s || typeof s.url !== 'string' || !s.url) continue
-      if (sidForUrl(s.url) === sid) { ambiguous += 1; hit = wid }
-    }
-    if (ambiguous > 1) {
-      console.warn(`[useWorkspaces] findWorkspaceBySid 按 host 命中 ${ambiguous} 个工作区（同站点多工作区为退化配置），取其一：${hit}`)
-    }
-    return hit
+    return pickWorkspaceBySid(j?.sessions || {}, sid, targetUrl, sidForUrl)
   } catch { return null }
 }
 

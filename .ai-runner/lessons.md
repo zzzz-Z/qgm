@@ -2993,3 +2993,11 @@ v2 的致命缺陷就藏在 `config.ts:319-325` 那 7 行解构里——只要�
 ## `.spec.ts` 不进 vitest
 
 vitest 配置已 `exclude: ['**/*.spec.ts']`，但外部 runner（如直接 `node --test`）会硬 import。新增 e2e 后若看到 `Playwright Test did not expect test() to be called here`，那是外部 runner 越界，不是文件写错。
+
+## `node:test` vs `vitest`：本仓 `.node-test.ts` 是 vitest 跑
+
+新建测试照抄了 `import { describe, it } from 'node:test'`，`vitest run` 直接报 `No test suite found in file`（但同文件 TAP 输出 5 pass，容易误判为「跑通了」）。本仓 `vitest.config.ts` 的 include 是 `packages/**/*.node-test.ts`，所以文件名后缀是 `.node-test.ts` 但运行时是 vitest——直接照抄 `workspace-session-url-select.node-test.ts` 的头部即可，不要用 `node --test` 显式跑（会因 ESM `.js` 后缀解析失败）。
+
+## 报告「测试已跑通」前必须看总账，不看 TAP 片段
+
+`npx vitest run <单文件>` 在 `No test suite` 时依然会输出 TAP 帧（5 pass），后续 `tail` 截取时极易误读为「全绿」。判据：结尾必须是 `Test Files  1 passed` / `Tests  5 passed`，只出现 `# tests 5 / # pass 5` 不构成通过。
