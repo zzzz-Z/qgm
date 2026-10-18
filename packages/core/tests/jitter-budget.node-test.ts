@@ -72,7 +72,7 @@ describe('[jitter-budget-v1] fill 前抖动预算', () => {
     const h = read(HEADLESS)
     const grace = h.match(/const FILL_VERIFY_GRACE_MS = (\d[\d_]*)/)
     expect(grace, 'FILL_VERIFY_GRACE_MS 未找到').toBeTruthy()
-    const graceMs = Number(String(grace[1]).replace(/_/g, ''))
+    const graceMs = Number(String(grace?.[1] ?? '').replace(/_/g, ''))
     expect(max + graceMs).toBeLessThanOrEqual(4000)
   })
 })

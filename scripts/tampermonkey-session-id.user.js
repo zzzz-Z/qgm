@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.17
+// @version      1.9.19
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -1042,7 +1042,11 @@ function extractLatestReplyText() {
  *   但也不能每轮都报——AI 会持续流式改写，同一轮里报 N 次会刷屏。
  * [CONSTRAINT] 纯函数、无 DOM/闭包依赖，与 headless-inject.ts 的同名实现同构，
  *   由 script-fence-gate 守卫测试对拍。
- */
+  * [headless-collector-v1] 稳定契约同步说明：无头侧已改为「信号驱动 + 静默窗 ≥400ms」，
+ *   本通道靠 MutationObserver 350ms 防抖 + isGenerating 分支，两者语义一致（静默即稳定）。
+ *   无头侧静默窗特意设为 400ms >= 本通道 350ms，避免比本通道更早交付半截正文。
+ *   改任一侧的稳定判据时必须同步本注释与对侧实现，否则站点改版时会有人按旧契约修错一边。
+*/
 /**
  * @param scriptMarkPositive 首行是否为 SCRIPT 标记
  * @param seenHashesLen 本轮已成功推送的脚本块数量

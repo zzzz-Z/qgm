@@ -10,7 +10,11 @@
  *   但也不能每轮都报——AI 会持续流式改写，同一轮里报 N 次会刷屏。
  * [CONSTRAINT] 纯函数、无 DOM/闭包依赖，与 headless-inject.ts 的同名实现同构，
  *   由 script-fence-gate 守卫测试对拍。
- */
+  * [headless-collector-v1] 稳定契约同步说明：无头侧已改为「信号驱动 + 静默窗 ≥400ms」，
+ *   本通道靠 MutationObserver 350ms 防抖 + isGenerating 分支，两者语义一致（静默即稳定）。
+ *   无头侧静默窗特意设为 400ms >= 本通道 350ms，避免比本通道更早交付半截正文。
+ *   改任一侧的稳定判据时必须同步本注释与对侧实现，否则站点改版时会有人按旧契约修错一边。
+*/
 
 type FenceDecision = 'report' | 'suppress' | 'none'
 

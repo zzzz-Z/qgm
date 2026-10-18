@@ -20,6 +20,40 @@ export {
 } from './headless-fill.js'
 
 /**
+ * [headless-collector-v1] 幂等重装页面侧三通道 observer。
+ * [WHY] 导航 / 新会话会重建 document，旧 observer 随旧 document 一起失效；
+ *   无头侧 waitForSignal 依赖 _bodyVersion 变化来提前唤醒，observer 失效后
+ *   只能退化为等满 800ms 上限（不会静默丢回复，但采集延迟回到旧水平）。
+ * [CONSTRAINT] 必须幂等：已就绪直接返回，不重复 observe（重复 observe 同一节点会叠加回调）。
+ * @returns {boolean} 重装后是否就绪
+ */
+export function ensureCollectorInPage() {
+  const w = window
+  if (!w.__aiRunnerDedup) {
+    w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '', _pendingScriptHash: null, _pendingDoneSig: null, _plainSentInCycle: false, _shortSentHash: '' }
+  }
+  const dedup = w.__aiRunnerDedup
+  if (dedup._collectorReady && dedup._observer && document.body) return true
+  try {
+    if (dedup._observer && typeof dedup._observer.disconnect === 'function') dedup._observer.disconnect()
+    const obs = new MutationObserver(() => {
+      dedup._bodyVersion = (typeof dedup._bodyVersion === 'number' ? dedup._bodyVersion : 0) + 1
+      dedup._lastMutationAt = Date.now()
+    })
+    obs.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true })
+    dedup._observer = obs
+    dedup._observerInstalled = true
+    dedup._collectorReady = true
+    dedup._lastMutationAt = Date.now()
+    if (typeof dedup._bodyVersion !== 'number') dedup._bodyVersion = 0
+    return true
+  } catch {
+    dedup._collectorReady = false
+    return false
+  }
+}
+
+/**
  * 检测 Reply In Page
  */
 export function detectReplyInPage(siteCfg = {}) {
@@ -68,6 +102,8 @@ export function detectReplyInPage(siteCfg = {}) {
   if (!dedup._preCache) dedup._preCache = new WeakMap()
   if (typeof dedup._seenGrowth !== 'boolean') dedup._seenGrowth = false
   if (typeof dedup._stableCount !== 'number') dedup._stableCount = 0
+  if (typeof dedup._lastMutationAt !== 'number') dedup._lastMutationAt = 0
+  if (typeof dedup._collectorReady !== 'boolean') dedup._collectorReady = false
   // [script-closure-gate-v1] 结构闭合门的挂点（见 extractLatestScript）：跨轮不残留，
   //   依赖 stillStreamingReply 的「正文长度变化即重置」自愈，这里只保证键存在
   if (typeof w.__aiRunnerClosureGate === 'undefined') w.__aiRunnerClosureGate = null
@@ -79,12 +115,23 @@ export function detectReplyInPage(siteCfg = {}) {
   //   勿复活关键词匹配。
   if (typeof dedup._limitBaseline !== 'number') dedup._limitBaseline = 0 // [limit-detect-v1]
   if (typeof dedup._rateBaseline !== 'number') dedup._rateBaseline = 0 // [rate-retry-v1]
+  // [headless-collector-v1] 三通道唤醒：childList / characterData / attributes。
+  // [WHY] 原实现只有 childList+characterData（无 attributes），且只记 _bodyVersion 计数；
+  //   Node 侧 tick 是 800ms 盲轮询，靠「连续 3 拍相同」反推稳定 ⇒ 2.4s 采集延迟。
+  //   与油猴的 observer 模型对齐后，Node 侧可改为「信号驱动 + 静默窗」，延迟降到 400-600ms。
+  // [CONSTRAINT] ready 必须在 observer 成功 observe 后置 true；失效（导航 / 页面重建）时
+  //   由 Node 侧 fillPrompt 前置检查兜底重装，否则回复会静默丢（本项目最贵的一类 bug）。
   if (!dedup._observerInstalled) {
     dedup._observerInstalled = true
     try {
-      const obs = new MutationObserver(() => { dedup._bodyVersion++ })
-      obs.observe(document.body, { childList: true, subtree: true, characterData: true })
+      const obs = new MutationObserver(() => {
+        dedup._bodyVersion++
+        dedup._lastMutationAt = Date.now()
+      })
+      obs.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true })
       dedup._observer = obs
+      dedup._collectorReady = true
+      dedup._lastMutationAt = Date.now()
     } catch { /* swallow: document.body 未就绪 / Observer 不支持，dedup 退化为纯计数 */ }
   }
 

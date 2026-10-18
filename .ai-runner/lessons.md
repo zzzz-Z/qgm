@@ -3742,3 +3742,11 @@ DeepSeek 在上下文触顶时渲染的文案匹配了 busy 正则，于是被�
 ## 抽取内联回调为函数时，守卫的 `extractFnBody` 可能整体失效
 
 `fill-verify-guard` 原用 `extractFnBody(src, 'handleFill')` 断言触顶分支；把 poll 回调抽到 `armReplyPoll` 后，触顶逻辑随之迁出 `handleFill` 体，守卫立刻假红（`未找到函数 armReplyPoll` 之外先报规则拼回失败）。两处教训：① 守卫的提取目标必须与代码归属同步迁移，判据要钉在真正含该逻辑的函数上；② `extractFnBody` 的 forms 数组原本只认 `export async function` / `export function` / `async function` / `async f(`，漏了普通 `function f(`，抽函数后一旦命名不合形态就整条断言崩塌。
+
+## 油猴产物是 assemble 的输出，直接改产物会被 split 守卫判为分叉
+
+`scripts/tampermonkey-session-id.user.js` 由 `scripts/assemble-userscript.mjs` 从 `packages/core/src/tampermonkey/*.ts` 片段 + `scripts/tampermonkey-version.json` 拼装而成，`tampermonkey-split` 守卫断言「产物 === buildUserscript(片段)」。直接编辑产物（哪怕只改注释）会立刻让该守卫变红，且 assemble 下次运行会把改动冲掉。正确路径：改片段源 → 跑 `node scripts/assemble-userscript.mjs`（或 `pnpm build`，step 5 会自动跑）→ 守卫自证。另注意 assemble 有「内容有变则自动递增版本」逻辑，`version.json` 手工改的值会被它再升一位。
+
+## `page.evaluate` 回调体内不能用 `window`（Node 侧 tsconfig 无 DOM lib）
+
+`window` 在 `page.evaluate(() => ...)` 的闭包里是浏览器全局，但 TypeScript 按 Node 环境检查该闭包，报 `TS2304: Cannot find name 'window'`。改用 `globalThis` + 显式窄类型断言：`(globalThis as unknown as { __aiRunnerDedup?: {...} }).__aiRunnerDedup`。这与 `headless-inject.ts` 整文件 `@ts-nocheck` 的处理不同——那个文件靠 `@ts-nocheck` 豁免，`ai-headless.ts` 是正常检查的。

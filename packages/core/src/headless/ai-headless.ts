@@ -2,7 +2,7 @@
 // DOM 逻辑（fillPrompt / stopGenerating / newSession / rotate）分 2D.2-2D.5 实现。
 import fs from 'node:fs'
 import { resolveBrowserEngine } from './browser-engine.js'
-import { clickNewSessionInPage, detectLoginStateInPage, detectReplyInPage, resetReplyDedupInPage, stopGeneratingInPage, verifyFillSentInPage } from './headless-inject.js'
+import { clickNewSessionInPage, detectLoginStateInPage, detectReplyInPage, ensureCollectorInPage, resetReplyDedupInPage, stopGeneratingInPage, verifyFillSentInPage } from './headless-inject.js'
 // [poll-diag-v1] poll 页面状态快照（DOM API 需在浏览器上下文函数里，不能在 Node 侧内联）
 import { collectPageDiagInPage } from './headless-fill.js'
 
@@ -75,6 +75,35 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   // [OPT] _getPage helper
   function _getPage(sid: string): Page | undefined {
     return sessions.get(sid)?.page as Page | undefined
+  }
+  /**
+   * [headless-collector-v1] 信号驱动等待：页面有 DOM 变化就尽快唤醒，无变化则按 800ms 兜底。
+   * [WHY] 原实现纯 800ms 盲轮询，靠「连续 3 拍相同」反推稳定 ⇒ 2.4s 采集延迟。
+   *   改为「排空页面信号 + 静默窗」后，采集延迟降到 400-600ms（与油猴 observer 同量级）。
+   * [CONSTRAINT] 静默窗 400ms 必须 >= 油猴 350ms 防抖，否则会比油猴更早交付（半截正文）。
+   * [CONSTRAINT] 最多等 800ms：页面完全无变化时不能无限等，否则超时告警失效。
+   */
+  async function waitForSignal(sid: string): Promise<void> {
+    const page = _getPage(sid)
+    if (!page) { await new Promise<void>(r => setTimeout(r, 800)); return }
+    const SILENCE_MS = 400
+    const MAX_WAIT_MS = 800
+    const deadline = Date.now() + MAX_WAIT_MS
+    let lastVer = -1
+    let silentSince = Date.now()
+    while (Date.now() < deadline) {
+      let ver = -1
+      try {
+        const v = await page.evaluate(() => {
+          const d = (globalThis as unknown as { __aiRunnerDedup?: { _bodyVersion?: number } }).__aiRunnerDedup
+          return d && typeof d._bodyVersion === 'number' ? d._bodyVersion : -1
+        })
+        ver = typeof v === 'number' ? v : -1
+      } catch { break }
+      if (ver !== lastVer) { lastVer = ver; silentSince = Date.now() }
+      else if (Date.now() - silentSince >= SILENCE_MS) { return }
+      await new Promise<void>(r => setTimeout(r, 50))
+    }
   }
   // 全局串行锁
   let openMutex: Promise<void> = Promise.resolve()
@@ -470,6 +499,18 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
           }
         }
       } catch { /* swallow: 探测失败按原流程走，由后续诊断兜底 */ }
+      // [headless-collector-v1] 导航/新会话后 observer 会失效，重新装载。
+      //   [CONSTRAINT] 不检查就 fill ⇒ 新页面无 observer ⇒ waitForSignal 永远等满 800ms 上限，
+      //   采集退化为纯轮询但仍能工作（不会静默丢回复，只是慢），属可接受的降级。
+      try {
+        const ready = await page.evaluate(() => {
+          const d = (globalThis as unknown as { __aiRunnerDedup?: { _collectorReady?: boolean } }).__aiRunnerDedup
+          return Boolean(d && d._collectorReady)
+        })
+        if (!ready) {
+          await page.evaluate(ensureCollectorInPage).catch(() => null)
+        }
+      } catch { /* swallow: collector 检查失败不阻断 fill */ }
       const ratio = rateLimitedRatio()
       const scale = ratio > 0.1 ? 2 : 1
       await jitterDelay(jitterMin * scale, jitterMax * scale)
@@ -589,7 +630,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       const NO_REPLY_ALERT_MS = 15_000
       // 防并发重入：上轮 evaluate 未完成时跳过本轮
       const tick = async () => {
-        if (stopped || running) { if (!stopped) setTimeout(tick, 800); return }
+        if (stopped || running) { if (!stopped) await waitForSignal(sid); return }
         running = true
         try {
           const streamError = completionErrors.get(sid)
@@ -634,7 +675,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
           }
         } catch { /* 页面导航/关闭时忽略 */ }
         running = false
-        if (!stopped) setTimeout(tick, 800)
+        if (!stopped) await waitForSignal(sid)
       }
       tick()
       return () => {
