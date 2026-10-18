@@ -166,6 +166,35 @@ prompt-budget    2/3   -> 阶段 5 多层级压缩   (最近 14 天 2 条 / 共 
 
 **不通过时的改向**：改从 `elToMd` 反推取数，并把 D6 决策标记为「已推翻」，重新评估引号/反斜杠保真。
 
+#### P0 实测记录（2026-10-19 01:15，进行中）
+
+探针：`tmp/probe-p0-fidelity.mjs`（复用 `headless:fill` → `headless:reply` 链路，零源码改动）。
+
+**已确认的两条**：
+
+1. **`textContent` 保真**：容器 `textContent` 里换行与引号原样保留，实证片段 —
+   `#! /usr/bin/env node\n// @desc P0 字符保真探针\n`、`js复制下载{\n  \"v\": 1,\n  \"turn\": 1`。
+   ⇒ D6 方向成立，不需要退回 `elToMd` 反推。
+2. **语言判定在当前渲染器上失效**：站点把语言标签渲染成 `<pre>` 头部的**文本节点**
+   （`js` + `复制` + `下载`），`guessLangFromClass`（只认 `language-*` 类名）与 `guessLangFromDom`
+   （只看前序兄弟与 wrap 内的 lang/header 标签）都取不到 ⇒ `lang` 为 null ⇒ 整块被
+   `if (lang !== 'js' && lang !== 'bash') continue` 丢弃。实测：同一段内容**加 shebang 后**才被提取出来。
+   ⇒ **新契约的取数不得复用 `extractLatestScript` 的语言闸门**，必须扫**全部** `pre > code`、
+   按「能否解析成 turn」判定，与语言标签无关。
+3. **`stoppedThisRound` 会连带抑制脚本提取**：页面残留「已停止」状态时
+   `markedNonScript || stoppedThisRound ? null : extractLatestScript()` 整条短路，即使块已在 DOM 里
+   也 `seenHashes: 0`。⇒ 信封路径**不得**继承这一抑制（信封解析是纯读，不产生副作用）。
+
+**未取得**：整段载荷的逐字节比对（首轮 `script` 帧已到，但探针读的是 `reply.code` 而实际在
+`reply.item.code`，字段读错；后续 3 次 fill 未能再产生新回复，`asst` 停在 2 不再增长，通道已不可靠）。
+
+**副作用（须告知用户）**：探针把 4 条测试消息写进了用户的真实会话
+`chat.deepseek.com/a/chat/s/73956dfb-35e6-48a6-b122-c38bd0187810`；且后 3 次 fill 未产生新回复，
+该会话当前处于「能发不能回」的观察状态。
+
+**重跑前提**：需要一个新的干净会话（`headless:new-session` 或用户手动新开），且 `asst` 计数能正常增长。
+在此之前 P2 的取数实现按第 2、3 条结论先写（它们不依赖比对结果）。
+
 ### P1 · 契约与解析器（不接线）
 
 **唯一源**：`packages/core/src/reply/turn-schema.ts`
