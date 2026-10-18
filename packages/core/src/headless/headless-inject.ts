@@ -25,7 +25,7 @@ export {
 export function detectReplyInPage(siteCfg = {}) {
   const w = window
   if (!w.__aiRunnerDedup) {
-    w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '', _pendingScriptHash: null, _pendingDoneSig: null, _plainSentInCycle: false } // [fix-reply-dedup] [fix-plain-once]
+    w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '', _pendingScriptHash: null, _pendingDoneSig: null, _plainSentInCycle: false, _shortSentHash: '' } // [fix-reply-dedup] [fix-plain-once] [short-reply-gate-v1]
   }
   const dedup = w.__aiRunnerDedup
 
@@ -424,13 +424,10 @@ export function detectReplyInPage(siteCfg = {}) {
 
   function extractLatestScript() {
     // [script-closure-gate-v1] 结构闭合门 —— 未闭合的块不当作完整脚本推送。
-    // [WHY] 此前唯一屏障是调用方的稳定判据（内置 2 帧同 hash / 油猴 350ms 防抖 + 生成中门），
-    //   两者都只要求「文本没变」、不要求块闭合 ⇒ 任何超窗停顿都让半截块被判完整，
-    //   下游报 `Unexpected end of input`，与上游 max_tokens 截断完全同形，应用端只能反复拆小重发。
-    // [CONSTRAINT] 只延迟、不丢弃：连续 CLOSURE_ACCEPT_TICKS 次不变仍未闭合 ⇒ 判为真截断，照旧放行。
-    // [CONSTRAINT] 门状态挂 window（不用 dedup）⇒ 双通道逐字同构；本函数经 page.evaluate 序列化，禁引用外部闭包。
-    // [CONSTRAINT] 扫描器语义须与 packages/core/src/post-run/script-check.ts 的 hasUnclosedStructure 一致
-    //   （那边是服务端判据），由 script-closure-gate 用例做语料对拍
+    // [WHY] 此前唯一屏障是调用方的稳定判据（2 帧同 hash / 油猴 350ms 防抖 + 生成中门），两者都只要求「文本没变」、
+    //   不要求块闭合 ⇒ 任何超窗停顿都让半截块被判完整，下游报 `Unexpected end of input`（与 max_tokens 截断同形）。
+    // [CONSTRAINT] 只延迟、不丢弃：连续 CLOSURE_ACCEPT_TICKS 次不变仍未闭合 ⇒ 判为真截断，照旧放行；
+    //   门状态挂 window（不用 dedup）⇒ 双通道逐字同构；扫描器语义须与 post-run/script-check.ts 的 hasUnclosedStructure 一致（语料对拍）。
     function hasUnclosedStructureJs(src) {
       const stack = []
       let state = 'code'
@@ -671,25 +668,22 @@ export function detectReplyInPage(siteCfg = {}) {
     return s
   }
 
-  // [reply-mark-v1] 标记行优先：先算首行标记，再决定是否走 DOM 结构判定
-  // [WHY] 带 `ASK` / `DONE` / `HANDOFF` 标记的回复若含代码块，旧逻辑会被 script 分支抢走
-  //   （script 判定排在 done / plain 之前）→ `DONE` 总结里的示例代码块会被当脚本重新执行
-  // [CONSTRAINT] extractReplyMd 是 DOM→Markdown 反推（保留换行），getMainText 的 textContent 无换行、
-  //   无法用于「首行」判定，故标记扫描一律基于前者
+  // [reply-mark-v1] 标记行优先：先算首行标记，再决定是否走 DOM 结构判定。
+  // [WHY] 带 ASK / DONE / HANDOFF 标记的回复若含代码块，旧逻辑会被 script 分支抢走（script 判定排在 done/plain 之前）
+  //   → DONE 总结里的示例代码块会被当脚本重新执行。[CONSTRAINT] extractReplyMd 是 DOM→Markdown 反推（保留换行），
+  //   getMainText 的 textContent 无换行、无法用于「首行」判定，故标记扫描一律基于前者。
   const replyBlocks = document.querySelectorAll('.ds-assistant-message-main-content')
-  // [no-root-no-reply-v1] 容器不存在（新会话首轮「已思考/搜索」期）⇒ replyRoot 置 null：
-  //   extractReplyMd(null) 返回空串、marks 全 -1、getMainText() 返回空 —— 原「兜底成 document」
-  //   会把侧栏历史会话标题（未知标签递归 inner() 拼成连体乱文）+ 用户首条消息卡反推成「回复」
-  //   推给前端（2026-10-08 18:53 截图两张噪音卡的根因，油猴通道同日同修）。
+  // [no-root-no-reply-v1] 容器不存在（新会话首轮「已思考/搜索」期）⇒ replyRoot 置 null：extractReplyMd(null) 返回空串、
+  //   marks 全 -1、getMainText() 返回空。原「兜底成 document」会把侧栏历史会话标题（未知标签递归 inner() 拼成连体乱文）
+  //   + 用户首条消息卡反推成「回复」推给前端（2026-10-08 18:53 两张噪音卡根因，油猴通道同日同修）。
   const replyRoot: Element | null = replyBlocks.length > 0 ? replyBlocks[replyBlocks.length - 1] : null
   const marks = scanReplyMarks(extractReplyMd(replyRoot))
   const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0
 
   // [stopped-no-autorun-v1] 本轮已推过 stopped ⇒ 不再推送残余脚本块（与 plain 抑制同一生命周期）。
-  // [WHY] 前端收 stopped 会 finish 整个循环；此后该回复里的闭合代码块若仍被推出，
-  //   循环已非活动 ⇒ 前端 `autoTakeover.scheduleAutoRun`（无条件立即执行）会把它跑掉，
-  //   形成无记账、无自检、无预算反馈的「循环外自动执行」旁路（WO-20261005 段三判定为缺陷）。
-  //   _stoppedReported 由 resetReplyDedupInPage 随 fill 轮次重置，新一轮脚本不受影响。
+  // [WHY] 前端收 stopped 会 finish 整个循环；此后该回复里的闭合代码块若仍被推出，循环已非活动 ⇒
+  //   前端 `autoTakeover.scheduleAutoRun`（无条件立即执行）会把它跑掉，形成无记账、无自检、无预算反馈的
+  //   「循环外自动执行」旁路（WO-20261005 段三判定为缺陷）。_stoppedReported 随 fill 轮次重置，新一轮脚本不受影响。
   // [parity] scripts/tampermonkey-session-id.user.js classifyAndPost 有同构守卫（stopPosted 标志）
   const stoppedThisRound = Boolean(dedup._stoppedReported)
 
@@ -697,14 +691,10 @@ export function detectReplyInPage(siteCfg = {}) {
   // [script-lang-whitelist-v2] 不再传 declared：语言白名单恒为 js/bash（见 extractLatestScript）
   const script = markedNonScript || stoppedThisRound ? null : extractLatestScript()
   // [generating-gate-v1] 无头通道补「生成中门」（与油猴 350ms 防抖 + 生成中门 parity）。
-  // [WHY] 原判据是三层弱条件叠加——脚本块 2 帧同 hash + hasUnclosedStructureJs 结构闭合
-  //   + stillStreamingReply 用 body.length 判稳定。三者都是「必要不充分」却被当作充分条件，
-  //   AI 写完一个完整函数后停顿 >800ms（或进入思考阶段 body 长度不变 3 帧）即误推脚本。
-  //   油猴通道的生成中门是「停止按钮可见 ⇒ 一定在生成」的强信号，无头通道缺这道门。
-  // [CONSTRAINT] 只拦「有脚本块 + 生成中」；markedNonScript（DONE/ASK/TEXT）分支不受影响，
-  //   否则 DONE 首行写在生成中会被推迟（下游 plain 分支已有独立 stable 判据）。
-  // [CONSTRAINT] 清 _pendingScriptHash 避免生成完成后因 hash 相同直接跳过 2 帧判据。
-  // [CONSTRAINT] isGeneratingInPage 图签名失配 fail-open（不误判生成中），与 stopped 检测共用同一探针。
+  // [WHY] 原判据是三层弱条件叠加（2 帧同 hash + hasUnclosedStructureJs 结构闭合 + stillStreamingReply 用 body.length 判稳定），
+  //   三者都是「必要不充分」却被当充分条件 ⇒ AI 写完完整函数后停顿 >800ms（或思考期长度不变 3 帧）即误推脚本。
+  // [CONSTRAINT] 只拦「有脚本块 + 生成中」；markedNonScript（DONE/ASK/TEXT）不受影响（否则 DONE 首行写在生成中会被推迟）。
+  // [CONSTRAINT] 清 _pendingScriptHash 避免生成完成后因 hash 相同直接跳过 2 帧判据；isGeneratingInPage 失配 fail-open（不误判生成中）。
   // [CHANGE-IMPACT] 站点改版致探针恒 false 时退化为原三层判据（非「永不放行」）。
   if (script && isGeneratingInPage()) {
     dedup._pendingScriptHash = null
@@ -743,47 +733,50 @@ export function detectReplyInPage(siteCfg = {}) {
   }
 
   // 文本稳定检测：连续 3 次 body 不变 → 生成结束，推 plain + text
+  dedup._hitSig2 = (dedup._hitSig2 || 0) + 1
   const sig2 = bodySignature()
   if (sig2 !== dedup.lastBodySig) {
+    dedup._hitSigChanged = (dedup._hitSigChanged || 0) + 1
     dedup.lastBodySig = sig2
     dedup._stableCount = 0
     dedup._seenGrowth = true
     return null
   }
-  if (!dedup._seenGrowth) return null
+  if (!dedup._seenGrowth) { dedup._hitNoGrowth = (dedup._hitNoGrowth || 0) + 1; return null }
   // [ask-any-cycle-v1] ASK 标记不受「本轮已推过 plain」约束：
   //   流式回复常先出无标记文本（被推成 plain）再补 ASK 块，若一并被去重拦下，提问卡永不出现。
   //   ASK 分支本身有 _stableCount>=3 稳定门槛，重复推的风险由该门槛承担。
-  if (dedup._plainSentInCycle && marks.ask < 0) return null
+  if (dedup._plainSentInCycle && marks.ask < 0) { dedup._hitPlainSent = (dedup._hitPlainSent || 0) + 1; return null }
   dedup._stableCount = (dedup._stableCount || 0) + 1
-  if (dedup._stableCount < 3) return null
+  if (dedup._stableCount < 3) { dedup._hitStableLow = (dedup._hitStableLow || 0) + 1; return null }
   const plainText = getMainText()
-  // [reply-mark-v1] 复用开头算好的 marks（同一份「首行标记行」判据，避免与脚本判定口径漂移）：
-  //   轮转摘要放行（SUMMARY_INSTRUCTION 要求 AI 输出 `HANDOFF` 首行 + 结构化摘要，无代码块，
-  //   不放行则 handoff 态永远收不到总结 → 30s 超时失败）；
-  //   含 ASK 的回复放行（交互提问需用户响应）；
-  //   [text-mark-v1] 含 TEXT 的回复放行（显式声明的纯文本回执）；
-  //   其余纯文本仍被拦下（过滤纯问候语的原意保留）
-  // [CONSTRAINT] 不能用 getMainText() 的 textContent 做标记扫描：它是 DOM textContent，
-  //   无换行，整段被当成「一行」，首行标记判据必然失配；marks 来自 extractReplyMd（保留换行）
-  if (!hasJsFence(plainText) && marks.ask < 0 && marks.handoff < 0 && marks.text < 0) return null
+  // [reply-mark-v1] 复用开头算好的 marks（与脚本判定同一口径，避免漂移）：HANDOFF / ASK / TEXT 放行，其余纯文本拦下；
+  //   [CONSTRAINT] 不能用 getMainText() 的 textContent 做标记扫描（无换行 ⇒ 整段被当「一行」，首行标记判据必失配）。
+  // [short-reply-gate-v1] 极短（去空白 <6 字）无标记回复不再恒丢：生成中或静止窗 <6tick ⇒ 等，否则交付。
+  // [WHY] 2026-10-18 实测「只回复两个字：收到」：body 铁定稳定（_stableCount=129）仍被旧闸门每 tick 丢弃 ⇒ 整轮无回复到 15s 告警。
+  // [CONSTRAINT] 交付不置 _plainSentInCycle（可能只是长回复前缀，锁死会让后续真答复被 _hitPlainSent 吞掉），去重用 _shortSentHash；
+  //   本轮已推过 stopped 时整闸门不参与（短文本同属「停止后补发」，先交付会绕开下方 stopped 守卫）。
+  if (marks.ask < 0 && marks.handoff < 0 && marks.text < 0 && !dedup._stoppedReported && !hasJsFence(plainText)) {
+    const _bare = plainText.replace(/\s+/g, '').length
+    const _h = _bare > 0 && _bare < 6 ? hash32(`short|${plainText}`) : ''
+    if (_h && (isGeneratingInPage() || (dedup._stableCount || 0) < 6)) { dedup._hitShortGate = (dedup._hitShortGate || 0) + 1; return null }
+    if (_h && dedup._shortSentHash !== _h) {
+      dedup._shortSentHash = _h; dedup._hitShortPass = (dedup._hitShortPass || 0) + 1
+      return { kind: 'plain', text: plainText }
+    }
+    if (_h) { dedup._hitShortDup = (dedup._hitShortDup || 0) + 1; return null }
+  }
   // [stopped-plain-noise-v1] 本轮已推过 stopped ⇒ 之后的 plain 必为「已停止」半截回复的补发，跳过。
-  // [WHY] stopped 分支只推一次（_stoppedReported 置位），而停止横幅插入/操作按钮态变化仍会让
-  //   body 稳定判据（_stableCount>=3）走到 plain 分支，把这条半截回复全文补发成 plain
-  //   ⇒ 前端时间线多出一张巨大 AI 文本卡（2026-10-08 截图实测）。
-  //   [script-plain-noise-v1] 的 marks.script 守卫拦不住它：半截回复首行是普通文本，不是标记行。
-  // [CONSTRAINT] _stoppedReported 由 resetReplyDedupInPage 随 fill 轮次重置，新一轮真实 plain 不受影响。
-  // [parity] scripts/tampermonkey-session-id.user.js classifyAndPost 有同构守卫（stopPosted 标志）
-  if (dedup._stoppedReported) return null
+  // [WHY] stopped 分支只推一次（_stoppedReported 置位），但停止横幅插入/按钮态变化仍会让 body 稳定判据（_stableCount>=3）
+  //   走到 plain 分支，把半截回复全文补发 ⇒ 前端多一张巨大文本卡（2026-10-08 实测）。[script-plain-noise-v1] 的 marks.script
+  //   守卫拦不住它（首行是普通文本）。_stoppedReported 随 fill 轮次重置，新一轮真实 plain 不受影响；油猴 stopPosted 同构。
+  if (dedup._stoppedReported) { dedup._hitStopped = (dedup._hitStopped || 0) + 1; return null }
   // [script-plain-noise-v1] 首行 = SCRIPT 且本会话已成功推过脚本 ⇒ plain 必为噪音，跳过。
-  // [WHY] 按输出契约，`SCRIPT` 首行的回复「第二行起是脚本代码块、代码块外零字符溢出」，没有可展示的正文。
-  //   脚本早已由上面的 script 分支推送；此后 body 稳定下来（_stableCount>=3）后到达此处的 plain 分支，
-  //   会再把整条回复的 DOM→Markdown 反推全文（N 个裸 `SCRIPT` 标记行 + 已推送过的围栏）发一遍
-  //   ⇒ 前端多出一张正文只有「SCRIPT」的文本卡（UI 侧 stripScriptBlocks 剥不掉裸标记行）。
-  // [CONSTRAINT] 要求已推过脚本才跳过：脚本从未推成功时保留旧 plain 行为，
-  //   避免「AI 说了话但应用端毫无反应」的静默失败变得不可观测。
-  // [parity] scripts/tampermonkey-session-id.user.js 的 classifyAndPost 有同构守卫
-  if (marks.script > 0 && dedup.seenHashes.length > 0) return null
+  // [WHY] 按输出契约，SCRIPT 首行的回复「第二行起是代码块、块外零字符」，没有可展示正文；脚本已由上面的 script 分支推送，
+  //   此后 body 稳定（_stableCount>=3）到达此处会把整条回复反推全文（裸标记行 + 已推围栏）再发一遍
+  //   ⇒ 前端多一张正文只有「SCRIPT」的卡（stripScriptBlocks 剥不掉裸标记行）。
+  // [CONSTRAINT] 要求已推过脚本才跳过：脚本从未推成功时保留旧 plain 行为，避免「AI 说了话但应用端毫无反应」不可观测（油猴同构）。
+  if (marks.script > 0 && dedup.seenHashes.length > 0) { dedup._hitScriptNoise = (dedup._hitScriptNoise || 0) + 1; return null }
   // [script-fence-gate-v1] SCRIPT 标记存在但本回复从未推出有效脚本块（body 已稳定，见上方 _stableCount>=3）⇒
   //   这是「裸写代码无围栏」或「代码块未被识别为 js」的静默失败：立即报 error 而非降级 plain 文本卡。
   // [CONSTRAINT] 用 dedup._scriptFenceReported 去重只报一次；已推过脚本（seenHashes 非空）走上方噪音抑制。
@@ -793,7 +786,7 @@ export function detectReplyInPage(siteCfg = {}) {
     dedup._scriptFenceReported = true
     return { kind: 'error', text: 'SCRIPT 载荷不是有效的 js/cjs 代码块：必须用 ```js 围栏包裹代码，且脚本头用 // @desc / // @why（参考 packages/core/SYSTEM.md §1 状态 A）。' }
   }
-  if (_fence === 'suppress') return null
+  if (_fence === 'suppress') { dedup._hitFenceSuppress = (dedup._hitFenceSuppress || 0) + 1; return null }
   dedup._plainSentInCycle = true
   // [text-mark-v1] TEXT 标记的载荷：取 DOM→Markdown 反推正文并剥掉标记行。
   // [WHY] getMainText() 是 textContent——块级标签之间不插换行，标记行会与正文粘成一行，

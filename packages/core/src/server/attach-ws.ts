@@ -71,6 +71,12 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
   const replyPollers = new Map<string, () => void>()
   // [fill-serialize-v1] 同 sid 的 fill 序列串行化，防止 await 交错导致 startReplyPoll 被覆写后孤儿化
   const fillChains = new Map<string, Promise<void>>()
+  // [rules-keep-v1] 每个 sid 最近一次「带规则头」提问的规则块（`<file path="SYSTEM.md">` 起的部分）。
+  // [WHY] 无头通道不再每条提问开新会话（no-new-session-per-fill-v1），系统提示词只随会话首问进入对话上下文。
+  //   但轮转仍会发生——触顶自动开新会话后新对话是「无系统提示词」的，AI 立刻失去角色与输出契约。
+  //   原实现在该分支只发一句「继续」，等于把系统提示词一起丢掉。此处留存一份，轮转时重新带上。
+  // [CONSTRAINT] 只做内存态：进程重启后首个带规则的 fill 会重新填充，无需持久化。
+  const rulesBlocks = new Map<string, string>()
 
   // 缓存最近外发消息（per-sid），供客户端重连后请求重放
   const _serverMsgBuf = new Map<string, unknown[]>()
@@ -122,6 +128,12 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
     const sid = String(msg.sid || 'default')
     const prompt = String(msg.prompt || '')
     if (!prompt) { send({ t: 'headless:state', sid, state: 'error', detail: 'prompt 为空' }); return }
+    // [rules-keep-v1] 记住规则块（见 rulesBlocks 声明处说明）：以客户端 first-prompt.ts 拼的
+    //   `# 会话首问规则（自动携带）…\n\n# 问题\n\n` 为界，切掉「问题」段只留规则，轮转后可原样复用。
+    if (prompt.includes('<file path="SYSTEM.md">')) {
+      const cut = prompt.indexOf('\n\n# 问题\n\n')
+      rulesBlocks.set(sid, cut > 0 ? prompt.slice(0, cut) : prompt)
+    }
     // [image-paste-v3] 与油猴 ai-runner:fill 的 images 字段对齐：有图先注入，再填文本
     const images = Array.isArray(msg.images) ? msg.images : []
     const prev = fillChains.get(sid) ?? Promise.resolve()
@@ -145,12 +157,17 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
       const oldStop = replyPollers.get(sid)
       if (oldStop) { oldStop(); replyPollers.delete(sid) }
       send({ t: 'headless:state', sid, state: 'filling' })
-      await pool.newSession(sid).catch(() => null)
-      // [reply-baseline-fix-v1] resetReplyDedup 必须在 fill 之前执行。
-      //   [WHY] 它的核心作用是记 `_baselineBlocks` = 当前 assistant 消息块数；poll 侧判据
-      //   `_baseBlocks.length <= _baselineBlocks → 无新回复`。若放在 fill 之后，DeepSeek 已渲染
-      //   AI 的空回复块，基线 = 含新块，poll 恒 return null → 前端收到 generating 后永远无 reply。
-      //   [CONSTRAINT] 必须在 fill 之前；顺序对调即回退至「无头静默丢回复」bug。
+      // [no-new-session-per-fill-v1] 禁止每次 fill 都开新会话。
+      // [WHY] 原实现无条件 `await pool.newSession(sid)` ⇒ 每条提问都落在一个**空对话**里：
+      //   ① 会话首问规则（SYSTEM.md/AGENTS.md，约 42KB）只在「恰好带规则的那一条」所在对话里，
+      //      之后每条提问都在新对话 ⇒ AI 完全没有系统提示词（2026-10-18 实测：headless.jsonl 里
+      //      每次 fill 前都有 new-session-ok，promptBytes 只有 6-14 字节）；
+      //   ② 连续对话被切断，回传的「脚本执行结果」与上一条脚本无从关联，多轮修正全在冷启动。
+      // [CONSTRAINT] 需要新会话就显式发 `headless:new-session`（客户端按钮 / 触顶恢复），不在 fill 里隐式做。
+      // [CONSTRAINT] 这条顺序不能动：resetReplyDedup 必须在 fill 之前（reply-baseline-fix-v1）。
+      //   [WHY] 它记 `_baselineBlocks` = 当前 assistant 消息块数，poll 侧判据是「块数未涨 ⇒ 无新回复」。
+      //   若放在 fill 之后，DeepSeek 已渲染 AI 空回复块 ⇒ 基线含新块 ⇒ poll 恒 return null ⇒ 静默丢回复。
+      //   没有 newSession 时它记的是**当前对话**最后一条 assistant 的 hash —— 仍是正确的本轮基线。
       await pool.resetReplyDedup(sid)
       // [image-paste-v3] 图片先于文本注入（与油猴同序）：上传多为异步，先占位避免文本覆盖图片区。
       if (images.length) {
@@ -215,8 +232,8 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
             send({ t: 'headless:reply', sid, reply: { kind: reply.kind, text: reply.text } })
             // [limit-autorecover-v1] 触顶后原会话不可能再产出：自动开新会话并把「继续」发过去，
             //   让任务在无人工干预下接续（原行为只是报错停下，用户看到「没反应」）。
-            //   [CONSTRAINT] 只发一句「继续」——完整上下文由工作台会话记录承载，
-            //   服务端不臆造总结；如需带系统提示词，由客户端首问链路负责注入。
+            //   [CONSTRAINT] 正文只发一句「继续」——完整上下文由工作台会话记录承载，
+            //   服务端不臆造总结；但**规则头必须带回去**（rules-keep-v1），否则新对话无系统提示词。
             if (reply.kind === 'limit') {
               void (async () => {
                 try {
@@ -225,7 +242,10 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
                   const ns = await pool.newSession(sid)
                   if (!ns) return
                   send({ t: 'headless:state', sid, state: 'filling', detail: '会话已达上限，已自动开启新会话' })
-                  await pool.fillPrompt(sid, '继续')
+                  // [rules-keep-v1] 新对话若丢掉系统提示词，AI 会连输出契约（SCRIPT/ASK/TEXT/DONE/HANDOFF）都不认，
+                  //   接下来整轮都在「自由聊天」。有留存就原样带回去，只替换「问题」段。
+                  const rules = rulesBlocks.get(sid) || ''
+                  await pool.fillPrompt(sid, rules ? `${rules}\n\n# 问题\n\n继续` : '继续')
                 } catch { /* swallow: 自动恢复失败不阻断主链路，用户可手动重发 */ }
               })()
             }
@@ -282,6 +302,8 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         if (stop) { stop(); replyPollers.delete(sid) }
         // [attach-ws-buffer-sid-cap-v1] sid 已关闭即无重放需求：同步删缓冲，与 replyPollers 同生命周期
         _serverMsgBuf.delete(sid)
+        // [rules-keep-v1] 与 `_serverMsgBuf` 同生命周期：sid 关闭后规则块无复用场景，不随会话累积
+        rulesBlocks.delete(sid)
         await pool.close(sid)
         send({ t: 'headless:state', sid, state: 'idle', detail: 'closed' })
         break

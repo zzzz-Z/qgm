@@ -322,13 +322,18 @@ const MARKER_SITE_COUNT: Record<string, number> = {
 // [WHY] 该正则每条分支都带转义（please\s+slow\s+down / rate\s+limit / too\s+many\s+requests），
 //   在源码文本里是**字面反斜杠**，无法自匹配 ⇒ 不属「自指」误报类；且它守在 send 复核路径上
 //   （改它会牵动 fill-ack 判定），取舍见 docs/plan/limit-marker-fp-fix.md §2 P0。
-const MARKER_RECEIVER_ALLOWLIST = new Set(['scanText', 'scanBodyText()', 'tail'])
+// [allowlist] 第二类例外：alertText 是 [busy-scope-v1] 刻意收窄到「最后一条 assistant 气泡」的扫描域。
+// [WHY] 全页 scanText 会把历史对话里残留的旧「服务器繁忙」当成本轮错误（实测误报）；收窄后比剥壳全页更严，
+//   不属「自指误报」类。它只服务 busy / rate 两条探针，改它会牵动本轮错误判定，故单独成类而非并进 scanText。
+const MARKER_RECEIVER_ALLOWLIST = new Set(['scanText', 'scanBodyText()', 'tail', 'alertText'])
 const RAW_EXCEPTION_RECEIVER = 'tail'
+const NARROWED_RECEIVERS = new Set(['alertText'])
 
 test('body text 调用点: 标记探针一律读剥壳后的正文（冻结清单 ratchet）', () => {
   // [site-adapter-v1] 正则锚点同时支持字面量 `/xxx/gi` 和锚点变量 `_XXX_ANCHOR` 两种形式
   const RE_SITE = /([\w$.]+(?:\(\))?)\.match\(\s*(?:\/(?:server busy|\(\?:消息|当前问题已停止|\(\?:\(\?:达到)[\s\S]*?\/[gimsuy]*|_\w+_ANCHOR\w*)/g
   let rawExceptions = 0
+  let narrowedReceivers = 0
   for (const rel of SOURCES) {
     const src = fs.readFileSync(path.join(ROOT, rel), 'utf8')
     const receivers = [...src.matchAll(RE_SITE)].map(m => m[1])
@@ -343,9 +348,12 @@ test('body text 调用点: 标记探针一律读剥壳后的正文（冻结清�
         `${rel} 的标记探针接收者是 ${r}：应读剥壳后的正文（scanText / scanBodyText()）`,
       )
       if (r === RAW_EXCEPTION_RECEIVER) rawExceptions++
+      // [narrowed-domain-v1] 收窄域接收者不参与 raw 例外计数，单独记账便于审计新增
+      if (NARROWED_RECEIVERS.has(r)) narrowedReceivers++
     }
   }
   assert.equal(rawExceptions, 1, 'raw 读取的例外只允许 verifyFillSentInPage 一处，新增例外必须先在计划文档留痕')
+  assert.equal(narrowedReceivers, 2, '收窄域接收者只允许 alertText 的 busy / rate 两处，新增须在此登记')
 })
 
 // ── 裸串 census（[limit-en-fixture-split-v1]）──────────────────────────────────

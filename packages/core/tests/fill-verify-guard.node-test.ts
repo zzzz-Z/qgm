@@ -164,6 +164,23 @@ test('fill-verify: 末条为 AI 气泡时不得判为已发送', () => {
   assert.equal(r.sent, false)
 })
 
+// [fill-verify-v3] 2026-10-18 实测回归：极短回复在 verify 完成前就渲染完，末条变成 AI 气泡。
+test('fill-verify: 增量区域内已出现 user 气泡（末条是刚到的 AI 气泡）仍判已发送', () => {
+  const verify = buildVerify()
+  // 基线 0（新建空会话）→ 现在 2 条：user(我发的) + assistant(已快速回「收到」)
+  const doc = makeDoc({ msgs: [userBubble(), assistantBubble()], inputValue: '' })
+  const r = verify(doc, { [BASELINE_KEY]: { count: 0 } })
+  assert.equal(r.sent, true, '末条为 AI 气泡不代表没发出：增量区域里已有 user 气泡即已送达')
+})
+
+test('fill-verify: 增量区域内只有 AI 气泡（无新 user 消息）仍判未发送', () => {
+  const verify = buildVerify()
+  // 基线 2 → 现在 3：只多了一条 AI 气泡（旧回复重渲染），不能算我这条发出去了
+  const doc = makeDoc({ msgs: [userBubble(), assistantBubble(), assistantBubble()], inputValue: '' })
+  const r = verify(doc, { [BASELINE_KEY]: { count: 2 } })
+  assert.equal(r.sent, false, '无新 user 气泡 ⇒ 不能判为已发送')
+})
+
 // ============ 结构断言：三处修复缺一不可 ============
 
 test('fill-verify: fillPromptInPage 必须记录发送基线', () => {
@@ -192,6 +209,48 @@ test('fill-verify: resetReplyDedup 必须在 fill 之前（reply-baseline-fix-v1
   assert.ok(atReset >= 0, 'handleFill 缺少 resetReplyDedup 调用')
   assert.ok(atFill >= 0, 'handleFill 缺少 fillPrompt 调用')
   assert.ok(atReset < atFill, `resetReplyDedup 必须在 fillPrompt 之前（实际 reset@${atReset} fill@${atFill}）`)
+})
+
+test('fill-verify: handleFill 不得隐式开新会话（no-new-session-per-fill-v1）', () => {
+  const src = read(ATTACH_WS)
+  const body = extractFnBody(src, 'handleFill')
+  // [WHY] 原实现在每次 fill 前无条件 `await pool.newSession(sid)`：每条提问都落进一个**空对话**，
+  //   而会话首问规则（SYSTEM.md/AGENTS.md，约 42KB）只拼在「恰好带规则的那一条」上 ⇒
+  //   除第一条外，所有提问的 prompt 只有几字节，AI 完全没有系统提示词（2026-10-18 实测）。
+  //   同时连续对话被切断，回传的脚本执行结果与上一条脚本无从关联。
+  // [CONSTRAINT] 需要新会话必须显式走 `headless:new-session`（触顶恢复 / 用户手动切换），不在 fill 里隐式做。
+  // [CONSTRAINT] 必须剥注释再判：说明性注释里会提到 `pool.newSession(sid)` 这个写法。
+  const code = body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  // 判据只约束「fill 之前」这一段：触顶恢复（reply.kind === 'limit'）里显式 newSession 是合法的，
+  // 它发生在 fill 之后的 poll 回调中，不是本条要防的「每条提问一个空对话」。
+  const atFill = code.indexOf('await pool.fillPrompt(sid, prompt)')
+  assert.ok(atFill >= 0, 'handleFill 缺少 fillPrompt 调用')
+  const preFill = code.slice(0, atFill)
+  assert.ok(
+    !/\.newSession\s*\(/.test(preFill),
+    'handleFill 在 fill 之前调用 newSession → 每条提问都会丢进空对话，系统提示词丢失',
+  )
+  assert.ok(code.includes('resetReplyDedup('), 'handleFill 失去了 resetReplyDedup（本轮回复基线）')
+})
+
+test('fill-verify: 触顶轮转必须把系统提示词带回新对话（rules-keep-v1）', () => {
+  const src = read(ATTACH_WS)
+  const body = extractFnBody(src, 'handleFill')
+  const code = body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  // [WHY] no-new-session-per-fill-v1 之后，系统提示词只随「会话首问」进入对话上下文。
+  //   唯一的轮转路径是触顶自动开新会话：旧实现只发一句裸「继续」⇒ 新对话没有 SYSTEM.md，
+  //   AI 连输出契约（SCRIPT/ASK/TEXT/DONE/HANDOFF）都不认，整轮退化成自由聊天。
+  assert.ok(code.includes('<file path="SYSTEM.md">'), 'handleFill 未识别规则头锚点 → 无法留存规则块')
+  assert.ok(/rulesBlocks\.set\(/.test(code), 'handleFill 未留存规则块 → 轮转后系统提示词丢失')
+  assert.ok(
+    !/fillPrompt\(sid,\s*'继续'\)/.test(code),
+    '触顶分支仍只发裸「继续」→ 新对话没有系统提示词',
+  )
+  assert.ok(
+    /fillPrompt\(sid,\s*rules\s*\?/.test(code),
+    '触顶分支未把留存规则块拼回 fillPrompt',
+  )
+  assert.ok(/rulesBlocks\.delete\(sid\)/.test(src), 'headless:close 未清 rulesBlocks（随 sid 累积，内存泄漏）')
 })
 
 test('fill-verify: fill 失败时 handleFill 不得提前 return（否则回复被静默丢弃）', () => {

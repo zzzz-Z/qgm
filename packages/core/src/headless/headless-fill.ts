@@ -122,7 +122,20 @@ export function verifyFillSentInPage(cfg = {}) {
     ? window.__aiRunnerFillBaseline.count
     : null
   const grew = base === null ? msgs.length > 0 : msgs.length > base
-  if (lastIsUserBubble && grew) return { sent: true, rateLimited: false, reason: '' }
+  // [fill-verify-v3] 有基线时判「增量区域里出现过任意 user 气泡」，不再要求**末条**是 user 气泡。
+  // [WHY] 2026-10-18 实测：极短回复（「收到」）在 verify 完成前就已渲染 ⇒ 末条已是 assistant 气泡
+  //   ⇒ lastIsUserBubble=false ⇒ 明明发出却报 ok:false。客户端把 ok:false 映射成 failed
+  //   （toast「发送失败」+ softPause），一次成功发送被显示成失败，正是本函数要消灭的误判。
+  //   增量区域（slice(base)）里存在 user 气泡 = 确有一条新用户消息落进对话，判据仍承重：
+  //   只有 assistant 新块（base=2→3）没有 user 气泡，依旧判未发送。
+  // [CONSTRAINT] 无基线时保持旧语义（末条须为 user 气泡）：此时无法界定「新增区」，放宽会命中历史消息。
+  let grewUserBubble = lastIsUserBubble && grew
+  if (base !== null && grew) {
+    // [CONSTRAINT] 此处禁止 TS 类型注解：守卫测试把这整个函数体抠出来在 vm 里直接跑（同 scanReplyMarks）
+    const arr = Array.prototype.slice.call(msgs, base)
+    grewUserBubble = arr.some(m => !m.querySelector(asstSel))
+  }
+  if (grewUserBubble) return { sent: true, rateLimited: false, reason: '' }
   // [rate-retry-v1] 发送被频控拒收：消息不进对话，页面尾部出现「过于频繁」提示。
   // 只扫尾部 3000 字符（提示渲染在底部输入区附近），避免历史消息里的旧文案误判。
   // 频控判定置于「输入框已清空」弱信号之前——被拒收时输入框同样会被清空，不能反判为已发送。
@@ -288,6 +301,32 @@ export function collectPageDiagInPage() {
     plainSent: Boolean(dedup._plainSentInCycle),
     lastBodySig: String(dedup.lastBodySig || ''),
     seenHashes: Array.isArray(dedup.seenHashes) ? dedup.seenHashes.length : -1,
+    // [poll-diag-v3] 区分 plain 分支各出口：hasJsFence / marks / stopped / 裸 SCRIPT 围栏
+    plainLen: (() => { try { return String((document.querySelectorAll('.ds-assistant-message-main-content').length ? (document.querySelectorAll('.ds-assistant-message-main-content')[document.querySelectorAll('.ds-assistant-message-main-content').length - 1].textContent || '') : '')).length } catch { return -1 } })(),
+    preCnt: (() => { try { const els = document.querySelectorAll('.ds-assistant-message-main-content'); if (!els.length) return -1; return els[els.length - 1].querySelectorAll('pre code, pre').length } catch { return -1 } })(),
+    stopped: Boolean(dedup._stoppedReported),
+    scriptFence: Boolean(dedup._scriptFenceReported),
+    // [poll-diag-v4] 锁定 plain 分支为何 return null：需 marks 与 plainText 实测
+    marks: (() => { try { const els = document.querySelectorAll('.ds-assistant-message-main-content'); const root = els.length ? els[els.length - 1] : null; const md = (function elToMd(node) { if (!node) return ''; if (node.nodeType === 3) return node.textContent || ''; if (node.nodeType !== 1) return ''; const el = node; const tag = el.tagName.toLowerCase(); const inner = () => Array.from(el.childNodes).map(elToMd).join(''); if (tag === 'br') return '\n'; if (tag === 'hr') return '\n---\n\n'; if (/^h[1-6]$/.test(tag)) return `${'#'.repeat(Number(tag.charAt(1)))} ${inner().trim()}\n\n`; if (tag === 'p') return `${inner().trim()}\n\n`; if (tag === 'ul' || tag === 'ol') { const o = []; let i = 1; for (const c of Array.from(el.children)) { if (c.tagName.toLowerCase() !== 'li') continue; o.push((tag === 'ul' ? '- ' : `${i++}. `) + elToMd(c).trim()) } return `${o.join('\n')}\n\n` } if (tag === 'pre') { const c = el.querySelector('code'); const lang = c ? ((c.className || '').match(/(?:language|lang)-([a-z0-9+#-]+)/i) || [])[1] || '' : ''; return `\`\`\`${lang}\n${((c || el).textContent || '').replace(/\n+$/, '')}\n\`\`\`\n\n` } return inner() })(root); const lines = md.split(/\r?\n/); let head = -1; for (let i = 0; i < lines.length; i++) { if (lines[i].trim().length > 0) { head = i; break } } const out = { script: -1, ask: -1, done: -1, handoff: -1, text: -1 }; if (head >= 0) { const line = lines[head].trim(); if (line === 'SCRIPT')out.script = head + 1; else if (line === 'ASK')out.ask = head + 1; else if (line === 'DONE')out.done = head + 1; else if (line === 'HANDOFF')out.handoff = head + 1; else if (line === 'TEXT')out.text = head + 1 } return out } catch { return null } })(),
+    plainHead: (() => { try { const els = document.querySelectorAll('.ds-assistant-message-main-content'); if (!els.length) return ''; const t = (els[els.length - 1].textContent || ''); return t.slice(0, 40) } catch { return '' } })(),
+    pendingScriptHash: String(dedup._pendingScriptHash || ''),
+    pendingDoneSig: String(dedup._pendingDoneSig || ''),
+    hits: {
+      sig2: dedup._hitSig2 || 0,
+      sigChanged: dedup._hitSigChanged || 0,
+      noGrowth: dedup._hitNoGrowth || 0,
+      plainSent: dedup._hitPlainSent || 0,
+      stableLow: dedup._hitStableLow || 0,
+      // [short-reply-gate-v1] 极短回复闸门三态计数：wait（继续等）/ pass（已交付）/ dup（同文本已交付）
+      // [改名] 旧字段 jsFence 名不副实：它统计的从来不是「js 围栏」，而是「极短文本被当噪音丢弃」的次数，
+      //   2026-10-18 排查时就因为这个名字把根因误判成 bodySignature 抖动，故改名并在新日志里弃用 jsFence。
+      shortGate: dedup._hitShortGate || 0,
+      shortPass: dedup._hitShortPass || 0,
+      shortDup: dedup._hitShortDup || 0,
+      stopped: dedup._hitStopped || 0,
+      scriptNoise: dedup._hitScriptNoise || 0,
+      fenceSuppress: dedup._hitFenceSuppress || 0,
+    },
   }
 }
 
@@ -386,7 +425,7 @@ export function resetReplyDedupInPage(cfg = {}) {
   })()
   // [rate-retry-v1] 频控基线：与 headless-inject detectReplyInPage、本文件 verifyFillSentInPage 三处同构（守卫测试 rate-marker-guard）
   const rateMessages = scanText.match(_RATE_ANCHOR_RR) || []
-  window.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: sig, _pendingScriptHash: null, _plainSentInCycle: false, _stableCount: 0, _seenGrowth: false, _baselineBlocks: baselineBlocks, _baselineLastHash: baselineLastHash, _busyErrorBaseline: busyMessages.length, _busyErrorReported: false, _scriptFenceReported: false, _prevGenBtn: false, _stoppedReported: false, _limitBaseline: limitMessages.length, _limitReported: false, _rateBaseline: rateMessages.length, _rateReported: false }
+  window.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: sig, _pendingScriptHash: null, _plainSentInCycle: false, _stableCount: 0, _seenGrowth: false, _baselineBlocks: baselineBlocks, _baselineLastHash: baselineLastHash, _busyErrorBaseline: busyMessages.length, _busyErrorReported: false, _scriptFenceReported: false, _prevGenBtn: false, _stoppedReported: false, _limitBaseline: limitMessages.length, _limitReported: false, _rateBaseline: rateMessages.length, _rateReported: false, _shortSentHash: '' }
   // [script-closure-gate-v1] 结构闭合门随轮次重置：上一轮遗留的门会拿旧长度当基线，
   //   让新回复第一帧就被判定为「已静止」→ 未闭合块提前放行（门本身见 headless-inject.ts）
   window.__aiRunnerClosureGate = null

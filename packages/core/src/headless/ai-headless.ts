@@ -579,6 +579,11 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       //   首次 tick 即判登录态；持续 NO_REPLY_ALERT_MS 无任何回复则上报一次 error。
       const startedAt = Date.now()
       let alerted = false
+      // [reply-got-v1] 本轮是否**曾经**收到过回复：告警只对「一条都没收到」成立。
+      // [WHY] 原实现收到回复时写 `alerted = false`（line 608），而 startedAt 固定为 fill 时刻 ⇒
+      //   回复到达后 15s，同一个 poller 又会补发一条「已发送但 15s 内未收到任何回复」。
+      //   2026-10-18 实测：每轮先拿到真回复，15s 后必然再来一条假告警（用户以为没收到回复）。
+      let gotReply = false
       // [reply-alert-fast-v1] 原 90s 太长，用户从未等到过提示。15s 覆盖正常回复延迟，
       //   又能在真正卡住时及时暴露。SSE error 走 completionErrors 分支，立即上报不受此限。
       const NO_REPLY_ALERT_MS = 15_000
@@ -605,6 +610,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
             }
           }
           if (!stopped && reply && typeof reply === 'object' && (reply as { kind?: string }).kind) {
+            gotReply = true
             alerted = false
             // [reply-error-visible-v1] busy / rate 两类 error 来自页面文案扫描（detectReplyInPage），
             //   不经过 completionErrors，原留痕只记 textLen 让排查无从下手。此处补记正文。
@@ -613,7 +619,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
               try { writeChannelLog('headless', { kind: 'reply-error', sid, text: String((reply as { text?: string }).text || '').slice(0, 200) }) } catch { /* swallow */ }
             }
             cb(reply as HeadlessReply)
-          } else if (!stopped && !alerted && Date.now() - startedAt > NO_REPLY_ALERT_MS) {
+          } else if (!stopped && !gotReply && !alerted && Date.now() - startedAt > NO_REPLY_ALERT_MS) {
             // 超时无回复：补一次登录态诊断，把原因说清楚而不是干等
             alerted = true
             const diag = await page.evaluate(detectLoginStateInPage, adapterCfg).catch(() => null)

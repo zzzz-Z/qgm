@@ -99,7 +99,9 @@ test('④ [parity] 三层守卫同源：油猴 stopPosted / headless _stoppedRep
 
   const hj = readFileSync('packages/core/src/headless/headless-inject.ts', 'utf8')
   assert.ok(hj.includes('[stopped-plain-noise-v1]'), 'headless 缺 [stopped-plain-noise-v1] 守卫')
-  assert.ok(hj.includes('if (dedup._stoppedReported) return null'), 'headless plain 分支缺 _stoppedReported 早退')
+  // [counter-tolerant-v1] 该分支 2026-10-18 起带诊断计数（_hitStopped++），不再是无花括号单句。
+  // 判据仍是「同一行必须 return null」——删掉早退即红，放宽的只是计数器的存在。
+  assert.ok(/if \(dedup\._stoppedReported\)[^\n]*return null/.test(hj), 'headless plain 分支缺 _stoppedReported 早退')
 
   const fe = readFileSync('packages/client/composables/ai/useAiReplyHandlers.ts', 'utf8')
   assert.ok(fe.includes('[stopped-plain-noise-v1]'), '前端通道入口缺 [stopped-plain-noise-v1] 守卫')

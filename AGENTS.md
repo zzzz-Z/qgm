@@ -126,6 +126,14 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 - `packages/client/tests/useRunner.node-test.ts` 新增 `stale-run-abort-v2` 用例：第二次 run 必须 abort 上一轮悬挂 fetch。
 - `packages/core/tests/hclc-guard.node-test.ts` 已扩至 `packages/client`：单文件 import ≤ 20 现在覆盖前端；`.vue` 剥 SFC 后只数 `<script>` 内 import；side-effect `import "x"` 形态亦计入。
 
+**本会话新增守卫（2026-10-18）**：
+
+- `packages/core/tests/short-reply-gate.node-test.ts`：极短回复（去空白 <6 字）不得被永久丢弃。直接调**真实** `detectReplyInPage`（桩 window/document）逐 tick 断言：生成中/静止窗未满 ⇒ 不交付，静止窗满 ⇒ 交付一次且不重复。改 `[short-reply-gate-v1]` 必跑（已做变异验证：出口改回恒 null ⇒ 3 条变红）。
+- `packages/core/tests/fill-verify-guard.node-test.ts` 新增 `[fill-verify-v3]` 两用例：极短回复会在 verify 完成前渲染，末条已是 assistant 气泡时仍须判「已发送」；只有 AI 气泡增量仍判未发送。
+- `packages/core/tests/fill-verify-guard.node-test.ts` 新增 `[no-new-session-per-fill-v1]` / `[rules-keep-v1]` 两用例：`handleFill` 在 **fill 之前**不得调 `newSession`（先剥注释再判；`extractFnBody('handleFill')` 会把嵌套的触顶 poll 回调一并抠出，故只能约束 fill 之前那一段）；触顶分支不得再发裸 `'继续'`，必须把留存规则块拼回 `fillPrompt`，且 `headless:close` 要清 `rulesBlocks`。均已对 HEAD 做变异验证（全红）。
+
+**会话不能隐式轮转**（`[no-new-session-per-fill-v1]`，2026-10-18）：系统提示词（SYSTEM.md + AGENTS.md ≈ 42K 码元）**只在会话首问注入一次**。`handleFill` 每次 fill 前调 `pool.newSession` ⇒ 每条提问都落进空对话、全程无系统提示词（实测 `promptBytes` 只有 6~14 字节）。要新会话只能显式发 `headless:new-session`。首问闸门是**持久化**的（`~/.ai-runner/workspace.json` 的 `firstPromptSent[model]`），历史 bug 会让它「已发但实际没进任何存活对话」——只改代码不复位则永不重新注入，复位命令见 `.workbuddy/memory/2026-10-18.md`。
+
 ### 验证目标绑定（verify-target-binding-v1）
 
 > 根因、DONE 契约与能力否定侦测见 `packages/core/SYSTEM.md` §13；本节只列本项目的命令、测试与文件。

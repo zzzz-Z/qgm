@@ -180,7 +180,7 @@
 - **依赖数量**：单文件唯一 `import` 模块数 > 20 → 阻断级违规（`hclc-guard.node-test.ts` 强制，覆盖 `packages/core/src` 与 `packages/client` 两处；`.vue` 剥 SFC 后只数 `<script>` 块内的 `import`/`from`；`ask-wiring.node-test.ts` 已随自动循环子系统退役删除，勿据 git 历史恢复）。
   - 豁免：`index.ts` / `deps.ts` 等 barrel 入口不计数（`isBarrel()` 判定）。
   - 范围外：`scripts/` 不纳入（一次性 CLI 工具 + 油猴单文件模型，见 `module-size-ratchet` 的 `scripts-exempt-v1` 说明）。
-- **文件体积**：普通模块 ≤ 800 行，组件 ≤ 1000 行；**新文件**超限必须拆分。既有超限模块列入 `module-size-ratchet.node-test.ts` 冻结清单，**只减不增**（生成物如 `auto-imports.d.ts` 豁免）。
+- **文件体积（软建议，不强制）**：普通模块建议 ≤ 800 行、组件建议 ≤ 1000 行。超限**不阻断提交**，仅作拆分提示：优先按职责边界判断「这里是不是两件事」，而不是为压行数拆文件。生成物如 `auto-imports.d.ts` 豁免。
 - **拆分的唯一依据是职责边界，不是行数或 import**：单个功能默认**内聚在一个文件**。禁止为压低行数把同一功能的状态机、文案、接线拆到不同文件；禁止为少一条 `import` 语句改用内联 `typeof import()` 或经无关模块转出类型。触及阈值时先问「这里是不是两件事」——是就拆，不是就继续加。阈值数字与三处守卫常量的同值性由 `module-size-ratchet.node-test.ts` 守住。
 
 <!-- [ssot-boundary-v2] 2026-10-17：原「依赖方向」与「本项目特化禁则」两条已迁出本文件。
