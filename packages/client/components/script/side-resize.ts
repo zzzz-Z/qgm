@@ -52,6 +52,24 @@ export function createSideResize(deps: SideResizeDeps) {
     e.preventDefault()
   }
 
+  /**
+   * [a11y-resize-keyboard-v1] 键盘调宽：按 delta 像素调整并夹到既有边界，随后持久化。
+   * [WHY] 手柄原为纯 div + pointerdown，键盘用户完全无法调宽（WCAG 2.1.1 键盘可达）。
+   * [CONSTRAINT] 边界与拖拽路径完全一致（MIN_SIDE_WIDTH / MAX_SIDE_WIDTH_RATIO），
+   *   两条路径不得各自演化出不同的夹紧规则；不设置 resizingSide（那是拖拽中的状态）。
+   * @param delta 正数加宽、负数收窄（像素）
+   */
+  function nudge(delta: number): void {
+    if (!paneRef.value) return
+    const rect = paneRef.value.getBoundingClientRect()
+    const max = rect.width * MAX_SIDE_WIDTH_RATIO
+    const next = Math.max(MIN_SIDE_WIDTH, Math.min(max, sideWidth.value + delta))
+    if (next === sideWidth.value) return
+    sideWidth.value = next
+    sideWidthBase.value = next
+    persistWidth(next)
+  }
+
   /** 组件卸载时移除可能残留的监听（拖拽中被销毁） */
   function dispose(): void {
     window.removeEventListener('pointermove', onSideMove)
@@ -59,5 +77,5 @@ export function createSideResize(deps: SideResizeDeps) {
     window.removeEventListener('pointercancel', onSideUp)
   }
 
-  return { onSideDown, onSideMove, onSideUp, dispose }
+  return { onSideDown, nudge, onSideMove, onSideUp, dispose }
 }

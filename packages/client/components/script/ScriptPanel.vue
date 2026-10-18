@@ -189,13 +189,27 @@ const { onPreviewFile, onRollback, onRollbackAll, closePreview } = createPreview
   rollbackAll,
 })
 // 侧栏拖拽（paneRef/sideWidth/sideWidthBase/resizingSide 由本组件持有）
-const { onSideDown, dispose: disposeSideResize } = createSideResize({
+const { onSideDown, nudge: nudgeSide, dispose: disposeSideResize } = createSideResize({
   paneRef,
   sideWidth,
   sideWidthBase,
   resizingSide,
   persistWidth: (w) => { try { localStorage.setItem(SIDE_WIDTH_KEY, String(w)) } catch { /* ignore */ } },
 })
+
+/**
+ * [a11y-resize-keyboard-v1] 分隔条键盘调宽：左右方向键 ±16px，Home/End 到最小/最大。
+ * [WHY] 手柄原为纯 div + pointerdown，键盘用户完全无法调宽（WCAG 2.1.1 键盘可达）。
+ * [CONSTRAINT] 只转发到 nudgeSide，边界夹紧与持久化统一在 side-resize.ts 内，不在此重复。
+ * @param e 键盘事件
+ */
+function onSideKeydown(e: KeyboardEvent): void {
+  const STEP = 16
+  if (e.key === 'ArrowLeft') { nudgeSide(STEP); e.preventDefault() }
+  else if (e.key === 'ArrowRight') { nudgeSide(-STEP); e.preventDefault() }
+  else if (e.key === 'Home') { nudgeSide(-1e6); e.preventDefault() }
+  else if (e.key === 'End') { nudgeSide(1e6); e.preventDefault() }
+}
 // exec 全流程（refs 由本组件持有）
 // [use-script-panel-actions-wired-v1] 运行逻辑簇已抽到 useScriptPanelActions；先装配后注入 createExecFlow
 // [use-script-panel-actions-wired-v2] toggleAutoTakeover / pauseAll 亦下沉到 composable
@@ -505,8 +519,14 @@ function onHtmlDrop(e: DragEvent) {
 
     <!-- 拖拽条：调整右侧面板宽度 -->
     <div
-      v-tooltip="'拖拽调整右侧面板宽度'" class="side-resize-handle" :class="{ active: resizingSide }"
+      v-tooltip="'拖拽或按方向键调整右侧面板宽度'" class="side-resize-handle" :class="{ active: resizingSide }"
+      role="separator"
+      aria-orientation="vertical"
+      :aria-label="`调整右侧面板宽度，当前 ${Math.round(sideWidth)} 像素`"
+      :aria-valuenow="Math.round(sideWidth)"
+      tabindex="0"
       @pointerdown="onSideDown"
+      @keydown="onSideKeydown"
     />
 
     <!-- 右侧：变更列表 & Diff -->

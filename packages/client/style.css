@@ -264,25 +264,36 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
-.terminal:focus,
-.terminal:focus-visible,
-.pane-main:focus,
+/* [a11y-focus-ring-v1] 鼠标点击不显示焦点环，键盘导航必须显示（WCAG 2.4.7）。
+ * [WHY] 原实现对本批滚动容器统一写 `outline: none !important`，`:focus-visible` 也在选择器里，
+ *   于是键盘用户 Tab 到这些容器时完全没有焦点指示；`!important` 还让任何补救规则都失效。
+ * [CONSTRAINT] 用 `:focus:not(:focus-visible)` 只关鼠标路径——它与 `:focus-visible` 互斥，
+ *   两者特异性相同且不冲突，故不需要 `!important`，也不再压制其它规则。
+ * [CONSTRAINT] `outline-offset: -2px` 让环画在容器内侧：滚动容器贴边，外扩会压到相邻元素。 */
+.pane-main:focus:not(:focus-visible),
+.cm-host:focus:not(:focus-visible),
+.pane:focus:not(:focus-visible),
+.editor:focus:not(:focus-visible),
+.side-tree:focus:not(:focus-visible),
+.side-changes:focus:not(:focus-visible),
+.chat-list:focus:not(:focus-visible),
+.term-body:focus:not(:focus-visible),
+.terminal:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* [a11y-focus-ring-v1] 键盘焦点环：仅 `:focus-visible` 触发，鼠标点击不受影响 */
 .pane-main:focus-visible,
-.cm-host:focus,
 .cm-host:focus-visible,
-.pane:focus,
 .pane:focus-visible,
-.editor:focus,
 .editor:focus-visible,
-.side-tree:focus,
 .side-tree:focus-visible,
-.side-changes:focus,
 .side-changes:focus-visible,
-.chat-list:focus,
 .chat-list:focus-visible,
-.term-body:focus,
-.term-body:focus-visible {
-  outline: none !important;
+.term-body:focus-visible,
+.terminal:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 
 ::selection {
@@ -364,4 +375,25 @@ button:focus-visible:where([class*='chip']) {
   50% {
     opacity: 0.9;
   }
+}
+
+/* [a11y-skip-link-v1] 键盘跳过导航：默认移出视口（不产生像素变化），仅聚焦时出现在左上角 */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 9999;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+}
+.skip-link:focus {
+  left: 8px;
+  top: 8px;
+  outline: 2px solid var(--color-running, #3b82f6);
+  outline-offset: 2px;
 }

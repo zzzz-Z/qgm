@@ -3314,3 +3314,18 @@ t2.replace(oldLine, '  // 注释', '  const i = s.indexOf(...)')   // ← 第三
 上轮用 `st.done` 判断构建完成，结果永远为 `undefined` ⇒ 判成「构建失败」⇒ 没触发重启。实际构建早已成功（日志尾部有 `[build-all] done` + `@shell-done exit=0`）。
 
 正确写法：`st.running === false && st.exitCode !== undefined`。字段名要先 `Object.keys(st)` 确认，不能凭记忆。
+
+补充（2026-10-18）：多次踩到：`st.done` 恒 `undefined`，导致构建明明成功却被判成失败、没触发重启。正确判据是 `st.running === false && st.exitCode !== undefined`。
+
+
+## `outline: none !important` 会连带抹掉键盘焦点
+
+原规则把 `:focus` 与 `:focus-visible` 写在同一个选择器列表里，本意是「滚动容器别显示焦点框」，结果鼠标和键盘一起被关掉，且 `!important` 让任何补救规则都失效。
+
+正确写法是用 `:focus:not(:focus-visible)` 只关鼠标路径——它与 `:focus-visible` 互斥，特异性相同不冲突，也不需要 `!important`。
+
+## CSS 的 splice 偏移一行会静默破坏规则块
+
+改 `style.css` 时 `splice(268, 18, ...)` 起点偏了一行，把 `.terminal:focus,` / `.terminal:focus-visible,` 两行留在了注释前面，形成悬空选择器——整个 `.terminal` 规则块失去 `{`，浏览器会静默丢弃后续规则。
+
+`eslint` 不检查 CSS 结构，`tsc` 更不检查。唯一能发现的是：① 括号计数（`{` 与 `}` 数量不等）② 真实构建 ③ 人工读回。本次靠读回发现。

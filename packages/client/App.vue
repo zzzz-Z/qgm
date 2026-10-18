@@ -258,6 +258,8 @@ function onLoginGui() {
     <WorkspaceGuide @ready="hasWorkspace = true" />
   </div>
   <div v-else class="app-shell">
+    <!-- [a11y-skip-link-v1] 键盘用户跳过顶栏直达主内容；默认屏幕外，仅聚焦时可见 -->
+    <a href="#main-content" class="skip-link">跳到主内容</a>
     <AiWindowList />
     <div class="app-body">
       <header class="hdr">
@@ -328,7 +330,7 @@ function onLoginGui() {
 
       <div class="layout-row">
         <div class="layout-main">
-          <main class="main">
+          <main id="main-content" class="main" tabindex="-1">
             <ScriptPanel />
           </main>
         </div>

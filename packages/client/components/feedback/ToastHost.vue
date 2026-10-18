@@ -53,11 +53,13 @@ function onToastClick(t: { id: number }) {
 
 <template>
   <Teleport to="body">
-    <div class="toast-host">
+    <!-- [a11y-toast-live-v1] 屏幕阅读器需感知 toast；用 aria-live 而非 role="status"（后者 aria-atomic=true 会整段重读） -->
+    <div class="toast-host" aria-live="polite" aria-atomic="false">
       <TransitionGroup name="toast">
         <div
           v-for="t in toasts"
           :key="t.id"
+          role="status"
           class="toast"
           :class="[t.type]"
           @click="onToastClick(t)"
@@ -75,16 +77,16 @@ function onToastClick(t: { id: number }) {
         tabindex="-1"
         @click.self="resolveConfirm(false)"
       >
-        <div class="modal-card" role="dialog" aria-modal="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="toast-modal-msg" aria-describedby="toast-modal-detail">
           <div class="modal-body">
             <div class="modal-icon" :class="{ danger: confirmState.danger }">
               {{ confirmState.icon }}
             </div>
             <div class="modal-text">
-              <div class="modal-msg">
+              <div id="toast-modal-msg" class="modal-msg">
                 {{ confirmState.msg }}
               </div>
-              <div v-if="confirmState.detail" class="modal-detail">
+              <div v-if="confirmState.detail" id="toast-modal-detail" class="modal-detail">
                 {{ confirmState.detail }}
               </div>
             </div>
