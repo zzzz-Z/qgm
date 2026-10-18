@@ -1026,6 +1026,8 @@ pm2 restart 使承载会话的进程瞬断，HTTP 通道中断。这是预期现
 
 补充（2026-10-18）：重启会瞬断正在服务的 `/run` 通道，属预期现象；验证必须跨轮探活（本轮 `curl` 返 200 即恢复）。
 
+补充（2026-10-18）：restart 会瞬断 5175 通道，正在跑 hook 的进程被杀，所以执行 restart 的同一轮脚本拿不到响应。正确做法是下一轮重新探活 + 查 `pm2 jlist` 的 `pm_uptime`，而不是当轮重试（当轮重试会撞上同一个瞬断窗口）。
+
 ## client dist 反查不能 grep 源码常量名
 
 [VERIFIED] 2026-10-06 复核方亲跑 · 源码 `180_000` 在产物里写作 `18e4`、`3000` 写作 `3e3` ⇒ 按源码字面量 grep 得到假阴性
@@ -2893,6 +2895,8 @@ TypeScript 控制流分析把 `const` 字面量收窄为 `'A'`，于是 `if (PHA
 补充（2026-10-12）：`__AI__.writeText` 只进 overlay，同进程 `readText` 能读到；但测试脚本里的 `readText(...).catch(...)` 会先炸在 `.catch is not a function`，根本走不到读路径。凡是「读文件可能不存在」的场景，一律 `tryReadFile`。
 
 补充（2026-10-12）：`__AI__.writeText` 只进 overlay，同进程 `readText` 能读到；但脚本写 `readText(...).catch(...)` 会先炸在 `.catch is not a function`，根本走不到读路径。凡「读文件可能不存在」一律 `tryReadFile`。
+
+补充（2026-10-18）：写探针时习惯性写成 `__AI__.readText(p).catch(() => null)`，导致 `TypeError: __AI__.readText(...).catch is not a function`，脚本整体崩溃、exit 7。`readText` 同步返回字符串（失败抛异常），`tryReadFile` 才返回 `{ok, content?}` 对象。要容错就用 `try { ... } catch { }` 包住，不要套 Promise 方法。
 
 ## `memory-budget.node-test.ts` 是 ratchet 型守卫：它的断言用字面量（`MAX_CHARS = 4300`）而非导出常量，意图是「改常量不会让测试同步变绿」。触红时正确做法是读文件头的阈值依据（本仓明确写了「不要靠调大这个数字『修复』」），而不是去改常量。真正能过的方式只有两条
 
