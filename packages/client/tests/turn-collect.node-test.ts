@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { test } from 'vitest'
-import { collectAwaiting, createTurnCollector } from '../composables/runner/turn-collect.js'
+import { collectAwaiting, createTurnCollector, supportsBlock } from '../composables/runner/turn-collect.js'
 import type { CollectBlock } from '../composables/runner/turn-collect.js'
 
 function blk(turnId: number, blockId: string, seq: number, type = 'script'): CollectBlock {
@@ -181,7 +181,8 @@ test('wiring: dispatchInbound 收到块帧必须喂给累积器（否则帧渲�
   const at = src.indexOf('function dispatchInbound')
   assert.ok(at > 0, '缺 dispatchInbound：块帧没有统一收口点')
   const body = src.slice(at, at + 900)
-  assert.match(body, /t === 'ai-runner:block'\) turnCollector\.add\(/, '块未进入累积器：渲染有、执行无')
+  assert.match(body, /t === 'ai-runner:block' && supportsBlock\(/, '块未过握手闸门 ⇒ 能力清单形同虚设')
+  assert.match(body, /\) turnCollector\.add\(/, '块未进入累积器：渲染有、执行无')
   assert.match(body, /onSessionIdMessage\(e\)/, '喂完累积器必须继续走分发器，否则不渲染')
   // [WHY 连 App.vue 一起断言] 归组挂在 dispatchInbound 上，若 window 通道仍注册裸 handler ⇒ 漏喂
   assert.match(readSrc('packages/client/App.vue'), /useEventListener\(window, 'message', dispatchInbound\)/, 'window 通道未走收口点')
@@ -208,6 +209,43 @@ test('wiring: App.vue 注册 window message 必须用 dispatchInbound 而非裸 
 test('wiring: useAppStartup 必须导出 dispatchInbound', () => {
   const src = readSrc('packages/client/composables/ui/useAppStartup.ts')
   assert.match(src, /migrateLastVisit, dispatchInbound \}/, '未导出 dispatchInbound：调用方无从拿到收口点')
+})
+
+// ── 能力握手（P4-c）──
+//
+// [WHY 三态而不是布尔] 油猴通道**根本没有 hello 帧**。若把「没收到 hello」
+// 解释成「不支持信封」，会把正常的油猴回包整轮拦掉 —— 那正是本方案最怕的
+// 「功能静默消失」，而且不会有任何报错。
+
+test('supportsBlock：未握手（null / undefined / 空）一律放行', () => {
+  assert.equal(supportsBlock(null, 'script'), true, 'null ⇒ 放行（油猴通道）')
+  assert.equal(supportsBlock(undefined, 'script'), true, 'undefined ⇒ 放行')
+  assert.equal(supportsBlock([], 'script'), true, '空清单 ⇒ 放行（旧服务端不发块帧）')
+})
+
+test('supportsBlock：已握手时按清单判定（缺哪种就拦哪种）', () => {
+  assert.equal(supportsBlock(['say', 'script'], 'script'), true)
+  assert.equal(supportsBlock(['say', 'script'], 'ask'), false, '清单不含 ask ⇒ 该块对端不认，留着只会被静默丢弃')
+  assert.equal(supportsBlock(['say', 'script'], 'handoff'), false)
+})
+
+test('supportsBlock：type 缺失时不拦（未知块不该被本地丢弃，交给服务端记账）', () => {
+  assert.equal(supportsBlock(['say'], ''), true)
+})
+
+test('wiring: 服务端 hello 帧必须携带 caps（握手判定的唯一源）', () => {
+  const src = readSrc('packages/core/src/server/attach-ws.ts')
+  // [WHY 连值一起断言] 只匹配 `caps` 会被「发了但内容是别的」骗过去；
+  //   这里锁死必须引用 protocol.ts 的 AI_CAPS 常量，避免清单在两处漂移。
+  assert.match(src, /t: 'hello'.*caps: AI_CAPS/, 'hello 未带 AI_CAPS ⇒ 客户端无从判断对端是否支持信封')
+  assert.match(src, /import \{ AI_CAPS \} from '\.\/protocol\.js'/, 'AI_CAPS 未从 protocol 引入 ⇒ 清单有第二份源')
+})
+
+test('wiring: 客户端 transport 暴露 caps()，且油猴通道返回 null（未握手 ⇒ 放行）', () => {
+  const src = readSrc('packages/client/composables/ai/useAiTransport.ts')
+  assert.match(src, /caps: \(\) => readonly string\[\] \| null/, '接口缺 caps() ⇒ 握手判定无处落地')
+  const tmpl = readSrc('packages/client/composables/ui/useAppStartup.ts')
+  assert.match(tmpl, /supportsBlock\(/, '收口点未调用 supportsBlock ⇒ 握手清单形同虚设')
 })
 
 test('wiring: useAppStartup 订阅 transport.onTurnEnd 且 replayed 透传进假事件', () => {

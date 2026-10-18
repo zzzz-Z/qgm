@@ -18,7 +18,7 @@ import { clearEvents } from './useEventStream'
 import { clearInbox } from '../runner/useScriptInbox'
 import { pushTerminalNotice } from '../runner/useRunner'
 // [turn-collect-v1] 信封流水线接线：累积器单例（归本文件所有，避免给消息分发模块再加一条 import）
-import { createTurnCollector } from '../runner/turn-collect.js'
+import { createTurnCollector, supportsBlock } from '../runner/turn-collect.js'
 import type { CollectBlock, CollectTurnEnd } from '../runner/turn-collect.js'
 import { setTurnFillSink, submitTurn } from '../runner/useTurnRunner.js'
 import { copyAndFill, useAiWindow } from '../ai/useAiWindow'
@@ -110,7 +110,9 @@ export function useAppStartup(deps: AppStartupDeps) {
     const p = (e && e.data) as { type?: string, block?: CollectBlock, end?: CollectTurnEnd, replayed?: boolean } | undefined
     if (p && typeof p === 'object') {
       const t = String(p.type || '')
-      if (t === 'ai-runner:block') turnCollector.add(p.block)
+      // [hello-caps-v1] 握手闸门：服务端明确宣告过能力清单且不含该类型 ⇒ 这块对端根本不认，
+      //   留着只会让它被静默丢弃（丢在看不见的地方）。未握手（null）一律放行。
+      if (t === 'ai-runner:block' && supportsBlock(getTransport().caps(), String(p.block?.type || ''))) turnCollector.add(p.block)
       // [CONSTRAINT] 回放帧只丢桶：跨刷新时执行账本是空的，让回放帧收口会把整轮脚本重跑一遍
       else if (t === 'ai-runner:turn-end' && p.replayed === true) turnCollector.drop(Number(p.end && p.end.turnId) || 0)
       else if (t === 'ai-runner:turn-end') turnCollector.end(p.end)

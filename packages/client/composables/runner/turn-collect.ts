@@ -62,6 +62,23 @@ export interface TurnCollector {
 
 export const DEFAULT_MAX_COLLECT_TURNS = 20
 
+/**
+ * [hello-caps-v1] 服务端能力清单里是否含某类块。
+ *
+ * [WHY 抽成纯函数] 这条判定是典型的「高频低可见」逻辑：判错不抛异常，
+ *   只表现为「脚本没执行」或「重复执行」，必须能脱离宿主被断言。
+ *
+ * [CONSTRAINT] **未握手 ⇒ 放行**（`caps` 为 null / undefined / 空）。
+ *   ① 油猴通道根本没有 hello 帧 —— 把「无 hello」当成「不支持」会把正常回包整轮拦掉；
+ *   ② 旧服务端不发 `ai:block`，放行也无害（它压根不会发）。
+ *   只有**明确握过手且清单里没有**时才拦：那时再消费只会被静默丢弃。
+ */
+export function supportsBlock(caps: readonly string[] | null | undefined, type: string): boolean {
+  if (!caps || caps.length === 0) return true
+  if (!type) return true
+  return caps.includes(type)
+}
+
 /** 从块列表派生「这一轮结束等什么」（与核心 deriveAwaiting 同义） */
 export function collectAwaiting(blocks: readonly CollectBlock[]): 'results' | 'user' | 'none' {
   let hasScript = false

@@ -117,6 +117,22 @@ export interface AiTurnEndDto {
  */
 export const AI_CAPS: readonly string[] = ['say', 'script', 'ask', 'handoff']
 
+/**
+ * [hello-caps-v1] 服务端是否声明支持某类块。
+ *
+ * [CONSTRAINT] **未握手 ⇒ 放行**（`caps === null`），这是刻意的默认：
+ *   ① 油猴通道根本没有 hello 帧，把「无 hello」当成「不支持」会整轮拦掉正常回包；
+ *   ② 旧服务端不发 `ai:block`，放行也无害 —— 它压根不会发。
+ *   只有**明确握过手且清单里没有**时才拦，此时确实该拦（否则块会被静默丢弃）。
+ * [WHY 抽成纯函数] 这条判定是典型的「高频低可见」逻辑：判错不会抛异常，
+ *   只表现为「脚本不执行」或「重复执行」，必须能脱离宿主被断言。
+ */
+export function supportsBlock(caps: readonly string[] | null | undefined, type: string): boolean {
+  if (!caps) return true
+  if (!type) return true
+  return caps.includes(type)
+}
+
 /** 传输层状态枚举：连接 / 断开 / 重连中 */
 export type TransportState = 'idle' | 'filling' | 'generating' | 'done' | 'error' | 'rate-limited'
 
