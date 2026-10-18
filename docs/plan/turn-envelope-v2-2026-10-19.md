@@ -379,6 +379,7 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | R6 | 单 turn 语法错导致整轮归零 | 大脚本转义出错 | 错误码精确回指 + 静默窗；接受该代价（已在决策基线记录） |
 | R7 | `say` 的自动 id 随数组下标漂移 | 流式过程中信封在前部插入块 ⇒ `say_1` 变 `say_2` | 按 `turn\|id` 去重会把同一条 say 当新块再推一次。缓解：P7 契约要求模型给**显式 id**（`say` 也写），自动 id 只在「整条信封一次到达」时可信；P5 执行账本只认 script/ask 的显式 id，不受影响 |
 | R8 | 时间线顺序：脚本卡由 `run:start` 建，可能晚于同 turn 的 `say`/`ask` 卡 | 多脚本 turn 且执行启动有先后 | `say`/`ask`/`handoff` 到帧即渲染（顺序由 `seq` 到达顺序保证）；脚本卡顺序由 **runner 按 `seq` 顺序启动 run** 保证（P5 约束：串行启动、并行执行），而不是靠插入占位卡 |
+| R9 | **真实并发 = 1，不是 §2.2 的 3** | 任何多脚本 turn | 根因在宿主不在执行器：`useRunner.run` 是单飞（`running` 守卫 + 模块级单例 `abortController`），且 `result`/`changes`/`liveStdout` 都是模块级单例 ⇒ 并发时互相覆盖，回灌只能看到最后一块。**执行器已支持并发上限 3 并有单测**（`turn-runner.node-test.ts`），接线层（`useTurnRunner.ts`）显式锁 `maxConcurrency: 1` 并注明。处方：先把 `useRunner` 改成 N 通道（每通道独立 abort + 独立结果槽），再改这一个数字 |
 
 ---
 
@@ -407,9 +408,11 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | P4-c | 待做 | — | `hello.caps` 与客户端的握手判定（与 P6 一起做才有意义） |
 | P6-a | 完成（2026-10-19） | 2026-10-19 | `buildOneCard` 认 `ai:block`（say/ask/handoff 建卡，script 不建）+ 采信守卫 13 条 |
 | P6-b | 完成（2026-10-19） | 2026-10-19 | `onBlock` 订阅（两处实现）+ `ai-runner:block` 路由 + `emitBus('ai:block')`；transport 守卫 +1（29） |
+| P5-a | 完成（2026-10-19） | 2026-10-19 | `turn-runner.ts` 纯执行器（幂等 `turn\|id` 账本 / 信号量并发 / 按 `seq` 串行启动 / 批量取消 / 1 turn = 1 轮 / `seed` 跨刷新防线）；19 条守卫 |
+| P5-b | 完成（2026-10-19） | 2026-10-19 | `useTurnRunner.ts` 接线（`autoFeedback:false`、`abort=stop`、一次 `fill`、`filledTurns` 防重复回灌）；9 条守卫；**并发锁 1（R9）** |
 | P3 | — | — | |
 | P4 | — | — | |
-| P5 | — | — | |
+| P5 | 完成（2026-10-19） | 2026-10-19 | 见 P5-a / P5-b |
 | P6 | — | — | |
 | P7 | — | — | |
 | P8 | — | — | 观察期后 |
@@ -458,6 +461,47 @@ AutoImport 插件** ⇒ 在测试里它们是 `ReferenceError`，于是本模块
 
 [CONSTRAINT] **「靠全局注入才跑得起来」的模块等于不可测**。凡是纯函数，依赖必须显式——
 自动导入是书写便利，不该成为可测性的前提。
+
+### P5 实测记录（2026-10-19）
+
+**结构**：纯逻辑 `turn-runner.ts`（零 vue / 零项目依赖，vitest 裸跑）
++ 接线 `useTurnRunner.ts`（注入 `useRunner.run` / `stop`）。分两层的理由与 `run-queue.ts` /
+`feedback-merge.ts` 一致：判据必须能脱离宿主被断言，执行器的五条性质（并发 / 幂等 / 取消 / 预算 / 顺序）
+一条都不需要造宿主。
+
+**「串行启动、并行执行」是怎么同时成立的**：按 `seq` 排序后**顺序 launch**（同步求值
+`deps.run(...)` 拿到 promise，不 await），只有槽位用尽才 `await acquire()`。于是「启动序 = seq 序」
+由循环保证，「执行期重叠」由不 await 保证。守卫里有一条直接断言 `submit` 返回后
+`startedOrder` 恰为 `['b0','b1','b2']`（前 3 个已同步启动）。
+
+**四件在写的过程中发现、且都靠变异验证才敢相信的事**：
+
+1. **空列表提交必须短路，不能记账**。原实现先 `rounds += 1` 再判空，后果是同 turn 的空提交会占住
+   `turns` 缓存 ⇒ 之后真正的块被幂等闸门挡住，整轮静默不执行。改后：`if (!list.length) return []`，
+   且 `rounds` 不动（空 turn 不计轮）。
+2. **账本分支原本是死代码**。因为 `submit` 先命中 `turns` 缓存，同 turn 二次进入永远走不到账本。
+   账本真正承重的场景是**跨刷新重放**：页面重连时客户端是新实例、`turns` 为空，只有把服务端
+   `turns.jsonl` 灌进账本才能挡住「已执行的块再跑一遍」。⇒ 补 `seed(turnId, outcomes)` API
+   （不覆盖首次记录、非法项跳过）+ 1 条守卫。这是把死代码变成承重判据，而不是删掉它。
+3. **`abort` 是全局 stop，不能对已收口的 turn 调**。原实现在 `turns.has(turnId)` 为真时就调
+   `deps.abort()` ⇒ 取消一个已跑完的 turn 会把**别的** turn 正在跑的执行一起掐掉（R9 单飞放大）。
+   改：只有 `live`（本 turn 确有在飞块）才下中止信号；`open`（已提交未收口，比如还在等槽位）
+   只写 mark —— 后续 launch 见到 mark 直接记账为 `aborted` 短路，不真的起进程。
+4. **重复回灌**。`runner.submit` 幂等（返回旧结果），但接线层拿到结果就 `fill` 一次 ⇒
+   同 turn 二次进入会把同一批结果**再提问一次**，与「1 turn = 1 轮」直接冲突。
+   改：`filledTurns` 集合（上限 100，随 `reset` 清空）。守卫「幂等：同 turn 二次 submit 不重跑、
+   不重复回灌」在变异下变红。
+
+**R9：真实并发 = 1（不是 §2.2 的 3），且这是宿主限制**。`useRunner.run` 是单飞的
+（`if (running.value)` 守卫 + 模块级单例 `abortController`），且 `result` / `changes` /
+`liveStdout` / `liveStderr` 全是模块级单例 —— 并发 3 时第二块会 abort 第一块，且结果槽互相覆盖，
+回灌只能看到最后一块还完全不可观测。执行器本身**已支持**上限 3 并有单测（`maxConcurrency: 1`
+注入用例），接线层显式锁 1 并在源码里写明「改这里的前提是把 useRunner 改成 N 通道」。
+**没有把 `maxConcurrency` 硬编码进执行器**，就是为了让这条限制只存在于一层、只改一个数字。
+
+**变异验证 10 次**（9 组 + G 复验）：trim 守卫、并发上限、同 turn 幂等、取消后不启动、启动序、
+`seed` 不覆盖、`abort` 仅live、重复回灌、`autoFeedback` 关闭 —— 每项都恰好命中对应判据；
+新增执行器测试 23 条 + 接线测试 9 条，合计 32/32；`tsc` / `test:tsc` / `client-tsc` 全绿；eslint 干净。
 
 ### P4-b 实测记录（2026-10-19）
 
