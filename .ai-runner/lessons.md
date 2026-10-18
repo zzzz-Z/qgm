@@ -3734,3 +3734,11 @@ DeepSeek 在上下文触顶时渲染的文案匹配了 busy 正则，于是被�
 ## 写「不得回归」的测试比删测试更有价值
 
 `site-switch-rules-reset` 原本断言的是「清首问标记必须先于开窗」这条时序约束，函数删了以后该约束无处依附。改成反向断言（下拉/handler 不得回来）后，判据仍然承重——把 `select` 加回去测试立刻变红。
+
+## 宿主 tsc 报 TS5083 是环境噪声，不是改动引入的类型错
+
+宿主侧「类型检查」步骤只看变更文件，会临时生成 `.ai-runner/tmp/tsconfig.json`；该文件不存在时报 `TS5083: Cannot read file`，与代码无关。判据：看到 `TS5083` + 路径含 `.ai-runner/tmp/` 一律跳过，改用 `npx tsc -p tsconfig.json --noEmit`（根配置才覆盖 `packages/core/src`）。项目无 `packages/core/tsconfig.json`，按包路径跑必然 `TS5058`。
+
+## 抽取内联回调为函数时，守卫的 `extractFnBody` 可能整体失效
+
+`fill-verify-guard` 原用 `extractFnBody(src, 'handleFill')` 断言触顶分支；把 poll 回调抽到 `armReplyPoll` 后，触顶逻辑随之迁出 `handleFill` 体，守卫立刻假红（`未找到函数 armReplyPoll` 之外先报规则拼回失败）。两处教训：① 守卫的提取目标必须与代码归属同步迁移，判据要钉在真正含该逻辑的函数上；② `extractFnBody` 的 forms 数组原本只认 `export async function` / `export function` / `async function` / `async f(`，漏了普通 `function f(`，抽函数后一旦命名不合形态就整条断言崩塌。

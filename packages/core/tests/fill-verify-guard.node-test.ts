@@ -29,6 +29,7 @@ function extractFnBody(src: string, name: string): string {
     new RegExp(`export\\s+async\\s+function\\s+${name}\\s*\\(`),
     new RegExp(`export\\s+function\\s+${name}\\s*\\(`),
     new RegExp(`async\\s+function\\s+${name}\\s*\\(`),
+    new RegExp(`function\\s+${name}\\s*\\(`),
     new RegExp(`async\\s+${name}\\s*\\(`),
   ]
   let at = -1
@@ -235,21 +236,32 @@ test('fill-verify: handleFill 不得隐式开新会话（no-new-session-per-fill
 
 test('fill-verify: 触顶轮转必须把系统提示词带回新对话（rules-keep-v1）', () => {
   const src = read(ATTACH_WS)
-  const body = extractFnBody(src, 'handleFill')
-  const code = body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  // [reply-poll-arm-v1] 触顶自动恢复的 poll 回调体已抽入 armReplyPoll：
+  //   规则留存（handleFill 识别 <file path="SYSTEM.md"> 并 rulesBlocks.set）与
+  //   规则拼回（armReplyPoll 里触顶分支的 fillPrompt）分处两个函数，须分别断言。
+  const fillBody = extractFnBody(src, 'handleFill')
+  const fillCode = fillBody.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
   // [WHY] no-new-session-per-fill-v1 之后，系统提示词只随「会话首问」进入对话上下文。
   //   唯一的轮转路径是触顶自动开新会话：旧实现只发一句裸「继续」⇒ 新对话没有 SYSTEM.md，
   //   AI 连输出契约（SCRIPT/ASK/TEXT/DONE/HANDOFF）都不认，整轮退化成自由聊天。
-  assert.ok(code.includes('<file path="SYSTEM.md">'), 'handleFill 未识别规则头锚点 → 无法留存规则块')
-  assert.ok(/rulesBlocks\.set\(/.test(code), 'handleFill 未留存规则块 → 轮转后系统提示词丢失')
+  assert.ok(fillCode.includes('<file path="SYSTEM.md">'), 'handleFill 未识别规则头锚点 → 无法留存规则块')
+  assert.ok(/rulesBlocks\.set\(/.test(fillCode), 'handleFill 未留存规则块 → 轮转后系统提示词丢失')
+
+  const armBody = extractFnBody(src, 'armReplyPoll')
+  const armCode = armBody.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  assert.ok(armCode.includes('reply.kind === \'limit\''), 'armReplyPoll 未包含触顶分支 → 自动恢复链路丢失')
   assert.ok(
-    !/fillPrompt\(sid,\s*'继续'\)/.test(code),
+    !/fillPrompt\(sid,\s*'继续'\)/.test(armCode),
     '触顶分支仍只发裸「继续」→ 新对话没有系统提示词',
   )
   assert.ok(
-    /fillPrompt\(sid,\s*rules\s*\?/.test(code),
+    /fillPrompt\(sid,\s*rules\s*\?/.test(armCode),
     '触顶分支未把留存规则块拼回 fillPrompt',
   )
+  // [limit-autorecover-v2] 恢复后必须重挂 poll，否则新对话的回复永远采集不到。
+  assert.ok(/armReplyPoll\(sid,\s*send\)/.test(armCode), '触顶恢复后未重新挂 reply poll → 新对话回复永不采集')
+  assert.ok(/state:\s*'error'/.test(armCode), 'newSession 失败时未发 error 帧 → 界面停在等待态')
+  assert.ok(/fillChains/.test(armCode), '触顶恢复未纳入 fillChains 串行 → 可与手动提问交错 fillPrompt')
   assert.ok(/rulesBlocks\.delete\(sid\)/.test(src), 'headless:close 未清 rulesBlocks（随 sid 累积，内存泄漏）')
 })
 

@@ -123,6 +123,78 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
   }
   httpServer.on('upgrade', onUpgrade)
 
+  /**
+   * [reply-poll-arm-v1] 为 sid 挂 reply poll（先停旧的后挂新的）。
+   * [WHY] 原实现只在 handleFill 内联挂载；触顶自动恢复先 stopReply() + replyPollers.delete()
+   *   再 newSession + fillPrompt，全程没有再挂 —— 新对话里 AI 的回复永远采集不到，
+   *   [limit-autorecover-v1] 声称修的症状原样保留（会话修好了、回复丢了）。
+   * [CONSTRAINT] handleFill 与触顶恢复必须共用本函数，禁止各自内联一份回调体。
+   */
+  function armReplyPoll(sid: string, send: (m: ServerMessage | TransportMessage) => void): void {
+    const prev = replyPollers.get(sid)
+    if (prev) { try { prev() } catch { /* swallow: 旧 poller 停止失败不阻断重挂 */ } }
+    replyPollers.delete(sid)
+    const stopReply = pool.startReplyPoll(sid, (reply) => { try {
+      // [headless-trace-v1] 无头回复留痕：记录每次 poll 命中的回复类型，
+      // 使「AI 回了没有 / 回的是什么 kind」与出站留痕成对，断链时可直接定位是发送端还是采集端。
+      // [reply-body-visible-v1] 补记正文：只记 textLen 让「31 字错误」无从定位（实测踩坑）。
+      //   截断到 200 字，足以区分「服务器繁忙 / 频繁 / 触顶 / 未登录」。
+      try { writeChannelLog('headless', { kind: 'reply', sid, replyKind: reply.kind, hasCode: Boolean(reply.code), textLen: reply.text ? reply.text.length : 0, ...(reply.kind === 'error' && reply.text ? { text: String(reply.text).slice(0, 200) } : {}) }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
+      if (reply.closureRelease) {
+        try { writeChannelLog('runner', { runId: 'closure-release', sid, closureTicks: reply.closureTicks, closureLen: reply.closureLen }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
+      }
+      if (reply.kind === 'script' && reply.code) {
+        send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now() } } })
+      } else {
+        send({ t: 'headless:reply', sid, reply: { kind: reply.kind, text: reply.text } })
+        // [limit-autorecover-v1] 触顶后原会话不可能再产出：自动开新会话并把「继续」发过去，
+        //   让任务在无人工干预下接续（原行为只是报错停下，用户看到「没反应」）。
+        //   [CONSTRAINT] 正文只发一句「继续」——完整上下文由工作台会话记录承载，
+        //   服务端不臆造总结；但**规则头必须带回去**（rules-keep-v1），否则新对话无系统提示词。
+        if (reply.kind === 'limit') {
+          // [limit-autorecover-v2] 三处修复：
+          //   ① 恢复后必须重新挂 reply poll（原实现只 stop 不 start，新对话的回复永远采集不到）；
+          //   ② newSession 失败时发 error 帧（原实现 `if (!ns) return` 静默放弃，界面停在等待态）；
+          //   ③ 整条恢复链纳入 fillChains 串行，防用户手动提问与恢复并发交错 fillPrompt。
+          const recovery = (async () => {
+            try {
+              stopReply()
+              replyPollers.delete(sid)
+              const rules = rulesBlocks.get(sid) || ''
+              const ns = await pool.newSession(sid)
+              if (!ns) {
+                send({ t: 'headless:state', sid, state: 'error', detail: rules ? '会话已达上限，自动开启新会话失败，请手动新建会话' : '会话已达上限，自动开启新会话失败且无规则留存，请手动新建会话' })
+                return
+              }
+              send({ t: 'headless:state', sid, state: 'filling', detail: '会话已达上限，已自动开启新会话' })
+              // [rules-keep-v1] 新对话若丢掉系统提示词，AI 会连输出契约都不认，接下来整轮都在「自由聊天」。
+              await pool.fillPrompt(sid, rules ? `${rules}\n\n# 问题\n\n继续` : '继续')
+              armReplyPoll(sid, send)
+            } catch (e) {
+              send({ t: 'headless:state', sid, state: 'error', detail: `触顶自动恢复异常：${String((e as Error)?.message || e).slice(0, 120)}` })
+            }
+          })()
+          const prevChain = fillChains.get(sid) ?? Promise.resolve()
+          const chained = prevChain.catch(() => {}).then(() => recovery)
+          fillChains.set(sid, chained)
+          void chained.finally(() => { if (fillChains.get(sid) === chained) fillChains.delete(sid) })
+        }
+        // [lesson-autocapture-v1] DONE 总结若含「踩坑记录」段，自动追加到 lessons.md
+        // WHY: 之前只能人工 pnpm lessons:add，知识沉淀依赖记忆；此处零成本捕获
+        // CONSTRAINT: 仅识别明确标题，无该段落即忽略；追加失败静默，不影响主链路
+        if (reply.kind === 'done' && reply.text) {
+          try {
+            const lessons = extractLessons(reply.text)
+            const n = appendLessons(lessons)
+            if (n > 0) send({ t: 'headless:state', sid, state: 'generating', detail: `lessons +${n}` })
+          } catch { /* swallow: 提取异常不应阻断 WS 主链路 */ }
+        }
+      }
+    } catch { /* swallow: 页面导航/关闭期间 evaluate 抛错，等下一轮 tick */ }
+    })
+    replyPollers.set(sid, stopReply)
+  }
+
   /** [attach-ws-split-v1] headless:fill 处理（含同 sid 串行链） */
   async function handleFill(msg: TransportMessage, send: (m: ServerMessage | TransportMessage) => void): Promise<void> {
     const sid = String(msg.sid || 'default')
@@ -216,53 +288,7 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         } catch { /* swallow: 页面导航期间 url() 抛错，等下一拍 */ }
         if (urlTries > 32) clearInterval(urlPoll)
       }, 250)
-      const stopReply = pool.startReplyPoll(sid, (reply) => {
-        try {
-          // [headless-trace-v1] 无头回复留痕：记录每次 poll 命中的回复类型，
-          // 使「AI 回了没有 / 回的是什么 kind」与出站留痕成对，断链时可直接定位是发送端还是采集端。
-          // [reply-body-visible-v1] 补记正文：只记 textLen 让「31 字错误」无从定位（实测踩坑）。
-          //   截断到 200 字，足以区分「服务器繁忙 / 频繁 / 触顶 / 未登录」。
-          try { writeChannelLog('headless', { kind: 'reply', sid, replyKind: reply.kind, hasCode: Boolean(reply.code), textLen: reply.text ? reply.text.length : 0, ...(reply.kind === 'error' && reply.text ? { text: String(reply.text).slice(0, 200) } : {}) }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
-          if (reply.closureRelease) {
-            try { writeChannelLog('runner', { runId: 'closure-release', sid, closureTicks: reply.closureTicks, closureLen: reply.closureLen }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
-          }
-          if (reply.kind === 'script' && reply.code) {
-            send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now() } } })
-          } else {
-            send({ t: 'headless:reply', sid, reply: { kind: reply.kind, text: reply.text } })
-            // [limit-autorecover-v1] 触顶后原会话不可能再产出：自动开新会话并把「继续」发过去，
-            //   让任务在无人工干预下接续（原行为只是报错停下，用户看到「没反应」）。
-            //   [CONSTRAINT] 正文只发一句「继续」——完整上下文由工作台会话记录承载，
-            //   服务端不臆造总结；但**规则头必须带回去**（rules-keep-v1），否则新对话无系统提示词。
-            if (reply.kind === 'limit') {
-              void (async () => {
-                try {
-                  stopReply()
-                  replyPollers.delete(sid)
-                  const ns = await pool.newSession(sid)
-                  if (!ns) return
-                  send({ t: 'headless:state', sid, state: 'filling', detail: '会话已达上限，已自动开启新会话' })
-                  // [rules-keep-v1] 新对话若丢掉系统提示词，AI 会连输出契约（SCRIPT/ASK/TEXT/DONE/HANDOFF）都不认，
-                  //   接下来整轮都在「自由聊天」。有留存就原样带回去，只替换「问题」段。
-                  const rules = rulesBlocks.get(sid) || ''
-                  await pool.fillPrompt(sid, rules ? `${rules}\n\n# 问题\n\n继续` : '继续')
-                } catch { /* swallow: 自动恢复失败不阻断主链路，用户可手动重发 */ }
-              })()
-            }
-            // [lesson-autocapture-v1] DONE 总结若含「踩坑记录」段，自动追加到 lessons.md
-            // WHY: 之前只能人工 pnpm lessons:add，知识沉淀依赖记忆；此处零成本捕获
-            // CONSTRAINT: 仅识别明确标题，无该段落即忽略；追加失败静默，不影响主链路
-            if (reply.kind === 'done' && reply.text) {
-              try {
-                const lessons = extractLessons(reply.text)
-                const n = appendLessons(lessons)
-                if (n > 0) send({ t: 'headless:state', sid, state: 'generating', detail: `lessons +${n}` })
-              } catch { /* swallow: 提取异常不应阻断 WS 主链路 */ }
-            }
-          }
-        } catch { /* swallow: 页面导航/关闭期间 evaluate 抛错，等下一轮 tick */ }
-      })
-      replyPollers.set(sid, stopReply)
+      armReplyPoll(sid, send)
     })
     fillChains.set(sid, chain)
     try { await chain } finally {
