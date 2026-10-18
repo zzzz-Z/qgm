@@ -28,3 +28,7 @@ coverage/
 # 由 scripts/fetch-ffmpeg.cjs 或手工从构建服务器下载。
 bin/ffmpeg
 bin/ffprobe
+
+# [size-soft-limit-v1] selfcheck-l2 的临时夹具（beforeAll 生成 / afterAll 删除），
+# 属运行态；不 ignore 会被 post-done 自动提交捕获。
+packages/core/src/selfcheck/__b1_probe_fixture.ts
