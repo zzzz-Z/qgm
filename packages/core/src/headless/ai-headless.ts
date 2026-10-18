@@ -26,6 +26,8 @@ import {
 import { createSlotQueue } from './headless-slot-queue.js'
 // [site-adapter-v1] 站点适配器：把所有站点相关硬编码抽成可切换的配置对象
 import { getDefaultAdapter } from './site-adapters/index.js'
+// [sse-error-visible-v1] 与 attach-ws 的 headless 留痕同通道，便于按 sid 关联
+import { writeChannelLog } from '../state/snapshot.js'
 
 type Page = import('playwright').Page
 export { parseDeepSeekCompletionError } from './headless-scheduler.js'
@@ -126,7 +128,12 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       void response.text().then((raw) => {
         const error = parseDeepSeekCompletionError(raw)
         console.info(`[headless-sse] sid=${sid} bytes=${raw.length} error=${Boolean(error)}`)
-        if (error) completionErrors.set(sid, error)
+        if (error) {
+          completionErrors.set(sid, error)
+          // [sse-error-visible-v1] 把 DeepSeek 返回的错误正文记进留痕：原实现只记 textLen，
+          //   排查时只能看到「31 字的 error」，不知道是账号风控、上下文超限还是频控。
+          try { writeChannelLog('headless', { kind: 'sse-error', sid, text: error.slice(0, 200) }) } catch { /* swallow */ }
+        }
       }).catch((error: unknown) => { console.warn(`[headless-sse] sid=${sid} body-read-failed=${String(error).slice(0, 120)}`) })
     })
   }
@@ -328,7 +335,8 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
                     new Promise<void>(r => setTimeout(r, 5000)),
                   ])
                 } catch { /* swallow: 落盘失败不阻断关闭 */ }
-                await new Promise<void>(r => setTimeout(r, 1500))
+                // [login-close-fast-v1] storageState() 已触发完整持久化，无需再等 1.5s
+                await new Promise<void>(r => setTimeout(r, 200))
                 try { await ctxLocal.close() } catch { /* swallow: 已关闭/进程已退 */ }
               })()
             }
@@ -345,7 +353,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
             //   与 3s 兜底竞速：谁先到都 resolve；超时后不再 await 残留 Promise（可能永不了结、挂引用阻止 GC）。
             void Promise.race([
               closeCtxOnce(),
-              new Promise<void>(r => setTimeout(r, 3000)),
+              new Promise<void>(r => setTimeout(r, 1500)),
             ]).then(() => resolve())
           }
           maxTimer = setTimeout(fire, LOGIN_GUI_MAX_MS, 'timeout')
@@ -557,7 +565,9 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       //   首次 tick 即判登录态；持续 NO_REPLY_ALERT_MS 无任何回复则上报一次 error。
       const startedAt = Date.now()
       let alerted = false
-      const NO_REPLY_ALERT_MS = 90_000
+      // [reply-alert-fast-v1] 原 90s 太长，用户从未等到过提示。15s 覆盖正常回复延迟，
+      //   又能在真正卡住时及时暴露。SSE error 走 completionErrors 分支，立即上报不受此限。
+      const NO_REPLY_ALERT_MS = 15_000
       // 防并发重入：上轮 evaluate 未完成时跳过本轮
       const tick = async () => {
         if (stopped || running) { if (!stopped) setTimeout(tick, 800); return }

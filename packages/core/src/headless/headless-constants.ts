@@ -25,7 +25,9 @@ export function defaultUserDataDir(): string {
 /** 浏览器启动超时（毫秒），超时抛错 */
 export const LAUNCH_TIMEOUT_MS = 30_000
 /** 登录稳定期（毫秒） */
-export const LOGIN_STABLE_MS = 10_000
+// [login-close-fast-v1] 原 10s 稳定窗让用户关窗后要干等十几秒。
+//   探针已要求 tokenState==='yes' + 有输入框 + 非登录页三重正面证据，2s 足够过滤页面跳转抖动。
+export const LOGIN_STABLE_MS = 2_000
 // [login-autoclose-timeout-v1] 时间兜底：探针识别不出新存储格式（tokenState=unknown）时，
 //   有头窗口若已打开超过此值且页面有输入框 + 非 /sign_in 即视为用户已登录，主动关窗释放 profile。
 //   [WHY] 用户实际场景：DeepSeek 已登录但探测读不到 userToken，autoclose 判据不满足 → 窗口久开 → inflight 永久挂起。
