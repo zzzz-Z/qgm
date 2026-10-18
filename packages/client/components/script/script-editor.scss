@@ -306,3 +306,12 @@ html[data-theme='dark'] .editor.card {
   color: var(--text-3);
   font-size: 12px;
 }
+
+/* [picker-total-hint-v1] 截断提示：常驻列表底部，弱化存在感但不可忽略 */
+.fp-more {
+  padding: 6px 12px;
+  border-top: 1px dashed var(--border-2, #2a2a2a);
+  font-size: 11px;
+  color: var(--text-3);
+  text-align: center;
+}

@@ -6,11 +6,15 @@
 //   且命中既有 `@[\\w./-]+` 芯片正则 ⇒ 无需改 CM 装饰插件。
 // [CHANGE-IMPACT] 修改 deps / 返回形状须同步 ScriptEditor 装配处与模板。
 
-import { computed, nextTick, ref } from 'vue'
+// [auto-import-explicit-v1] 显式导入：vitest/tsc 没有 auto-import 插件，
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { FileNode } from '../../types'
 
 /** 技能在 @ 选择器中的插入前缀，避免与文件路径混淆 */
 export const SKILL_PICK_PREFIX = 'skill/'
+
+/** [picker-max-items-v1] 列表最多渲染条数；超出时 UI 提示「还有 N 条未显示」 */
+export const PICKER_MAX_ITEMS = 200
 
 /** @ 选择器条目：文件与技能共用一套渲染 */
 export interface PickerItem {
@@ -84,15 +88,32 @@ export function useFilePicker(deps: UseFilePickerDeps) {
   const pickerStyle = computed(() => ({ left: `${pickerX.value}px`, top: `${pickerY.value}px` }))
 
   /**
+   * [picker-title-fallback-v1] title 只做兜底，不与 label 同权。
+   * [WHY] title 是完整路径，若用 `Math.max(scoreMatch(label), scoreMatch(title))`，
+   *   输入 `packages` 时所有文件的路径段首都命中 ⇒ 全部得 80 分，排序完全失效。
+   * [CONSTRAINT] label（文件名/技能名）命中时以它的分数为准；仅当 label 完全不匹配
+   *   才退回 title 的匹配，且分数打 6 折——「路径里有」弱于「文件名里有」。
+   */
+  function scoreItem(it: PickerItem, q: string): number {
+    const byLabel = scoreMatch(it.label, q)
+    if (byLabel > 0) return byLabel
+    const byTitle = scoreMatch(it.title, q)
+    return byTitle > 0 ? Math.floor(byTitle * 0.6) : 0
+  }
+
+  /** [picker-total-v1] 过滤后的完整命中数（未截断）；供 UI 提示「还有更多」 */
+  const pickerTotal = ref(0)
+
+  /**
    * 合并双源并按 query 过滤。
-   * [CONSTRAINT] 技能优先于文件（同名场景下技能是更明确的意图）；各源独立截断，避免文件树挤掉技能。
+   * [CONSTRAINT] 技能优先降级为「同分 tiebreaker」——精确匹配的文件不该被不相关的技能压住。
+   *   空 query 只列已装技能，避免 200 条文件铺屏把技能入口挤到看不见。
    */
   const pickerFiltered = computed<PickerItem[]>(() => {
     const q = pickerQuery.value.trim().toLowerCase()
     const fileItems: PickerItem[] = pickerFiles.value.map((p) => {
       // [picker-file-split-label-v1] label 只放文件名，目录放 hint：
-      //   深层路径（packages/client/components/script/prompt-builder.ts）整串当 label
-      //   会撑爆列表宽度，且文件名被挤到右边看不见。
+      //   深层路径整串当 label 会撑爆列表宽度，且文件名被挤到右边看不见。
       const slash = p.lastIndexOf('/')
       return {
         kind: 'file' as const,
@@ -103,13 +124,11 @@ export function useFilePicker(deps: UseFilePickerDeps) {
       }
     })
     // [picker-skill-first-v1] 空 query 只列已装技能；输入后才并行搜文件与技能。
-    if (!q) return [...pickerSkills.value]
+    if (!q) { pickerTotal.value = pickerSkills.value.length; return [...pickerSkills.value] }
 
-    // [picker-match-score-v1] 按匹配质量排序，而非「技能全在前」：
-    //   分数高者优先；同分时技能优先（更明确的意图），再按 label 字典序稳定。
     const scored: Array<{ it: PickerItem, score: number }> = []
     for (const it of [...pickerSkills.value, ...fileItems]) {
-      const s = Math.max(scoreMatch(it.label, q), scoreMatch(it.title, q))
+      const s = scoreItem(it, q)
       if (s > 0) scored.push({ it, score: s })
     }
     scored.sort((a, b) => {
@@ -117,7 +136,8 @@ export function useFilePicker(deps: UseFilePickerDeps) {
       if (a.it.kind !== b.it.kind) return a.it.kind === 'skill' ? -1 : 1
       return a.it.label.localeCompare(b.it.label)
     })
-    return scored.slice(0, 200).map(s => s.it)
+    pickerTotal.value = scored.length
+    return scored.slice(0, PICKER_MAX_ITEMS).map(s => s.it)
   })
 
   async function pickerLoadFiles() {
@@ -225,6 +245,33 @@ export function useFilePicker(deps: UseFilePickerDeps) {
     pickerIndex.value = (pickerIndex.value + d + n) % n
   }
 
+  /**
+   * [picker-hover-sync-v1] 鼠标悬停同步高亮索引。
+   * [WHY] 原实现只有 @mousedown，hover 不改 pickerIndex —— 用户看到第 5 行高亮却点第 2 行，
+   *   Enter 仍按旧索引插入，插入的内容与视觉焦点不一致。
+   * @param i 目标索引（越界自动夹紧）
+   */
+  function pickerSetIndex(i: number): void {
+    const n = pickerFiltered.value.length
+    if (!n) return
+    pickerIndex.value = Math.max(0, Math.min(n - 1, i))
+  }
+
+  /**
+   * [picker-jump-v1] 跳到首/尾或翻页。
+   * [WHY] 200 条结果下只有单步移动，从第 1 条到最后要按 199 次方向键。
+   * @param target 目标位置：first / last / pageUp / pageDown
+   */
+  function pickerJump(target: 'first' | 'last' | 'pageUp' | 'pageDown'): void {
+    const n = pickerFiltered.value.length
+    if (!n) return
+    const PAGE = 10
+    if (target === 'first') pickerIndex.value = 0
+    else if (target === 'last') pickerIndex.value = n - 1
+    else if (target === 'pageUp') pickerSetIndex(pickerIndex.value - PAGE)
+    else pickerSetIndex(pickerIndex.value + PAGE)
+  }
+
   function pickerConfirm() {
     const it = pickerFiltered.value[pickerIndex.value]
     if (it) pickerPick(it)
@@ -257,11 +304,14 @@ export function useFilePicker(deps: UseFilePickerDeps) {
     pickerSkills,
     pickerStyle,
     pickerFiltered,
+    pickerTotal,
     pickerLoadFiles,
     pickerLoadSkills,
     pickerOpenAt,
     pickerClose,
     pickerMove,
+    pickerSetIndex,
+    pickerJump,
     pickerConfirm,
     pickerPick,
   }

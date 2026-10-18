@@ -3422,3 +3422,31 @@ assert.ok(scoreMatch(DEEP, 'script') > scoreMatch(DEEP, 'components'))  // ← �
 ## 改动落在构建之后必须重建
 
 `11:00:47` 那次构建完成后，我又改了技能项的 `label`/`hint`。如果不重新构建，prod 上跑的仍是旧行为。判断依据是产物 mtime vs 改动时间，而不是「我记得刚才构建过」。
+
+## 逗号表达式赋值只保留最后一个值
+
+想一次给三个变量赋值，写成了：
+
+js复制下载```
+ls[i] = "// 注释行 1",
+        "// 注释行 2",
+        "import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'"
+```
+
+这是逗号表达式，整个右侧求值为最后一个字符串，等价于 `ls[i] = "import {...}"`——前两行注释与原来的 vue import 行一起被冲掉了。
+
+修法：要么 `ls.splice(i, 1, a, b, c)`，要么分开写三次赋值。批量插入行一律用 `splice`。
+
+## 子进程 lint 看到的是上一版磁盘状态
+
+改完 `file-picker.ts` 后立刻跑 `npx eslint`，报 16 errors potentially fixable；但下一轮重跑却是 EXIT=0、零输出。
+
+原因是 `writeText` 只进 overlay，`npx eslint` 起真子进程读真盘——它看到的是上一版（半成品）。本轮 `flush()` 之后结果才是真的。
+
+验证脚本类改动前先 `flush()`，这是 `overlay-blind-v1` 在自验场景的实例。
+
+## 从零测试一个 composable 会连带暴露隐式依赖
+
+`useFilePicker()` 在浏览器里跑了很久都没问题，第一次在 vitest 下调用就炸。原因是它只 import 了 `computed` / `nextTick` / `ref`，`watch` 和 `onBeforeUnmount` 全靠 auto-import。
+
+给存量 composable 补首个单测时，先检查它的 import 是否完整——这类缺陷在应用运行时完全不可见。

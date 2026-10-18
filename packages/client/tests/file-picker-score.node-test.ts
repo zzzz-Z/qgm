@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 
 import { it } from 'vitest'
 
-import { scoreMatch } from '../components/script/file-picker.js'
+import { scoreMatch, useFilePicker } from '../components/script/file-picker.js'
 
 const DEEP = 'packages/client/components/script/prompt-builder.ts'
 
@@ -49,4 +49,59 @@ it('scoreMatch：排序语义 —— 精确命中必须排在缩写命中之前'
   const exact = scoreMatch('pb.ts', 'pb')
   const acronym = scoreMatch(DEEP, 'pb')
   assert.ok(exact > acronym, `精确命中(${exact}) 必须高于缩写命中(${acronym})`)
+})
+
+// [picker-hover-sync-v1][picker-jump-v1] 交互索引：鼠标悬停同步高亮、Home/End/PageUp/PageDown 跳转。
+// [判据承重] 把 pickerSetIndex 的夹紧逻辑删掉 ⇒ T1/T3 必红；把 PAGE 步长改错 ⇒ T3 必红。
+
+/** 构造一个已装载 25 条文件、query 非空的 picker 实例 */
+function makePicker() {
+  const fp = useFilePicker({ getCmView: () => null })
+  fp.pickerFiles.value = Array.from({ length: 25 }, (_, i) => `a${String(i + 1).padStart(2, '0')}.ts`)
+  fp.pickerQuery.value = 'a'
+  return fp
+}
+
+it('pickerSetIndex：索引越界时夹紧到 [0, n-1]，不产生悬空选中', () => {
+  const fp = makePicker()
+  assert.equal(fp.pickerFiltered.value.length, 25)
+  fp.pickerSetIndex(5)
+  assert.equal(fp.pickerIndex.value, 5)
+  fp.pickerSetIndex(999)
+  assert.equal(fp.pickerIndex.value, 24, '上越界夹到末尾')
+  fp.pickerSetIndex(-1)
+  assert.equal(fp.pickerIndex.value, 0, '下越界夹到开头')
+})
+
+it('pickerJump：first / last 直达首尾', () => {
+  const fp = makePicker()
+  fp.pickerSetIndex(7)
+  fp.pickerJump('last')
+  assert.equal(fp.pickerIndex.value, 24)
+  fp.pickerJump('first')
+  assert.equal(fp.pickerIndex.value, 0)
+})
+
+it('pickerJump：pageDown / pageUp 步长 10，且在两端夹紧', () => {
+  const fp = makePicker()
+  fp.pickerJump('pageDown')
+  assert.equal(fp.pickerIndex.value, 10)
+  fp.pickerJump('pageDown')
+  assert.equal(fp.pickerIndex.value, 20)
+  fp.pickerJump('pageDown')
+  assert.equal(fp.pickerIndex.value, 24, '越过末尾时夹到 24')
+  fp.pickerJump('pageUp')
+  assert.equal(fp.pickerIndex.value, 14)
+})
+
+it('pickerSetIndex / pickerJump：列表为空时静默 no-op（不得抛错、不得改动索引）', () => {
+  const fp = makePicker()
+  fp.pickerQuery.value = 'zzz-无匹配'
+  assert.equal(fp.pickerFiltered.value.length, 0)
+  fp.pickerSetIndex(4)
+  assert.equal(fp.pickerIndex.value, 0, '空列表不得改变索引')
+  fp.pickerJump('last')
+  assert.equal(fp.pickerIndex.value, 0)
+  fp.pickerJump('pageDown')
+  assert.equal(fp.pickerIndex.value, 0)
 })

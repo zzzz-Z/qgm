@@ -62,9 +62,12 @@ const {
   pickerInputRef,
   pickerStyle,
   pickerFiltered,
+  pickerTotal,
   pickerOpenAt,
   pickerClose,
   pickerMove,
+  pickerSetIndex,
+  pickerJump,
   pickerConfirm,
   pickerPick,
 } = useFilePicker({ getCmView: () => cmView })
@@ -385,16 +388,23 @@ defineExpose({ insertText })
             aria-controls="file-picker-listbox" :aria-activedescendant="`fp-opt-${pickerIndex}`"
             @keydown.down.prevent="pickerMove(1)" @keydown.up.prevent="pickerMove(-1)"
             @keydown.enter.prevent="pickerConfirm" @keydown.esc.prevent="pickerClose"
+            @keydown.home.prevent="pickerJump('first')" @keydown.end.prevent="pickerJump('last')"
+            @keydown.page-up.prevent="pickerJump('pageUp')" @keydown.page-down.prevent="pickerJump('pageDown')"
           >
           <div id="file-picker-listbox" class="fp-list" role="listbox">
             <div
               v-for="(it, i) in pickerFiltered" :id="`fp-opt-${i}`" :key="`${it.kind}:${it.value}`" class="fp-item" :title="it.title"
               :class="{ active: i === pickerIndex }" role="option" :aria-selected="i === pickerIndex"
+              @mouseenter="pickerSetIndex(i)"
               @mousedown.prevent="pickerPick(it)"
             >
               <span class="fp-item-kind" :class="`fp-kind-${it.kind}`">{{ it.kind === 'skill' ? '技能' : '文件' }}</span>
               <span class="fp-item-label">{{ it.label }}</span>
               <span v-if="it.hint" class="fp-item-hint">{{ it.hint }}</span>
+            </div>
+            <!-- [picker-total-hint-v1] 结果被截断时必须可见：否则用户以为「只匹配到这些」 -->
+            <div v-if="pickerTotal > pickerFiltered.length" class="fp-more">
+              还有 {{ pickerTotal - pickerFiltered.length }} 条未显示，请细化关键词
             </div>
             <div v-if="!pickerFiltered.length" class="fp-empty">
               无匹配文件或技能
