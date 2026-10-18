@@ -3317,6 +3317,7 @@ t2.replace(oldLine, '  // 注释', '  const i = s.indexOf(...)')   // ← 第三
 
 补充（2026-10-18）：多次踩到：`st.done` 恒 `undefined`，导致构建明明成功却被判成失败、没触发重启。正确判据是 `st.running === false && st.exitCode !== undefined`。
 
+补充（2026-10-18）：多次踩到：`st.done` 恒 `undefined`，导致构建明明成功却被判成失败、没触发重启。正确判据是 `st.running === false && st.exitCode !== undefined`。
 
 ## `outline: none !important` 会连带抹掉键盘焦点
 
