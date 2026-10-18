@@ -45,6 +45,15 @@ export const skillsHono = new Hono()
  * [CONSTRAINT] 粒度是单文件 + mtime：编辑某个 SKILL.md 只失效该条，新增/删除由
  *   readdirSync 自然发现。不用整体缓存是因为「改内容」不改目录 mtime，整体缓存会漏。
  */
+/**
+ * [skill-meta-cache-lru-v1] 缓存条目上限。
+ * [WHY] key 是 SKILL.md 的绝对路径 ⇒ 不同工作区天然隔离，不会串数据；
+ *   但切换工作区后旧 root 的条目永不淘汰，长期运行会单调增长。
+ * [CONSTRAINT] 用 LRU 而非接线 setRoot：config.ts 不依赖 skills 层，反向 import 会成环；
+ *   而缓存 key 自带 root 前缀，LRU 淘汰是最小且无耦合的收敛手段。
+ *   512 条 ≈ 15 个工作区 × 34 技能，远超单进程实际访问面。
+ */
+const SKILL_META_CACHE_MAX = 512
 const _skillMetaCache = new Map<string, { mtimeMs: number, meta: Record<string, string> | null }>()
 
 /**
@@ -79,6 +88,11 @@ export function listSkillMetas(root: string): SkillMeta[] {
       try {
         meta = parseFrontmatter(fs.readFileSync(skillFile, 'utf8'))
       } catch { meta = null }
+      // [skill-meta-cache-lru-v1] 达上限时淘汰最旧条目（Map 保插入序，首个即最久未刷新）
+      if (_skillMetaCache.size >= SKILL_META_CACHE_MAX) {
+        const oldest = _skillMetaCache.keys().next()
+        if (!oldest.done) _skillMetaCache.delete(oldest.value)
+      }
       _skillMetaCache.set(skillFile, { mtimeMs, meta })
     }
     if (!meta) {

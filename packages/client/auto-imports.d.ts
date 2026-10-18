@@ -586,7 +586,7 @@ declare global {
   export type { SendTraceInput } from './composables/ai/send-trace'
   import('./composables/ai/send-trace')
   // @ts-ignore
-  export type { MatchedSkill } from './composables/ai/skill-registry'
+  export type { MatchedSkill, SkillMatchResult } from './composables/ai/skill-registry'
   import('./composables/ai/skill-registry')
   // @ts-ignore
   export type { AiReplyHandlersDeps } from './composables/ai/useAiReplyHandlers'

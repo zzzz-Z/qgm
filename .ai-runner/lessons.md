@@ -3391,3 +3391,13 @@ mtimeMs2: 1792290162290.999
 ## 双引号字符串不能跨行
 
 用 `"it('...', async () => {\n  ...\n})"` 构造多行代码字符串时，裸换行会让 JS 解析器报 `Invalid or unexpected token`。必须用模板字符串（反引号）或显式 `\n` 拼接。
+
+## `splice` 用 `trim() === '}'` 找函数收尾会被内层块截断
+
+替换 `matchSkills` 时用「逐行找到 `trim() === '}'`」作为函数收尾，结果命中了函数体内的 `catch { }` 块——旧函数的尾部（`return []` 与 `}`）残留下来，`tsc` 报 TS1128 两条。
+
+修法：改函数前用大括号深度计数定位真实边界，或先 `readText` 拿到全文再按行号切片。
+
+## 改返回类型时先 grep 调用方
+
+`matchSkills` 从 `Promise<MatchedSkill[]>` 改为 `Promise<SkillMatchResult>`，先 grep 确认只有 `buildSkillsBlock` 一个调用方、且 `packages/client/tests` 下零测试覆盖。如果贸然改，会连带多处报错。

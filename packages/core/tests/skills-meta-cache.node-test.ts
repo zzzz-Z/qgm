@@ -62,22 +62,28 @@ it('listSkillMetas：mtime 变化后重新解析', () => {
 })
 
 it('listSkillMetas：clearSkillMetaCache 强制重读', () => {
-  // [判据承重] 本用例同时承担两件事：
-  //   ① 「mtime 未变时命中缓存」——改内容但 mtime 不变，第二次调用必须返回旧值；
-  //   ② 「clearSkillMetaCache 后强制重读」——清缓存后必须看到新值。
-  // [CONSTRAINT] 不再单独写一条「mtime 未变」用例：它依赖 utimesSync 精确还原 mtime，
-  //   而 Date 只有毫秒精度、原始 mtimeMs 带小数，跨平台还原后必然漂移，会让用例随机红。
+  // [cache-test-determinism-v1] 不用 utimesSync「还原」原 mtime：Date 只有毫秒精度，
+  //   原始 mtimeMs 带小数，还原后可能跨毫秒边界（X.9812 → X+1.999），Math.floor 也挡不住。
+  //   改为两次都显式设同一个固定时间戳 —— 缓存比较的就是这个值，不存在还原误差。
   clearSkillMetaCache()
   const { root, file } = mkSkill('delta', FM('delta', '清缓存前'))
-  const st = fs.statSync(file)
+
+  const FIXED = new Date('2026-01-01T00:00:00.000Z')
+  fs.utimesSync(file, FIXED, FIXED)
   assert.equal(listSkillMetas(root)[0].description, '清缓存前')
 
+  // 改内容，但把 mtime 显式设回同一个 FIXED ⇒ mtime 未变，应命中缓存
   fs.writeFileSync(file, FM('delta', '清缓存后'))
-  fs.utimesSync(file, st.atime, st.mtime) // 保持 mtime 不变
+  fs.utimesSync(file, FIXED, FIXED)
 
-  assert.equal(listSkillMetas(root)[0].description, '清缓存前', '未清缓存时应命中旧值')
+  assert.equal(listSkillMetas(root)[0].description, '清缓存前', 'mtime 未变时应命中旧值')
+
   clearSkillMetaCache()
-  assert.equal(listSkillMetas(root)[0].description, '清缓存后', 'clearSkillMetaCache 后必须重读')
+  assert.equal(
+    listSkillMetas(root)[0].description,
+    '清缓存后',
+    'clearSkillMetaCache 后必须重读 —— 本句是「缓存失效出口」的承重判据',
+  )
 })
 
 it('listSkillMetas：frontmatter 缺 name 或 description 的技能被跳过（不得静默降质）', () => {
@@ -97,4 +103,30 @@ it('listSkillMetas：frontmatter 缺 name 或 description 的技能被跳过（�
 
   const metas = listSkillMetas(root)
   assert.deepEqual(metas.map(m => m.name), ['ok'], '缺 name / description 的技能必须被跳过并告警')
+})
+
+// [skill-meta-cache-lru-v1] 缓存必须有上限：key 是绝对路径，切工作区后旧条目永不清会单调增长。
+// [判据承重] 把上限判断删掉（无条件 set）⇒ 本用例必红（size 会超过上限）。
+it('listSkillMetas：缓存条目数不超过上限（LRU 淘汰最旧）', () => {
+  clearSkillMetaCache()
+  const LIMIT = 512
+  // 建 1 个 root，塞 LIMIT + 8 个技能 ⇒ 必须触发淘汰
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qgm-skill-lru-'))
+  roots.push(root)
+  const base = path.join(root, '.ai-runner', 'skills')
+  const n = LIMIT + 8
+  for (let i = 0; i < n; i++) {
+    const name = `s${String(i).padStart(3, '0')}`
+    const d = path.join(base, name)
+    fs.mkdirSync(d, { recursive: true })
+    fs.writeFileSync(path.join(d, 'SKILL.md'), FM(name, `第 ${i} 个技能`))
+  }
+
+  const metas = listSkillMetas(root)
+  assert.equal(metas.length, n, '全部技能都必须出现在返回结果里（淘汰只影响缓存，不影响读取）')
+
+  // 第二次调用：最旧的 8 个已被淘汰，会重新读盘；其余命中缓存
+  const metas2 = listSkillMetas(root)
+  assert.equal(metas2.length, n, '淘汰后结果必须仍然完整')
+  assert.deepEqual(metas2.map(m => m.name), metas.map(m => m.name), '淘汰不得改变返回顺序')
 })
