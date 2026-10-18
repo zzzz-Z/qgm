@@ -14,7 +14,7 @@ interface TaskRow { text: string, done: boolean, running: boolean }
 // [task-board-items-v1] 结构化任务（服务端 items）；非空即优先于 todo/done 旧视图
 interface TaskItemRow { id: string, text: string, status: 'pending' | 'running' | 'done' | 'failed', at: number }
 /** 服务端 items 的线上形状（外部数据不可信，逐字段清洗） */
-interface RawTaskItem { id?: string, desc?: string, status?: string, doneAt?: number, failedAt?: number }
+interface RawTaskItem { id?: string, desc?: string, status?: string, startedAt?: number, doneAt?: number, failedAt?: number }
 
 // [taskboard-poll-seq-v1] 请求序号守卫：慢响应不得覆盖新数据（旧响应到达时丢弃）
 let _pollSeq = 0
@@ -148,7 +148,8 @@ const loopBadge = computed(() => LOOP_BADGE[String(runtimeState.value.kind)] || 
 // [taskboard-loop-badge-v1] 循环是否在跑（running/waiting）：leftover 文案分叉用（模板对普通对象不自动解包，统一走 computed）
 const isLoopActive = computed(() => LOOP_PROGRESSING.has(String(runtimeState.value.kind)))
 const elapsedLabel = computed(() => {
-  if (!isLoopActive.value) return ''
+  // [taskboard-elapsed-v3] 判据改为「有 running 项」而非 loop kind：任务看板与循环状态解耦，
+  //   无头/未启动循环时 kind 恒 idle，原判据会让耗时永远不显示（实测）。
   const runAt = items.value.find(r => r.status === 'running')?.at
   if (!runAt) return ''
   const ms = nowTick.value - runAt
@@ -281,7 +282,9 @@ async function poll() {
             id: String(x.id || ''),
             text: String(x.desc || '').trim(),
             status: (x.status === 'running' || x.status === 'done' || x.status === 'failed' ? x.status : 'pending') as TaskItemRow['status'],
-            at: Number(x.doneAt || x.failedAt) || 0,
+            // [taskboard-elapsed-v2] running 项取 startedAt（原只读 doneAt/failedAt，
+            //   ⇒ 运行中 at 恒为 0，耗时永远算不出）；done/failed 仍按各自时刻
+            at: Number(x.startedAt || x.doneAt || x.failedAt) || 0,
           }))
           .filter((x: TaskItemRow) => Boolean(x.text))
       : []
@@ -308,10 +311,6 @@ function onVis() {
     >
       <span class="tp-caret" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
       <span class="tp-title">任务完成详情</span>
-      <!-- [taskboard-loop-badge-v1] 循环运行状态徽章（idle/running/waiting/paused/stopped） -->
-      <span class="tp-loop" :class="loopBadge.cls">{{ loopBadge.text }}</span>
-      <!-- [taskboard-elapsed-v1] 当前轮耗时集中在此：原分散在每张脚本卡头部，属全局信息却按步骤重复 -->
-      <span v-if="elapsedLabel" class="tp-elapsed">{{ elapsedLabel }}</span>
       <!-- [failed-round-highlight-v1] 失败徽标可点：直接滚到时间线里最近一张失败卡 -->
       <button
         v-if="failedCount > 0"
@@ -359,6 +358,8 @@ function onVis() {
       <div v-if="runningRow" ref="runningItemRef" class="tp-item running">
         <span class="tp-icon" aria-hidden="true">◐</span>
         <span class="tp-text">{{ runningRow.text }}</span>
+        <!-- [taskboard-elapsed-v2] 耗时贴着正在执行的那一行：它属于「当前这件事」而非整个面板 -->
+        <span v-if="elapsedLabel" class="tp-item-elapsed">{{ elapsedLabel }}</span>
       </div>
       <template v-if="pendingRows.length">
         <button v-if="runningRow" type="button" class="tp-group-label is-btn" @click="toggleGroup('pending')">
@@ -649,26 +650,6 @@ function onVis() {
 .tp-failed-badge.is-btn:hover {
   background: rgb(248 81 73 / 22%);
 }
-/* [taskboard-loop-badge-v1] 循环运行状态徽标：活动态绿、暂停橙、停止/未运行灰 */
-.tp-loop {
-  padding: 2px 8px;
-  font:
-    600 10.5px/1.4 ui-monospace,
-    monospace;
-  border-radius: 999px;
-}
-.tp-loop.loop-running {
-  color: var(--success);
-  background: rgb(63 185 80 / 12%);
-}
-.tp-loop.loop-paused {
-  color: var(--warning, #d29922);
-  background: rgb(210 153 34 / 12%);
-}
-.tp-loop.loop-stopped {
-  color: var(--text-3);
-  background: rgb(127 127 127 / 10%);
-}
 /* [taskboard-clear-v1] 清空按钮：ghost 风格，hover 加深；仅收尾态出现 */
 .tp-clear {
   padding: 1px 8px;
@@ -721,11 +702,13 @@ function onVis() {
   opacity: 0.5;
   cursor: default;
 }
-.tp-elapsed {
+/* [taskboard-elapsed-v2] 运行中行的耗时：贴在任务文字右侧，弱色不抢主体 */
+.tp-item-elapsed {
   flex: 0 0 auto;
-  font: 400 11px/16px var(--mono, ui-monospace, monospace);
+  margin-left: auto;
+  font: 400 11px/1.4 var(--mono, ui-monospace, monospace);
   color: var(--text-3, #8b949e);
-  opacity: 0.75;
+  opacity: 0.7;
   font-variant-numeric: tabular-nums;
 }
 </style>

@@ -3564,3 +3564,19 @@ for v in $(...); do grep -q "$v:" style.css || echo $v; done
 ## `no-use-before-define` 在 `.vue` setup 里同样生效
 
 `useIntervalFn` 回调里引用后定义的 `computed` 会直接 lint 报错。写法上要么把定时器定义提到依赖之后，要么让回调不引用后定义符号（本轮选了后者）。
+
+## `elapsedLabel` 曾靠 `isLoopActive` 判据 → 无头环境下永远不显示
+
+任务看板的「有任务在跑」与循环引擎的 `kind` 是两件事，判据应基于数据本身（存在 `status==='running'` 的项），不要耦合到循环状态机。
+
+## `at` 字段归一化遗漏 running 分支
+
+服务端 `running` 项带的是 `startedAt`，而前端只读 `doneAt || failedAt`，导致耗时恒为 0。字段映射要按状态分别取时刻，不能只覆盖终态。
+
+## prod（5175）读 dist，源码改动必须重建才可见
+
+本轮实测时页面仍显示旧徽章，`grep dist` 确认产物是旧时间戳——源码已删但页面还在，就是没 build，不是改错了。
+
+## `browser.run` 每次新建 tab，sid 随之变化
+
+想把测试数据喂给被观察的页面，必须在同一个 `page.evaluate` 里先写后读，跨轮推送是另一个桶。
