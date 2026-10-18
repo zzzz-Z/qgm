@@ -3638,3 +3638,15 @@ persistent context 的 localStorage 本来就持久化。token 为 null 的直�
 ## 验证持久化必须跨「关窗」边界
 
 只在同一会话内读 token 证明不了持久化；必须关掉 context 再重开读一次。
+
+## 磁盘上的登录态 ≠ 运行中进程的登录态
+
+Chromium 的内存页面在 launch 那一刻就定住了，profile 目录后来被写入新 cookie，已运行的进程不会重读。任何「登录后生效」的逻辑都必须包含「销毁旧会话」或「重新导航」。
+
+## 验证必须指向正在干活的进程，不是磁盘
+
+我前几轮反复用独立 Playwright 读 profile 验证「登录态在」，全部通过——但那验证的是磁盘，不是工作台实际用的那个进程。这正是 §13 `verify-target-binding-v1` 说的「验证错目标」。
+
+## `ps` 查进程比翻日志更快定位这类问题
+
+`--user-data-dir` + `--headless` 两个参数一出来，就能确认「有一个僵尸 session 占着 profile」。

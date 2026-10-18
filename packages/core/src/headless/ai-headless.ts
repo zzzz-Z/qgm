@@ -366,7 +366,18 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       sessions.delete(sid)
       completionErrors.delete(sid)
       if (!loginVerified) return { ok: false, detail: '登录窗口已关闭，但无头校验仍进入登录页；登录态未通过验证，请重新完成登录' }
-      return { ok: true, detail: autoClosed ? '已检测到登录成功，窗口已自动关闭，登录态已落盘' : '登录窗口已关闭，登录态已落盘' }
+      // [login-invalidate-sessions-v1] 登录成功后必须销毁**所有**已存在的 headless 会话。
+      //   [WHY] 每个会话是独立 Chromium 进程，其内存里的页面停留在登录前的 /sign_in 状态；
+      //     磁盘上的 cookie 更新后，这些进程不会自动感知（实测：15:11 起的常驻 session 一直占着
+      //     profile 锁，后续 fill 全打到它的登录页上，表现为「登录了但还是找不到输入框」）。
+      //     清空 sessions 后，下次 fill 会重新 launch，读到最新登录态。
+      //   [CONSTRAINT] 只清内存条目并 shutdown 进程；profile 目录不动（登录态就在里面）。
+      for (const [oldSid, oldSession] of [...sessions.entries()]) {
+        try { await shutdown(oldSession) } catch { /* swallow: 单个会话关闭失败不阻断其余 */ }
+        sessions.delete(oldSid)
+        completionErrors.delete(oldSid)
+      }
+      return { ok: true, detail: autoClosed ? '已检测到登录成功，窗口已自动关闭，登录态已落盘（已重置无头会话）' : '登录窗口已关闭，登录态已落盘（已重置无头会话）' }
     } catch (e) {
       try { if (ctx) await ctx.close() } catch { /* swallow: ctx 已关闭，close 失败忽略 */ }
       return { ok: false, detail: String((e as Error).message || e).slice(0, 200) }
@@ -418,6 +429,22 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
         return false
       }
       completionErrors.delete(sid)
+      // [login-page-recover-v1] 长生命周期会话可能停在 /sign_in（登录态更新前就已存在），
+      //   此时代码会一路走到「找不到输入框」。先检查一次路径，若在登录页且磁盘已有登录态，
+      //   重新导航到主站即可自愈，无需销毁整个会话。
+      try {
+        const curUrl = typeof (page as { url?: () => string }).url === 'function'
+          ? String((page as { url: () => string }).url() || '')
+          : ''
+        if (/\/sign_in|\/login/i.test(curUrl)) {
+          const diag = await page.evaluate(detectLoginStateInPage, adapterCfg).catch(() => null)
+          const d = diag as { tokenState?: string } | null
+          if (d && d.tokenState === 'yes') {
+            await (page as { goto?: (u: string, o?: unknown) => Promise<unknown> }).goto?.(defaultUrl, { waitUntil: 'domcontentloaded' })
+            await new Promise<void>(r => setTimeout(r, 1500))
+          }
+        }
+      } catch { /* swallow: 探测失败按原流程走，由后续诊断兜底 */ }
       const ratio = rateLimitedRatio()
       const scale = ratio > 0.1 ? 2 : 1
       await jitterDelay(jitterMin * scale, jitterMax * scale)
