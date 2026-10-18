@@ -1,7 +1,6 @@
 // 无头浏览器会话池。依赖 playwright（optional dep）。
 // DOM 逻辑（fillPrompt / stopGenerating / newSession / rotate）分 2D.2-2D.5 实现。
 import fs from 'node:fs'
-import path from 'node:path'
 import { resolveBrowserEngine } from './browser-engine.js'
 import { clickNewSessionInPage, detectLoginStateInPage, detectReplyInPage, resetReplyDedupInPage, stopGeneratingInPage, verifyFillSentInPage } from './headless-inject.js'
 
@@ -79,10 +78,21 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   // 同 sid 重复调用会对同一 userDataDir 二次 launch —— Chromium 单 profile 独占必崩。
   // 记录 in-flight Promise，重复调用直接返回提示（首个调用保持阻塞语义不变）
   const loginGuiInflight = new Map<string, Promise<{ ok: boolean, detail?: string }>>()
-  const baseUserDataDir = opts.userDataDir || defaultUserDataDir()
-  // 每个 sid 独立 profile；default 保留原路径兼容旧登录态
-  function userDataDirFor(sid: string): string {
-    return sid === 'default' ? baseUserDataDir : path.join(baseUserDataDir, sid)
+  // [profile-global-v1] 惰性求值：不再在 pool 创建时快照路径（原实现把 ROOT 冻结在启动那一刻）
+  const explicitUserDataDir = opts.userDataDir || ''
+  function baseDir(): string {
+    return explicitUserDataDir || defaultUserDataDir()
+  }
+  /**
+   * [profile-global-v1] 所有 sid 共用同一 profile。
+   * [WHY] sid 是「窗口槽位」临时标识（随 sessionStorage 变化），而登录态是账号级资产。
+   *   原实现按 sid 分子目录 ⇒ 切 transport / 刷新 / 换槽位后 sid 变了，
+   *   就读到另一份未登录的 profile，表现为「刚登录又说未登录」。
+   * [CONSTRAINT] 代价：同 profile 不允许并发 launch（Chromium 单实例锁）。
+   *   当前使用场景不并发；若将来需要多窗口并行，改为按站点分而非按 sid 分。
+   */
+  function userDataDirFor(_sid: string): string {
+    return baseDir()
   }
   // [site-adapter-v1] 站点适配器：所有站点相关硬编码从这里取
   const adapter = opts.adapter || getDefaultAdapter()
@@ -394,13 +404,9 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       sessions.delete(sid)
       // [completion-error-leak-v1] 会话销毁时须同步清理该 sid 的错误缓存，否则 Map 随 sid 单调增长
       completionErrors.delete(sid)
-      // [profile-gc-v1] per-sid profile 目录同样要删：每个新 sid 建一个几十 MB 的 Chromium
-      //   profile，原实现只删内存条目不删磁盘 ⇒ 实测残留 3 个孤儿目录共 45MB 且只增不减。
-      //   [CONSTRAINT] 绝不删 `default`（那是共享登录态，路径等于 baseUserDataDir 本身）；
-      //   删除失败（Windows 文件占用 / 只读 fs）静默忽略，不能因清理失败阻断 close。
-      if (sid !== 'default') {
-        try { fs.rmSync(userDataDirFor(sid), { recursive: true, force: true }) } catch { /* 清理失败不阻断 close */ }
-      }
+      // [profile-global-v1] 不再删除 profile 目录：它现在是全局唯一的登录态载体，
+      //   删掉等于「每次关窗都清一次登录」。原来的 per-sid 清理是为回收几十 MB 孤儿目录，
+      //   在共用 profile 方案下既无孤儿可收，也绝不能收。
       releaseSlot()
     },
     get(sid) { return sessions.get(sid) || null },

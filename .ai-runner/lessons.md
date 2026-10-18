@@ -3616,3 +3616,15 @@ persistent context 的 localStorage 本来就持久化。token 为 null 的直�
 ## 判断登录是否成功，看 `path` 比看 token 更可靠
 
 `/sign_in` 一定未登录；`/` 且有 textarea 基本可判定已登录。token 字段格式（`{"value":..., "__version":"0"}`）容易被误解析。
+
+## `profile-gc-v1` 与登录态持久化天然冲突
+
+按 sid 清理 profile 的前提是"profile 是可丢弃的缓存"，但登录态恰恰存在 profile 里。任何"清理 profile 回收空间"的逻辑都必须先确认它不承载持久状态。
+
+## `sid` 不适合做持久化目录名
+
+它来自 `sessionStorage`（`useAiWindowTable.ts:21`），随标签页/切换而变化。用它做 profile 子目录 = 让临时标识决定持久资产的位置，是这类 bug 的结构性来源。
+
+## `path.join(ROOT, ...)` 形式的路径在 `setRoot` 之后会漂移
+
+凡是与「工作区无关的持久化数据」（登录态、缓存、全局配置），都不该挂 `ROOT`。

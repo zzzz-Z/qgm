@@ -9,11 +9,17 @@ import { ROOT } from '../config.js'
 export const DEFAULT_URL = 'https://chat.deepseek.com/'
 
 /**
- * 无头浏览器默认 profile 目录；[lazy-path-v1] 改为函数式：原 const 在模块导入时快照 ROOT，
- * standalone 下 setRoot 切换工作区后仍指向启动 cwd（隐藏 bug）
+ * 无头浏览器默认 profile 目录。
+ * [profile-global-v1] 与 ROOT 解耦：登录态是**账号级资产**，不该随工作区目录变化。
+ *   原实现 `path.join(ROOT, '.ai-runner', 'headless-profile')` 导致：
+ *   切工作区后 profile 路径变化 → 在新目录里未登录 → 表现为「登录了但还是找不到输入框」。
+ *   改为用户级固定目录（~/.ai-runner/headless-profile），所有工作区共用一份登录态。
+ * [CONSTRAINT] 迁移：旧路径下的 profile 不会自动搬走，首次使用需重新登录一次。
  */
 export function defaultUserDataDir(): string {
-  return path.join(ROOT, '.ai-runner', 'headless-profile')
+  const home = process.env.HOME || process.env.USERPROFILE || ''
+  if (!home) return path.join(ROOT, '.ai-runner', 'headless-profile')
+  return path.join(home, '.ai-runner', 'headless-profile')
 }
 
 /** 浏览器启动超时（毫秒），超时抛错 */
