@@ -3588,3 +3588,15 @@ for v in $(...); do grep -q "$v:" style.css || echo $v; done
 ## 客户端与服务端对同一事件各写一条留痕时必须同口径
 
 无头路径原先客户端写 `ok:true`、服务端写真实 `ok`，两条日志会给出相反结论。这类「观测手段自相矛盾」比没有日志更难排查。
+
+## `launchPersistentContext` 的 `close()` 不保证落盘
+
+Chromium 的 cookie / localStorage 有内存缓冲，登录后立即关窗会丢会话。必须 `storageState()` 或显式等待，否则「用户明明登录了」与「profile 里查不到登录态」会长期矛盾。
+
+## 诊断信息必须在抛出点采集，不能在 catch 里回填
+
+`fillPrompt` 原本 `catch { return false }` 把所有原因压成一个布尔，导致「未登录」和「选择器失效」在下游完全同形。加 `lastFillError` Map 后，attach-ws 才能把真实原因送到前端。
+
+## 改 `waitAck` 返回类型会打破既有单测
+
+接口从 `Promise<boolean>` 变 `Promise<{ok,reason}>` 时，`useAiTransport-factory.node-test.ts` 的 `assert.equal(r, true)` 会立即失败——这是好事，说明测试真的在守着契约。

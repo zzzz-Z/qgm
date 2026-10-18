@@ -40,7 +40,7 @@ export interface AiTransport {
   /** [mute-flag] 恢复消息接收 */
   unMute?: () => void
   // [P3-1c] waitAck
-  waitAck?: (t: string, sid: string, timeoutMs?: number, ackId?: string) => Promise<boolean>
+  waitAck?: (t: string, sid: string, timeoutMs?: number, ackId?: string) => Promise<{ ok: boolean, reason: string }>
 }
 
 /** 存储键：transport 偏好（'headless' | 'tampermonkey'） */
@@ -120,7 +120,7 @@ export function createTampermonkeyTransport(): AiTransport {
     sendRotate(sid, payload) { return callDs('sendRotateImpl', payload, sid) },
     sendNewSession(sid, payload) { return callDs('sendNewSessionImpl', payload, sid) },
     // [P3-1c] 油猴链路无服务端 ACK，立即返回 true（保持行为不变）
-    waitAck: () => Promise.resolve(true),
+    waitAck: () => Promise.resolve({ ok: true, reason: '' }),
     // 暂停时屏蔽消息接收（不移除监听，可 unMute 恢复）
     mute() {
       muted = true
@@ -158,7 +158,7 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   let ws: WebSocket | null = null
   let muted = false
   const queue: string[] = []
-  const ackWaiters: Array<{ sid: string, ackId: string, resolve: (ok: boolean) => void, timer: ReturnType<typeof setTimeout> }> = []
+  const ackWaiters: Array<{ sid: string, ackId: string, resolve: (r: { ok: boolean, reason: string }) => void, timer: ReturnType<typeof setTimeout> }> = []
 
   // [ws-reconnect-v1] dev 后端重启 / 网络抖动后旧 socket 半开：浏览器仍报 OPEN，send() 不抛错但帧永不到达，
   // 表层即「发消息没反应」。close/error 后指数退避自动重连，排队帧在 open 后 flush，业务无感知
@@ -232,7 +232,7 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
           if ((ackId ? i === matchIdx : ackWaiters[i].sid === ackSid)) {
             const w = ackWaiters[i]
             clearTimeout(w.timer)
-            w.resolve(Boolean((msg as Record<string, unknown>).ok))
+            w.resolve({ ok: Boolean((msg as Record<string, unknown>).ok), reason: String((msg as Record<string, unknown>).reason || '') })
             ackWaiters.splice(i, 1)
           }
         }
@@ -265,7 +265,7 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
           if (ackWaiters[i].sid === sid) {
             const w = ackWaiters[i]
             clearTimeout(w.timer)
-            w.resolve(true)
+            w.resolve({ ok: true, reason: 'state-frame' })
             ackWaiters.splice(i, 1)
           }
         }
@@ -302,12 +302,12 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
       // [sid-normalize-v1] 服务端 attach-ws 用 `msg.sid || 'default'` 归一化，回包 sid 恒为 'default'；
       // 客户端若以原始 '' 注册 waiter，永远匹配不上 ACK → 3s 超时（隐藏 bug）
       const normalizedSid = sid || 'default'
-      return new Promise<boolean>((resolve) => {
-        let waiter: { sid: string, ackId: string, resolve: (ok: boolean) => void, timer: ReturnType<typeof setTimeout> }
+      return new Promise<{ ok: boolean, reason: string }>((resolve) => {
+        let waiter: { sid: string, ackId: string, resolve: (r: { ok: boolean, reason: string }) => void, timer: ReturnType<typeof setTimeout> }
         const timer = setTimeout(() => {
           const i = ackWaiters.indexOf(waiter)
           if (i >= 0) ackWaiters.splice(i, 1)
-          resolve(false)
+          resolve({ ok: false, reason: 'ack-timeout' })
         }, timeoutMs)
         waiter = { sid: normalizedSid, ackId: String(ackId || ''), resolve, timer }
         ackWaiters.push(waiter)
@@ -327,7 +327,7 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     onGitChanged(cb) { gitChangedCbs.add(cb); return () => { gitChangedCbs.delete(cb) } },
     // [ws-reconnect-v1] disposed 阻断重连定时器；切换 transport 时旧连接彻底退役，不产生僵尸重连
     // [dispose-leak-v1] queue / ackWaiters 亦须清理：前者滞留字符串引用，后者悬挂 timer + Promise
-    dispose() { disposed = true; muted = false; clearReconnect(); try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; queue.length = 0; for (const w of ackWaiters) { clearTimeout(w.timer); w.resolve(false) } ackWaiters.length = 0; replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear(); filesChangedCbs.clear(); gitChangedCbs.clear() },
+    dispose() { disposed = true; muted = false; clearReconnect(); try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; queue.length = 0; for (const w of ackWaiters) { clearTimeout(w.timer); w.resolve({ ok: false, reason: 'disposed' }) } ackWaiters.length = 0; replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear(); filesChangedCbs.clear(); gitChangedCbs.clear() },
     // [mute-flag-v1] 用 flag 静音；原实现清空回调集合不可恢复，unMute 后所有订阅者永久失联
     mute() { muted = true },
     unMute() { muted = false },

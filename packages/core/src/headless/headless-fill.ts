@@ -253,6 +253,22 @@ export function detectLoginStateInPage(cfg = {}) {
       tokenState = typeof parsed?.value === 'string' && parsed.value.length > 0 ? 'yes' : 'no'
     }
   } catch { tokenState = 'unknown' }
+  // [login-cookie-v1] 多源判据：DeepSeek 的会话标识并不总在 localStorage.userToken 里
+  //   （实测登录后 Cookies 表仍只有匿名条目，localStorage 也读不到 → 原判据恒 unknown）。
+  //   补一条 cookie 探针：存在非匿名会话 cookie 即视为登录态正面证据。
+  //   [CONSTRAINT] 只做「存在性」判断，不解析具体值；匿名标记（HWWAFSESID / smidV2 / thumbcache）排除。
+  let cookieLoggedIn = false
+  try {
+    const raw = String(document.cookie || '')
+    if (raw) {
+      const ANON = /^(?:HWWAFSESID|HWWAFSESTIME|smidV2|ds_session_id|\.thumbcache_)/i
+      cookieLoggedIn = raw.split(';').some((pair) => {
+        const name = pair.split('=')[0].trim()
+        return Boolean(name) && !ANON.test(name)
+      })
+    }
+  } catch { /* swallow: cookie 不可读时保持 false */ }
+  if (tokenState !== 'yes' && cookieLoggedIn) tokenState = 'yes'
   return {
     path: location.pathname,
     hasInput: !!document.querySelector('textarea:not([readonly]):not([disabled]), [contenteditable="true"]'),

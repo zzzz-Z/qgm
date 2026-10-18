@@ -66,6 +66,8 @@ async function verifyFillWithGrace(page: Page, cfg: Record<string, unknown>): Pr
 export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
   const sessions = new Map<string, HeadlessSession>()
   const completionErrors = new Map<string, string>()
+  // [fill-diagnose-v1] sid → 最近一次 fill 失败原因（未登录 / 无输入框 / 验证失败）
+  const lastFillError = new Map<string, string>()
 
   // [OPT] _getPage helper
   function _getPage(sid: string): Page | undefined {
@@ -304,7 +306,22 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
           let maxTimer: ReturnType<typeof setTimeout> | null = null
           let pollTimer: ReturnType<typeof setInterval> | null = null
           function closeCtxOnce(): Promise<void> {
-            if (!closing) closing = ctxLocal.close().catch(() => { /* swallow: 已关闭/进程已退 */ })
+            if (!closing) {
+              // [login-flush-v1] 关窗前必须强制落盘：Chromium 的 cookie / localStorage 有内存缓冲，
+              //   立即 close() 会让刚登录写入的会话丢失（实测：登录窗关闭后 Cookies 表里仍只有匿名条目，
+              //   后续无头实例复用同一 profile 仍被判未登录 → 永远提示找不到输入框）。
+              //   storageState() 会触发一次完整持久化；再留 1.5s 让 Chromium 收尾写盘。
+              closing = (async () => {
+                try {
+                  await Promise.race([
+                    ctxLocal.storageState(),
+                    new Promise<void>(r => setTimeout(r, 5000)),
+                  ])
+                } catch { /* swallow: 落盘失败不阻断关闭 */ }
+                await new Promise<void>(r => setTimeout(r, 1500))
+                try { await ctxLocal.close() } catch { /* swallow: 已关闭/进程已退 */ }
+              })()
+            }
             return closing
           }
           function fire(reason: 'ctx-close' | 'page-close' | 'no-pages' | 'timeout'): void {
@@ -406,7 +423,17 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
           //   而 locator.fill() + keyboard.press() 走真实输入链路，实测 5s 内收到回复。
           const selector = 'textarea:not([readonly]):not([disabled]), [contenteditable="true"]'
           const locator = page.locator(selector).first()
-          if (await locator.count() === 0) throw new Error('fill 返回 false')
+          if (await locator.count() === 0) {
+            // [fill-diagnose-v1] 输入框为零时先判登录态，把「未登录」与「选择器失效」区分开：
+            //   原实现一律抛 'fill 返回 false'，前端只能看到「找不到输入框」，
+            //   实际最常见成因是页面被重定向到 /sign_in（无头 profile 无登录态）。
+            const diag = await page.evaluate(detectLoginStateInPage, adapterCfg).catch(() => null)
+            const d = diag as { path?: string, hasInput?: boolean, tokenState?: string } | null
+            if (d && (/sign_in|login/i.test(String(d.path || '')) || d.tokenState !== 'yes')) {
+              throw new Error(`not-logged-in: 无头浏览器未登录（path=${d.path || '?'} tokenState=${d.tokenState || '?'}）；请点「登录」在有头窗口完成登录后重试`)
+            }
+            throw new Error('no-input-box: 页面上找不到输入框（选择器可能已失效）')
+          }
           await locator.click()
           await locator.fill(prompt)
           await page.keyboard.press('Enter')
@@ -426,12 +453,17 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
           return true
         })
         recordRequest(false)
+        lastFillError.delete(sid)
         return ok === true
       } catch (e) {
         if (/429|rate.?limit/i.test(String(e))) recordRequest(true)
+        // [fill-diagnose-v1] 保留失败原因供 attach-ws 透传给前端：
+        //   否则「未登录」「选择器失效」「验证失败」在下游一律表现为「找不到输入框」。
+        lastFillError.set(sid, String((e as Error)?.message || e || 'fill-failed').slice(0, 300))
         return false
       }
     },
+    lastFillError(sid) { return lastFillError.get(sid) || '' },
     async stopGenerating(sid) {
       const page = _getPage(sid)
       if (!page) {

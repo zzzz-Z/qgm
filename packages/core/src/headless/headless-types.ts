@@ -55,6 +55,8 @@ export interface HeadlessPool {
   list: () => HeadlessSession[]
   getPage: (sid: string) => unknown | null
   fillPrompt: (sid: string, prompt: string) => Promise<boolean>
+  /** [fill-diagnose-v1] 最近一次 fill 失败原因（not-logged-in / no-input-box / fill 验证失败…）；成功则清空 */
+  lastFillError: (sid: string) => string
   stopGenerating: (sid: string) => Promise<boolean>
   newSession: (sid: string) => Promise<{ url: string, id: string } | null>
   /** [headless-login-gui-v1] 引导式登录：有头窗口打开站点，用户登录后关窗，登录态落盘 */

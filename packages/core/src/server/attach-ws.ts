@@ -169,13 +169,16 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
       // [fill-ack-v1] 与油猴 ai-runner:fill-ack 对齐：显式回执注入结果，
       // 使工作台 sendFillToAsync 不再依赖 state 帧的间接推断。
       // [fill-ack-id-v1] 回显请求携带的 ackId（旧客户端不发则省略），客户端据此精确匹配 waiter
-      send({ t: 'headless:fill-ack', sid, ok, reason: ok ? '' : 'fill-verify-failed', ...(msg.ackId ? { ackId: String(msg.ackId) } : {}) })
+      // [fill-diagnose-v1] 失败原因透传：not-logged-in / no-input-box / 验证失败等，
+      //   原实现一律写死 'fill-verify-failed'，前端只能看到「找不到输入框」这一层。
+      const fillReason = ok ? '' : (pool.lastFillError(sid) || 'fill-verify-failed')
+      send({ t: 'headless:fill-ack', sid, ok, reason: fillReason, ...(msg.ackId ? { ackId: String(msg.ackId) } : {}) })
       if (!ok) {
         // [fill-verify-v2] 止血（AGENDA-10）：验证失败 ≠ 一定没发出去（页面改版 / 消息慢渲染都会误判）。
         // 旧实现在此 return → 对方真回复了也无人接收，整轮被静默丢弃。
         // 改为仅上报 error 供前端 toast，随后照常 resetReplyDedup + startReplyPoll。
         // [CONSTRAINT] 代价：真未发送时 poll 空转；每次 tick 仅一次只读 evaluate，且下次 fill 会先 stop 掉它。
-        send({ t: 'headless:state', sid, state: 'error', detail: 'fill 验证失败（未找到输入框/发送按钮），仍继续等待回复' })
+        send({ t: 'headless:state', sid, state: 'error', detail: fillReason || 'fill 验证失败（未找到输入框/发送按钮），仍继续等待回复' })
       } else {
         send({ t: 'headless:state', sid, state: 'generating' })
       }

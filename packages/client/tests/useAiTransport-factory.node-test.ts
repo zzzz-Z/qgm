@@ -127,11 +127,13 @@ test('createTampermonkeyTransport: sendFill 返回 boolean', () => {
   assert.equal(typeof r, 'boolean')
 })
 
-test('createTampermonkeyTransport: waitAck 立即 resolve true', async () => {
+test('createTampermonkeyTransport: waitAck 立即 resolve 成功', async () => {
   const t = mod.createTampermonkeyTransport()
   assert.ok(t.waitAck)
+  // [fill-ack-id-v1] waitAck 返回 { ok, reason }（原为裸 boolean）：失败时要能带回原因
   const r = await t.waitAck('t', 'sid')
-  assert.equal(r, true)
+  assert.equal(r.ok, true)
+  assert.equal(typeof r.reason, 'string')
 })
 
 test('createTampermonkeyTransport: onReply 注册/注销', () => {

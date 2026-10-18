@@ -469,11 +469,19 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     }
     // [CONSTRAINT] 超时须覆盖 pool.fillPrompt 全链路（含输入框探测 + 800ms 发送验证）：
     //   浏览器侧同链路验证窗为 800ms，无头侧另含页面就绪等待，取 12s 留足余量。
-    const acked = tr.waitAck ? await tr.waitAck('fill', hsSid, 12_000, ackId) : true
-    if (!acked) {
-      log.warn('[copyAndFill] headless fill 未收到 ack（超时） sid=', hsSid, 'ackId=', ackId)
+    const ack = tr.waitAck ? await tr.waitAck('fill', hsSid, 12_000, ackId) : { ok: true, reason: '' }
+    if (!ack.ok) {
+      log.warn('[copyAndFill] headless fill 失败或未回执 sid=', hsSid, 'ackId=', ackId, 'reason=', ack.reason)
       if (pendingRulesKey) _rulesPendingSids.delete(pendingRulesKey)
-      return 'unacked'
+      // [fill-diagnose-v1] 把服务端给出的真实原因带给用户：未登录 / 找不到输入框 / 验证失败。
+      //   原实现只返回笼统失败，用户只能看到「找不到输入框」，无从判断该去登录还是该报 bug。
+      if (ack.reason && ack.reason !== 'ack-timeout') {
+        const notLoggedIn = /not-logged-in/i.test(ack.reason)
+        toast(notLoggedIn
+          ? '无头浏览器未登录：请点顶部「登录」在有头窗口完成登录后重试'
+          : `无头发送失败：${ack.reason}`, 'error', TOAST_LONGEST)
+      }
+      return ack.reason === 'ack-timeout' ? 'unacked' : 'failed'
     }
     // ack ok=true 才登记规则已注入（失败时下次仍需注入）
     if (pendingRulesKey) markRulesInjected(pendingRulesKey)
