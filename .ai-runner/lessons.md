@@ -3450,3 +3450,13 @@ ls[i] = "// 注释行 1",
 `useFilePicker()` 在浏览器里跑了很久都没问题，第一次在 vitest 下调用就炸。原因是它只 import 了 `computed` / `nextTick` / `ref`，`watch` 和 `onBeforeUnmount` 全靠 auto-import。
 
 给存量 composable 补首个单测时，先检查它的 import 是否完整——这类缺陷在应用运行时完全不可见。
+
+## `flex: 0 1 auto` 不会让子项吃满剩余空间
+
+原来 `.fp-item-label` 是 `flex: 0 1 auto`——它允许收缩但不主动增长。当同行还有 `hint` 时，剩余空间按各自内容宽度分配，label 拿不到额外宽度。
+
+改 `flex: 1 1 auto` 才是「占满剩余」。这在只有两个子项时不明显，但一旦行内元素变多（kind 徽标 + label + hint），差异立刻显现。
+
+## `text-overflow: ellipsis` 在 flex 子项上需要 `min-width: 0`
+
+flex 子项的默认 `min-width` 是 `auto`（不小于内容宽度），此时即使写了 `overflow: hidden`，元素也不会收缩到内容宽度以下，省略号永远不出现。必须显式 `min-width: 0`。

@@ -398,9 +398,10 @@ defineExpose({ insertText })
               @mouseenter="pickerSetIndex(i)"
               @mousedown.prevent="pickerPick(it)"
             >
-              <span class="fp-item-kind" :class="`fp-kind-${it.kind}`">{{ it.kind === 'skill' ? '技能' : '文件' }}</span>
+              <span class="fp-item-kind" :aria-label="it.kind === 'skill' ? '技能' : '文件'" :class="`fp-kind-${it.kind}`">{{ it.kind === 'skill' ? '技' : '文' }}</span>
               <span class="fp-item-label">{{ it.label }}</span>
-              <span v-if="it.hint" class="fp-item-hint">{{ it.hint }}</span>
+              <!-- [picker-no-inline-hint-v1] 行内不显示详情：hint 常驻会挤掉文件名，
+                   路径/描述已在 title 里，hover 可见即可 -->
             </div>
             <!-- [picker-total-hint-v1] 结果被截断时必须可见：否则用户以为「只匹配到这些」 -->
             <div v-if="pickerTotal > pickerFiltered.length" class="fp-more">
