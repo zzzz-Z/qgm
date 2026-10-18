@@ -13,6 +13,21 @@ function fence(body: string): string {
   return `${F}js\n${body}\n${F}`
 }
 
+// [strip-tool-mark-v1] 工具调用标记泄漏行必须丢弃：它在截断时以普通文本漏进正文，
+// 前端原样渲染就是用户看到的乱码。判据承重——正则失效则此用例必红。
+test('T-TOOL: 工具调用标记行被整行剥离，正文保留', () => {
+  const t = ['正常正文第一行', '<||DSML||| calls>', '<||DSML||| invoke name="act">', '正常正文第二行'].join('\n')
+  assert.equal(stripScriptBlocks(t), '正常正文第一行\n正常正文第二行')
+})
+
+test('T-TOOL: 纯标记残留 ⇒ 空串（不渲染空噪音卡）', () => {
+  assert.equal(stripScriptBlocks('<||DSML||| calls>'), '')
+})
+
+test('T-TOOL: 散文里的竖线不受影响（不误吞）', () => {
+  assert.equal(stripScriptBlocks('用 a || b 表示或运算'), '用 a || b 表示或运算')
+})
+
 test('S1: 含 shebang 的脚本围栏块被整体剥离 ⇒ 空串', () => {
   const t = fence('#! /usr/bin/env node\n// @why x\nconsole.log(1)')
   assert.equal(stripScriptBlocks(t), '')

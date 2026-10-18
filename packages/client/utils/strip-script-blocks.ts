@@ -16,6 +16,7 @@
 //   标记清单与 utils/reply-mark.ts 同源；漂移由 strip-script-blocks.node-test.ts 的 T3 钉住
 //   （该用例从 reply-mark.ts 源码抠出标记词逐个对拍，将来加标记而此处漏加会立刻变红）。
 const REPLY_MARK_LINE_RE = /^(?:SCRIPT|ASK|DONE|HANDOFF|TEXT)$/
+const TOOL_MARK_LINE_RE = /^<\|\|.*>$/
 
 /** 脚本头行判据：shebang 或脚本头注释（与 reply-mark 契约特征一致） */
 function isScriptHeaderLine(line: string): boolean {
@@ -51,7 +52,7 @@ export function stripScriptBlocks(text: string): string {
   while (i < lines.length) {
     const line = lines[i]
     // [strip-mark-lines-v1] 形态 ⓪：裸标记行 —— 标记不是内容，永远不进文本卡
-    if (REPLY_MARK_LINE_RE.test(line.trim())) {
+    if (REPLY_MARK_LINE_RE.test(line.trim()) || TOOL_MARK_LINE_RE.test(line.trim())) {
       i += 1
       continue
     }

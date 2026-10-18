@@ -3528,3 +3528,11 @@ for v in $(...); do grep -q "$v:" style.css || echo $v; done
 ## 分组标签文本加箭头后会破坏精确匹配断言
 
 `labels.indexOf('失败')` 在标签变成 `▾ 失败 · 2` 后恒返回 -1，而 `toBeLessThan` 对 -1 与 -1 比较会给出 `expected -1 to be less than -1` 这种毫无指向性的失败。标签类断言一律用 `includes` 定位，不要用 `indexOf` 全等。
+
+## 正则字面量里的 `\\|` 与 patchFile 转义会互相打架
+
+往 `patchFile` 的锚点里写正则时，`\\|` 在脚本字符串里是 `\|`，落到文件里是正则的「转义竖线」，三层转义很容易错一层。表现是锚点 `ANCHOR_NOT_FOUND` 或正则静默不匹配。稳妥做法：锚点只取不含反斜杠的稳定片段（如 `const TOOL_MARK_LINE_RE = `），或者改完立刻 `readText` 打印该行 `JSON.stringify` 核对真实字节。
+
+## 测试绿了不代表改动生效，用例数才是硬证据
+
+连续两轮 `vitest` 都报 `15 passed`，但 `grep -c "^test("` 数出 18。是 reporter 输出被截断导致我看漏了尾部，误判成「用例没写进去」。核对用例是否真的被收录，用 grep 计数比读 reporter 摘要可靠。
