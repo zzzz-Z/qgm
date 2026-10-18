@@ -1,9 +1,59 @@
 import { cleanCode } from './codeCleaner'
 
-interface ContextFile {
+export interface ContextFile {
   path: string
   content: string
   error?: string
+}
+
+/** [prompt-source-budget-v1] 失败轮附加源码的总量上限（与 §10 脚本预算同量级） */
+export const SOURCE_BUDGET_BYTES = 12 * 1024
+const TRUNC_HEAD = 60
+const TRUNC_TAIL = 40
+
+/**
+ * [prompt-source-budget-v1] 按总预算裁剪文件列表：超预算的文件只保留首尾。
+ * [WHY] 实测失败轮 prompt 最大 24.8KB（dist/interceptor.cjs 单文件 587 行占 20KB+），无上限时 p90 也到 6.1KB。
+ *   renderFile 的 no-file-truncate-v1（用户要求诊断时给全文）保持不变——本函数在**调用侧**按总量分配，
+ *   先到先得，超出的截首尾。这样「首选文件仍给全文」与「总 prompt 有界」同时成立。
+ * [CONSTRAINT] 有 error 的条目（读失败）与总预算内的一切文件原样保留，不裁剪任何内容。
+ * @param files 待裁剪的文件列表（顺序即优先级）
+ * @param maxBytes 总量上限；默认 SOURCE_BUDGET_BYTES
+ * @returns 裁剪后的列表 + 被裁剪的路径（供调用方在标题里注明）
+ */
+export function capFilesByBudget(
+  files: ContextFile[],
+  maxBytes: number = SOURCE_BUDGET_BYTES,
+): { files: ContextFile[], truncated: string[] } {
+  const size = (f: ContextFile) => (f.content ? new TextEncoder().encode(f.content).length : 0)
+  let total = 0
+  for (const f of files) total += size(f)
+  if (total <= maxBytes) return { files, truncated: [] }
+
+  const out: ContextFile[] = []
+  const truncated: string[] = []
+  let used = 0
+  for (const f of files) {
+    const mine = size(f)
+    if (!f.content || f.error || used + mine <= maxBytes) {
+      out.push(f)
+      used += mine
+      continue
+    }
+    const lines = f.content.split('\n')
+    if (lines.length <= TRUNC_HEAD + TRUNC_TAIL + 1) {
+      out.push(f)
+      used += mine
+      continue
+    }
+    const omitted = lines.length - TRUNC_HEAD - TRUNC_TAIL
+    const marker = `... [已省略 ${omitted} 行 / 共 ${lines.length} 行；需要全文请用 readText 读取] ...`
+    const content = [...lines.slice(0, TRUNC_HEAD), marker, ...lines.slice(-TRUNC_TAIL)].join('\n')
+    out.push({ ...f, content })
+    truncated.push(f.path)
+    used += new TextEncoder().encode(content).length
+  }
+  return { files: out, truncated }
 }
 /** 代码清洗选项（contextBuilder 专用）；[CONSTRAINT] stripComments 与 stripBlankLines 独立生效，不影响行号映射（保留空行占位） */
 // [naming-v1] 不叫 CleanOptions：utils/codeCleaner.ts 已有同名但独立的 interface，

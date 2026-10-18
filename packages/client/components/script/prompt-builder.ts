@@ -4,7 +4,7 @@
 // [explicit-imports-v1] buildErrorContext / shouldIncludeChanges 原先靠 auto-import 提供：
 //   app 能跑，但 tsconfig.test.json 没有该插件 —— 本模块一旦被测试 import 就报
 //   `Cannot find name`（AGENTS.md 已把这条列为项目独有约束）。改为显式 import 消除隐患。
-import { buildErrorContext } from '../../utils/contextBuilder'
+import { buildErrorContext, capFilesByBudget } from '../../utils/contextBuilder'
 import { shouldIncludeChanges } from '../../composables/runner/useRunFeedback'
 
 /** 变更条目（type: added / modified / deleted） */
@@ -72,6 +72,9 @@ export function pushFenced(p: string[], body: string): void {
   p.push('')
 }
 
+/** [prompt-source-budget-v1] 构建产物路径：对诊断无价值，直接不进 prompt */
+const BUILD_ARTIFACT_RE = /\/(?:dist|build|\.turbo|\.vite|coverage)\//
+
 /** 失败时把相关文件源码块追加到 prompt 数组（去重后取前 5 个路径） */
 export async function appendFailedSourceFiles(
   p: string[],
@@ -92,12 +95,20 @@ export async function appendFailedSourceFiles(
     })
     const data = await res.json()
     if (data.files?.length) {
+      // [prompt-source-budget-v1] 先过滤构建产物、再按总预算裁剪：实测 dist/interceptor.cjs（587 行）
+      //   曾让单条 prompt 达 24.8KB。产物由源码同步生成（runtime-cjs-copy 守卫），对诊断无价值。
+      const raw = data.files as Array<{ path: string, content: string, error?: string }>
+      const realFiles = raw.filter(f => !BUILD_ARTIFACT_RE.test(String(f.path)))
+      const dropped = raw.length - realFiles.length
+      const { files: cappedFiles, truncated } = capFilesByBudget(realFiles)
       p.push('# 相关文件源码（失败时自动附加，含报错涉及的文件）')
+      if (dropped > 0) p.push(`> 已过滤 ${dropped} 个构建产物（dist/build），它们由源码同步生成，无需诊断`)
+      if (truncated.length > 0) p.push(`> 超出体积预算已截首尾：${truncated.join(', ')}（需要全文请用 readText）`)
       // [fence-safe-v1] 本段原先**无围栏**（直接 push buildErrorContext 的 `<file path=…>` 块）⇒
       //   落进会话是**普通文本**，页面内探针扫得到被 dump 的源码（其中就有探针自己的触顶词表）
       //   ⇒ 自指误报（Channel D）。加围栏后整段落进 `<pre><code>`，探针剥壳即看不见。
       // [CONSTRAINT] `<file path=…>` 与 `N| ` 行号逐字符不变——它们是 AI 侧解析契约，只加外壳不动内容。
-      pushFenced(p, buildErrorContext(data.files, opts.errorLocs, {
+      pushFenced(p, buildErrorContext(cappedFiles, opts.errorLocs, {
         stripComments: opts.stripComments,
         stripBlankLines: opts.stripBlankLines,
       }))
@@ -307,16 +318,41 @@ export function appendClaimMismatch(p: string[], r: PromptResult | null): void {
 }
 
 // [trim-output-inlined-v1] 原 trimOutput 已是恒等函数，内联后删除 output-utils.ts
-/** 追加 stderr / stdout 原始输出块 */
+/**
+ * [raw-output-budget-v1] stdout / stderr 进 prompt 前的体积预算（字节）。
+ * [WHY] 服务端 run.ts:384-385 已把 summary 帧的 stdoutTail/stderrTail 截到 2000/4000，
+ *   但前端 useRunner.ts:580 用 `liveStdout.value || s.stdoutTail` —— liveStdout 是流式累积的
+ *   完整输出、无上限，服务端截断被完全绕过。实测单条 prompt 达 25.5KB（成功轮，非失败轮附加源码）。
+ * [CONSTRAINT] 与 §10 脚本预算（12KB）同量级，保证「输入 + 输出」总量可控。
+ *   `@ctx: full` 是用户在脚本头显式声明的「我要看全量」，此时跳过截断（与服务端 run.ts 判据一致）。
+ */
+export const RAW_OUTPUT_MAX_BYTES = { stdout: 2000, stderr: 4000 }
+
+/**
+ * 按字节预算截尾，并在头部标注省略量。
+ * [CONSTRAINT] 多字节字符按比例折算会略超预算，量级正确即可——目的是防止数量级膨胀，不是精确限额。
+ * @param text 原文
+ * @param maxBytes 字节上限
+ */
+function capTail(text: string, maxBytes: number): string {
+  const bytes = new TextEncoder().encode(text).length
+  if (bytes <= maxBytes) return text
+  const keep = Math.max(200, Math.floor(text.length * (maxBytes / bytes)))
+  const omitted = text.length - keep
+  return `... [已省略前 ${omitted} 字符 / 共 ${text.length} 字符；需要全文请用 readText 或 --ctx:full 重跑]\n${text.slice(-keep)}`
+}
+
+/** 追加 stderr / stdout 原始输出块（[raw-output-budget-v1] 超预算截尾，@ctx: full 跳过） */
 export function appendRawOutputs(p: string[], r: PromptResult | null): void {
   if (!r) return
+  const keepFull = r.scriptCtx === 'full'
   if (r.stderr) {
     p.push('# 错误输出 (stderr)')
-    pushFenced(p, r.stderr)
+    pushFenced(p, keepFull ? r.stderr : capTail(r.stderr, RAW_OUTPUT_MAX_BYTES.stderr))
   }
   if (r.stdout) {
     p.push('# Stdout')
-    pushFenced(p, r.stdout)
+    pushFenced(p, keepFull ? r.stdout : capTail(r.stdout, RAW_OUTPUT_MAX_BYTES.stdout))
   }
 }
 

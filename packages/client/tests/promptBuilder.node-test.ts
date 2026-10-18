@@ -20,6 +20,7 @@ import {
   fenceFor,
   pushFenced,
 } from '../components/script/prompt-builder.js'
+import { capFilesByBudget } from '../utils/contextBuilder.js'
 
 it('appendFingerprints：无指纹 / 空数组时不产出任何块', () => {
   const cases: Array<Parameters<typeof appendFingerprints>[1]> = [
@@ -137,6 +138,28 @@ it('appendRawOutputs：stdout 含三反引号与探针词表时，词表必须�
   assert.match(text, /^# 错误输出 \(stderr\)$/m, 'stderr 块标题形态保持不变')
 })
 
+// [raw-output-budget-v1] stdout / stderr 进 prompt 前的体积预算。
+// [判据承重] 把 capTail 改回恒等函数 ⇒ T1 必红；把 keepFull 判断删掉 ⇒ T2 必红。
+it('appendRawOutputs：超预算的 stdout/stderr 被截尾并标注省略', () => {
+  const big = 'x'.repeat(50000)
+  const p: string[] = []
+  appendRawOutputs(p, { ok: true, code: 0, stdout: big, stderr: big })
+  const text = p.join('\n')
+  assert.ok(text.includes('已省略'), '超预算必须标注省略量')
+  assert.ok(text.length < big.length, '总量必须显著小于原文（两个 50KB 若都保留会 >100KB）')
+  assert.ok(text.includes('# Stdout'), '段落标题仍须保留')
+  assert.ok(text.includes('# 错误输出 (stderr)'), 'stderr 段落标题仍须保留')
+})
+
+it('appendRawOutputs：scriptCtx=full 时跳过截断（用户在脚本头显式要求全量）', () => {
+  const big = 'y'.repeat(50000)
+  const p: string[] = []
+  appendRawOutputs(p, { ok: true, code: 0, stdout: big, scriptCtx: 'full' })
+  const text = p.join('\n')
+  assert.ok(!text.includes('已省略'), '@ctx: full 不得截断（与服务端 run.ts 判据一致）')
+  assert.ok(text.includes(big), '全文必须原样保留')
+})
+
 it('appendTscReport / appendLintReport / appendTestReport：含反引号的输出不得撑破围栏', () => {
   const noisy = ['错误信息里带代码围栏:', '```', `${MARKER_VOCAB}`, '```', '结尾'].join('\n')
   const cases: Array<[string, (p: string[]) => void]> = [
@@ -244,6 +267,77 @@ it('appendFailedSourceFiles：# 相关文件源码 段落必须落在围栏内�
     )
     assert.ok(inside[0].includes('1| export const a = 1'), '<file path=…> 与 `N| ` 行号契约须逐字符不变')
     assert.ok(inside[0].includes(`3| // ${MARKER_VOCAB}`), '被 dump 的源码行整体在块内（含探针词表那行）')
+  } finally {
+    globalThis.fetch = origFetch
+  }
+})
+
+// [prompt-source-budget-v1] 失败轮附加源码的预算控制。
+// [判据承重] 把 capFilesByBudget 改成直接返回 files ⇒ T2/T3 必红；
+//   删掉 BUILD_ARTIFACT_RE 过滤 ⇒ T4 必红（实测 dist/interceptor.cjs 单文件 20KB+）。
+
+it('capFilesByBudget：总量未超预算时原样返回，不做任何裁剪', () => {
+  const files = [
+    { path: 'a.ts', content: 'x'.repeat(100) },
+    { path: 'b.ts', content: 'y'.repeat(100) },
+  ]
+  const { files: out, truncated } = capFilesByBudget(files, 1024)
+  assert.equal(out.length, 2)
+  assert.equal(truncated.length, 0, '预算内不应记录任何截断')
+  assert.equal(out[0].content, files[0].content, '预算内内容必须逐字符不变')
+})
+
+it('capFilesByBudget：超预算的文件只保留首尾，并在中间标注省略行数', () => {
+  const big = Array.from({ length: 200 }, (_, i) => `line${i + 1}`).join('\n')
+  const files = [
+    { path: 'small.ts', content: 'ok' },
+    { path: 'big.ts', content: big },
+  ]
+  const { files: out, truncated } = capFilesByBudget(files, 300)
+  assert.equal(out.length, 2, '文件数不变，只是内容被裁')
+  assert.deepEqual(truncated, ['big.ts'], '必须记录被裁剪的路径')
+  const body = out[1].content
+  assert.ok(body.includes('line1\n'), '首部必须保留')
+  assert.ok(body.includes('line200'), '尾部必须保留')
+  assert.ok(body.includes('已省略'), '中间必须有省略标注')
+  assert.ok(!body.includes('line100'), '中段必须被裁掉')
+})
+
+it('capFilesByBudget：error 条目与预算内文件永不被裁', () => {
+  const files = [
+    { path: 'a.ts', content: 'x'.repeat(100) },
+    { path: 'broken.ts', content: '', error: 'ENOENT' },
+    { path: 'big.ts', content: Array.from({ length: 300 }).fill('z').join('\n') },
+  ]
+  const { files: out, truncated } = capFilesByBudget(files, 200)
+  assert.deepEqual(out[1], files[1], 'error 条目必须原样保留（渲染成 <file error=…/> 契约）')
+  assert.deepEqual(truncated, ['big.ts'], '只有真正被裁的才进 truncated')
+})
+
+it('appendFailedSourceFiles：构建产物不进 prompt，超预算文件被裁首尾', async () => {
+  const origFetch = globalThis.fetch
+  // [prompt-source-budget-v1] 必须真超 SOURCE_BUDGET_BYTES（12KB）才触发裁剪：1000 行 × 19B ≈ 19KB
+  const bigBody = Array.from({ length: 1000 }).fill('export const x = 1').join('\n')
+  globalThis.fetch = (async () => ({
+    json: async () => ({
+      files: [
+        { path: 'apps/standalone/dist/interceptor.cjs', content: 'DIST'.repeat(3000) },
+        { path: 'packages/core/src/real.ts', content: bigBody },
+      ],
+    }),
+  })) as unknown as typeof fetch
+  try {
+    const p: string[] = []
+    await appendFailedSourceFiles(
+      p,
+      { ok: false, code: 1, errorFiles: ['apps/standalone/dist/interceptor.cjs', 'packages/core/src/real.ts'] },
+      [],
+      { stripComments: false, stripBlankLines: false, errorLocs: new Map() },
+    )
+    const text = p.join('\n')
+    assert.ok(!text.includes('DISTDIST'), 'dist 产物内容不得进 prompt（由源码同步生成，对诊断无价值）')
+    assert.ok(text.includes('已过滤 1 个构建产物'), '必须明确告知过滤了几个产物')
+    assert.ok(text.includes('已省略'), '超预算文件必须被裁首尾并标注')
   } finally {
     globalThis.fetch = origFetch
   }

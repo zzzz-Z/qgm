@@ -22,6 +22,7 @@ declare global {
   const KEY_THEME: typeof import('./composables/ui/useAppStorage').KEY_THEME
   const LESSONS_BUDGET: typeof import('./composables/ai/load-lessons').LESSONS_BUDGET
   const LIMIT_TOAST_GENERIC: typeof import('./utils/limit-notice').LIMIT_TOAST_GENERIC
+  const LIVE_OUTPUT_MAX_CHARS: typeof import('./composables/runner/live-output').LIVE_OUTPUT_MAX_CHARS
   const LS_BASH_POLICY_KEY: typeof import('./utils/storage').LS_BASH_POLICY_KEY
   const LS_CMD_HISTORY_KEY: typeof import('./utils/storage').LS_CMD_HISTORY_KEY
   const LS_SIDE_WIDTH_KEY: typeof import('./utils/storage').LS_SIDE_WIDTH_KEY
@@ -35,6 +36,7 @@ declare global {
   const PHASE_LABEL: typeof import('./utils/timeline-build').PHASE_LABEL
   const REFRESH_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').REFRESH_GUARD_MS
   const RESUME_WATCHDOG_MS: typeof import('./composables/ai/useAiReplyHandlers').RESUME_WATCHDOG_MS
+  const SOURCE_BUDGET_BYTES: typeof import('./utils/contextBuilder').SOURCE_BUDGET_BYTES
   const STOPPED_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').STOPPED_GUARD_MS
   const STOPPED_HEAD: typeof import('./utils/stop-notice').STOPPED_HEAD
   const STOPPED_PLAIN_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').STOPPED_PLAIN_GUARD_MS
@@ -57,6 +59,7 @@ declare global {
   const activeSessionId: typeof import('./composables/ui/useAppStorage').activeSessionId
   const aiWindowListCollapsed: typeof import('./composables/ui/useAiWindowListCollapse').aiWindowListCollapsed
   const ansiToHtml: typeof import('./utils/ansi-render').ansiToHtml
+  const appendCapped: typeof import('./composables/runner/live-output').appendCapped
   const applyToEditor: typeof import('./composables/runner/useScriptInbox').applyToEditor
   const askUser: typeof import('./composables/ui/useAsk').askUser
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
@@ -71,6 +74,7 @@ declare global {
   const buildMergedFeedbackText: typeof import('./composables/runner/feedback-merge').buildMergedFeedbackText
   const buildOneCard: typeof import('./utils/timeline-build').buildOneCard
   const buildSkillsBlock: typeof import('./composables/ai/skill-registry').buildSkillsBlock
+  const capFilesByBudget: typeof import('./utils/contextBuilder').capFilesByBudget
   const clampTextPreview: typeof import('./utils/timeline-preview').clampTextPreview
   const clearEvents: typeof import('./composables/ui/useEventStream').clearEvents
   const clearInbox: typeof import('./composables/runner/useScriptInbox').clearInbox
@@ -202,6 +206,7 @@ declare global {
   const normalizeStopHit: typeof import('./utils/stop-notice').normalizeStopHit
   const notifyLimit: typeof import('./composables/ai/reply-toasts').notifyLimit
   const notifyResumeExhausted: typeof import('./composables/ai/reply-toasts').notifyResumeExhausted
+  const notifyResumeFailed: typeof import('./composables/ai/reply-toasts').notifyResumeFailed
   const notifyResumeTimeout: typeof import('./composables/ai/reply-toasts').notifyResumeTimeout
   const notifySelfcheckReject: typeof import('./composables/ai/reply-toasts').notifySelfcheckReject
   const notifySiteError: typeof import('./composables/ai/reply-toasts').notifySiteError
@@ -650,7 +655,7 @@ declare global {
   export type { AskPayload } from './utils/ask-parser'
   import('./utils/ask-parser')
   // @ts-ignore
-  export type { ContextCleanOptions } from './utils/contextBuilder'
+  export type { ContextFile, ContextCleanOptions } from './utils/contextBuilder'
   import('./utils/contextBuilder')
   // @ts-ignore
   export type { ReplyMarkScan } from './utils/reply-mark'
@@ -685,6 +690,7 @@ declare module 'vue' {
     readonly KEY_THEME: UnwrapRef<typeof import('./composables/ui/useAppStorage')['KEY_THEME']>
     readonly LESSONS_BUDGET: UnwrapRef<typeof import('./composables/ai/load-lessons')['LESSONS_BUDGET']>
     readonly LIMIT_TOAST_GENERIC: UnwrapRef<typeof import('./utils/limit-notice')['LIMIT_TOAST_GENERIC']>
+    readonly LIVE_OUTPUT_MAX_CHARS: UnwrapRef<typeof import('./composables/runner/live-output')['LIVE_OUTPUT_MAX_CHARS']>
     readonly LS_BASH_POLICY_KEY: UnwrapRef<typeof import('./utils/storage')['LS_BASH_POLICY_KEY']>
     readonly LS_CMD_HISTORY_KEY: UnwrapRef<typeof import('./utils/storage')['LS_CMD_HISTORY_KEY']>
     readonly LS_SIDE_WIDTH_KEY: UnwrapRef<typeof import('./utils/storage')['LS_SIDE_WIDTH_KEY']>
@@ -698,6 +704,7 @@ declare module 'vue' {
     readonly PHASE_LABEL: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_LABEL']>
     readonly REFRESH_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['REFRESH_GUARD_MS']>
     readonly RESUME_WATCHDOG_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['RESUME_WATCHDOG_MS']>
+    readonly SOURCE_BUDGET_BYTES: UnwrapRef<typeof import('./utils/contextBuilder')['SOURCE_BUDGET_BYTES']>
     readonly STOPPED_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['STOPPED_GUARD_MS']>
     readonly STOPPED_HEAD: UnwrapRef<typeof import('./utils/stop-notice')['STOPPED_HEAD']>
     readonly STOPPED_PLAIN_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['STOPPED_PLAIN_GUARD_MS']>
@@ -720,6 +727,7 @@ declare module 'vue' {
     readonly activeSessionId: UnwrapRef<typeof import('./composables/ui/useAppStorage')['activeSessionId']>
     readonly aiWindowListCollapsed: UnwrapRef<typeof import('./composables/ui/useAiWindowListCollapse')['aiWindowListCollapsed']>
     readonly ansiToHtml: UnwrapRef<typeof import('./utils/ansi-render')['ansiToHtml']>
+    readonly appendCapped: UnwrapRef<typeof import('./composables/runner/live-output')['appendCapped']>
     readonly applyToEditor: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['applyToEditor']>
     readonly askUser: UnwrapRef<typeof import('./composables/ui/useAsk')['askUser']>
     readonly asyncComputed: UnwrapRef<typeof import('@vueuse/core')['asyncComputed']>
@@ -734,6 +742,7 @@ declare module 'vue' {
     readonly buildMergedFeedbackText: UnwrapRef<typeof import('./composables/runner/feedback-merge')['buildMergedFeedbackText']>
     readonly buildOneCard: UnwrapRef<typeof import('./utils/timeline-build')['buildOneCard']>
     readonly buildSkillsBlock: UnwrapRef<typeof import('./composables/ai/skill-registry')['buildSkillsBlock']>
+    readonly capFilesByBudget: UnwrapRef<typeof import('./utils/contextBuilder')['capFilesByBudget']>
     readonly clampTextPreview: UnwrapRef<typeof import('./utils/timeline-preview')['clampTextPreview']>
     readonly clearEvents: UnwrapRef<typeof import('./composables/ui/useEventStream')['clearEvents']>
     readonly clearInbox: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['clearInbox']>
@@ -865,6 +874,7 @@ declare module 'vue' {
     readonly normalizeStopHit: UnwrapRef<typeof import('./utils/stop-notice')['normalizeStopHit']>
     readonly notifyLimit: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifyLimit']>
     readonly notifyResumeExhausted: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifyResumeExhausted']>
+    readonly notifyResumeFailed: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifyResumeFailed']>
     readonly notifyResumeTimeout: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifyResumeTimeout']>
     readonly notifySelfcheckReject: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifySelfcheckReject']>
     readonly notifySiteError: UnwrapRef<typeof import('./composables/ai/reply-toasts')['notifySiteError']>

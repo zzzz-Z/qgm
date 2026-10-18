@@ -3,6 +3,7 @@ import { useSessionStorage } from '@vueuse/core'
 import { emit } from '../ui/useEventStream'
 import type { BaselineDiffResponse, Change, ChangeEntry, DecisionPayload, RunResponse } from '../../types'
 import { uid } from '../../utils/id'
+import { appendCapped } from './live-output'
 // [restore-import-v1] readNdjson 早前被按 auto-import 名单清理时误删：app 侧兜底可跑，
 // 但 tsc --noEmit 报 Cannot find name 'readNdjson'（run 的 NDJSON 流解析依赖它）
 import { readNdjson } from '../../utils/stream'
@@ -164,7 +165,7 @@ async function pollBgOnce(id: string): Promise<boolean> {
   w.from = Number(data.next) || w.from
   if (text) {
     bgLogs.value = { ...bgLogs.value, [id]: (bgLogs.value[id] || '') + text }
-    liveStdout.value += text
+    appendCapped(liveStdout, text)
   }
   return data.done === true
 }
@@ -528,11 +529,11 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
       } else if (frame.type === 'chunk') {
         if (frame.stream === 'stdout') {
           const data = String(frame.data || '')
-          liveStdout.value += data
+          appendCapped(liveStdout, data)
           // [bg-stream-v1] 后台任务 id 标记走前台 stdout，随 chunk 实时到达 ⇒ 立刻起轮询
           for (const id of scanBgIds(data)) startBgWatch(id)
         } else if (frame.stream === 'stderr') {
-          liveStderr.value += String(frame.data || '')
+          appendCapped(liveStderr, String(frame.data || ''))
         }
         flushChunk()
       }

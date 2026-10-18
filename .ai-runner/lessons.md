@@ -3280,3 +3280,15 @@ Chromium 的 `SingletonLock` 形如 `hostname-pid` 的软链。用 `readFile(loc
 ## `.finally()` 会把 Promise 的失败吞干净
 
 `copyAndFill` 返回的 `FillResult` 是值不是异常，`.finally()` 既不接收也不检查它。原实现写 `.finally(() => endAutoResume(sid))` 本意只是清理，但顺带让所有失败路径静默了。改成 `.then().catch().finally()` 三连后，失败才第一次变得可见。
+
+## 服务端做了截断 ≠ 客户端用了截断后的值
+
+`run.ts` 认真地把 `stdoutTail` 截到 2000 字节，但 `useRunner.ts` 用 `liveStdout.value || s.stdoutTail` —— `||` 的短路语义让服务端的努力完全白费。这类「上游守规矩、下游绕过」的缺陷极难从日志里发现，因为两边各自看起来都对。
+
+排查方法是比对实测数据与理论预期：日志显示 p90 = 6.1 KB、max = 25.5 KB，而服务端明明把每个输出段都截到了 2–4 KB，说明有别的东西在放大体积。顺着这个矛盾往下挖才找到 `||`。
+
+## 测试数据量必须真能触发被测条件
+
+给 `capFilesByBudget` 写的 T4 用例初始用 400 行 × 19 字节 ≈ 7.6 KB，没超过 12 KB 预算，`已省略` 断言直接失败。改成 1000 行 ≈ 19 KB 才真正触发裁剪。
+
+判据承重的前提是「被测分支真的被走到」——数据量不够时，断言看似在测预算，实际在测「预算内不裁剪」这条相反的路径。
