@@ -453,6 +453,25 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     }
   }
 
+  /**
+   * [turn-block-frame-v1] 块帧 → 总线事件（只渲染，不执行）。
+   * [WHY 不在这里跑脚本] 块是渲染数据，执行由 runner 按 (turn,id) 账本另行触发。
+   *   在这里顺手执行会把「渲染」与「执行」重新耦合成旧模型——那正是本方案要拆开的东西。
+   * [CONSTRAINT] 坏块静默丢弃但不抛：一条畸形帧不该让整条时间线中断；
+   *   服务端已把坏块记进 turns.jsonl 的 `skipped`，排查有据。
+   */
+  function handleBlockMsg(payload: MessageEvent['data'], e?: MessageEvent): void {
+    // [CONSTRAINT] 与 handleAiReply 同一道「是否来自当前 AI 站点」的门（无头侧的假事件 origin 是
+    //   `ws://headless`，与 reply 路径完全同形，因此这里不会把块滤掉）：
+    //   少了它，多工作区并行时 A 窗口的块会渲染进 B 窗口的时间线。
+    if (e && !isFromActiveAiSite(e)) return
+    const block = payload ? (payload as { block?: unknown }).block : null
+    if (!block || typeof block !== 'object') return
+    const type = String((block as { type?: string }).type || '')
+    const titles: Record<string, string> = { say: 'AI 说明', script: 'AI 脚本', ask: 'AI 提问', handoff: '交班摘要' }
+    try { emitBus('ai:block', titles[type] || 'AI 块', { payload: { block } }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
+  }
+
   /** 处理 ai-runner:summary 摘要回包 */
   function handleSummaryMsg(payload: MessageEvent['data']): void {
     const text = String(payload.text || '')
@@ -583,6 +602,9 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       return
     }
     if (t === 'ai-runner:summary') return handleSummaryMsg(payload)
+    // [turn-block-frame-v1] 块帧路由：无头侧由 useAppStartup 把 WS `ai:block` 包成同形假事件，
+    //   油猴侧（P3）直接发这个 type —— 两条通道共用同一个处理点，与 reply/script 同构。
+    if (t === 'ai-runner:block') return handleBlockMsg(payload, e)
     if (t === 'ai-runner:new-session-created') return handleNewSessionCreated(payload)
     if (t === 'ai-runner:url-updated') return handleUrlUpdated(payload)
     if (t === 'ai-runner:session-id' && payload.id) handleSessionIdUpdate(payload)

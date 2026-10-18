@@ -24,6 +24,14 @@ export interface AiTransport {
   sendLoginGui?: (sid: string, url?: string) => boolean
   // [replay-flag-v1] 第三参 replayed=true 表示断线重连的历史回放帧，消费方仅可做 UI 恢复、禁止重入 auto-loop
   onReply: (cb: (r: unknown, sid: string, replayed?: boolean) => void) => () => void
+  /**
+   * [turn-block-frame-v1] 订阅块帧（`ai:block`）：一个块一帧，按 `seq` 到达。
+   * [WHY 单独开一条订阅而不是塞进 onReply] 块帧不是「一条回复」，它没有 `kind` 语义、
+   *   也不参与 auto-loop 判定（只有渲染）。混进 onReply 会让 `useAppStartup` 那条
+   *   「帧 → 假 MessageEvent → onSessionIdMessage」的桥接多一个必须特判的 shape。
+   * [CONSTRAINT] `replayed=true` 时只可用于 UI 恢复（时间线补齐），**不得**触发执行。
+   */
+  onBlock?: (cb: (block: unknown, sid: string, replayed?: boolean) => void) => () => void
   onSummary: (cb: (text: string, sid: string, degraded: boolean) => void) => () => void
   /** [headless-state-err-v1] 订阅服务端 headless:state，UI 侧据此显示 error（如未登录） */
   onState?: (cb: (state: string, detail: string, sid: string) => void) => () => void
@@ -84,6 +92,9 @@ function callDs(name: string, ...args: unknown[]): boolean {
  */
 export function createTampermonkeyTransport(): AiTransport {
   const replyCbs = new Set<(r: unknown, sid: string, replayed?: boolean) => void>()
+  // [turn-block-frame-v1] 块帧订阅。油猴侧在 P3 才会发 ai-runner:block；此实现先具有同一形状，
+  //   免得 P3 时再改一次接口与两处实现。
+  const blockCbs = new Set<(b: unknown, sid: string, replayed?: boolean) => void>()
   const summaryCbs = new Set<(t: string, sid: string, d: boolean) => void>()
   const newSidCbs = new Set<(url: string, id: string) => void>()
 
@@ -131,11 +142,12 @@ export function createTampermonkeyTransport(): AiTransport {
       muted = false
     },
     onReply(cb) { replyCbs.add(cb); return () => { replyCbs.delete(cb) } },
+    onBlock(cb) { blockCbs.add(cb); return () => { blockCbs.delete(cb) } },
     onSummary(cb) { summaryCbs.add(cb); return () => { summaryCbs.delete(cb) } },
     onNewSessionCreated(cb) { newSidCbs.add(cb); return () => { newSidCbs.delete(cb) } },
     dispose() {
       if (typeof window !== 'undefined') window.removeEventListener('message', onMessage)
-      replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear()
+      replyCbs.clear(); blockCbs.clear(); summaryCbs.clear(); newSidCbs.clear()
     },
   }
 }
@@ -147,6 +159,8 @@ export function createTampermonkeyTransport(): AiTransport {
  */
 export function createHeadlessTransport(wsUrl?: string): AiTransport {
   const replyCbs = new Set<(r: unknown, sid: string, replayed?: boolean) => void>()
+  // [turn-block-frame-v1] 块帧订阅（ai:block）：与 replyCbs 分开，见 AiTransport.onBlock 的说明
+  const blockCbs = new Set<(b: unknown, sid: string, replayed?: boolean) => void>()
   const summaryCbs = new Set<(t: string, sid: string, d: boolean) => void>()
   const newSidCbs = new Set<(url: string, id: string) => void>()
   // [headless-state-err-v1] 服务端 state 订阅（error 用于 UI 反馈）
@@ -257,6 +271,8 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
         for (const cb of gitChangedCbs) { try { cb() } catch { /* swallow: 单订阅者异常不阻断其他 */ } }
       }
       else if (msg.t === 'headless:reply') { for (const cb of replyCbs) cb(msg.reply, sid, replayed) }
+      // [turn-block-frame-v1] 块帧：一个块一帧。replayed 透传 —— 回放只补时间线，不得触发执行。
+      else if (msg.t === 'ai:block') { for (const cb of blockCbs) { try { cb(msg.block, sid, replayed) } catch { /* swallow: 单订阅者异常不阻断其他 */ } } }
       else if (msg.t === 'headless:script') { for (const cb of replyCbs) cb({ kind: 'script', item: msg.item }, sid, replayed) }
       else if (msg.t === 'headless:summary') { for (const cb of summaryCbs) cb(String(msg.text || ''), sid, Boolean(msg.degraded)) }
       else if (msg.t === 'headless:new-session-created') { for (const cb of newSidCbs) cb(String(msg.url || ''), String(msg.id || '')) }
@@ -320,6 +336,7 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     sendNewSession(sid, p) { return send('headless:new-session', { sid, summary: p.summary }) },
     sendLoginGui(sid, url) { return send('headless:login-gui', { sid, url }) },
     onReply(cb) { replyCbs.add(cb); return () => { replyCbs.delete(cb) } },
+    onBlock(cb) { blockCbs.add(cb); return () => { blockCbs.delete(cb) } },
     onSummary(cb) { summaryCbs.add(cb); return () => { summaryCbs.delete(cb) } },
     onNewSessionCreated(cb) { newSidCbs.add(cb); return () => { newSidCbs.delete(cb) } },
     onState(cb) { stateCbs.add(cb); return () => { stateCbs.delete(cb) } },
@@ -329,7 +346,7 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     onGitChanged(cb) { gitChangedCbs.add(cb); return () => { gitChangedCbs.delete(cb) } },
     // [ws-reconnect-v1] disposed 阻断重连定时器；切换 transport 时旧连接彻底退役，不产生僵尸重连
     // [dispose-leak-v1] queue / ackWaiters 亦须清理：前者滞留字符串引用，后者悬挂 timer + Promise
-    dispose() { disposed = true; muted = false; clearReconnect(); try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; queue.length = 0; for (const w of ackWaiters) { clearTimeout(w.timer); w.resolve({ ok: false, reason: 'disposed' }) } ackWaiters.length = 0; replyCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear(); filesChangedCbs.clear(); gitChangedCbs.clear() },
+    dispose() { disposed = true; muted = false; clearReconnect(); try { if (ws) ws.close() } catch { /* swallow: WS 已断/未建立，close 幂等失败忽略 */ } ws = null; queue.length = 0; for (const w of ackWaiters) { clearTimeout(w.timer); w.resolve({ ok: false, reason: 'disposed' }) } ackWaiters.length = 0; replyCbs.clear(); blockCbs.clear(); summaryCbs.clear(); newSidCbs.clear(); stateCbs.clear(); filesChangedCbs.clear(); gitChangedCbs.clear() },
     // [mute-flag-v1] 用 flag 静音；原实现清空回调集合不可恢复，unMute 后所有订阅者永久失联
     mute() { muted = true },
     unMute() { muted = false },

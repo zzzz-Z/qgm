@@ -406,13 +406,32 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | P4-b | 完成（2026-10-19） | 2026-10-19 | `attach-ws` 发块帧（`desc`/`why` 取真值）+ `turns.jsonl` transition + 重放清单；`turnToFrames` 4 条 / `replay-buffer` 7 条 |
 | P4-c | 待做 | — | `hello.caps` 与客户端的握手判定（与 P6 一起做才有意义） |
 | P6-a | 完成（2026-10-19） | 2026-10-19 | `buildOneCard` 认 `ai:block`（say/ask/handoff 建卡，script 不建）+ 采信守卫 13 条 |
-| P6-b | 待做 | — | `useAiReplyHandlers` 订阅块帧 + 时间线按 `seq` 排序 + 脚本卡 `desc/why` 走块真值 |
+| P6-b | 完成（2026-10-19） | 2026-10-19 | `onBlock` 订阅（两处实现）+ `ai-runner:block` 路由 + `emitBus('ai:block')`；transport 守卫 +1（29） |
 | P3 | — | — | |
 | P4 | — | — | |
 | P5 | — | — | |
 | P6 | — | — | |
 | P7 | — | — | |
 | P8 | — | — | 观察期后 |
+
+### P6-b 实测记录（2026-10-19）
+
+块帧走**与 reply 完全相同的桥**：WS `ai:block` → `transport.onBlock` → `useAppStartup` 包成同形假事件
+（`type: 'ai-runner:block'`, origin `ws://headless`）→ `onSessionIdMessage` → `handleBlockMsg` →
+`emitBus('ai:block', 标题, { payload: { block } })` → `buildOneCard`（P6-a）。油猴侧 P3 直接发同 type，
+两条通道共用同一个处理点 —— 与 reply / script 同构。
+
+**为什么单开 `onBlock` 而不塞进 `onReply`**：块没有 `kind` 语义、也不参与 auto-loop 判定，
+只有渲染。混进 `onReply` 会让那条桥多一个必须特判的 shape；一旦漏判，块会被喂进 `handleAiReply`
+并走「kind 缺失」的静默丢弃。守卫里有一条专门断言「`ai:block` 不混进 `onReply`」。
+
+**两个刻意选择**：
+1. `replayed` 的块**照样派发**。回放只补时间线（渲染），「跑过没有」的权威是 runner 的 `(turn,id)` 账本，
+   渲染层不该承担这个判断。
+2. `handleBlockMsg` 复用 `handleAiReply` 那道 `isFromActiveAiSite` 门：否则多工作区并行时
+   A 窗口的块会渲染进 B 窗口的时间线。
+
+**变异验证**：删掉 `msg.t === 'ai:block'` 派发行 ⇒ 恰好 1 条红（新加的那条）。
 
 ### P6-a 实测记录（2026-10-19）
 

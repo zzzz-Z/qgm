@@ -339,3 +339,27 @@ test('useAiTransport: 返回 { transport }', () => {
   assert.ok(r.transport)
   assert.equal(typeof r.transport.kind, 'string')
 })
+
+// [turn-block-frame-v1] 块帧是**独立**订阅通道：一个块一帧，与「一条回复」语义不同。
+// [WHY 必须断言「不混进 onReply」] 若混进去，useAppStartup 那条「帧 → 假 MessageEvent → 分发器」的桥
+//   就要为块多一个特判分支；而块没有 kind 语义、也不该参与 auto-loop 判定 —— 一旦混入，
+//   旧回复链路会被块帧喂进 handleAiReply，产生「kind 缺失」类静默丢弃。
+test('createHeadlessTransport: ai:block 走 onBlock 而不混进 onReply，replayed 透传', async () => {
+  const t = mod.createHeadlessTransport()
+  t.sendFill('s', { prompt: 'p' }) // 触发建连
+  await new Promise(r => setTimeout(r, 0))
+  const blocks: Array<{ block: unknown, replayed: boolean }> = []
+  const replies: unknown[] = []
+  const offBlock = t.onBlock!((block, _sid, replayed) => { blocks.push({ block, replayed: Boolean(replayed) }) })
+  t.onReply((r) => { replies.push(r) })
+  const stub = WSStub.last!
+  const block = { turnId: 3, blockId: 'c1', seq: 0, type: 'script', lang: 'js', desc: 'd', why: 'w', code: 'x' }
+  stub.dispatchMessage(JSON.stringify({ t: 'ai:block', sid: 's', block }))
+  stub.dispatchMessage(JSON.stringify({ t: 'ai:block', sid: 's', replay: true, block }))
+  offBlock()
+  stub.dispatchMessage(JSON.stringify({ t: 'ai:block', sid: 's', block })) // 退订后不应再收到
+  assert.deepEqual(blocks.map(x => x.replayed), [false, true], '实时帧 false、回放帧 true')
+  assert.deepEqual(blocks[0].block, block, '块载荷必须原样透传（渲染层靠它取 desc/why）')
+  assert.equal(replies.length, 0, 'ai:block 不得混进 onReply')
+  t.dispose()
+})

@@ -45,6 +45,8 @@ let _offHeadlessState: (() => void) | null = null
 // [headless-url-bridge-v1] 无头侧的 url-updated / new-session-created 两条帧
 let _offHeadlessUrl: (() => void) | null = null
 let _offHeadlessNewSid: (() => void) | null = null
+// [turn-block-frame-v1] 块帧订阅句柄（与 reply 同生命周期）
+let _offHeadlessBlock: (() => void) | null = null
 
 /** 组装 App 启动族（探测 / 重开 / 订阅 / 回放） */
 export function useAppStartup(deps: AppStartupDeps) {
@@ -98,6 +100,14 @@ export function useAppStartup(deps: AppStartupDeps) {
         const fake = { data: { type: 'ai-runner:new-session-created', url, id, site: 'headless' }, origin: 'ws://headless', source: null } as unknown as MessageEvent
         try { onSessionIdMessage(fake) } catch (error) { log.error('[headless-new-sid] 处理失败:', error) }
       })
+      // [turn-block-frame-v1] 块帧走与 reply 完全相同的桥：WS 帧 → 同形假事件 → onSessionIdMessage。
+      // [WHY 不复用 onReply] 块没有 kind 语义、也不参与 auto-loop；混进 reply 会让下游多一个必须特判的 shape。
+      // [CONSTRAINT] replayed 的块**照样派发**：回放只补时间线（渲染），执行由 runner 的 (turn,id) 账本挡住
+      //   ——账本才是「跑过没有」的权威，渲染层不必也不该承担这个判断。
+      _offHeadlessBlock = transport.onBlock?.((block: unknown, sid: string) => {
+        const fake = { data: { type: 'ai-runner:block', block, sessionId: sid, site: 'headless' }, origin: 'ws://headless', source: null } as unknown as MessageEvent
+        try { onSessionIdMessage(fake) } catch (error) { log.error('[headless-block] 处理失败:', error) }
+      }) ?? null
       log.warn('[ai-runner] 无头 reply 订阅已注册')
     } catch (error) { log.error('[headless-reply] 订阅失败:', error) }
   }
@@ -107,10 +117,12 @@ export function useAppStartup(deps: AppStartupDeps) {
     try { _offHeadlessState?.() } catch { /* swallow: 退订竞态 */ }
     try { _offHeadlessUrl?.() } catch { /* swallow: 退订竞态 */ }
     try { _offHeadlessNewSid?.() } catch { /* swallow: 退订竞态 */ }
+    try { _offHeadlessBlock?.() } catch { /* swallow: 退订竞态 */ }
     _offHeadlessReply = null
     _offHeadlessState = null
     _offHeadlessUrl = null
     _offHeadlessNewSid = null
+    _offHeadlessBlock = null
   })
 
   /**
