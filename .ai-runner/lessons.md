@@ -3368,3 +3368,26 @@ t2.replace(oldLine, '  // 注释', '  const i = s.indexOf(...)')   // ← 第三
 我上一轮判断 ScriptCard 不在视觉覆盖内，依据是 `grep -c "KnowledgePanel|knowledge"` 返回 0 后顺带认为 ScriptCard 也一样。实际 `visual.spec.ts` 里有 `06-script` 视图、`visual.spec.ts-snapshots/` 里有两张基线 PNG。
 
 教训：断言「某组件无基线保护」时，必须同时检查 ① spec 文件里的视图列表 ② snapshots 目录的实际文件。只查一处会得出相反结论，进而做出错误的「安全改动」判断。
+
+## `utimesSync` 无法精确还原 `mtimeMs`
+
+测试「mtime 未变时命中缓存」时用 `fs.utimesSync(file, st.atime, st.mtime)` 恢复时间戳，实测：
+
+text复制下载```
+mtimeMs1: 1792290162290.9812
+mtimeMs2: 1792290162290.999
+```
+
+`Date` 只有毫秒精度，原始 `mtimeMs` 带小数，还原后必然不等。单跑能过、全量跑挂（文件系统时间精度差异放大抖动）。
+
+修法两层：① 实现侧用 `Math.floor` 归一化比较（文件系统 mtime 的实际精度就是毫秒级）；② 测试侧删掉单独依赖该行为的用例，把「缓存命中」与「clear 后重读」合并——后者的前半段（改内容但 mtime 不变、必须返回旧值）已覆盖同一判据。
+
+## `vi.spyOn(node:fs)` 在 ESM 下不可写
+
+想用 `vi.spyOn(fsMod.default, 'readFileSync')` 计数读盘次数，但 `node:fs` 的 ESM 命名空间对象不可写，会抛错。且该文件没有 `import { vi }`，`tsc` 直接报 TS2304。
+
+最终放弃了 spy 方案，改用「mtime 归一化 + 内容篡改」的行为验证——判据不依赖 mock 实现细节。
+
+## 双引号字符串不能跨行
+
+用 `"it('...', async () => {\n  ...\n})"` 构造多行代码字符串时，裸换行会让 JS 解析器报 `Invalid or unexpected token`。必须用模板字符串（反引号）或显式 `\n` 拼接。

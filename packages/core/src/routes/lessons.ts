@@ -34,6 +34,7 @@ lessonsHono.post('/lessons', async (c) => {
  */
 lessonsHono.post('/lessons/match', async (c) => {
   let query = ''
+  let requestedLimit: number | null = null
   let limit = 3
   // [docs-retrieval-v1] scope: 'lessons'（默认，向后兼容）| 'docs'。
   // 无 'all'——lessons+docs 混语料会让 df/DF_RATIO_MAX/avgLen 双向污染，要两边发两次请求。
@@ -42,7 +43,11 @@ lessonsHono.post('/lessons/match', async (c) => {
     const body = await c.req.json()
     query = String(body && body.query ? body.query : '')
     const n = Number(body && body.limit)
-    if (Number.isFinite(n) && n > 0 && n <= 10) limit = Math.floor(n)
+    if (Number.isFinite(n) && n > 0) {
+      requestedLimit = Math.floor(n)
+      // [limit-visible-v1] 与 /skills/match 同口径：钳到上限而非静默降回默认值。
+      limit = Math.min(requestedLimit, 10)
+    }
     if (body && body.scope === 'docs') scope = 'docs'
   } catch { /* 请求体非 JSON，按空查询处理 */ }
 
@@ -59,7 +64,7 @@ lessonsHono.post('/lessons/match', async (c) => {
         score: Number(r.score.toFixed(3)),
         matched: r.matched,
       }))
-      return c.json({ ok: true, query, scope, matches })
+      return c.json({ ok: true, query, scope, matches, requestedLimit, appliedLimit: limit })
     }
     const docs = listLessonDocs(getRoot())
     const ranked = rankLessons(query, docs, limit)
@@ -70,8 +75,8 @@ lessonsHono.post('/lessons/match', async (c) => {
       score: Number(r.score.toFixed(3)),
       matched: r.matched,
     }))
-    return c.json({ ok: true, query, scope, matches })
+    return c.json({ ok: true, query, scope, matches, requestedLimit, appliedLimit: limit })
   } catch {
-    return c.json({ ok: true, query, scope, matches: [] })
+    return c.json({ ok: true, query, scope, matches: [], requestedLimit, appliedLimit: limit })
   }
 })

@@ -37,6 +37,24 @@ export const skillsHono = new Hono()
  * [CONSTRAINT] 目录缺失或读取失败一律返回空数组，不抛错——首问不应因技能目录异常而中断。
  * [CHANGE-IMPACT] 被 GET /skills、POST /skills/match 与安装侧 self-check 共用。
  */
+/**
+ * [skill-meta-cache-v1] 按 SKILL.md 的 (路径, mtimeMs) 缓存已解析的 frontmatter。
+ * [WHY] 每次 GET /skills 或 POST /skills/match 都要遍历目录并读每个 SKILL.md 全文，
+ *   而 parseFrontmatter 只扫前几十行；34 个技能即单次请求 34 次读盘，且 match 里正文
+ *   还要再读一遍。缓存后命中路径只需 stat（读元数据、不读内容）。
+ * [CONSTRAINT] 粒度是单文件 + mtime：编辑某个 SKILL.md 只失效该条，新增/删除由
+ *   readdirSync 自然发现。不用整体缓存是因为「改内容」不改目录 mtime，整体缓存会漏。
+ */
+const _skillMetaCache = new Map<string, { mtimeMs: number, meta: Record<string, string> | null }>()
+
+/**
+ * 清空 frontmatter 缓存（工作区切换 / 安装后强制刷新时调用）。
+ * [CONSTRAINT] 与 load-rules 的 clearRulesCache 同模式：模块级单例必须有显式出口。
+ */
+export function clearSkillMetaCache(): void {
+  _skillMetaCache.clear()
+}
+
 export function listSkillMetas(root: string): SkillMeta[] {
   const dir = skillsDir(root)
   const out: SkillMeta[] = []
@@ -48,17 +66,33 @@ export function listSkillMetas(root: string): SkillMeta[] {
     // 跳过 .registry.json / .store 等点开头条目（.store 是本地库，不是技能）
     if (ent.name.startsWith('.')) continue
     const skillFile = path.join(dir, ent.name, 'SKILL.md')
-    if (!fs.existsSync(skillFile)) continue
-    try {
-      const text = fs.readFileSync(skillFile, 'utf8')
-      const meta = parseFrontmatter(text)
-      if (meta) {
-        out.push({ name: meta.name, description: meta.description, keywords: meta.keywords, path: `.ai-runner/skills/${ent.name}/SKILL.md` })
-      } else {
-        // [frontmatter-warn-v1] 解析失败过去是静默跳过，技能会从清单与检索中同时消失且无信号。
-        console.warn(`[skills] frontmatter 解析失败，该技能将从清单与检索中缺席: ${ent.name}/SKILL.md`)
-      }
-    } catch { /* 单文件解析失败不阻断整表 */ }
+    // [skill-meta-cache-v1] stat 一次拿 mtime：命中缓存时省掉 readFileSync
+    let mtimeMs: number
+    // [skill-meta-cache-v1] 用 Math.floor 归一化：文件系统 mtime 的实际精度是毫秒级，
+    //   而 utimesSync 等 API 会引入亚毫秒抖动（实测 ~0.018ms）——直接比浮点会让缓存永不命中。
+    try { mtimeMs = Math.floor(fs.statSync(skillFile).mtimeMs) } catch { continue }
+    const cached = _skillMetaCache.get(skillFile)
+    let meta: Record<string, string> | null
+    if (cached && cached.mtimeMs === mtimeMs) {
+      meta = cached.meta
+    } else {
+      try {
+        meta = parseFrontmatter(fs.readFileSync(skillFile, 'utf8'))
+      } catch { meta = null }
+      _skillMetaCache.set(skillFile, { mtimeMs, meta })
+    }
+    if (!meta) {
+      // [frontmatter-warn-v1] 解析失败过去是静默跳过，技能会从清单与检索中同时消失且无信号。
+      console.warn(`[skills] frontmatter 解析失败，该技能将从清单与检索中缺席: ${ent.name}/SKILL.md`)
+      continue
+    }
+    // [frontmatter-validate-v1] name / description 缺失时不得静默入表：
+    //   name 空 → 注入标题退化为空；description 空 → BM25 的 descStats 恒为 0，等价自动降权。
+    if (!meta.name || !meta.description) {
+      console.warn(`[skills] frontmatter 缺 name 或 description，该技能将从清单与检索中缺席: ${ent.name}/SKILL.md`)
+      continue
+    }
+    out.push({ name: meta.name, description: meta.description, keywords: meta.keywords, path: `.ai-runner/skills/${ent.name}/SKILL.md` })
   }
   out.sort((a, b) => a.name.localeCompare(b.name))
   return out
@@ -123,12 +157,18 @@ function readSkillBody(root: string, relPath: string): string {
  */
 skillsHono.post('/skills/match', async (c) => {
   let query = ''
+  let requestedLimit: number | null = null
   let limit = 3
   try {
     const body = await c.req.json()
     query = String(body && body.query ? body.query : '')
     const n = Number(body && body.limit)
-    if (Number.isFinite(n) && n > 0 && n <= 10) limit = Math.floor(n)
+    if (Number.isFinite(n) && n > 0) {
+      requestedLimit = Math.floor(n)
+      // [limit-visible-v1] 超上限时钳到 MAX_MATCH_LIMIT（原实现静默降为默认值 3，
+      //   调用方传 20 拿到 3 条会误判「只有 3 条相关」）。
+      limit = Math.min(requestedLimit, 10)
+    }
   } catch { /* 请求体非 JSON，按空查询处理 */ }
 
   const root = getRoot()
@@ -138,10 +178,16 @@ skillsHono.post('/skills/match', async (c) => {
   // [total-budget-v1] 按 score 顺序累加，超出总预算则丢弃尾部整条技能。
   // ranked 已按 score 降序，故高分技能优先保留。
   const matches: Array<{ name: string, path: string, score: number, matched: string[], body: string }> = []
+  let truncatedByBudget = false
   let used = 0
   for (const r of ranked) {
     const body = readSkillBody(root, r.path)
-    if (used + body.length > TOTAL_MAX_CHARS && matches.length > 0) break
+    if (used + body.length > TOTAL_MAX_CHARS && matches.length > 0) {
+      // [budget-truncated-visible-v1] 记录「被体积预算砍掉」，供调用方区分「只这么多相关」
+      //   与「相关很多但装不下」。
+      truncatedByBudget = true
+      break
+    }
     used += body.length
     matches.push({
       name: r.name,
@@ -152,7 +198,7 @@ skillsHono.post('/skills/match', async (c) => {
     })
   }
 
-  return c.json({ ok: true, query, matches })
+  return c.json({ ok: true, query, matches, requestedLimit, appliedLimit: limit, truncatedByBudget })
 })
 
 /**

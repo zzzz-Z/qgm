@@ -55,6 +55,10 @@ interface MatchResp {
   ok: boolean
   query: string
   matches: Array<{ title: string, body: string, state: string, score: number, matched: string[] }>
+  /** [limit-visible-v1] 调用方传入的原始 limit；非法或未传时为 null */
+  requestedLimit: number | null
+  /** [limit-visible-v1] 服务端真实生效的 limit（超上限钳到 10，非法值回落默认 3） */
+  appliedLimit: number
 }
 
 async function postMatch(body: unknown): Promise<{ status: number, json: MatchResp }> {
@@ -90,13 +94,23 @@ test('端点评据③：[REJECTED] 条目 state=rejected，且正文含状态行
 })
 
 // 变异：把 limit 夹取改成无条件的 limit = Math.floor(n) ⇒ limit=999 返回 9 条 ⇒ 红
-test('端点评据：limit 越界被夹取（999 ⇒ 落回默认 3；0 ⇒ 默认 3；10 ⇒ 上限内生效）', async () => {
+test('端点评据：limit 超上限钳到 10（不再静默落回默认 3），并在响应里暴露真实生效值', async () => {
+  // [limit-visible-v1] 旧契约是「超限静默降回默认 3」——调用方传 999 拿到 3 条会误判
+  //   「只有 3 条相关」，实际是参数被改写。现改为钳到上限 10，并在响应里回传
+  //   requestedLimit（调用方原值）与 appliedLimit（真实生效值），让降级可见。
+  // [判据承重] 把 limit 解析改回 `n <= 10 ? n : 默认` ⇒ 下面 requestedLimit 断言必红。
   const big = await postMatch({ query: 'alpha beta', limit: 999 })
-  assert.equal(big.json.matches.length, 3, 'limit=999 必须落回默认 3（透传会返回 9）')
+  assert.equal(big.json.requestedLimit, 999, '调用方原值必须原样回传')
+  assert.equal(big.json.appliedLimit, 10, 'limit=999 必须钳到上限 10，而非落回默认 3')
+  assert.equal(big.json.matches.length, 9, '夹具只有 9 条命中，故实际返回 9 条')
+
   const zero = await postMatch({ query: 'alpha beta', limit: 0 })
-  assert.equal(zero.json.matches.length, 3, 'limit=0 非法 ⇒ 落回默认 3')
+  assert.equal(zero.json.requestedLimit, null, 'limit=0 非法，requestedLimit 应为 null')
+  assert.equal(zero.json.appliedLimit, 3, 'limit=0 非法 ⇒ 保持默认 3')
+
   const ten = await postMatch({ query: 'alpha beta', limit: 10 })
-  assert.equal(ten.json.matches.length, 9, 'limit=10 在上限内，应返回全部 9 条命中')
+  assert.equal(ten.json.appliedLimit, 10, 'limit=10 在上限内')
+  assert.equal(ten.json.matches.length, 9, 'limit=10 应返回全部 9 条命中')
 })
 
 // 变异：删掉 c.req.json() 的 .catch ⇒ 非 JSON 抛错 ⇒ 500 ⇒ 红

@@ -3,6 +3,8 @@
 //       且 goal 为空时按 P0-2 要求应返回空串——该分支既是死代码又与目标冲突。
 // [CONSTRAINT] 检索失败回退为空串，绝不阻断首问；本模块无缓存（正文随查询变化，缓存无意义）。
 
+import { log } from '../../utils/log'
+
 export interface MatchedSkill {
   name: string
   path: string
@@ -30,7 +32,11 @@ export async function matchSkills(query: string, limit = 3): Promise<MatchedSkil
     })
     const j = await r.json()
     if (j && j.ok && Array.isArray(j.matches)) return j.matches as MatchedSkill[]
-  } catch { /* 检索不可用 → 退回无技能注入 */ }
+  } catch (e) {
+    // [skill-match-visible-fail-v1] 原实现静默返回空数组：一次网络抖动就让本次首问永久失去技能注入，
+    //   且首问标记照常置位（不再重试），用户只会觉得「技能好像没生效」而毫无信号。
+    log.warn('[skill-registry] 技能检索失败，本次不注入技能', e)
+  }
   return []
 }
 

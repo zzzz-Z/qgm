@@ -10,6 +10,8 @@
 // [CHANGE-IMPACT] 被 session-prompt.ts 的两个 prompt 构建函数消费；调整 LESSONS_BUDGET 会改变首问长度。
 
 /** lessons 注入预算（字符）。超出后按条目边界截断，宁少勿滥。 */
+import { log } from '../../utils/log'
+
 export const LESSONS_BUDGET = 6000
 
 /**
@@ -68,7 +70,10 @@ async function matchLessons(query: string, limit = 3): Promise<MatchedLesson[]> 
     })
     const j = await r.json()
     if (j && j.ok && Array.isArray(j.matches)) return j.matches as MatchedLesson[]
-  } catch { /* 检索不可用 → 走回退 */ }
+  } catch (e) {
+    // [lessons-match-visible-fail-v1] 原实现静默走回退：无从区分「零命中」与「端点挂了」。
+    log.warn('[load-lessons] 检索失败，回退尾截断', e)
+  }
   return []
 }
 
