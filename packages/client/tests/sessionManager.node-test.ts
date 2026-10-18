@@ -27,7 +27,7 @@ it('[session-scope-per-site-v1] useSessionManager 按站点分桶：ctxKey/scope
   assert.ok(/setSessionModelScope,/.test(src) && /switchSite,/.test(src), '导出面缺新 API')
 })
 
-it('[session-scope-per-site-v1] App.vue 接线：watch(modelId) 调 switchSite；onMounted 设作用域；onSiteChange 不再 resetSession', () => {
+it('[session-scope-per-site-v1] App.vue 接线：watch(modelId) 调 switchSite；onMounted 设作用域；不直接调 resetSession', () => {
   const app = readFileSync(join(ROOT, 'packages/client/App.vue'), 'utf8')
   // 1) 解构里含 switchSite / setSessionModelScope，且不再解构 resetSession
   assert.ok(/\bswitchSite\b/.test(app), 'App.vue 未消费 switchSite')

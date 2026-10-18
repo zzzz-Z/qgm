@@ -10,9 +10,7 @@ import TooltipHost from './components/feedback/TooltipHost.vue'
 import KeyboardHelp from './components/feedback/KeyboardHelp.vue'
 import type { SessionEntry } from './composables/ui/useAppStorage'
 import { theme } from './composables/ui/useAppStorage'
-// [site-switch-tab-follow-v1] getWindowBySidImpl 供 onSiteChange 探测「目标服务商窗口是否已开」；
-//   已开则只激活不导航（保留用户原会话），未开才新开。
-import { getWindowBySidImpl as getWindowBySid, setActiveWinSidImpl as setActiveWinSid, winSidOf } from './composables/ai/useAiWindowTable'
+import { setActiveWinSidImpl as setActiveWinSid, winSidOf } from './composables/ai/useAiWindowTable'
 
 const WorkspaceGuide = defineAsyncComponent(() => import('./components/panels/WorkspaceGuide.vue'))
 const MOCK_MODE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mock')
@@ -20,12 +18,10 @@ const hasWorkspace = ref(true)
 const keyboardHelpOpen = ref(false)
 const absenceInfo = ref<{ daysAgo: number } | null>(null)
 
-/** 自动接管模式开关 */
-const autoTakeover = useAutoTakeover()
 // [session-scope-per-site-v1] 会话上下文按站点分桶：switchSite 承担跨站点切换，
 //   不再需要 resetSession（切站点不再清空消息，改为「旧桶落盘 / 新桶恢复」）。
 const { restoreFromStorage, setSessionModelScope, switchSite } = useSessionManager()
-const { modelId, MODELS, setModel } = useAiSite()
+const { modelId } = useAiSite()
 const sessionHistory = ref<SessionEntry[]>(loadHistoryBySite(modelId.value))
 // [session-scope-per-site-v1] setup 顶层同步一次作用域：onMounted 的 restoreFromStorage
 //   才会从「当前站点」的桶里读，而不是默认桶。
@@ -178,48 +174,6 @@ async function activateWorkspaceFromQuery(): Promise<void> {
   } catch { /* 未就绪：忽略 */ }
 }
 
-/**
- * [multi-site-switch-v1] 切换 AI 站点（DeepSeek / 通义千问 等）
- * [WHY] composable 层早已具备多站点能力（MODELS + setModel，会重置 sessionId 与 url），
- *   但 2026-10-11 左栏由「站点列表」改为「工作区列表」后 UI 入口一并消失，用户无法切换。
- * [site-switch-tab-follow-v1] 2026-10-16 起去整页 reload：watch(modelId) 已响应式接管
- *   sessionHistory / activeSessionId / winSid 的切换，reload 只是为了「图省事清场」的历史包袱；
- *   改为显式 resetSession() + 激活/新开目标站点 tab——tab 跟随需求得以满足，且不再闪屏丢工作台状态。
- * [CHANGE-IMPACT] 依赖 useAiSite().setModel；失败仅 toast，不做任何切换。
- */
-async function onSiteChange(e: Event) {
-  const v = (e.target as HTMLSelectElement).value
-  if (!v || v === modelId.value) return
-  if (!setModel(v)) { toast('切换站点失败：未知的站点 id', 'error', TOAST_MEDIUM); return }
-  // [multi-site-switch-v1] 切站点 = 换 AI 服务商 = 全新 AI 上下文，SYSTEM.md 不在新上下文里。
-  //   必须清目标工作区「新站点」的首问标记；否则 wsSent=true 硬短路 → 新站点永久不注入规则。
-  try {
-    const { useWorkspaces } = await import('./composables/data/useWorkspaces')
-    const w = useWorkspaces()
-    const wsId = String(w.activeId.value || '')
-    // [key-composite-v1] 清「新站点」在该工作区下的首问键（而非当前站点）。
-    if (wsId) await w.setFirstPromptSent(wsId, v, false)
-  } catch { /* 清标记失败不阻断；用户可点开窗按钮（新建窗口分支）兜底 */ }
-  // [session-scope-per-site-v1] SessionManager 的作用域切换由 watch(modelId) → switchSite 统一承担：
-  //   此处不再显式 resetSession —— 分桶后切站点保留旧站点消息、恢复新站点消息，
-  //   若在此先清内存会覆盖 switchSite 落盘旧桶的时机（内存已空 → 落盘为空桶）。
-
-  // [site-switch-tab-follow-v1] 切/开目标站点 tab：已开则只激活（保留用户原会话），未开才新开。
-  //   与「站点共用一个 tab」的既有命名空间一致：sid = win_<modelId>。
-  const sid = winSidOf(v)
-  try {
-    const existing = getWindowBySid(sid)
-    if (existing && !existing.closed) {
-      try { existing.focus() } catch { /* 跨域 / 休眠标签页：忽略 */ }
-    } else {
-      const m = MODELS.find(x => x.id === v)
-      if (m) {
-        const { openSite } = await import('./composables/ai/useAiWindow')
-        openSite(m.url, sid)
-      }
-    }
-  } catch { /* 开窗失败不阻断切换 */ }
-}
 function onTransportChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
   // [use-storage-v1] ref 赋值即持久化，无需手动 setItem
@@ -275,17 +229,6 @@ function onLoginGui() {
           <!-- [hdr-transport-group-v1] 传输链路控组合一：把「油猴 / 无头」选择、无头引导登录、更新油猴脚本
            收进同一个分段控件（原先是三个各自描边的独立控件，视觉上零散且高度不一）。
            结构： [ 链路选择 ▾ | (无头时) 引导登录 | 更新脚本 ] -->
-          <select
-            class="site-select"
-            :value="modelId"
-            aria-label="AI 站点"
-            title="切换 AI 站点（会重置会话上下文）"
-            @change="onSiteChange"
-          >
-            <option v-for="m in MODELS" :key="m.id" :value="m.id">
-              {{ m.label }}
-            </option>
-          </select>
           <div class="transport-switch" role="group" aria-label="AI 传输链路（切换后自动刷新）" title="AI 传输链路（切换后自动刷新）">
             <select
               class="transport-select"

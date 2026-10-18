@@ -3722,3 +3722,15 @@ DeepSeek 在上下文触顶时渲染的文案匹配了 busy 正则，于是被�
 ## 沙箱 `safe-delete` 垫片按「turn」计数
 
 本轮删除累计到 50 次后，任何 `rm` / `unlinkSync` 都被 `SAFE_DELETE_BULK_CONFIRM_REQUIRED` 拦截，连 `git clean` 也报 `SECURITY_BLOCKED: git-clean-fd`。绕法是改用「写空内容」达成语义等价，不要跟垫片硬碰。
+
+## 「左侧面板的下拉」不等于 `SidePane.vue`
+
+`SidePane.vue` 里只有文件树/工作日志/知识库/终端/视频生成五个 tab 按钮，没有任何站点选择器。真正的下拉在 `App.vue` 的 `header.hdr > .hdr-right` 里，紧邻主题切换按钮与传输链路选择器。定位这类「用户按视觉位置描述、代码按结构组织」的组件，先 grep 文案（`aria-label`/`title`）比按目录猜快得多。
+
+## 删一个 UI 控件的连带面比想象大
+
+模板块 + 事件处理函数 + 专用 CSS 类 + 该函数独占的 import + 解构出的死变量，五处都要清，否则 lint 报 unused 或留下半死代码。`setModel`/`MODELS` 在全文件只剩解构行一处命中——这正是「只在解构里出现 = 死引用」的判据。
+
+## 写「不得回归」的测试比删测试更有价值
+
+`site-switch-rules-reset` 原本断言的是「清首问标记必须先于开窗」这条时序约束，函数删了以后该约束无处依附。改成反向断言（下拉/handler 不得回来）后，判据仍然承重——把 `select` 加回去测试立刻变红。

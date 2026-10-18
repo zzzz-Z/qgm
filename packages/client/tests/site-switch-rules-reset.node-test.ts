@@ -17,24 +17,15 @@ function readSrc(rel: string): string {
   return fs.readFileSync(path.join(ROOT, rel), 'utf8')
 }
 
-test('site-switch-rules-reset: onSiteChange 清目标工作区首问标记，且先于开窗', () => {
+test('[site-switch-ui-removed-v1] 顶部站点下拉已移除：App.vue 不得再有 site-select / onSiteChange', () => {
   const src = readSrc(APP_SRC)
-  const idxA = src.indexOf('function onSiteChange')
-  const idxB = src.indexOf('function onTransportChange')
-  assert.ok(idxA > 0 && idxB > idxA, 'onSiteChange / onTransportChange 未按预期出现')
-  const body = src.slice(idxA, idxB)
-  // [key-composite-v1] 三参签名：只清新站点在该工作区下的键（不误清旧站点）
-  const clearIdx = body.indexOf('setFirstPromptSent(wsId, v, false)')
-  // [site-switch-tab-follow-v1] 去 reload：切站点改为显式激活/新开 tab + resetSession
-  const openIdx = body.indexOf('openSite(m.url, sid)')
-  assert.ok(clearIdx > 0, '切站点未清首问标记：新服务商上下文永久不注入 SYSTEM.md')
-  assert.ok(openIdx > clearIdx, '清标记必须先于开窗：开窗后 watch/focus 时序不可控')
-  assert.ok(!/setFirstPromptSent\(wsId, false\)/.test(body), '不得回退为两参：会清掉全部服务商标记')
-  assert.ok(body.includes('await import'), '动态 import 缺失（防模块级循环依赖）')
-  assert.ok(body.includes('composables/data/useWorkspaces'), 'useWorkspaces 动态 import 路径不符')
-  // [site-switch-tab-follow-v1] 不得再整页 reload：reload 会清空 windowTable 内存引用，
-  //   目标站点 tab 无法被「已开则激活」的路径命中，切服务商跟随诉求失效。
-  assert.ok(!body.includes('window.location.reload()'), 'onSiteChange 不得回退为整页 reload（tab 无法跟随）')
+  // 判据承重：把下拉或 handler 任一加回去，本条必红。
+  assert.ok(!/class="site-select"/.test(src), 'App.vue 顶部仍渲染站点下拉（已按需求移除）')
+  assert.ok(!/function onSiteChange\s*\(/.test(src), 'App.vue 仍有 onSiteChange handler（已随下拉移除）')
+  // 站点切换的职责已由 watch(modelId) → switchSite 承担（见 sessionManager.node-test.ts 的接线断言），
+  //   此处只保证 UI 入口不再回来；不得顺手把 setModel/MODELS 解构留在 App.vue 里当死代码。
+  assert.ok(!/\bsetModel\b/.test(src), 'App.vue 残留 setModel 死引用')
+  assert.ok(!/\bMODELS\b/.test(src), 'App.vue 残留 MODELS 死引用')
 })
 
 // [key-composite-v1] useAiWindow 4 处 firstPromptSent 调用点必须带站点参数（复合键）。
