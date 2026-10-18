@@ -429,6 +429,75 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     }
   }
 
+  /**
+   * [headless-session-switch-v1] 输入框选择器：与 launch / fillPrompt 的判据逐字一致
+   * （导航后必须等到「fill 能用的那个输入框」，否则紧接着的 fill 必报 no-input-box）
+   */
+  const INPUT_SELECTOR = 'textarea:not([readonly]):not([disabled]), [contenteditable="true"]'
+
+  /** [headless-session-switch-v1] 归一化 URL：忽略 hash 与末尾斜杠，只比「同一文档」语义 */
+  function sameNavTarget(cur: string, want: string): boolean {
+    const norm = (u: string): string => {
+      try {
+        const x = new URL(u)
+        x.hash = ''
+        return `${x.origin}${x.pathname.replace(/\/+$/, '')}${x.search}`
+      } catch { return String(u).trim() }
+    }
+    return norm(cur) === norm(want)
+  }
+
+  /**
+   * [headless-session-switch-v1] 在**已有**浏览器会话内导航到目标会话（不新开浏览器）。
+   * [WHY] 需求是「切工作区 → 切到该工作区对应的会话；没打开过就当新会话」。
+   *   原本只有 per-sid 的浏览器（sid = `win_<modelId>`，同站点多工作区撞同一个 sid），
+   *   `pool.open` 命中已有会话就直接 return ⇒ 页面一动不动，B 工作区的提问续进 A 的对话。
+   *   给每个工作区一套 Chromium 不可行（poolLimit=5 / profile 独占锁 / 每实例数百 MB），
+   *   ⇒ 保持「1 站点 1 浏览器」，改用**页面级导航**切会话：
+   *     有绑定会话 URL → goto 该 URL；没绑定 → goto 站点首页（首页即新对话）。
+   * [CONSTRAINT] 导航后必须重装 collector：新文档里 observer 全丢，不装则回复采集退化为纯轮询。
+   * [CONSTRAINT] 失败置 state=error 并记 lastFillError（不吞）：调用方见 error 会 close + 重建，
+   *   比静默把下一条提问发进旧会话安全 —— 那正是本函数要根治的跨工作区串味。
+   */
+  async function navigateSession(sid: string, s: HeadlessSession, url: string): Promise<void> {
+    const page = s.page as Page | undefined
+    if (!page) return
+    /** 导航 + 就绪判定（输入框可见 + collector 重装），两段路（目标会话 / 回退首页）共用 */
+    const go = async (target: string): Promise<void> => {
+      await page.goto(target, { waitUntil: 'domcontentloaded', timeout: LAUNCH_TIMEOUT_MS })
+      await page.waitForSelector(INPUT_SELECTOR, { timeout: 15000, state: 'visible' })
+      await page.evaluate(ensureCollectorInPage).catch(() => null)
+    }
+    try {
+      await go(url)
+      s.url = url
+      s.state = 'idle'
+      s.detail = undefined
+      lastFillError.delete(sid)
+      try { writeChannelLog('headless', { kind: 'navigate-ok', sid, url }) } catch { /* swallow: 留痕失败不阻断 */ }
+    } catch (e) {
+      const first = String((e as Error)?.message || e).slice(0, 160)
+      // [navigate-fallback-v1] 目标会话可能已失效：站点会重定向到「对话不存在」页且没有输入框。
+      //   油猴侧表现为站点自己跳回首页，无头侧必须对齐 —— 回退到站点首页（首页即新会话），
+      //   否则一个过期绑定就让整个通道停在 error（用户看到「发了没反应 + 无头链路错误」）。
+      //   [CONSTRAINT] 回退成功仍算 idle：新会话马上就能 fill，会话绑定会由 fill 后的 url-updated 纠正。
+      try {
+        await go(defaultUrl)
+        s.url = defaultUrl
+        s.state = 'idle'
+        s.detail = undefined
+        lastFillError.delete(sid)
+        try { writeChannelLog('headless', { kind: 'navigate-fallback', sid, url, reason: first }) } catch { /* swallow: 留痕失败不阻断 */ }
+      } catch (e2) {
+        const detail = `导航到目标会话失败：${first}；回退站点首页也失败：${String((e2 as Error)?.message || e2).slice(0, 120)}`
+        s.state = 'error'
+        s.detail = detail
+        lastFillError.set(sid, detail)
+        try { writeChannelLog('headless', { kind: 'navigate-fail', sid, url, detail }) } catch { /* swallow: 留痕失败不阻断 */ }
+      }
+    }
+  }
+
   return {
     async open(sid, url) {
       // [login-gui-guard-v1] 登录窗口阻塞期间持有 profile 单实例锁，
@@ -444,7 +513,16 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       await prev
       try {
         const existing = sessions.get(sid)
-        if (existing && existing.context) return existing
+        if (existing && existing.context) {
+          // [headless-session-switch-v1] 已有会话也要看 url：原实现无条件 return existing，
+          //   客户端发来的 url（切工作区 / 开新会话的目标）被整条丢弃 ⇒ 切了工作区页面却没换会话。
+          //   [CONSTRAINT] url 为空时保持原语义（仅确保会话存活），导航只由显式带 url 的调用发起——
+          //   否则 fill 前的 sendOpen 会把刚切到新会话的页面拽回旧会话。
+          if (url && !sameNavTarget(String(existing.page ? (existing.page as Page).url() : ''), url)) {
+            await navigateSession(sid, existing, url)
+          }
+          return existing
+        }
         await acquireSlot()
         const s = await launch(sid, url || defaultUrl)
         if (s.state === 'error') releaseSlot()

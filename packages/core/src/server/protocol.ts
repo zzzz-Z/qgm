@@ -62,7 +62,10 @@ export interface TransportMessage {
 
 /** 客户端 → 服务端消息联合类型 */
 export type ClientMessage
-  = | { t: 'headless:open', sid: string, url?: string }
+  // [headless-session-switch-v1] nav=true 才按 url 导航（切工作区 / 开新会话）。
+  //   [CONSTRAINT] 缺省（含旧版客户端，它一律带 url）必须是「不导航」——
+  //   否则旧客户端的 fill 前 sendOpen 会把页面拽回它 localStorage 里的旧会话。
+  = | { t: 'headless:open', sid: string, url?: string, nav?: boolean }
     | { t: 'headless:close', sid: string }
     | { t: 'headless:list' }
     // [fill-ack-id-v1] ackId 由客户端生成并透传，服务端原样回写；并发 fill 靠它区分归属

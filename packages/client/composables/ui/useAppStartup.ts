@@ -42,6 +42,9 @@ export interface AppStartupDeps {
 // [hmr-unsub-v1] 保存取消句柄：dev HMR 重跑 setup / 组件卸载时必须成对退订
 let _offHeadlessReply: (() => void) | null = null
 let _offHeadlessState: (() => void) | null = null
+// [headless-url-bridge-v1] 无头侧的 url-updated / new-session-created 两条帧
+let _offHeadlessUrl: (() => void) | null = null
+let _offHeadlessNewSid: (() => void) | null = null
 
 /** 组装 App 启动族（探测 / 重开 / 订阅 / 回放） */
 export function useAppStartup(deps: AppStartupDeps) {
@@ -81,6 +84,20 @@ export function useAppStartup(deps: AppStartupDeps) {
         try { pushTerminalNotice(`[无头链路错误] ${message}`, { divider: true }) } catch { /* swallow: 时间线未就绪 */ }
         log.error('[headless-state] sid=', sid, 'detail=', detail)
       }) ?? null
+      // [headless-url-bridge-v1] 无头侧的 url-updated / new-session-created 与油猴同名帧语义相同，
+      //   必须同样喂给 onSessionIdMessage（它就是按 data.type 路由的分发器）。
+      // [WHY] 原实现只订了 onReply / onState ⇒ 这两条帧在传输层落到空集合：
+      //   ① confirmNav 永不触发 → 每次切工作区 8s 后必刷一条「绑定的会话可能已失效」假告警；
+      //   ② persistSessionBinding 永不执行 → 无头侧从不回写工作区会话绑定，
+      //      绑定永远停在 kind:'site' 的首页 URL，切工作区也就没有「对应会话」可切。
+      _offHeadlessUrl = transport.onUrlUpdated?.((url: string, sid: string) => {
+        const fake = { data: { type: 'ai-runner:url-updated', url, sessionId: sid, site: 'headless' }, origin: 'ws://headless', source: null } as unknown as MessageEvent
+        try { onSessionIdMessage(fake) } catch (error) { log.error('[headless-url] 处理失败:', error) }
+      }) ?? null
+      _offHeadlessNewSid = transport.onNewSessionCreated((url: string, id: string) => {
+        const fake = { data: { type: 'ai-runner:new-session-created', url, id, site: 'headless' }, origin: 'ws://headless', source: null } as unknown as MessageEvent
+        try { onSessionIdMessage(fake) } catch (error) { log.error('[headless-new-sid] 处理失败:', error) }
+      })
       log.warn('[ai-runner] 无头 reply 订阅已注册')
     } catch (error) { log.error('[headless-reply] 订阅失败:', error) }
   }
@@ -88,8 +105,12 @@ export function useAppStartup(deps: AppStartupDeps) {
   onUnmounted(() => {
     try { _offHeadlessReply?.() } catch { /* swallow: 退订竞态 */ }
     try { _offHeadlessState?.() } catch { /* swallow: 退订竞态 */ }
+    try { _offHeadlessUrl?.() } catch { /* swallow: 退订竞态 */ }
+    try { _offHeadlessNewSid?.() } catch { /* swallow: 退订竞态 */ }
     _offHeadlessReply = null
     _offHeadlessState = null
+    _offHeadlessUrl = null
+    _offHeadlessNewSid = null
   })
 
   /**

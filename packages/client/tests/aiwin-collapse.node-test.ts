@@ -108,7 +108,7 @@ test('[trae-modal-pick-v1] 新建工作区必须走模态弹窗 + 系统选择�
   assert.match(raw, /<Teleport to="body">/, '模态弹窗须用 Teleport 到 body（否则被面板 overflow 裁剪）')
   assert.match(raw, /class="awl-modal-mask"/, '缺少模态遮罩')
   assert.match(raw, /class="awl-modal-card"/, '缺少模态卡片容器')
-  assert.match(raw, /function openModal\(/, '缺少 openModal 入口')
+  assert.ok(!/function openModal\(/.test(raw), 'openModal 死代码应已删除（模板直连 onNewWorkspaceDirect）')
   assert.match(raw, /function closeModal\(/, '缺少 closeModal 出口')
   assert.match(raw, /async function onPickTarget\(/, '缺少 onPickTarget（系统选择器入口）')
   assert.ok((raw.match(/@click="onPickTarget"/g) || []).length >= 1, '缺少 onPickTarget 挂点')
@@ -122,13 +122,12 @@ test('[trae-single-mode-v1] 只保留「目录」模式：分支/克隆 tab 及�
   const raw = fs.readFileSync(path.join(ROOT, LIST_REL), 'utf8')
   // [WHY] 用户明示删掉「分支」「克隆」两个 tab；回归形态包括：
   //   ① tablist 回来了 ② worktree/clone 的模板分支还在 ③ 对应 ref/函数未清干净
-  //   [CONSTRAINT] addMode 单值保留下游 if 判据兼容外壳；断言只看结构与语义，不锁样式。
+  //   [CONSTRAINT] addMode 已彻底删除（openModal 删除后无读写点）；断言只看结构与语义，不锁样式。
   //   [CONSTRAINT] 判据前必须剥离注释：JSDoc 里会保留「原入口是 pathInput/urlInput 手填」「与 onPickRepo 共用 pickPath」等
   //     历史沿革说明，那些是有效文档而非死代码——不剥离会误判为残留。
   const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
   assert.ok(!raw.includes('role="tablist"'), '三模式 tablist 应已删除')
-  assert.ok(!/addMode\s*===?\s*'worktree'/.test(code), 'worktree 模式引用残留')
-  assert.ok(!/addMode\s*===?\s*'clone'/.test(code), 'clone 模式引用残留')
+  assert.ok(!/addMode/.test(code), 'addMode 已无读写点，应彻底删除（不得只删比较分支）')
   assert.ok(!code.includes('branchInput'), 'branchInput 变量/引用残留')
   assert.ok(!code.includes('urlInput'), 'urlInput 变量/引用残留')
   assert.ok(!code.includes('baseRepoPath'), 'baseRepoPath 变量/引用残留')

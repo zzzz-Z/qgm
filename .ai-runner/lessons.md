@@ -2658,6 +2658,14 @@ TypeScript 控制流分析把 `const` 字面量收窄为 `'A'`，于是 `if (PHA
 
 `--reporter=basic` 会以 `ERR_LOAD_URL: Failed to load url basic` 失败，看起来像配置问题，实为 reporter 名不存在。
 
+补充（2026-10-18）：[VERIFIED] 2026-10-19 本轮实测 · `npx vitest run x --reporter=basic` 失败，栈顶是 `loadCustomReporterModule`，容易被误读成用例挂了。
+
+默认 reporter 即可（`npx vitest run <file>`），需要摘要用 `grep -E "Tests |Test Files"` 过滤，别猜 reporter 名。
+
+补充（2026-10-18）：[VERIFIED] 2026-10-19 本轮实测 · `npx vitest run x --reporter=basic` 失败，栈顶是 `loadCustomReporterModule`，容易被误读成用例挂了。
+
+默认 reporter 即可（`npx vitest run <file>`），需要摘要用 `grep -E "Tests |Test Files"` 过滤，别猜 reporter 名。
+
 ## 测试必须在仓库根跑
 [VERIFIED] 2026-10-10 本会话全部测试命令均从仓库根发起，`npx vitest run <相对路径>` 正常
 
@@ -3762,3 +3770,15 @@ DeepSeek 在上下文触顶时渲染的文案匹配了 busy 正则，于是被�
 ## 「先睡再探」比「密集轮询」省一个数量级
 
 初版 `waitForSignal` 是 50ms 粒度循环探测，最坏 16 次 `page.evaluate` / 800ms。改为「先睡满静默窗 400ms，醒了再探一次」后，页面静止（绝大多数轮间）只需 1 次 evaluate 即返回——因为静默窗本身就是「没变化」的证明。只有当页面确实在变化时才进入加密探测。这个模式适用于任何「等待某个条件稳定」的轮询：先用时间换确定性，再用探测换响应性。
+
+## 用 grep 判残留会把注释当代码，自绊白烧一轮
+
+[VERIFIED] 2026-10-19 本轮实测 · 清理 `addMode` 后跑 `/addMode/.test(readText(file))` 仍返回 `true`，误判「还原没落盘」，又开一轮排查，实为残留只出现在我新写的注释里。
+
+判残留前先剥注释（`raw.replace(/\/\*[\s\S]*?\*\//g,'').replace(/\/\/[^\n]*/g,'')` 后再测），或注释里干脆不复述该标识符。既有 `aiwin-collapse` 测试本来就是剥注释后断言的——照抄它的做法即可。
+
+## 判「失败是否本轮引入」用 stash 对照，比读代码猜可靠
+
+[VERIFIED] 2026-10-19 本轮实测 · 客户端 7 个失败看似可疑，`git stash push -u` 后重跑同样 7 failed / 33 passed，一次定性为存量。
+
+注意 `-u` 要带上（新测试文件是 untracked），且必须在同一轮内 `stash pop` 回来并核对 `git status`，否则改动会滞留 stash。

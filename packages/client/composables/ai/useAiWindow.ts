@@ -220,7 +220,9 @@ export function openSite(atUrl?: string, sid?: string): Window | null {
     const useSid = sid ?? getActiveWinSid()
     setActiveWinSid(useSid)
     void loadTransport().then((t) => {
-      try { t.useAiTransport().transport.sendOpen?.(useSid, { url: atUrl ?? url.value }) } catch { /* swallow: WS 未就绪即丢弃；不阻断 open 调用 */ }
+      // [headless-session-switch-v1] nav:true = 这是「把页面切到这个会话」的显式导航
+      //   （切工作区 / 开新会话走这里）。fill 前那次 open 不带 nav，故不会导航。
+      try { t.useAiTransport().transport.sendOpen?.(useSid, { url: atUrl ?? url.value, nav: true }) } catch { /* swallow: WS 未就绪即丢弃；不阻断 open 调用 */ }
     })
     return null
   }
@@ -455,7 +457,11 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     const t = await loadTransport()
     const tr = t.useAiTransport().transport
     const hsSid = getActiveWinSid()
-    tr.sendOpen?.(hsSid, { url: url.value })
+    // [headless-session-switch-v1] 这里只做「确保该 sid 有活会话」，**不传 url**。
+    //   服务端 headless:open 现在会按 url 导航（切工作区 / 开新会话靠它切会话），
+    //   若此处仍带 url.value（站点视图里的上一次会话 URL），刚被切到新会话的页面会在
+    //   fill 前被拽回旧会话 —— 提问落进错的工作区。导航只由 openSite 显式发起。
+    tr.sendOpen?.(hsSid, {})
     // [headless-fill-ack-v1] 与浏览器模式对齐：不再「帧入队即算成功」。
     //   旧实现只看 sendFill 的布尔（恒 true），服务端 pool.fillPrompt 的真实 ok 被丢弃，
     //   填失败与填成功在客户端完全同形 —— 表现为「发了、AI 不回、无任何错误」。

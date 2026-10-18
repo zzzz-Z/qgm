@@ -10,9 +10,9 @@ import { useWorkspaces } from '../../composables/data/useWorkspaces'
 import { useSiteMatrix } from '../../composables/ai/useSiteMatrix'
 
 const adding = ref(false)
-// [trae-single-mode-v1] 只保留「目录」模式（用户明示删掉分支/克隆）：
-// addMode 单值保留下游 if 判据的兼容外壳，避免大范围改动。
-const addMode = ref<'register'>('register')
+// [trae-single-mode-v1] 只保留「目录」模式（用户明示删掉分支/克隆）。
+// [WHY] 原 addMode ref 仅为下游 if 判据提供兼容外壳；openModal 删除后已无任何读写点，
+//   连同 worktree/clone 分支一并清除，避免留 unused 死状态。
 const pathInput = ref('')
 const busy = ref(false)
 const pickingRepo = ref(false)
@@ -62,15 +62,35 @@ async function submitAdd(): Promise<void> {
   toast('工作区已就绪', 'info', TOAST_SHORT_MEDIUM)
 }
 /**
- * [trae-modal-pick-v1] 打开「新建工作区」弹窗，重置所有输入状态。
- * [WHY] 原入口是内联表单（挤在左栏里且 pathInput/urlInput 手填），
- *   改为模态后「打开动作」与「状态清空」合并，避免上次残留。
+ * [new-workspace-direct-pick-v1] 点击「新建工作区」直接弹系统文件夹选择器，选完即注册。
+ * [WHY] 原流程是「弹模态 → 点『选择目录』 → 再弹系统选择器 → 确认」四步；
+ *   用户要求跳过模态，一步到位。register(p, false) 与 submitAdd 的语义一致（入册但不激活）。
+ * [CONSTRAINT] 取消（204）静默返回，不 toast；平台不支持（501）才提示。
+ *   防重入用 pickingRepo（与 onPickTarget 共用同一个 ref）。
  */
-function openModal(): void {
-  addMode.value = 'register'
-  pathInput.value = ''
-  adding.value = true
+async function onNewWorkspaceDirect(): Promise<void> {
+  if (pickingRepo.value || busy.value) return
+  pickingRepo.value = true
+  const picked = await pickPath()
+  pickingRepo.value = false
+  if (!picked.ok) {
+    if (picked.canceled) return
+    toast(`选择目录失败：${picked.error || (picked.unsupported ? '当前平台不支持系统选择器' : '未知错误')}`, 'error', TOAST_MEDIUM)
+    return
+  }
+  const p = String(picked.path || '').trim()
+  if (!p) return
+  busy.value = true
+  const r = await register(p, false)
+  busy.value = false
+  if (!r.ok) { toast(`新建工作区失败：${r.error || '未知错误'}`, 'error', TOAST_MEDIUM); return }
+  toast('工作区已就绪', 'info', TOAST_SHORT_MEDIUM)
 }
+/**
+ * [new-workspace-direct-pick-v1] 原 openModal（弹窗入口）已删：模板改为直连 onNewWorkspaceDirect，
+ * 一步弹系统选择器。弹窗状态重置（pathInput/adding）由 submitAdd 与 closeModal 各自负责。
+ * [CONSTRAINT] aiwin-collapse 测试断言同步改为「不得再出现 openModal 调用点」。
+ */
 /**
  * [trae-modal-pick-v1] 关闭「新建工作区」弹窗并清空状态。
  * [CONSTRAINT] 取消与确认后都走本函数；submitAdd 成功后自身也清一次（幂等）。
@@ -162,7 +182,7 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
       class="awl-new-workspace"
       type="button"
       aria-label="新建工作区"
-      @click="openModal"
+      @click="onNewWorkspaceDirect"
     >
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
       <span class="awl-new-workspace-label">新建工作区</span>

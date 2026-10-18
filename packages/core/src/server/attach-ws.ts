@@ -218,13 +218,14 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         await pool.close(sid).catch(() => {})
         sess = null
       }
-      if (!sess) {
-        send({ t: 'headless:state', sid, state: 'filling' })
-        sess = await pool.open(sid)
-        if (sess.state === 'error') {
-          send({ t: 'headless:state', sid, state: 'error', detail: sess.detail || 'open 失败' })
-          return
-        }
+      if (!sess) send({ t: 'headless:state', sid, state: 'filling' })
+      // [headless-session-switch-v1] 会话已存在也过一次 pool.open（它只等全局锁，不做事）：
+      //   切工作区的导航在飞时导航函数持有 openMutex，这里会被挡在锁后，
+      //   避免 fill 落到仍在加载的页面 ⇒ no-input-box / 假失败。
+      sess = await pool.open(sid)
+      if (sess.state === 'error') {
+        send({ t: 'headless:state', sid, state: 'error', detail: sess.detail || 'open 失败' })
+        return
       }
       const oldStop = replyPollers.get(sid)
       if (oldStop) { oldStop(); replyPollers.delete(sid) }
@@ -251,6 +252,12 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
           }
         } catch { /* swallow: 图片注入失败不阻断文本发送 */ }
       }
+      // [url-updated-v1] URL 轮询基线必须在 fill **之前**取：会话 URL 是「发问后」才变的
+      //   （DeepSeek 新建对话在首条消息发送后才落到 /a/chat/s/<id>）。
+      //   原实现把基线取在 fillPrompt 返回之后 ⇒ 那时 URL 早已变完 ⇒ cur === prevUrl
+      //   ⇒ 该帧几乎从不发出，工作区会话绑定因此在无头侧永远补不上。
+      const page0 = pool.getPage(sid) as { url?: () => string } | null
+      const prevUrl = page0 && typeof page0.url === 'function' ? page0.url() : ''
       const ok = await pool.fillPrompt(sid, prompt)
       // [headless-trace-v1] 无头出站留痕：与页面通道的 send.jsonl 同构，
       // 使「无头发了多少条提问 / 发成功了没有」可直接观测，无需再靠 arrive 反推。
@@ -272,9 +279,7 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         send({ t: 'headless:state', sid, state: 'generating' })
       }
       // [url-updated-v1] 与油猴 ai-runner:url-updated 对齐：发送后轮询 URL 变化（最多 8s，250ms 间隔）。
-      // 会话切换（新建/跳转）时工作台需同步 url，原实现无此通道。
-      const page = pool.getPage(sid) as { url?: () => string } | null
-      const prevUrl = page && typeof page.url === 'function' ? page.url() : ''
+      // 会话切换（新建/跳转）时工作台需同步 url，原实现无此通道。基线见上（fill 之前取的 prevUrl）。
       let urlTries = 0
       const urlPoll = setInterval(async () => {
         urlTries += 1
@@ -318,8 +323,32 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
       }
       case 'headless:open': {
         const sid = String(msg.sid || 'default')
-        const s = await pool.open(sid)
+        // [headless-session-switch-v1] url 是「把页面切到这个会话」的目标，原实现整条丢弃 ⇒
+        //   切工作区时 pool.open 命中已有会话直接返回，页面一动不动，B 的提问续进 A 的对话。
+        //   [CONSTRAINT] 只有 nav=true 才导航：旧版客户端在**每次 fill 前**都会带 url
+        //   （取它 localStorage 里的站点视图地址），若按 url 无条件导航，那些会话会被拽回旧对话。
+        //   新客户端只在 openSite（切工作区 / 开新会话）显式声明 nav。
+        const wantUrl = msg.nav === true ? String(msg.url || '') : ''
+        if (wantUrl) {
+          // [headless-session-switch-v1] 切会话 = 放弃上一轮的回复等待：不摘掉 poller 的话，
+          //   它接着读**新页面**，会把不相干的正文当作上一轮的回复交付
+          //   （旧 poller 的 baseline/dedup 属于旧对话，跨文档失效）。
+          const stopPoll = replyPollers.get(sid)
+          if (stopPoll) { stopPoll(); replyPollers.delete(sid) }
+        }
+        const s = await pool.open(sid, wantUrl || undefined)
         send({ t: 'headless:state', sid, state: s.state, detail: s.detail })
+        // [headless-session-switch-v1] 导航落地上报：客户端 confirmNav 依赖本帧（收到才清 8s 超时），
+        //   不上报则每次切工作区都会刷一条「绑定的会话可能已失效」的假告警。
+        //   顺带把当前会话 URL 回传，客户端 persistSessionBinding 才有机会把无头侧的会话绑定补上
+        //   （无头通道此前从不回写，绑定永远停在 kind:'site' 的首页 URL）。
+        try {
+          const p = pool.getPage(sid) as { url?: () => string } | null
+          const cur = p && typeof p.url === 'function' ? p.url() : ''
+          //   只在「本次确实带 url（= 显式要切会话）」时上报：fill 前那次空 open 不必逐条上报，
+          //   发问后的 URL 变化由 fill 侧的轮询负责（基线已挪到 fill 之前）。
+          if (wantUrl && cur && s.state === 'idle') send({ t: 'headless:url-updated', sid, url: cur })
+        } catch { /* swallow: 导航竞态下 url() 抛错，客户端有 8s 超时兜底 */ }
         break
       }
       case 'headless:close': {

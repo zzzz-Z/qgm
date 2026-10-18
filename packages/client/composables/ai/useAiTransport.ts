@@ -14,7 +14,9 @@ export interface AiTransport {
   // [CHANGE-IMPACT] 消费方 useAiWindowSend.sendFill / copyAndFill 传参处，及 headless send('headless:fill') 载荷
   // [fill-ack-id-v1] ackId 可选：带上则可精确匹配自己的 fill-ack，避免同 sid 并发串话
   sendFill: (sid: string, payload: { prompt: string, context?: string, images?: string[], ackId?: string }) => boolean
-  sendOpen?: (sid: string, payload: { url?: string }) => boolean
+  // [headless-session-switch-v1] nav=true 才让服务端按 url 导航（切工作区 / 开新会话）；
+  //   缺省不导航，旧客户端（一律带 url）因此保持原行为，不会被拽回旧会话。
+  sendOpen?: (sid: string, payload: { url?: string, nav?: boolean }) => boolean
   sendStop: (sid: string) => boolean
   sendRotate: (sid: string, payload: { instruction: string }) => boolean
   sendNewSession: (sid: string, payload: { summary: string }) => boolean
@@ -290,7 +292,7 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   }
   return {
     kind: 'headless',
-    sendOpen(sid, p) { return send('headless:open', { sid, url: p.url }) },
+    sendOpen(sid, p) { return send('headless:open', { sid, url: p.url, nav: p.nav === true }) },
     // [manual-fill-bypass-paused-v1] 同 tampermonkey 通道：传输层不拦 paused（理由见上方同名注释）
     // [image-channel-v3] 原实现显式只挑 prompt/context，images 被丢；改为条件展开
     // [CONSTRAINT] images 缺省时不写入字段，保持旧载荷形状兼容旧服务端
