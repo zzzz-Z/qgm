@@ -410,9 +410,12 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | P6-b | 完成（2026-10-19） | 2026-10-19 | `onBlock` 订阅（两处实现）+ `ai-runner:block` 路由 + `emitBus('ai:block')`；transport 守卫 +1（29） |
 | P5-a | 完成（2026-10-19） | 2026-10-19 | `turn-runner.ts` 纯执行器（幂等 `turn\|id` 账本 / 信号量并发 / 按 `seq` 串行启动 / 批量取消 / 1 turn = 1 轮 / `seed` 跨刷新防线）；19 条守卫 |
 | P5-b | 完成（2026-10-19） | 2026-10-19 | `useTurnRunner.ts` 接线（`autoFeedback:false`、`abort=stop`、一次 `fill`、`filledTurns` 防重复回灌）；9 条守卫；**并发锁 1（R9）** |
+| P3 | 完成（2026-10-19） | 2026-10-19 | 油猴侧分帧片段 `turn-emit.ts` + `dispatch` 信封优先 + `pnpm userscript:build`（@version 1.9.20，24 段）；与核心 `blocksToFrames` **行为对拍** 26 条 |
+| P3-b | 完成（2026-10-19） | 2026-10-19 | 客户端累积器 `turn-collect.ts`（19 条）+ `transport.onTurnEnd` + `ai-runner:turn-end` 路由 + `useAppStartup` 统一入站口 `dispatchInbound`（App.vue 改注册它）；**修掉两条静默断口**（油猴侧空桶 / `blockId` vs `id`） |
 | P3 | — | — | |
 | P4 | — | — | |
 | P5 | 完成（2026-10-19） | 2026-10-19 | 见 P5-a / P5-b |
+| P3 | 完成（2026-10-19） | 2026-10-19 | 见 P3 / P3-b |
 | P6 | — | — | |
 | P7 | — | — | |
 | P8 | — | — | 观察期后 |
@@ -461,6 +464,78 @@ AutoImport 插件** ⇒ 在测试里它们是 `ReferenceError`，于是本模块
 
 [CONSTRAINT] **「靠全局注入才跑得起来」的模块等于不可测**。凡是纯函数，依赖必须显式——
 自动导入是书写便利，不该成为可测性的前提。
+
+### P3 / P3-b 实测记录（2026-10-19）
+
+**P3（油猴侧）** 三件事：把 `turn-schema` 加进 `SEGMENTS`（此前产物里根本没有 `parseTurn`，
+信封永远读不出来）、新增片段 `turn-emit.ts`、在 `classifyAndPost` 的③分流**最前面**加信封分支。
+
+**三个真实险点，都是先踩到才知道**：
+
+1. **`SEGMENTS` 里 `turn-schema` 必须在 `turn-emit` 之前**。函数声明会提升，但
+   `TURN_BLOCK_TYPES` / `TURN_SCRIPT_LANGS` 是 `const` —— 顺序反了会在 IIFE 执行时 TDZ。
+   守卫里有一条专门断言下标先后（只看文件里有没有字符串是不够的）。
+2. **信封分支必须在 `scanReplyMarks` 之前**。旧标记扫描会把信封 JSON 正文判成 `marks.text`
+   或 `marks.done` ⇒ 下面的 script 分支整轮跳过，信封退化成 plain。变异把顺序挪回去 ⇒ 接线守卫变红。
+3. **`emitTurn` 的返回语义是「本轮由信封承载」而不是「发了新帧」**。重复扫到同一信封时一帧都不该发，
+   但仍要返回 true 让 dispatch `return` —— 返回 false 会回落 plain，把 JSON 正文推上屏。
+   这条在用例名里直接写了理由，避免后人「优化」成 `return sent > 0`（变异验证已锁）。
+
+**又一次踩到 `truncated` 闸门不承重**（与 P2-a 同一个陷阱，相隔两片）：
+删掉 `if (r.truncated) return null` ⇒ **0 条红**。根因完全相同：半截信封时 `parseTurn` 返回
+`blocks: []`，已被 `blocks.length === 0` 兜住。真正承重的场景是「同一段文本里**既有闭合信封、
+又有新的未闭合信封**」——`parseTurn` 会从后往前跳过未闭合那个、退回到**闭合的旧信封**并返回它的 blocks，
+没有闸门就把上一版当新内容再推一遍（重复执行）。补该用例后重跑 ⇒ 恰好 1 条红。
+⇒ **这条闭合/半截判据在三处（无头 / 油猴 / 核心守卫）各踩一次，说明它不是偶发，是这类解析器的固有盲区。**
+
+**P3-b（客户端消费 turn-end）** 是 P3 的必要配套：油猴发了帧没人听，脚本照样不执行。
+
+- 新增零依赖的 `turn-collect.ts`：块按 `turnId` 归组、`blockId` 去重（后到覆盖，R2）、`seq` 排序，
+  结束帧到达才一次性提交。**以块的真值判定有没有 script 块，不信 `end.awaiting`** —— 帧可能被中间层改写，
+  而「本地有没有 script 块」是可验证的事实。
+- `useAiReplyHandlers` 只 import 累积器，**不 import 执行器**（否则每个「只测消息分发」的用例
+  都得先造 useRunner 宿主）；收口回调由 `useAppStartup` 用 `setOnSubmit` 注入。
+- 依赖方向因此是单向的：`useAppStartup → useTurnRunner / useAiReplyHandlers → turn-collect`。
+
+**回放帧（replayed）不触发执行**：跨刷新时客户端是新实例、执行账本为空，让重放帧驱动执行会把整轮
+脚本重跑一遍。当前做法是保守丢弃（回放只补时间线）；真正的「跨刷新续跑」要靠把服务端
+`turns.jsonl` 灌进 `seed()` —— 那是独立一片，不在这里顺手做。
+
+**变异共 12 组**（执行器 9 + 累积器 6 之外的部分 / transport 3 / 前端接线 5 / 分帧 9），全部恰好命中
+对应判据。新增守卫 26 + 17 + 1 = 44 条；`tsc` / `test:tsc` / `client-tsc` 全绿；eslint 干净。
+
+**踩到一个新的类型陷阱**：`assert.deepEqual(got, [], msg)` 会把 `got` **收窄成 `never[]`**
+（node:assert 的 deepEqual 带 `asserts actual is T` 签名）⇒ 之后 `got.push(t)` 报
+「number 不能赋给 never」，且报错行指向 push 那行、离真正的原因很远。处方：断言空数组一律用
+`assert.equal(x.length, 0)`。已在代码里写注释标记，避免后人再踩。
+
+#### P3-b 收尾记录（2026-10-19，两条真实断口）
+
+**断口一：归组挂在「生产通道内部」而不是「分发器入参处」⇒ 油猴侧空桶。**
+
+块帧有两条互不相同的来源：油猴走 `window.postMessage`（App.vue 的 `useEventListener(window,
+'message', onSessionIdMessage)` **直接**进分发器）、无头走 WS（`useAppStartup` 包成同形假事件转发）。
+我最初把 `turnCollector.add()` 写进无头订阅回调里 ⇒ 只有无头侧喂到桶，油猴侧的块**只渲染、不归组**，
+收口时 `sorted()` 返回 `[]` ⇒ `end()` 直接 return。
+
+**这类断口最要命的地方是它不报错**：时间线照常出卡片、事件流照常有 `ai:block`、日志干净，
+唯一的可见后果是「脚本没跑」——而那正是用户会先怀疑 AI 没生成的地方。
+修订：新增 `dispatchInbound(e)` 作为**统一入站口**（先归组再转发），App.vue 改注册它，
+无头桥也改调它。判据由 4 条接线锚点钉死（含一条反向断言「裸 handler 不得仍在注册」）。
+
+**断口二：`pickScriptBlocks` 只认 `id`，而帧的规范字段是 `blockId` ⇒ 整批静默跳过。**
+
+累积器交上来的块是 `{ turnId, blockId, seq, type, … }`（帧 shape，与核心 `turn-frames.ts` 同构），
+而执行器的准入闸门写的是 `if (typeof o.id !== 'string') return` ⇒ `pickScriptBlocks` 返回 `[]`
+⇒ `submitTurn` 里 `if (!list.length) return []` ⇒ **一个脚本都不执行，且零报错**。
+
+这是「高频低可见逻辑必须由守卫承重」这条纪律的又一次兑现：原有用例**全部用 `id` 构造输入**，
+于是这条断口能一路绿到生产。修订：`blockId` 为规范字段、`id` 仅作宽松输入兜底（顺序不可反），
+并补两条用例（认 `blockId` / 同存时以 `blockId` 为准）。变异移除 `blockId` 分支 ⇒ 恰好 2 条红。
+
+**顺带修掉的一条我自己引入的红**：给 `useAiReplyHandlers.ts` 加累积器 import 后，该文件的
+**唯一 import 模块数到 21，超过 HCLC 阻断阈值 20**。处置不是放宽阈值，而是把累积器单例的所有权
+挪到 `useAppStartup`（依赖方向也更对：谁负责跑，由启动期 wiring 决定）。
 
 ### P5 实测记录（2026-10-19）
 

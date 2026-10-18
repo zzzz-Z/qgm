@@ -363,3 +363,28 @@ test('createHeadlessTransport: ai:block 走 onBlock 而不混进 onReply，repla
   assert.equal(replies.length, 0, 'ai:block 不得混进 onReply')
   t.dispose()
 })
+
+// [turn-collect-v1] 结束帧独立通道。
+// [WHY 必须断言「replayed 透传」] 回放帧若被当成实时帧，累积器会收口并触发执行 ——
+//   而跨刷新时执行账本是空的，整轮脚本会被重跑一遍（侧效应不可撤销）。
+// [WHY 必须断言「不混进 onBlock」] 结束帧不带块内容，混进 onBlock 会让渲染层收到一个没有
+//   type 的对象，时间线要么建出空卡、要么按「未知类型」静默丢弃 —— 两种都不可观测。
+test('createHeadlessTransport: ai:turn-end 走 onTurnEnd，replayed 透传，不混进 onBlock', async () => {
+  const t = mod.createHeadlessTransport()
+  t.sendFill('s', { prompt: 'p' }) // 触发建连
+  await new Promise(r => setTimeout(r, 0))
+  const ends: Array<{ end: unknown, replayed: boolean }> = []
+  const blocks: unknown[] = []
+  const offEnd = t.onTurnEnd!((end, _sid, replayed) => { ends.push({ end, replayed: Boolean(replayed) }) })
+  t.onBlock!((block) => { blocks.push(block) })
+  const stub = WSStub.last!
+  const end = { turnId: 3, awaiting: 'results', blocks: 1 }
+  stub.dispatchMessage(JSON.stringify({ t: 'ai:turn-end', sid: 's', end }))
+  stub.dispatchMessage(JSON.stringify({ t: 'ai:turn-end', sid: 's', replay: true, end }))
+  offEnd()
+  stub.dispatchMessage(JSON.stringify({ t: 'ai:turn-end', sid: 's', end })) // 退订后不应再收到
+  assert.deepEqual(ends.map(x => x.replayed), [false, true], '实时帧 false、回放帧 true')
+  assert.deepEqual(ends[0].end, end, '结束载荷必须原样透传（累积器靠 turnId/awaiting 收口）')
+  assert.equal(blocks.length, 0, 'ai:turn-end 不得混进 onBlock')
+  t.dispose()
+})

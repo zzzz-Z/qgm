@@ -17,7 +17,11 @@ import { useToast } from './useToast'
 import { clearEvents } from './useEventStream'
 import { clearInbox } from '../runner/useScriptInbox'
 import { pushTerminalNotice } from '../runner/useRunner'
-import { useAiWindow } from '../ai/useAiWindow'
+// [turn-collect-v1] 信封流水线接线：累积器单例（归本文件所有，避免给消息分发模块再加一条 import）
+import { createTurnCollector } from '../runner/turn-collect.js'
+import type { CollectBlock, CollectTurnEnd } from '../runner/turn-collect.js'
+import { setTurnFillSink, submitTurn } from '../runner/useTurnRunner.js'
+import { copyAndFill, useAiWindow } from '../ai/useAiWindow'
 import { getTransport, transportKind } from '../ai/useAiTransport'
 import { useAiSite } from '../ai/useAiSite'
 import { log } from '../../utils/log'
@@ -47,6 +51,39 @@ let _offHeadlessUrl: (() => void) | null = null
 let _offHeadlessNewSid: (() => void) | null = null
 // [turn-block-frame-v1] 块帧订阅句柄（与 reply 同生命周期）
 let _offHeadlessBlock: (() => void) | null = null
+let _offHeadlessTurnEnd: (() => void) | null = null
+
+/**
+ * [turn-collect-v1] 块帧累积器单例 —— **归本文件所有**。
+ *
+ * [WHY 挂在这里而不是 useAiReplyHandlers] 两条理由，缺一不可：
+ *   ① 依赖方向：累积器要调 `submitTurn`（执行器），而执行器要 `useRunner`；
+ *      若把单例放进 `useAiReplyHandlers`，就得给它加一条静态 import —— 而该文件的
+ *      **唯一 import 模块数已顶到 HCLC 阻断阈值（≤20）**，再加一条即红。
+ *   ② 接线点语义：分发器只该「按 type 转发」，「谁负责跑」属于启动期的 wiring 决定。
+ *
+ * [WHY 模块级而非 composable 内] 块与结束帧可能经两条通道（WS 假事件 / 油猴 postMessage）
+ *   到达，也可能跨组件重挂；每个实例一本账会让块分裂到两个桶，谁都凑不出完整列表。
+ */
+const turnCollector = createTurnCollector()
+
+/**
+ * 一次性接线：累积器收口 → 执行器提交；执行器回灌 → AI 网页。
+ * [CONSTRAINT] 回灌走 `copyAndFill(text, { skipRules: true })`：与 feedbackMerge 的出站口
+ *   同一条路径 —— 规则块已在会话首问注入，回灌时再带一遍会把它顶掉。
+ */
+let turnWired = false
+function wireTurnPipeline(): void {
+  if (turnWired) return
+  turnWired = true
+  turnCollector.setOnSubmit((turnId, blocks) => {
+    // 不 await：收口是同步回调，执行时长由脚本决定，阻塞它会让后续帧排队
+    void submitTurn(turnId, blocks).catch(error => log.error('[turn-runner] 提交失败:', error))
+  })
+  setTurnFillSink(async (text: string) => {
+    await copyAndFill(text, { skipRules: true })
+  })
+}
 
 /** 组装 App 启动族（探测 / 重开 / 订阅 / 回放） */
 export function useAppStartup(deps: AppStartupDeps) {
@@ -54,6 +91,32 @@ export function useAppStartup(deps: AppStartupDeps) {
   const { toast } = useToast()
   const aiWin = useAiWindow()
   const { url: siteUrl, setUrl: setSiteUrl } = useAiSite()
+  wireTurnPipeline()
+
+  /**
+   * [turn-collect-v1] 统一入站口：**任何**块帧 / 结束帧都必须经这里进分发器。
+   *
+   * [WHY 必须有单一收口点] 块帧有两条互不相同的来源：油猴走 `window.postMessage`，
+   *   由 App.vue 的 `useEventListener(window, 'message', …)` 直接进分发器；无头侧走 WS，
+   *   由本文件包成同形假事件再转发。若只在无头那一侧喂累积器，油猴通道就变成
+   *   「帧渲染了但脚本永不执行」——且这条断裂不会产生任何错误，因为渲染层完全正常。
+   *   ⇒ 收口点必须是分发器的**入参处**，而不是某一条生产通道的内部。
+   *
+   * [CONSTRAINT] 先归组再渲染：结束帧不带块内容，执行器只能靠这里的累积拿到完整列表。
+   * [CONSTRAINT] 回放帧只丢桶、不收口：跨刷新时客户端执行账本是空的，
+   *   若让回放帧驱动收口，整轮脚本会被重跑一遍（判定依据 `data.replayed`）。
+   */
+  function dispatchInbound(e: MessageEvent): void {
+    const p = (e && e.data) as { type?: string, block?: CollectBlock, end?: CollectTurnEnd, replayed?: boolean } | undefined
+    if (p && typeof p === 'object') {
+      const t = String(p.type || '')
+      if (t === 'ai-runner:block') turnCollector.add(p.block)
+      // [CONSTRAINT] 回放帧只丢桶：跨刷新时执行账本是空的，让回放帧收口会把整轮脚本重跑一遍
+      else if (t === 'ai-runner:turn-end' && p.replayed === true) turnCollector.drop(Number(p.end && p.end.turnId) || 0)
+      else if (t === 'ai-runner:turn-end') turnCollector.end(p.end)
+    }
+    onSessionIdMessage(e)
+  }
 
   /** [workspace-mode-v1] 探测工作区状态：无工作区时渲染引导页；网络失败默认放行 */
   async function probeWorkspace(): Promise<void> {
@@ -100,13 +163,19 @@ export function useAppStartup(deps: AppStartupDeps) {
         const fake = { data: { type: 'ai-runner:new-session-created', url, id, site: 'headless' }, origin: 'ws://headless', source: null } as unknown as MessageEvent
         try { onSessionIdMessage(fake) } catch (error) { log.error('[headless-new-sid] 处理失败:', error) }
       })
-      // [turn-block-frame-v1] 块帧走与 reply 完全相同的桥：WS 帧 → 同形假事件 → onSessionIdMessage。
+      // [turn-block-frame-v1] 块帧走与 reply 完全相同的桥：WS 帧 → 同形假事件 → 分发器。
       // [WHY 不复用 onReply] 块没有 kind 语义、也不参与 auto-loop；混进 reply 会让下游多一个必须特判的 shape。
-      // [CONSTRAINT] replayed 的块**照样派发**：回放只补时间线（渲染），执行由 runner 的 (turn,id) 账本挡住
-      //   ——账本才是「跑过没有」的权威，渲染层不必也不该承担这个判断。
+      // [CONSTRAINT] 必须走 dispatchInbound 而不是直接 onSessionIdMessage：归组动作属于「分发器入参处」，
+      //   放在这里（某一条生产通道内部）就会漏掉油猴的 window.postMessage 通道。
       _offHeadlessBlock = transport.onBlock?.((block: unknown, sid: string) => {
         const fake = { data: { type: 'ai-runner:block', block, sessionId: sid, site: 'headless' }, origin: 'ws://headless', source: null } as unknown as MessageEvent
-        try { onSessionIdMessage(fake) } catch (error) { log.error('[headless-block] 处理失败:', error) }
+        try { dispatchInbound(fake) } catch (error) { log.error('[headless-block] 处理失败:', error) }
+      }) ?? null
+      // [turn-collect-v1] 结束帧同桥：它是「本 turn 收口」的唯一信号，累积器据此提交执行。
+      // [CONSTRAINT] `replayed` 必须透传进假事件：dispatchInbound 据此决定「收口」还是「丢桶」。
+      _offHeadlessTurnEnd = transport.onTurnEnd?.((end: unknown, sid: string, replayed?: boolean) => {
+        const fake = { data: { type: 'ai-runner:turn-end', end, sessionId: sid, site: 'headless', replayed: replayed === true }, origin: 'ws://headless', source: null } as unknown as MessageEvent
+        try { dispatchInbound(fake) } catch (error) { log.error('[headless-turn-end] 处理失败:', error) }
       }) ?? null
       log.warn('[ai-runner] 无头 reply 订阅已注册')
     } catch (error) { log.error('[headless-reply] 订阅失败:', error) }
@@ -118,11 +187,13 @@ export function useAppStartup(deps: AppStartupDeps) {
     try { _offHeadlessUrl?.() } catch { /* swallow: 退订竞态 */ }
     try { _offHeadlessNewSid?.() } catch { /* swallow: 退订竞态 */ }
     try { _offHeadlessBlock?.() } catch { /* swallow: 退订竞态 */ }
+    try { _offHeadlessTurnEnd?.() } catch { /* swallow: 退订竞态 */ }
     _offHeadlessReply = null
     _offHeadlessState = null
     _offHeadlessUrl = null
     _offHeadlessNewSid = null
     _offHeadlessBlock = null
+    _offHeadlessTurnEnd = null
   })
 
   /**
@@ -161,5 +232,7 @@ export function useAppStartup(deps: AppStartupDeps) {
     lastVisit.value = Date.now()
   }
 
-  return { probeWorkspace, subscribeHeadlessReply, reconnectAfterRefresh, syncActiveSessionFromSite, migrateLastVisit }
+  // [turn-collect-v1] dispatchInbound 是 App.vue 注册 window message 时应当用的入口
+  //   （它比裸 onSessionIdMessage 多一步「块帧归组」），由 turn-collect 的接线锚点钉死。
+  return { probeWorkspace, subscribeHeadlessReply, reconnectAfterRefresh, syncActiveSessionFromSite, migrateLastVisit, dispatchInbound }
 }

@@ -15,6 +15,10 @@ export type EventKind
     // [turn-block-frame-v1] 块帧事件：一个块一条，payload 是 { block }。
     //   [CONSTRAINT] 与 ai:script / ai:plain 并列而非替代——旧通道仍在用它们，双读期内两者都会出现。
     | 'ai:block'
+    // [turn-collect-v1] 结束帧事件：一轮块发完的收口信号，payload 是 { end }。
+    //   [CONSTRAINT] 它**不带块内容**（只带 turnId / awaiting / blocks 计数）——
+    //     完整块列表由客户端累积器按 turnId 归组得到，执行器据此提交。
+    | 'ai:turn-end'
     | 'ai:decision' | 'ai:need-files' | 'ai:stream'
     | 'run:start' | 'run:end' | 'run:error' | 'run:stage'
     | 'loop:round' | 'loop:static' | 'loop:finish'

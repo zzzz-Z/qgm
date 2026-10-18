@@ -105,18 +105,31 @@ export function turnRunKey(turnId: number, blockId: string): string {
   return `${turnId}|${blockId}`
 }
 
-/** 从任意块列表里挑出可执行项并按 seq 排序（幂等：不修改入参） */
+/**
+ * 从任意块列表里挑出可执行项并按 seq 排序（幂等：不修改入参）。
+ *
+ * [CONSTRAINT] 块 id 的规范字段是 **`blockId`**（帧 shape，见 core/reply/turn-frames.ts），
+ *   `id` 只是宽松输入的兜底。
+ *   [WHY 必须认 blockId] 曾经这里只认 `id` ⇒ 累积器交上来的帧被整批跳过：
+ *   `pickScriptBlocks` 返回 `[]` ⇒ `submitTurn` 直接 `return []` ⇒ **脚本一个都不执行、
+ *   也没有任何报错**（渲染层照常出卡片）。这正是「高频低可见」逻辑最难发现的一类断口：
+ *   它不会产生异常，只会让功能安静地消失。
+ *   [CONSTRAINT] 兜底顺序不可反：帧一定带 `blockId`，若先读 `id` 会先命中同名旧字段。
+ */
 export function pickScriptBlocks(blocks: unknown): TurnScriptBlock[] {
   if (!Array.isArray(blocks)) return []
   const out: TurnScriptBlock[] = []
   blocks.forEach((b, i) => {
     if (!b || typeof b !== 'object') return
     const o = b as Record<string, unknown>
-    if (typeof o.id !== 'string' || o.id.length === 0) return
+    const id = typeof o.blockId === 'string' && o.blockId.length > 0
+      ? o.blockId
+      : (typeof o.id === 'string' && o.id.length > 0 ? o.id : '')
+    if (!id) return
     if (o.type !== undefined && o.type !== 'script') return
     if (typeof o.code !== 'string' || o.code.trim().length === 0) return
     out.push({
-      id: o.id,
+      id,
       seq: typeof o.seq === 'number' && Number.isFinite(o.seq) ? o.seq : i,
       code: o.code,
       lang: typeof o.lang === 'string' ? o.lang : undefined,

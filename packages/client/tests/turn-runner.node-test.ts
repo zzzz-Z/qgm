@@ -437,6 +437,23 @@ test('pickScriptBlocks：过滤无 id / 空 code / 非 script，按 seq 排序�
   assert.deepEqual(pickScriptBlocks('nope'), [])
 })
 
+// [WHY 这条是踩过坑的判据] 帧的规范字段是 `blockId` 而不是 `id`。
+//   曾经 pickScriptBlocks 只认 `id` ⇒ 累积器交上来的帧被整批跳过 ⇒ 脚本静默不执行、且零报错。
+//   只测 `id` 的话，这个断口能一路绿到生产。
+test('pickScriptBlocks：认块帧的规范字段 blockId（不认 ⇒ 整轮脚本静默不执行）', () => {
+  const picked = pickScriptBlocks([
+    { type: 'script', blockId: 'a', seq: 1, code: '1' },
+    { type: 'script', blockId: 'b', seq: 0, code: '2' },
+    { type: 'script', blockId: '', seq: 2, code: '3' },
+  ])
+  assert.deepEqual(picked.map(b => [b.id, b.seq]), [['b', 0], ['a', 1]])
+})
+
+test('pickScriptBlocks：blockId 与 id 同时存在时以 blockId 为准', () => {
+  const picked = pickScriptBlocks([{ type: 'script', blockId: 'canon', id: 'legacy', code: 'x' }])
+  assert.deepEqual(picked.map(b => b.id), ['canon'])
+})
+
 test('pickScriptBlocks：seq 缺省时用数组下标兜底', () => {
   const picked = pickScriptBlocks([
     { type: 'script', id: 'x', code: '1' },

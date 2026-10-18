@@ -14,6 +14,9 @@ export const SEGMENTS = [
   'header',
   'types',
   'hash',
+  // [turn-emit-v1] 信封解析器必须在 turn-emit 之前：parseTurn 是函数声明（会提升），
+  // 但 TURN_BLOCK_TYPES / TURN_SCRIPT_LANGS 是 const，同一 IIFE 内未初始化即引用会抛 TDZ。
+  'turn-schema',
   'language',
   'markdown',
   'marks',
@@ -26,6 +29,8 @@ export const SEGMENTS = [
   'detect',
   'fence',
   'emit',
+  // [turn-emit-v1] 信封分帧（复用 script-extract 的 codeTextOf，函数声明提升所以顺序安全）
+  'turn-emit',
   'dispatch',
   'observer',
   'fill',

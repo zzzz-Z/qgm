@@ -472,6 +472,25 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     try { emitBus('ai:block', titles[type] || 'AI 块', { payload: { block } }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
   }
 
+  /**
+   * [turn-collect-v1] 结束帧 → 事件流（供时间线展示「本 turn 收口」）。
+   * [WHY 不在这里收口执行] 累积器单例归 `useAppStartup` 所有（依赖注入，见该文件注释）；
+   *   本模块若直接持有它会多一条静态 import，而本文件的**唯一 import 模块数已到 HCLC
+   *   阻断阈值（≤20）** —— 再加一条就红。
+   */
+  function handleTurnEndMsg(payload: MessageEvent['data'], e?: MessageEvent): void {
+    if (e && !isFromActiveAiSite(e)) return
+    const end = payload ? (payload as { end?: unknown }).end : null
+    if (!end || typeof end !== 'object') return
+    const awaiting = String((end as { awaiting?: string }).awaiting || 'none')
+    const titles: Record<string, string> = {
+      results: '等待执行结果',
+      user: '等待用户回答',
+      none: '本轮结束',
+    }
+    try { emitBus('ai:turn-end', titles[awaiting] || '本轮结束', { payload: { end } }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
+  }
+
   /** 处理 ai-runner:summary 摘要回包 */
   function handleSummaryMsg(payload: MessageEvent['data']): void {
     const text = String(payload.text || '')
@@ -605,6 +624,9 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     // [turn-block-frame-v1] 块帧路由：无头侧由 useAppStartup 把 WS `ai:block` 包成同形假事件，
     //   油猴侧（P3）直接发这个 type —— 两条通道共用同一个处理点，与 reply/script 同构。
     if (t === 'ai-runner:block') return handleBlockMsg(payload, e)
+    // [turn-collect-v1] 结束帧路由：无头侧由 useAppStartup 把 WS `ai:turn-end` 包成同形假事件，
+    //   油猴侧（P3）直接发这个 type。两条通道共用同一个处理点。
+    if (t === 'ai-runner:turn-end') return handleTurnEndMsg(payload, e)
     if (t === 'ai-runner:new-session-created') return handleNewSessionCreated(payload)
     if (t === 'ai-runner:url-updated') return handleUrlUpdated(payload)
     if (t === 'ai-runner:session-id' && payload.id) handleSessionIdUpdate(payload)

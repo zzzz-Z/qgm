@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.19
+// @version      1.9.20
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -61,6 +61,341 @@ function hash32(s) {
     }
     return (h >>> 0).toString(16).padStart(8, '0');
 }
+
+/* @turn-schema:cb5aa89887c5dc9b */
+// 由 scripts/sync-turn-schema.mjs 从 packages/core/src/reply/turn-schema.ts 生成，请勿手改。
+// @ts-nocheck
+// >>> BEGIN turn-schema
+// [turn-schema-v1] turn 信封契约的**唯一源**。
+//
+// 为什么是唯一源：本文件会被 scripts/sync-turn-schema.mjs 复制成三份产物
+// （无头内联段 / 油猴片段 / 前端副本），三份头部各带 `/* @turn-schema:<hash> */`，
+// 由 reply-turn-fingerprint 守卫重算源哈希比对 —— 「三处同一份源码」是判据，不是承诺。
+//
+// [CONSTRAINT] 本文件必须保持「纯 JS 可执行」：
+//   · 不写 TS 注解（生成器直接复制，不做类型擦除）
+//   · 不 import 任何模块（无头侧 page.evaluate 不能加载模块）
+//   · 不用 Date / Math.random（解析必须幂等，同输入同输出）
+//   · 不读全局状态（不得依赖 window / document / process）
+//
+// 契约形状（v1）：
+//   { "v": 1, "turn": 7, "content": [ {type:'say'|'script'|'ask'|'handoff', ...} ] }
+// 派生语义（不由本文件决定，由调用方按块列表推导）：
+//   有 ask 块 ⇒ 停循环等用户；有 script 块 ⇒ 执行后回灌；无执行块 ⇒ 本 turn 即总结；
+//   有 handoff 块 ⇒ 轮转会话。
+// [CONSTRAINT] 首版**不含 lane**：schema 只声明已实现的能力，不支持的东西必须报错而非静默丢弃。
+/** 契约版本（写进 `v` 字段；缺省按 1 处理） */
+const TURN_SCHEMA_VERSION = 1;
+/** 已实现的块类型（注册表）。新增工具类型 = 往这里加一项 + 在 validateBlock 加一个分支 */
+const TURN_BLOCK_TYPES = ['say', 'script', 'ask', 'handoff'];
+/** script 块可接受的 lang（白名单，不做别名归一：别名会让「写错」变成「猜对了」） */
+const TURN_SCRIPT_LANGS = ['js', 'cjs'];
+/**
+ * 找出所有候选 JSON 起点（每个 ```json 围栏内的第一个 `{`，以及整段以 `{` 开头的情形）。
+ * [WHY] 不能用 ```…``` 正则截体：script.code 里一旦出现反引号围栏（脚本要输出 Markdown 时很常见），
+ *   正则会提前闭合，把整条回复打成噪音卡。这里只定位起点，终点交给配平扫描。
+ * @param text 原文
+ * @returns 起点下标数组（升序）
+ */
+function findCandidates(text) {
+    const out = [];
+    const re = /```[ \t]*json[ \t]*\r?\n[ \t]*\{/gi;
+    let m = re.exec(text);
+    while (m) {
+        out.push(m.index + m[0].length - 1);
+        m = re.exec(text);
+    }
+    const trimmed = text.trim();
+    if (trimmed.charAt(0) === '{') {
+        const at = text.indexOf('{');
+        if (!out.includes(at))
+            out.push(at);
+    }
+    return out;
+}
+/**
+ * 从 from 处的 `{` 起做**字符串感知**的花括号配平，返回对象结束后的下标（开区间）。
+ * [CONSTRAINT] 必须跳过字符串内部的括号与 `\"` 转义，否则 `{"code":"} "}` 会提前闭合。
+ * @param text 原文
+ * @param from 起点（必为 `{`）
+ * @returns 结束下标；未闭合返回 -1
+ */
+function scanObjectEnd(text, from) {
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let i = from; i < text.length; i++) {
+        const ch = text.charAt(i);
+        if (inStr) {
+            if (esc) {
+                esc = false;
+                continue;
+            }
+            if (ch === '\\') {
+                esc = true;
+                continue;
+            }
+            if (ch === '"')
+                inStr = false;
+            continue;
+        }
+        if (ch === '"') {
+            inStr = true;
+            continue;
+        }
+        if (ch === '{') {
+            depth += 1;
+            continue;
+        }
+        if (ch === '}') {
+            depth -= 1;
+            if (depth === 0)
+                return i + 1;
+        }
+    }
+    return -1;
+}
+/**
+ * 在 content 数组内部逐个切出**已配平**的元素对象（流式安全的增量解析基础）。
+ * [WHY] 整段信封闭合要等模型写完最后一笔；而脚本块一配平就该能开跑（等价 API 的
+ *   content_block_start）。本函数只切元素，不做校验，校验交给 validateBlock。
+ * @param text 原文
+ * @returns 元素原文数组（可能不完整，末尾元素可能缺失）
+ */
+function sliceContentElements(text) {
+    const out = [];
+    const at = text.search(/"content"\s*:\s*\[/);
+    if (at < 0)
+        return out;
+    let i = text.indexOf('[', at);
+    if (i < 0)
+        return out;
+    i += 1;
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    let start = -1;
+    for (; i < text.length; i++) {
+        const ch = text.charAt(i);
+        if (inStr) {
+            if (esc) {
+                esc = false;
+                continue;
+            }
+            if (ch === '\\') {
+                esc = true;
+                continue;
+            }
+            if (ch === '"')
+                inStr = false;
+            continue;
+        }
+        if (ch === '"') {
+            inStr = true;
+            continue;
+        }
+        if (ch === '{') {
+            if (depth === 0)
+                start = i;
+            depth += 1;
+            continue;
+        }
+        if (ch === '}') {
+            depth -= 1;
+            if (depth === 0 && start >= 0) {
+                out.push(text.slice(start, i + 1));
+                start = -1;
+            }
+            continue;
+        }
+        if (ch === ']' && depth === 0)
+            break;
+    }
+    return out;
+}
+/**
+ * 校验并归一化单个块。
+ * [CONSTRAINT] 返回 `{ block, errors }`：block 为 null 表示该块不可用（errors 非空）。
+ *   字段一律「有就收窄、没有就补默认值或报错」，绝不抛异常。
+ * @param raw 原始元素
+ * @param index 在 content 中的下标（用于错误定位）
+ */
+function validateBlock(raw, index) {
+    const errors = [];
+    const at = `#${index + 1}`;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        errors.push({ code: 'BLOCK_UNKNOWN_TYPE', block: at, field: 'type', detail: '块不是对象' });
+        return { block: null, errors };
+    }
+    const type = typeof raw.type === 'string' ? raw.type.toLowerCase() : '';
+    if (!TURN_BLOCK_TYPES.includes(type)) {
+        errors.push({ code: 'BLOCK_UNKNOWN_TYPE', block: at, field: 'type', detail: type || '（缺失）' });
+        return { block: null, errors };
+    }
+    const rawId = typeof raw.id === 'string' ? raw.id.trim() : '';
+    if (type === 'say') {
+        const text = typeof raw.text === 'string' ? raw.text : '';
+        if (!text.trim())
+            errors.push({ code: 'BLOCK_MISSING_FIELD', block: rawId || at, field: 'text' });
+        return { block: { type: 'say', id: rawId || (`say_${index + 1}`), text }, errors };
+    }
+    if (type === 'handoff') {
+        const summary = typeof raw.summary === 'string' ? raw.summary : (typeof raw.text === 'string' ? raw.text : '');
+        if (!summary.trim())
+            errors.push({ code: 'BLOCK_MISSING_FIELD', block: rawId || at, field: 'summary' });
+        return { block: { type: 'handoff', id: rawId || (`handoff_${index + 1}`), summary }, errors };
+    }
+    if (type === 'ask') {
+        const question = typeof raw.question === 'string' ? raw.question : '';
+        if (!rawId)
+            errors.push({ code: 'BLOCK_MISSING_FIELD', block: at, field: 'id' });
+        if (!question.trim())
+            errors.push({ code: 'BLOCK_MISSING_FIELD', block: rawId || at, field: 'question' });
+        const rawOptions = Array.isArray(raw.options) ? raw.options : [];
+        const options = [];
+        for (let i = 0; i < rawOptions.length; i++) {
+            const o = rawOptions[i];
+            const label = o && typeof o === 'object' && typeof o.label === 'string' ? o.label : '';
+            if (!label.trim())
+                continue;
+            const oid = o && typeof o.id === 'string' && o.id ? o.id : (`opt_${options.length + 1}`);
+            options.push({ id: oid, label });
+        }
+        return { block: { type: 'ask', id: rawId || (`ask_${index + 1}`), question, options }, errors };
+    }
+    // type === 'script'
+    const lang = typeof raw.lang === 'string' ? raw.lang.trim().toLowerCase() : '';
+    const desc = typeof raw.desc === 'string' ? raw.desc : '';
+    const why = typeof raw.why === 'string' ? raw.why : '';
+    const code = typeof raw.code === 'string' ? raw.code : '';
+    if (!rawId)
+        errors.push({ code: 'BLOCK_MISSING_FIELD', block: at, field: 'id' });
+    if (!lang)
+        errors.push({ code: 'BLOCK_MISSING_FIELD', block: rawId || at, field: 'lang' });
+    else if (!TURN_SCRIPT_LANGS.includes(lang))
+        errors.push({ code: 'BLOCK_BAD_LANG', block: rawId || at, field: 'lang', detail: lang });
+    if (!desc.trim())
+        errors.push({ code: 'BLOCK_MISSING_FIELD', block: rawId || at, field: 'desc' });
+    if (!why.trim())
+        errors.push({ code: 'BLOCK_MISSING_FIELD', block: rawId || at, field: 'why' });
+    if (!code.trim())
+        errors.push({ code: 'BLOCK_MISSING_FIELD', block: rawId || at, field: 'code' });
+    return {
+        block: { type: 'script', id: rawId, lang, desc, why, code },
+        errors,
+    };
+}
+/**
+ * 把已校验的块并入结果集，处理同 id 复用。
+ * [D8] 未执行的块可以覆盖、已执行的块只能上报 —— 解析层无法知道执行状态，因此这里统一
+ *   「后到覆盖先到」并把冲突记进 errors；是否重跑由执行器的 (turn,id) 账本决定。
+ * @param acc 累积结果 { blocks, errors }
+ * @param block 校验通过的块
+ */
+function mergeBlock(acc, block) {
+    if (!block || !block.id) {
+        acc.blocks.push(block);
+        return;
+    }
+    const idx = acc.blocks.findIndex((it) => { return it && it.id === block.id; });
+    if (idx < 0) {
+        acc.blocks.push(block);
+        return;
+    }
+    const prev = acc.blocks[idx];
+    if (JSON.stringify(prev) === JSON.stringify(block))
+        return;
+    acc.blocks[idx] = block;
+    acc.errors.push({ code: 'BLOCK_DUP_ID', block: block.id, field: 'id', detail: 'superseded' });
+}
+/**
+ * 解析一条完整的 turn 信封。
+ * @param md 回复原文（Markdown 或裸 JSON 均可）
+ * @returns {turn, blocks, truncated, errors}；不是信封时 blocks 为空且 errors 含 TURN_NOT_JSON
+ */
+function parseTurn(md) {
+    const text = String(md ?? '');
+    const out = { turn: null, blocks: [], truncated: false, errors: [] };
+    if (!text) {
+        out.errors.push({ code: 'TURN_NOT_JSON', detail: '空输入' });
+        return out;
+    }
+    const cands = findCandidates(text);
+    if (!cands.length) {
+        out.errors.push({ code: 'TURN_NOT_JSON', detail: '无 json 围栏且不以 { 开头' });
+        return out;
+    }
+    let obj = null;
+    for (let i = cands.length - 1; i >= 0; i--) {
+        const end = scanObjectEnd(text, cands[i]);
+        if (end < 0) {
+            out.truncated = true;
+            continue;
+        }
+        let parsed = null;
+        try {
+            parsed = JSON.parse(text.slice(cands[i], end));
+        }
+        catch {
+            continue;
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            continue;
+        obj = parsed;
+        break;
+    }
+    if (!obj) {
+        out.errors.push({ code: 'TURN_NOT_JSON', detail: '围栏内不是可解析的对象' });
+        return out;
+    }
+    if (typeof obj.turn === 'number')
+        out.turn = obj.turn;
+    const content = Array.isArray(obj.content) ? obj.content : null;
+    if (!content || content.length === 0) {
+        out.errors.push({ code: 'TURN_NO_CONTENT', detail: '缺 content 或为空数组' });
+        return out;
+    }
+    for (let i = 0; i < content.length; i++) {
+        const r = validateBlock(content[i], i);
+        for (let k = 0; k < r.errors.length; k++)
+            out.errors.push(r.errors[k]);
+        if (r.block)
+            mergeBlock(out, r.block);
+    }
+    return out;
+}
+/**
+ * 增量解析：只返回**已配平**的 content 元素，不等整信封闭合。
+ * [WHY] 流式下脚本块写完就该能开跑；等整段闭合会把多块 turn 的延迟叠加成 N 倍。
+ * [CONSTRAINT] 不返回 truncated 判断 —— 是否「真的截断」由调用方的静默窗决定，
+ *   解析层只负责「现在能确定什么」。
+ * @param md 回复原文
+ * @returns {turn, blocks, errors}：只含**已配平**元素的解析结果，未闭合部分不出块
+ */
+function parseTurnPartial(md) {
+    const text = String(md ?? '');
+    const out = { turn: null, blocks: [], errors: [] };
+    const turnMatch = text.match(/"turn"\s*:\s*(\d+)/);
+    if (turnMatch)
+        out.turn = Number(turnMatch[1]);
+    const elems = sliceContentElements(text);
+    for (let i = 0; i < elems.length; i++) {
+        let parsed = null;
+        try {
+            parsed = JSON.parse(elems[i]);
+        }
+        catch {
+            continue;
+        }
+        const r = validateBlock(parsed, i);
+        for (let k = 0; k < r.errors.length; k++)
+            out.errors.push(r.errors[k]);
+        if (r.block)
+            mergeBlock(out, r.block);
+    }
+    return out;
+}
+// <<< END turn-schema
 
 /**
  * 语言判定四级回退：className → DOM 邻近探测 → 内容特征 → 脚本头契约。
@@ -1125,6 +1460,213 @@ function emitFenceError() {
 }
 
 /**
+ * turn 信封 → 块帧 / 结束帧（油猴侧，P3）。
+ *
+ * [WHY] 信封到达时「整轮内容」是一次性确定的对象，不再需要 extractLatestScript 那三道
+ *   流式门（语言白名单 / 闭合门 / 内容门）—— 块已经带 `lang` 且 code 是 JSON 里的完整字符串。
+ *   继续走旧路径的后果是：信封 JSON 会被语言判定当成 json 拒掉，整条回复降级为 plain，
+ *   用户看到一坨 JSON 上屏且脚本一个都不执行。
+ *
+ * [CONSTRAINT] 帧 shape 与「块字段收窄」必须与核心 `packages/core/src/reply/turn-frames.ts`
+ *   完全同构，由 turn-emit-parity 用例做**行为对拍**（同一批块两端产出的帧必须逐字节相同）。
+ *   这条判据承重的原因：一旦某端多带一个字段（例如 say 帧带上 code），前端的「采信守卫」
+ *   就再也测不出「值是从别的字段抄来的」。
+ *
+ * [CONSTRAINT] 去重键是 `turn|blockId` 而非内容 hash：同一信封会被 MutationObserver
+ *   反复扫到，按内容 hash 去重会把「同 id 改了内容」的块也一并挡掉（R2 要求后到覆盖先到）。
+ */
+/** 已推送过的 `turn|blockId`；跨 poll 保留（turnId 单调递增，旧条目自然失效） */
+const seenTurnBlocks = new Set();
+/** 已推过结束帧的 turnId；同一信封重复扫到时不得重复发 */
+const endedTurnIds = new Set();
+/** 去重集合上限；超了整体清空（信封 turnId 单调递增，清空不会造成重推） */
+const TURN_SEEN_MAX = 800;
+function turnBlockKey(turnId, blockId) {
+    return `${turnId}|${blockId}`;
+}
+/**
+ * 本轮结束后循环等什么。优先级 **script > ask > none**（与核心 deriveAwaiting 同构）。
+ * [WHY] 不让前端各自推导：三处推导必然在「既有 script 又有 ask」上分叉，
+ *   而分叉的后果是循环要么空转要么提前结束，且没有任何一处报错。
+ */
+function turnAwaiting(blocks) {
+    let hasScript = false;
+    let hasAsk = false;
+    for (let i = 0; i < blocks.length; i++) {
+        const t = blocks[i] && blocks[i].type;
+        if (t === 'script')
+            hasScript = true;
+        else if (t === 'ask')
+            hasAsk = true;
+    }
+    if (hasScript)
+        return 'results';
+    if (hasAsk)
+        return 'user';
+    return 'none';
+}
+/**
+ * 单块收窄。返回字符串 = 跳过的原因（缺哪个字段），返回对象 = 可用的帧。
+ * [CONSTRAINT] 只输出该类型**该有**的字段：把 `code` 塞进 say 帧会让前端有机会读错字段。
+ */
+function turnToFrame(turnId, blockId, seq, type, b) {
+    if (type === 'say') {
+        const text = typeof b.text === 'string' ? b.text : '';
+        if (!text.trim())
+            return 'text';
+        return { turnId, blockId, seq, type, text };
+    }
+    if (type === 'handoff') {
+        const summary = typeof b.summary === 'string' ? b.summary : '';
+        if (!summary.trim())
+            return 'summary';
+        return { turnId, blockId, seq, type, summary };
+    }
+    if (type === 'ask') {
+        const question = typeof b.question === 'string' ? b.question : '';
+        if (!question.trim())
+            return 'question';
+        const options = [];
+        const rawOptions = Array.isArray(b.options) ? b.options : [];
+        for (let i = 0; i < rawOptions.length; i++) {
+            const o = rawOptions[i];
+            const label = o && typeof o.label === 'string' ? o.label : '';
+            if (!label.trim())
+                continue;
+            const oid = o && typeof o.id === 'string' && o.id ? o.id : `opt_${options.length + 1}`;
+            options.push({ id: oid, label });
+        }
+        return { turnId, blockId, seq, type, question, options };
+    }
+    // script
+    const lang = typeof b.lang === 'string' ? b.lang : '';
+    const code = typeof b.code === 'string' ? b.code : '';
+    const desc = typeof b.desc === 'string' ? b.desc : '';
+    const why = typeof b.why === 'string' ? b.why : '';
+    if (!code.trim())
+        return 'code';
+    if (lang !== 'js' && lang !== 'cjs')
+        return 'lang';
+    if (!desc.trim())
+        return 'desc';
+    if (!why.trim())
+        return 'why';
+    return { turnId, blockId, seq, type, lang, desc, why, code };
+}
+/**
+ * 块列表 → `{ blocks, end }`（与核心 blocksToFrames 同构）。
+ * [CONSTRAINT] `seq` 取输入数组下标而非「已发块计数」：跳过的块要在 seq 上留空洞，
+ *   前端据此能发现「说好的第 3 块没来」，而不是把第 4 块错位当成第 3 块。
+ */
+function turnBlocksToFrames(turnId, raw) {
+    const blocks = [];
+    const skipped = [];
+    const list = Array.isArray(raw) ? raw : [];
+    for (let i = 0; i < list.length; i++) {
+        const b = list[i] || {};
+        const id = typeof b.id === 'string' ? b.id : `#${i + 1}`;
+        const type = typeof b.type === 'string' ? b.type : '';
+        if (type !== 'say' && type !== 'script' && type !== 'ask' && type !== 'handoff') {
+            skipped.push(`${id}:type`);
+            continue;
+        }
+        const frame = turnToFrame(turnId, id, i, type, b);
+        if (typeof frame === 'string') {
+            skipped.push(`${id}:${frame}`);
+            continue;
+        }
+        blocks.push(frame);
+    }
+    const end = { turnId, awaiting: turnAwaiting(blocks), blocks: blocks.length };
+    if (skipped.length > 0)
+        end.skipped = skipped;
+    return { blocks, end };
+}
+/**
+ * 从最后一条 AI 回复里读信封（与无头侧 readTurnBlocks 同构）。
+ * [CONSTRAINT] 从后往前扫、命中即返回：一条回复里若有多个围栏，信封永远是最后交付的那个。
+ * [CONSTRAINT] `truncated` ⇒ 返回 null 而不是把半截信封当完整交付。
+ */
+function readTurnFromRoot(root) {
+    try {
+        if (!root || typeof root.querySelectorAll !== 'function')
+            return null;
+        const pres = root.querySelectorAll('pre');
+        if (!pres || !pres.length)
+            return null;
+        for (let i = pres.length - 1; i >= 0; i--) {
+            const pre = pres[i];
+            const codeEl = pre && typeof pre.querySelector === 'function' ? pre.querySelector('code') : null;
+            const raw = (codeEl && codeTextOf(codeEl)) || (pre && pre.textContent) || '';
+            if (!raw)
+                continue;
+            const r = parseTurn(raw);
+            if (!r || !r.blocks || r.blocks.length === 0)
+                continue;
+            if (r.truncated)
+                return null;
+            return { turnId: typeof r.turn === 'number' ? r.turn : 0, blocks: r.blocks, errors: r.errors || [] };
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * 把一个信封推成帧。
+ * @returns 本轮内容是否**由信封承载**（true ⇒ 调用方必须 return，不得再走 script / plain）
+ * [CONSTRAINT] 重复扫到同一信封时一帧都不发，但仍返回 true：
+ *   若返回 false，dispatch 会回落到 plain 分支把信封 JSON 正文推上屏。
+ * [CONSTRAINT] 没有任何可用块（全被字段校验跳过）⇒ 返回 false：此时确实退化成旧路径，
+ *   让 script / plain 有机会兜住（半截块至少能靠 plain 让用户看见）。
+ */
+function emitTurn(turn) {
+    if (!turn || !turn.blocks || !turn.blocks.length)
+        return false;
+    const frames = turnBlocksToFrames(turn.turnId, turn.blocks);
+    if (!frames.blocks.length)
+        return false;
+    const sid = extractSidFromHash();
+    let sent = 0;
+    for (let i = 0; i < frames.blocks.length; i++) {
+        const block = frames.blocks[i];
+        const key = turnBlockKey(block.turnId, block.blockId);
+        if (seenTurnBlocks.has(key))
+            continue;
+        seenTurnBlocks.add(key);
+        if (seenTurnBlocks.size > TURN_SEEN_MAX) {
+            seenTurnBlocks.clear();
+            seenTurnBlocks.add(key);
+        }
+        post({
+            type: 'ai-runner:block',
+            block,
+            site: location.origin,
+            sessionId: sid,
+        });
+        sent++;
+    }
+    const endKey = turn.turnId;
+    if (!endedTurnIds.has(endKey)) {
+        endedTurnIds.add(endKey);
+        if (endedTurnIds.size > TURN_SEEN_MAX) {
+            endedTurnIds.clear();
+            endedTurnIds.add(endKey);
+        }
+        post({
+            type: 'ai-runner:turn-end',
+            end: frames.end,
+            site: location.origin,
+            sessionId: sid,
+        });
+    }
+    if (sent > 0)
+        lastBodySig = bodySignature();
+    return true;
+}
+
+/**
  * 分类分发 —— 每轮 DOM 稳定后被调用一次，决定「这一轮要推什么」。
  *
  * 三段式，顺序不可随意调换：
@@ -1249,6 +1791,17 @@ function classifyAndPost() {
         }
         // ---------- ③ 分流 ----------
         const replyRoot = latestAssistantRoot();
+        // [turn-emit-v1] 信封优先（契约 §2.1）：命中即整轮按块交付，**不再**走 script / plain。
+        // [WHY] 信封 JSON 在旧路径下的实际下场：语言判定把它归到 json ⇒ 白名单拒绝 ⇒
+        //   整条回复降级 plain，用户看到一坨 JSON 且脚本一个都不执行（静默失效）。
+        // [CONSTRAINT] 必须先于 scanReplyMarks：旧标记扫描对 JSON 正文无意义，
+        //   命中 marks.text / marks.done 会让下面的 script 分支整轮跳过。
+        // [CONSTRAINT] stopPosted 后不推：前端已 finish 循环，此时推块等于「循环外自动执行」旁路。
+        if (!stopPosted) {
+            const turn = readTurnFromRoot(replyRoot);
+            if (turn && emitTurn(turn))
+                return;
+        }
         const marks = scanReplyMarks(replyRoot ? extractReplyMd(replyRoot) : '');
         const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0;
         // script：标记行为非脚本类时整轮不走脚本分类（否则带示例代码块的 DONE 总结会被当脚本执行）

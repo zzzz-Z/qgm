@@ -44,9 +44,12 @@ const {
   reconnectAfterRefresh,
   syncActiveSessionFromSite,
   migrateLastVisit,
+  // [turn-collect-v1] 油猴侧（window.postMessage）是块帧的两条来源之一，
+  //   注册**分发器包装**而非裸 onSessionIdMessage：否则块只渲染、不进累积器 ⇒ 脚本永不执行。
+  dispatchInbound,
 } = useAppStartup({ hasWorkspace, sessionHistory, onSessionIdMessage })
 
-useEventListener(window, 'message', onSessionIdMessage)
+useEventListener(window, 'message', dispatchInbound)
 useEventListener(window, 'keydown', onShiftQuestion)
 
 watch(modelId, (newId, oldId) => {

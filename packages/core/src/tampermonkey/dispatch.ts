@@ -133,6 +133,17 @@ function classifyAndPost(): void {
     // ---------- ③ 分流 ----------
 
     const replyRoot = latestAssistantRoot()
+    // [turn-emit-v1] 信封优先（契约 §2.1）：命中即整轮按块交付，**不再**走 script / plain。
+    // [WHY] 信封 JSON 在旧路径下的实际下场：语言判定把它归到 json ⇒ 白名单拒绝 ⇒
+    //   整条回复降级 plain，用户看到一坨 JSON 且脚本一个都不执行（静默失效）。
+    // [CONSTRAINT] 必须先于 scanReplyMarks：旧标记扫描对 JSON 正文无意义，
+    //   命中 marks.text / marks.done 会让下面的 script 分支整轮跳过。
+    // [CONSTRAINT] stopPosted 后不推：前端已 finish 循环，此时推块等于「循环外自动执行」旁路。
+    if (!stopPosted) {
+      const turn = readTurnFromRoot(replyRoot)
+      if (turn && emitTurn(turn)) return
+    }
+
     const marks = scanReplyMarks(replyRoot ? extractReplyMd(replyRoot) : '')
     const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0
 
