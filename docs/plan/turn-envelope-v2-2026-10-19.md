@@ -218,8 +218,12 @@ BLOCK_REGISTRY       -> { say, script, ask, handoff }
 | 油猴片段 | `packages/core/src/tampermonkey/turn-schema.ts` | IIFE 片段，由 `assemble-userscript.mjs` 拼装 |
 | 前端副本 | `packages/client/utils/turn-schema.ts` | 独立模块 |
 
-生成器职责：规范化（去注释 / 折叠空白）→ 计算 sha256 前 16 位 → 在三处产物头部写入
-`/* @turn-schema:<hash> */` → 幂等重写（内容不变则不动文件）。
+生成器职责：`canonicalBody(源)`（去生成头两行 + 规范化空白）→ 计算 sha256 前 16 位 →
+三处产物头部写入同一个 `/* @turn-schema:<hash> */` → `sharedBody(源, mode)` 做该端外壳适配
+（目前只有一条：fragment 剥顶层 `export`）→ 幂等重写（内容不变则不动文件）。
+
+> **[CONSTRAINT] 指纹只算 `canonicalBody`，绝不按 mode 分支。** P1-b 首版把 `export` 剥除放进了
+> 被哈希的函数里，结果两端指纹不同却各自自洽——判据静默失效而测试全绿。适配必须发生在算哈希**之后**。
 
 **接线**（易漏）：新增 `pnpm turn-schema:sync` 入口需同步 `scripts/anchors.json`，
 并核对 `README` 的「通过 pnpm 调用」表。
@@ -382,7 +386,9 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | 阶段 | 状态 | 完成日期 | 备注 |
 |---|---|---|---|
 | P0 | 完成（2026-10-19） | 2026-10-19 | 5.2KB / 11.2KB 两档逐字节相等；阻塞闸门已开 |
-| P1 | — | — | |
+| P1-a | 完成（2026-10-19） | 2026-10-19 | 唯一源 `turn-schema.ts` 278 行 + 语义守卫 19 条 |
+| P1-b | 完成（2026-10-19） | 2026-10-19 | 生成器 + 指纹守卫 10 条；两处文件产物已出（前端 / 油猴） |
+| P1-c | 待做 | — | 无头内联段（`headless-inject.ts` 的 BEGIN/END）+ 行为对拍守卫 |
 | P2 | — | — | |
 | P3 | — | — | |
 | P4 | — | — | |
@@ -390,3 +396,25 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | P6 | — | — | |
 | P7 | — | — | |
 | P8 | — | — | 观察期后 |
+
+### P1-b 实测记录（2026-10-19）
+
+**一次返工**：首版 `sharedBody(src, mode)` 在 fragment 模式下剥 `export`，而指纹算在**剥完之后**，
+于是 `packages/client/utils/turn-schema.ts` = `cb5aa898…`、`packages/core/src/tampermonkey/turn-schema.ts`
+= `43fa6678…` —— **两处产物各自自洽，但「三处同一份源码」这个判据已经退化成空**。
+处方：拆成 `canonicalBody(src)`（与 mode 无关，指纹只算它）+ `sharedBody(src, mode)`（外壳适配，发生在算哈希之后）。
+教训：**指纹的输入必须只由源决定**；任何按运行端分支的规范化都会让判据失效，而且失效时测试仍然全绿（各自自洽）。
+
+**变异验证（两次，均已 sha256 还原）**：
+
+| 变异 | 期望 | 实测 |
+|---|---|---|
+| 源尾部加 `// mutation-probe`，不重建 | 指纹 / 代码体 / `--check` 三条红 | 3 failed，与期望逐条一致 |
+| 手改前端产物 `TURN_SCHEMA_VERSION = 2`（保留原哈希） | **只有代码体 + `--check` 红** | 2 failed |
+
+第二次变异是本守卫分层的证明：只比嵌入哈希会漏检手改（手改不改它自己写的哈希），
+所以「代码体逐字等于 `sharedBody(源)`」不是冗余断言，是承重的那一条。
+
+**接线核对**：`pnpm turn-schema:sync` / `turn-schema:check` 已入 `package.json`；
+`scripts/anchors.json` 增 4 条（源导出 `parseTurn` / 两处产物含 BEGIN 标记 / 指纹守卫含判据文案），
+`verify-anchors` 通过 67 条。

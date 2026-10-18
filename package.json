@@ -54,6 +54,8 @@
     "typecheck": "pnpm tsc && pnpm tsc:apps && pnpm tsc:client && pnpm test:tsc",
     "skills:gen": "node scripts/agent-skills-generate.cjs",
     "skills:check": "node scripts/agent-skills-generate.cjs --check",
+    "turn-schema:sync": "node scripts/sync-turn-schema.mjs",
+    "turn-schema:check": "node scripts/sync-turn-schema.mjs --check",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:e2e": "playwright test --config packages/client/playwright.config.ts",
     "verify": "pnpm anchors:verify && pnpm docs:verify && pnpm crossfile:verify && pnpm typecheck && pnpm lint && pnpm test:unit",
