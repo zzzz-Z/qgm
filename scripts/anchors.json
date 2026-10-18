@@ -265,6 +265,10 @@
       "contains": "// >>> BEGIN turn-schema"
     },
     {
+      "file": "packages/core/src/headless/headless-inject.ts",
+      "contains": "// >>> BEGIN turn-schema"
+    },
+    {
       "file": "packages/core/tests/reply-turn-fingerprint.node-test.ts",
       "contains": "三处产物嵌入的指纹必须相等"
     }

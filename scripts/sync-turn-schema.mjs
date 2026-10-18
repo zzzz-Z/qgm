@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { canonicalBody, fingerprint, render, sharedBody, SOURCE_REL, TARGETS } from './lib/turn-schema-io.mjs'
+import { canonicalBody, fingerprint, render, renderInline, sharedBody, SOURCE_REL, TARGETS } from './lib/turn-schema-io.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SRC = join(ROOT, SOURCE_REL)
@@ -27,9 +27,16 @@ let drifted = 0
 
 for (const target of TARGETS) {
   const body = sharedBody(raw, target.mode)
-  const next = render(target, body, hash)
   const abs = join(ROOT, target.rel)
   const prev = existsSync(abs) ? readFileSync(abs, 'utf8') : null
+  const next = target.kind === 'inline'
+    ? (prev === null ? null : renderInline(prev, body, hash))
+    : render(target, body, hash)
+  if (next === null) {
+    drifted += 1
+    console.error(`[turn-schema] ✗ ${target.rel} 缺 ${'// >>> BEGIN turn-schema'} / END 标记，无法定位内联区段`)
+    continue
+  }
   if (prev === next) {
     console.log(`[turn-schema] = ${relative(ROOT, abs)} (${hash})`)
     continue

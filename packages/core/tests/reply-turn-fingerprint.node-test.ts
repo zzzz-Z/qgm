@@ -25,6 +25,7 @@ const SYNC = 'scripts/sync-turn-schema.mjs'
 
 interface Target {
   rel: string
+  kind: string
   mode: string
   header: string[]
 }
@@ -83,8 +84,9 @@ function runCheck(): { code: number, err: string, out: string } {
 }
 
 describe('turn-schema 指纹：三处产物同源', () => {
-  test('至少两处已注册产物，且文件都存在（P1 第三片接入无头段后自动纳入）', () => {
-    expect(TARGETS.length).toBeGreaterThanOrEqual(2)
+  test('三处产物都已注册且文件存在（前端 / 油猴 / 无头内联）', () => {
+    expect(TARGETS.length, '缺一处运行端 ⇒ 该端只能手抄解析器').toBe(3)
+    expect(TARGETS.filter(t => t.kind === 'inline').length, '无头必须走 inline 段').toBe(1)
     for (const t of TARGETS) {
       expect(existsSync(join(ROOT, t.rel)), `${t.rel} 未生成，请跑 pnpm turn-schema:sync`).toBe(true)
     }
@@ -117,13 +119,17 @@ describe('turn-schema 指纹：三处产物同源', () => {
     }
   })
 
-  test('外壳适配：module 保留 export，fragment 不得有顶层 export（IIFE 内不合法）', () => {
-    const byMode = new Map(TARGETS.map(t => [t.mode, extractBody(read(t.rel)) ?? '']))
-    if (byMode.has('module')) {
-      expect(byMode.get('module'), 'module 产物必须导出 parseTurn 供前端 import').toContain('export function parseTurn')
-    }
-    if (byMode.has('fragment')) {
-      expect(byMode.get('fragment'), 'fragment 里的 export 会进 IIFE 顶层，直接 SyntaxError').not.toMatch(/^export /m)
+  test('外壳适配：module 保留 export，fragment/inline 不得有顶层 export', () => {
+    // [CONSTRAINT] 逐产物断言，不用 Map<mode, body>——三处里有两处同 mode，
+    //   按 mode 建索引会互相覆盖，于是只校验到最后一条，前面那条的违规无人发现。
+    for (const t of TARGETS) {
+      const body = extractBody(read(t.rel)) ?? ''
+      if (t.mode === 'module') {
+        expect(body, `${t.rel} 必须导出 parseTurn 供前端 import`).toContain('export function parseTurn')
+      }
+      else {
+        expect(body, `${t.rel} 里的 export 会进 IIFE/函数体，直接 SyntaxError`).not.toMatch(/^export /m)
+      }
     }
   })
 
@@ -135,6 +141,33 @@ describe('turn-schema 指纹：三处产物同源', () => {
   test('指纹算法幂等：同输入两次结果相同（否则守卫会随机红）', () => {
     const src = sourceText()
     expect(fingerprint(canonicalBody(src))).toBe(fingerprint(canonicalBody(src)))
+  })
+})
+
+// [WHY] inline 段与整文件产物有**两种只属于它的失效模式**，指纹与代码体断言都看不见：
+//   ① 生成器退化成「整文件覆盖」⇒ 宿主函数被抹掉，但指纹与代码体依然逐字正确；
+//   ② 段被贴到模块顶层 ⇒ 语法正确、指纹正确，但 page.evaluate 序列化时它根本不在函数体内，
+//      浏览器侧永远看不到它（正是本方案要消灭的「静默失效」）。
+describe('turn-schema 指纹：无头内联段的位置约束', () => {
+  const INLINE = 'packages/core/src/headless/headless-inject.ts'
+
+  test('区外内容原样保留：宿主两个导出函数仍在', () => {
+    const text = read(INLINE)
+    expect(text, 'inline 生成覆盖了整文件，宿主被抹掉').toContain('export function detectReplyInPage')
+    expect(text).toContain('export function ensureCollectorInPage')
+  })
+
+  test('段必须在函数体内（BEGIN 行有缩进），否则 page.evaluate 序列化时它不在作用域', () => {
+    const beginLine = read(INLINE).split('\n').find(l => l.includes(BEGIN)) ?? ''
+    expect(beginLine, `${INLINE} 里没有 BEGIN 标记`).not.toBe('')
+    expect(beginLine, 'BEGIN 标记顶格 ⇒ 段在模块顶层，浏览器侧看不到').toMatch(/^\s+\/\//)
+  })
+
+  test('生成器的 inline 渲染是幂等的：连跑两次不追加第二份指纹', () => {
+    const r = runCheck()
+    expect(r.code).toBe(0)
+    const hits = read(INLINE).match(/@turn-schema:[0-9a-f]{16}/g) ?? []
+    expect(hits.length, 'inline 段每次生成都新写一行指纹 ⇒ 第二次就重复').toBe(1)
   })
 })
 

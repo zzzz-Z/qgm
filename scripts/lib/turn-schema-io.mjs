@@ -3,10 +3,16 @@
 //   不是构建动作本身。与 scripts/lib/userscript-segments.mjs 同一范式：库 + 薄入口。
 import { createHash } from 'node:crypto'
 
-/** 生成产物清单。新增运行端只需在这里加一条（P2 会加无头内联段） */
+/**
+ * 生成产物清单。
+ * kind='file'   整文件由生成器拥有（前端副本 / 油猴片段）
+ * kind='inline' 只替换文件里 BEGIN…END 之间的区段，区外内容原样保留（无头内联段）
+ * [CONSTRAINT] 新增运行端只需加一条；守卫按本清单遍历，不写死数量。
+ */
 export const TARGETS = [
   {
     rel: 'packages/client/utils/turn-schema.ts',
+    kind: 'file',
     mode: 'module',
     // 前端是 TS 包，纯 JS 源要靠 @ts-nocheck 才过类型检查；同时要豁免 ban-ts-comment
     header: [
@@ -16,8 +22,15 @@ export const TARGETS = [
   },
   {
     rel: 'packages/core/src/tampermonkey/turn-schema.ts',
+    kind: 'file',
     mode: 'fragment',
     header: ['// @ts-nocheck'],
+  },
+  {
+    // 无头侧必须内联：page.evaluate 的整段函数被序列化送进浏览器，模块级引用会 ReferenceError
+    rel: 'packages/core/src/headless/headless-inject.ts',
+    kind: 'inline',
+    mode: 'fragment',
   },
 ]
 
@@ -79,6 +92,32 @@ export function render(target, body, hash) {
     '',
   ]
   return lines.join('\n')
+}
+
+/**
+ * 渲染 inline 产物：只替换 `BEGIN…END` 之间，区外（含缩进）逐字保留。
+ * [WHY] 无头段的宿主是 `detectReplyInPage` 的函数体，里面有 700 行既有逻辑与大量注释；
+ *   整文件重写会让任何一次生成都变成「宿主文件的完整覆盖」，一次缩进或注释差异就是全文件 diff。
+ * [CONSTRAINT] 缩进取 BEGIN 行的行首空格数，区内每一行按同一缩进前置：
+ *   生成器不做自动重排（原样搬），否则 extractBody 的「剥最小公共缩进」会与源对不上。
+ * @param text 现有全文
+ * @param body 要写入的代码体（已做 mode 适配）
+ * @param hash 源指纹
+ * @returns 新全文；找不到标记返回 null（避免把整文件当区段覆盖）
+ */
+export function renderInline(text, body, hash) {
+  const lines = String(text).replace(/\r\n/g, '\n').split('\n')
+  const s = lines.findIndex(l => l.includes(BEGIN))
+  const e = lines.findIndex(l => l.includes(END))
+  if (s < 0 || e < 0 || e <= s) return null
+  const indent = lines[s].match(/^ */)[0]
+  // 幂等：先吃掉上一次写在这行上方的指纹注释，否则每跑一次就多一行
+  let head = s
+  while (head > 0 && lines[head - 1].includes('@turn-schema:')) head -= 1
+  const block = [`${indent}/* @turn-schema:${hash} */`, lines[s]]
+  for (const l of body.replace(/\n$/, '').split('\n')) block.push(l.length > 0 ? `${indent}${l}` : '')
+  block.push(lines[e])
+  return [...lines.slice(0, head), ...block, ...lines.slice(e + 1)].join('\n')
 }
 
 /**

@@ -11,7 +11,40 @@ import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
-import { parseTurn, parseTurnPartial, TURN_BLOCK_TYPES } from '../src/reply/turn-schema.js'
+import { parseTurnPartial as parseTurnPartialRaw, parseTurn as parseTurnRaw, TURN_BLOCK_TYPES } from '../src/reply/turn-schema.js'
+
+// [ts-view-v1] 源文件必须保持**零 TS 语法**（它被逐字复制进油猴 IIFE 片段与无头内联段，
+//   TS 注解会原样进产物），代价是 `const out = { errors: [] }` 被推断成 `never[]`，
+//   于是测试里 `r.errors[0].code` 全是 TS2339。这里补一份**最小的只读类型视图**，只影响本测试：
+//   不引入第二套实现，也不让源文件为了测试而长出会泄漏进产物的类型标注。
+interface TurnBlock {
+  type: string
+  id: string
+  text?: string
+  summary?: string
+  question?: string
+  options?: { id: string, label: string }[]
+  lang?: string
+  desc?: string
+  why?: string
+  code?: string
+}
+interface TurnError {
+  code: string
+  detail?: string
+  block?: string
+  field?: string
+}
+interface TurnResult {
+  turn: number | null
+  blocks: TurnBlock[]
+  truncated: boolean
+  errors: TurnError[]
+}
+type TurnPartial = Omit<TurnResult, 'truncated'>
+
+const parseTurn = parseTurnRaw as unknown as (md: string) => TurnResult
+const parseTurnPartial = parseTurnPartialRaw as unknown as (md: string) => TurnPartial
 
 const SRC = fs.readFileSync(path.join(process.cwd(), 'packages/core/src/reply/turn-schema.ts'), 'utf8')
 
@@ -137,7 +170,7 @@ describe('turn-schema: 大载荷', () => {
     const code = Array.from({ length: 200 }, (_, i) => `const p${i} = "\\\\server\\\\share\\\\目录${i}"`).join('\n')
     const r = parseTurn(fence({ v: 1, turn: 1, content: [{ ...C1, code }] }))
     expect(r.blocks[0].code).toBe(code)
-    expect(r.blocks[0].code.length).toBe(code.length)
+    expect(r.blocks[0].code?.length).toBe(code.length)
   })
 })
 

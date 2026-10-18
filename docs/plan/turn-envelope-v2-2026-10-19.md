@@ -387,8 +387,8 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 |---|---|---|---|
 | P0 | 完成（2026-10-19） | 2026-10-19 | 5.2KB / 11.2KB 两档逐字节相等；阻塞闸门已开 |
 | P1-a | 完成（2026-10-19） | 2026-10-19 | 唯一源 `turn-schema.ts` 278 行 + 语义守卫 19 条 |
-| P1-b | 完成（2026-10-19） | 2026-10-19 | 生成器 + 指纹守卫 10 条；两处文件产物已出（前端 / 油猴） |
-| P1-c | 待做 | — | 无头内联段（`headless-inject.ts` 的 BEGIN/END）+ 行为对拍守卫 |
+| P1-b | 完成（2026-10-19） | 2026-10-19 | 生成器 + 指纹守卫 13 条；三处产物同源（`cb5aa89887c5dc9b`） |
+| P1-c | 完成（2026-10-19） | 2026-10-19 | 无头内联段（region 替换）+ 三端行为对拍 6 条；P1 三个守卫全绿 52/52 |
 | P2 | — | — | |
 | P3 | — | — | |
 | P4 | — | — | |
@@ -418,3 +418,30 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 **接线核对**：`pnpm turn-schema:sync` / `turn-schema:check` 已入 `package.json`；
 `scripts/anchors.json` 增 4 条（源导出 `parseTurn` / 两处产物含 BEGIN 标记 / 指纹守卫含判据文案），
 `verify-anchors` 通过 67 条。
+
+### P1-c 实测记录（2026-10-19）
+
+**inline 段与整文件产物是两种东西**，生成器里用 `kind: 'file' | 'inline'` 区分：
+`inline` 只替换 `BEGIN…END` 之间的区段，缩进取 BEGIN 行的行首空格数，区外逐字保留
+（宿主 `detectReplyInPage` 有 700 行既有逻辑，整文件覆盖会把「生成」变成「全文件 diff」）。
+
+段插在 `detectReplyInPage` 函数体内、`bodySignature()` 之后，`headless-inject.ts` 871 → 1159 行。
+外壳用 `/* eslint-disable unused-imports/no-unused-vars, ts/no-unused-vars */` 包住（P2 接线前无人调用）。
+
+**inline 专属的两种失效模式**（指纹与代码体断言都看不见，因此单列守卫）：
+① 生成器退化成整文件覆盖 ⇒ 宿主被抹掉，而指纹与代码体依然逐字正确；
+② 段被贴到模块顶层 ⇒ 语法正确、指纹正确，但 `page.evaluate` 序列化时它不在函数体内，浏览器侧永远看不到它。
+判据：`headless-inject.ts` 仍含两个导出函数；BEGIN 行**必须有缩进**。
+
+**行为对拍的取法**（`reply-turn-parity`，6 条 / 16 例）：前端副本真实 `import`（顺带验证生成物是合法模块）、
+油猴与无头各自抠代码体后 `vm.runInNewContext`。比较前一律 `JSON.parse(JSON.stringify())` 扁平化——
+vm 里造的对象属于另一个 realm，原型链不同会让深比误报。
+
+**变异验证**：只改油猴副本的 `TURN_SCRIPT_LANGS`（加 `bash`）⇒ 对拍 3 条红，
+且报错信息精确到 `[lang 不在白名单（bash）] 油猴端与前端端输出不同`。
+
+**一个此前漏跑的闸门**：`pnpm test:tsc` 在 P1-a 提交时**没跑**，补齐后发现 P1-a 的测试有 20 条 TS2339
+（`Property 'code' does not exist on type 'never'`）。根因：源文件必须零 TS 语法（会逐字进油猴 IIFE），
+于是 `const out = { errors: [] }` 被推断成 `never[]`。处方是**测试侧**补一份最小类型视图
+（`TurnResult` / `TurnBlock` / `TurnError` + 一次 `as unknown as`），不改源、不让源长出会泄漏进产物的标注。
+教训：**P1 的闸门必须包含 `test:tsc`**，eslint 与 vitest 双绿不代表类型可用。
