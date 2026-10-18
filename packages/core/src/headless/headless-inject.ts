@@ -721,7 +721,6 @@ export function detectReplyInPage(siteCfg = {}) {
   //   锁死：「嵌入哈希 == 重算源哈希」且「代码体逐字相同」，改源不重建即红。
   // [CONSTRAINT] 生成源是 packages/core/src/reply/turn-schema.ts；重建命令 pnpm turn-schema:sync。
   // [CHANGE-IMPACT] 接线在 P2：扫**全部** pre > code、信封优先、标记回落、且不得继承 stoppedThisRound 抑制。
-  /* @turn-schema:cb5aa89887c5dc9b */
   /* eslint-disable unused-imports/no-unused-vars, ts/no-unused-vars -- 生成段：符号是否被调用取决于接线进度 */
   /* @turn-schema:cb5aa89887c5dc9b */
   // >>> BEGIN turn-schema
