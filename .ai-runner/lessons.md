@@ -3180,19 +3180,19 @@ TS 版把 `marked` 判定抽成顶层 `hasScriptHead`，沙箱只抽了 `extract
 
 ## 批量改写 import 块时贪婪正则吞掉相邻语句
 
-拆分 `routes/workspace.ts` 的 import 时用 `/<import \{[\s\S]*?\} from '\.\.\/config\.js'/` 匹配替换，非贪婪仍从第一个 `import {` 起算，把 `hono` / `node:fs` / `node:path` 三条导入与 `new Hono()` 声明行一起吞掉。tsc 报出 60+ 条 `Cannot find name 'fs'/'path'/'Hono'`。
+[VERIFIED] 2026-10-18 实测：拆分 routes/workspace.ts 时 tsc 报 60+ 条 Cannot find name 'fs'/'path'/'Hono'。原记录：拆分 `routes/workspace.ts` 的 import 时用 `/<import \{[\s\S]*?\} from '\.\.\/config\.js'/` 匹配替换，非贪婪仍从第一个 `import {` 起算，把 `hono` / `node:fs` / `node:path` 三条导入与 `new Hono()` 声明行一起吞掉。tsc 报出 60+ 条 `Cannot find name 'fs'/'path'/'Hono'`。
 
 修法：改 import 块时锚点必须包含前一行上下文（如 `import { execFile } from 'node:child_process'\n\n/** 注释`），或直接按行号切片重建，不要用「从第一个 `import {` 到目标 `from`」的跨度正则。
 
 ## 拆分后 barrel 与测试是漏网的两类消费方
 
-`config.ts` 拆分后 `pnpm tsc` 立刻报 `index.ts` 与 `deps.ts` 找不到符号——它们不是普通调用点，而是 re-export 层，grep `from '...config.js'` 的常规做法会看到它们但容易误判为「正常引用」。
+[VERIFIED] 2026-10-18 实测：config.ts 拆分后 index.ts / deps.ts / workspace-registry 测试三处同时红。原记录：`config.ts` 拆分后 `pnpm tsc` 立刻报 `index.ts` 与 `deps.ts` 找不到符号——它们不是普通调用点，而是 re-export 层，grep `from '...config.js'` 的常规做法会看到它们但容易误判为「正常引用」。
 
 修法：拆分公共模块后，除调用方外必须单独核查三类：① 包根 barrel（`index.ts`）② `deps.ts` 之类的依赖聚合层 ③ 测试里的动态 `await import()`（静态 grep 抓不到符号使用，需先取变量名再按 `var.symbol` 逐行扫描重定向）。
 
 ## 子进程验证必须紧接 flush
 
-`writeText` 只进 overlay，`__AI__.shell` 起的 eslint/tsc 读真盘。清完 `aiError` 后立即跑 eslint 仍报同一条 warning，误以为改错了位置；`flush()` 后 grep 确认文件里已无该符号，重跑即通过。
+[VERIFIED] 2026-10-18 实测：清完 aiError 后立即跑 eslint 仍报同一条 warning，flush() 后重跑通过。原记录：`writeText` 只进 overlay，`__AI__.shell` 起的 eslint/tsc 读真盘。清完 `aiError` 后立即跑 eslint 仍报同一条 warning，误以为改错了位置；`flush()` 后 grep 确认文件里已无该符号，重跑即通过。
 
 修法：凡是「写完源码 → 立刻用 shell 跑 lint/tsc/测试」的验证轮，脚本第一步就 `await __AI__.flush()`。
 
@@ -3200,31 +3200,31 @@ TS 版把 `marked` 判定抽成顶层 `hasScriptHead`，沙箱只抽了 `extract
 
 ## 大文件批量改名必须按「函数块」而不是「变量名」替换
 
-`git.ts` 里 `const r = await run(...)` 出现 13 次，语义各异（restore / rev-parse / reset / status / add / commit / checkout …）。若用 `t.split('r').join('xxx')` 之类按名替换，13 处会被改成同一个名字，且会误伤 `restore`/`reset`/`refs` 等单词里的字母 `r`。
+[VERIFIED] 2026-10-18 实测：git.ts 的 13 处 const r 语义各异，按名替换会串味。原记录：`git.ts` 里 `const r = await run(...)` 出现 13 次，语义各异（restore / rev-parse / reset / status / add / commit / checkout …）。若用 `t.split('r').join('xxx')` 之类按名替换，13 处会被改成同一个名字，且会误伤 `restore`/`reset`/`refs` 等单词里的字母 `r`。
 
 修法：先用 `^function` 正则建立函数边界表，把每个单字母声明归属到具体函数，再以整段代码块（含 `r.code`/`r.stderr`/`r.stdout` 全部使用点）为锚点做唯一性校验替换。锚点命中数 ≠ 1 时立即 `exit(2)`。
 
 ## 替换后必须扫描「同形不同义」的残留
 
-`routes/workspace.ts` 里 `/workspace/pick` 与 `/workspace/pick-path` 两个端点各有一份 `const r = await nativePick()`。首轮替换只命中了第一份的前半段，`r.path` 在后续 4 行仍被引用，tsc 报 4 条 `Cannot find name 'r'`——这是「改了一半」的典型形态，且前半段改名成功让错误信息看起来像另一处的问题。
+[VERIFIED] 2026-10-18 实测：routes/workspace.ts 首轮替换漏了后半段，tsc 报 4 条 Cannot find name 'r'。原记录：`routes/workspace.ts` 里 `/workspace/pick` 与 `/workspace/pick-path` 两个端点各有一份 `const r = await nativePick()`。首轮替换只命中了第一份的前半段，`r.path` 在后续 4 行仍被引用，tsc 报 4 条 `Cannot find name 'r'`——这是「改了一半」的典型形态，且前半段改名成功让错误信息看起来像另一处的问题。
 
 修法：每个端点按「声明 → 所有使用点」整段读回、整段替换；替换后用 `grep -n` 扫该变量名残留，为空才收工。
 
 ## `execFileSync` 起的子进程看不见本轮 overlay 写入
 
-给 `session-start.cjs` 加完体积告警后立即跑它，输出仍是旧的「无待清理项」——因为 `writeText` 只进 overlay，`execFileSync` 读真盘。必须先 `await __AI__.flush()` 再跑，否则会误判「改了没生效」并重复修同一处。
+[VERIFIED] 2026-10-18 实测：给 session-start.cjs 加体积告警后立即跑，输出仍是旧行为。原记录：给 `session-start.cjs` 加完体积告警后立即跑它，输出仍是旧的「无待清理项」——因为 `writeText` 只进 overlay，`execFileSync` 读真盘。必须先 `await __AI__.flush()` 再跑，否则会误判「改了没生效」并重复修同一处。
 
 修法：任何「改脚本 → 立刻用 shell 跑该脚本验证」的轮次，脚本开头就 `flush()`。这是 `overlay-blind-v1` 在脚本自验场景的实例。
 
 ## 体积检查块插在 early-return 之后等于没插
 
-`clean-ai-runner.mjs` 有 `if (!doomed.length) { console.log('[skip] 无可清理项'); return }`。首轮把体积块插在它后面的 `console.log` 锚点处，条目为 0 时整块被跳过，实测输出只有 `[skip]`。
+[VERIFIED] 2026-10-18 实测：clean-ai-runner.mjs 条目为 0 时整块被跳过，只输出 [skip]。原记录：`clean-ai-runner.mjs` 有 `if (!doomed.length) { console.log('[skip] 无可清理项'); return }`。首轮把体积块插在它后面的 `console.log` 锚点处，条目为 0 时整块被跳过，实测输出只有 `[skip]`。
 
 修法：新增的「诊断/告警」逻辑必须放在所有 early-return 之前；锚点选择要看控制流，不能只看文本位置。
 
 ## `SingletonLock` 是符号链接，`readFile` 读不到
 
-Chromium 的 `SingletonLock` 形如 `hostname-pid` 的软链。用 `readFile(lockPath, 'utf8')` 会对悬空软链抛 ENOENT，被 `catch { continue }` 吞掉 ⇒ 判定规则永不命中（实测输出为空，误以为「没有孤儿」）。必须 `readlink()` 取目标字符串再解析 pid。
+[VERIFIED] 2026-10-18 实测：孤儿 profile 判定规则输出为空，改 readlink 后正常命中。原记录：Chromium 的 `SingletonLock` 形如 `hostname-pid` 的软链。用 `readFile(lockPath, 'utf8')` 会对悬空软链抛 ENOENT，被 `catch { continue }` 吞掉 ⇒ 判定规则永不命中（实测输出为空，误以为「没有孤儿」）。必须 `readlink()` 取目标字符串再解析 pid。
 
 ## 大文件锚点在注释空格上有微小差异就会反复失配
 
@@ -3232,7 +3232,7 @@ Chromium 的 `SingletonLock` 形如 `hostname-pid` 的软链。用 `readFile(loc
 
 ## 用户脚本有两份，产物是生成物
 
-`packages/core/src/tampermonkey/*.ts` 是片段源，`scripts/tampermonkey-session-id.user.js` 是 `scripts/assemble-userscript.mjs` 拼出来的产物。`tampermonkey-split` 测试断言两者严格相等——直接改产物会当场变红，且下次组装即被覆盖。改油猴必须先改片段再 `node scripts/assemble-userscript.mjs`（它会自动 bump `@version` 并写 `tampermonkey-version.json`）。
+[VERIFIED] 2026-10-18 实测：直接改 .user.js 被 tampermonkey-split 拦下，须改片段源再 assemble。原记录：`packages/core/src/tampermonkey/*.ts` 是片段源，`scripts/tampermonkey-session-id.user.js` 是 `scripts/assemble-userscript.mjs` 拼出来的产物。`tampermonkey-split` 测试断言两者严格相等——直接改产物会当场变红，且下次组装即被覆盖。改油猴必须先改片段再 `node scripts/assemble-userscript.mjs`（它会自动 bump `@version` 并写 `tampermonkey-version.json`）。
 
 ## 守卫里的 `[KNOWN-GAP]` 不是免责声明，是待办
 
@@ -3240,7 +3240,7 @@ Chromium 的 `SingletonLock` 形如 `hostname-pid` 的软链。用 `readFile(loc
 
 ## 守卫文件的多段 splice 必须用内容定位而非硬编码行号
 
-改 `stopped-baseline-guard.node-test.ts` 时按行号 `splice` 连续改三处，前一处改动会让后续行号整体偏移，导致断言写到错误位置、甚至产生悬空 `assert.ok(` 造成 TS1005。
+[VERIFIED] 2026-10-18 实测：按行号连改三处导致行号漂移，产生悬空 assert 触发 TS1005。原记录：改 `stopped-baseline-guard.node-test.ts` 时按行号 `splice` 连续改三处，前一处改动会让后续行号整体偏移，导致断言写到错误位置、甚至产生悬空 `assert.ok(` 造成 TS1005。
 
 修法：先 `findIndex` 按内容找到每段的首行与收尾 `)`，算出区间再 splice；多处修改从后往前做。硬编码行号只在「单点替换」时可接受。
 
@@ -3292,3 +3292,9 @@ Chromium 的 `SingletonLock` 形如 `hostname-pid` 的软链。用 `readFile(loc
 给 `capFilesByBudget` 写的 T4 用例初始用 400 行 × 19 字节 ≈ 7.6 KB，没超过 12 KB 预算，`已省略` 断言直接失败。改成 1000 行 ≈ 19 KB 才真正触发裁剪。
 
 判据承重的前提是「被测分支真的被走到」——数据量不够时，断言看似在测预算，实际在测「预算内不裁剪」这条相反的路径。
+
+## `||` 的短路语义会静默废掉上游的防护
+
+`useRunner.ts:580` 写 `liveStdout.value || String(s.stdoutTail || ...)`。服务端 `run.ts` 认真把 `stdoutTail` 截到 2000 字节，但 `liveStdout.value` 一旦非空（正常情况都非空），`||` 左边胜出，服务端的截断永远不会被用到。两处代码各自看都对，合起来失效。
+
+发现方式是比对实测数据与理论预期：日志里 p90 = 6.1 KB、max = 25.5 KB，而服务端明明把每段输出都截到了 2–4 KB，这个矛盾说明有别的东西在放大体积。

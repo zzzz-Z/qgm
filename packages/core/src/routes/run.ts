@@ -137,6 +137,9 @@ runHono.post('/run', async (c) => {
         error: `脚本头契约违规：${reason}${hint}`,
         metaError: true,
         rule: 'SYSTEM.md',
+        // [reject-size-visible-v1] 与 syntax 分支同口径回传体积：AI 被 MISSED_DESC 拒时，
+        //   同样需要知道「这一轮本来就已经超预算」，否则只会反复重发同长度的脚本。
+        scriptSize: measureScriptSize(script),
         breaker: v.tripped,
       }, v.tripped ? 429 : 400)
     }
@@ -347,7 +350,7 @@ runHono.post('/run', async (c) => {
             cur.updatedAt = new Date().toISOString()
             fs.writeFileSync(stPath, JSON.stringify(cur, null, 2))
           } catch { /* ignore */ }
-          writeChannelLog('runner', { runId, exit: result.code, timedOut: result.timedOut === true, durationMs: Date.now() - startedAt, changeCount: changes.length, pipeline })
+          writeChannelLog('runner', { runId, exit: result.code, timedOut: result.timedOut === true, durationMs: Date.now() - startedAt, changeCount: changes.length, pipeline, ctx: scriptMeta.ctx || 'default' })
           writeRunLog({ ts: startedAt, runId, desc: scriptDesc, why: scriptWhy, script: effectiveScript.slice(0, 2000), exit: result.code, timedOut: result.timedOut === true, durationMs: Date.now() - startedAt, changeCount: changes.length, changes: changes.slice(0, 50), errorFiles, fingerprints })
           const { needFiles, decision } = parseDecisionMarkers(result.stdout)
           if (decision || (needFiles && needFiles.length)) {
