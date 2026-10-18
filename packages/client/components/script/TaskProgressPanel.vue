@@ -68,7 +68,12 @@ const retrying = ref('')
 // [taskboard-group-collapse-v1] 分组可折叠：done 一多就把待办挤出视野，需能单独收起某一组。
 // [WHY] 默认收起「已完成」——历史项只增不减，常驻展开会持续挤占待办与失败的可见高度。
 const collapsedGroups = ref<Record<string, boolean>>({ done: true })
+// [taskboard-elapsed-v1] 当前轮耗时：取运行中任务的 at，运行中每秒刷新；无运行项则不显示（不刷 0s 噪音）
+const nowTick = ref(Date.now())
 
+// [taskboard-elapsed-v1] 每秒刷新仅用于耗时显示；用独立守卫判断（不引用后定义的 isLoopActive，
+//   避免 ts/no-use-before-define），无运行项时 tick 不推进，elapsedLabel 自然为空。
+useIntervalFn(() => { nowTick.value = Date.now() }, 1000)
 // [hmr-safe-poll-v1] useIntervalFn 随组件作用域自动清理，避免 HMR 替换 setup 时旧 timer 残留
 // [initial-poll-v1] immediate 只启动定时器、不立即调回调；首次拉取靠 onMounted 手动触发
 useIntervalFn(() => { if (_visible.value) void poll() }, 2000)
@@ -142,6 +147,13 @@ const hasLeftover = computed(() => pendingRows.value.length > 0 && !runningRow.v
 const loopBadge = computed(() => LOOP_BADGE[String(runtimeState.value.kind)] || LOOP_BADGE.idle)
 // [taskboard-loop-badge-v1] 循环是否在跑（running/waiting）：leftover 文案分叉用（模板对普通对象不自动解包，统一走 computed）
 const isLoopActive = computed(() => LOOP_PROGRESSING.has(String(runtimeState.value.kind)))
+const elapsedLabel = computed(() => {
+  if (!isLoopActive.value) return ''
+  const runAt = items.value.find(r => r.status === 'running')?.at
+  if (!runAt) return ''
+  const ms = nowTick.value - runAt
+  return ms < 1000 ? '' : `${Math.round(ms / 1000)}s`
+})
 // [taskboard-failed-badge-v1] 头部失败计数徽章：不展开也能一眼看到有失败项
 const failedCount = computed(() => failedRows.value.length)
 
@@ -298,6 +310,8 @@ function onVis() {
       <span class="tp-title">任务完成详情</span>
       <!-- [taskboard-loop-badge-v1] 循环运行状态徽章（idle/running/waiting/paused/stopped） -->
       <span class="tp-loop" :class="loopBadge.cls">{{ loopBadge.text }}</span>
+      <!-- [taskboard-elapsed-v1] 当前轮耗时集中在此：原分散在每张脚本卡头部，属全局信息却按步骤重复 -->
+      <span v-if="elapsedLabel" class="tp-elapsed">{{ elapsedLabel }}</span>
       <!-- [failed-round-highlight-v1] 失败徽标可点：直接滚到时间线里最近一张失败卡 -->
       <button
         v-if="failedCount > 0"
@@ -706,5 +720,12 @@ function onVis() {
 .tp-retry:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.tp-elapsed {
+  flex: 0 0 auto;
+  font: 400 11px/16px var(--mono, ui-monospace, monospace);
+  color: var(--text-3, #8b949e);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
 }
 </style>
