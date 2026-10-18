@@ -63,7 +63,7 @@
 
 ---
 
-## §1 输出契约与状态机
+## §1 输出契约与 turn 信封
 
 - 承重：`packages/core/tests/system-contract.node-test.ts`（G1/G4–G10）+ `packages/core/tests/overlay-flush-and-lang-check.node-test.ts`
 
@@ -281,7 +281,7 @@
 
 - 承重：无（提示词侧自律）
 
-**获取顺序：本地优先，不可跳层**（skills-install-v1）：① 先查本地（`GET /__ai/skills` / `POST /__ai/skills/match`），命中即用不联网——「表里没有」≠「没装」，已装清单只认磁盘；② 本地确无命中时**用 `ASK` 问用户是否联网检索**，同意才走远端；③ 安装走 `POST /__ai/skills/install`。判成功看「能列出 + 能命中」，不看 exit code。
+**获取顺序：本地优先，不可跳层**（skills-install-v1）：① 先查本地（`GET /__ai/skills` / `POST /__ai/skills/match`），命中即用不联网——「表里没有」≠「没装」，已装清单只认磁盘；② 本地确无命中时**用 `ask` 块问用户是否联网检索**（回落态用 `ASK`），同意才走远端；③ 安装走 `POST /__ai/skills/install`。判成功看「能列出 + 能命中」，不看 exit code。
 
 ---
 
