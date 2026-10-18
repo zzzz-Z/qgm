@@ -229,14 +229,23 @@ export function collectStopCandidatesInPage() {
   return { count: out.length, brief: out.join(' | ') }
 }
 
+// [newsession-parity-v1] 与油猴侧 actions.ts 的 clickNewSession 逐条对齐：
+//   ① 候选选择器补 [role="button"]；② 文案候选补「新建会话/开启新对话」；
+//   ③ 匹配字段补 data-testid；④ 按钮 disabled 时视为未命中；⑤ 找不到时跳根路径兜底。
+//   原实现只认 button/a + 三个文案，DeepSeek 改版后恒返回 false（实测 click-fail）。
 export function clickNewSessionInPage() {
-  const all = Array.from(document.querySelectorAll('button, a'))
+  const all = Array.from(document.querySelectorAll('button, a, [role="button"]'))
   const btn = all.find((el) => {
-    const lbl = `${el.getAttribute('aria-label') || ''} ${el.textContent || ''} ${el.getAttribute('title') || ''}`
-    return /新建对话|新对话|新建聊天|new\s*chat|new\s*conversation/i.test(lbl)
-  })
-  if (btn) {
-    btn.click()
+    const lbl = `${el.getAttribute('aria-label') || ''} ${el.textContent || ''} ${el.getAttribute('title') || ''} ${el.getAttribute('data-testid') || ''}`
+    return /新建对话|新对话|新建聊天|新建会话|开启新对话|new\s*chat|new\s*conversation/i.test(lbl)
+  }) as HTMLButtonElement | undefined
+  if (btn && !btn.disabled) {
+    try { btn.click(); return true } catch { /* 点击失败：落跳转兜底 */ }
+  }
+  // [CONSTRAINT] 已在根路径时不再赋值 location.href：会触发整页重载并重建无头页面。
+  const root = `${location.origin}/`
+  if (location.href !== root && location.pathname !== '/') {
+    location.href = root
     return true
   }
   return false

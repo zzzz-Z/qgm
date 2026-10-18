@@ -16,6 +16,7 @@ import { activeSessionId, loadActiveSessionIdBySite } from './useAppStorage'
 import { useToast } from './useToast'
 import { clearEvents } from './useEventStream'
 import { clearInbox } from '../runner/useScriptInbox'
+import { pushTerminalNotice } from '../runner/useRunner'
 import { useAiWindow } from '../ai/useAiWindow'
 import { getTransport, transportKind } from '../ai/useAiTransport'
 import { useAiSite } from '../ai/useAiSite'
@@ -75,6 +76,9 @@ export function useAppStartup(deps: AppStartupDeps) {
         if (state !== 'error') return
         const message = detail || '无头链路异常'
         try { toast(`无头链路错误：${message}`, 'error', TOAST_LONG) } catch { /* swallow: toast 未就绪 */ }
+        // [err-to-timeline-v1] 错误同时上屏到时间线：toast 几秒即消失，用户回头翻记录时
+        //   看不到任何失败痕迹（实测「发出去没反应、也没有任何提示」正是这类静默）。
+        try { pushTerminalNotice(`[无头链路错误] ${message}`, { divider: true }) } catch { /* swallow: 时间线未就绪 */ }
         log.error('[headless-state] sid=', sid, 'detail=', detail)
       }) ?? null
       log.warn('[ai-runner] 无头 reply 订阅已注册')

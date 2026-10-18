@@ -211,6 +211,22 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
             send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now() } } })
           } else {
             send({ t: 'headless:reply', sid, reply: { kind: reply.kind, text: reply.text } })
+            // [limit-autorecover-v1] 触顶后原会话不可能再产出：自动开新会话并把「继续」发过去，
+            //   让任务在无人工干预下接续（原行为只是报错停下，用户看到「没反应」）。
+            //   [CONSTRAINT] 只发一句「继续」——完整上下文由工作台会话记录承载，
+            //   服务端不臆造总结；如需带系统提示词，由客户端首问链路负责注入。
+            if (reply.kind === 'limit') {
+              void (async () => {
+                try {
+                  stopReply()
+                  replyPollers.delete(sid)
+                  const ns = await pool.newSession(sid)
+                  if (!ns) return
+                  send({ t: 'headless:state', sid, state: 'filling', detail: '会话已达上限，已自动开启新会话' })
+                  await pool.fillPrompt(sid, '继续')
+                } catch { /* swallow: 自动恢复失败不阻断主链路，用户可手动重发 */ }
+              })()
+            }
             // [lesson-autocapture-v1] DONE 总结若含「踩坑记录」段，自动追加到 lessons.md
             // WHY: 之前只能人工 pnpm lessons:add，知识沉淀依赖记忆；此处零成本捕获
             // CONSTRAINT: 仅识别明确标题，无该段落即忽略；追加失败静默，不影响主链路
