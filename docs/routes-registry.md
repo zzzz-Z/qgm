@@ -48,6 +48,16 @@
 
 - **`/__ai/video/*` 域** —— `POST /video/tasks`（建任务）、`GET /video/tasks`（列任务）、`GET|DELETE /video/tasks/:id`、`POST /video/tasks/:id/script|terms`、`GET /video/tasks/:id/download`、`GET|PUT /video/config`、`GET|POST /video/musics`、`GET|POST /video/materials`、`POST /video/scripts`。字段以源文件为 SSOT。
 
+## WebSocket 帧（不适用 routes-registry-v1，单列以免误判漏登记）
+
+> 本注册表只覆盖 `/__ai/*` HTTP 端点。以下为 **WS 帧**，由 `attach-ws.ts` 发出，客户端经 `useAiTransport` 订阅。
+
+- **`ai-runner:block`** —— turn 信封的块帧（SSOT：`packages/core/src/reply/turn-frames.ts` 的 `blocksToFrames`）。消费方 `packages/client/composables/ai/useAiTransport.ts` 的 `onBlock`。
+- **`ai:turn-end`** —— 轮次边界帧（`AiTurnEndDto`，SSOT：`packages/core/src/server/protocol.ts`）。
+- **`hello`** —— 连接握手帧，带 `caps: AI_CAPS`（`hello-caps-v1`）。新客户端据此判断是否启用信封消费。
+
+新增 WS 帧时：改 `protocol.ts` 的类型 + `AI_CAPS`（若属块类型），并在本节登记。
+
 ## run（SSOT：`routes/run.ts` + `workspace-scope.ts`）
 
 - **POST /\__ai/run**（既有端点增补）—— body 新增 `workspaceId?`：目标工作区缺省用活跃项；注册表外 id 返 404。执行链包在 ALS 作用域里，脚本 cwd / overlay / post-run tsc·lint / 快照 / 日志按目标工作区 root 解析（并发运行互不串台）；summary 帧新增 `workspaceId` 字段。

@@ -34,8 +34,22 @@ function slice(start: string, end: string): string {
   return md.slice(a, b)
 }
 
-const stateB = slice('### 状态 B：ASK（交互阻断）', '### 状态 C：')
-const stateD = slice('### 状态 D：DONE（任务终止）', '### 状态 E：')
+/** 在给定文本内切片（供 §1 内部状态段使用，避免跨章 indexOf 误命中附录 C） */
+function sliceIn(text: string, start: string, end: string): string {
+  const a = text.indexOf(start)
+  assert.ok(a > -1, `§1 内找不到起始锚「${start}」`)
+  const b = text.indexOf(end, a + start.length)
+  assert.ok(b > a, `§1 内找不到结束锚「${end}」`)
+  return text.slice(a, b)
+}
+
+// [appendix-c-scoped-v1] 状态段在附录 C（§1 已改为 §1.1-§1.6 信封结构，无「### 状态 X」标题）
+//   附录 C 是兼容冻结区，P8 删它时这些断言必须同步改——由本行注释与 §1.6 引用共同标记
+const _cAt = md.indexOf('## 附录 C')
+assert.ok(_cAt > -1, 'SYSTEM.md 找不到「## 附录 C」')
+const appendixC = md.slice(_cAt)
+const stateB = sliceIn(appendixC, '### 状态 B：ASK（交互阻断）', '### 状态 C：')
+const stateD = sliceIn(appendixC, '### 状态 D：DONE（任务终止）', '### 状态 E：')
 const s8 = slice('## §8 错误恢复与重试预算', '## §9 ')
 const s12 = slice('## §12 提交前自复检协议', '## §13 ')
 
