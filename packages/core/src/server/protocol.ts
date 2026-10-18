@@ -43,6 +43,67 @@ export interface NeedFilesPayloadDto {
   paths: string[]
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// [turn-block-frame-v1] turn 信封的块帧（v2.1 契约）
+//
+// [WHY] 旧契约把一次回复压成一个 `AiReplyDto`（一个 kind + 一个载荷），于是
+//   「先说理再跑两个脚本再提问」必须靠前端**再解析文本**还原顺序与归属；
+//   `attach-ws.ts` 里 `desc: ''` 那处硬编码就是这个模型的必然产物（没有地方放 desc）。
+//   块帧把「顺序」与「载荷」都变成协议字段：一个块一帧，turn 结束一帧。
+//
+// [CONSTRAINT] 这是**只增**的协议：旧帧（headless:reply / headless:script）一行不改，
+//   旧客户端继续走旧帧；新客户端认块帧。双读期至少覆盖到 P8 观察期结束。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 块类型：与 packages/core/src/reply/turn-schema.ts 的 TURN_BLOCK_TYPES 同源 */
+export type AiBlockType = 'say' | 'script' | 'ask' | 'handoff'
+
+/**
+ * 一个块。字段按 `type` 收窄（wire 上是 JSON，故用扁平可空字段而非判别联合）。
+ * [CONSTRAINT] 不加 `lane` / `parallel` 之类「未来能力」占位：契约只声明已实现的东西，
+ *   不支持的能力必须报错，而不是被静默忽略。
+ */
+export interface AiBlockDto {
+  /** 所属 turn；同一轮内唯一，跨轮递增 */
+  turnId: number
+  /** 块 id（信封里的 id；say 缺省时由解析器补） */
+  blockId: string
+  /** 在 content 数组中的位置（0 起）。前端按它占位，不按到达顺序 */
+  seq: number
+  type: AiBlockType
+  /** say：正文 */
+  text?: string
+  /** script：代码正文 */
+  code?: string
+  /** script：语言（白名单，不做别名归一） */
+  lang?: 'js' | 'cjs'
+  /** script：做什么（**必须**从块取真值，不允许再由服务端填空串） */
+  desc?: string
+  /** script：为什么做 */
+  why?: string
+  /** ask：问题正文 */
+  question?: string
+  /** ask：选项（直接来自块，前端不再解析文本） */
+  options?: DecisionOptionDto[]
+  /** handoff：交班摘要 */
+  summary?: string
+}
+
+/**
+ * turn 结束帧：告诉前端「这一轮还有没有后续」。
+ * [WHY] 不派生在前端做，是因为它决定**循环是否继续**：awaiting='results' ⇒ 回灌执行结果；
+ *   'user' ⇒ 停下来等提问卡；'none' ⇒ 本 turn 即总结，结束循环。
+ *   让前端各自从块列表推导，三处（前端 / 服务端 / 油猴）会漂移。
+ */
+export interface AiTurnEndDto {
+  turnId: number
+  awaiting: 'results' | 'user' | 'none'
+  /** 本轮发出的块数（含被跳过的未知类型不算），用于前端对账「说好的块到齐没有」 */
+  blocks: number
+  /** 被跳过的块（未知 type 等）——宁可上报也不静默丢弃 */
+  skipped?: string[]
+}
+
 /** 传输层状态枚举：连接 / 断开 / 重连中 */
 export type TransportState = 'idle' | 'filling' | 'generating' | 'done' | 'error' | 'rate-limited'
 
@@ -79,8 +140,12 @@ export type ClientMessage
 // [replay-flag-v1] 可缓存消息（reply/script/summary/new-session-created）在断线重连重放时带 replay:true；
 // 客户端据此区分「实时回复」与「历史回放」：回放仅供 UI 恢复，禁止重入 auto-loop
 export type ServerMessage
-  = | { t: 'hello', version: number }
+  = | { t: 'hello', version: number, caps?: string[] }
     | { t: 'headless:reply', sid: string, reply: AiReplyDto, replay?: boolean }
+    // [turn-block-frame-v1] 块帧：一个块一帧，按 seq 排序即得原始 content 顺序
+    | { t: 'ai:block', sid: string, block: AiBlockDto, replay?: boolean }
+    // [turn-block-frame-v1] turn 结束：awaiting 决定循环是否继续（派生规则见 turn-frames.ts）
+    | { t: 'ai:turn-end', sid: string, end: AiTurnEndDto, replay?: boolean }
     | { t: 'headless:script', sid: string, item: InboxItemDto, replay?: boolean }
     | { t: 'headless:state', sid: string, state: TransportState, detail?: string }
     | { t: 'headless:new-session-created', sid: string, url: string, id: string, replay?: boolean }

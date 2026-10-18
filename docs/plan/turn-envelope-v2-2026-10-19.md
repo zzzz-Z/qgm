@@ -280,6 +280,15 @@ pnpm userscript:build
 `protocol.ts` 新增 `AiBlockDto`、`AiTurnEndDto`；帧加 `turnId` / `blockId`；新增 `ai:turn-end`
 （`{turnId, awaiting: 'results'|'user'|'none'}`）。`hello` 带 `caps: ['say','script','ask','handoff']`。
 
+**P4-a（已完成）的两处契约修订**：
+
+1. **`awaiting` 优先级必须钉死**：§2.1 同时写了「有 `ask` ⇒ 停循环等用户」与「有 `script` ⇒ 执行后回灌」，
+   但 `awaiting` 是单值。定 **script > ask > none**：有执行块时必须先收回执行结果，否则下一轮无东西可推理；
+   同一 turn 的提问卡在块到达时就按 `seq` 占位渲染，用户随时可答，不需要循环为它暂停。
+   反过来的代价是「先回灌结果、提问卡被盖住」——已用测试钉死，改优先级必红。
+2. **新增 `rotate: boolean`（handoff）而不塞进 `awaiting`**：§2.1 列了四种行为，三值枚举表达不了。
+   轮转与「等结果 / 等用户」是正交的（可以先收执行结果再轮转），塞进枚举会逼出一个假的互斥。
+
 `attach-ws.ts`：一个 turn 的 N 个块逐帧发出；`desc` / `why` 从块取真值（**修掉现在硬编码 `''` 的那处**）。
 
 日志：新增 `.ai-runner/logs/turns.jsonl`，只写 L2/L3 transition（`block.start` / `block.emit` /
@@ -392,12 +401,30 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | P1-c | 完成（2026-10-19） | 2026-10-19 | 无头内联段（region 替换）+ 三端行为对拍 6 条；P1 三个守卫全绿 52/52 |
 | P2-a | 完成（2026-10-19） | 2026-10-19 | 页面侧 `readTurnBlocks()` + 假 DOM 守卫 11 条；**未改任何返回路径**（零行为变化） |
 | P2-b | 待做 | — | 把 `readTurnBlocks` 接进判定链（信封优先 / 标记回落）+ `ai-headless` 回调扩为数组 |
+| P4-a | 完成（2026-10-19） | 2026-10-19 | `AiBlockDto`/`AiTurnEndDto`/`ai:block`/`ai:turn-end` + 纯映射 `blocksToFrames`（17 条），**未接线** |
+| P4-b | 待做 | — | `attach-ws.ts` 发块帧（`desc`/`why` 取真值）+ `turns.jsonl` 只写 transition |
 | P3 | — | — | |
 | P4 | — | — | |
 | P5 | — | — | |
 | P6 | — | — | |
 | P7 | — | — | |
 | P8 | — | — | 观察期后 |
+
+### P4-a 实测记录（2026-10-19）
+
+`packages/core/src/reply/turn-frames.ts`：`deriveAwaiting` / `deriveRotate` / `blocksToFrames`（纯函数，
+只 import protocol 的类型，不读时钟、不读全局）。守卫 `reply-turn-frames.node-test.ts` 17 条。
+
+**三个刻意的设计选择**：
+
+- **`seq` 取输入数组下标，不取「已发块计数」**：被跳过的块会在 `seq` 上留洞，前端据此能发现
+  「说好的第 3 块没来」，而不是把第 4 块错位当第 3 块渲染。变异：`seq` 改成 `blocks.length` ⇒ 留洞那条红。
+- **坏块进 `skipped`（`<id>:<reason>`），不抛异常也不静默跳过**：解析器已校验过一次，
+  这里再挡一次是防「别的调用方直接构造 `RawBlock`」。全合法时 `end` 不带 `skipped` 字段（不留空数组噪音）。
+- **每类帧只带自己的字段**：`say` 帧不带 `code`、`script` 帧不带 `text`。字段串味会让 P6 的
+  「采信守卫」（`desc/why` 非空且与输入等值）失去意义——它测不出「值从别的字段抄来的」。
+
+**变异验证两次**：`awaiting` 改成 ask 优先 ⇒ 2 条红（含四块齐全那条）；`seq` 改成已发计数 ⇒ 1 条红。
 
 ### P2-a 实测记录（2026-10-19）
 
