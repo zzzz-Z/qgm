@@ -12,7 +12,8 @@ export interface AiTransport {
   // [image-channel-v3] images 与 FillPayload.images 同源（DataURL 数组）；油猴分支全量透传，headless 分支显式挑字段
   // [CONSTRAINT] 字段可缺省，旧实现不识该字段不报错
   // [CHANGE-IMPACT] 消费方 useAiWindowSend.sendFill / copyAndFill 传参处，及 headless send('headless:fill') 载荷
-  sendFill: (sid: string, payload: { prompt: string, context?: string, images?: string[] }) => boolean
+  // [fill-ack-id-v1] ackId 可选：带上则可精确匹配自己的 fill-ack，避免同 sid 并发串话
+  sendFill: (sid: string, payload: { prompt: string, context?: string, images?: string[], ackId?: string }) => boolean
   sendOpen?: (sid: string, payload: { url?: string }) => boolean
   sendStop: (sid: string) => boolean
   sendRotate: (sid: string, payload: { instruction: string }) => boolean
@@ -39,7 +40,7 @@ export interface AiTransport {
   /** [mute-flag] 恢复消息接收 */
   unMute?: () => void
   // [P3-1c] waitAck
-  waitAck?: (t: string, sid: string, timeoutMs?: number) => Promise<boolean>
+  waitAck?: (t: string, sid: string, timeoutMs?: number, ackId?: string) => Promise<boolean>
 }
 
 /** 存储键：transport 偏好（'headless' | 'tampermonkey'） */
@@ -157,7 +158,7 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   let ws: WebSocket | null = null
   let muted = false
   const queue: string[] = []
-  const ackWaiters: Array<{ sid: string, resolve: (ok: boolean) => void, timer: ReturnType<typeof setTimeout> }> = []
+  const ackWaiters: Array<{ sid: string, ackId: string, resolve: (ok: boolean) => void, timer: ReturnType<typeof setTimeout> }> = []
 
   // [ws-reconnect-v1] dev 后端重启 / 网络抖动后旧 socket 半开：浏览器仍报 OPEN，send() 不抛错但帧永不到达，
   // 表层即「发消息没反应」。close/error 后指数退避自动重连，排队帧在 open 后 flush，业务无感知
@@ -222,8 +223,13 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
       // 原实现只能靠 headless:state 间接推断，fill 失败时与成功同形。
       if (msg.t === 'headless:fill-ack') {
         const ackSid = String((msg as Record<string, unknown>).sid || '')
+        // [fill-ack-id-v1] 有 ackId 时只认精确匹配，避免同 sid 并发 fill 串话；旧服务端不带则退回按 sid
+        const ackId = String((msg as Record<string, unknown>).ackId || '')
+        const matchIdx = ackId
+          ? ackWaiters.findIndex(w => w.ackId === ackId)
+          : ackWaiters.findIndex(w => w.sid === ackSid)
         for (let i = ackWaiters.length - 1; i >= 0; i--) {
-          if (ackWaiters[i].sid === ackSid) {
+          if ((ackId ? i === matchIdx : ackWaiters[i].sid === ackSid)) {
             const w = ackWaiters[i]
             clearTimeout(w.timer)
             w.resolve(Boolean((msg as Record<string, unknown>).ok))
@@ -289,20 +295,21 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     // [image-channel-v3] 原实现显式只挑 prompt/context，images 被丢；改为条件展开
     // [CONSTRAINT] images 缺省时不写入字段，保持旧载荷形状兼容旧服务端
     // [CHANGE-IMPACT] 服务端 headless:fill handler 需识别并消费 images，否则静默忽略
-    sendFill(sid, p) { return send('headless:fill', { sid, prompt: p.prompt, context: p.context, ...(p.images && p.images.length ? { images: p.images } : {}) }) },
-    // [P3-1c] waitAck：等 headless:state 回包（filling/generating/error 任一），超时返回 false
-    waitAck(_t, sid, timeoutMs = 3000) {
+    sendFill(sid, p) { return send('headless:fill', { sid, prompt: p.prompt, context: p.context, ...(p.images && p.images.length ? { images: p.images } : {}), ...(p.ackId ? { ackId: p.ackId } : {}) }) },
+    // [fill-ack-id-v1] waitAck：等 headless:fill-ack；带 ackId 时精确匹配，
+    //   不带时退化为按 sid 匹配（兼容旧服务端）。超时返回 false。
+    waitAck(_t, sid, timeoutMs = 3000, ackId?: string) {
       // [sid-normalize-v1] 服务端 attach-ws 用 `msg.sid || 'default'` 归一化，回包 sid 恒为 'default'；
       // 客户端若以原始 '' 注册 waiter，永远匹配不上 ACK → 3s 超时（隐藏 bug）
       const normalizedSid = sid || 'default'
       return new Promise<boolean>((resolve) => {
-        let waiter: { sid: string, resolve: (ok: boolean) => void, timer: ReturnType<typeof setTimeout> }
+        let waiter: { sid: string, ackId: string, resolve: (ok: boolean) => void, timer: ReturnType<typeof setTimeout> }
         const timer = setTimeout(() => {
           const i = ackWaiters.indexOf(waiter)
           if (i >= 0) ackWaiters.splice(i, 1)
           resolve(false)
         }, timeoutMs)
-        waiter = { sid: normalizedSid, resolve, timer }
+        waiter = { sid: normalizedSid, ackId: String(ackId || ''), resolve, timer }
         ackWaiters.push(waiter)
       })
     },

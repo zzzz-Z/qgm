@@ -65,7 +65,8 @@ export type ClientMessage
   = | { t: 'headless:open', sid: string, url?: string }
     | { t: 'headless:close', sid: string }
     | { t: 'headless:list' }
-    | { t: 'headless:fill', sid: string, prompt: string, context?: string, images?: string[] }
+    // [fill-ack-id-v1] ackId 由客户端生成并透传，服务端原样回写；并发 fill 靠它区分归属
+    | { t: 'headless:fill', sid: string, prompt: string, context?: string, images?: string[], ackId?: string }
     | { t: 'headless:stop', sid: string }
     | { t: 'headless:rotate', sid: string, instruction: string }
     | { t: 'headless:new-session', sid: string, summary: string }
@@ -85,7 +86,8 @@ export type ServerMessage
     | { t: 'headless:error', error: string }
     | { t: 'headless:stop-diag', sid: string, count: number, brief: string }
     // [fill-ack-v1] 与油猴 ai-runner:fill-ack 对齐：工作台据此判定「已注入」而非靠 state 猜
-    | { t: 'headless:fill-ack', sid: string, ok: boolean, reason: string }
+    // [fill-ack-id-v1] ackId 回显请求侧的值（旧客户端不发则省略），客户端据此精确匹配自己的 waiter
+    | { t: 'headless:fill-ack', sid: string, ok: boolean, reason: string, ackId?: string }
     // [url-updated-v1] 与油猴 ai-runner:url-updated 对齐：发送后轮询 URL 变化（最多 8s）
     | { t: 'headless:url-updated', sid: string, url: string }
     // [fs-watch-v1] 文件树 / git 状态变化广播：由 server/fs-watch.ts 的 recursive watcher 触发；

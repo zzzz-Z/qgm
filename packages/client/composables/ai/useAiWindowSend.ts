@@ -119,7 +119,9 @@ export function sendFillToImpl(sid: string, payload: FillPayloadImpl): boolean {
 export function sendFillImpl(payload: FillPayloadImpl, sid?: string): boolean {
   if (isHeadless()) {
     headlessSend('sendFillImpl', sid ?? getActiveWinSid(), payload)
-    traceSend({ sid: sid ?? getActiveWinSid(), via: 'headless', source: payload.source || 'loop-round', prompt: payload.prompt, ok: true })
+    // [headless-trace-honest-v1] 不再写 ok:true：此处只是「帧已入队」，真实注入结果由服务端
+    //   pool.fillPrompt 决定并另写一条 headless 留痕。两条留痕给出相反结论会让排查失去依据。
+    traceSend({ sid: sid ?? getActiveWinSid(), via: 'headless', source: payload.source || 'loop-round', prompt: payload.prompt, ok: undefined })
     return true
   }
   // [send-trace-v1] 生产路径里 sendFillToImpl 的直接调用方只有 ds 桥（循环引擎），故此处显式标 loop-round

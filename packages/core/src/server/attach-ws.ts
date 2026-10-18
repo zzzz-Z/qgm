@@ -168,7 +168,8 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
       try { writeChannelLog('headless', { kind: 'fill', sid, ok, promptBytes: prompt.length, promptHead: prompt.slice(0, 80) }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
       // [fill-ack-v1] 与油猴 ai-runner:fill-ack 对齐：显式回执注入结果，
       // 使工作台 sendFillToAsync 不再依赖 state 帧的间接推断。
-      send({ t: 'headless:fill-ack', sid, ok, reason: ok ? '' : 'fill-verify-failed' })
+      // [fill-ack-id-v1] 回显请求携带的 ackId（旧客户端不发则省略），客户端据此精确匹配 waiter
+      send({ t: 'headless:fill-ack', sid, ok, reason: ok ? '' : 'fill-verify-failed', ...(msg.ackId ? { ackId: String(msg.ackId) } : {}) })
       if (!ok) {
         // [fill-verify-v2] 止血（AGENDA-10）：验证失败 ≠ 一定没发出去（页面改版 / 消息慢渲染都会误判）。
         // 旧实现在此 return → 对方真回复了也无人接收，整轮被静默丢弃。

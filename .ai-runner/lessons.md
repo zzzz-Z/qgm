@@ -3580,3 +3580,11 @@ for v in $(...); do grep -q "$v:" style.css || echo $v; done
 ## `browser.run` 每次新建 tab，sid 随之变化
 
 想把测试数据喂给被观察的页面，必须在同一个 `page.evaluate` 里先写后读，跨轮推送是另一个桶。
+
+## `FillResult` 是封闭联合类型，扩三态会级联到所有消费点
+
+`copyAndFill` 的返回被 `exec-flow`、`script-panel-actions`、`worklog-*` 多处按 `=== 'failed'` 判定；扩类型前必须 grep 全部 `'failed'` / `'sent'` 比较点，逐个确认语义（本轮 `unacked` 在 `exec-flow` 需单独分支，不能落进失败路径）。
+
+## 客户端与服务端对同一事件各写一条留痕时必须同口径
+
+无头路径原先客户端写 `ok:true`、服务端写真实 `ok`，两条日志会给出相反结论。这类「观测手段自相矛盾」比没有日志更难排查。

@@ -69,6 +69,9 @@ export function createExecFlow(deps: ExecFlowDeps) {
       toast('发送失败', 'warn', TOAST_MEDIUM)
       return
     }
+    // [headless-fill-ack-v1] unacked = 帧已发出但没等到回执（无头超时 / 油猴未回）：
+    //   不再当作成功静默吞掉，也不再当作失败重试（可能造成重复发送），只如实提示「未确认」。
+    if (r === 'unacked') toast('已发送，但未收到页面确认；若 AI 无响应请手动重发', 'warn', TOAST_LONG)
     const okN = items.filter(i => i.ok).length
     emit('ai:feedback', `📤 回传 AI：${items.length} 条执行结果（成功 ${okN} · 失败 ${items.length - okN}）`, { payload: { prompt: mergedText.slice(0, 8000), changes: items.flatMap(i => i.changes), exit: items[items.length - 1]?.exit ?? -1, ok: items.some(i => i.ok), merged: items.length } })
     copied.value = true

@@ -59,7 +59,9 @@ export type {
 } from './useAiWindowSend'
 
 // ── 类型 ──
-type FillResult = 'sent' | 'opened' | 'failed'
+// [headless-fill-ack-v1] unacked = 帧已发出但未收到回执（结果未知）；
+//   与浏览器模式同语义，由调用方决定「按已发送处理」还是提示，不得当成确定失败。
+type FillResult = 'sent' | 'opened' | 'failed' | 'unacked'
 
 // ── 模块级常量 ──
 
@@ -452,13 +454,30 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
   if (isHeadless()) {
     const t = await loadTransport()
     const tr = t.useAiTransport().transport
-    tr.sendOpen?.(getActiveWinSid(), { url: url.value })
-    // [manual-fill-bypass-paused-v1] 必须尊重真实返回值：旧实现无条件 return 'sent'，
-    // WS 发送失败时用户消息照样上屏+亮「思考中」，实际帧从未发出，表现为永久无响应
-    const sent = tr.sendFill(getActiveWinSid(), { prompt: finalPrompt, ...imagePayload })
-    if (sent && pendingRulesKey) markRulesInjected(pendingRulesKey)
-    else if (pendingRulesKey) _rulesPendingSids.delete(pendingRulesKey)
-    return sent ? 'sent' : 'failed'
+    const hsSid = getActiveWinSid()
+    tr.sendOpen?.(hsSid, { url: url.value })
+    // [headless-fill-ack-v1] 与浏览器模式对齐：不再「帧入队即算成功」。
+    //   旧实现只看 sendFill 的布尔（恒 true），服务端 pool.fillPrompt 的真实 ok 被丢弃，
+    //   填失败与填成功在客户端完全同形 —— 表现为「发了、AI 不回、无任何错误」。
+    //   现在带 ackId 发帧并等 headless:fill-ack：ok=true → sent；ok=false → failed；
+    //   超时（无回执）→ unacked，交由调用方按「结果未知」降级处理。
+    const ackId = `hf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+    const queued = tr.sendFill(hsSid, { prompt: finalPrompt, ...imagePayload, ackId })
+    if (!queued) {
+      if (pendingRulesKey) _rulesPendingSids.delete(pendingRulesKey)
+      return 'failed'
+    }
+    // [CONSTRAINT] 超时须覆盖 pool.fillPrompt 全链路（含输入框探测 + 800ms 发送验证）：
+    //   浏览器侧同链路验证窗为 800ms，无头侧另含页面就绪等待，取 12s 留足余量。
+    const acked = tr.waitAck ? await tr.waitAck('fill', hsSid, 12_000, ackId) : true
+    if (!acked) {
+      log.warn('[copyAndFill] headless fill 未收到 ack（超时） sid=', hsSid, 'ackId=', ackId)
+      if (pendingRulesKey) _rulesPendingSids.delete(pendingRulesKey)
+      return 'unacked'
+    }
+    // ack ok=true 才登记规则已注入（失败时下次仍需注入）
+    if (pendingRulesKey) markRulesInjected(pendingRulesKey)
+    return 'sent'
   }
 
   const sid = getActiveWinSid()

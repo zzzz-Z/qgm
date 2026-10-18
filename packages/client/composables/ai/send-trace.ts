@@ -31,8 +31,16 @@ export interface SendTraceInput {
   source: string
   /** 本次投递的完整 prompt（本模块只取首部与字节数，不外传正文） */
   prompt: string
-  /** 投递结果：postMessage / WS 是否未抛错 */
-  ok: boolean
+  /**
+   * 投递结果：
+   * - true  = 已确认投递成功（页面回执 ok / postMessage 未抛错）
+   * - false = 已确认失败
+   * - undefined = **结果未知**（仅帧入队，真实注入结果由对端另写一条留痕）
+   * [headless-trace-honest-v1] 三态而非布尔：无头路径在客户端无法知道 pool.fillPrompt 的结果，
+   *   写 true 会与服务端 headless 留痕给出相反结论。服务端按 body.ok === true 归一化，
+   *   undefined 自然落成 false（= 未确认成功），无需改服务端。
+   */
+  ok?: boolean
 }
 
 /**
