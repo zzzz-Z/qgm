@@ -1,4 +1,4 @@
-/* @turn-schema:cb5aa89887c5dc9b */
+/* @turn-schema:aeefb0a64575f427 */
 // 由 scripts/sync-turn-schema.mjs 从 packages/core/src/reply/turn-schema.ts 生成，请勿手改。
 /* eslint-disable ts/ban-ts-comment -- 纯 JS 源，由 scripts/sync-turn-schema.mjs 生成 */
 // @ts-nocheck
@@ -215,7 +215,8 @@ function mergeBlock(acc, block) {
 /**
  * 解析一条完整的 turn 信封。
  * @param md 回复原文（Markdown 或裸 JSON 均可）
- * @returns {turn, blocks, truncated, errors}；不是信封时 blocks 为空且 errors 含 TURN_NOT_JSON
+ * @returns {turn, blocks, truncated, errors}；解析不出对象时 errors 含
+ *   TURN_TRUNCATED（未配平＝还在流式写入）或 TURN_NOT_JSON（配平了但不是对象）
  */
 export function parseTurn(md) {
   const text = String(md ?? '')
@@ -240,7 +241,12 @@ export function parseTurn(md) {
     break
   }
   if (!obj) {
-    out.errors.push({ code: 'TURN_NOT_JSON', detail: '围栏内不是可解析的对象' })
+    // [CONSTRAINT] 两种「没解析出对象」必须区分开，否则模型拿到的修法是错的：
+    //   · 围栏已开但对象还没配平 ⇒ 还在流式写入（TURN_TRUNCATED），等下一拍即可；
+    //   · 围栏配平了但里面不是对象 ⇒ 真的写错了（TURN_NOT_JSON），必须改写。
+    out.errors.push(out.truncated
+      ? { code: 'TURN_TRUNCATED', detail: '围栏已开但对象未配平（流式未写完）' }
+      : { code: 'TURN_NOT_JSON', detail: '围栏内不是可解析的对象' })
     return out
   }
   if (typeof obj.turn === 'number') out.turn = obj.turn

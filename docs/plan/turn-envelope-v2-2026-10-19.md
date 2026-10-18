@@ -405,7 +405,7 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | P2-b | 完成（2026-10-19） | 2026-10-19 | 信封优先分支接进 `detectReplyInPage`（早于 marks/script/done/plain）+ `turnAwaiting` / `turnRotate` 派生 + `seenTurnIds` 去重账本；8 条守卫 |
 | P4-a | 完成（2026-10-19） | 2026-10-19 | `AiBlockDto`/`AiTurnEndDto`/`ai:block`/`ai:turn-end` + 纯映射 `blocksToFrames`（17 条），**未接线** |
 | P4-b | 完成（2026-10-19） | 2026-10-19 | `attach-ws` 发块帧（`desc`/`why` 取真值）+ `turns.jsonl` transition + 重放清单；`turnToFrames` 4 条 / `replay-buffer` 7 条 |
-| P4-c | 待做 | — | `hello.caps` 与客户端的握手判定（与 P6 一起做才有意义） |
+| P4-c | 完成（2026-10-19） | 2026-10-19 | `AI_CAPS` 唯一源 + `supportsBlock` 纯函数（两侧各一份）+ hello 带 caps + 客户端 `caps()` + `dispatchInbound` 闸门；守卫 4 条；变异 3 组全命中 |
 | P6-a | 完成（2026-10-19） | 2026-10-19 | `buildOneCard` 认 `ai:block`（say/ask/handoff 建卡，script 不建）+ 采信守卫 13 条 |
 | P6-b | 完成（2026-10-19） | 2026-10-19 | `onBlock` 订阅（两处实现）+ `ai-runner:block` 路由 + `emitBus('ai:block')`；transport 守卫 +1（29） |
 | P5-a | 完成（2026-10-19） | 2026-10-19 | `turn-runner.ts` 纯执行器（幂等 `turn\|id` 账本 / 信号量并发 / 按 `seq` 串行启动 / 批量取消 / 1 turn = 1 轮 / `seed` 跨刷新防线）；19 条守卫 |
@@ -416,8 +416,8 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | P4 | — | — | |
 | P5 | 完成（2026-10-19） | 2026-10-19 | 见 P5-a / P5-b |
 | P3 | 完成（2026-10-19） | 2026-10-19 | 见 P3 / P3-b |
-| P6 | — | — | |
-| P7 | — | — | |
+| P6 | 完成（2026-10-19） | 2026-10-19 | 见 P6-a / P6-b |
+| P7 | 完成（2026-10-19） | 2026-10-19 | §1 改写为信封契约（骨架 A/B + 派生规则 + 字段校验 + 错误码表），旧五标记迁 附录 C；总 43077 B ≤ 43159，§1 6508 B ≤ 8834；新增 G10-a/b 双向守卫（文档示例 ⟺ parseTurn），变异 3 组全命中；**顺带实现文档已承诺但解析器从不发出的 `TURN_TRUNCATED`** |
 | P8 | — | — | 观察期后 |
 
 ### P6-b 实测记录（2026-10-19）

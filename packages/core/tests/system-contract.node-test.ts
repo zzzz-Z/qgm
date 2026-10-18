@@ -7,8 +7,23 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import process from 'node:process'
+import { parseTurn as parseTurnRaw } from '../src/reply/turn-schema.js'
 
 const md = fs.readFileSync(path.join(process.cwd(), 'packages/core/SYSTEM.md'), 'utf8')
+
+interface ParsedTurn {
+  turn: number | null
+  blocks: unknown[]
+  truncated: boolean
+  errors: unknown[]
+}
+const parseTurn = parseTurnRaw as unknown as (md: string) => ParsedTurn
+
+/** 包成 ```json 围栏（解析器真实入口：它自己会找围栏） */
+function fence(obj: unknown): string {
+  return `\`\`\`json\n${JSON.stringify(obj, null, 2)}\n\`\`\``
+}
 
 /** 截取 [start, end) 之间的正文；缺任一锚点即断言失败（防标题被改名后守卫静默通过） */
 function slice(start: string, end: string): string {
@@ -96,4 +111,57 @@ test('G6-b 标注行里以行内代码写出的守卫路径必须在磁盘真实
     }
   }
   assert.deepEqual(missing, [], `标注引用了不存在的守卫文件（改名后须同步）：\n${missing.join('\n')}`)
+})
+
+// ── [system-md-examples-v1] G10：契约文档的 JSON 示例 ⟺ 解析器行为 ──
+// [WHY] 文档与解析器会各自漂移：文档改了骨架而解析器没跟上（或反之），
+//   模型照文档写出来的信封在采集侧被整轮丢弃 —— 不报错，只表现为「AI 什么都没干」，
+//   正是 §17 最难自查的那一类失效。这里把它钉成机器判据（双向）。
+// [CONSTRAINT] 只认 ```json 围栏；非信封的 JSON 示例请改用 ```text / ```ts，否则 G10-a 会红。
+
+/** 抽出 SYSTEM.md 里所有 ```json 围栏（含围栏行本身，走解析器真实入口） */
+function jsonFences(): Array<{ line: number, raw: string }> {
+  const out: Array<{ line: number, raw: string }> = []
+  const re = /^[ \t]*```[ \t]*json[ \t]*\r?\n[\s\S]*?^[ \t]*```[ \t]*$/gm
+  let m: RegExpExecArray | null
+  while ((m = re.exec(md)) !== null) {
+    out.push({ line: md.slice(0, m.index).split('\n').length, raw: m[0] })
+  }
+  return out
+}
+
+test('G10-a §1 的每个 json 骨架示例都能被 parseTurn 解析通过', () => {
+  // 变异：删骨架里任一必填字段、或把 type 改成注册表名之外的名字 ⇒ 红
+  const fences = jsonFences()
+  assert.ok(fences.length >= 2, `只抽到 ${fences.length} 个 json 示例（骨架 A / B 应各一个）`)
+  for (const f of fences) {
+    const r = parseTurn(f.raw)
+    assert.equal(r.errors.length, 0, `第 ${f.line} 行的 json 示例解析报错：${JSON.stringify(r.errors)}`)
+    assert.ok(r.blocks.length > 0, `第 ${f.line} 行的 json 示例未产出任何块`)
+    assert.equal(r.truncated, false, `第 ${f.line} 行的 json 示例被判为截断（花括号未配平？）`)
+  }
+})
+
+test('G10-b §1.5 列的每个错误码都必须由解析器真实发出（防文档空头承诺）', () => {
+  // [WHY] 单向守卫不够：文档写了一个解析器从不产生的 code，模型照着改也修不好，
+  //   而这条承诺恰恰是「回灌自纠」的落点。历史教训：schema 只声明已实现的能力。
+  const sec15 = slice('### §1.5 错误码（回灌自纠）', '### §1.6 ')
+  const codes = [...sec15.matchAll(/`([A-Z][A-Z_]+)`/g)].map(m => m[1])
+  assert.ok(codes.length >= 7, `只抽到 ${codes.length} 个错误码：${codes.join(',')}`)
+  const emitted = new Set<string>()
+  const probe = (text: string): void => {
+    for (const e of parseTurn(text).errors) emitted.add(String((e as { code?: string }).code))
+  }
+  probe('') // TURN_NOT_JSON（空输入）
+  probe('DONE\n\n## 总结\n裸文本') // TURN_NOT_JSON
+  probe(fence({ v: 1, turn: 1, content: [] })) // TURN_NO_CONTENT
+  probe(fence({ v: 1, turn: 1, content: [{ type: 'nope', id: 'x1' }] })) // BLOCK_UNKNOWN_TYPE
+  probe(fence({ v: 1, turn: 1, content: [{ type: 'script', id: 'c1' }] })) // BLOCK_MISSING_FIELD
+  // BLOCK_BAD_LANG
+  probe(fence({ v: 1, turn: 1, content: [{ type: 'script', id: 'c1', lang: 'bash', desc: 'd', why: 'w', code: 'x' }] }))
+  // BLOCK_DUP_ID
+  probe(fence({ v: 1, turn: 1, content: [{ type: 'say', id: 's1', text: 'a' }, { type: 'say', id: 's1', text: 'b' }] }))
+  probe('```json\n{ "v": 1, "turn": 1, "content": [') // TURN_TRUNCATED
+  const missing = codes.filter(c => !emitted.has(c))
+  assert.deepEqual(missing, [], `文档声明了但解析器从不发出的错误码：${missing.join(', ')}`)
 })

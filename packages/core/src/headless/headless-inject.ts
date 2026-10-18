@@ -722,7 +722,7 @@ export function detectReplyInPage(siteCfg = {}) {
   // [CONSTRAINT] 生成源是 packages/core/src/reply/turn-schema.ts；重建命令 pnpm turn-schema:sync。
   // [CHANGE-IMPACT] 接线在 P2：扫**全部** pre > code、信封优先、标记回落、且不得继承 stoppedThisRound 抑制。
   /* eslint-disable unused-imports/no-unused-vars, ts/no-unused-vars -- 生成段：符号是否被调用取决于接线进度 */
-  /* @turn-schema:cb5aa89887c5dc9b */
+  /* @turn-schema:aeefb0a64575f427 */
   // >>> BEGIN turn-schema
   // [turn-schema-v1] turn 信封契约的**唯一源**。
   //
@@ -935,7 +935,8 @@ export function detectReplyInPage(siteCfg = {}) {
   /**
    * 解析一条完整的 turn 信封。
    * @param md 回复原文（Markdown 或裸 JSON 均可）
-   * @returns {turn, blocks, truncated, errors}；不是信封时 blocks 为空且 errors 含 TURN_NOT_JSON
+   * @returns {turn, blocks, truncated, errors}；解析不出对象时 errors 含
+   *   TURN_TRUNCATED（未配平＝还在流式写入）或 TURN_NOT_JSON（配平了但不是对象）
    */
   function parseTurn(md) {
     const text = String(md ?? '')
@@ -960,7 +961,12 @@ export function detectReplyInPage(siteCfg = {}) {
       break
     }
     if (!obj) {
-      out.errors.push({ code: 'TURN_NOT_JSON', detail: '围栏内不是可解析的对象' })
+      // [CONSTRAINT] 两种「没解析出对象」必须区分开，否则模型拿到的修法是错的：
+      //   · 围栏已开但对象还没配平 ⇒ 还在流式写入（TURN_TRUNCATED），等下一拍即可；
+      //   · 围栏配平了但里面不是对象 ⇒ 真的写错了（TURN_NOT_JSON），必须改写。
+      out.errors.push(out.truncated
+        ? { code: 'TURN_TRUNCATED', detail: '围栏已开但对象未配平（流式未写完）' }
+        : { code: 'TURN_NOT_JSON', detail: '围栏内不是可解析的对象' })
       return out
     }
     if (typeof obj.turn === 'number') out.turn = obj.turn
