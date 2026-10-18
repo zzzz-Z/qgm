@@ -234,13 +234,27 @@ export function collectStopCandidatesInPage() {
 //   ③ 匹配字段补 data-testid；④ 按钮 disabled 时视为未命中；⑤ 找不到时跳根路径兜底。
 //   原实现只认 button/a + 三个文案，DeepSeek 改版后恒返回 false（实测 click-fail）。
 export function clickNewSessionInPage() {
-  const all = Array.from(document.querySelectorAll('button, a, [role="button"]'))
-  const btn = all.find((el) => {
-    const lbl = `${el.getAttribute('aria-label') || ''} ${el.textContent || ''} ${el.getAttribute('title') || ''} ${el.getAttribute('data-testid') || ''}`
-    return /新建对话|新对话|新建聊天|新建会话|开启新对话|new\s*chat|new\s*conversation/i.test(lbl)
-  }) as HTMLButtonElement | undefined
-  if (btn && !btn.disabled) {
-    try { btn.click(); return true } catch { /* 点击失败：落跳转兜底 */ }
+  // [newsession-textnode-v1] DeepSeek 的「New chat」按钮是纯图标 + 文本节点结构：
+  //   <span>New chat</span> 包在一个可点击 div（._5a8ac7a）里，button/aria-label/title 全为空。
+  //   原实现只扫 button/a/[role=button] 的 aria/text/title/testid ⇒ 恒命中不到（实测 177 个候选 0 命中）。
+  //   改为：遍历文本节点找到关键词，再向上找可点击祖先（button / role=button / onclick / 有 class 的 div）。
+  const KW = /^(?:新建对话|新对话|新建聊天|新建会话|开启新对话|new\s*chat|new\s*conversation)$/i
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  let node: Node | null = null
+  while ((node = walker.nextNode())) {
+    if (!KW.test(String(node.textContent || '').trim())) continue
+    let el: HTMLElement | null = node.parentElement
+    for (let depth = 0; depth < 6 && el; depth++) {
+      const clickable = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || typeof (el as HTMLElement).onclick === 'function' || (el.className || '').toString().includes('_5a8ac7a')
+      if (clickable && !(el as HTMLButtonElement).disabled) {
+        try { el.click(); return true } catch { /* 点击失败：落跳转兜底 */ }
+      }
+      el = el.parentElement
+    }
+    // 文本已命中但找不到可点击祖先：直接点它的父级兜底
+    const fallback = node.parentElement?.parentElement
+    if (fallback) { try { fallback.click(); return true } catch { /* 落跳转兜底 */ } }
+    break
   }
   // [CONSTRAINT] 已在根路径时不再赋值 location.href：会触发整页重载并重建无头页面。
   const root = `${location.origin}/`
