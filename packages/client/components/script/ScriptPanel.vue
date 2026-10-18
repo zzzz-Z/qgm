@@ -119,7 +119,7 @@ const { toast, confirmDialog } = useToast()
 // U.3: CodeMirror 全家桶懒加载——首建编辑器时才 await import，CM 打进独立 chunk
 
 // 已删 persistWarning：文件内无消费点
-const { script, lastRunCode, running, result, changes, rolling, busyAll, liveStdout, liveStderr, doneSummary, run, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback, changeView, cumulativeLoading, cumulativeError, visibleChanges, setChangeView } = useRunner()
+const { script, lastRunCode, runIds, running, result, changes, rolling, busyAll, liveStdout, liveStderr, doneSummary, run, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback, changeView, cumulativeLoading, cumulativeError, visibleChanges, setChangeView } = useRunner()
 /**
  * [cumulative-baseline-v1] 视图切换的写入口必须收敛到 useRunner.setChangeView
  * [WHY] 若把 v-model 直接绑到 changeView，切换只改了值、不触发累积拉取——面板会停在上一次的
@@ -425,6 +425,14 @@ function onHtmlDrop(e: DragEvent) {
   fileSuccess.value = true
   scheduleFileSuccessReset()
 }
+
+/**
+ * [ctx-usage-v1] 上下文消耗粗估（字节）。
+ * [WHY] 前端拿不到权威 token 计数；用「轮次 × 每轮典型 prompt 字节」给出量级感知，
+ *   足够回答「这个会话是不是该重开了」这一个问题。
+ * [CONSTRAINT] 3KB 来自实测均值（send.jsonl 的 promptBytes p50≈1.7KB / p90≈5.9KB），取中偏上。
+ */
+const tokenEstimate = computed(() => runIds.value.length * 3000)
 </script>
 
 <template>
@@ -472,6 +480,8 @@ function onHtmlDrop(e: DragEvent) {
         :done-summary="doneSummary"
         :ai-waiting="aiWaiting"
         :delivering="delivering"
+        :run-count="runIds.length"
+        :token-estimate="tokenEstimate"
         @preview="onPreviewFile"
       />
       <!-- 编辑器 (下方) -->

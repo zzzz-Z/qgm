@@ -44,8 +44,7 @@ export interface QuestionItem extends PreviewFields {
   answered: boolean
   answer: string
 }
-export interface DividerItem { type: 'round-divider', key: string, roundLabel: string, timeLabel: string }
-export type CardItem = ScriptItem | TextItem | DoneItem | AskItem | QuestionItem | DividerItem
+export type CardItem = ScriptItem | TextItem | DoneItem | AskItem | QuestionItem
 
 export const PHASE_LABEL: Record<string, string> = {
   pending: '等待执行',
@@ -84,7 +83,6 @@ export function normalizeAskOptions(raw: unknown): Array<{ id: string, label: st
 /**
  * 单个事件 → 卡片或 null。
  * [WHY] 增量维护的关键：每个事件按 id 缓存结果，只有该事件变化时才重算。
- * [CONSTRAINT] 返回值不含 round-divider（分隔条依赖前序状态，由 buildCards 层插入）。
  * [CHANGE-IMPACT] 被 TerminalPane 的 timelineItems 增量维护消费。
  */
 export function buildOneCard(ev: { id: number, kind: string, ts: number, payload?: Record<string, unknown> }):
@@ -174,7 +172,6 @@ export function buildOneCard(ev: { id: number, kind: string, ts: number, payload
  * [WHY] 500 事件下任一事件到达时，原 computed 会整条重算；改成：
  *   ① 每个事件 id 对应一个卡片实例，缓存于 Map；
  *   ② 只有「事件引用变化」（同 id 不同对象）或「新事件」才重算；
- *   ③ round-divider 由前序状态决定，单独按位置插入，每次全量重建（极少，成本可忽略）。
  * [CONSTRAINT] 缓存 key = 事件 id；同 id 不同 payload 意味着事件被 updateKey 原地更新。
  * [CHANGE-IMPACT] TerminalPane 的 timelineItems 改调本函数；cache 由调用方持有（避免模块级状态）。
  */
@@ -183,7 +180,7 @@ export function buildCards(
   cache: Map<number, { ref: object, card: ScriptItem | TextItem | DoneItem | AskItem | QuestionItem | null }>,
 ): CardItem[] {
   const out: CardItem[] = []
-  let lastRound = 0
+  const lastRound = 0
   let lastScriptCard: ScriptItem | null = null
   for (const ev of events) {
     const cached = cache.get(ev.id)
@@ -195,14 +192,7 @@ export function buildCards(
       cache.set(ev.id, { ref: ev, card })
     }
     if (!card) continue
-    if (card.type === 'script') {
-      const loopRoundNum = Number(((ev.payload || {}) as Record<string, unknown>).loopRound || 0)
-      if (loopRoundNum > 0 && loopRoundNum !== lastRound) {
-        lastRound = loopRoundNum
-        out.push({ type: 'round-divider', key: `rd-${loopRoundNum}-${ev.id}`, roundLabel: `R${loopRoundNum}`, timeLabel: card.timeLabel })
-      }
-      lastScriptCard = card
-    }
+    if (card.type === 'script') lastScriptCard = card
     out.push(card)
   }
   void lastScriptCard

@@ -93,6 +93,28 @@ test('失败原因常显在头部（藏进折叠区 ⇒ 失败时先点开才知
   assert.ok(!/card\.reason/.test(TAIL), '失败原因不该同时出现在展开区（双源）')
 })
 
+// ---------- ②b 三级层级：L1 常显 / L2 折叠 / L3 按需 ----------
+
+test('[script-card-l3-v1] why/reason 被 L2 折叠区门控（否则等于回到「全平铺」）', () => {
+  assert.match(HEAD, /class="script-card-l2"/, '头部缺 L2 容器 .script-card-l2')
+  const l2 = HEAD.slice(HEAD.indexOf('class="script-card-l2"'))
+  const l2End = l2.indexOf('</span>')
+  const l2Block = l2.slice(0, l2End)
+  assert.match(l2Block, /card\.why/, 'L2 里应有 why')
+  // 门控必须存在：v-if="expanded && hasL2"
+  assert.ok(
+    /v-if="expanded && hasL2"/.test(HEAD),
+    'L2 未受 expanded 门控 ⇒ 折叠层级形同虚设（why/reason 又变常显）',
+  )
+})
+
+test('[script-card-l3-v1] hasL2 计算属性存在且不引用 hasBody', () => {
+  const m = CARD_SRC.match(/const hasL2 = computed\(\(\) =>([\s\S]*?)\)\n/)
+  assert.ok(m, '未找到 hasL2 定义')
+  assert.match(m[1], /why/, 'hasL2 应包含 why')
+  assert.match(m[1], /reason/, 'hasL2 应包含 reason')
+})
+
 // ---------- ③ 溢出提示：单行省略必须配 tooltip ----------
 
 test('desc / why / reason 三处单行文本都挂了溢出提示指令', () => {

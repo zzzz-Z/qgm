@@ -179,6 +179,14 @@ onBeforeUnmount(() => {
   if (_autoCollapseTimer) { clearTimeout(_autoCollapseTimer); _autoCollapseTimer = null }
 })
 
+// [failed-round-highlight-v1] 顶栏跳转：找 DOM 里最后一张 .script-card.phase-error 并滚到视野内。
+// [CONSTRAINT] 卡片 id 由 ScriptCard 按 card.key 生成（card-<key>），此处只按类名找，避免跨组件传 key。
+function jumpToLatestFailed() {
+  if (typeof document === 'undefined') return
+  const nodes = document.querySelectorAll('.script-card.phase-error')
+  const last = nodes[nodes.length - 1]
+  if (last) last.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
 async function clearBoard(): Promise<void> {
   const sid = effectiveSessionId.value
   if (!sid || clearing.value) return
@@ -284,7 +292,16 @@ function onVis() {
       <span class="tp-title">任务完成详情</span>
       <!-- [taskboard-loop-badge-v1] 循环运行状态徽章（idle/running/waiting/paused/stopped） -->
       <span class="tp-loop" :class="loopBadge.cls">{{ loopBadge.text }}</span>
-      <span v-if="failedCount > 0" class="tp-failed-badge">{{ failedCount }} 失败</span>
+      <!-- [failed-round-highlight-v1] 失败徽标可点：直接滚到时间线里最近一张失败卡 -->
+      <button
+        v-if="failedCount > 0"
+        class="tp-failed-badge is-btn"
+        type="button"
+        title="跳到最近一次失败"
+        @click.stop="jumpToLatestFailed"
+      >
+        {{ failedCount }} 失败
+      </button>
       <span v-if="total > 0" class="tp-pct">{{ progressPercent }}%</span>
       <span class="tp-count">{{ doneCount }}/{{ total }}</span>
       <button
@@ -567,7 +584,16 @@ function onVis() {
   background: rgb(248 81 73 / 12%);
   border-radius: 999px;
 }
-/* [taskboard-loop-badge-v1] 循环运行状态徽章：活动态绿、暂停橙、停止/未运行灰 */
+/* [failed-round-highlight-v1] 徽章按钮化：清掉原生 button 外观，保留徽章视觉 */
+.tp-failed-badge.is-btn {
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+.tp-failed-badge.is-btn:hover {
+  background: rgb(248 81 73 / 22%);
+}
+/* [taskboard-loop-badge-v1] 循环运行状态徽标：活动态绿、暂停橙、停止/未运行灰 */
 .tp-loop {
   padding: 2px 8px;
   font:

@@ -60,12 +60,12 @@ describe('ScriptCard 真实渲染', () => {
     document.body.innerHTML = ''
   })
 
-  it('只有 why、无输出 ⇒ 头部常显 WHY，且没有折叠箭头', () => {
+  // [script-card-l3-v1] 三级层级：L1 常显 desc+状态，L2（why/reason/耗时）折叠，L3（原始输出/变更）按需。
+  // 因此 why 不再「常显」，而是折叠在头部 L2 区：需先展开才可见——这是有意的信息降噪。
+  it('只有 why、无输出 ⇒ L1 无折叠箭头，展开后可见 why', async () => {
     const w = render({ why: '配置缺失会导致启动失败' })
     const head = w.find('.script-card-head')
-    const whyRow = head.find('.script-card-why')
-    assert.ok(whyRow.exists(), 'why 未渲染在 .script-card-head 内 ⇒ 又要展开才能看到')
-    assert.match(whyRow.text(), /配置缺失会导致启动失败/, 'why 文案未渲染')
+    assert.ok(!w.find('.script-card-why').exists(), 'L2 未展开就渲染了 why ⇒ 三级层级失效（回到全平铺）')
     assert.ok(!head.classes().includes('is-clickable'), '无输出却仍可点击 ⇒ 折叠箭头泛滥回归')
     assert.equal(head.attributes('aria-expanded'), undefined, '无输出却带 aria-expanded')
     w.unmount()
@@ -82,11 +82,12 @@ describe('ScriptCard 真实渲染', () => {
     assert.ok(tail.exists(), '点击后未渲染展开区')
     assert.match(tail.text(), /a\.ts/, '展开区无变更文件路径')
     assert.ok(!/\bwhy\b|为什么要跑这一步/.test(tail.text()), '展开区仍有 why ⇒ 与头部重复')
-    assert.equal(w.find('.script-card-why').text().includes('为什么要跑这一步'), true, 'why 未常显在头部')
+    // [script-card-l3-v1] why 在头部 L2 区，展开后可见；不再常显
+    assert.equal(w.find('.script-card-why').text().includes('为什么要跑这一步'), true, '展开后 why 仍不可见')
     w.unmount()
   })
 
-  it('失败态 ⇒ 头部常显失败原因（reason），不藏在展开区', () => {
+  it('失败态 ⇒ L2 展开后头部可见失败原因（reason）', async () => {
     const w = render({
       phaseClass: 'phase-error',
       exit: 2,
@@ -94,8 +95,10 @@ describe('ScriptCard 真实渲染', () => {
       stderrText: 'Error: boom',
     })
     const head = w.find('.script-card-head')
-    const reason = head.find('.script-card-reason')
-    assert.ok(reason.exists(), 'reason 未渲染在头部 ⇒ 失败原因仍不可见')
+    assert.ok(!head.find('.script-card-reason').exists(), '[script-card-l3-v1] reason 应在 L2 折叠区，未展开不该可见')
+    await head.trigger('click')
+    const reason = w.find('.script-card-head').find('.script-card-reason')
+    assert.ok(reason.exists(), 'reason 未渲染在头部 L2 区 ⇒ 失败原因仍不可见')
     assert.match(reason.text(), /未收到 summary 帧/, 'reason 文案未渲染')
     assert.ok(!/\b未收到 summary 帧\b/.test(w.find('.script-card-tail').exists() ? w.find('.script-card-tail').text() : ''), 'reason 不该重复进展开区')
     w.unmount()
@@ -107,18 +110,22 @@ describe('ScriptCard 真实渲染', () => {
     w.unmount()
   })
 
-  it('desc / why / reason 三处都挂上 v-overflow-tip，且不写原生 title', () => {
+  it('desc / why / reason 三处都挂上 v-overflow-tip，且不写原生 title', async () => {
     const w = render({
       desc: '很长很长的一段描述'.repeat(6),
       why: '理由'.repeat(40),
       phaseClass: 'phase-error',
       reason: '未收到 summary 帧',
+      // [script-card-l3-v1] 有 stderr ⇒ hasBody 为真，头部才可点击展开 L2
+      stderrText: 'Error: boom',
     })
+    // [script-card-l3-v1] why/reason 在 L2 折叠区，先展开才渲染
+    await w.find('.script-card-head').trigger('click')
     // 判据承重：vOverflowTip 在 mounted 时把文案写到 el.__ovText。
     // 若有人把指令摘掉、或换回无条件 v-tooltip，这里必然拿不到 ⇒ 真的变红。
     for (const sel of ['.script-card-desc', '.why-text', '.reason-text']) {
-      const el = w.find(sel).element as HTMLElement & { __ovText?: string }
       assert.ok(w.find(sel).exists(), `找不到 ${sel}`)
+      const el = w.find(sel).element as HTMLElement & { __ovText?: string }
       assert.equal(typeof el.__ovText, 'string', `${sel} 没挂上 v-overflow-tip（无 __ovText）⇒ 截断后看不全`)
       assert.ok((el.__ovText as string).length > 0, `${sel} 的提示文案为空`)
       assert.equal(el.getAttribute('title'), null, `${sel} 写了原生 title ⇒ 会与自定义 tooltip 双重弹出`)

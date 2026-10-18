@@ -3512,3 +3512,11 @@ for v in $(...); do grep -q "$v:" style.css || echo $v; done
 ## 测试断言可以当「契约文档」用
 
 `preview-diff-render.node-test.ts` 的用例名直接写着「宿主注入的右侧内边距」——它明确告诉我这个变量是局部注入而非全局 token。如果改之前先读这条测试，就不会误映射。
+
+## 跨文件同名类名会让 grep 定位失真
+
+在 `TerminalPane.vue` 里反复 grep `round-divider` 拿到的是样式与注释噪音，真正的顶栏在 `TaskProgressPanel.vue`（`tp-head`）。查组件位置时先 `grep` 文件名再 `dump` 单文件行号，比全局 `grep` 关键词快得多——全局结果会被 `.scss`、测试与 `auto-imports.d.ts` 稀释到无法阅读。
+
+## 断言里「先取 element 再判 exists」会抛而非失败
+
+`w.find(sel).element` 在空包装上直接抛 `Cannot call element on an empty DOMWrapper`，错误信息完全不指向缺失的选择器。必须 `assert.ok(w.find(sel).exists())` 在前，`.element` 取值在后——否则测试红得毫无信息量，白烧一轮。

@@ -3,7 +3,6 @@
 // 复用项目已有极简 markdown 渲染器（不引入新依赖）
 // 事件流单例（localStorage 持久化），用于渲染每轮脚本 desc
 // [rd-import-v1] 引入抽出的轮次分隔条组件
-import RoundDivider from './RoundDivider.vue'
 import TaskProgressPanel from './TaskProgressPanel.vue'
 // [panel-resize-scroll-v1] D4：面板尺寸变化时补偿 chat-list scrollTop，防贴底跳变
 // [sc-wire-v1] 脚本卡片抽为子组件
@@ -83,9 +82,6 @@ interface AskItem extends PreviewFields {
   timeLabel: string
   role?: 'user-answer'
 }
-// [round-divider-v1] 轮次分隔条：loopRound 变化时插入，视觉上呈现 TRAE 式「轮次分组」
-// [CONSTRAINT] 依赖 payload.loopRound（由 App.vue ...currentLoopContext() 注入）；手动模式无 loopRound → 不插条
-interface DividerItem { type: 'round-divider', key: string, roundLabel: string, timeLabel: string }
 // [ask-card-v1] AI 提问卡：ASK 不再弹窗，改为对话流里一张可点选/可打字的卡片
 // [CONSTRAINT] askId 与 useAsk.askState.id 比对判断「是否仍可交互」——
 //   历史遗留或已被新提问取代的卡片只读展示，防止误点后无人接收回答
@@ -112,7 +108,7 @@ interface QuestionItem extends PreviewFields {
 //   本函数把内容等价的卡替换回上一次的对象引用，v-for 命中同 key + 同 props 时不再触发 updated。
 // [CONSTRAINT] 必须组件内私有 cache；浅比较（字段全等 + 数组用 JSON 串）足够，卡字段均为原始类型/纯数组。
 // [CHANGE-IMPACT] 若误用「长寿命外部 cache」会跨组件实例泄漏，务必保持本声明。
-type AnyCard = ScriptItem | TextItem | DoneItem | AskItem | QuestionItem | DividerItem
+type AnyCard = ScriptItem | TextItem | DoneItem | AskItem | QuestionItem
 
 /** 组件接收的 props 定义 */
 const props = defineProps<{
@@ -129,6 +125,10 @@ const props = defineProps<{
   // [deliver-window-v1] 结果已产出但回传窗未收口（脚本跑完 → 真正发出去之间那几秒）。
   //   此前这段完全不可见：界面显示「成功」却什么都没发生，用户以为卡住或漏发。
   delivering?: boolean
+  /** [ctx-usage-v1] 本会话累计轮次（runIds 长度）；0 表示尚未运行 */
+  runCount?: number
+  /** [ctx-usage-v1] 估算的累计 prompt 字节数（前端按轮粗估，仅用于量级感知） */
+  tokenEstimate?: number
 }>()
 // [script-card-changes-v1] 冒泡 ScriptCard 的预览点击 → 由 ScriptPanel 打开浮层
 const emit = defineEmits<{ preview: [path: string] }>()
@@ -162,6 +162,12 @@ const _seenScriptKeys = new Set<string>()
 let _lastPanelHeight = 0
 let _panelRo: ResizeObserver | null = null
 let _innerRo: ResizeObserver | null = null
+/**
+ * [ui-empty-guide-v2] 空态引导是否已看过（localStorage 持久化）。
+ * [WHY] 三步引导对首访用户有价值，对回头用户是纯噪音（占 3 屏）。
+ * [CONSTRAINT] 读写都包 try/catch：隐私模式下 localStorage 可能抛错，此时退化为「每次都显示」。
+ */
+const GUIDE_KEY = '__ai_empty_guide_seen'
 
 // 等待时长本地计时：aiWaiting 为 true 时启动，false 时停止并归零
 // [WHY] 用本地 interval 而非改 useAiWaiting 契约（避免污染其他消费方）；仅用于展示层
@@ -175,6 +181,7 @@ const panelHostRef = ref<HTMLElement | null>(null)
 const atBottom = ref(true)
 // [chat-autofollow-v1] 内容 wrapper：观察内容高度变化，贴底时自动跟随（见 template 内注释）
 const chatInnerRef = ref<HTMLElement | null>(null)
+const guideSeen = ref(readGuideSeen())
 
 const { events: busEvents } = useEventBus()
 const { pause: pauseWaitTimer, resume: resumeWaitTimer } = useIntervalFn(() => {
@@ -182,9 +189,7 @@ const { pause: pauseWaitTimer, resume: resumeWaitTimer } = useIntervalFn(() => {
 }, 1000, { immediate: false })
 
 const timelineItems = computed(() => {
-  const out: Array<ScriptItem | TextItem | DoneItem | AskItem | QuestionItem | DividerItem> = []
-  // [round-divider-v1] 追踪上一张脚本卡的轮次；跨轮时插入分隔条（初始 0 表示尚未出现任何轮次）
-  let lastRound = 0
+  const out: Array<ScriptItem | TextItem | DoneItem | AskItem | QuestionItem> = []
   for (const ev of busEvents.value) {
     // [ask-card-v1] AI 提问卡：ASK 解析结果，渲染为对话流内可点选/可打字的卡片（替代旧弹窗）
     // [CONSTRAINT] 正文与选项皆空才跳过；只要有一项就渲染（纯选项问题也合法）
@@ -270,12 +275,6 @@ const timelineItems = computed(() => {
     // [WHY] 原实现对 payload.stdoutTail 原样展示且无省略提示，安装/构建类输出会整段刷屏
     const outTail = tailTextPreview(denoiseLog(String(p.stdoutTail || '')), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
     const errTail = tailTextPreview(denoiseLog(String(p.stderrTail || '')), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
-    // [round-divider-v1] loopRound 变化时插一条轮次分隔（不改变原有卡片结构，纯视觉分组）
-    const loopRoundNum = Number(p.loopRound || 0)
-    if (loopRoundNum > 0 && loopRoundNum !== lastRound) {
-      lastRound = loopRoundNum
-      out.push({ type: 'round-divider', key: `rd-${loopRoundNum}-${ev.id}`, roundLabel: `R${loopRoundNum}`, timeLabel })
-    }
     out.push({
       type: 'script',
       key,
@@ -349,6 +348,11 @@ watch(
   },
   { flush: 'post' },
 )
+/** 引导展示过一次即落记忆位（watch 而非 onMounted：首帧可能还在 running 态） */
+watch(() => !guideSeen.value && timelineItems.value.length === 0, (shouldShow) => {
+  if (!shouldShow || guideSeen.value) return
+  try { window.localStorage.setItem(GUIDE_KEY, '1') } catch { /* ignore */ }
+})
 
 // 页面刷新时自动滚到最后一条：
 // [WHY] 上面的 watch 非 immediate，刷新时 busEvents 若同步恢复则不触发；需挂载后主动滚一次
@@ -469,10 +473,33 @@ function normalizeAskOptions(raw: unknown): Array<{ id: string, label: string }>
   }
   return out
 }
+function readGuideSeen(): boolean {
+  try { return window.localStorage.getItem(GUIDE_KEY) === '1' } catch { return false }
+}
+/** 用户主动点「看引导」：重新展开并清除记忆位 */
+function reopenGuide(): void {
+  guideSeen.value = false
+  try { window.localStorage.removeItem(GUIDE_KEY) } catch { /* 存储不可用：仅本次生效 */ }
+}
+/**
+ * [ctx-usage-v1] 字节数 → 易读量级（K / M）。
+ * [WHY] 精确值无意义（前端拿不到真实 token 计数），用户只需要「大致用了多少」。
+ */
+function fmtTokens(bytes: number): string {
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)}M`
+  if (bytes >= 1_000) return `${Math.round(bytes / 1_000)}K`
+  return String(bytes)
+}
 </script>
 
 <template>
   <section class="terminal">
+    <!-- [ctx-usage-v1] 上下文消耗指示：用户唯一能感知「该开新会话了」的信号。
+         刻意不做精确 token 计数（前端拿不到权威值），只给量级。 -->
+    <div v-if="(runCount || 0) > 0" class="ctx-usage" role="status">
+      <span class="ctx-rounds">{{ runCount }} 轮</span>
+      <span v-if="tokenEstimate" class="ctx-tokens">~{{ fmtTokens(tokenEstimate) }}</span>
+    </div>
     <!-- [flow-timeline] 全流程时间线 -->
     <div class="flow-timeline">
       <!-- [task-progress-panel-v1] 任务完成详情：待办 + 已完成划线，替代原「已完成 N/M 步」 -->
@@ -488,14 +515,8 @@ function normalizeAskOptions(raw: unknown): Array<{ id: string, label: string }>
         <div ref="chatInnerRef" class="chat-list-inner">
           <!-- 每轮脚本 desc：Markdown 渲染；来源 busEvents（已持久化到 localStorage） -->
           <template v-for="card in timelineItems" :key="card.key">
-            <!-- [rd-tpl-v1] 已抽为子组件 -->
-            <RoundDivider
-              v-if="card.type === 'round-divider'"
-              :round-label="card.roundLabel"
-              :time-label="card.timeLabel"
-            />
             <ScriptCard
-              v-else-if="card.type === 'script'"
+              v-if="card.type === 'script'"
               :key="card.key"
               :card="card"
               :live-stdout="card.key === latestScriptKey ? liveStdout : ''"
@@ -510,46 +531,57 @@ function normalizeAskOptions(raw: unknown): Array<{ id: string, label: string }>
 
           <!-- 空态：无卡片 / 无输出 / 无总结 -->
           <div v-if="!running && !liveStdout && !liveStderr && timelineItems.length === 0" class="tree-empty">
-            <!-- [ui-empty-guide-v1] 三入口引导（WO-20261007-02 阶段 C1）：
-               原为空区一行「还没有执行记录」，新用户无从知道「运行什么、去哪写、循环是什么」。 -->
-            <div class="empty-title">
-              还没有执行记录
-            </div>
-            <div class="empty-steps">
-              <div class="empty-step">
-                <span class="empty-step-n" aria-hidden="true">1</span>
-                <div class="empty-step-body">
-                  <div class="empty-step-t">
-                    写脚本
+            <!-- [ui-empty-guide-v2] 引导记忆化：首访展示完整三步，之后只留一行。
+                 [WHY] 三步引导占 3 屏，对第二次打开的用户是纯噪音；但新用户第一次确实需要。
+                 [CONSTRAINT] 记忆位是 localStorage，与「清空会话」解耦——清空历史不该重放引导。 -->
+            <template v-if="!guideSeen">
+              <div class="empty-title">
+                还没有执行记录
+              </div>
+              <div class="empty-steps">
+                <div class="empty-step">
+                  <span class="empty-step-n" aria-hidden="true">1</span>
+                  <div class="empty-step-body">
+                    <div class="empty-step-t">
+                      写脚本
+                    </div>
+                    <div class="empty-step-d">
+                      在下方编辑器粘贴或让 AI 生成 cjs / bash 脚本
+                    </div>
                   </div>
-                  <div class="empty-step-d">
-                    在下方编辑器粘贴或让 AI 生成 cjs / bash 脚本
+                </div>
+                <div class="empty-step">
+                  <span class="empty-step-n" aria-hidden="true">2</span>
+                  <div class="empty-step-body">
+                    <div class="empty-step-t">
+                      点运行
+                    </div>
+                    <div class="empty-step-d">
+                      执行结果与文件改动会出现在这条时间线里
+                    </div>
+                  </div>
+                </div>
+                <div class="empty-step">
+                  <span class="empty-step-n" aria-hidden="true">3</span>
+                  <div class="empty-step-body">
+                    <div class="empty-step-t">
+                      审变更
+                    </div>
+                    <div class="empty-step-d">
+                      右侧面板看 diff，可回滚；或开启自动循环让 AI 连续跑
+                    </div>
                   </div>
                 </div>
               </div>
-              <div class="empty-step">
-                <span class="empty-step-n" aria-hidden="true">2</span>
-                <div class="empty-step-body">
-                  <div class="empty-step-t">
-                    点运行
-                  </div>
-                  <div class="empty-step-d">
-                    执行结果与文件改动会出现在这条时间线里
-                  </div>
-                </div>
+            </template>
+            <template v-else>
+              <div class="empty-title">
+                还没有执行记录
               </div>
-              <div class="empty-step">
-                <span class="empty-step-n" aria-hidden="true">3</span>
-                <div class="empty-step-body">
-                  <div class="empty-step-t">
-                    审变更
-                  </div>
-                  <div class="empty-step-d">
-                    右侧面板看 diff，可回滚；或开启自动循环让 AI 连续跑
-                  </div>
-                </div>
-              </div>
-            </div>
+              <button type="button" class="empty-guide-reopen" @click="reopenGuide">
+                看引导
+              </button>
+            </template>
           </div>
         </div>
       </div>

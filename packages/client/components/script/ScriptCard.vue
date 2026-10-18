@@ -54,6 +54,8 @@ const lineCount = computed(() => (cleanedOutput.value ? cleanedOutput.value.spli
 // [script-card-changes-v1] 展开条件改为「有变更文件 或 有 stderr」：
 //   stdout 里的 ✓ ok(...) 打点是噪音，成功无变更的步骤不应长出可点开的箭头。
 const hasBody = computed(() => props.card.changes.length > 0 || Boolean(props.card.stderrText) || Boolean(fullOutput.value))
+// [script-card-l3-v1] L2 折叠区是否有内容：why / 失败原因 / 耗时行数。全空则不渲染折叠区，避免空箭头。
+const hasL2 = computed(() => Boolean(props.card.why) || Boolean(props.card.reason) || props.card.durationMs != null)
 // [timeline-denoise-v1] 结果摘要只在终态出现，运行中 / 等待中不占位
 const isFinal = computed(() => props.card.phaseClass === 'phase-done' || props.card.phaseClass === 'phase-error')
 const isFailed = computed(() => props.card.phaseClass === 'phase-error')
@@ -106,7 +108,7 @@ function toggle(): void { expanded.value = !expanded.value }
 </script>
 
 <template>
-  <div class="script-card" :class="[card.phaseClass, { 'is-expanded': expanded }]">
+  <div :id="`card-${card.key}`" class="script-card" :class="[card.phaseClass, { 'is-expanded': expanded }]">
     <!-- [ui-kbd-a11y-v1] 可点击头补键盘可达（WO-20261007-02 阶段 C5）：
          role/tabindex 仅在 hasBody 时生效；Enter/Space 等价于点击。 -->
     <div
@@ -149,23 +151,29 @@ function toggle(): void { expanded.value = !expanded.value }
            两者都常显（why 原先藏在展开区，等于要求用户逐行点开才懂意图）；
            都是单行省略号 + 溢出才提示 ⇒ 头部高度可预期（≤3 行）且裁掉的全文随时可查。 -->
       <span class="script-card-main">
-        <span v-overflow-tip="card.desc" class="script-card-desc">{{ card.desc }}</span>
-        <span v-if="card.why" class="script-card-why">
-          <span class="why-label">WHY</span>
-          <span v-overflow-tip="card.why" class="why-text">{{ card.why }}</span>
+        <!-- L1 常显：只留 desc（这一步做了什么）+ 右侧状态摘要，保证每行高度稳定 -->
+        <span class="script-card-l1">
+          <span v-overflow-tip="card.desc" class="script-card-desc">{{ card.desc }}</span>
+          <span v-if="resultLabel" class="script-card-stat" :class="resultClass">{{ resultLabel }}</span>
         </span>
-        <!-- [script-card-reason-v1] 失败原因常显：useRunner 的 error 分支才下发。
+        <!-- L2 折叠：why / 失败原因 / 耗时与行数——需要时按 ▸ 展开，不占常驻视觉位 -->
+        <span v-if="expanded && hasL2" class="script-card-l2">
+          <span v-if="card.why" class="script-card-why">
+            <span class="why-label">WHY</span>
+            <span v-overflow-tip="card.why" class="why-text">{{ card.why }}</span>
+          </span>
+          <!-- [script-card-reason-v1] 失败原因常显：useRunner 的 error 分支才下发。
              放在头部而非展开区 —— 失败时「为什么失败」是最该一眼看到的信息，
              藏进折叠区后用户得先点开才知道要不要点开（且无 stderr 的失败根本没有折叠区）。 -->
-        <span v-if="card.reason" class="script-card-reason">
-          <span class="reason-label">失败原因</span>
-          <span v-overflow-tip="card.reason" class="reason-text">{{ card.reason }}</span>
+          <span v-if="card.reason" class="script-card-reason">
+            <span class="reason-label">失败原因</span>
+            <span v-overflow-tip="card.reason" class="reason-text">{{ card.reason }}</span>
+          </span>
+          <span v-if="card.durationMs != null" class="script-card-dur">{{ lineCount }} 行 · {{ durLabel }}</span>
         </span>
+        <span v-if="!hasL2 && resultLabel" class="script-card-stat" :class="resultClass">{{ resultLabel }}</span>
+        <span class="script-card-time">{{ card.timeLabel }}</span>
       </span>
-      <!-- [timeline-denoise-v1] 结果摘要：变更文件数 / 退出码，替代原先"只有一行 desc"的空信息位 -->
-      <span v-if="resultLabel" class="script-card-stat" :class="resultClass">{{ resultLabel }}</span>
-      <span v-if="card.durationMs != null" class="script-card-dur">{{ lineCount }} 行 · {{ durLabel }}</span>
-      <span class="script-card-time">{{ card.timeLabel }}</span>
     </div>
     <!-- [script-card-head-v2] 展开区只剩原始输出（why 已上提到头部）：
          有输出的步骤才配折叠箭头，不再是「几乎每行都能点开、点开只有一段复述」。 -->
@@ -213,6 +221,12 @@ function toggle(): void { expanded.value = !expanded.value }
   background: transparent;
   border-radius: 10px;
   transition: background-color 0.14s ease;
+}
+/* [failed-round-highlight-v1] 失败卡左侧留一道红边：扫读时不必逐个点开就能定位失败轮 */
+.script-card.phase-error {
+  border-left: 2px solid var(--danger-1, #f85149);
+  padding-left: 6px;
+  background: rgba(248, 81, 73, 0.05);
 }
 /* [card-bg-on-expand-v1] 展开时显示背景（替代 hover 变色，避免与头部 hover 叠成两层） */
 .script-card.is-expanded {
@@ -276,6 +290,22 @@ function toggle(): void { expanded.value = !expanded.value }
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+/* [script-card-l3-v1] L1：desc + 结果摘要同一行，常驻可见；L2 缩进在其下方，仅展开时出现 */
+.script-card-l1 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.script-card-l2 {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding-left: 2px;
+  border-left: 2px solid var(--border-1, #30363d);
+  margin-top: 1px;
 }
 /* [script-card-head-v2] desc 现在是列容器的第一行，必须显式 block + width:100% + min-width:0，
    否则列容器下不会收缩，省略号（ellipsis）根本不会出现 —— 这是 flex 纵向布局的常见坑。 */

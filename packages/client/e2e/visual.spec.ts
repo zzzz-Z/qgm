@@ -30,7 +30,6 @@ const MASK_SELECTORS = [
   '.toast-host',
   '.tt-host',
   '.script-card-time',
-  '.round-divider-time',
   '.tp-time',
   '.wait-elapsed',
 ]

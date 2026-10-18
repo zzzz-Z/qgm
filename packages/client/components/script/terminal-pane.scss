@@ -592,3 +592,18 @@
     content: '...';
   }
 }
+
+/* [ctx-usage-v1] 会话消耗指示：弱化存在感，仅作量级提示，不抢时间线注意力 */
+.ctx-usage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 12px;
+  font-size: var(--font-11);
+  color: var(--text-4);
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+.ctx-tokens {
+  color: var(--text-5);
+}
