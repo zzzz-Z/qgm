@@ -458,25 +458,36 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
   flex: 1;
   min-height: 0;
   margin: 0;
-  padding: 6px;
+  /* [workspace-panel-ui-v2] 6px → 8px：与 48px 顶部条和卡片圆角对齐，减少贴边感 */
+  padding: 8px 6px;
   list-style: none;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+  scrollbar-gutter: stable;
 }
 
 .awl-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 8px;
+  /* [workspace-panel-ui-v2] 7px → 8px：单行高度约 36px，接近 40px 触达下限 */
+  padding: 8px;
   border-radius: 8px;
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition:
+    background 0.12s ease,
+    box-shadow 0.12s ease;
 }
 .awl-item:hover {
   background: rgba(127, 127, 127, 0.12);
+}
+/* [workspace-panel-ui-v2] 键盘可达：列表项可聚焦（role=option 已具备，补齐可见焦点环） */
+.awl-item:focus-visible {
+  outline: 2px solid var(--primary, #58a6ff);
+  outline-offset: -2px;
 }
 /* 非激活项降色阶：凸显激活项 */
 .awl-item:not(.active) .awl-label {
@@ -492,6 +503,8 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 .awl-item.active {
   /* [ui-color-token-v1] 硬编码 primary → 语义变量 */
   background: var(--primary-bg);
+  /* [workspace-panel-ui-v2] 激活项加一圈极淡描边，与 hover 态拉开层级（不依赖颜色深浅） */
+  box-shadow: inset 0 0 0 1px rgb(88 166 255 / 22%);
 }
 .awl-item.active::before {
   content: '';
@@ -527,6 +540,8 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
   font-size: 12.5px;
   font-weight: 500;
   color: var(--text);
+  /* [workspace-panel-ui-v2] 行高固定，避免多语言/字号下高度抖动 */
+  line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -613,8 +628,13 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 }
 
 .awl-empty {
-  padding: 12px 8px;
+  /* [workspace-panel-ui-v2] 空态给虚线容器，让「尚无注册工作区」看起来是提示位而非渲染失败 */
+  margin: 4px 2px;
+  padding: 16px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
   font-size: 11.5px;
+  line-height: 1.5;
   color: var(--text-3);
   text-align: center;
   cursor: default;

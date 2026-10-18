@@ -311,6 +311,32 @@ export function collectPageDiagInPage() {
     plainHead: (() => { try { const els = document.querySelectorAll('.ds-assistant-message-main-content'); if (!els.length) return ''; const t = (els[els.length - 1].textContent || ''); return t.slice(0, 40) } catch { return '' } })(),
     pendingScriptHash: String(dedup._pendingScriptHash || ''),
     pendingDoneSig: String(dedup._pendingDoneSig || ''),
+    // [gen-gate-diag-v1] 补上 isGeneratingInPage 的观测盲区：它一旦恒真，
+    //    script 分支会在 :699 被永久拦住、plain 短回复在 :762 被拦住，
+    //   而且**所有 hits 计数器都不增加**（那两道门都在计数之前 return）——
+    //   2026-10-18 实测「AI 回复了 553 字脚本、hits 全 0、stableCount=0」正是这个形态，
+    //   但旧 diag 只记 dedup.stopped（≠ 页面生成态），导致只能靠猜。
+    // [CONSTRAINT] 这里**不复制** isGeneratingInPage 的布尔判据（副本必然与真判据漂移），
+    //   只吐原始证据：哪些可见元素命中了 stop 语义、圆钮有几个。真假由人判。
+    genHit: (() => {
+      try {
+        const re = /停止生成|停止回答|停止输出|终止|取消生成|停止|中断|暂停生成|stop\s*generat|stop\s*stream|stop\s*response|stop\s*answer|stop\s*cancel|\bcancel\b|\babort\b|\binterrupt\b|\bhalt\b/i
+        const out: string[] = []
+        for (const el of document.querySelectorAll('button, div[role], span[role], a[role], [role="switch"], [role="menuitem"]')) {
+          const e = el as HTMLElement
+          if ((e as HTMLButtonElement).disabled || e.getAttribute('aria-disabled') === 'true') continue
+          if (e.offsetParent === null) continue
+          const lbl = [e.getAttribute('aria-label'), e.getAttribute('title'), e.getAttribute('data-state'), e.getAttribute('class'), (e.textContent || '').slice(0, 40)].filter(Boolean).join(' ')
+          if (re.test(lbl)) {
+            out.push(`${e.tagName}.${String(e.className || '').slice(0, 36)}|${String(e.getAttribute('aria-label') || '-').slice(0, 24)}`)
+            if (out.length >= 3) break
+          }
+        }
+        return out
+      } catch { return [] }
+    })(),
+    circle: (() => { try { return document.querySelectorAll('[role="button"].ds-button--circle, button.ds-button--circle').length } catch { return -1 } })(),
+    hasBox: (() => { try { return Boolean(document.querySelector('textarea:not([readonly]):not([disabled]), [contenteditable="true"]')) } catch { return false } })(),
     hits: {
       sig2: dedup._hitSig2 || 0,
       sigChanged: dedup._hitSigChanged || 0,
@@ -326,6 +352,11 @@ export function collectPageDiagInPage() {
       stopped: dedup._hitStopped || 0,
       scriptNoise: dedup._hitScriptNoise || 0,
       fenceSuppress: dedup._hitFenceSuppress || 0,
+      // [ask-dedup-v1] ASK 同内容重复拦截次数。ASK 是唯一绕过 _plainSentInCycle 的出口，
+      //   这个计数持续增长 = 去重在工作；恒为 0 而 marks.ask=1 连拍多拍 = 每拍都在重复交付。
+      //   [WHY 必须单独记] 2026-10-18 刷屏事故里 marks.ask=1、stableCount 一路涨、却没有任何一个
+      //   既有 hit 计数变化，日志看起来「一切正常」，只能靠 reply 条数反推。
+      askDup: dedup._hitAskDup || 0,
     },
   }
 }
@@ -425,7 +456,7 @@ export function resetReplyDedupInPage(cfg = {}) {
   })()
   // [rate-retry-v1] 频控基线：与 headless-inject detectReplyInPage、本文件 verifyFillSentInPage 三处同构（守卫测试 rate-marker-guard）
   const rateMessages = scanText.match(_RATE_ANCHOR_RR) || []
-  window.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: sig, _pendingScriptHash: null, _plainSentInCycle: false, _stableCount: 0, _seenGrowth: false, _baselineBlocks: baselineBlocks, _baselineLastHash: baselineLastHash, _busyErrorBaseline: busyMessages.length, _busyErrorReported: false, _scriptFenceReported: false, _prevGenBtn: false, _stoppedReported: false, _limitBaseline: limitMessages.length, _limitReported: false, _rateBaseline: rateMessages.length, _rateReported: false, _shortSentHash: '' }
+  window.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: sig, _pendingScriptHash: null, _plainSentInCycle: false, _stableCount: 0, _seenGrowth: false, _baselineBlocks: baselineBlocks, _baselineLastHash: baselineLastHash, _busyErrorBaseline: busyMessages.length, _busyErrorReported: false, _scriptFenceReported: false, _prevGenBtn: false, _stoppedReported: false, _limitBaseline: limitMessages.length, _limitReported: false, _rateBaseline: rateMessages.length, _rateReported: false, _shortSentHash: '', _askSentHash: '' }
   // [script-closure-gate-v1] 结构闭合门随轮次重置：上一轮遗留的门会拿旧长度当基线，
   //   让新回复第一帧就被判定为「已静止」→ 未闭合块提前放行（门本身见 headless-inject.ts）
   window.__aiRunnerClosureGate = null

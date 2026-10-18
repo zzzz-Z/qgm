@@ -635,8 +635,17 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       //   又能在真正卡住时及时暴露。SSE error 走 completionErrors 分支，立即上报不受此限。
       const NO_REPLY_ALERT_MS = 15_000
       // 防并发重入：上轮 evaluate 未完成时跳过本轮
+      // [poll-loop-must-reschedule-v1] 每一拍都必须调度下一拍，`stopped` 是唯一允许不调度的出口。
+      // [WHY] 2026-10-18 B 档把末尾的 `setTimeout(tick, 800)` 换成了 `await waitForSignal(sid)`，
+      //   但 await 完函数就返回了、没有重新调度 ⇒ **poll 只跑一拍就永久静默**。
+      //   实测形态：fill-ack ok=true、state=generating，之后 headless.jsonl 只有一条 poll-miss，
+      //   然后一条回复都收不到（用户报「无头发了消息，前台收不到」）。
+      //   这不是偶发：任何一次 fill 都必然在首拍之后失联，与页面大小/机器快慢无关。
+      // [CONSTRAINT] 用 setTimeout(tick, 0) 而不是直接 `void tick()`：把递归摊到宏任务，
+      //   避免栈累积；节奏完全由 waitForSignal（静默窗 400ms / 上限 800ms）决定，符合 B 档本意。
       const tick = async () => {
-        if (stopped || running) { if (!stopped) await waitForSignal(sid); return }
+        if (stopped) return
+        if (running) { await waitForSignal(sid); if (!stopped) setTimeout(tick, 0); return }
         running = true
         try {
           const streamError = completionErrors.get(sid)
@@ -681,7 +690,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
           }
         } catch { /* 页面导航/关闭时忽略 */ }
         running = false
-        if (!stopped) await waitForSignal(sid)
+        if (!stopped) { await waitForSignal(sid); if (!stopped) setTimeout(tick, 0) }
       }
       tick()
       return () => {

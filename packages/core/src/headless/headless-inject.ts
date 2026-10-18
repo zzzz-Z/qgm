@@ -30,7 +30,7 @@ export {
 export function ensureCollectorInPage() {
   const w = window
   if (!w.__aiRunnerDedup) {
-    w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '', _pendingScriptHash: null, _pendingDoneSig: null, _plainSentInCycle: false, _shortSentHash: '' }
+    w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '', _pendingScriptHash: null, _pendingDoneSig: null, _plainSentInCycle: false, _shortSentHash: '', _askSentHash: '' }
   }
   const dedup = w.__aiRunnerDedup
   if (dedup._collectorReady && dedup._observer && document.body) return true
@@ -59,7 +59,7 @@ export function ensureCollectorInPage() {
 export function detectReplyInPage(siteCfg = {}) {
   const w = window
   if (!w.__aiRunnerDedup) {
-    w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '', _pendingScriptHash: null, _pendingDoneSig: null, _plainSentInCycle: false, _shortSentHash: '' } // [fix-reply-dedup] [fix-plain-once] [short-reply-gate-v1]
+    w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '', _pendingScriptHash: null, _pendingDoneSig: null, _plainSentInCycle: false, _shortSentHash: '', _askSentHash: '' } // [fix-reply-dedup] [fix-plain-once] [short-reply-gate-v1]
   }
   const dedup = w.__aiRunnerDedup
 
@@ -846,7 +846,20 @@ export function detectReplyInPage(siteCfg = {}) {
   //   「首个非空行 = 独占标记行」判据失配 → askUser 不触发 → ai:question 不入流 → 提问卡不渲染。
   // [CONSTRAINT] 传 extractReplyMd(replyRoot) 原样（不剥标记行）：parseAsk 需按标记行定位问题正文。
   if (marks.ask > 0) {
-    return { kind: 'plain', text: extractReplyMd(replyRoot) }
+    // [ask-dedup-v1] ASK 必须自带去重 —— 它是全链路上**唯一**没被 `_plainSentInCycle` 覆盖的出口。
+    // [WHY] 上面 :796 的 plain 去重**刻意豁免**了 ASK（[ask-any-cycle-v1]：流式回复常先出无标记文本
+    //   再补 ASK 块，一并拦下会让提问卡永不出现）。但豁免之后 ASK 分支自身零去重，
+    //   而 `_stableCount >= 3` 只是「最低稳定门槛」（涨到 3 就永远通过），不是去重。
+    //   ⇒ ASK 一旦稳定，**每一拍都会再推一次**。2026-10-18 实测：同一条 ASK 在 22 秒内被推了 23 次，
+    //   间隔 818ms（正好等于 tick 周期），前端表现为「同一段回复刷了十几遍」。
+    //   轮询时代 poll 只跑一拍，所以这个缺陷一直没暴露；循环续命修好后立刻刷屏。
+    // [CONSTRAINT] 用内容 hash 而非布尔位：ASK 正文会随流式补全增长，内容变了就应该再推一次
+    //   （否则提问卡停在半截旧文本）。同内容只推一次，内容变化才放行。
+    const askText = extractReplyMd(replyRoot)
+    const askHash = hash32(`ask|${askText}`)
+    if (dedup._askSentHash === askHash) { dedup._hitAskDup = (dedup._hitAskDup || 0) + 1; return null }
+    dedup._askSentHash = askHash
+    return { kind: 'plain', text: askText }
   }
   if (marks.text > 0) {
     const body = extractReplyMd(replyRoot).split(/\r?\n/).slice(marks.text).join('\n').trim()
