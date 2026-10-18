@@ -40,7 +40,19 @@ export const LOGIN_GUI_MAX_MS = 300_000
 export const DEFAULT_POOL_LIMIT = 5
 /** 池满时排队等待上限（毫秒），超时抛错 */
 export const DEFAULT_QUEUE_TIMEOUT_MS = 60_000
-/** 请求间隔抖动下限（毫秒），用于规避限流 */
-export const DEFAULT_JITTER_MIN_MS = 3500
-/** 请求间隔抖动上限（毫秒），与下限配合 */
-export const DEFAULT_JITTER_MAX_MS = 6000
+/**
+ * 请求间隔抖动下限（毫秒）——模拟真人操作节奏，规避限流。
+ * [jitter-budget-v1] 2026-10-18：3500/6000 → 600/1200。原值让**每一轮**多付 3.5–6.0s 固定等待，
+ *   实测（headless.jsonl n=109 同口径轮间 + send.jsonl n=29 油猴对照）：
+ *     无头轮间 p50 14.74s / p90 57.62s，油猴 p50 7.04s / p90 8.20s ⇒ 差额 7.7s 里 4.75s 是纯 jitter。
+ *   `EXECUTE` 阶段两通道同为 0.14–0.26s、run 管道 1.64–2.03s ⇒ 脚本本身没变慢，慢的全是调度。
+ * [WHY 600–1200] 油猴 `doSend` 是 300ms + 400ms = 700ms 才出回执，本区间与其同量级，更接近真人
+ *   （真人打字 + 点发送约 1–2s）。原 3.5–6.0s 不产生任何正确性收益，只把钱花在等待上。
+ * [CONSTRAINT] 自适应保留：ai-headless.ts 的 `rateLimitedRatio() > 0.1 ? 2 : 1` 不动，
+ *   有频控迹象时自动回到 1200–2400ms。下调后该自适应的绝对放大值比原来小 5.8 倍，
+ *   且 rateWindow（最近 100 次 fill）覆盖时长由 ~24.5min 缩到 ~12.5min ⇒ 单次 429 的污染期同时减半。
+ *   两个维度都是减轻，故无需为「跨 sid 共享单例」这条既有缺陷额外加码。
+ */
+export const DEFAULT_JITTER_MIN_MS = 600
+/** 请求间隔抖动上限（毫秒，不含），与下限配合 */
+export const DEFAULT_JITTER_MAX_MS = 1200
