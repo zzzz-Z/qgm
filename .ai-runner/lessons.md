@@ -3472,3 +3472,21 @@ flex 子项的默认 `min-width` 是 `auto`（不小于内容宽度），此时�
 给 `SidePane.vue` 补 `isNarrow` 时，我在 `</script>` 之前插入——但这个文件是 `<script setup>` + `<template>` + `<style scoped>` 结构，`</script>` 在第 102 行，而 `<template>` 在第 119 行。插入点本身没错，错在我上一轮用「最后一个非空行之后」的算法，把代码塞进了 `</script>` 与 `<template>` 之间，成了模板文本，`tsc` 报 `Property 'isNarrow' does not exist`。
 
 改 SFC 时先 `grep -n '</script>\|<template>\|<style'` 拿到真实边界，不要靠「文件末尾」之类的相对位置推断。
+
+## `position: fixed` 会被 `overflow: hidden` 的祖先裁切
+
+直觉上 `fixed` 相对视口定位，不受祖先影响。但只要祖先是「包含块」（有 `position: relative/absolute/fixed`）且带 `overflow: hidden`，fixed 后代就会被裁在那个祖先的边界里。
+
+这是 CSS 规范里容易忽略的一条。排查时应该沿着 fixed 元素的祖先链逐个检查 `overflow` 与 `position`，而不是只看 fixed 元素自己。
+
+## 只有变体选择器、没有基础规则，是「能跑但不健壮」的典型
+
+`.pane-side` 只有 `.pane-side.is-collapsed` 变体，靠 Tailwind 工具类补齐布局。在文档流里一切正常，一旦切换布局模式（改 `position: fixed`）就全盘失效。
+
+给组件根元素写 class 时，若布局关键属性（display / flex-direction / height）依赖工具类而非组件自有样式，就应该补一条基础规则兜底——工具类会被移除、被覆盖，而组件自有样式不会。
+
+## 布局问题要分层排查，不能一次只改一处
+
+这一轮连续三次 DONE 都没修好，原因是每次只改一个可疑点（宽度 → overflow → flex），而三层问题是叠加的，修掉一层仍被下一层挡住。
+
+正确做法是一次性把所有可疑层写进同一个诊断脚本：祖先 overflow、元素自身 display/height、子项 flex 约束、z-index 层级——四条同时检查，一次性定位全部缺口。

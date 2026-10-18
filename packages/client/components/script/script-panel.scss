@@ -31,6 +31,13 @@
     padding: 0;
     /* [ui-responsive-v1] 抽屉定位锚点 */
     position: relative;
+    /* [side-drawer-clip-v1] 窄屏下本元素是 fixed 抽屉的包含块（position:relative），
+     *   overflow:hidden 会把滑入的抽屉裁在本元素边界内 —— 用户只看到遮罩、看不到面板。
+     *   断点内由下方 @media 放开 overflow。 */
+    /* [side-drawer-clip-v1] 放开裁剪：本元素是 fixed 抽屉的包含块，
+     *   overflow:hidden 会把滑入的抽屉裁在边界内 —— 用户只看到遮罩、看不到面板。
+     *   [CONSTRAINT] 只在此断点内放开；桌面端面板在文档流内，仍需裁掉溢出内容。 */
+    overflow: visible;
   }
 
   /* [ui-responsive-v1] 右侧面板改浮层抽屉：默认滑出屏幕，sideDrawerOpen=true 时滑入。

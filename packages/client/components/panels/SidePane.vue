@@ -266,6 +266,18 @@ defineExpose({ selectTab })
   background: rgb(255 255 255 / 6%);
   color: var(--text);
 }
+/* [pane-side-base-v1] 面板基础布局：flex 列容器。
+ * [WHY] 原先只有 .pane-side.is-collapsed 变体，没有基础规则 ⇒ aside 是块级流容器，
+ *   内部 flex:1 的内容区拿不到高度来源，窄屏改为 position:fixed 后内容区直接塌陷为 0 高，
+ *   表现就是「只有遮罩、面板一片空白」。
+ * [CONSTRAINT] 必须 flex-direction: column：子项纵向堆叠（tabs 在上、内容在下）。 */
+.pane-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .pane-side.is-collapsed {
   overflow: hidden;
 }
