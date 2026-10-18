@@ -3356,3 +3356,15 @@ t2.replace(oldLine, '  // 注释', '  const i = s.indexOf(...)')   // ← 第三
 改 `isOverflowing` 时按「签名 + 2 行 + `}`」= 4 行做 `splice`，但原函数实际是 5 行（签名 + cw + sw + return + `}`），结果留下一个孤立的 `}`，`tsc` 报 TS1128、`overflow-tip` 测试文件整个解析失败（17 条全部 skipped）。
 
 修法：改函数前先读完整函数体确认行数，或者干脆用 `findIndex` 定位起止行再 splice。
+
+## 跨块正则校验会给出假阴性
+
+回退 `opacity` 后我用 `/\.why-label,[\s\S]{0,200}opacity: 0\.7;/` 校验，返回 `false`——因为 `.why-label, .reason-label` 到 `opacity` 之间的实际字符数超过 200（中间隔着 `font-family`、`font-size`、`letter-spacing`、`color` 四行）。
+
+教训：跨块正则的距离上限是猜的，写小了就假阴性。校验已落盘的值应该用行号 + 精确匹配，而不是跨块正则。
+
+## 断言「不在覆盖内」前必须先看基线目录
+
+我上一轮判断 ScriptCard 不在视觉覆盖内，依据是 `grep -c "KnowledgePanel|knowledge"` 返回 0 后顺带认为 ScriptCard 也一样。实际 `visual.spec.ts` 里有 `06-script` 视图、`visual.spec.ts-snapshots/` 里有两张基线 PNG。
+
+教训：断言「某组件无基线保护」时，必须同时检查 ① spec 文件里的视图列表 ② snapshots 目录的实际文件。只查一处会得出相反结论，进而做出错误的「安全改动」判断。

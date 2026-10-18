@@ -275,7 +275,7 @@ function toggle(): void { expanded.value = !expanded.value }
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
 }
 /* [script-card-head-v2] desc 现在是列容器的第一行，必须显式 block + width:100% + min-width:0，
    否则列容器下不会收缩，省略号（ellipsis）根本不会出现 —— 这是 flex 纵向布局的常见坑。 */
@@ -338,7 +338,7 @@ function toggle(): void { expanded.value = !expanded.value }
   font-weight: 400;
   letter-spacing: 0.5px;
   color: var(--text-3, #8b949e);
-  opacity: 0.85;
+  opacity: 0.7;
 }
 .reason-label {
   color: var(--danger, #f85149);
