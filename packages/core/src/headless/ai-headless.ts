@@ -579,6 +579,12 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
             : await page.evaluate(detectReplyInPage, { generatingSelector: adapter.selectors.generatingSelector })
           if (!stopped && reply && typeof reply === 'object' && (reply as { kind?: string }).kind) {
             alerted = false
+            // [reply-error-visible-v1] busy / rate 两类 error 来自页面文案扫描（detectReplyInPage），
+            //   不经过 completionErrors，原留痕只记 textLen 让排查无从下手。此处补记正文。
+            const rk = (reply as { kind?: string }).kind
+            if (rk === 'error') {
+              try { writeChannelLog('headless', { kind: 'reply-error', sid, text: String((reply as { text?: string }).text || '').slice(0, 200) }) } catch { /* swallow */ }
+            }
             cb(reply as HeadlessReply)
           } else if (!stopped && !alerted && Date.now() - startedAt > NO_REPLY_ALERT_MS) {
             // 超时无回复：补一次登录态诊断，把原因说清楚而不是干等
