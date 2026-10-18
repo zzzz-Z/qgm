@@ -3460,3 +3460,15 @@ ls[i] = "// 注释行 1",
 ## `text-overflow: ellipsis` 在 flex 子项上需要 `min-width: 0`
 
 flex 子项的默认 `min-width` 是 `auto`（不小于内容宽度），此时即使写了 `overflow: hidden`，元素也不会收缩到内容宽度以下，省略号永远不出现。必须显式 `min-width: 0`。
+
+## 内联 style 会静默压过媒体查询
+
+`SidePane` 的宽度是 `:style="{ width: displayWidth + 'px' }"`，而 `displayWidth` 由 `sideWidth`（默认 320、下限 280）算出。媒体查询里写多少 `width` 都不会生效——内联 style 的优先级在 CSS 层叠之上，除非目标规则带 `!important`。
+
+之前加窄屏适配时只处理了 `position` / `transform`（这两个属性内联 style 里没有），所以「看起来做了响应式」，唯独宽度漏了。加响应式规则前，先确认目标属性是否被内联 style 占用。
+
+## 组件可能有多个 `</script>` 语义块，插入点不能用第一个匹配
+
+给 `SidePane.vue` 补 `isNarrow` 时，我在 `</script>` 之前插入——但这个文件是 `<script setup>` + `<template>` + `<style scoped>` 结构，`</script>` 在第 102 行，而 `<template>` 在第 119 行。插入点本身没错，错在我上一轮用「最后一个非空行之后」的算法，把代码塞进了 `</script>` 与 `<template>` 之间，成了模板文本，`tsc` 报 `Property 'isNarrow' does not exist`。
+
+改 SFC 时先 `grep -n '</script>\|<template>\|<style'` 拿到真实边界，不要靠「文件末尾」之类的相对位置推断。

@@ -45,6 +45,14 @@
     transform: translateX(100%);
     transition: transform 0.2s ease;
   }
+
+  /* [side-drawer-width-v1] 抽屉宽度覆盖内联 style。
+   * [WHY] SidePane 的宽度来自内联 :style，优先级高于媒体查询；
+   *   窄屏沿用 320px（下限 280px）必然溢出——视口 360px 时面板比屏幕还宽，被裁掉一半。
+   * [CONSTRAINT] min(88vw, 360px)：大屏不变，窄屏自动收窄且两侧留边。 */
+  .pane :deep(.pane-side) {
+    width: min(88vw, 360px) !important;
+  }
   .side-resize-handle {
     display: none;
   }
