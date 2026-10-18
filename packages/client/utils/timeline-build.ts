@@ -1,6 +1,12 @@
 // [timeline-build-v1] 从 TerminalPane 抽出：busEvents → 卡片列表的纯函数。
 // [WHY] 原实现是组件内 computed，任一事件到达即整条重算 500 条。
 //   抽成纯函数后，可被「增量维护」按事件级缓存复用，也可被 vitest 直测。
+//
+// [explicit-import-v1] 这两个函数原先靠 unplugin-auto-import 的全局注入（vite 侧 dirs: ['utils/**']）。
+// [WHY 改成显式 import] vitest.config.ts **没有挂 AutoImport 插件** ⇒ 在测试里它们是 ReferenceError，
+//   于是本模块此前**根本没有任何用例**（想测也起不来）。显式 import 对 vite 完全无害
+//   （已显式导入的符号插件不会重复注入），代价是两行，收益是「这个模块终于可被断言」。
+import { clampTextPreview, tailTextPreview } from './timeline-preview.js'
 
 export interface PreviewFields {
   text: string
@@ -132,6 +138,47 @@ export function buildOneCard(ev: { id: number, kind: string, ts: number, payload
     if (!text) return null
     const pv = clampTextPreview(text, TEXT_PREVIEW.lines, TEXT_PREVIEW.chars)
     return { type: 'text', key: `text-${ev.id}`, timeLabel: hmsLabel(ev.ts), text, ...pv }
+  }
+  // [turn-block-frame-v1] 块帧：一个块一帧，按 seq 顺序到达 ⇒ 时间线顺序天然等于 content 顺序，
+  //   不再需要从一段 Markdown 里反推「哪句话配哪个脚本」。
+  //
+  // [WHY script 块不建卡] 块里没有执行数据（exit / 时长 / stdout / changes 全在 run:* 事件里）。
+  //   若在此建一张「等待执行」占位卡，等 run:start 再建一张真卡，用户会看到两张同 desc 的卡；
+  //   要对上就必须让占位 key 与 runner 的 updateKey 完全一致 —— 那是跨模块隐式耦合，
+  //   而**代价换来的只是顺序**。故 script 块显式返回 null，由 run:start 建卡（见风险 R8）。
+  // [CONSTRAINT] `say` 与 `handoff` 都渲染为文本卡：handoff 的载荷是交班摘要，
+  //   用户需要读到它才能知道「为什么换会话了」，吞掉它等于把轮转变成静默行为。
+  if (ev.kind === 'ai:block') {
+    const b = ((ev.payload || {}) as { block?: Record<string, unknown> }).block
+    if (!b) return null
+    const blockId = String(b.blockId || '')
+    const turnId = Number(b.turnId) || 0
+    if (b.type === 'say' || b.type === 'handoff') {
+      const text = String(b.type === 'say' ? b.text || '' : b.summary || '').trim()
+      if (!text) return null
+      const pv = clampTextPreview(text, TEXT_PREVIEW.lines, TEXT_PREVIEW.chars)
+      return { type: 'text', key: `blk-${turnId}-${blockId}`, timeLabel: hmsLabel(ev.ts), text, ...pv }
+    }
+    if (b.type === 'ask') {
+      const question = String(b.question || '').trim()
+      const options = normalizeAskOptions(b.options)
+      if (!question && options.length === 0) return null
+      const pv = clampTextPreview(question, ASK_PREVIEW.lines, ASK_PREVIEW.chars)
+      // [turn-ask-options-v1] options 直接来自块，**不再解析文本**（旧路径 parseAsk 猜选项）。
+      //   askId 用块 id：回答事件按 askId 回填 answered/answer，与 ai:question 同一套匹配规则。
+      return {
+        type: 'question',
+        key: `blk-${turnId}-${blockId}`,
+        timeLabel: hmsLabel(ev.ts),
+        askId: blockId,
+        options,
+        answered: false,
+        answer: '',
+        text: question,
+        ...pv,
+      }
+    }
+    return null
   }
   if (ev.kind !== 'run:start') return null
   const p = (ev.payload || {}) as Record<string, unknown>

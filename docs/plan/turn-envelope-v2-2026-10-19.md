@@ -378,6 +378,7 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | R5 | 油猴旧副本长期存在 | 用户不重装 | D10 双读永久保留 |
 | R6 | 单 turn 语法错导致整轮归零 | 大脚本转义出错 | 错误码精确回指 + 静默窗；接受该代价（已在决策基线记录） |
 | R7 | `say` 的自动 id 随数组下标漂移 | 流式过程中信封在前部插入块 ⇒ `say_1` 变 `say_2` | 按 `turn\|id` 去重会把同一条 say 当新块再推一次。缓解：P7 契约要求模型给**显式 id**（`say` 也写），自动 id 只在「整条信封一次到达」时可信；P5 执行账本只认 script/ask 的显式 id，不受影响 |
+| R8 | 时间线顺序：脚本卡由 `run:start` 建，可能晚于同 turn 的 `say`/`ask` 卡 | 多脚本 turn 且执行启动有先后 | `say`/`ask`/`handoff` 到帧即渲染（顺序由 `seq` 到达顺序保证）；脚本卡顺序由 **runner 按 `seq` 顺序启动 run** 保证（P5 约束：串行启动、并行执行），而不是靠插入占位卡 |
 
 ---
 
@@ -404,12 +405,40 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | P4-a | 完成（2026-10-19） | 2026-10-19 | `AiBlockDto`/`AiTurnEndDto`/`ai:block`/`ai:turn-end` + 纯映射 `blocksToFrames`（17 条），**未接线** |
 | P4-b | 完成（2026-10-19） | 2026-10-19 | `attach-ws` 发块帧（`desc`/`why` 取真值）+ `turns.jsonl` transition + 重放清单；`turnToFrames` 4 条 / `replay-buffer` 7 条 |
 | P4-c | 待做 | — | `hello.caps` 与客户端的握手判定（与 P6 一起做才有意义） |
+| P6-a | 完成（2026-10-19） | 2026-10-19 | `buildOneCard` 认 `ai:block`（say/ask/handoff 建卡，script 不建）+ 采信守卫 13 条 |
+| P6-b | 待做 | — | `useAiReplyHandlers` 订阅块帧 + 时间线按 `seq` 排序 + 脚本卡 `desc/why` 走块真值 |
 | P3 | — | — | |
 | P4 | — | — | |
 | P5 | — | — | |
 | P6 | — | — | |
 | P7 | — | — | |
 | P8 | — | — | 观察期后 |
+
+### P6-a 实测记录（2026-10-19）
+
+`timeline-build.ts` 的 `buildOneCard` 增 `ev.kind === 'ai:block'` 分支：
+`say` / `handoff` → 文本卡，`ask` → 提问卡（`askId` = 块 id，`options` 直接用块字段），
+`script` → **null**（显式不建卡）。守卫 `client/tests/timeline-turn-blocks.node-test.ts` 13 条。
+
+**为什么 script 块不建卡（与计划原文的偏离，需记）**：块里没有执行数据（`exit` / 时长 / stdout /
+`changes` 全在 `run:*` 事件里）。若在建块卡时放一张「等待执行」占位卡，等 `run:start` 再建真卡，
+用户会看到两张同 `desc` 的卡；要对上就得让占位 key 与 runner 的 `updateKey` 完全一致——
+那是跨模块隐式耦合，而换来的只是顺序。故改为「脚本卡仍由 `run:start` 建，顺序由 runner
+按 `seq` 启动 run 来保证」，并登记为 R8。
+
+**采信守卫（P6 的核心判据）**：不只断言「有卡」，还断言 `text` / `question` / `options` /
+`summary` **与输入逐字相等**。变异：把 `normalizeAskOptions(b.options)` 换成 `normalizeAskOptions([])`
+⇒ 2 条红（含「选项里出现文本里没有的内容也能渲染」——该用例专门证明没退回解析文本）。
+
+**一个顺带挖出来的结构问题**：`timeline-build.ts` 原先靠 `unplugin-auto-import` 注入
+`clampTextPreview` / `tailTextPreview`（vite 侧 `dirs: ['utils/**']`），而 **vitest.config.ts 没有挂
+AutoImport 插件** ⇒ 在测试里它们是 `ReferenceError`，于是本模块此前**根本没有任何用例**
+（想测也起不来，第一次运行即 `tailTextPreview is not defined`）。
+处方：改成显式 `import { clampTextPreview, tailTextPreview } from './timeline-preview.js'`。
+显式导入对 vite 无害（已导入的符号插件不重复注入），代价两行，收益是「这个模块终于可被断言」。
+
+[CONSTRAINT] **「靠全局注入才跑得起来」的模块等于不可测**。凡是纯函数，依赖必须显式——
+自动导入是书写便利，不该成为可测性的前提。
 
 ### P4-b 实测记录（2026-10-19）
 
