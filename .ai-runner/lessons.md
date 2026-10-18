@@ -3330,3 +3330,15 @@ t2.replace(oldLine, '  // 注释', '  const i = s.indexOf(...)')   // ← 第三
 改 `style.css` 时 `splice(268, 18, ...)` 起点偏了一行，把 `.terminal:focus,` / `.terminal:focus-visible,` 两行留在了注释前面，形成悬空选择器——整个 `.terminal` 规则块失去 `{`，浏览器会静默丢弃后续规则。
 
 `eslint` 不检查 CSS 结构，`tsc` 更不检查。唯一能发现的是：① 括号计数（`{` 与 `}` 数量不等）② 真实构建 ③ 人工读回。本次靠读回发现。
+
+## CSS 同名规则块分散维护会静默漂移
+
+给 `.kb-hit` 加 hover 时先插了一个新的 `.kb-hit { transition: ... }` 块，导致文件里出现两个同名规则。CSS 合法、浏览器正常渲染、lint 也不报错，但后续改样式时极易只改一处、另一处静默失效。
+
+修法是把 `transition` 并进原块，只留 `.kb-hit:hover` 独立。改动 CSS 时应先 grep 目标选择器是否已存在，避免无意识分裂。
+
+## 锚点必须按 prettier 格式化后的实际行文构造
+
+首轮合并重复块时锚点写的是单行 `transition: border-color 0.14s ease, background-color 0.14s ease;`，但 prettier 已把它展开成多行——锚点失配、脚本 `exit 2`。
+
+多行属性值不要写进单行锚点，改用行号定位 + 内容校验。

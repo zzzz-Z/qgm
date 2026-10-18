@@ -89,33 +89,53 @@ async function search() {
     </div>
     <div class="kb-search">
       <input
-        v-model="query" class="kb-input" placeholder="搜索知识库…" spellcheck="false"
+        v-model="query"
+        class="kb-input"
+        placeholder="搜索知识库…"
+        spellcheck="false"
+        aria-label="知识库搜索关键词"
         @keydown.enter.prevent="search"
       >
       <button class="kb-btn" :disabled="busy || !query.trim()" @click="search">
-        搜索
+        {{ busy ? '搜索中…' : '搜索' }}
       </button>
     </div>
-    <ul v-if="hits.length" class="kb-hits">
-      <li v-for="(h, i) in hits" :key="i" class="kb-hit">
-        <div class="kb-hit-head">
-          <span class="kb-path">{{ h.src || h.path || '（无路径）' }}</span>
-          <span v-if="h.state" class="kb-state">{{ h.state }}</span>
-        </div>
-        <div class="kb-hit-title">
-          {{ h.title || '' }}
-        </div>
-        <div class="kb-snippet">
-          {{ h.snippet || (h.body || '').slice(0, 160) }}
-        </div>
-      </li>
-    </ul>
-    <p v-else-if="degraded" class="kb-offline">
-      知识库离线，无法检索（{{ reason }}）
+
+    <!-- [kb-feedback-v1] 三种非结果态必须可区分：加载中 / 未搜索 / 无命中。
+         原实现只有「无命中」，首次打开与搜索中都是一片空白，用户无从判断该等还是该改词。 -->
+    <p v-if="busy" class="kb-hint" role="status">
+      正在检索{{ source === 'wiki' ? '外部 Wiki' : '本地知识库' }}…
     </p>
-    <p v-else-if="searched" class="kb-empty">
-      无命中
+    <p v-else-if="!searched && !degraded" class="kb-hint">
+      输入关键词后回车或点「搜索」；默认检索经验台账，可切换到项目文档。
     </p>
+
+    <template v-if="!busy">
+      <div v-if="hits.length" class="kb-count">
+        命中 {{ hits.length }} 条
+      </div>
+      <ul v-if="hits.length" class="kb-hits">
+        <li v-for="(h, i) in hits" :key="i" class="kb-hit">
+          <div class="kb-hit-head">
+            <span class="kb-path">{{ h.src || h.path || '（无路径）' }}</span>
+            <span v-if="h.state" class="kb-state">{{ h.state }}</span>
+          </div>
+          <div class="kb-hit-title">
+            {{ h.title || '' }}
+          </div>
+          <div class="kb-snippet">
+            {{ h.snippet || (h.body || '').slice(0, 160) }}
+          </div>
+        </li>
+      </ul>
+      <!-- [kb-empty-action-v1] 无命中时给出下一步，而不是只报「无命中」让用户自己猜 -->
+      <p v-else-if="degraded" class="kb-offline">
+        知识库离线，无法检索（{{ reason }}）
+      </p>
+      <p v-else-if="searched" class="kb-empty">
+        无命中。可尝试：换更短的关键词、切换到「项目文档」源、或去掉专业术语用口语描述。
+      </p>
+    </template>
   </section>
 </template>
 
@@ -200,6 +220,9 @@ async function search() {
   border: 1px solid var(--border-2, #2a2a2a);
   border-radius: 4px;
   padding: 6px 8px;
+  transition:
+    border-color 0.14s ease,
+    background-color 0.14s ease;
 }
 .kb-hit-head {
   display: flex;
@@ -230,6 +253,23 @@ async function search() {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* [kb-feedback-v1] 结果计数与引导文案：弱化存在感，不与命中条目争视觉重心 */
+.kb-count {
+  font-size: 12px;
+  opacity: 0.6;
+  margin: 2px 0;
+}
+.kb-hint {
+  font-size: 12px;
+  opacity: 0.55;
+  margin: 4px 0;
+  line-height: 1.5;
+}
+.kb-hit:hover {
+  border-color: var(--primary, #58a6ff);
+  background: rgb(88 166 255 / 6%);
+}
+
 .kb-empty,
 .kb-offline {
   opacity: 0.6;
