@@ -23,7 +23,7 @@ function tickBody(s: string): string {
   const open = s.indexOf('{', at)
   let depth = 0
   for (let i = open; i < s.length; i++) {
-    if (s[i] === '{') depth++
+    if (s[i] === '{') { depth++ }
     else if (s[i] === '}') {
       depth--
       if (depth === 0) return s.slice(open, i + 1)
@@ -42,7 +42,7 @@ describe('[poll-loop-reschedule-v1] poll 循环不得断链', () => {
 
   it('禁止「await waitForSignal 后直接 return」的断链写法', () => {
     // 这正是事故写法：等完信号就 return，没有 setTimeout(tick)
-    expect(body).not.toMatch(/await waitForSignal\(sid\)\s*;?\s*return\s*[}\n]/)
+    expect(body).not.toMatch(/await waitForSignal\(sid\)(?:\s+(?:;\s+)?|;\s+)return\s*[}\n]/)
   })
 
   it('stopped 是唯一允许不调度的出口，且必须先判（否则停止后仍会无限续命）', () => {

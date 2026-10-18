@@ -21,7 +21,7 @@ function askBlock(s: string): string {
   const open = s.indexOf('{', at)
   let depth = 0
   for (let i = open; i < s.length; i++) {
-    if (s[i] === '{') depth++
+    if (s[i] === '{') { depth++ }
     else if (s[i] === '}') {
       depth--
       if (depth === 0) return s.slice(open, i + 1)

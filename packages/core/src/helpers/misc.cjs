@@ -67,8 +67,12 @@ function createMiscApi(deps) {
     if (!s.includes('\n') && s.length < 500) {
       try { if (fs.existsSync(s)) return { ok: false, error: 'syntaxCheck 接收源码内容而非文件路径；请用 __AI__.readText(p) 读取后传入' } } catch { /* ignore */ }
     }
-    if (/<script[\s>]|<template[\s>]|<style[\s>]/.test(s)) {
-      return { ok: false, error: 'syntaxCheck 不支持 .vue SFC；请改用 __AI__.typeCheck' }
+    // [sfc-detect-precise-v1] 仅当文件名是 .vue 或源码**顶层**以 SFC 块标签开头时才判 SFC；
+    //   原实现裸扫全文，任何含 `<script>` 字样的普通 JS（如生成本文件的源码、正则字面量）都被误伤。
+    const isVueFile = /\.vue$/i.test(String(filename || ''))
+    const isSfcSource = /^\s*<(?:script|template|style)[\s>]/.test(s)
+    if (isVueFile || isSfcSource) {
+      return { ok: false, code: 'UNSUPPORTED_LANG', error: 'syntaxCheck 不支持 .vue SFC；请改用 __AI__.typeCheck', hint: '对 .vue 请用 __AI__.lint([file]) 或 __AI__.typeCheck()' }
     }
     const TS_EXT_RE = /\.(?:ts|tsx|mts|cts|mjs)$/i
     const ESM_ERR_RE = /Cannot use import statement outside a module|Unexpected token '?export'?|Cannot use '?import\.meta'?/
