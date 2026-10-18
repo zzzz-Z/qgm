@@ -341,7 +341,17 @@ async function fillWithDegrade(sid: string, payload: { prompt: string, images?: 
     r = await sendFillToAsync(sid, payload, ackTimeout, out)
   }
   if (r !== 'unacked') return r
-  log.warn('[copyAndFill] fill 未收到回执（该页可能未运行油猴脚本 / 油猴为旧版），降级按已发送处理 sid=', sid)
+  // [unacked-retry-v1] 未回执 ≠ 已送达：油猴的消息监听是页面级的，切会话/切路由/站点重渲染
+  //   都会短暂卸掉监听，表现为「这一条丢了，下一条又通了」（用户实测：重发一条即恢复）。
+  //   原实现直接降级 sent ⇒ 内容没填进输入框、AI 永远不回复，而工作台以为发出去了干等。
+  //   改为有限重试（2 次 / 800ms），仍无 ack 才降级并提示，把瞬时丢帧自愈掉。
+  for (let attempt = 0; attempt < 2 && r === 'unacked'; attempt++) {
+    log.warn('[copyAndFill] fill 未回执，800ms 后重试 attempt=', attempt + 1, 'sid=', sid)
+    await promiseTimeout(800)
+    r = await sendFillToAsync(sid, payload, ackTimeout, out)
+  }
+  if (r !== 'unacked') return r
+  log.warn('[copyAndFill] fill 重试后仍未回执（该页可能未运行油猴脚本 / 油猴为旧版），降级按已发送处理 sid=', sid)
   if (!_unackedHintShown) {
     _unackedHintShown = true
     // [unacked-hint-v2] 首因不是「油猴是旧版」而是「这个页面里根本没有脚本」：
@@ -349,7 +359,7 @@ async function fillWithDegrade(sid: string, payload: { prompt: string, images?: 
     //   ② Chrome 刚打开「允许运行用户脚本」时，**已加载**的旧页面不会自动补注入，必须重载。
     //   两种成因的处置都是「重载该页 / 改用工作台按钮开窗」，故按可操作顺序重写提示文案。
     // [CONSTRAINT] 文案须保留「未回执」字样：e2e/fail-feedback-probe.spec.ts 用它判定回传出站阶段已抵达
-    toast('AI 窗口未回执：该页可能没运行油猴脚本。请在该窗口按 F5 重载后重试；若是你自己手动打开的页面则无法回传（无 opener），请改用工作台按钮重开。本条已按「已发送」处理', 'warn', TOAST_LONGEST)
+    toast('AI 窗口未回执（已自动重试 2 次）：该页可能没运行油猴脚本。请在该窗口按 F5 重载后重试；若是你自己手动打开的页面则无法回传（无 opener），请改用工作台按钮重开。本条已按「已发送」处理', 'warn', TOAST_LONGEST)
   }
   return 'sent'
 }

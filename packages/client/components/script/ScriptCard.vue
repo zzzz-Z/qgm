@@ -55,7 +55,8 @@ const lineCount = computed(() => (cleanedOutput.value ? cleanedOutput.value.spli
 //   stdout 里的 ✓ ok(...) 打点是噪音，成功无变更的步骤不应长出可点开的箭头。
 const hasBody = computed(() => props.card.changes.length > 0 || Boolean(props.card.stderrText) || Boolean(fullOutput.value))
 // [script-card-l3-v1] L2 折叠区是否有内容：why / 失败原因 / 耗时行数。全空则不渲染折叠区，避免空箭头。
-const hasL2 = computed(() => Boolean(props.card.why) || Boolean(props.card.reason) || props.card.durationMs != null)
+// [script-card-detail-v1] reason 已移到展开区元信息栏，不再参与 L2 判空
+const hasL2 = computed(() => Boolean(props.card.why) || props.card.durationMs != null)
 // [timeline-denoise-v1] 结果摘要只在终态出现，运行中 / 等待中不占位
 const isFinal = computed(() => props.card.phaseClass === 'phase-done' || props.card.phaseClass === 'phase-error')
 const isFailed = computed(() => props.card.phaseClass === 'phase-error')
@@ -66,8 +67,8 @@ const isFailed = computed(() => props.card.phaseClass === 'phase-error')
  */
 const resultLabel = computed(() => {
   if (!isFinal.value) return ''
-  if (isFailed.value) return props.card.exit === null ? '失败' : `exit ${props.card.exit}`
-  return props.card.changeCount > 0 ? `${props.card.changeCount} 文件变更` : '无改动'
+  if (isFailed.value) return props.card.exit === null ? '' : `exit ${props.card.exit}`
+  return props.card.changeCount > 0 ? String(props.card.changeCount) : ''
 })
 /** 结果徽标配色类：失败红、有变更主色、无改动弱化 */
 /** [card-duration-v1] 耗时文案：<1s 显示 ms，否则显示秒 */
@@ -155,6 +156,7 @@ function toggle(): void { expanded.value = !expanded.value }
         <span class="script-card-l1">
           <span v-overflow-tip="card.desc" class="script-card-desc">{{ card.desc }}</span>
           <span v-if="resultLabel" class="script-card-stat" :class="resultClass">{{ resultLabel }}</span>
+          <span class="script-card-time">{{ card.timeLabel }}</span>
         </span>
         <!-- L2 折叠：why / 失败原因 / 耗时与行数——需要时按 ▸ 展开，不占常驻视觉位 -->
         <span v-if="expanded && hasL2" class="script-card-l2">
@@ -162,22 +164,26 @@ function toggle(): void { expanded.value = !expanded.value }
             <span class="why-label">WHY</span>
             <span v-overflow-tip="card.why" class="why-text">{{ card.why }}</span>
           </span>
-          <!-- [script-card-reason-v1] 失败原因常显：useRunner 的 error 分支才下发。
-             放在头部而非展开区 —— 失败时「为什么失败」是最该一眼看到的信息，
-             藏进折叠区后用户得先点开才知道要不要点开（且无 stderr 的失败根本没有折叠区）。 -->
-          <span v-if="card.reason" class="script-card-reason">
-            <span class="reason-label">失败原因</span>
-            <span v-overflow-tip="card.reason" class="reason-text">{{ card.reason }}</span>
-          </span>
           <span v-if="card.durationMs != null" class="script-card-dur">{{ lineCount }} 行 · {{ durLabel }}</span>
         </span>
         <span v-if="!hasL2 && resultLabel" class="script-card-stat" :class="resultClass">{{ resultLabel }}</span>
-        <span class="script-card-time">{{ card.timeLabel }}</span>
       </span>
     </div>
     <!-- [script-card-head-v2] 展开区只剩原始输出（why 已上提到头部）：
          有输出的步骤才配折叠箭头，不再是「几乎每行都能点开、点开只有一段复述」。 -->
     <div v-if="expanded && hasBody" class="script-card-tail">
+      <!-- [script-card-detail-v1] 展开区先给一行元信息（状态 / 耗时 / 输出行数 / 退出码），
+           头部只留 desc + 状态点 + 时间，信息密度上移到这里，避免折叠态噪音。 -->
+      <div class="tail-meta">
+        <span v-if="isFailed" class="tail-meta-item is-fail">{{ card.exit === null ? '执行失败' : `退出码 ${card.exit}` }}</span>
+        <span v-if="card.durationMs != null" class="tail-meta-item">耗时 {{ durLabel }}</span>
+        <span v-if="lineCount" class="tail-meta-item">{{ lineCount }} 行输出</span>
+        <span v-if="card.changeCount" class="tail-meta-item">{{ card.changeCount }} 文件变更</span>
+      </div>
+      <div v-if="card.reason" class="tail-reason">
+        <span class="reason-label">失败原因</span>
+        <span class="reason-text">{{ card.reason }}</span>
+      </div>
       <div v-if="fullOutput" class="sc-out">
         <!-- eslint-disable-next-line vue/no-v-html -- ansiToHtml 已严格转义，仅注入白名单色 span -->
         <pre ref="outScrollRef" class="sc-out-scroll" @scroll.passive="onOutScroll"><span v-html="outputHtml" /><span v-if="isRunning" class="sc-cursor" aria-hidden="true">█</span></pre>
@@ -222,11 +228,11 @@ function toggle(): void { expanded.value = !expanded.value }
   border-radius: 10px;
   transition: background-color 0.14s ease;
 }
-/* [failed-round-highlight-v1] 失败卡左侧留一道红边：扫读时不必逐个点开就能定位失败轮 */
+/* [script-card-fail-quiet-v1] 失败降噪：红边收细到 1px、去掉淡红底。
+   失败仍有图标 + exit 码可辨，但不再整卡染色（四重提示叠加是本轮要解决的噪音源）。 */
 .script-card.phase-error {
-  border-left: 2px solid var(--danger-1, #f85149);
+  border-left: 1px solid color-mix(in srgb, var(--danger-1, #f85149) 45%, transparent);
   padding-left: 6px;
-  background: rgba(248, 81, 73, 0.05);
 }
 /* [card-bg-on-expand-v1] 展开时显示背景（替代 hover 变色，避免与头部 hover 叠成两层） */
 .script-card.is-expanded {
@@ -273,8 +279,9 @@ function toggle(): void { expanded.value = !expanded.value }
   opacity: 0.6;
   font-variant-numeric: tabular-nums;
 }
+/* [script-card-compact-v1] 时间不再独占一行：跟随状态徽标成组，靠 head 的 gap 控制间距 */
 .script-card-time {
-  margin-left: auto;
+  flex: 0 0 auto;
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 11px;
   font-weight: 400;
@@ -392,6 +399,36 @@ function toggle(): void { expanded.value = !expanded.value }
 }
 .reason-text {
   color: var(--danger, #f85149);
+}
+/* [script-card-detail-v1] 展开区元信息栏：紧凑一行，弱色，失败项才着色 */
+.tail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 6px;
+  font: 400 11px/1.4 var(--mono, ui-monospace, monospace);
+  color: var(--text-3, #8b949e);
+  opacity: 0.85;
+}
+.tail-meta-item.is-fail {
+  color: var(--danger, #f85149);
+  opacity: 0.9;
+}
+/* 展开后的失败原因：允许三行，比折叠态更详细 */
+.tail-reason {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+.tail-reason .reason-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  overflow: hidden;
 }
 /* [sc-tail-scroll-v1] 去掉外层 max-height/overflow：与 .sc-out-scroll 嵌套滚动冲突；输出区自理滚动 */
 .script-card-tail {
