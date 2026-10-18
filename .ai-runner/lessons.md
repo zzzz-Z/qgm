@@ -3608,3 +3608,11 @@ Chromium 的 cookie / localStorage 有内存缓冲，登录后立即关窗会丢
 ## 无头链路失败必须主动上报
 
 `fill ok:true` + 零 reply 的组合是彻底静默的，用户无法区分「在思考」和「根本没发出去」。任何「等待外部事件」的轮询都必须有超时出口。
+
+## 不要把"token 为 null"倒推成"关窗清 token"
+
+persistent context 的 localStorage 本来就持久化。token 为 null 的直接含义是"从未成功登录过"，而不是"登录了又丢了"。区分这两者需要「登录过程中 + 关窗后」两次采样对比，只采样关窗后必然误判。
+
+## 判断登录是否成功，看 `path` 比看 token 更可靠
+
+`/sign_in` 一定未登录；`/` 且有 textarea 基本可判定已登录。token 字段格式（`{"value":..., "__version":"0"}`）容易被误解析。
