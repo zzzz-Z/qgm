@@ -346,6 +346,7 @@ declare global {
   const submitTurn: typeof import('./composables/runner/useTurnRunner').submitTurn
   const subscribeTreeDrop: typeof import('./composables/ui/drag-bus').subscribeTreeDrop
   const summaryArrivalSeq: typeof import('./composables/runner/useRunner').summaryArrivalSeq
+  const supportsBlock: typeof import('./composables/runner/turn-collect').supportsBlock
   const syncRef: typeof import('@vueuse/core').syncRef
   const syncRefs: typeof import('@vueuse/core').syncRefs
   const tailTextPreview: typeof import('./utils/timeline-preview').tailTextPreview
@@ -1045,6 +1046,7 @@ declare module 'vue' {
     readonly submitTurn: UnwrapRef<typeof import('./composables/runner/useTurnRunner')['submitTurn']>
     readonly subscribeTreeDrop: UnwrapRef<typeof import('./composables/ui/drag-bus')['subscribeTreeDrop']>
     readonly summaryArrivalSeq: UnwrapRef<typeof import('./composables/runner/useRunner')['summaryArrivalSeq']>
+    readonly supportsBlock: UnwrapRef<typeof import('./composables/runner/turn-collect')['supportsBlock']>
     readonly syncRef: UnwrapRef<typeof import('@vueuse/core')['syncRef']>
     readonly syncRefs: UnwrapRef<typeof import('@vueuse/core')['syncRefs']>
     readonly tailTextPreview: UnwrapRef<typeof import('./utils/timeline-preview')['tailTextPreview']>
