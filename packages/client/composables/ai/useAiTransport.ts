@@ -9,6 +9,15 @@ type AiTransportKind = 'tampermonkey' | 'headless'
 /** AI（接口） */
 export interface AiTransport {
   readonly kind: AiTransportKind
+  /**
+   * [hello-caps-v1] 服务端在 `hello` 帧里宣告的能力清单。
+   * @returns `null` = **未握手**（油猴通道 / 旧服务端）⇒ 消费侧一律**放行**；
+   *          数组 = 已握手 ⇒ 只有清单里的块类型会被消费。
+   * [WHY 必须是三态而不是布尔] 油猴通道根本没有 hello 帧。若把「无 hello」
+   *   解释成「不支持」，会把正常的油猴回包整轮拦掉 —— 那正是本方案最怕的
+   *   「功能静默消失」，而且不会有任何报错。
+   */
+  caps: () => readonly string[] | null
   // [image-channel-v3] images 与 FillPayload.images 同源（DataURL 数组）；油猴分支全量透传，headless 分支显式挑字段
   // [CONSTRAINT] 字段可缺省，旧实现不识该字段不报错
   // [CHANGE-IMPACT] 消费方 useAiWindowSend.sendFill / copyAndFill 传参处，及 headless send('headless:fill') 载荷
@@ -153,6 +162,8 @@ export function createTampermonkeyTransport(): AiTransport {
     onBlock(cb) { blockCbs.add(cb); return () => { blockCbs.delete(cb) } },
     onSummary(cb) { summaryCbs.add(cb); return () => { summaryCbs.delete(cb) } },
     onNewSessionCreated(cb) { newSidCbs.add(cb); return () => { newSidCbs.delete(cb) } },
+    // [hello-caps-v1] 油猴通道不握手 ⇒ 返回 null，消费侧按「未知 ⇒ 放行」处理
+    caps: () => null,
     dispose() {
       if (typeof window !== 'undefined') window.removeEventListener('message', onMessage)
       replyCbs.clear(); blockCbs.clear(); summaryCbs.clear(); newSidCbs.clear()
@@ -183,6 +194,12 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
   const urlUpdatedCbs = new Set<(url: string, sid: string) => void>()
   let ws: WebSocket | null = null
   let muted = false
+  /**
+   * [hello-caps-v1] 服务端宣告的能力清单；`null` = 尚未握手。
+   * [WHY 单独存而不是每次读 socket] hello 只在连接建立时来一帧，之后不会重发；
+   *   解析一次存下来，消费侧随时可问，不必关心时序。
+   */
+  let helloCaps: readonly string[] | null = null
   const queue: string[] = []
   const ackWaiters: Array<{ sid: string, ackId: string, resolve: (r: { ok: boolean, reason: string }) => void, timer: ReturnType<typeof setTimeout> }> = []
 
@@ -245,6 +262,12 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
       const sid = String(msg.sid || '')
       // [replay-flag-v1] 重连重放帧带 replay:true；同标记透传给回调，App.vue 据此拒绝重入 auto-loop
       const replayed = Boolean(msg.replay)
+      // [hello-caps-v1] 握手：hello 帧带服务端能力清单，缺省即旧服务端（视为未握手 ⇒ 放行）。
+      if (msg.t === 'hello') {
+        const c = (msg as { caps?: unknown }).caps
+        helloCaps = Array.isArray(c) ? c.map(String) : null
+        return
+      }
       // [fill-ack-v1] 与油猴 ai-runner:fill-ack 对齐：无头侧显式回执注入结果，唤醒 waitAck。
       // 原实现只能靠 headless:state 间接推断，fill 失败时与成功同形。
       if (msg.t === 'headless:fill-ack') {
@@ -351,6 +374,8 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
     onBlock(cb) { blockCbs.add(cb); return () => { blockCbs.delete(cb) } },
     onTurnEnd(cb) { endCbs.add(cb); return () => { endCbs.delete(cb) } },
     onSummary(cb) { summaryCbs.add(cb); return () => { summaryCbs.delete(cb) } },
+    // [hello-caps-v1] 已握手返回清单；未握手返回 null ⇒ 消费侧按「未知 ⇒ 放行」处理
+    caps: () => helloCaps,
     onNewSessionCreated(cb) { newSidCbs.add(cb); return () => { newSidCbs.delete(cb) } },
     onState(cb) { stateCbs.add(cb); return () => { stateCbs.delete(cb) } },
     onStopDiag(cb) { stopDiagCbs.add(cb); return () => { stopDiagCbs.delete(cb) } },
