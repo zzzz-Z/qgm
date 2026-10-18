@@ -3520,3 +3520,11 @@ for v in $(...); do grep -q "$v:" style.css || echo $v; done
 ## 断言里「先取 element 再判 exists」会抛而非失败
 
 `w.find(sel).element` 在空包装上直接抛 `Cannot call element on an empty DOMWrapper`，错误信息完全不指向缺失的选择器。必须 `assert.ok(w.find(sel).exists())` 在前，`.element` 取值在后——否则测试红得毫无信息量，白烧一轮。
+
+## 组件测试里 `findAll('.tp-item')` 会因折叠静默少数
+
+给分组加默认折叠后，既有断言 `expect(items.length).toBe(3)` 直接变成 2，但报错只写「expected 2 to be 3」，完全不提「因为 done 组收起了」。改这类「渲染数量」断言时，必须同时确认该分组是否默认展开——否则会误判成渲染逻辑坏了，去翻模板而忽略折叠状态。正确做法是先点开对应组标题再计数。
+
+## 分组标签文本加箭头后会破坏精确匹配断言
+
+`labels.indexOf('失败')` 在标签变成 `▾ 失败 · 2` 后恒返回 -1，而 `toBeLessThan` 对 -1 与 -1 比较会给出 `expected -1 to be less than -1` 这种毫无指向性的失败。标签类断言一律用 `includes` 定位，不要用 `indexOf` 全等。

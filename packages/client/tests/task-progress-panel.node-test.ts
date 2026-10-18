@@ -39,6 +39,9 @@ test('有 todo + done：面板渲染、待办在前、已完成划线', async ()
   await flushPromises()
   expect(w.find('.task-progress').exists()).toBe(true)
   expect(w.find('.tp-count').text()).toBe('1/3')
+  // [taskboard-group-collapse-v1] 「已完成」默认收起，需先点开才渲染 done 行
+  const doneLabel = w.findAll('.tp-group-label').find(n => n.text().includes('已完成'))
+  await doneLabel!.trigger('click')
   const items = w.findAll('.tp-item')
   expect(items.length).toBe(3)
   expect(items[0].classes()).not.toContain('done')
@@ -109,7 +112,10 @@ test('items: 四态渲染（执行中 / 待办 / 失败 / 已完成），失败�
   expect(w.find('.tp-item.running').text()).toContain('在跑的任务')
   // 分组顺序：失败段在已完成段之前
   const labels = w.findAll('.tp-group-label').map(n => n.text())
-  expect(labels.indexOf('失败')).toBeLessThan(labels.indexOf('已完成'))
+  // [taskboard-group-collapse-v1] 标签文本带折叠箭头与计数，改用包含匹配定位
+  const failedIdx = labels.findIndex(t => t.includes('失败'))
+  const doneIdx = labels.findIndex(t => t.includes('已完成'))
+  expect(failedIdx).toBeLessThan(doneIdx)
   w.unmount()
 })
 
@@ -339,5 +345,24 @@ test('failedBadge: 有失败项时头部显示失败计数徽章', async () => {
   const badge = w.find('.tp-failed-badge')
   expect(badge.exists()).toBe(true)
   expect(badge.text()).toBe('2 失败')
+  w.unmount()
+})
+
+// [taskboard-group-collapse-v1] 分组折叠：已完成默认收起，点击可展开/再收起
+test('分组折叠：已完成默认收起，点击切换', async () => {
+  mockTasks({ items: [
+    { id: 'a', desc: '待办的事', status: 'pending' },
+    { id: 'd', desc: '做完的事', status: 'done', doneAt: 1 },
+  ] })
+  const w = mount(TaskProgressPanel)
+  await flushPromises()
+  // 默认收起：done 行不渲染，但标签显示计数
+  expect(w.findAll('.tp-item.done').length).toBe(0)
+  const label = w.findAll('.tp-group-label').find(n => n.text().includes('已完成'))!
+  expect(label.text()).toContain('1')
+  await label.trigger('click')
+  expect(w.findAll('.tp-item.done').length).toBe(1)
+  await w.findAll('.tp-group-label').find(n => n.text().includes('已完成'))!.trigger('click')
+  expect(w.findAll('.tp-item.done').length).toBe(0)
   w.unmount()
 })

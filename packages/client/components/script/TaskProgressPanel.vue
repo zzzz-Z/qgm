@@ -65,6 +65,9 @@ const runningItemRef = ref<HTMLElement | null>(null)
 const clearing = ref(false)
 // [taskboard-retry-v1] 失败项一键重新登记：push 原文（服务端对 failed 项允许重新登记），下一轮 poll 回 pending
 const retrying = ref('')
+// [taskboard-group-collapse-v1] 分组可折叠：done 一多就把待办挤出视野，需能单独收起某一组。
+// [WHY] 默认收起「已完成」——历史项只增不减，常驻展开会持续挤占待办与失败的可见高度。
+const collapsedGroups = ref<Record<string, boolean>>({ done: true })
 
 // [hmr-safe-poll-v1] useIntervalFn 随组件作用域自动清理，避免 HMR 替换 setup 时旧 timer 残留
 // [initial-poll-v1] immediate 只启动定时器、不立即调回调；首次拉取靠 onMounted 手动触发
@@ -179,6 +182,9 @@ onBeforeUnmount(() => {
   if (_autoCollapseTimer) { clearTimeout(_autoCollapseTimer); _autoCollapseTimer = null }
 })
 
+function toggleGroup(name: string): void {
+  collapsedGroups.value = { ...collapsedGroups.value, [name]: !collapsedGroups.value[name] }
+}
 // [failed-round-highlight-v1] 顶栏跳转：找 DOM 里最后一张 .script-card.phase-error 并滚到视野内。
 // [CONSTRAINT] 卡片 id 由 ScriptCard 按 card.key 生成（card-<key>），此处只按类名找，避免跨组件传 key。
 function jumpToLatestFailed() {
@@ -341,19 +347,19 @@ function onVis() {
         <span class="tp-text">{{ runningRow.text }}</span>
       </div>
       <template v-if="pendingRows.length">
-        <div v-if="runningRow" class="tp-group-label">
-          待办
-        </div>
-        <div v-for="r in pendingRows" :key="`p-${r.text}`" class="tp-item">
+        <button v-if="runningRow" type="button" class="tp-group-label is-btn" @click="toggleGroup('pending')">
+          {{ collapsedGroups.pending ? '▸' : '▾' }} 待办 · {{ pendingRows.length }}
+        </button>
+        <div v-for="r in (collapsedGroups.pending ? [] : pendingRows)" :key="`p-${r.text}`" class="tp-item">
           <span class="tp-icon" aria-hidden="true">○</span>
           <span class="tp-text">{{ r.text }}</span>
         </div>
       </template>
       <template v-if="failedRows.length">
-        <div class="tp-group-label">
-          失败
-        </div>
-        <div v-for="r in failedRows" :key="`f-${r.text}`" class="tp-item failed">
+        <button type="button" class="tp-group-label is-btn" @click="toggleGroup('failed')">
+          {{ collapsedGroups.failed ? '▸' : '▾' }} 失败 · {{ failedRows.length }}
+        </button>
+        <div v-for="r in (collapsedGroups.failed ? [] : failedRows)" :key="`f-${r.text}`" class="tp-item failed">
           <span class="tp-icon" aria-hidden="true">✗</span>
           <span class="tp-text">{{ r.text }}</span>
           <span v-if="hhmm(r.at)" class="tp-time">{{ hhmm(r.at) }}</span>
@@ -370,10 +376,10 @@ function onVis() {
         </div>
       </template>
       <template v-if="doneRows.length">
-        <div class="tp-group-label">
-          已完成
-        </div>
-        <div v-for="r in doneRows" :key="`d-${r.text}`" class="tp-item done">
+        <button type="button" class="tp-group-label is-btn" @click="toggleGroup('done')">
+          {{ collapsedGroups.done ? '▸' : '▾' }} 已完成 · {{ doneRows.length }}
+        </button>
+        <div v-for="r in (collapsedGroups.done ? [] : doneRows)" :key="`d-${r.text}`" class="tp-item done">
           <span class="tp-icon" aria-hidden="true">✓</span>
           <span class="tp-text">{{ r.text }}</span>
           <span v-if="hhmm(r.at)" class="tp-time">{{ hhmm(r.at) }}</span>
@@ -397,10 +403,18 @@ function onVis() {
   font-size: 12px;
   /* [taskboard-width-fit-v1] 宽度按内容自适应（最长项决定），不撑满父容器；
      max-width 防超长项溢出屏幕，超出时文字换行（tp-text 已设 break-word） */
-  width: fit-content;
-  min-width: 200px;
+  /* [taskboard-width-v2] 由 fit-content 改为撑满父容器：
+     原窄条会让长任务文本折成 2–3 行，且与右侧对话区宽度严重失配（用户截图反馈）。
+     max-width 保留 100% 防溢出，靠内边距控制可读宽度而不是靠缩窄面板。 */
+  width: 100%;
   max-width: 100%;
-  align-self: flex-start;
+  align-self: stretch;
+  /* [taskboard-surface-v2] 加下边框阴影：原纯平面板与下方时间线同底色，
+     失败卡红底直接贴上来时看不出边界（用户截图反馈）。 */
+  box-shadow:
+    0 1px 0 var(--border),
+    0 4px 12px -8px rgb(0 0 0 / 45%);
+  border-radius: 0 0 8px 8px;
 }
 .task-progress.collapsed {
   max-height: none;
@@ -496,6 +510,16 @@ function onVis() {
     transform: rotate(360deg);
   }
 }
+/* [taskboard-head-hierarchy-v1] 进度为主：百分比加粗提亮，计数退为次信息；
+   原两者同权重并排，读起来像一坨数字（用户截图反馈）。 */
+.tp-pct {
+  font-weight: 700;
+  color: var(--text-2);
+}
+.tp-count {
+  color: var(--text-3);
+  background: rgb(127 127 127 / 8%);
+}
 /* [taskboard-ui-v2] 百分比徽章：monospace 数字，弱背景 */
 .tp-pct {
   padding: 2px 8px;
@@ -529,6 +553,24 @@ function onVis() {
   letter-spacing: 0.6px;
   color: var(--text-3);
   text-transform: uppercase;
+}
+/* [taskboard-group-collapse-v1] 分组标题按钮化：保留原小标签视觉，但整行可点折叠 */
+.tp-group-label.is-btn {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-11);
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  color: var(--text-3);
+  text-align: left;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+.tp-group-label.is-btn:hover {
+  color: var(--text-2);
 }
 /* [taskboard-stale-v1] 连续拉取失败提示：黄色弱底，不与错误态混淆 */
 /* [ui-loading-state-v1] 首轮 poll 骨架提示（C4） */
