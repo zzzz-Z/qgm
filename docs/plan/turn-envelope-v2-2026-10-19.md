@@ -402,7 +402,7 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | P1-b | 完成（2026-10-19） | 2026-10-19 | 生成器 + 指纹守卫 13 条；三处产物同源（`cb5aa89887c5dc9b`） |
 | P1-c | 完成（2026-10-19） | 2026-10-19 | 无头内联段（region 替换）+ 三端行为对拍 6 条；P1 三个守卫全绿 52/52 |
 | P2-a | 完成（2026-10-19） | 2026-10-19 | 页面侧 `readTurnBlocks()` + 假 DOM 守卫 11 条；**未改任何返回路径**（零行为变化） |
-| P2-b | 待做 | — | 把 `readTurnBlocks` 接进判定链（信封优先 / 标记回落）+ `ai-headless` 回调扩为数组 |
+| P2-b | 完成（2026-10-19） | 2026-10-19 | 信封优先分支接进 `detectReplyInPage`（早于 marks/script/done/plain）+ `turnAwaiting` / `turnRotate` 派生 + `seenTurnIds` 去重账本；8 条守卫 |
 | P4-a | 完成（2026-10-19） | 2026-10-19 | `AiBlockDto`/`AiTurnEndDto`/`ai:block`/`ai:turn-end` + 纯映射 `blocksToFrames`（17 条），**未接线** |
 | P4-b | 完成（2026-10-19） | 2026-10-19 | `attach-ws` 发块帧（`desc`/`why` 取真值）+ `turns.jsonl` transition + 重放清单；`turnToFrames` 4 条 / `replay-buffer` 7 条 |
 | P4-c | 待做 | — | `hello.caps` 与客户端的握手判定（与 P6 一起做才有意义） |

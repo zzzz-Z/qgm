@@ -721,7 +721,8 @@ export function detectReplyInPage(siteCfg = {}) {
   //   锁死：「嵌入哈希 == 重算源哈希」且「代码体逐字相同」，改源不重建即红。
   // [CONSTRAINT] 生成源是 packages/core/src/reply/turn-schema.ts；重建命令 pnpm turn-schema:sync。
   // [CHANGE-IMPACT] 接线在 P2：扫**全部** pre > code、信封优先、标记回落、且不得继承 stoppedThisRound 抑制。
-  /* eslint-disable unused-imports/no-unused-vars, ts/no-unused-vars -- 生成段，P2 接线后才被调用 */
+  /* @turn-schema:cb5aa89887c5dc9b */
+  /* eslint-disable unused-imports/no-unused-vars, ts/no-unused-vars -- 生成段：符号是否被调用取决于接线进度 */
   /* @turn-schema:cb5aa89887c5dc9b */
   // >>> BEGIN turn-schema
   // [turn-schema-v1] turn 信封契约的**唯一源**。
@@ -1001,6 +1002,34 @@ export function detectReplyInPage(siteCfg = {}) {
     return out
   }
   // <<< END turn-schema
+  /* eslint-enable unused-imports/no-unused-vars, ts/no-unused-vars */
+
+  /**
+   * [turn-envelope-v1] 本轮结束后循环等什么。优先级 **script > ask > none**。
+   * [WHY 不让前端各自推导] 三处推导必然在「既有 script 又有 ask」上分叉，
+   *   而分叉的后果是循环要么空转要么提前结束，没有任何一处会报错。
+   * [parity] 与 core/reply/turn-frames.ts 的 deriveAwaiting、油猴 turn-emit.ts 的 turnAwaiting 同构。
+   */
+  function turnAwaiting(blocks) {
+    let hasScript = false
+    let hasAsk = false
+    for (let i = 0; i < blocks.length; i++) {
+      const t = blocks[i] && blocks[i].type
+      if (t === 'script') hasScript = true
+      else if (t === 'ask') hasAsk = true
+    }
+    if (hasScript) return 'results'
+    if (hasAsk) return 'user'
+    return 'none'
+  }
+
+  /** [turn-envelope-v1] 是否含 handoff 块（轮转会话）。与 awaiting 正交 */
+  function turnRotate(blocks) {
+    for (let i = 0; i < blocks.length; i++) {
+      if (blocks[i] && blocks[i].type === 'handoff') return true
+    }
+    return false
+  }
 
   // [turn-envelope-v1] 从页面读信封：扫**全部** `pre > code` 的 textContent，逐个试 parseTurn。
   //
@@ -1013,7 +1042,7 @@ export function detectReplyInPage(siteCfg = {}) {
   //   流式增量由 parseTurnPartial 承担（P2-b 用 `pendingBlocks` 静默窗接入），此处不做半截交付。
   // [CONSTRAINT] 函数体内不得写 TS 注解（守卫用 vm 抠函数体真跑，注解会编译失败）；
   //   签名同理 —— 参数不加类型，靠文件级 @ts-nocheck。
-  // [CHANGE-IMPACT] P2-b 才会调用它（信封优先 / 标记回落）；此刻挂由 eslint-disable 包住的未引用声明。
+  // [CHANGE-IMPACT] P2-b 起由下方「信封优先」分支调用；信封缺失时返回 null ⇒ 旧标记链路原样接管。
   function readTurnBlocks(root) {
     if (!root || typeof root.querySelectorAll !== 'function') return null
     const pres = root.querySelectorAll('pre')
@@ -1035,19 +1064,17 @@ export function detectReplyInPage(siteCfg = {}) {
     }
     return null
   }
-  /* eslint-enable unused-imports/no-unused-vars, ts/no-unused-vars */
 
   // [reply-mark-v1] 标记行优先：先算首行标记，再决定是否走 DOM 结构判定。
   // [WHY] 带 ASK / DONE / HANDOFF 标记的回复若含代码块，旧逻辑会被 script 分支抢走（script 判定排在 done/plain 之前）
   //   → DONE 总结里的示例代码块会被当脚本重新执行。[CONSTRAINT] extractReplyMd 是 DOM→Markdown 反推（保留换行），
   //   getMainText 的 textContent 无换行、无法用于「首行」判定，故标记扫描一律基于前者。
+  // [turn-envelope-v1] 但**信封比标记更优先**：见下方信封分支。
   const replyBlocks = document.querySelectorAll('.ds-assistant-message-main-content')
   // [no-root-no-reply-v1] 容器不存在（新会话首轮「已思考/搜索」期）⇒ replyRoot 置 null：extractReplyMd(null) 返回空串、
   //   marks 全 -1、getMainText() 返回空。原「兜底成 document」会把侧栏历史会话标题（未知标签递归 inner() 拼成连体乱文）
   //   + 用户首条消息卡反推成「回复」推给前端（2026-10-08 18:53 两张噪音卡根因，油猴通道同日同修）。
   const replyRoot: Element | null = replyBlocks.length > 0 ? replyBlocks[replyBlocks.length - 1] : null
-  const marks = scanReplyMarks(extractReplyMd(replyRoot))
-  const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0
 
   // [stopped-no-autorun-v1] 本轮已推过 stopped ⇒ 不再推送残余脚本块（与 plain 抑制同一生命周期）。
   // [WHY] 前端收 stopped 会 finish 整个循环；此后该回复里的闭合代码块若仍被推出，循环已非活动 ⇒
@@ -1055,6 +1082,41 @@ export function detectReplyInPage(siteCfg = {}) {
   //   「循环外自动执行」旁路（WO-20261005 段三判定为缺陷）。_stoppedReported 随 fill 轮次重置，新一轮脚本不受影响。
   // [parity] scripts/tampermonkey-session-id.user.js classifyAndPost 有同构守卫（stopPosted 标志）
   const stoppedThisRound = Boolean(dedup._stoppedReported)
+
+  // [turn-envelope-v1] 信封优先（契约 §2.1）：命中即整轮按块交付，**不再**走 marks / script / plain。
+  // [WHY 必须最先] 信封正文是 JSON，旧标记扫描对它的判定无意义；且 script 分支排在 done/plain 之前，
+  //   一旦被它抢走，信封里的多个块只剩最后一个会被推出（旧实现的历史缺陷源）。
+  // [WHY 要带 kind:'turn'] `ai-headless` 的转发门是 `reply.kind` 真值判定；不带 kind 会被当成
+  //   「poll 未命中」并记一条 poll-miss 诊断，前端则一条回复都收不到 —— 比不发更糟。
+  // [CONSTRAINT] stopped 之后不读信封：与油猴 stopPosted 同构，避免「循环外自动执行」旁路。
+  // [CONSTRAINT] 半截信封（truncated）由 readTurnBlocks 返回 null ⇒ 落到旧路径，等下一拍。
+  // [turn-envelope-v1] 信封路径的去重账本（旧路径继续用 seenHashes，两者并存互不干扰）。
+  // [WHY 必须去重] poll 每 800ms 重扫同一份 DOM，信封一旦闭合就会**每拍都命中**；
+  //   不去重 ⇒ 前端每 800ms 收到一组同样的块帧 ⇒ 时间线持续多出重复卡片。
+  // [WHY 防御式初始化] HMR / 旧页面 bundle 可能留下没有本字段的 dedup 对象，
+  //   直接 `.push` 会 TypeError ⇒ 整条采集链路静默失效。
+  if (!Array.isArray(dedup.seenTurnIds)) dedup.seenTurnIds = []
+  if (!stoppedThisRound && replyRoot) {
+    const turn = readTurnBlocks(replyRoot)
+    if (turn) {
+      // 同一 turn 只交付一次，且**必须 return null 而不是往下回落到旧路径**：
+      //   回落会让旧标记链路把信封 JSON 的正文再推一遍（plain 卡），比不发更糟。
+      if (dedup.seenTurnIds.includes(turn.turnId)) return null
+      dedup.seenTurnIds.push(turn.turnId)
+      return {
+        kind: 'turn',
+        turnId: turn.turnId,
+        blocks: turn.blocks,
+        turnDone: true,
+        awaiting: turnAwaiting(turn.blocks),
+        rotate: turnRotate(turn.blocks),
+        errors: turn.errors || [],
+      }
+    }
+  }
+
+  const marks = scanReplyMarks(extractReplyMd(replyRoot))
+  const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0
 
   // script 需连续 2 次相同 hash 才推，避开流式中途残缺
   // [script-lang-whitelist-v2] 不再传 declared：语言白名单恒为 js/bash（见 extractLatestScript）
