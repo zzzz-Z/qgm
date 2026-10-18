@@ -18,42 +18,11 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
+import { BEGIN, canonicalBody, extractBody, fingerprint, readFingerprint, sharedBody, SOURCE_REL, TARGETS } from '../../../scripts/lib/turn-schema-io.mjs'
 
 const ROOT = process.cwd()
 const SYNC = 'scripts/sync-turn-schema.mjs'
-
-interface Target {
-  rel: string
-  kind: string
-  mode: string
-  header: string[]
-}
-
-// [CONSTRAINT] 路径相对 tests/ 上溯三层到仓库根；.mjs 无类型声明只能动态解析
-// （与 tampermonkey-split.node-test.ts 同款）。
-// top-level await 违反 antfu/no-top-level-await（仓库统一禁用）⇒ 放 beforeAll。
-let TARGETS: Target[]
-let SOURCE_REL: string
-let BEGIN: string
-let canonicalBody: (src: string) => string
-let sharedBody: (src: string, mode: string) => string
-let fingerprint: (body: string) => string
-let extractBody: (text: string) => null | string
-let readFingerprint: (text: string) => string
-
-beforeAll(async () => {
-  // @ts-expect-error .mjs 无类型声明，且 scripts/ 不在 tsconfig.test.json 的 include 内
-  const mod = await import('../../../scripts/lib/turn-schema-io.mjs')
-  TARGETS = mod.TARGETS
-  SOURCE_REL = mod.SOURCE_REL
-  BEGIN = mod.BEGIN
-  canonicalBody = mod.canonicalBody
-  sharedBody = mod.sharedBody
-  fingerprint = mod.fingerprint
-  extractBody = mod.extractBody
-  readFingerprint = mod.readFingerprint
-})
 
 function read(rel: string): string {
   return readFileSync(join(ROOT, rel), 'utf8')

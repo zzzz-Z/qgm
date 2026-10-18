@@ -368,6 +368,7 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | R4 | 提示词预算越线 | `§1` 改写后变长 | 硬判据 ≤ 8834 B；超了必须压缩后再提交 |
 | R5 | 油猴旧副本长期存在 | 用户不重装 | D10 双读永久保留 |
 | R6 | 单 turn 语法错导致整轮归零 | 大脚本转义出错 | 错误码精确回指 + 静默窗；接受该代价（已在决策基线记录） |
+| R7 | `say` 的自动 id 随数组下标漂移 | 流式过程中信封在前部插入块 ⇒ `say_1` 变 `say_2` | 按 `turn\|id` 去重会把同一条 say 当新块再推一次。缓解：P7 契约要求模型给**显式 id**（`say` 也写），自动 id 只在「整条信封一次到达」时可信；P5 执行账本只认 script/ask 的显式 id，不受影响 |
 
 ---
 
@@ -389,13 +390,45 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | P1-a | 完成（2026-10-19） | 2026-10-19 | 唯一源 `turn-schema.ts` 278 行 + 语义守卫 19 条 |
 | P1-b | 完成（2026-10-19） | 2026-10-19 | 生成器 + 指纹守卫 13 条；三处产物同源（`cb5aa89887c5dc9b`） |
 | P1-c | 完成（2026-10-19） | 2026-10-19 | 无头内联段（region 替换）+ 三端行为对拍 6 条；P1 三个守卫全绿 52/52 |
-| P2 | — | — | |
+| P2-a | 完成（2026-10-19） | 2026-10-19 | 页面侧 `readTurnBlocks()` + 假 DOM 守卫 11 条；**未改任何返回路径**（零行为变化） |
+| P2-b | 待做 | — | 把 `readTurnBlocks` 接进判定链（信封优先 / 标记回落）+ `ai-headless` 回调扩为数组 |
 | P3 | — | — | |
 | P4 | — | — | |
 | P5 | — | — | |
 | P6 | — | — | |
 | P7 | — | — | |
 | P8 | — | — | 观察期后 |
+
+### P2-a 实测记录（2026-10-19）
+
+**做法**：在 `detectReplyInPage` 内、内联段之后加 `readTurnBlocks(root)`：从后往前扫**全部** `pre > code`
+的 `textContent`，逐个 `parseTurn`，命中即返回 `{turnId, blocks, errors}`；`blocks` 为空 / 信封未闭合 ⇒ `null`。
+**刻意不改任何返回路径** —— 信封路径的接线留给 P2-b，本片可证零行为变化。
+
+**为什么不复用语言闸门**：P0 已实测该渲染器把语言标签渲染成 `<pre>` 内的文本节点，
+`guessLangFromClass` / `guessLangFromDom` 都取不到 ⇒ 按语言筛会把信封整个漏掉。
+唯一可靠判据是「这段文本能否被 parseTurn 解析成信封」。
+
+**两次判据不承重，都是变异验证逼出来的**：
+
+1. 删掉 `if (r.truncated) return null` ⇒ **11 条测试全绿**（变异存活）。
+   根因：信封未闭合时 `parseTurn` 返回 `blocks: []`，已被上一条 `blocks.length === 0` 兜住。
+   该闸门真正承重的场景是「同一段文本里**既有闭合信封、又有未闭合信封**」——
+   此时 `parseTurn` 取到闭合那个的 blocks 且 `truncated = true`，没有闸门就会把上一版交付出去。
+   补该用例后重跑变异 ⇒ 恰好 1 条红。
+2. 同理，写守卫时必须自问「这条断言有没有被前置逻辑绕过」。
+
+**新增风险 R7**（`say` 自动 id 随数组下标漂移）：`say` 未写 id 时补 `say_{index+1}`，
+流式过程中前部插入块会让同一条 say 从 `say_1` 变 `say_2` ⇒ 按 `turn|id` 去重会重复推。
+缓解：P7 契约要求 `say` 也写显式 id；P5 执行账本只认 script/ask 的显式 id。
+
+**又抓到一次 `test:tsc` 漏跑**（同 P1-c 的教训复现）：静态 `import ... from '...mjs'` 报 TS7016。
+处方不是逐处 `@ts-expect-error`（那会连「导出名拼错」一起盖掉），而是补
+`scripts/lib/turn-schema-io.d.mts` 声明 —— 顺带让指纹守卫的 14 行 `beforeAll` 动态 import 退化成一行静态 import。
+⇒ **凡新增测试文件，收尾必跑 `test:tsc`。**
+
+闸门：79/79（turn-schema 19 + fingerprint 13 + parity 6 + headless-turn-blocks 11 + mark-parity 10
++ multi-script-blocks 16 + tampermonkey-split 4）；eslint 干净；`tsc` / `test:tsc` 全绿。
 
 ### P1-b 实测记录（2026-10-19）
 

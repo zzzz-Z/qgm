@@ -1001,6 +1001,40 @@ export function detectReplyInPage(siteCfg = {}) {
     return out
   }
   // <<< END turn-schema
+
+  // [turn-envelope-v1] 从页面读信封：扫**全部** `pre > code` 的 textContent，逐个试 parseTurn。
+  //
+  // [WHY] 不复用语言闸门：P0 实测（2026-10-19）该渲染器把语言标签渲染成 `<pre>` 内的**文本节点**
+  //   （`js` / `复制` / `下载`），`guessLangFromClass` 与 `guessLangFromDom` 都取不到 ⇒
+  //   按语言筛会把信封整个漏掉。唯一可靠的判据是「这段文本能否被 parseTurn 解析成信封」。
+  // [WHY] 取 `textContent` 而非 `elToMd` 反推：P0 两档载荷（5264 B / 11214 B）逐字节相等，
+  //   0 个不可见字符；反推路径会引入换行/转义改写，正是本方案要消灭的失真源。
+  // [CONSTRAINT] 只在信封**闭合**时返回；`truncated` ⇒ 返回 null 等下一拍。
+  //   流式增量由 parseTurnPartial 承担（P2-b 用 `pendingBlocks` 静默窗接入），此处不做半截交付。
+  // [CONSTRAINT] 函数体内不得写 TS 注解（守卫用 vm 抠函数体真跑，注解会编译失败）；
+  //   签名同理 —— 参数不加类型，靠文件级 @ts-nocheck。
+  // [CHANGE-IMPACT] P2-b 才会调用它（信封优先 / 标记回落）；此刻挂由 eslint-disable 包住的未引用声明。
+  function readTurnBlocks(root) {
+    if (!root || typeof root.querySelectorAll !== 'function') return null
+    const pres = root.querySelectorAll('pre')
+    if (!pres || !pres.length) return null
+    // 从后往前：信封通常是本回复最后一个代码块；命中即返回，不必扫完
+    for (let i = pres.length - 1; i >= 0; i--) {
+      const pre = pres[i]
+      const codeEl = pre && typeof pre.querySelector === 'function' ? pre.querySelector('code') : null
+      const codeText = codeEl && typeof codeEl.textContent === 'string' ? codeEl.textContent : ''
+      const preText = pre && typeof pre.textContent === 'string' ? pre.textContent : ''
+      const raw = codeText || preText
+      if (!raw) continue
+      let r = null
+      try { r = parseTurn(raw) }
+      catch { continue }
+      if (!r || !r.blocks || r.blocks.length === 0) continue
+      if (r.truncated) return null
+      return { turnId: typeof r.turn === 'number' ? r.turn : 0, blocks: r.blocks, errors: r.errors || [] }
+    }
+    return null
+  }
   /* eslint-enable unused-imports/no-unused-vars, ts/no-unused-vars */
 
   // [reply-mark-v1] 标记行优先：先算首行标记，再决定是否走 DOM 结构判定。
