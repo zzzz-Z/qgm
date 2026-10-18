@@ -49,6 +49,15 @@ test('collector: 油猴副本注释已同步契约说明', () => {
   assert.ok(/静默窗特意设为 400ms/.test(s), '必须写明 400ms >= 350ms 的理由')
 })
 
+test('collector: 短回复闸门已退役 _stableCount<6，只保留 isGeneratingInPage', () => {
+  const s = fs.readFileSync(INJECT, 'utf8')
+  // [headless-collector-v1] 新模型由 waitForSignal 静默窗保证稳定，轮询时代的「连续 6 拍」补偿已无意义。
+  // 承重：把 `_stableCount < 6` 加回去即变红。
+  assert.ok(!/\(dedup\._stableCount \|\| 0\) < 6/.test(s), '_stableCount < 6 应已退役（静默窗已隐含稳定）')
+  assert.ok(/if \(_h && isGeneratingInPage\(\)\)/.test(s), 'isGeneratingInPage 那一半必须保留（防生成中推半截）')
+  assert.ok(/_shortSentHash/.test(s), '短回复去重必须仍由 _shortSentHash 承担')
+})
+
 test('collector: waitForSignal 必须是模块级函数而非 pool 方法', () => {
   const s = fs.readFileSync(HEADLESS, 'utf8')
   assert.ok(/async function waitForSignal\(sid: string\)/.test(s), 'waitForSignal 必须是模块级函数')

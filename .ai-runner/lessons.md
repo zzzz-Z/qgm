@@ -3750,3 +3750,11 @@ DeepSeek 在上下文触顶时渲染的文案匹配了 busy 正则，于是被�
 ## `page.evaluate` 回调体内不能用 `window`（Node 侧 tsconfig 无 DOM lib）
 
 `window` 在 `page.evaluate(() => ...)` 的闭包里是浏览器全局，但 TypeScript 按 Node 环境检查该闭包，报 `TS2304: Cannot find name 'window'`。改用 `globalThis` + 显式窄类型断言：`(globalThis as unknown as { __aiRunnerDedup?: {...} }).__aiRunnerDedup`。这与 `headless-inject.ts` 整文件 `@ts-nocheck` 的处理不同——那个文件靠 `@ts-nocheck` 豁免，`ai-headless.ts` 是正常检查的。
+
+## 退役轮询时代的「拍数补偿」必须连同它的守卫阈值一起改
+
+`short-reply-gate` 的「不抢跑」用例原本断言 `firstHitAt >= 7`，这是 `_stableCount < 6` 的直接映射（6 拍 + 1）。退役 `<6` 后代码行为是第 3 拍交付，守卫立即变红——这不是回归，是守卫在忠实报告行为变更。处理方式不是放宽守卫到「随便几拍都行」，而是同步把阈值改成新模型的实际语义（`≥3`，对应主稳定门 `_stableCount >= 3`），并在注释里写明退役依据。否则下次有人看到红会以为是自己改坏了。
+
+## 「先睡再探」比「密集轮询」省一个数量级
+
+初版 `waitForSignal` 是 50ms 粒度循环探测，最坏 16 次 `page.evaluate` / 800ms。改为「先睡满静默窗 400ms，醒了再探一次」后，页面静止（绝大多数轮间）只需 1 次 evaluate 即返回——因为静默窗本身就是「没变化」的证明。只有当页面确实在变化时才进入加密探测。这个模式适用于任何「等待某个条件稳定」的轮询：先用时间换确定性，再用探测换响应性。

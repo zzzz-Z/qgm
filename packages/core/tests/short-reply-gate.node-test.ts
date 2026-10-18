@@ -99,14 +99,17 @@ describe('detectReplyInPage：极短回复（<6 字）', () => {
     expect(env.dedup()._hitShortDup).toBeGreaterThan(0)
   })
 
-  it('交付发生在静止窗满之后（≥7 tick），不在第 1 个稳定 tick 抢跑', () => {
+  it('交付发生在主稳定门之后（≥3 tick），不在第 1 个稳定 tick 抢跑', () => {
+    // [headless-collector-v1] _stableCount < 6 已退役（新模型由 waitForSignal 静默窗保证稳定），
+    //   短回复现在只受主稳定门 _stableCount >= 3 约束，不再额外等 6 拍。
+    //   本用例仍守住「不抢跑」：第 1 个稳定 tick 不得交付。
     const env = stubEnv({ reply: '收到' })
     let firstHitAt = -1
     for (let i = 1; i <= 12 && firstHitAt < 0; i++) {
       if (detectReplyInPage()) firstHitAt = i
     }
-    expect(firstHitAt).toBeGreaterThanOrEqual(7)
-    expect(firstHitAt).toBeLessThanOrEqual(9)
+    expect(firstHitAt).toBeGreaterThanOrEqual(3)
+    expect(firstHitAt).toBeLessThanOrEqual(5)
   })
 
   it('生成中（停止按钮可见）不得交付「收到」——它可能只是长回复的首帧', () => {

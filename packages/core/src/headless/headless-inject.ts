@@ -806,7 +806,10 @@ export function detectReplyInPage(siteCfg = {}) {
   if (marks.ask < 0 && marks.handoff < 0 && marks.text < 0 && !dedup._stoppedReported && !hasJsFence(plainText)) {
     const _bare = plainText.replace(/\s+/g, '').length
     const _h = _bare > 0 && _bare < 6 ? hash32(`short|${plainText}`) : ''
-    if (_h && (isGeneratingInPage() || (dedup._stableCount || 0) < 6)) { dedup._hitShortGate = (dedup._hitShortGate || 0) + 1; return null }
+    // [headless-collector-v1] _stableCount < 6 已退役：新模型由 waitForSignal 的静默窗（≥400ms）保证稳定，
+    //   轮询时代的「连续拍数」补偿意义消失。保留 isGeneratingInPage() 那一半——它防的是
+    //   「生成中推半截」，与唤醒机制无关；短回复去重仍由 _shortSentHash 承担。
+    if (_h && isGeneratingInPage()) { dedup._hitShortGate = (dedup._hitShortGate || 0) + 1; return null }
     if (_h && dedup._shortSentHash !== _h) {
       dedup._shortSentHash = _h; dedup._hitShortPass = (dedup._hitShortPass || 0) + 1
       return { kind: 'plain', text: plainText }

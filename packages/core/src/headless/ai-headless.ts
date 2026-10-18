@@ -88,7 +88,13 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     if (!page) { await new Promise<void>(r => setTimeout(r, 800)); return }
     const SILENCE_MS = 400
     const MAX_WAIT_MS = 800
-    const deadline = Date.now() + MAX_WAIT_MS
+    const PROBE_STEP_MS = 100
+    // [headless-collector-v1-cpu] 先睡一个静默窗再开始探测。
+    // [WHY] 页面静止时（绝大多数轮间）直接睡 400ms 后第一次探测就能返回，
+    //   总 evaluate 次数从 8 降到 2；页面在变化时才开始加密探测。
+    //   CPU 代价：静止轮 2 次轻读（只读一个整数）vs 旧方案 1 次全页扫描，量级相当。
+    await new Promise<void>(r => setTimeout(r, SILENCE_MS))
+    const deadline = Date.now() + (MAX_WAIT_MS - SILENCE_MS)
     let lastVer = -1
     let silentSince = Date.now()
     while (Date.now() < deadline) {
@@ -102,7 +108,7 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       } catch { break }
       if (ver !== lastVer) { lastVer = ver; silentSince = Date.now() }
       else if (Date.now() - silentSince >= SILENCE_MS) { return }
-      await new Promise<void>(r => setTimeout(r, 50))
+      await new Promise<void>(r => setTimeout(r, PROBE_STEP_MS))
     }
   }
   // 全局串行锁
