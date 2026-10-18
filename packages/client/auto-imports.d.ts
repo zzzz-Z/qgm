@@ -664,7 +664,7 @@ declare global {
   export type { ScriptMeta } from './utils/scriptMeta'
   import('./utils/scriptMeta')
   // @ts-ignore
-  export type { PreviewFields, ScriptItem, TextItem, DoneItem, AskItem, QuestionItem, DividerItem, CardItem } from './utils/timeline-build'
+  export type { PreviewFields, ScriptItem, TextItem, DoneItem, AskItem, QuestionItem, CardItem } from './utils/timeline-build'
   import('./utils/timeline-build')
   // @ts-ignore
   export type { TextPreview, TailPreview } from './utils/timeline-preview'
