@@ -6,7 +6,7 @@ import { useToast } from '../../composables/ui/useToast'
 import { useWorkspaces } from '../../composables/data/useWorkspaces'
 // [multi-site-matrix-v1] 矩阵视图数据面经中间层收敛：面板不直接耦合站点窗口表
 //   （架构守卫 ai-window-sid-wiring 禁止面板直接耦合站点窗口表）
-import { MODELS } from '../../composables/ai/useAiSite'
+// [site-select-row-removed-v1] 行内站点下拉已移除（2026-10-18 用户要求），MODELS 不再在此组件消费
 import { useSiteMatrix } from '../../composables/ai/useSiteMatrix'
 
 const adding = ref(false)
@@ -18,7 +18,8 @@ const busy = ref(false)
 const pickingRepo = ref(false)
 
 const { toast } = useToast()
-const { workspaces, activeId, loading, load, activate, register, remove, pickPath, setSession } = useWorkspaces()
+const { workspaces, activeId, loading, load, activate, register, remove, pickPath } = useWorkspaces()
+// [site-select-row-removed-v1] setSession 原本只服务行内站点下拉（onSiteChange），下拉移除后改为不取用
 // [multi-site-matrix-v1] 站点矩阵数据面（窗口状态 + 站点映射经中间层，解耦窗口表）
 const matrix = useSiteMatrix()
 
@@ -29,7 +30,6 @@ const items = computed(() => workspaces.value.map((w) => {
     label: w.label,
     root: w.root,
     active: w.id === activeId.value,
-    siteIdRaw: m.siteId,
     siteLabel: m.siteLabel,
     winOpen: m.winOpen,
   }
@@ -95,22 +95,6 @@ async function onPickTarget(): Promise<void> {
     return
   }
   pathInput.value = r.path || ''
-}
-/**
- * [multi-site-matrix-v1] 为指定工作区显式绑定站点：写 url 到 workspace session。
- * [WHY] 矩阵视图此前只「显示」站点（由首次使用隐式形成）；用户需能主动改。
- * [CONSTRAINT] 只写绑定，不导航当前窗口——下次切到该工作区时才会导航到该站点。
- */
-async function onSiteChange(wsId: string, ev: Event): Promise<void> {
-  const target = ev.target as HTMLSelectElement
-  const modelId = target.value
-  const m = MODELS.find(x => x.id === modelId)
-  if (!m) return
-  // [workspace-schema-v2] 换绑站点 = 旧会话失效：显式 kind:'site' 写 homeUrl 并清 sessionUrl/sessionId
-  const r = await setSession(wsId, { kind: 'site', homeUrl: m.url })
-  if (!r) { toast('绑定站点失败', 'error', TOAST_MEDIUM); return }
-  await matrix.loadAllSessions()
-  toast(`已为工作区绑定 ${m.label}`, 'info', TOAST_SHORT_MEDIUM)
 }
 async function onRemove(item: { id: string, label: string }): Promise<void> {
   if (busy.value) return
@@ -242,16 +226,8 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
         <div class="awl-meta">
           <span class="awl-label">{{ w.label }}</span>
           <span class="awl-sub">
-            <select
-              class="awl-site-select"
-              :value="w.siteIdRaw"
-              :title="`为「${w.label}」选择站点`"
-              @click.stop
-              @change="onSiteChange(w.id, $event)"
-            >
-              <option value="" disabled>选择站点</option>
-              <option v-for="m in MODELS" :key="m.id" :value="m.id">{{ m.label }}</option>
-            </select>
+            <!-- [site-select-row-removed-v1] 行内站点下拉已移除：站点绑定只能由「首次使用该工作区」隐式形成，
+                 需要换站点时用顶部站点切换 / 重新打开该工作区。保留窗口状态指示。 -->
             <span v-if="w.siteLabel" class="awl-win" :class="{ open: w.winOpen }">{{ w.winOpen ? '● 已开窗' : '○ 未开窗' }}</span>
           </span>
         </div>
@@ -622,22 +598,8 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
   color: var(--danger, #f85149);
 }
 
-/* [multi-site-matrix-v1] 工作区行内的站点选择 + 窗口状态（矩阵视图） */
-.awl-sub .awl-site-select {
-  max-width: 90px;
-  padding: 1px 2px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--primary, #58a6ff);
-  font-size: var(--font-11);
-  font-weight: 500;
-  cursor: pointer;
-}
-.awl-sub .awl-site-select:hover {
-  border-color: var(--border);
-  background: var(--surface-2, rgb(127 127 127 / 10%));
-}
+/* [multi-site-matrix-v1] 工作区行内的窗口状态（矩阵视图）
+   [site-select-row-removed-v1] 行内站点下拉已按用户要求移除（2026-10-18），.awl-site-select 样式一并删除 */
 .awl-sub .awl-win {
   margin-left: 6px;
   color: var(--text-3);

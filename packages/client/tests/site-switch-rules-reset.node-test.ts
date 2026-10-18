@@ -28,6 +28,25 @@ test('[site-switch-ui-removed-v1] 顶部站点下拉已移除：App.vue 不得�
   assert.ok(!/\bMODELS\b/.test(src), 'App.vue 残留 MODELS 死引用')
 })
 
+// [site-select-row-removed-v1] 左侧面板工作区行内的站点下拉也已移除（2026-10-18 用户要求）。
+// [WHY] 与顶部下拉同族：行内 select 既是重复入口，又让「矩阵视图」在窄宽度下挤成一列。
+//   移除后站点绑定只能由「首次使用该工作区」隐式形成；换站点走顶部切换 / 重开该工作区。
+// [承重] 把 <select class="awl-site-select"> 或 onSiteChange 任一加回去，本条必红；
+//   同时禁止留下 MODELS / setSession 死引用（Vue <script setup> 里未被模板消费即死代码）。
+test('[site-select-row-removed-v1] 工作区行内站点下拉已移除：AiWindowList.vue 不得再有 awl-site-select / onSiteChange', () => {
+  // [CONSTRAINT] 必须先剥注释：本组件刻意在注释里复述被删的标识符（记录 WHY），
+  //   不剥则断言自绊（AGENTS.md「收尾 residual 断言必须排除注释行」）。
+  const src = readSrc('packages/client/components/panels/AiWindowList.vue')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '')
+  assert.ok(!/awl-site-select/.test(src), 'AiWindowList.vue 仍渲染行内站点下拉（含样式残留）')
+  assert.ok(!/function onSiteChange\s*\(/.test(src), 'AiWindowList.vue 仍有 onSiteChange handler（已随下拉移除）')
+  assert.ok(!/选择站点/.test(src), 'AiWindowList.vue 仍残留「选择站点」占位文案')
+  assert.ok(!/\bMODELS\b/.test(src), 'AiWindowList.vue 残留 MODELS 死引用（<script setup> 未消费即死代码）')
+  assert.ok(!/\bsetSession\b/.test(src), 'AiWindowList.vue 残留 setSession 死引用')
+})
+
 // [key-composite-v1] useAiWindow 4 处 firstPromptSent 调用点必须带站点参数（复合键）。
 // [site-from-sid-v1] 站点 id 从 activeWinSid / useSid / winSid 反推（modelIdFromSid），不取全局 modelId，
 //   否则切工作区换槽位后写的是旧站点的键。
