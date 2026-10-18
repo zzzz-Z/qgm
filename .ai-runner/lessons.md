@@ -3650,3 +3650,11 @@ Chromium 的内存页面在 launch 那一刻就定住了，profile 目录后来�
 ## `ps` 查进程比翻日志更快定位这类问题
 
 `--user-data-dir` + `--headless` 两个参数一出来，就能确认「有一个僵尸 session 占着 profile」。
+
+## Playwright 的 `Page` 对象生命周期与 Chromium 进程解耦
+
+进程死了，`page` 对象仍存在且不抛错于属性访问，只在真正操作 DOM 时才失败。任何依赖 `page` 非空来判断「会话可用」的代码都是错的，必须做一次真实探活（`evaluate`）。
+
+## `SingletonLock` 残留不会阻塞启动
+
+它是符号链接指向 PID，Chromium 启动时校验 PID 存活，死锁自动接管。不要为此写清理逻辑。

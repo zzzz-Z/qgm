@@ -428,6 +428,21 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       if (!page) {
         return false
       }
+      // [zombie-session-guard-v1] 会话健康检查：Chromium 进程可能已死（崩溃 / 被外部 kill /
+      //   重启后残留），而 Playwright 的 Page 对象仍挂在内存里。此时所有 DOM 操作都会抛错，
+      //   被 withBackoff / catch 吞掉后可能表现为假成功，用户侧看到「fill ok 但永远没回复」。
+      //   每次 fill 前做一次轻量探活：失败即判定会话已死，关掉并重建。
+      try {
+        const alive = await Promise.race([
+          page.evaluate(() => 1),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('probe-timeout')), 3000)),
+        ])
+        if (alive !== 1) throw new Error('probe-bad')
+      } catch {
+        lastFillError.set(sid, 'session-dead: 无头浏览器进程已失效，已重建会话，请重试')
+        await this.close(sid).catch(() => {})
+        return false
+      }
       completionErrors.delete(sid)
       // [login-page-recover-v1] 长生命周期会话可能停在 /sign_in（登录态更新前就已存在），
       //   此时代码会一路走到「找不到输入框」。先检查一次路径，若在登录页且磁盘已有登录态，
