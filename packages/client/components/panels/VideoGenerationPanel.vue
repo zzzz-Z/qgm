@@ -333,7 +333,7 @@ async function manualRefresh() {
 .vp-assets {
   margin: 4px 0;
   font-size: 12px;
-  color: var(--fg-dim, #888);
+  color: var(--text-3, #888);
 }
 .vp-cfg {
   margin-bottom: 10px;
@@ -344,7 +344,7 @@ async function manualRefresh() {
 .vp-cfg-sum {
   cursor: pointer;
   font-size: 12px;
-  color: var(--fg-dim, #888);
+  color: var(--text-3, #888);
 }
 .vp-cfg-body {
   padding-top: 6px;
@@ -369,10 +369,10 @@ async function manualRefresh() {
   gap: 10px;
   margin: 6px 0 10px;
   font-size: 12px;
-  color: var(--fg-dim, #888);
+  color: var(--text-3, #888);
 }
 .vp-st-active {
-  color: var(--accent, #4a8);
+  color: var(--primary, #4a8);
 }
 .vp-st-done {
   color: #4c8;
@@ -387,7 +387,7 @@ async function manualRefresh() {
   color: #e55;
 }
 .vp-status.st-processing {
-  color: var(--accent, #4a8);
+  color: var(--primary, #4a8);
 }
 .vp-title {
   margin: 0 0 8px;
@@ -396,12 +396,12 @@ async function manualRefresh() {
 .vp-sub {
   margin: 16px 0 6px;
   font-size: 13px;
-  color: var(--fg-dim, #888);
+  color: var(--text-3, #888);
 }
 .vp-label {
   display: block;
   margin: 6px 0 4px;
-  color: var(--fg-dim, #888);
+  color: var(--text-3, #888);
 }
 .vp-input,
 .vp-select {
@@ -425,7 +425,7 @@ async function manualRefresh() {
 }
 .vp-msg {
   margin: 8px 0;
-  color: var(--fg-dim, #888);
+  color: var(--text-3, #888);
 }
 .vp-list {
   list-style: none;
@@ -451,12 +451,12 @@ async function manualRefresh() {
 }
 .vp-bar {
   height: 100%;
-  background: var(--accent, #4a8);
+  background: var(--primary, #4a8);
   transition: width 0.3s;
 }
 .vp-meta {
   font-size: 12px;
-  color: var(--fg-dim, #888);
+  color: var(--text-3, #888);
 }
 .vp-err {
   color: #e55;
@@ -467,7 +467,7 @@ async function manualRefresh() {
   margin-top: 4px;
 }
 .vp-empty {
-  color: var(--fg-dim, #888);
+  color: var(--text-3, #888);
   text-align: center;
 }
 </style>

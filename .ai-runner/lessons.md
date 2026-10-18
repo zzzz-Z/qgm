@@ -3490,3 +3490,25 @@ flex 子项的默认 `min-width` 是 `auto`（不小于内容宽度），此时�
 这一轮连续三次 DONE 都没修好，原因是每次只改一个可疑点（宽度 → overflow → flex），而三层问题是叠加的，修掉一层仍被下一层挡住。
 
 正确做法是一次性把所有可疑层写进同一个诊断脚本：祖先 overflow、元素自身 display/height、子项 flex 约束、z-index 层级——四条同时检查，一次性定位全部缺口。
+
+## shell 里 `grep "$v:"` 遇到 `--` 开头的变量名会被当命令选项
+
+统计「变量是否已定义」时写成：
+
+bash复制下载```
+for v in $(...); do grep -q "$v:" style.css || echo $v; done
+```
+
+`$v` 是 `--bg` 时展开成 `grep -q --bg: style.css`，`--bg:` 被 grep 当成未知选项，匹配必然失败 → 把已定义变量全报成未定义。
+
+修法：变量名含 `-` 前缀时不要交给 shell 拼命令，改用 Node 解析（`[...css.matchAll(/^\s*(--[\w-]+)\s*:/gm)]`）。
+
+## 批量映射必须校验「值类型」
+
+`--diff-header-pr: 40px` 是长度，`--surface-2: #fafafa` 是颜色。批量文本替换只认变量名、不认语义，把前者换成后者后，`padding: 8px var(--surface-2, 12px) 8px 12px` 里的颜色值会被 CSS 判为无效 → padding 静默失效。
+
+修法：映射表要带类型标注；批量替换后必须按属性类别扫描一遍（`padding/margin/width/...` 位置是否引用了颜色 token）。
+
+## 测试断言可以当「契约文档」用
+
+`preview-diff-render.node-test.ts` 的用例名直接写着「宿主注入的右侧内边距」——它明确告诉我这个变量是局部注入而非全局 token。如果改之前先读这条测试，就不会误映射。

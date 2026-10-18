@@ -209,14 +209,14 @@
   font-size: 12px;
   border-bottom: 1px solid var(--border);
   color: var(--text-2);
-  background: var(--surface-1);
+  background: var(--surface);
   flex-shrink: 0;
 }
 .status-bar.ok {
   color: var(--success);
 }
 .status-bar.err {
-  color: var(--danger, var(--error, #e53e3e));
+  color: var(--danger, var(--danger, #e53e3e));
 }
 .status-bar .status-elapsed {
   color: var(--text-3, var(--text-2));

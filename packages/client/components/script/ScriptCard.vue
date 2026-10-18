@@ -464,7 +464,7 @@ function toggle(): void { expanded.value = !expanded.value }
 }
 .script-card-tail .sc-cursor {
   display: inline-block;
-  color: var(--accent, #58a6ff);
+  color: var(--primary, #58a6ff);
   animation: sc-blink 1s step-end infinite;
 }
 @keyframes sc-blink {
@@ -478,7 +478,7 @@ function toggle(): void { expanded.value = !expanded.value }
   bottom: 42px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: var(--accent, #58a6ff);
+  background: var(--primary, #58a6ff);
   color: #fff;
   border: none;
   font-size: 11px;
@@ -496,7 +496,7 @@ function toggle(): void { expanded.value = !expanded.value }
   color: var(--text-3, #8b949e);
 }
 .script-card-tail .sc-out-bar .sc-running {
-  color: var(--accent, #58a6ff);
+  color: var(--primary, #58a6ff);
 }
 </style>
 

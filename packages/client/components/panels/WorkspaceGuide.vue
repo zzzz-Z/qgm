@@ -106,7 +106,7 @@ async function selectByPath() {
 
 .ws-desc {
   margin: 0;
-  color: var(--text-dim);
+  color: var(--text-3);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -133,7 +133,7 @@ async function selectByPath() {
 }
 
 .ws-divider {
-  color: var(--text-dim);
+  color: var(--text-3);
   font-size: 12px;
   text-align: center;
 }

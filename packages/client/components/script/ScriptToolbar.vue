@@ -136,11 +136,11 @@ const emit = defineEmits<{
 .tpl-bar button.ghost-btn {
   background: transparent;
   border: 1px solid var(--border, #2a2d36);
-  color: var(--fg-2, #b6b8bf);
+  color: var(--text-2, #b6b8bf);
 }
 .tpl-bar button.ghost-btn:hover:not(:disabled) {
-  background: var(--surface-hover, rgb(127 127 127 / 8%));
-  border-color: var(--border-hover, rgb(127 127 127 / 22%));
+  background: var(--surface-2, rgb(127 127 127 / 8%));
+  border-color: var(--border-strong, rgb(127 127 127 / 22%));
   color: var(--text);
 }
 .tpl-bar button.primary-btn.takeover {
@@ -197,7 +197,7 @@ const emit = defineEmits<{
   align-items: center;
   gap: 6px;
   padding: 6px 14px;
-  border: 1px solid var(--dsw-alias-border-l2, rgb(127 127 127 / 20%));
+  border: 1px solid var(--border, rgb(127 127 127 / 20%));
   border-radius: 10px;
   font-size: var(--font-12);
   font-weight: 500;
@@ -205,19 +205,19 @@ const emit = defineEmits<{
   transition:
     background 120ms ease,
     border-color 120ms ease;
-  color: var(--dsw-alias-label-primary, inherit);
-  background: var(--dsw-specific-input-major, var(--bg-2, rgb(127 127 127 / 5%)));
+  color: var(--text, inherit);
+  background: var(--surface, var(--surface, rgb(127 127 127 / 5%)));
 }
 .primary-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 .primary-btn:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover, rgb(127 127 127 / 8%));
+  background: var(--surface-2, rgb(127 127 127 / 8%));
 }
 .primary-btn.head-run,
 .primary-btn.run {
-  background: var(--dsw-alias-state-business-primary, #4176e6);
+  background: var(--primary, #4176e6);
   color: #fff;
   border-color: transparent;
 }
@@ -269,7 +269,7 @@ const emit = defineEmits<{
   flex-wrap: nowrap;
 }
 .ghost-btn:hover:not(:disabled) {
-  background: var(--surface-hover, rgb(127 127 127 / 8%));
+  background: var(--surface-2, rgb(127 127 127 / 8%));
   color: var(--text);
   border-color: var(--border, rgb(127 127 127 / 18%));
 }

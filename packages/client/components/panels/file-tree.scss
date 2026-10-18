@@ -666,7 +666,7 @@ html.ai-runner-dragging body {
   cursor: pointer;
 }
 .ft-btn:hover {
-  color: var(--text-1, #fff);
+  color: var(--text, #fff);
   border-color: var(--text-3, #666);
   background: rgb(255 255 255 / 6%);
 }
@@ -695,7 +695,7 @@ html.ai-runner-dragging body {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
   line-height: 1.5;
-  color: var(--text-1, inherit);
+  color: var(--text, inherit);
 }
 
 /* [ft-md-render-v1] Markdown 预览样式；与 TerminalPane.done-summary-body 对齐
@@ -708,7 +708,7 @@ html.ai-runner-dragging body {
     'Segoe UI',
     'PingFang SC',
     sans-serif;
-  color: var(--text-1, inherit);
+  color: var(--text, inherit);
   word-break: break-word;
 }
 .ft-md :deep(p) {
