@@ -54,6 +54,13 @@ export function detectReplyInPage(siteCfg = {}) {
     dedup._scanText = bodyText()
   }
   const scanText = dedup._scanText
+  // [busy-scope-v1] busy/rate 文案只能来自「最后一条 assistant 气泡」，不能扫全页：
+  //   历史对话里残留的旧「服务器繁忙」会被全页扫描命中并当成**本轮**错误（实测误报，
+  //   真实网页上并无任何限流提示）。这里单独取最后一条气泡的文本作为告警扫描域。
+  const _lastAsstEl = document.querySelectorAll('.ds-assistant-message-main-content')
+  const alertText = _lastAsstEl.length
+    ? String(_lastAsstEl[_lastAsstEl.length - 1].textContent || '')
+    : ''
 
   // body version + hash 缓存，避免每次 poll 重算
   if (typeof dedup._bodyVersion !== 'number') dedup._bodyVersion = 0
@@ -97,7 +104,7 @@ export function detectReplyInPage(siteCfg = {}) {
   const _baseBlocks = document.querySelectorAll('.ds-assistant-message-main-content')
 
   if (!dedup._busyErrorReported) {
-    const busyMessages = scanText.match(/server busy, please try again later\.?|(?:服务器|服务)繁忙[^\n。！!]*[。！!]?/gi) || []
+    const busyMessages = alertText.match(/server busy, please try again later\.?|(?:服务器|服务)繁忙[^\n。！!]*[。！!]?/gi) || []
     const busyBaseline = typeof dedup._busyErrorBaseline === 'number' ? dedup._busyErrorBaseline : 0
     if (busyMessages.length > busyBaseline) {
       dedup._busyErrorReported = true
@@ -111,7 +118,7 @@ export function detectReplyInPage(siteCfg = {}) {
   //              正则与 headless-fill.ts 的 verifyFillSentInPage / resetReplyDedupInPage 两处内联同构
   //              （守卫测试 rate-marker-guard.node-test.ts）
   if (!dedup._rateReported) {
-    const rateMessages = scanText.match(/(?:消息|发送|操作|请求|访问)过于频繁|过于频繁[，,\s]*请稍后重试|please\s+slow\s+down|too\s+many\s+requests|rate\s+limit/gi) || []
+    const rateMessages = alertText.match(/(?:消息|发送|操作|请求|访问)过于频繁|过于频繁[，,\s]*请稍后重试|please\s+slow\s+down|too\s+many\s+requests|rate\s+limit/gi) || []
     const rateBaseline = typeof dedup._rateBaseline === 'number' ? dedup._rateBaseline : 0
     if (rateMessages.length > rateBaseline) {
       dedup._rateReported = true

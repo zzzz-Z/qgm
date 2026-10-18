@@ -534,21 +534,33 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
     async newSession(sid) {
       const page = _getPage(sid)
       if (!page) {
+        // [newsession-diag-v1] 原实现静默 return null，fill 继续在旧会话里发 —— 会话越长越可能触顶。
+        try { writeChannelLog('headless', { kind: 'new-session-fail', sid, reason: 'no-page' }) } catch { /* swallow */ }
         return null
       }
       try {
         const ok = await page.evaluate(clickNewSessionInPage)
         if (ok !== true) {
+          try { writeChannelLog('headless', { kind: 'new-session-fail', sid, reason: 'click-fail' }) } catch { /* swallow */ }
+          // [newsession-rebuild-v1] 点不到「新对话」按钮时强制重建 page：
+          //   继续用旧会话会让上下文无限增长直至触顶（页面渲染出「繁忙/超限」提示，
+          //   被 detectReplyInPage 当成错误回复上报，表现为「发出去但永远没有真回复」）。
+          await this.close(sid).catch(() => {})
           return null
         }
         // [headless-newsession-v1] 等输入框渲染完成再返回，否则 attach-ws 立即 fill 会找不到输入框
         // [WHY] DeepSeek 新建会话是 SPA 路由跳转，URL 变化不代表 DOM 就绪；1500ms 固定延迟不够
-        // [CONSTRAINT] 复用 launch() 的输入框选择器；10s 超时后仍找不到则返回 null（让 fill 报错）
+        // [CONSTRAINT] 复用 launch() 的输入框选择器；超时则重建 page
         await page.waitForSelector('textarea:not([readonly]):not([disabled]), [contenteditable="true"]', { timeout: 10000, state: 'visible' })
         const url = page.url()
         const idMatch = url.match(/\/chat\/([\w-]+)/) || url.match(/\/c\/([\w-]+)/)
+        try { writeChannelLog('headless', { kind: 'new-session-ok', sid, url }) } catch { /* swallow */ }
         return { url, id: idMatch ? idMatch[1] : '' }
-      } catch { return null }
+      } catch (e) {
+        try { writeChannelLog('headless', { kind: 'new-session-fail', sid, reason: 'wait-timeout', detail: String((e as Error)?.message || e).slice(0, 120) }) } catch { /* swallow */ }
+        await this.close(sid).catch(() => {})
+        return null
+      }
     },
     async rotate(sid, instruction) {
       return this.fillPrompt(sid, instruction)
