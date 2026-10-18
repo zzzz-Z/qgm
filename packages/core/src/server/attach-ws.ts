@@ -17,6 +17,7 @@ import { turnToFrames } from '../reply/turn-frames.js'
 import type { RawBlock } from '../reply/turn-frames.js'
 // [replay-buffer-v1] 重放缓冲与可重放帧清单（抽出去是为了能被单独断言）
 import { createBufferOut } from './replay-buffer.js'
+import { AI_CAPS } from './protocol.js'
 import type { ServerMessage, TransportMessage } from './protocol.js'
 // Vite 可能是 HttpServer | Http2SecureServer，取交集的最小子集
 
@@ -441,7 +442,9 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
     const ws = ws0 as AliveWs
     ws.isAlive = true
     ws.on('pong', () => { ws.isAlive = true })
-    ws.send(JSON.stringify({ t: 'hello', version: 1 }))
+    // [hello-caps-v1] 宣告本服务端支持的块类型；老客户端忽略未知字段即可，
+    //   新客户端据此决定要不要启用信封消费（避免「发了没人收」的静默失效）。
+    ws.send(JSON.stringify({ t: 'hello', version: 1, caps: AI_CAPS }))
     ws.on('message', (data) => {
       let msg: TransportMessage
       try { msg = JSON.parse(String(data)) as TransportMessage }

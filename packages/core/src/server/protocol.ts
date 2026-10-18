@@ -104,6 +104,19 @@ export interface AiTurnEndDto {
   skipped?: string[]
 }
 
+/**
+ * [hello-caps-v1] 服务端 `hello` 帧宣告的块类型能力清单。
+ *
+ * [WHY 需要握手] 生产里服务端与客户端是**两份独立发布的产物**：服务端可以先于客户端
+ *   升级（此时客户端还不认 `ai:block`），也可以落后于客户端（此时发了也没人收）。
+ *   没有握手判定的话，两边只能靠「对端没反应」来猜，而这个猜测在信封路径上的代价是
+ *   **脚本静默不执行** —— 前端照常出块卡片，只有「没跑」这一个可见后果。
+ *
+ * [CONSTRAINT] 顺序即契约：这里是**唯一源**，客户端据此判断是否启用信封消费。
+ *   新增块类型必须先加进这里，否则客户端会整轮忽略该类型的块。
+ */
+export const AI_CAPS: readonly string[] = ['say', 'script', 'ask', 'handoff']
+
 /** 传输层状态枚举：连接 / 断开 / 重连中 */
 export type TransportState = 'idle' | 'filling' | 'generating' | 'done' | 'error' | 'rate-limited'
 
