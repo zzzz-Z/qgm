@@ -203,7 +203,9 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         try {
           // [headless-trace-v1] 无头回复留痕：记录每次 poll 命中的回复类型，
           // 使「AI 回了没有 / 回的是什么 kind」与出站留痕成对，断链时可直接定位是发送端还是采集端。
-          try { writeChannelLog('headless', { kind: 'reply', sid, replyKind: reply.kind, hasCode: Boolean(reply.code), textLen: reply.text ? reply.text.length : 0 }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
+          // [reply-body-visible-v1] 补记正文：只记 textLen 让「31 字错误」无从定位（实测踩坑）。
+          //   截断到 200 字，足以区分「服务器繁忙 / 频繁 / 触顶 / 未登录」。
+          try { writeChannelLog('headless', { kind: 'reply', sid, replyKind: reply.kind, hasCode: Boolean(reply.code), textLen: reply.text ? reply.text.length : 0, ...(reply.kind === 'error' && reply.text ? { text: String(reply.text).slice(0, 200) } : {}) }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
           if (reply.closureRelease) {
             try { writeChannelLog('runner', { runId: 'closure-release', sid, closureTicks: reply.closureTicks, closureLen: reply.closureLen }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
           }
