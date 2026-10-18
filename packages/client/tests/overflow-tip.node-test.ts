@@ -104,6 +104,28 @@ test('isOverflowing：字段缺失（undefined）不得抛错，按不溢出处�
   assert.equal(mod.isOverflowing({}), false)
 })
 
+// [overflow-tip-vertical-v1] 多行 clamp 的截断在纵向：只看 scrollWidth 会让这类文本永不提示。
+// [判据承重] 把 isOverflowing 改回只判横向 ⇒ 下面三条全红。
+test('isOverflowing：纵向被裁（多行 clamp）也算溢出', () => {
+  assert.equal(
+    mod.isOverflowing({ clientWidth: 300, scrollWidth: 300, clientHeight: 36, scrollHeight: 90 }),
+    true,
+    '横向未溢出但纵向被裁 —— 两行 clamp 的典型形态，必须判为溢出',
+  )
+})
+
+test('isOverflowing：两维都未超（含 1px 容差）不算溢出', () => {
+  assert.equal(
+    mod.isOverflowing({ clientWidth: 300, scrollWidth: 301, clientHeight: 36, scrollHeight: 37 }),
+    false,
+  )
+})
+
+test('isOverflowing：未参与布局时两维都是 0，任一维度也不得单独判溢出', () => {
+  // display:none 时 scrollHeight 可能仍有值而 clientHeight 为 0，只判纵向会假阳性
+  assert.equal(mod.isOverflowing({ clientWidth: 0, clientHeight: 0, scrollWidth: 400, scrollHeight: 90 }), false)
+})
+
 // ============ 指令接线 ============
 
 test('vOverflowTip 导出且含 mounted / updated / beforeUnmount', () => {

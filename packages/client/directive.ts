@@ -100,10 +100,30 @@ interface OverflowEl extends HTMLElement {
  * [CHANGE-IMPACT] 容差 +1px：亚像素缩放下 scrollWidth/clientWidth 常差 1，不加会让
  *   「其实没截断」的文本也弹提示。
  */
-export function isOverflowing(el: { scrollWidth?: number, clientWidth?: number }): boolean {
+/**
+ * 元素内容是否被裁掉（横向单行省略 或 纵向多行 clamp）
+ * [WHY] 抽成纯函数才能被单测直接断言边界（未上屏 / 恰好相等 / 差 1px）；
+ *   指令本体依赖真实布局，node 环境测不到，判据会退化成「有没有绑监听」这种不承重的形态。
+ * [overflow-tip-vertical-v1] 同时判两个维度：`-webkit-line-clamp` 的截断发生在纵向
+ *   （scrollHeight > clientHeight），只看 scrollWidth 会让多行 clamp 的文本永不提示。
+ * [CONSTRAINT] 先判「是否参与布局」（任一维度有非零尺寸）：display:none / 未上屏时
+ *   两维都是 0，若先算溢出会拿到 scrollWidth>0、clientWidth=0 的假阳性。
+ * [CHANGE-IMPACT] 容差 +1px：亚像素缩放下 scroll/client 常差 1，不加会让「其实没截断」也弹提示。
+ */
+export function isOverflowing(el: {
+  scrollWidth?: number
+  clientWidth?: number
+  scrollHeight?: number
+  clientHeight?: number
+}): boolean {
   const cw = Number(el.clientWidth ?? 0)
   const sw = Number(el.scrollWidth ?? 0)
-  return cw > 0 && sw > cw + 1
+  const ch = Number(el.clientHeight ?? 0)
+  const sh = Number(el.scrollHeight ?? 0)
+  if (cw <= 0 && ch <= 0) return false
+  const horizontal = cw > 0 && sw > cw + 1
+  const vertical = ch > 0 && sh > ch + 1
+  return horizontal || vertical
 }
 
 /**

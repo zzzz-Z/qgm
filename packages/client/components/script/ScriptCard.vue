@@ -275,7 +275,7 @@ function toggle(): void { expanded.value = !expanded.value }
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 3px;
 }
 /* [script-card-head-v2] desc 现在是列容器的第一行，必须显式 block + width:100% + min-width:0，
    否则列容器下不会收缩，省略号（ellipsis）根本不会出现 —— 这是 flex 纵向布局的常见坑。 */
@@ -338,7 +338,7 @@ function toggle(): void { expanded.value = !expanded.value }
   font-weight: 400;
   letter-spacing: 0.5px;
   color: var(--text-3, #8b949e);
-  opacity: 0.7;
+  opacity: 0.85;
 }
 .reason-label {
   color: var(--danger, #f85149);
@@ -348,7 +348,12 @@ function toggle(): void { expanded.value = !expanded.value }
 .reason-text {
   flex: 1 1 auto;
   min-width: 0;
-  white-space: nowrap;
+  /* [desc-why-legibility-v1] 允许两行：why / reason 是完整句子，单行省略后只能 hover 才能读全，
+     而这两行的价值正是「一眼看懂意图 / 失败原因」。头部高度仍可预期（≤4 行）。 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
   overflow: hidden;
   text-overflow: ellipsis;
 }

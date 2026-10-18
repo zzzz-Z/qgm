@@ -3342,3 +3342,17 @@ t2.replace(oldLine, '  // 注释', '  const i = s.indexOf(...)')   // ← 第三
 首轮合并重复块时锚点写的是单行 `transition: border-color 0.14s ease, background-color 0.14s ease;`，但 prettier 已把它展开成多行——锚点失配、脚本 `exit 2`。
 
 多行属性值不要写进单行锚点，改用行号定位 + 内容校验。
+
+## 改 CSS 的截断方式会连带废掉依赖它的 JS 判据
+
+把 `white-space: nowrap` 改成 `-webkit-line-clamp: 2`，看起来只是 CSS 层面的可读性改进。但 `v-overflow-tip` 的 `isOverflowing` 只判 `scrollWidth > clientWidth`——截断从横向转到纵向后，判据恒为 false，tooltip 再也不弹。
+
+这类「改样式破坏配套 JS」的缺陷极隐蔽：CSS 生效了、组件渲染正常、lint 不报错、测试也不红（因为没有测试覆盖纵向场景）。只有用户实际去 hover 时才会发现「怎么没提示了」。
+
+教训：改任何 `overflow` / `text-overflow` / `line-clamp` 相关样式前，先 grep 有没有配套的溢出检测逻辑。
+
+## `splice` 的行数必须与函数实际行数一致
+
+改 `isOverflowing` 时按「签名 + 2 行 + `}`」= 4 行做 `splice`，但原函数实际是 5 行（签名 + cw + sw + return + `}`），结果留下一个孤立的 `}`，`tsc` 报 TS1128、`overflow-tip` 测试文件整个解析失败（17 条全部 skipped）。
+
+修法：改函数前先读完整函数体确认行数，或者干脆用 `findIndex` 定位起止行再 splice。
