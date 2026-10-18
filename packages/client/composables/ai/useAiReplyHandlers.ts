@@ -29,6 +29,7 @@ import { log } from '../../utils/log'
 import {
   notifyLimit,
   notifyResumeExhausted,
+  notifyResumeFailed,
   notifyResumeTimeout,
   notifySelfcheckReject,
   notifySiteError,
@@ -173,6 +174,8 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
         setTimeout(() => {
           void aiWindow
             .copyAndFill('继续', { skipRules: true })
+            .then((r) => { if (r === 'failed') notifyResumeFailed() })
+            .catch(() => notifyResumeFailed())
             .finally(() => endAutoResume(sid))
           armResumeWatchdog(sid)
         }, 1500)
@@ -219,10 +222,13 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       const _d = decideOnStopped(sid)
       if (_d.resume) {
         beginAutoResume(sid)
+        log.info('[stop-resume] 平台中断，自动续推', { sid })
         // 延迟 1.5s：等站点按钮/输入框状态稳定（停止后立即 fill 会与状态切换竞争）
         setTimeout(() => {
           void aiWindow
             .copyAndFill('继续', { skipRules: true })
+            .then((r) => { if (r === 'failed') notifyResumeFailed() })
+            .catch(() => notifyResumeFailed())
             .finally(() => endAutoResume(sid))
           // [resume-watchdog-v1] 续推后迟迟无任何回复 ⇒ 明确告知，不再静默干等。
           // [WHY] 续推的回复若落进 stopped 抑制窗口、或探针静默失效（选择器改版），
@@ -234,6 +240,10 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       } else if (_d.reason === 'max-reached') {
         // 达上限：明确告知用户，不再静默
         notifyResumeExhausted(MAX_AUTO_RESUME)
+      } else if (_d.reason === 'user-stop') {
+        // [resume-user-stop-visible-v1] 行为不变（尊重用户意图），但必须留痕：
+        //   否则「平台中断但没续推」与「刚点过停止所以按设计不续推」在日志上完全同形。
+        log.info('[stop-resume] 用户主动停止，跳过自动续推', { sid })
       }
       return
     }

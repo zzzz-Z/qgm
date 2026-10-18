@@ -52,3 +52,13 @@ export function notifyResumeTimeout(seconds: number): void {
 export function notifyResumeExhausted(max: number): void {
   toast(`平台中断后已自动续推 ${max} 次仍未完成，请手动处理`, 'warn', TOAST_LONG)
 }
+
+/**
+ * [resume-visible-fail-v1] 自动续推发送失败（窗口引用失效 / 页面未就绪）。
+ * [WHY] 原实现用 `.finally()` 丢弃 copyAndFill 返回值，返回 `failed` 时完全静默——
+ *   用户只看到「已停止」toast，无从判断是「按设计不续推」还是「续推发不出去」
+ *   （2026-10-18 实测：窗口非工作台 openSite 打开时 getWindowBySid 拿不到引用，必走全失败分支）。
+ */
+export function notifyResumeFailed(): void {
+  toast('自动续推失败：AI 窗口可能已失效。请在左侧站点列表点击该站点重建引用后手动继续', 'warn', TOAST_LONG)
+}

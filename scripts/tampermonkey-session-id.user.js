@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.16
+// @version      1.9.17
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
 // @match        https://chat.deepseek.com/*
 // @match        https://chatgpt.com/*
@@ -712,10 +712,18 @@ function hasContinueBtn() {
  *   与 headless-inject.ts 的 hasStoppedLabelInPage 同构，改一处必须同步另一处。
  */
 const STOPPED_LABEL_TEXT = '已停止';
+/**
+ * [stopped-label-v2] 上溯到整条消息容器再扫。
+ * [WHY] 「已停止」角标挂在**思考块头部**，是正文容器 `.ds-assistant-message-main-content` 的
+ *   兄弟节点而非子节点 ⇒ v1 的 scope 永远扫不到（2026-10-18 用户实测三判据全 miss）。
+ * [CONSTRAINT] 用 `closest` 仍限定在当前轮，不扫历史消息；找不到祖先时退回正文容器（fail-safe）。
+ */
+const STOPPED_MESSAGE_SELECTOR = '.ds-message';
 function hasStoppedLabel() {
-    const scope = latestAssistantRoot();
-    if (!scope)
+    const root = latestAssistantRoot();
+    if (!root)
         return false;
+    const scope = root.closest(STOPPED_MESSAGE_SELECTOR) || root;
     try {
         for (const el of scope.querySelectorAll('span, div')) {
             if (el.closest('.ds-markdown, pre, code'))

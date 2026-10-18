@@ -3259,3 +3259,24 @@ Chromium 的 `SingletonLock` 形如 `hostname-pid` 的软链。用 `readFile(loc
 ## 「探活 200」不等于「新产物生效」
 
 服务重启后旧产物也可能返回 200（进程起来了但加载的是旧代码）。必须比对进程启动时间与产物 mtime：进程晚于产物才算加载了新版。本轮 `07:41:14 > 07:39:14`，判据成立。
+
+## 守卫锚点不能硬编码已删除的章节
+
+`api-surface-parity` T2 用 `md.indexOf('### §3.3')` 当 §3.2 的区间右界。§3.3 被有意删除后 `indexOf` 返回 `-1`，`expect(b).toBeGreaterThan(a)` 假红——测试本身成了「删章节就必然挂」的耦合点。
+
+修法：区间右界改为动态定位「下一个 `## §N` 顶级标题」。这样无论增删子节都不会影响判据，同时保留了「只扫 §3.2 区间」的精确性。
+
+## 压缩文档前先跑一遍守卫，拿到全部硬断言
+
+删 SYSTEM.md 章节前先 grep 了 `system-contract` / `system-md-coherence` / `ssot-boundary-guard` 的 `assert.*` 行，确认：
+
+- `§12` 必须含 `metaerror-fuse-v1` 和 `不得转 \`ASK``
+- `§0.1` 的机制名要能在附录 A 找到（A4）
+- 每章必须有 `- 承重：` 且引用的文件路径在磁盘上存在（G6-a / G6-b）
+- 附录 A 不得少于 37 行（A1）
+
+其中 G6-b 绊了一次：我写 `visual-spec-guard.node-test.ts` 裸文件名，守卫按路径解析找不到，必须写全 `packages/client/tests/visual-spec-guard.node-test.ts`。
+
+## `.finally()` 会把 Promise 的失败吞干净
+
+`copyAndFill` 返回的 `FillResult` 是值不是异常，`.finally()` 既不接收也不检查它。原实现写 `.finally(() => endAutoResume(sid))` 本意只是清理，但顺带让所有失败路径静默了。改成 `.then().catch().finally()` 三连后，失败才第一次变得可见。

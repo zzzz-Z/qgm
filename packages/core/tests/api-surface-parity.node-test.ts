@@ -100,7 +100,13 @@ test('T1 门面本身装载成功（前置：守卫不能建立在空对象上�
 test('T2 SYSTEM.md §3.2 提到的每个 API 在门面上真实存在', () => {
   const md = fs.readFileSync(path.join(ROOT, 'packages/core/SYSTEM.md'), 'utf8')
   const a = md.indexOf('### §3.2')
-  const b = md.indexOf('### §3.3', a)
+  // [t2-boundary-v2] 右界改为「下一个顶级 `## §N` 标题」：原实现硬编码 `### §3.3`，
+  //   而 §3.3 降级协议已因「从未触发」被删除 ⇒ indexOf 返回 -1，T2 假红。
+  //   动态定位同时消除「增删子节即需同步改测试」的脆弱性。
+  const b = (() => {
+    const m = md.slice(a).match(/\n## §\d/)
+    return m ? a + (m.index ?? 0) : md.length
+  })()
   expect(a).toBeGreaterThan(-1)
   expect(b).toBeGreaterThan(a)
   const names = apiNamesIn(md.slice(a, b))

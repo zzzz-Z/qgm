@@ -159,9 +159,17 @@ function hasContinueBtn(): boolean {
  *   与 headless-inject.ts 的 hasStoppedLabelInPage 同构，改一处必须同步另一处。
  */
 const STOPPED_LABEL_TEXT = '已停止'
+/**
+ * [stopped-label-v2] 上溯到整条消息容器再扫。
+ * [WHY] 「已停止」角标挂在**思考块头部**，是正文容器 `.ds-assistant-message-main-content` 的
+ *   兄弟节点而非子节点 ⇒ v1 的 scope 永远扫不到（2026-10-18 用户实测三判据全 miss）。
+ * [CONSTRAINT] 用 `closest` 仍限定在当前轮，不扫历史消息；找不到祖先时退回正文容器（fail-safe）。
+ */
+const STOPPED_MESSAGE_SELECTOR = '.ds-message'
 function hasStoppedLabel(): boolean {
-  const scope = latestAssistantRoot()
-  if (!scope) return false
+  const root = latestAssistantRoot()
+  if (!root) return false
+  const scope = root.closest(STOPPED_MESSAGE_SELECTOR) || root
   try {
     for (const el of scope.querySelectorAll('span, div')) {
       if (el.closest('.ds-markdown, pre, code')) continue

@@ -221,12 +221,12 @@ export function detectReplyInPage(siteCfg = {}) {
       const label = String(el.getAttribute('aria-label') || el.textContent || '').trim()
       if (label && BTN_RE.test(label)) { out.byBtn = true; break }
     }
-    // [CONSTRAINT] 「已停止」扫描三重保险：精确等值 + 排除正文容器 + 要求同容器有 svg
-    //   （正文复述「已停止」时父元素 textContent 是整段话，不会恰好等于三个字）
-    const scope = document.querySelectorAll('.ds-assistant-message-main-content')
-    const root = scope.length ? scope[scope.length - 1] : null
-    if (root) {
-      for (const el of root.querySelectorAll('span, div')) {
+    // [CONSTRAINT] 三重保险：精确等值 + 排除正文 + 要求同容器有 svg
+    const list = document.querySelectorAll('.ds-assistant-message-main-content')
+    const root = list.length ? list[list.length - 1] : null; if (root) {
+      // [stopped-label-v2] 角标在思考块头部（正文容器的兄弟），须上溯到整条消息容器
+      const msgScope = root.closest('.ds-message') || root
+      for (const el of msgScope.querySelectorAll('span, div')) {
         if (el.closest('.ds-markdown, pre, code')) continue
         if (String(el.textContent || '').trim() !== '已停止') continue
         if (el.querySelector('svg') || el.parentElement?.querySelector('svg')) { out.byLabel = true; break }
