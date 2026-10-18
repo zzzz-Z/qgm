@@ -25,7 +25,9 @@ export interface SnapshotData {
 //   完全不可见 —— 频控阈值、同轮双发、多块放大都没法验收，只能靠 run 数间接推算。
 // [arrive-log-v1] `arrive` = **脚本到达前端**的留痕（页面通道每推一条上报一次，见 routes/arrive-log.ts 的 WHY）：
 //   收件箱是内存态、到达播报已删，这一段此前零落盘 ⇒ 「没推送」与「推了被吞」在服务端同形，只能猜。
-export type LogChannel = 'runner' | 'pipeline' | 'decisions' | 'reject' | 'board' | 'send' | 'wiki' | 'arrive' | 'headless'
+// [turn-events-v1] turns = turn 信封的层级事件（block.start / block.emit / block.result / turn.start / turn.end）。
+//   [CONSTRAINT] 只写 transition，不写 tick —— tick 级数据在 headless.jsonl，两者混写会让 jsonl 失去可读性。
+export type LogChannel = 'runner' | 'pipeline' | 'decisions' | 'reject' | 'board' | 'send' | 'wiki' | 'arrive' | 'headless' | 'turns'
 // AIRUNNER-BATCH4-3A-INLINE-CONST
 // 从 src/config.ts 内联常量；strip-types 无法解析 .js 后缀 import（T6）。
 // 可变路径用 getter（config.setRoot 会写 AI_RUNNER_ROOT 到 env；避免 ESM 常量快照）。

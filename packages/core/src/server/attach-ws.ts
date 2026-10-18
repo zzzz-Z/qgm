@@ -12,6 +12,11 @@ import { collectStopCandidatesInPage, pasteImagesInPage } from '../headless/head
 // [lesson-autocapture-v1] DONE 总结中的踩坑记录自动落盘，见 post-run/lesson-extract.ts
 import { appendLessons, extractLessons } from '../post-run/lesson-extract.js'
 import { writeChannelLog } from '../state/snapshot.js'
+// [turn-envelope-v1] 信封 → 块帧的映射是纯函数（reply/turn-frames.ts），此处只负责发与留痕
+import { turnToFrames } from '../reply/turn-frames.js'
+import type { RawBlock } from '../reply/turn-frames.js'
+// [replay-buffer-v1] 重放缓冲与可重放帧清单（抽出去是为了能被单独断言）
+import { createBufferOut } from './replay-buffer.js'
 import type { ServerMessage, TransportMessage } from './protocol.js'
 // Vite 可能是 HttpServer | Http2SecureServer，取交集的最小子集
 
@@ -22,35 +27,10 @@ type AnyHttpServer = Pick<import('node:events').EventEmitter, 'on' | 'off'>
 type AliveWs = WebSocket & { isAlive?: boolean }
 const HEARTBEAT_MS = 30000
 
-/**
- * [attach-ws-buffer-factory-v1] 外发消息缓冲：仅记录可重放的业务帧，单 sid 上限 30 条。
- * [attach-ws-buffer-sid-cap-v1] sid 数量同样有上限：原实现 key 只在 dispose 时 clear，
- *   而 sid 随浏览器标签页 / 刷新 / 重连单调增加 ⇒ Map 无界增长，每个 key 还各留最多 30 条
- *   reply（含完整脚本正文）。达上限时淘汰最旧 key（Map 保插入序，取首个即最久未新增者），
- *   与 LRU 近义：仍在活跃推送的 sid 每帧都会先 delete 再 set 重新入队尾。
- * [CONSTRAINT] 淘汰只丢「重放能力」，不影响在线会话：会话本身的浏览器上下文由 pool 持有。
- */
-const _SRV_BUF_MAX = 30
-const _SRV_SID_MAX = 64
-function createBufferOut(buf: Map<string, unknown[]>): (sid: string, payload: unknown) => void {
-  return (sid, payload) => {
-    if (!sid) return
-    const t = (payload as { t?: string }).t || ''
-    if (t !== 'headless:reply' && t !== 'headless:script' && t !== 'headless:summary' && t !== 'headless:new-session-created') return
-    let arr = buf.get(sid)
-    if (!arr) {
-      if (buf.size >= _SRV_SID_MAX) {
-        const oldest = buf.keys().next()
-        if (!oldest.done) buf.delete(oldest.value)
-      }
-      arr = []
-      buf.set(sid, arr)
-    }
-    arr.push(payload)
-    if (arr.length > _SRV_BUF_MAX) arr.shift()
-  }
-}
-
+// [replay-buffer-v1] 外发消息缓冲与「可重放帧清单」已抽到 server/replay-buffer.ts。
+// [WHY 抽走] 那段逻辑原先只存在于本文件的闭包里，零用例覆盖：把「四个 `!==` 串联」改成
+//   「清单 includes」时漏掉判断行本身，会让 headless:state / files:changed 也进 30 条上限的缓冲，
+//   把重放能力冲垮，而所有闸门仍全绿（no-unused-vars 只是 warning）。抽出去后由 replay-buffer 用例守。
 /** WebSocket 挂载配置：路径、心跳、升级处理 */
 export interface AttachWsOptions {
   wsPath?: string
@@ -142,6 +122,26 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
       try { writeChannelLog('headless', { kind: 'reply', sid, replyKind: reply.kind, hasCode: Boolean(reply.code), textLen: reply.text ? reply.text.length : 0, ...(reply.kind === 'error' && reply.text ? { text: String(reply.text).slice(0, 200) } : {}) }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
       if (reply.closureRelease) {
         try { writeChannelLog('runner', { runId: 'closure-release', sid, closureTicks: reply.closureTicks, closureLen: reply.closureLen }) } catch { /* swallow: 留痕失败不阻断主链路 */ }
+      }
+      // [turn-envelope-v1] 信封回复：一个块一帧 + 末尾结束帧，顺序即 content 顺序。
+      // [WHY] 必须先于旧分支：旧 else 会把 kind='turn' 当普通 reply 发一个 text 为 undefined 的空帧，
+      //   前端收到一个「什么都没有的回复」，比不发更糟（会占掉一次循环）。
+      // [CONSTRAINT] 0 块不发任何帧（turnToFrames 已返回空数组）：phantom turn-end 会让前端新建空占位并等它。
+      // [CONSTRAINT] 只写 transition（block.emit / turn.end），不写 tick —— tick 归 headless.jsonl，
+      //   两者混写会让 turns.jsonl 失去「一轮几次状态变化」这个唯一用途。
+      if (reply.kind === 'turn') {
+        const frames = turnToFrames(sid, typeof reply.turnId === 'number' ? reply.turnId : 0, (Array.isArray(reply.blocks) ? reply.blocks : []) as RawBlock[])
+        for (const m of frames) {
+          send(m)
+          try {
+            if (m.t === 'ai:block') writeChannelLog('turns', { kind: 'block.emit', sid, turnId: m.block.turnId, blockId: m.block.blockId, seq: m.block.seq, blockType: m.block.type })
+            else if (m.t === 'ai:turn-end') writeChannelLog('turns', { kind: 'turn.end', sid, turnId: m.end.turnId, awaiting: m.end.awaiting, blocks: m.end.blocks, skipped: m.end.skipped ? m.end.skipped.join(',') : '' })
+          } catch { /* swallow: 留痕失败不阻断主链路 */ }
+        }
+        if (frames.length === 0) {
+          try { writeChannelLog('turns', { kind: 'turn.empty', sid, turnId: typeof reply.turnId === 'number' ? reply.turnId : 0, reason: 'no-usable-block' }) } catch { /* swallow */ }
+        }
+        return
       }
       if (reply.kind === 'script' && reply.code) {
         send({ t: 'headless:reply', sid, reply: { kind: 'script', item: { id: `inb_${Math.random().toString(36).slice(2, 10)}`, code: reply.code, lang: (reply.lang === 'bash' ? 'bash' : 'js'), site: '', hash: reply.hash || '', desc: '', why: '', ts: Date.now() } } })

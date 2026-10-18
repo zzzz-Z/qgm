@@ -12,7 +12,7 @@
 //   ⑤ 纯函数：同输入同输出，且不修改入参
 
 import { describe, expect, test } from 'vitest'
-import { blocksToFrames, deriveAwaiting, deriveRotate } from '../src/reply/turn-frames.js'
+import { blocksToFrames, deriveAwaiting, deriveRotate, turnToFrames } from '../src/reply/turn-frames.js'
 
 const SAY = { type: 'say', id: 'say_1', text: '先同时探两路。' }
 const C1 = { type: 'script', id: 'c1', lang: 'js', desc: '统计 md 文件分布', why: '决定先改哪几个', code: 'console.log(1)' }
@@ -120,6 +120,35 @@ describe('blocksToFrames：坏块不静默', () => {
   test('全部合法时 end 不带 skipped 字段（wire 上不留空数组噪音）', () => {
     const end = blocksToFrames(1, [SAY]).end as { skipped?: string[] }
     expect('skipped' in end).toBe(false)
+  })
+})
+
+describe('turnToFrames：发帧序列', () => {
+  test('四块 ⇒ 四块帧 + 一个结束帧，结束帧必须最后', () => {
+    const frames = turnToFrames('w1', 7, [SAY, C1, C2, ASK])
+    expect(frames.map(f => f.t)).toEqual(['ai:block', 'ai:block', 'ai:block', 'ai:block', 'ai:turn-end'])
+    const blocks = frames.filter(f => f.t === 'ai:block') as { block: { seq: number, blockId: string } }[]
+    expect(blocks.map(f => f.block.seq)).toEqual([0, 1, 2, 3])
+    expect(blocks.map(f => f.block.blockId)).toEqual(['say_1', 'c1', 'c2', 'q1'])
+    const end = frames[frames.length - 1] as { end: { awaiting: string, blocks: number } }
+    expect(end.end.awaiting).toBe('results')
+    expect(end.end.blocks).toBe(4)
+  })
+
+  test('所有帧都带同一个 sid（多标签页并发时不串台）', () => {
+    const frames = turnToFrames('win_model_a', 1, [SAY, C1])
+    expect(frames.every(f => (f as { sid: string }).sid === 'win_model_a')).toBe(true)
+  })
+
+  test('空 turn / 全是坏块 ⇒ 零帧，不发 phantom 结束帧', () => {
+    expect(turnToFrames('w', 1, [])).toEqual([])
+    expect(turnToFrames('w', 1, [{ type: 'lane', id: 'x' }])).toEqual([])
+  })
+
+  test('结束帧透传 skipped（坏块不静默消失）', () => {
+    const frames = turnToFrames('w', 2, [SAY, { type: 'lane', id: 'x' }])
+    const end = frames[frames.length - 1] as { end: { skipped?: string[] } }
+    expect(end.end.skipped).toEqual(['x:type'])
   })
 })
 

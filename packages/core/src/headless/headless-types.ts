@@ -37,7 +37,13 @@ export interface HeadlessOptions {
 export interface HeadlessReply {
   // [stopped-detect-v1] stopped = AI 页面「当前问题已停止」（生成被中止，无 DONE/无完整脚本）
   // [limit-detect-v1] limit = AI 会话达到长度上限（继续提问无产出，应触发轮转新会话）
-  kind: 'script' | 'done' | 'plain' | 'error' | 'stopped' | 'limit'
+  // [turn-envelope-v1] turn = 页面回复是 JSON 信封，载荷在 blocks；与旧 kind 互斥（解析器优先）
+  kind: 'script' | 'done' | 'plain' | 'error' | 'stopped' | 'limit' | 'turn'
+  // [turn-envelope-v1] kind='turn' 时有效：所属 turn 与块列表（形状见 reply/turn-frames.ts 的 RawBlock）
+  turnId?: number
+  blocks?: unknown[]
+  /** 信封未闭合（流式）时为 true；服务端据此等待而不发帧 */
+  truncated?: boolean
   code?: string
   lang?: string
   hash?: string

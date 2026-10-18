@@ -402,13 +402,43 @@ curl -s -m 5 http://127.0.0.1:5175/__ai/workspace/registry | head -c 200
 | P2-a | 完成（2026-10-19） | 2026-10-19 | 页面侧 `readTurnBlocks()` + 假 DOM 守卫 11 条；**未改任何返回路径**（零行为变化） |
 | P2-b | 待做 | — | 把 `readTurnBlocks` 接进判定链（信封优先 / 标记回落）+ `ai-headless` 回调扩为数组 |
 | P4-a | 完成（2026-10-19） | 2026-10-19 | `AiBlockDto`/`AiTurnEndDto`/`ai:block`/`ai:turn-end` + 纯映射 `blocksToFrames`（17 条），**未接线** |
-| P4-b | 待做 | — | `attach-ws.ts` 发块帧（`desc`/`why` 取真值）+ `turns.jsonl` 只写 transition |
+| P4-b | 完成（2026-10-19） | 2026-10-19 | `attach-ws` 发块帧（`desc`/`why` 取真值）+ `turns.jsonl` transition + 重放清单；`turnToFrames` 4 条 / `replay-buffer` 7 条 |
+| P4-c | 待做 | — | `hello.caps` 与客户端的握手判定（与 P6 一起做才有意义） |
 | P3 | — | — | |
 | P4 | — | — | |
 | P5 | — | — | |
 | P6 | — | — | |
 | P7 | — | — | |
 | P8 | — | — | 观察期后 |
+
+### P4-b 实测记录（2026-10-19）
+
+**做完了什么**：`attach-ws.ts` 在旧 `script` 分支**之前**加 `kind === 'turn'` 分支 →
+`turnToFrames(sid, turnId, blocks)` 逐帧 `send`，并逐帧写 `turns` 通道（`block.emit` / `turn.end`，
+0 块时只写一条 `turn.empty` 供排查）。块自带 `desc`/`why`，`attach-ws:147` 那处硬编码 `desc: ''`
+在信封路径上不再出现（旧路径**一行未改**）。`LogChannel` 加 `'turns'`。重放清单加入两个块帧。
+
+**三个实现约束**（都写进注释了）：
+1. 信封分支必须**先于**旧 `else`：否则 `kind='turn'` 会被当普通 reply 发一个 `text: undefined` 的空帧，
+   前端会「收到一条什么都没有的回复」并占掉一次循环 —— 比不发更糟。
+2. 0 块**不发**结束帧：`blocks: 0` 的 turn-end 会让前端新建空 turn 占位并等它永远不来的后续块。
+3. `turns.jsonl` 只写 transition，不写 tick（tick 归 `headless.jsonl`）。两者混写会让这个文件
+   失去唯一用途——「一轮发生了几次状态变化」。
+
+**近失误与由此新增的守卫（本轮最重要的一条）**：
+把重放缓冲的「四个 `!==` 串联」改成「清单 `includes`」时，我**漏掉了判断行本身**，
+于是所有帧（含 `headless:state` / `files:changed` 这类每 tick 都有的）都会进 30 条上限的缓冲，
+重放能力被瞬间冲垮。当时闸门**全绿**：`ts/no-unused-vars` 只是 warning（eslint exit 0），
+vitest 里没有任何用例碰这段代码。
+
+处方不是「下次小心」，而是把它抽成 `server/replay-buffer.ts`（可独立 import，无重依赖）并补 7 条用例，
+首条就是「非清单帧一律不入」。变异：删掉那一行 ⇒ 恰好 1 条红。
+该用例还顺手抓到一个真 bug：`put(sid, null)` 会抛 `Cannot read properties of null` ——
+缓冲在 `send` 路径上，抛出就不只是「没存进重放」，而是「这一帧根本没发出去」；
+已改为非对象静默丢弃。
+
+[CONSTRAINT] **抽出来的判据才守得住**。高频、低可见、无守卫的过滤/限流逻辑，
+不要留在需要造整个宿主才能断言的闭包里 —— 那种地方等价于没有测试。
 
 ### P4-a 实测记录（2026-10-19）
 

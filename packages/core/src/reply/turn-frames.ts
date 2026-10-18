@@ -9,7 +9,7 @@
 // [CONSTRAINT] 本文件不 import 运行时代码，只用 protocol 的类型；不读时间、不读全局，
 //   同输入同输出（否则「这一帧该不该发」会被时钟与随机 id 污染，测试无法复现）。
 
-import type { AiBlockDto, AiBlockType, AiTurnEndDto } from '../server/protocol.js'
+import type { AiBlockDto, AiBlockType, AiTurnEndDto, ServerMessage } from '../server/protocol.js'
 
 /** 解析器产出的块（结构上与 turn-schema.ts 的返回值一致，这里只声明用得到的字段） */
 export interface RawBlock {
@@ -98,6 +98,23 @@ export function blocksToFrames(turnId: number, raw: readonly RawBlock[]): TurnFr
 
 function isBlockType(t: string): t is AiBlockType {
   return t === 'say' || t === 'script' || t === 'ask' || t === 'handoff'
+}
+
+/**
+ * 把一个 turn 直接映射成**要发出去的帧序列**（块帧按 seq 顺序 + 末尾一个结束帧）。
+ *
+ * [WHY] 发帧顺序是契约的一部分（前端按 `seq` 占位、结束帧必须最后到），
+ *   放进纯函数才能断言「顺序」而不必起一个 WS。
+ * [CONSTRAINT] 空 turn（没有任何可用块）返回空数组，**不发结束帧**：
+ *   一个 `blocks: 0` 的 turn-end 会让前端新建一个空 turn 占位并等它，比什么都不发更糟。
+ */
+export function turnToFrames(sid: string, turnId: number, raw: readonly RawBlock[]): ServerMessage[] {
+  const { blocks, end } = blocksToFrames(turnId, raw)
+  if (blocks.length === 0) return []
+  const out: ServerMessage[] = []
+  for (const b of blocks) out.push({ t: 'ai:block', sid, block: b })
+  out.push({ t: 'ai:turn-end', sid, end })
+  return out
 }
 
 /**
