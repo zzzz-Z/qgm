@@ -3625,6 +3625,16 @@ persistent context 的 localStorage 本来就持久化。token 为 null 的直�
 
 它来自 `sessionStorage`（`useAiWindowTable.ts:21`），随标签页/切换而变化。用它做 profile 子目录 = 让临时标识决定持久资产的位置，是这类 bug 的结构性来源。
 
+补充（2026-10-18）：它来自 `sessionStorage`（随标签页/切换变化），用它做 profile 子目录 = 让临时标识决定持久资产的位置。
+
 ## `path.join(ROOT, ...)` 形式的路径在 `setRoot` 之后会漂移
 
 凡是与「工作区无关的持久化数据」（登录态、缓存、全局配置），都不该挂 `ROOT`。
+
+## `close()` 里的 profile 清理会删掉登录态
+
+任何「回收磁盘」的逻辑必须先确认目标不承载持久状态；`profile-gc-v1` 的注释写着"孤儿目录"，但登录态恰恰住在里面。
+
+## 验证持久化必须跨「关窗」边界
+
+只在同一会话内读 token 证明不了持久化；必须关掉 context 再重开读一次。
