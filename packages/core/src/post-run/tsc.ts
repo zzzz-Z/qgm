@@ -63,7 +63,14 @@ export async function runTsc(
     const bp = path.join(getRoot(), base)
     if (!fs.existsSync(bp)) return { code: 1, stdout: '', stderr: `[ai-runner] 缺少 ${base}\n` }
     const safe = base.replace(/[^a-z0-9]/gi, '_')
-    const tmp = path.join(getRoot(), `.ai-runner-tsconfig.${runId}.${safe}.json`)
+    // [tsc-tmp-in-runner-dir-v1] 临时配置放 .ai-runner/tmp：根目录会被 sandbox 的 safe-delete
+    //   垫片拦下 unlink（SAFE_DELETE_BULK_CONFIRM_REQUIRED）⇒ 文件永久堆在仓库根、污染 git status。
+    //   .ai-runner/ 整体 gitignored，即便 finally 清理失败也不外泄。
+    const tmpDir = path.join(getRoot(), '.ai-runner', 'tmp')
+    fs.mkdirSync(tmpDir, { recursive: true })
+    // [tmp-reaper-runid-v2] 必须让文件名以 runId 开头，否则 reapStaleTmp 的
+    //   /^\d{13}-[a-z0-9]{4}-/ 前缀匹配不到 ⇒ 崩溃遗留的临时配置永久滞留。
+    const tmp = path.join(tmpDir, `${runId}-${safe}.tsconfig.json`)
     const co = client
       ? { skipLibCheck: true, noEmit: true }
       : { lib: ['ES2022', 'DOM', 'DOM.Iterable'], skipLibCheck: true, noEmit: true, rootDir: '.', allowImportingTsExtensions: true }

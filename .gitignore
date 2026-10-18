@@ -32,3 +32,7 @@ bin/ffprobe
 # [size-soft-limit-v1] selfcheck-l2 的临时夹具（beforeAll 生成 / afterAll 删除），
 # 属运行态；不 ignore 会被 post-done 自动提交捕获。
 packages/core/src/selfcheck/__b1_probe_fixture.ts
+
+# [tsc-tmp-in-runner-dir-v1] 历史上 tsc 临时配置写在仓库根（已改为 .ai-runner/tmp）。
+# 兜底：任何位置生成的该前缀文件都不入库。
+.ai-runner-tsconfig.*.json
