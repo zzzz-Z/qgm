@@ -504,6 +504,12 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
       }
       let stopped = false
       let running = false
+      // [reply-silent-guard-v1] 静默兜底：fill 成功后若长时间零回复，多半是页面停在 /sign_in
+      //   （未登录）或选择器已失效。原实现无声空转，用户只看到「发了但没反应」。
+      //   首次 tick 即判登录态；持续 NO_REPLY_ALERT_MS 无任何回复则上报一次 error。
+      const startedAt = Date.now()
+      let alerted = false
+      const NO_REPLY_ALERT_MS = 90_000
       // 防并发重入：上轮 evaluate 未完成时跳过本轮
       const tick = async () => {
         if (stopped || running) { if (!stopped) setTimeout(tick, 800); return }
@@ -514,7 +520,20 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
             ? (completionErrors.delete(sid), { kind: 'error', text: streamError })
             : await page.evaluate(detectReplyInPage, { generatingSelector: adapter.selectors.generatingSelector })
           if (!stopped && reply && typeof reply === 'object' && (reply as { kind?: string }).kind) {
+            alerted = false
             cb(reply as HeadlessReply)
+          } else if (!stopped && !alerted && Date.now() - startedAt > NO_REPLY_ALERT_MS) {
+            // 超时无回复：补一次登录态诊断，把原因说清楚而不是干等
+            alerted = true
+            const diag = await page.evaluate(detectLoginStateInPage, adapterCfg).catch(() => null)
+            const d = diag as { path?: string, tokenState?: string } | null
+            const onLoginPage = Boolean(d && /sign_in|login/i.test(String(d.path || '')))
+            cb({
+              kind: 'error',
+              text: onLoginPage || (d && d.tokenState !== 'yes')
+                ? `无头浏览器未登录（页面在 ${d?.path || '?'}）。请点顶部「登录」在有头窗口完成登录后重试`
+                : `已发送但 ${Math.round(NO_REPLY_ALERT_MS / 1000)}s 内未收到任何回复；页面可能改版导致选择器失效`,
+            } as HeadlessReply)
           }
         } catch { /* 页面导航/关闭时忽略 */ }
         running = false

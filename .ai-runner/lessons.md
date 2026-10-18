@@ -3600,3 +3600,11 @@ Chromium 的 cookie / localStorage 有内存缓冲，登录后立即关窗会丢
 ## 改 `waitAck` 返回类型会打破既有单测
 
 接口从 `Promise<boolean>` 变 `Promise<{ok,reason}>` 时，`useAiTransport-factory.node-test.ts` 的 `assert.equal(r, true)` 会立即失败——这是好事，说明测试真的在守着契约。
+
+## 登录态判定不能用单一来源
+
+`localStorage.userToken` 在 DeepSeek 上是 `{"value":null}` 的空壳对象，`JSON.parse` 后取 `.value` 得 null——只看它会把"有对象"误判为"已登录"，只看 cookie 又会漏。多源 + 页面路径联合判定才可靠。
+
+## 无头链路失败必须主动上报
+
+`fill ok:true` + 零 reply 的组合是彻底静默的，用户无法区分「在思考」和「根本没发出去」。任何「等待外部事件」的轮询都必须有超时出口。
