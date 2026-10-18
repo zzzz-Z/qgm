@@ -267,11 +267,27 @@ export function clickNewSessionInPage() {
 
 /** [poll-diag-v1] poll 眼中的页面状态快照（排查「SSE 有内容但 detectReplyInPage 读不到」） */
 export function collectPageDiagInPage() {
+  const els = document.querySelectorAll('.ds-assistant-message-main-content')
+  const last = els.length ? (els[els.length - 1].textContent || '') : ''
+  let h = 0x811C9DC5
+  for (let i = 0; i < last.length; i++) h = Math.imul(h ^ last.charCodeAt(i), 0x1000193) >>> 0
+  const nowHash = last.length ? (h >>> 0).toString(16).padStart(8, '0') : ''
+  const dedup = window.__aiRunnerDedup || {}
   return {
     url: location.href,
-    asst: document.querySelectorAll('.ds-assistant-message-main-content').length,
+    asst: els.length,
     msg: document.querySelectorAll('.ds-message').length,
     bodyLen: (document.body.textContent || '').length,
+    nowHash,
+    baseHash: typeof dedup._baselineLastHash === 'string' ? dedup._baselineLastHash : 'MISSING',
+    baseBlocks: typeof dedup._baselineBlocks === 'number' ? dedup._baselineBlocks : -1,
+    lastLen: last.length,
+    // [poll-diag-v2] 稳定门槛诊断：sig 一直在变 ⇒ _stableCount 永远到不了 3，plain 分支永不触发
+    stableCount: typeof dedup._stableCount === 'number' ? dedup._stableCount : -1,
+    seenGrowth: Boolean(dedup._seenGrowth),
+    plainSent: Boolean(dedup._plainSentInCycle),
+    lastBodySig: String(dedup.lastBodySig || ''),
+    seenHashes: Array.isArray(dedup.seenHashes) ? dedup.seenHashes.length : -1,
   }
 }
 
