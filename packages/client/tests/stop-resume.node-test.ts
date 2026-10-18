@@ -52,9 +52,14 @@ describe('stop-resume: 决策链', () => {
     assert.equal(d.reason, 'max-reached')
   })
 
-  test('空 sid ⇒ resume=false（防误判）', () => {
+  test('空 sid ⇒ resume=true（不再误判成用户主动停止）', () => {
+    // [resume-empty-sid-v1] 原实现把「拿不到 sid」当成「用户明确要停」并静默跳过。
+    // 实测 2026-10-18：payload.sessionId 取自 URL hash 的 sid 参数，DeepSeek 无此 hash ⇒ 恒空，
+    // 于是探针命中却永不续推。空 sid 时无 user-stop 记录可比，保守方向是允许续推。
+    // [判据承重] 把 decideOnStopped 的空 sid 分支改回 resume:false ⇒ 本用例必红。
     const d = decideOnStopped('')
-    assert.equal(d.resume, false)
+    assert.equal(d.resume, true)
+    assert.equal(d.reason, 'auto')
   })
 
   test('TTL 过期标记视为无效（60s 前的旧标记不拦当前 stopped）', () => {

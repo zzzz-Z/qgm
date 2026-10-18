@@ -49,7 +49,13 @@ export function markUserStop(sid: string): void {
  *   达上限：返回 false，由调用方决定是否提示用户。
  */
 export function decideOnStopped(sid: string): { resume: boolean, reason: 'user-stop' | 'max-reached' | 'auto' } {
-  if (!sid) return { resume: false, reason: 'user-stop' }
+  // [resume-empty-sid-v1] 空 sid 不再当成「用户主动停止」。
+  // [WHY] 原实现 `if (!sid) return { resume: false, reason: 'user-stop' }` 把「拿不到 sid」
+  //   与「用户明确要停」混为一谈 ⇒ 探针命中但续推被静默跳过（2026-10-18 实测：
+  //   payload.sessionId 取自 URL hash `#sid=`，DeepSeek 无此 hash ⇒ 恒为空）。
+  // [CONSTRAINT] 空 sid 时无 user-stop 记录可比，保守方向是「允许续推」——
+  //   续推的默认意图是帮用户恢复，真用户停过则 markUserStop 会带上窗口 sid 命中下面的分支。
+  if (!sid) return { resume: true, reason: 'auto' }
   // ① 用户主动停？
   const t = userStopAtBySid.get(sid)
   if (t !== undefined) {

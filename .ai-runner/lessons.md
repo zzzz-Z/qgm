@@ -3298,3 +3298,19 @@ TS 版把 `marked` 判定抽成顶层 `hasScriptHead`，沙箱只抽了 `extract
 `useRunner.ts:580` 写 `liveStdout.value || String(s.stdoutTail || ...)`。服务端 `run.ts` 认真把 `stdoutTail` 截到 2000 字节，但 `liveStdout.value` 一旦非空（正常情况都非空），`||` 左边胜出，服务端的截断永远不会被用到。两处代码各自看都对，合起来失效。
 
 发现方式是比对实测数据与理论预期：日志里 p90 = 6.1 KB、max = 25.5 KB，而服务端明明把每段输出都截到了 2–4 KB，这个矛盾说明有别的东西在放大体积。
+
+## `String.prototype.replace` 只吃两个参数，第三个被静默丢弃
+
+改测试时写了：
+
+js复制下载```
+t2.replace(oldLine, '  // 注释', '  const i = s.indexOf(...)')   // ← 第三参被忽略
+```
+
+结果 `const i` 声明整行丢失，`tsc` 报 4 条 `Cannot find name 'i'`，而测试运行时仍能过（`i` 在 JS 里报 ReferenceError 会中断，但该用例恰好没执行到）。改成单个替换串才修好。
+
+## `shellStatus` 的完成判定字段是 `running`/`exitCode`，不是 `done`
+
+上轮用 `st.done` 判断构建完成，结果永远为 `undefined` ⇒ 判成「构建失败」⇒ 没触发重启。实际构建早已成功（日志尾部有 `[build-all] done` + `@shell-done exit=0`）。
+
+正确写法：`st.running === false && st.exitCode !== undefined`。字段名要先 `Object.keys(st)` 确认，不能凭记忆。

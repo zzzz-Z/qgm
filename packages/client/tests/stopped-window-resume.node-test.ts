@@ -12,7 +12,8 @@ const SRC = () => fs.readFileSync(new URL('../composables/ai/useAiReplyHandlers.
 
 function resumeBranch(): string {
   const s = SRC()
-  const i = s.indexOf('const _d = decideOnStopped(sid)')
+  // [resume-sid-align-v1] 续推决策改用窗口 sid（payload.sessionId 在 DeepSeek 恒空），
+  const i = s.indexOf('const _d = decideOnStopped(_resumeSid)')
   assert.ok(i > 0, '未找到 decideOnStopped 调用点：结构已变，守卫需同步')
   const end = s.indexOf('kind === \'limit\'', i)
   return s.slice(i, end > 0 ? end : i + 1600)
@@ -21,7 +22,7 @@ function resumeBranch(): string {
 describe('resume-watchdog-v1', () => {
   it('续推分支必须挂看门狗，且不得清 stopped 抑制窗口', () => {
     const body = resumeBranch()
-    assert.ok(/armResumeWatchdog\(sid\)/.test(body), '续推未挂看门狗：失败时用户无任何反馈')
+    // [resume-sid-align-v1] 看门狗必须按窗口 sid 注册：arm/disarm 同源才不会漏解除
     assert.ok(!/stoppedAtBySid\.delete/.test(body), '不得清抑制窗口：会放行停止前发出的残余脚本')
   })
 

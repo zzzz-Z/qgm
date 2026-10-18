@@ -201,7 +201,9 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     if (!isFromActiveAiSite(e)) return
     stopAiWaiting()
     // [resume-watchdog-v1] 任何非 stopped 的真实回复都说明续推已被响应
-    if (String(payload.kind || '') !== 'stopped') disarmResumeWatchdog(String(payload.sessionId || ''))
+    // [resume-sid-align-v1] 解除看门狗必须与 arm 侧同源（窗口 sid）：
+    //   arm 已改用窗口 sid 注册，disarm 若仍用 payload.sessionId（恒空）⇒ 看门狗永不解除 ⇒ 误报超时。
+    if (String(payload.kind || '') !== 'stopped') disarmResumeWatchdog(aiWindow.getActiveWinSid?.() || String(payload.sessionId || ''))
     const sid = String(payload.sessionId || '')
     // [loop-consolidation-P2] 摘除 routedToLoop：auto-loop 子系统零调用点，判定恒 false，
     //   分支已无意义（详见 docs/plan/loop-consolidation.md 段五 P2）。
@@ -219,23 +221,27 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       notifyStopped(payload.text)
       // [stop-resume-v1] 续推决策（stop-resume.ts 单一入口）：
       //   用户主动停 ⇒ 不续推（尊重意图）；平台自动停 ⇒ 续推（帮用户恢复），上限 MAX_AUTO_RESUME 次。
-      const _d = decideOnStopped(sid)
+      // [resume-sid-align-v1] 续推决策必须用**窗口 sid**（与 markUserStop / copyAndFill 同源）。
+      //   `sid` 是 payload.sessionId（URL hash 派生，DeepSeek 恒空）；两者混用会让
+      //   user-stop 标记永远消费不到、且空值被误判成用户停止（2026-10-18 实测）。
+      const _resumeSid = aiWindow.getActiveWinSid?.() || sid
+      const _d = decideOnStopped(_resumeSid)
       if (_d.resume) {
-        beginAutoResume(sid)
-        log.info('[stop-resume] 平台中断，自动续推', { sid })
+        beginAutoResume(_resumeSid)
+        log.info('[stop-resume] 平台中断，自动续推', { sid: _resumeSid })
         // 延迟 1.5s：等站点按钮/输入框状态稳定（停止后立即 fill 会与状态切换竞争）
         setTimeout(() => {
           void aiWindow
             .copyAndFill('继续', { skipRules: true })
             .then((r) => { if (r === 'failed') notifyResumeFailed() })
             .catch(() => notifyResumeFailed())
-            .finally(() => endAutoResume(sid))
+            .finally(() => endAutoResume(_resumeSid))
           // [resume-watchdog-v1] 续推后迟迟无任何回复 ⇒ 明确告知，不再静默干等。
           // [WHY] 续推的回复若落进 stopped 抑制窗口、或探针静默失效（选择器改版），
           //   用户看到的是「自动续推后页面毫无反应」；没有兜底提示就完全无从判断。
           // [CONSTRAINT] 只提示不改抑制逻辑——放行续推的 plain 会让「停止前发出、
           //   停止后到达」的残余脚本一起逃逸（stopped-no-autorun 守卫判据）。
-          armResumeWatchdog(sid)
+          armResumeWatchdog(_resumeSid)
         }, 1500)
       } else if (_d.reason === 'max-reached') {
         // 达上限：明确告知用户，不再静默
