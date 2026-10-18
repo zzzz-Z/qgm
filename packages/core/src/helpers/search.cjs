@@ -25,6 +25,49 @@ function createSearchApi(deps) {
   const _rcMem = {}
 
   /**
+   * [top-freq-v1] 按行匹配后聚合统计频次，等价 `grep | sort | uniq -c | sort -rn`。
+   *
+   * [WHY 不复用 grep] grep 返回平铺行记录且有 300 条上限、默认 skip `.ai-runner`，
+   *   做频次统计会同时失真与漏扫。本函数直接聚合，返回 `[{count, value}]`。
+   *
+   * @param {string|RegExp} pattern 行匹配正则
+   * @param {{dir?: string, files?: string[], ext?: string[], skip?: string[], limit?: number, maxScan?: number, keyOf?: Function}} [opts]
+   * @returns {Array<{count: number, value: string}>} 按频次降序
+   */
+  function topFreq(pattern, opts) {
+    opts = opts || {}
+    const re = pattern instanceof RegExp ? pattern : new RegExp(pattern)
+    const files = opts.files || S().walk(opts.dir || process.cwd(), {
+      ext: opts.ext || ['ts', 'tsx', 'vue', 'js', 'cjs', 'mjs', 'json', 'jsonl', 'md'],
+      skip: opts.skip || [],
+    })
+    const limit = opts.limit || 20
+    const maxScan = opts.maxScan || 200000
+    const keyOf = typeof opts.keyOf === 'function' ? opts.keyOf : line => line.trim()
+    const counter = new Map()
+    let scanned = 0
+    for (const f of files) {
+      if (scanned >= maxScan) break
+      let raw
+      try { raw = fs.readFileSync(f, 'utf8') } catch { continue }
+      if (typeof raw !== 'string') continue
+      const fl = raw.split(String.fromCharCode(10))
+      for (const line of fl) {
+        re.lastIndex = 0
+        if (!re.test(line)) continue
+        scanned++
+        const key = String(keyOf(line))
+        counter.set(key, (counter.get(key) || 0) + 1)
+        if (scanned >= maxScan) break
+      }
+    }
+    const arr = []
+    for (const [value, count] of counter) arr.push({ count, value })
+    arr.sort((a, b) => b.count - a.count)
+    return arr.slice(0, limit)
+  }
+
+  /**
    * 递归遍历目录，按扩展名与跳过清单过滤。
    *
    * [walk-ext-normalize-v1] opts.ext 自动去前导点（.ts → ts），防静默空匹配。
@@ -179,6 +222,7 @@ function createSearchApi(deps) {
   return {
     walk,
     grep,
+    topFreq,
     symbol,
     dumpCtx,
     template,

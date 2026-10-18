@@ -164,6 +164,8 @@ const __AI__ = {
   /** search 族（helpers/search.cjs）：检索 / 模板解析 / 读缓存。 */
   walk(dir, opts) { return searchApi.walk(dir, opts) },
   grep(pattern, opts) { return searchApi.grep(pattern, opts) },
+  /** [top-freq-v1] 聚合频次统计，等价 grep|sort|uniq -c|sort -rn。@param {string|RegExp} pattern @param {object} [opts] @returns {Array<{count:number,value:string}>} */
+  topFreq(pattern, opts) { return searchApi.topFreq(pattern, opts) },
   symbol(name, opts) { return searchApi.symbol(name, opts) },
   dumpCtx(file, line, n) { return searchApi.dumpCtx(file, line, n) },
   template(file) { return searchApi.template(file) },
