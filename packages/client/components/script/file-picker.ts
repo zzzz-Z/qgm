@@ -25,6 +25,37 @@ export interface PickerItem {
   title: string
 }
 
+/**
+ * [picker-match-score-v1] 匹配评分：分数越高越靠前，0 表示不匹配。
+ * [WHY] 原实现只做 `label.includes(q)` 后按「技能全在前、文件全在后」排列，
+ *   输入 `pb` 匹配不到 `prompt-builder.ts`（无词首缩写），且精确命中项可能被
+ *   `slice(0, 200)` 截掉 —— 用户看到的顺序与意图无关。
+ * [CONSTRAINT] 纯函数、无副作用，便于单测直接断言边界（空串 / 不匹配 / 各档位）。
+ * @param haystack 被搜索的文本（小写化由调用方保证）
+ * @param needle 查询词（已小写化、已 trim）
+ * @returns 评分；0 表示不匹配
+ */
+export function scoreMatch(haystack: string, needle: string): number {
+  if (!needle) return 1
+  const h = haystack.toLowerCase()
+  const q = needle.toLowerCase()
+  const idx = h.indexOf(q)
+  if (idx < 0) {
+    // [picker-acronym-v1] 词首缩写：pb → Prompt-Builder（取每个词的首字母）
+    const initials = h.split(/[/._-]+/).filter(Boolean).map(s => s[0]).join('')
+    if (initials.includes(q)) return 40
+    return 0
+  }
+  const segs = h.split(/[/._-]+/).filter(Boolean)
+  const base = h.split('/').pop() || h
+  // 完全相等 > 文件名前缀 > 任意段首 > 子串
+  if (h === q) return 100
+  if (base === q || base.replace(/\.[^.]+$/, '') === q) return 95
+  if (base.startsWith(q)) return 90
+  if (segs.some(s => s.startsWith(q))) return 80
+  return 50
+}
+
 interface UseFilePickerDeps {
   getCmView: () => import('@codemirror/view').EditorView | null
 }
@@ -57,21 +88,36 @@ export function useFilePicker(deps: UseFilePickerDeps) {
    * [CONSTRAINT] 技能优先于文件（同名场景下技能是更明确的意图）；各源独立截断，避免文件树挤掉技能。
    */
   const pickerFiltered = computed<PickerItem[]>(() => {
-    const q = pickerQuery.value.toLowerCase()
-    const fileItems: PickerItem[] = pickerFiles.value.map(p => ({
-      kind: 'file',
-      value: p,
-      label: p,
-      hint: '',
-      title: p,
-    }))
-    // [picker-skill-first-v1] 空 query 只列已装技能；输入后才并行搜文件与技能，
-    //   否则 200 条文件铺屏会把技能入口挤到看不见。
+    const q = pickerQuery.value.trim().toLowerCase()
+    const fileItems: PickerItem[] = pickerFiles.value.map((p) => {
+      // [picker-file-split-label-v1] label 只放文件名，目录放 hint：
+      //   深层路径（packages/client/components/script/prompt-builder.ts）整串当 label
+      //   会撑爆列表宽度，且文件名被挤到右边看不见。
+      const slash = p.lastIndexOf('/')
+      return {
+        kind: 'file' as const,
+        value: p,
+        label: slash >= 0 ? p.slice(slash + 1) : p,
+        hint: slash >= 0 ? p.slice(0, slash) : '',
+        title: p,
+      }
+    })
+    // [picker-skill-first-v1] 空 query 只列已装技能；输入后才并行搜文件与技能。
     if (!q) return [...pickerSkills.value]
-    const all = [...pickerSkills.value, ...fileItems]
-    return all
-      .filter(it => it.label.toLowerCase().includes(q) || it.hint.toLowerCase().includes(q))
-      .slice(0, 200)
+
+    // [picker-match-score-v1] 按匹配质量排序，而非「技能全在前」：
+    //   分数高者优先；同分时技能优先（更明确的意图），再按 label 字典序稳定。
+    const scored: Array<{ it: PickerItem, score: number }> = []
+    for (const it of [...pickerSkills.value, ...fileItems]) {
+      const s = Math.max(scoreMatch(it.label, q), scoreMatch(it.title, q))
+      if (s > 0) scored.push({ it, score: s })
+    }
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      if (a.it.kind !== b.it.kind) return a.it.kind === 'skill' ? -1 : 1
+      return a.it.label.localeCompare(b.it.label)
+    })
+    return scored.slice(0, 200).map(s => s.it)
   })
 
   async function pickerLoadFiles() {
@@ -107,8 +153,9 @@ export function useFilePicker(deps: UseFilePickerDeps) {
         return {
           kind: 'skill' as const,
           value: `${SKILL_PICK_PREFIX}${s.name}`,
-          label: rel,
-          hint: desc.slice(0, 120),
+          // [picker-skill-label-v1] 与文件项对齐：label 只放技能名，路径进 hint 前缀
+          label: s.name,
+          hint: `技能 · ${desc.slice(0, 110)}`,
           title: `${s.name}${desc ? ` · ${desc}` : ''}\n${rel}`,
         }
       })

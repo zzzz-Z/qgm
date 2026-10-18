@@ -3401,3 +3401,24 @@ mtimeMs2: 1792290162290.999
 ## 改返回类型时先 grep 调用方
 
 `matchSkills` 从 `Promise<MatchedSkill[]>` 改为 `Promise<SkillMatchResult>`，先 grep 确认只有 `buildSkillsBlock` 一个调用方、且 `packages/client/tests` 下零测试覆盖。如果贸然改，会连带多处报错。
+
+## 断言要先对齐实现的真实语义，而不是自己的期待
+
+我给「路径段首 80」这条写了两条断言：
+
+js复制下载```
+assert.equal(scoreMatch(DEEP, 'script'), 80)
+assert.ok(scoreMatch(DEEP, 'script') > scoreMatch(DEEP, 'components'))  // ← 错
+```
+
+第二条立刻红了——`script` 和 `components` 都是路径段首，同为 80 分。`scoreMatch` 的设计是六档评分，不含「段位置敏感」，因为对 `@` 选择器没有可论证的收益（输入 `script` 时 `prompt-builder.ts` 与 `script.ts` 谁更该排前，取决于用户意图而非路径深度）。
+
+改成 `assert.equal(...)` 断言两者相等，并在注释里写清为什么不做位置敏感。
+
+## lint 的 exit code 与输出可能不一致
+
+查 `file-picker.ts` 的 lint 时先看到 `2 errors potentially fixable`，下一轮重跑却是 `EXIT=0` 且无任何输出。不要凭一次输出就断言状态——重跑一次拿到干净的退出码，再结合 `readText` 确认改动仍在磁盘上，三者一致才算定论。
+
+## 改动落在构建之后必须重建
+
+`11:00:47` 那次构建完成后，我又改了技能项的 `label`/`hint`。如果不重新构建，prod 上跑的仍是旧行为。判断依据是产物 mtime vs 改动时间，而不是「我记得刚才构建过」。

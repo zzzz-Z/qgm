@@ -274,12 +274,15 @@ html[data-theme='dark'] .editor.card {
   color: var(--text-3);
 }
 .fp-item-label {
-  flex: 0 0 auto;
+  /* [picker-label-shrink-v1] 允许收缩：label 已是纯文件名，长名不得把目录 hint 挤出可视区 */
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .fp-item-hint {
+  /* [picker-hint-floor-v1] 目录 hint 保底可见：多个同名文件（两个 index.ts）只能靠它区分 */
   flex: 1 1 auto;
+  min-width: 72px;
   min-width: 0;
   color: var(--text-3);
   font-size: 11px;
