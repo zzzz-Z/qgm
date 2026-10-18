@@ -265,6 +265,16 @@ export function clickNewSessionInPage() {
   return false
 }
 
+/** [poll-diag-v1] poll 眼中的页面状态快照（排查「SSE 有内容但 detectReplyInPage 读不到」） */
+export function collectPageDiagInPage() {
+  return {
+    url: location.href,
+    asst: document.querySelectorAll('.ds-assistant-message-main-content').length,
+    msg: document.querySelectorAll('.ds-message').length,
+    bodyLen: (document.body.textContent || '').length,
+  }
+}
+
 export function detectLoginStateInPage(cfg = {}) {
   const sel = cfg.login || {}
   const tokenKey = sel.tokenStorageKey || 'userToken'

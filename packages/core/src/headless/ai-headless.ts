@@ -3,6 +3,8 @@
 import fs from 'node:fs'
 import { resolveBrowserEngine } from './browser-engine.js'
 import { clickNewSessionInPage, detectLoginStateInPage, detectReplyInPage, resetReplyDedupInPage, stopGeneratingInPage, verifyFillSentInPage } from './headless-inject.js'
+// [poll-diag-v1] poll 页面状态快照（DOM API 需在浏览器上下文函数里，不能在 Node 侧内联）
+import { collectPageDiagInPage } from './headless-fill.js'
 
 // [headless-types-reexport-v1] 类型声明已抽到 headless-types.ts；此处 re-export 保持对外 API 兼容
 import type { HeadlessOptions, HeadlessPool, HeadlessReply, HeadlessSession } from './headless-types.js'
@@ -586,9 +588,22 @@ export function createHeadlessPool(opts: HeadlessOptions = {}): HeadlessPool {
         running = true
         try {
           const streamError = completionErrors.get(sid)
-          const reply = streamError
-            ? (completionErrors.delete(sid), { kind: 'error', text: streamError })
-            : await page.evaluate(detectReplyInPage, { generatingSelector: adapter.selectors.generatingSelector })
+          // [poll-diag-v1] SSE 有内容但 poll 恒返回 null 时，唯一能区分「页面不对」与「选择器失效」
+          //   的办法是把 poll 眼中的页面状态记下来：url / assistant 块数 / body 长度。
+          //   原实现零观测，导致这类问题只能靠猜（实测绕了十几轮）。
+          let reply: unknown = null
+          if (streamError) {
+            completionErrors.delete(sid)
+            reply = { kind: 'error', text: streamError }
+          } else {
+            reply = await page.evaluate(detectReplyInPage, { generatingSelector: adapter.selectors.generatingSelector })
+            if (!reply || typeof reply !== 'object' || !(reply as { kind?: string }).kind) {
+              const diag = await page.evaluate(collectPageDiagInPage).catch(() => null)
+              if (diag && (diag as { asst: number }).asst > 0) {
+                try { writeChannelLog('headless', { kind: 'poll-miss', sid, ...diag }) } catch { /* swallow */ }
+              }
+            }
+          }
           if (!stopped && reply && typeof reply === 'object' && (reply as { kind?: string }).kind) {
             alerted = false
             // [reply-error-visible-v1] busy / rate 两类 error 来自页面文案扫描（detectReplyInPage），
