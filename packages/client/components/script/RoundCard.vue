@@ -63,9 +63,15 @@ const isAskActive = computed(() => {
   return askState.value.id === c.askId
 })
 
+// [ask-hotkey-v2] 只在 ASK 活跃期挂监听：失效/已回答即撤，避免长期占用全局数字键。
+watch(isAskActive, (active) => {
+  if (typeof window === 'undefined') return
+  if (active) window.addEventListener('keydown', onKeydown)
+  else window.removeEventListener('keydown', onKeydown)
+}, { immediate: true })
+
 // [ui-p2c-render-probe-v1] mount/update 各打一次；判据①用 update delta 算单事件重渲染卡数
 onMounted(() => probeRender(`rc:${props.card.key}`, 'mount'))
-onMounted(() => { if (typeof window !== 'undefined') window.addEventListener('keydown', onKeydown) })
 onUpdated(() => probeRender(`rc:${props.card.key}`, 'update'))
 onBeforeUnmount(() => { if (typeof window !== 'undefined') window.removeEventListener('keydown', onKeydown) })
 
@@ -76,8 +82,12 @@ onBeforeUnmount(() => { if (typeof window !== 'undefined') window.removeEventLis
 function onKeydown(e: KeyboardEvent): void {
   if (!isAskActive.value) return
   if (!qCard.value.options.length) return
-  const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase()
-  if (tag === 'input' || tag === 'textarea') return
+  // [ask-hotkey-v2] 排除所有可编辑区域：input / textarea / contenteditable。
+  //   [WHY] 原实现只排除 input/textarea，导致 contenteditable 编辑器（CodeMirror 等）
+  //   里打字时数字键被全局监听吞掉（用户实测无法输入数字）。
+  const el = e.target as HTMLElement | null
+  const tag = el?.tagName?.toLowerCase()
+  if (tag === 'input' || tag === 'textarea' || el?.isContentEditable === true) return
   const n = Number(e.key)
   if (!Number.isInteger(n) || n < 1 || n > qCard.value.options.length) return
   e.preventDefault()
