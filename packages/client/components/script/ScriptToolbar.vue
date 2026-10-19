@@ -43,7 +43,7 @@ const emit = defineEmits<{
 
     <!-- [stop-btn-loop-only-v1] 停止按钮只在「有活可停」时显示：running / aiWaiting / delivering / remoteGenerating。
          去掉 autoTakeoverEnabled —— 它只是开关状态，不代表有任务在跑（用户实测「总结后按钮还在」）。
-         接管开着但空闲时显示「开始」按钮，点击即关闭接管（合理：空闲时点它 = 收工）。
+         接管开着但空闲时显示「发送」按钮，点击 = 再发一次（不回关接管）。
          [pause-really-stops-v1] 两态：未运行 .takeover 蓝（开始）/ 运行中 .pause 琥珀（停止）。
           守卫见 tests/toolbar-ctrl-colors.node-test.ts -->
     <button
@@ -64,8 +64,8 @@ const emit = defineEmits<{
     </button>
     <button
       v-else
-      v-tooltip="'开始：执行当前脚本，随后自动把结果发 AI 并执行下一轮'"
-      aria-label="开始循环"
+      v-tooltip="'发送：执行当前内容并发给 AI，AI 回填后自动执行下一轮'"
+      aria-label="发送"
       class="primary-btn takeover head-run"
       :class="{ 'is-waiting': aiWaiting || delivering }"
       :aria-busy="aiWaiting || delivering"

@@ -183,29 +183,15 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
 
   /** 切换 Auto Takeover：开→立即执行当前脚本；关→取消待发执行 */
   function toggleAutoTakeover(): void {
-    if (autoTakeoverEnabled.value) {
-      disableAutoTakeover()
-      cancelAutoRun()
-      toast('已关闭自动接管', 'info', TOAST_DEFAULT)
-    } else {
-      if (!script.value.trim()) {
-        toast('请先在输入提问再开启接管', 'warn', TOAST_DEFAULT)
-        return
-      }
-      enableAutoTakeover()
-      // [toast-race-fix-v1] 原实现在 runSmart 之前就 toast「已开启」，若 runSmart 失败会再弹一条
-      //   「发送失败」，两条堆叠用户容易漏看后一条（实测「点了没反应」）。
-      //   改为：先执行，成功后才提示「已开启」。
-      void (async () => {
-        try {
-          await runSmart()
-          toast('已开启自动接管：已发送当前内容，AI 回填后自动执行', 'success', TOAST_LONG)
-        } catch (e) {
-          // runSmart 内部已 toast 具体失败原因，这里只补充接管状态
-          toast('自动接管已开启，但本次发送失败（见上方提示）', 'warn', TOAST_LONG)
-        }
-      })()
+    // [send-is-takeover-v1] 「发送」本身就是接管动作：每次点击都发送当前内容 + 确保接管开启。
+    //   [WHY] 原实现在 autoTakeoverEnabled=true 时点击走「关闭接管」分支——用户在接管中想发新内容，
+    //   点按钮却关掉了接管（实测困惑）。现在：接管一旦开着就不再自动关，关闭留给停止按钮 / 空闲时的显式操作。
+    if (!script.value.trim()) {
+      toast('请先在输入提问再发送', 'warn', TOAST_DEFAULT)
+      return
     }
+    if (!autoTakeoverEnabled.value) enableAutoTakeover()
+    void runSmart()
   }
 
   /**
