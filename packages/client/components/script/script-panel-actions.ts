@@ -153,7 +153,8 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
   async function runSmart(): Promise<void> {
     const rawScript = script.value.trim()
     if (!rawScript) {
-      toast('请先在编辑器写内容再发送', 'warn', TOAST_DEFAULT)
+      // [empty-toast-v2] 统一措辞覆盖两种场景：首次未输入 / 发送成功后被清空
+      toast('编辑器为空——请先输入内容再发送', 'warn', TOAST_DEFAULT)
       return
     }
     const text = attachedFiles.value.length
