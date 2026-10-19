@@ -116,6 +116,7 @@ const __AI__ = {
   getChangedFiles() { return fsApi.getChangedFiles() },
   getProjectRoot() { return fsApi.getProjectRoot() },
   atomicWrite(file, content) { return fsApi.atomicWrite(file, content) },
+  affectedTests(changedFiles, opts) { return fsApi.affectedTests(changedFiles, opts) },
 
   /** output 族（helpers/output.cjs）：语义输出 / 退出协议 / 断言。 */
   log(...args) { return outputApi.log(...args) },
@@ -167,6 +168,9 @@ const __AI__ = {
   /** [top-freq-v1] 聚合频次统计，等价 grep|sort|uniq -c|sort -rn。@param {string|RegExp} pattern @param {object} [opts] @returns {Array<{count:number,value:string}>} */
   topFreq(pattern, opts) { return searchApi.topFreq(pattern, opts) },
   symbol(name, opts) { return searchApi.symbol(name, opts) },
+  findDefinition(name, opts) { return searchApi.findDefinition(name, opts) },
+  findReferences(name, opts) { return searchApi.findReferences(name, opts) },
+  renameSymbol(name, newName, opts) { return searchApi.renameSymbol(name, newName, opts) },
   dumpCtx(file, line, n) { return searchApi.dumpCtx(file, line, n) },
   template(file) { return searchApi.template(file) },
   usedInTemplate(file, names) { return searchApi.usedInTemplate(file, names) },
@@ -204,7 +208,7 @@ outputApi = createOutputApi({ self: () => __AI__, c: _c })
 
 patchApi = createPatchApi({ self: () => __AI__, changelog: _changelog, anchorReport: _anchorReport })
 
-fsApi = createFsApi({ safeReaddir, globToRe, changelog: _changelog })
+fsApi = createFsApi({ self: () => __AI__, safeReaddir, globToRe, changelog: _changelog })
 
 lintApi = createLintApi({ binPath: _binPath, execBin: _execBin })
 

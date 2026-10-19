@@ -132,6 +132,77 @@ function createSearchApi(deps) {
    * @param {object} [opts] 同 grep
    * @returns {Array<{file: string, line: number, text: string}>} 命中的行记录列表
    */
+  /**
+   * [symbol-semantic-v1] 定义位置检索：按语言常见声明形态匹配 name 的声明点。
+   * [WHY] 既有 symbol() 只做 \bname\b 文本匹配，无法区分声明与引用；多文件重构需要定义点。
+   * [CONSTRAINT] 纯正则轻量索引，不做 AST/LSP；宁可多报可疑点也不漏报。
+   * @param {string} name 符号名
+   * @param {{dir?: string, ext?: string[]|string, limit?: number}} [opts]
+   * @returns {{file: string, line: number, text: string, kind: string}[]}
+   */
+  function findDefinition(name, opts) {
+    const o = opts || {}
+    const n = esc(name)
+    const pats = [
+      { kind: 'function', re: new RegExp(`(^|[^\\w$.])(?:async\\s+)?function\\s+${n}\\s*\\(`) },
+      { kind: 'class', re: new RegExp(`(^|[^\\w$.])class\\s+${n}\\b`) },
+      { kind: 'const', re: new RegExp(`(^|[^\\w$.])(?:const|let|var)\\s+${n}\\s*=`) },
+      { kind: 'interface', re: new RegExp(`(^|[^\\w$.])interface\\s+${n}\\b`) },
+      { kind: 'type', re: new RegExp(`(^|[^\\w$.])type\\s+${n}\\s*=`) },
+    ]
+    const files = S().walk(o.dir || process.cwd(), { ext: o.ext || ['.ts', '.tsx', '.js', '.cjs', '.mjs', '.vue'] })
+    const limit = typeof o.limit === 'number' ? o.limit : 200
+    const out = []
+    for (const f of files) {
+      let txt
+      try { txt = fs.readFileSync(f, 'utf8') } catch { continue }
+      const lines = txt.split(String.fromCharCode(10))
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
+        if (!line.includes(name)) continue
+        for (const p of pats) {
+          if (p.re.test(line)) { out.push({ file: f, line: i + 1, text: line.trim().slice(0, 200), kind: p.kind }); break }
+        }
+        if (out.length >= limit) return out
+      }
+    }
+    return out
+  }
+
+  /**
+   * [symbol-semantic-v1] 引用检索：grep 全词匹配 + 标注是否定义行。
+   * @param {string} name 符号名
+   * @param {{dir?: string, ext?: string[]|string, limit?: number}} [opts]
+   * @returns {{file: string, line: number, text: string, isDef: boolean}[]}
+   */
+  function findReferences(name, opts) {
+    const normFile = f => path.resolve(f)
+    const defs = findDefinition(name, Object.assign({ limit: 500 }, opts || {}))
+    const defSet = new Set(defs.map(d => `${normFile(d.file)}:${d.line}`))
+    const hits = S().grep(new RegExp(`\\b${esc(name)}\\b`), opts || {})
+    const out = []
+    for (const h of hits) {
+      const key = `${normFile(h.file)}:${h.line}`
+      out.push({ file: h.file, line: h.line, text: h.text, isDef: defSet.has(key) })
+    }
+    return out
+  }
+
+  /**
+   * [symbol-semantic-v1] 重命名预演：收集引用并生成替换计划，不落盘。
+   * [WHY] 落盘语义归 patchFile/overlay；此处只产出计划，避免绕过原子写与审计漏斗。
+   * @param {string} name 旧名
+   * @param {string} newName 新名
+   * @param {{dir?: string, ext?: string[]|string, limit?: number}} [opts]
+   * @returns {{changes: {file: string, line: number, text: string, isDef: boolean}[], total: number}}
+   */
+  function renameSymbol(name, newName, opts) {
+    if (!newName || typeof newName !== 'string') throw new Error('renameSymbol: newName required')
+    if (!/^[A-Z_$][\w$]*$/i.test(newName)) throw new Error('renameSymbol: newName must be a valid identifier')
+    const refs = findReferences(name, opts)
+    return { changes: refs, total: refs.length }
+  }
+
   function symbol(name, opts) {
     const re = new RegExp(`\\b${esc(name)}\\b`)
     return S().grep(re, opts)
@@ -224,6 +295,9 @@ function createSearchApi(deps) {
     grep,
     topFreq,
     symbol,
+    findDefinition,
+    findReferences,
+    renameSymbol,
     dumpCtx,
     template,
     usedInTemplate,

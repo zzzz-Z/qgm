@@ -214,6 +214,8 @@
   - `syntaxCheck(code, filename)` —— **仅 CJS/JS**（vm.Script）：不支持 `.vue` SFC；`.ts`/`.tsx`/`.mjs` 或源码含 `import`/`export` 时返回 `code:'UNSUPPORTED_LANG'`（**能力边界不是语法错误**，改用 `lint([file])` / `typeCheck()`）。第 1 参必须是源码字符串（非路径）。
   - `shell` 收字符串形态时**不做 shell 解析**：含 `| & ; > < $ ( ) * ? ~` 或引号直接返回 `SHELL_METACHAR_UNSUPPORTED` ⇒ 需要 shell 语义显式写 `await __AI__.shell(['sh','-c','ls | grep x'])`；危险命令 `rm -rf`/`git push -f`/`git reset --hard`/`sudo` 等命中 `SECURITY_BLOCKED`，危险串出现在不可执行位置（如 grep 模式）不拦。
   - `flush()` —— **仅 overlay 沙箱内有效**；`writeText` 只进 overlay，轮末 `exit 0` 才落盘；而 `shell`/`exec`/`lint`/`typeCheck` 起的都是**真子进程、读真盘**，看不见本轮写入 ⇒ 子进程要校验本轮产物时**先 `await __AI__.flush()`**。代价：flush 之后本轮若再失败不再回滚（与人工保存同语义）。
+  - **符号语义层（`symbol-semantic-v1`）**：`findDefinition(name, opts?)` → 声明点（`{file,line,text,kind}`，kind ∈ function/class/const/interface/type）；`findReferences(name, opts?)` → 全词引用并标 isDef 字段；`renameSymbol(name, newName, opts?)` → **只产出替换计划不落盘**（落盘走 `patchFile`/`replaceInFile`，避免绕过 overlay 原子写与审计漏斗）。三者均为正则轻量索引，非 AST/LSP，`.ts/.tsx/.js/.cjs/.mjs/.vue` 默认覆盖。
+  - **受影响测试发现（`affected-tests-v1`）**：`affectedTests(changedFiles, opts?)` → `{tests, matched, total}`；双通道（静态 import 传递闭包 + 文本路径字面量，支持 `.js`→`.ts` 后缀映射），用于改完只跑受影响子集而非全量。
 
 **后台长任务（>180s / 流式输出）**：`await __AI__.shell(cmd, {background:true})` 立即返回 `{ok:true,background:true,id,pid,logPath}`（detached，不阻塞 `/run`，绕开 180s SIGTERM）。跨轮用 `shellStatus(id)` / `readShell(id, {from})`（按字节偏移取增量，返回 `{text,next,done}`）/ `killShell(id)` 管控。子进程退出会自写 `[@shell-done exit=N …]` 哨兵——`done:true` 即结束。`BG_ID=<id>` 自动打到 stdout 供前端秒级流式上屏（AI **不需要** `readShell` 再打印；收口判断仍须 `shellStatus(id)`）。
 

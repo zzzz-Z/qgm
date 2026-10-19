@@ -19,7 +19,9 @@ const path = require('node:path')
  * @returns {{readFiles: Function, getChangedFiles: Function, getProjectRoot: Function, atomicWrite: Function}}
  */
 function createFsApi(deps) {
-  const { safeReaddir, globToRe, changelog: _changelog } = deps
+  const { self, safeReaddir, globToRe, changelog: _changelog } = deps
+  /** [affected-tests-v1] 门面自引用：walk 属 search 族，经 self 取避免反向 require。 */
+  const S = () => self()
 
   /**
    * [read-files-v1] 按 glob 遍历 cwd，跳过点开头目录与 node_modules。
@@ -81,7 +83,110 @@ function createFsApi(deps) {
     return true
   }
 
-  return { readFiles, getChangedFiles, getProjectRoot, atomicWrite }
+  /**
+   * [affected-tests-v1] 受影响测试发现：按 import 图与路径字面量反查应跑的测试文件。
+   * [WHY] 改完源码只知道跑全量（145 个测试文件）反馈太慢；精准跑子集是主流编程智能体的基本能力。
+   * [CONSTRAINT] 双通道（静态 import 相对路径 + 文本里的 src/ 路径字面量），因为部分测试用
+   *   createRequire + 拼接路径装载，纯静态 import 图会漏。两通道合并去重。
+   * @param {string[]} changedFiles 改动文件（绝对或相对均可）
+   * @param {{testsDir?: string, srcDir?: string, ext?: string[]|string}} [opts]
+   * @returns {{tests: string[], matched: {test: string, reason: string, via: string}[], total: number}}
+   */
+  function affectedTests(changedFiles, opts) {
+    const o = opts || {}
+    const cwd = process.cwd()
+    const testsDir = o.testsDir || 'packages/core/tests'
+    const srcDir = o.srcDir || 'packages/core/src'
+    const norm = p => path.relative(cwd, path.resolve(cwd, p)).replace(/\\/g, '/')
+    const noExt = p => p.replace(/\.(ts|tsx|js|cjs|mjs)$/, '')
+    const changedFull = new Set((changedFiles || []).map(p => norm(p)))
+    const changed = new Set((changedFiles || []).map(p => noExt(norm(p))))
+
+    /** 解析候选后缀，返回真实存在的文件路径；不存在返回 null。 */
+    const resolveExt = (base) => {
+      const cands = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.cjs`, `${base}.mjs`, `${base}/index.ts`, `${base}/index.cjs`]
+      const stripped = base.replace(/\.(js|mjs)$/, '')
+      if (stripped !== base) cands.unshift(`${stripped}.ts`, `${stripped}.tsx`)
+      for (const p0 of cands) {
+        try { if (fs.statSync(path.resolve(cwd, p0)).isFile()) return norm(path.resolve(cwd, p0)) } catch {}
+      }
+      return null
+    }
+    /** 从一行里抽出被引用的模块路径；无则返回空串。零正则，避免多层转义。 */
+    const specOf = (line) => {
+      const keys = ['require(', 'from ', 'import ']
+      for (const k of keys) {
+        const i = line.indexOf(k)
+        if (i < 0) continue
+        const rest = line.slice(i + k.length)
+        const q1 = rest.indexOf(String.fromCharCode(39))
+        const q2 = rest.indexOf(String.fromCharCode(34))
+        const qi = q1 < 0 ? q2 : (q2 < 0 ? q1 : Math.min(q1, q2))
+        if (qi < 0) continue
+        const qc = rest[qi]
+        const end2 = rest.indexOf(qc, qi + 1)
+        if (end2 < 0) continue
+        return rest.slice(qi + 1, end2)
+      }
+      return ''
+    }
+
+    /** 展开单个文件的直接依赖（相对 import/require），返回归一化路径集。 */
+    const depsOf = (file) => {
+      const out = new Set()
+      let txt
+      try { txt = fs.readFileSync(path.resolve(cwd, file), 'utf8') } catch { return out }
+      for (const line of txt.split(String.fromCharCode(10))) {
+        if (!line.includes('require') && !line.includes('import')) continue
+        const spec = specOf(line)
+        if (!spec || spec[0] !== '.') continue
+        const base = path.dirname(path.resolve(cwd, file))
+        const r = resolveExt(norm(path.resolve(base, spec)))
+        if (r) out.add(r)
+      }
+      return out
+    }
+    /** 传递闭包：BFS 展开至深度 3，覆盖 barrel 两跳。 */
+    const closureOf = (test) => {
+      const seen = new Set()
+      let frontier = [test]
+      for (let depth = 0; depth < 3; depth++) {
+        const next = []
+        for (const f of frontier) {
+          for (const d of depsOf(f)) {
+            if (seen.has(d)) continue
+            seen.add(d)
+            next.push(d)
+          }
+        }
+        frontier = next
+      }
+      return seen
+    }
+
+    const tests = S().walk(testsDir, { ext: o.ext || ['.ts', '.mts', '.js'] })
+    const out = []
+    const seen = new Set()
+    for (const t of tests) {
+      const tNorm = norm(t)
+      const txt = fs.readFileSync(t, 'utf8')
+      let hit = null
+      for (const c of changedFull) {
+        const rel = path.relative(path.dirname(path.resolve(cwd, tNorm)), path.resolve(cwd, c)).replace(/\\/g, '/')
+        if (txt.includes(c) || txt.includes(rel)) { hit = { test: tNorm, reason: c, via: 'literal' }; break }
+      }
+      if (!hit) {
+        const clos = new Set([...closureOf(tNorm)].map(noExt))
+        for (const c of changed) {
+          if (clos.has(c)) { hit = { test: tNorm, reason: c, via: 'import' }; break }
+        }
+      }
+      if (hit && !seen.has(hit.test)) { seen.add(hit.test); out.push(hit) }
+    }
+    return { tests: out.map(x => x.test), matched: out, total: out.length }
+  }
+
+  return { readFiles, getChangedFiles, getProjectRoot, atomicWrite, affectedTests }
 }
 
 module.exports = { createFsApi }
