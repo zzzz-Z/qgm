@@ -186,7 +186,31 @@ function createFsApi(deps) {
     return { tests: out.map(x => x.test), matched: out, total: out.length }
   }
 
-  return { readFiles, getChangedFiles, getProjectRoot, atomicWrite, affectedTests }
+  /**
+   * [reflect-v1] 结构化反思：聚合变更集 / 受影响测试 / 看板状态，产出可执行判断。
+   * [WHY] 差异不在「能改代码」，而在「改完知道自己漏了什么」；把静默失效变显式风险。
+   * @param {{board?: {failed?: number, todo?: number, running?: number}, testsRun?: string[]}} [opts]
+   *   board 由调用方传入（reflect 不发起网络请求，保持纯函数）；testsRun 是本轮已跑测试。
+   * @returns {{changed: string[], shouldTest: string[], untested: string[], risks: {kind: string, detail: string}[], nextStep: string}}
+   */
+  function reflect(opts) {
+    const o = opts || {}
+    const changed = getChangedFiles()
+    const shouldTest = changed.length ? affectedTests(changed).tests : []
+    const ran = new Set(o.testsRun || [])
+    const untested = shouldTest.filter(t => !ran.has(t))
+    const risks = []
+    if (untested.length) risks.push({ kind: 'untested', detail: `${untested.length} 个受影响测试未跑` })
+    if (o.board && o.board.failed > 0) risks.push({ kind: 'board-failed', detail: `${o.board.failed} 个看板项失败` })
+    if (o.board && o.board.running > 0) risks.push({ kind: 'board-running', detail: '仍有任务 running 未收口' })
+    if (!changed.length) risks.push({ kind: 'no-change', detail: '变更集为空' })
+    let nextStep = '无风险项，可收尾'
+    if (untested.length) nextStep = `先跑受影响测试：${untested.slice(0, 3).join(', ')}`
+    else if (risks.some(r => r.kind === 'board-failed')) nextStep = '处理看板失败项后再声明完成'
+    else if (risks.some(r => r.kind === 'no-change')) nextStep = '确认 AI_RUNNER_CHANGED 注入'
+    return { changed, shouldTest, untested, risks, nextStep }
+  }
+  return { readFiles, getChangedFiles, getProjectRoot, atomicWrite, affectedTests, reflect }
 }
 
 module.exports = { createFsApi }

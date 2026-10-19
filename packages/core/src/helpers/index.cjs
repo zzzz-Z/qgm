@@ -117,6 +117,7 @@ const __AI__ = {
   getProjectRoot() { return fsApi.getProjectRoot() },
   atomicWrite(file, content) { return fsApi.atomicWrite(file, content) },
   affectedTests(changedFiles, opts) { return fsApi.affectedTests(changedFiles, opts) },
+  reflect(opts) { return fsApi.reflect(opts) },
 
   /** output 族（helpers/output.cjs）：语义输出 / 退出协议 / 断言。 */
   log(...args) { return outputApi.log(...args) },
