@@ -1,7 +1,7 @@
 import { promiseTimeout } from '@vueuse/core'
 // [key-composite-v1] modelIdFromSid 用于把「当前激活窗口 sid」还原成站点 id，
 //   与 winSidOf 互逆；切工作区换 activeWinSid 时首问键必须按窗口实际站点记，不能再取全局 modelId。
-import { currentSiteUrl, modelIdFromSid, url } from './useAiSite'
+import { currentSiteUrl, modelIdFromSid, url, useAiSite } from './useAiSite'
 // [loop-consolidation-P3d] 拼装逻辑抽到 first-prompt.ts（独立职责 + 稳定测试落点）
 import { prependFirstPromptRules } from './first-prompt.js'
 // [at-ref-expand-v1] @ 引用展开（编辑插标记 / 提交时展开）
@@ -146,7 +146,8 @@ function markRulesInjected(sid: string): void {
       //   切工作区换 activeWinSid 后全局 modelId 可能仍是旧值 → 取全局会串键。
       const curModel = modelIdFromSid(getActiveWinSid())
       if (wsId) {
-        const ok = await w.setFirstPromptSent(wsId, curModel, true)
+        // [first-prompt-session-v1] 传当前会话 ID：换会话后判据能识别「会话变了需重注入」
+        const ok = await w.setFirstPromptSent(wsId, curModel, true, String(useAiSite().sessionId.value || ''))
         if (!ok) log.warn('[markRulesInjected] firstPromptSent 写入失败 wsId=', wsId)
       } else {
         log.warn('[markRulesInjected] activeId 未就绪，工作区维度去重未登记')
@@ -411,7 +412,14 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
       // [site-from-sid-v1] 用 activeWinSid 反推：发问发生在「当前激活窗口」上，键必须与该窗口站点一致。
       const curModel = modelIdFromSid(getActiveWinSid())
       if (wsId) {
-        if (await w.getFirstPromptSent(wsId, curModel)) wsSent = true
+        // [first-prompt-session-v1] wsSent 改为「已发 + 会话一致」：
+        //   [WHY] 原判据 `if (await ...)` 在返回对象后恒 truthy（对象恒真）→ wsSent 永远 true。
+        //   且无头通道换会话后，同一工作区不同会话应重新注入（新会话历史里没有 SYSTEM.md）。
+        //   [CONSTRAINT] sessionId 为空（旧数据 / 首次）⇒ 保守视为「已发」（保持旧行为）。
+        const r = await w.getFirstPromptSent(wsId, curModel)
+        // [first-prompt-session-v1] 用 useAiSite().sessionId（已 import，零新依赖）
+        const curSid = String(useAiSite().sessionId.value || '')
+        if (r.sent && (!r.sessionId || r.sessionId === curSid)) wsSent = true
       }
     } catch { /* 未就绪：wsSent=false，走窗口维度 */ }
     // [chat-first-no-rules-v1] skipRules=true 用于纯聊天首问（"开始聊天"）：不注入 SYSTEM.md，

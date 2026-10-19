@@ -188,24 +188,28 @@ async function setSession(id: string, session: SetSessionPayload): Promise<boole
  * [first-prompt-persist-v1] 读某工作区是否已发过带规则首问。
  * [CONSTRAINT] 服务端不可达 / 未记录一律返回 false（保守：视为该发规则）。
  */
-async function getFirstPromptSent(id: string, modelId?: string): Promise<boolean> {
+// [first-prompt-session-v1] 返回 sent + sessionId 双字段：sessionId 让调用方判断「同一工作区不同会话」
+async function getFirstPromptSent(id: string, modelId?: string): Promise<{ sent: boolean, sessionId: string }> {
   try {
     // [key-composite-v1] 首问标记按 (工作区, 服务商) 复合维度：切服务商读独立键，避免跨站串状态
     const q = `id=${encodeURIComponent(id)}${modelId ? `&model=${encodeURIComponent(modelId)}` : ''}`
     const r = await fetch(`/__ai/workspace/first-prompt?${q}`)
-    if (!r.ok) return false
-    const j = await r.json().catch(() => null) as { ok?: boolean, sent?: boolean } | null
-    return j?.sent === true
-  } catch { return false }
+    if (!r.ok) return { sent: false, sessionId: '' }
+    const j = await r.json().catch(() => null) as { ok?: boolean, sent?: boolean, sessionId?: string } | null
+    return { sent: j?.sent === true, sessionId: String(j?.sessionId || '') }
+  } catch { return { sent: false, sessionId: '' } }
 }
 
 /**
  * [first-prompt-persist-v1] 写某工作区首问状态。
  * [CONSTRAINT] 失败静默（不阻断 copyAndFill）；服务端会在工作区不存在时返回 404。
  */
-async function setFirstPromptSent(id: string, modelId: string | undefined, sent: boolean): Promise<boolean> {
+// [first-prompt-session-v1] 透传 sessionId：记录「在哪个会话发的」，供前端判断会话维度去重
+async function setFirstPromptSent(id: string, modelId: string | undefined, sent: boolean, sessionId?: string): Promise<boolean> {
   try {
-    const r = await fetch('/__ai/workspace/first-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, model: modelId || '', sent }) })
+    const body: Record<string, unknown> = { id, model: modelId || '', sent }
+    if (sessionId) body.sessionId = sessionId
+    const r = await fetch('/__ai/workspace/first-prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
     return r.ok
   } catch { return false }
 }

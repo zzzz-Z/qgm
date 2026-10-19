@@ -10,6 +10,7 @@ import {
   getActiveWorkspaceId,
   getWorkspace,
   getWorkspaceFirstPromptSent,
+  getWorkspaceFirstPromptSession,
   getWorkspaces,
   getWorkspaceSession,
   getWorkspaceSessions,
@@ -314,7 +315,12 @@ workspaceHono.get('/workspace/first-prompt', (c) => {
   if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
   // [key-composite-v1] model 可选：复合键 <wsId>::<modelId>；缺省时退化为裸 wsId（测试兜底）
   const model = String(c.req.query('model') || '').trim()
-  return c.json({ ok: true, sent: getWorkspaceFirstPromptSent(id, model || undefined) })
+  // [first-prompt-session-v1] 同时返回 sessionId：前端据此判断「同一工作区不同会话」
+  return c.json({
+    ok: true,
+    sent: getWorkspaceFirstPromptSent(id, model || undefined),
+    sessionId: getWorkspaceFirstPromptSession(id, model || undefined) || '',
+  })
 })
 
 /**
@@ -322,12 +328,13 @@ workspaceHono.get('/workspace/first-prompt', (c) => {
  * [CONSTRAINT] 目标工作区必须已注册（否则 404）；写后立即持久化。
  */
 workspaceHono.post('/workspace/first-prompt', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { id?: string, model?: string, sent?: boolean } | null
+  const body = (await c.req.json().catch(() => null)) as { id?: string, model?: string, sent?: boolean, sessionId?: string } | null
   const id = String(body?.id || '').trim()
   if (!id) return c.json({ ok: false, error: 'id 为空' }, 400)
   // [key-composite-v1] model 可选：复合键 <wsId>::<modelId>
   const model = String(body?.model || '').trim()
-  const ok = setWorkspaceFirstPromptSent(id, model || undefined, body?.sent === true)
+  // [first-prompt-session-v1] 透传 sessionId：记录「在哪个会话发的」，供前端判断会话维度去重
+  const ok = setWorkspaceFirstPromptSent(id, model || undefined, body?.sent === true, body?.sessionId || undefined)
   if (!ok) return c.json({ ok: false, error: '工作区不存在' }, 404)
   return c.json({ ok: true, sent: getWorkspaceFirstPromptSent(id, model || undefined) })
 })

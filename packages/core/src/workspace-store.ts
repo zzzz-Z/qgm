@@ -105,7 +105,7 @@ export interface WorkspaceEntry {
   /** [workspace-schema-v2] 内联会话绑定（homeUrl/sessionUrl 分离） */
   session?: WorkspaceSessionInline
   /** [workspace-schema-v2] 内联首问标记（按 modelId 维度） */
-  firstPromptSent?: Record<string, boolean>
+  firstPromptSent?: Record<string, boolean | { sessionId: string }>
 }
 
 /** 由 root 绝对路径派生确定性工作区 id（同路径幂等） */
@@ -248,7 +248,23 @@ export function getWorkspaceSessions(): Record<string, WorkspaceSession> {
 export function getWorkspaceFirstPromptSent(id: string, modelId?: string): boolean {
   const m = String(modelId || '').trim()
   if (!m) return false
-  return workspaces.get(id)?.firstPromptSent?.[m] === true
+  // [first-prompt-session-v1] 对象形态 { sessionId } 也代表已发；与 setWorkspaceFirstPromptSent 的 prev 判据保持同构
+  const v = workspaces.get(id)?.firstPromptSent?.[m]
+  return v === true || (typeof v === 'object' && v !== null)
+}
+/**
+ * [first-prompt-session-v1] 读「首问是在哪个会话发的」。
+ * [WHY] firstPromptSent 原本是 boolean（工作区维度），无法区分「同一工作区不同会话」。
+ *   无头通道换会话后仍需注入 SYSTEM.md，靠 sessionId 比对才能判断。
+ * [CONSTRAINT] 旧数据是裸 true（无 sessionId），返回 undefined——语义上「不知道在哪个会话」。
+ *   调用方应把 undefined 视为「保守不注入」（保持旧行为）。
+ */
+export function getWorkspaceFirstPromptSession(id: string, modelId?: string): string | undefined {
+  const m = String(modelId || '').trim()
+  if (!m) return undefined
+  const v = workspaces.get(id)?.firstPromptSent?.[m]
+  if (v && typeof v === 'object' && typeof v.sessionId === 'string') return v.sessionId
+  return undefined
 }
 
 /**
@@ -259,17 +275,20 @@ export function getWorkspaceFirstPromptSent(id: string, modelId?: string): boole
  * @param sent 是否已发过首问
  * @returns 工作区不存在时返回 false
  */
-export function setWorkspaceFirstPromptSent(id: string, modelId: string | undefined, sent: boolean): boolean {
+export function setWorkspaceFirstPromptSent(id: string, modelId: string | undefined, sent: boolean, sessionId?: string): boolean {
   const entry = workspaces.get(id)
   if (!entry) return false
   const m = String(modelId || '').trim()
   if (!m) return false
-  const prev = entry.firstPromptSent?.[m] === true
+  // [first-prompt-session-v1] 判据改为「有任意值」而非「=== true」：对象形态 { sessionId } 也代表已发
+  const raw = entry.firstPromptSent?.[m]
+  const prev = raw === true || (typeof raw === 'object' && raw !== null)
   const next = Boolean(sent)
   // [workspace-write-skip-v1] 值未变时不落盘：newSession 分支每次切换都会调本函数
   if (prev === next) return true
   if (next) {
-    entry.firstPromptSent = { ...(entry.firstPromptSent || {}), [m]: true }
+    // [first-prompt-session-v1] 有 sessionId 时存对象（记录在哪个会话发的）；无则存 true（向后兼容）
+    entry.firstPromptSent = { ...(entry.firstPromptSent || {}), [m]: sessionId ? { sessionId } : true }
   } else if (entry.firstPromptSent) {
     delete entry.firstPromptSent[m]
   }
@@ -292,7 +311,7 @@ export function getActiveWorkspaceId(): string | null {
  */
 function migrateV1ToV2(j: {
   sessions?: Record<string, { url?: string, sessionId?: string, updatedAt?: number }>
-  firstPromptSent?: Record<string, boolean>
+  firstPromptSent?: Record<string, boolean | { sessionId: string }>
 }): boolean {
   let touched = false
   const byId = new Map<string, WorkspaceEntry>()
@@ -345,7 +364,7 @@ export function loadWorkspaceRegistry(): string | null {
       root?: string
       workspaces?: WorkspaceEntry[]
       sessions?: Record<string, { url?: string, sessionId?: string, updatedAt?: number }>
-      firstPromptSent?: Record<string, boolean>
+      firstPromptSent?: Record<string, boolean | { sessionId: string }>
     }
     const list = Array.isArray(j.workspaces) ? j.workspaces : []
     // [workspace-schema-v2] 恢复循环**携带内联字段**（Q1 修复核心）：

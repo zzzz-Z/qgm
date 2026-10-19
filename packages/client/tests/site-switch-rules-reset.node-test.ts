@@ -54,7 +54,8 @@ test('[site-select-row-removed-v1] 工作区行内站点下拉已移除：AiWind
 test('key-composite: useAiWindow 4 处 firstPromptSent 调用均带站点参数', () => {
   const src = readSrc('packages/client/composables/ai/useAiWindow.ts')
   // 3 处 set：写 true / false（第二参为 curModel，其定义为 modelIdFromSid(...)）
-  const setHits = src.match(/setFirstPromptSent\(wsId, curModel, (?:true|false)\)/g) || []
+  // [first-prompt-session-v1] 正则允许第 4 参（sessionId）：判据意图仍是「必须带站点参数 curModel」
+  const setHits = src.match(/setFirstPromptSent\(wsId, curModel, (?:true|false)(?:, [^)]+)?\)/g) || []
   // 1 处 get：读（第二参同样为 curModel）
   const getHits = src.match(/getFirstPromptSent\(wsId, curModel\)/g) || []
   assert.equal(setHits.length, 3, `应有 3 处带站点参的 setFirstPromptSent，实际 ${setHits.length}`)
