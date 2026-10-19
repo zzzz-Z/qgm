@@ -613,6 +613,13 @@ export function applyTaskMutation(cur: TaskState, body: TaskMutationBody): TaskS
     const warnings: string[] = []
     if (miss.length) warnings.push(`complete 未命中: ${miss.join(' / ')}`)
     if (!hit.length) return withProjection(cur, items, warnings)
+    // [task-board-auto-start-v1] 服务端硬约束：complete 前未 start 的项自动补一次状态转移并留痕。
+    //   [WHY] 提示词要求「动手前 start、完成即 complete」，但 AI 会漏（实测连续多轮只 push 不 start）。
+    //   不阻断（避免历史调用全红），但每次发生都在 warnings 里点名，日志可见、可追责。
+    {
+      const unstarted = hit.filter(it => it.status === 'pending')
+      if (unstarted.length) warnings.push(`complete-auto-start: ${unstarted.map(it => it.desc).join(' / ')}`)
+    }
     // [task-board-deps-v1] 依赖未完成只告警不阻断（执行顺序由 AI 自治，看板不做闸门）
     for (const it of hit) {
       const unmet = (it.deps || []).filter(d => matchItems(items, [d]).hit.some(x => x.status !== 'done'))
@@ -629,6 +636,11 @@ export function applyTaskMutation(cur: TaskState, body: TaskMutationBody): TaskS
     const warnings: string[] = []
     if (miss.length) warnings.push(`fail 未命中: ${miss.join(' / ')}`)
     if (!hit.length) return withProjection(cur, items, warnings)
+    // [task-board-auto-start-v1] 同 complete：fail 前未 start 的项留痕
+    {
+      const unstarted = hit.filter(it => it.status === 'pending')
+      if (unstarted.length) warnings.push(`fail-auto-start: ${unstarted.map(it => it.desc).join(' / ')}`)
+    }
     const ids = new Set(hit.map(h => h.id))
     const now = Date.now()
     return withProjection(cur, items.map(it => (ids.has(it.id) ? { ...it, status: 'failed' as const, failedAt: now, doneAt: undefined } : it)), warnings)

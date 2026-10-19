@@ -65,8 +65,24 @@ const isAskActive = computed(() => {
 
 // [ui-p2c-render-probe-v1] mount/update 各打一次；判据①用 update delta 算单事件重渲染卡数
 onMounted(() => probeRender(`rc:${props.card.key}`, 'mount'))
+onMounted(() => { if (typeof window !== 'undefined') window.addEventListener('keydown', onKeydown) })
 onUpdated(() => probeRender(`rc:${props.card.key}`, 'update'))
+onBeforeUnmount(() => { if (typeof window !== 'undefined') window.removeEventListener('keydown', onKeydown) })
 
+/**
+ * [ask-hotkey-v1] 数字键 1–9 快速选择：主流智能体（Cursor / Claude Code）的通用交互。
+ * [CONSTRAINT] 只在 isAskActive 且目标不在输入框内时响应；卸载时移除监听。
+ */
+function onKeydown(e: KeyboardEvent): void {
+  if (!isAskActive.value) return
+  if (!qCard.value.options.length) return
+  const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase()
+  if (tag === 'input' || tag === 'textarea') return
+  const n = Number(e.key)
+  if (!Number.isInteger(n) || n < 1 || n > qCard.value.options.length) return
+  e.preventDefault()
+  submitAnswer(qCard.value.options[n - 1].label)
+}
 function toggle(): void { expanded.value = !expanded.value }
 function submitAnswer(text: string): void {
   const t = String(text || '').trim()
@@ -165,13 +181,18 @@ function submitAnswer(text: string): void {
     <div v-if="card.text" class="done-summary-body" v-html="html" />
     <div v-if="qCard.options.length" class="question-options">
       <button
-        v-for="o in qCard.options" :key="o.id"
+        v-for="(o, idx) in qCard.options" :key="o.id"
         class="question-opt" type="button"
         :disabled="!isAskActive"
         @click="submitAnswer(o.label)"
       >
-        {{ o.label }}
+        <span class="question-opt-num" aria-hidden="true">{{ idx + 1 }}</span>
+        <span class="question-opt-label">{{ o.label }}</span>
       </button>
+      <!-- [ask-hotkey-v1] 数字键快捷选择提示：仅在可交互时显示 -->
+      <div v-if="isAskActive" class="question-hotkey-hint">
+        按 1–{{ qCard.options.length }} 快速选择
+      </div>
     </div>
     <div v-if="qCard.answered" class="question-answer">
       你的回答：{{ qCard.answer || '（已取消）' }}

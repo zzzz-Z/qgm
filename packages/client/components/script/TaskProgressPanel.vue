@@ -299,6 +299,7 @@ function onVis() {
       @click="collapsed = !collapsed"
     >
       <span class="tp-caret" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
+      <span v-if="runningRow" class="tp-status-dot" aria-hidden="true" />
       <span class="tp-title">任务完成详情</span>
       <!-- [failed-round-highlight-v1] 失败徽标可点：直接滚到时间线里最近一张失败卡 -->
       <button
@@ -311,7 +312,7 @@ function onVis() {
         {{ failedCount }} 失败
       </button>
       <span v-if="total > 0" class="tp-pct">{{ progressPercent }}%</span>
-      <span class="tp-count">{{ doneCount }}/{{ total }}</span>
+      <span class="tp-count">{{ doneCount }}/{{ total }}<span v-if="runningRow" class="tp-running-tag"> · 执行中</span></span>
       <button
         v-if="canClear"
         type="button"

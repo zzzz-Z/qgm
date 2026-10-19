@@ -29,6 +29,13 @@ import { useAiSite } from '../ai/useAiSite'
 import { log } from '../../utils/log'
 import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
 
+/** [post-done-gate-v3] 已触发终轮 hook 的 turnId（油猴通道），防重连重放重复提交 */
+const _turnEndHookFired = new Set<number>()
+const _TURN_END_HOOK_MAX = 100
+/** [post-done-gate-v3] 每 sid 最近一次提交时间：30s 节流 */
+const _turnLastCommitAt = new Map<string, number>()
+const _TURN_COMMIT_THROTTLE_MS = 30_000
+
 // [loop-consolidation-P3a] 内联 AiReply（原 import('../ai/auto-loop/types').AiReply）；
 //   该目录将随 P3b 删除，此处仅用作 onReply 回调的形参断言。
 interface AiReply {
@@ -193,8 +200,28 @@ export function useAppStartup(deps: AppStartupDeps) {
   function settleTurnEnd(p: { end?: CollectTurnEnd }): void {
     const turnId = Number(p.end && p.end.turnId) || 0
     const hasScript = turnCollector.pending(turnId).some(b => b.type === 'script')
+    const blocks = turnCollector.pending(turnId)
     turnCollector.end(p.end)
     if (!hasScript) rt.settleIdle()
+    // [post-done-gate-v3] 油猴通道也要触发 BeforeDoneFinal：原实现只在服务端 attach-ws
+    //   （无头通道）触发，油猴路径的终轮从不过 hook ⇒ git 从不提交。
+    //   判据 awaiting==='none'：无脚本待执行、无提问待回答 = 执行器不会自动续跑。
+    const awaiting = p.end && p.end.awaiting
+    if (awaiting === 'none' && !_turnEndHookFired.has(turnId)) {
+      const sid = String(activeSessionId.value || '')
+      const now = Date.now()
+      const last = _turnLastCommitAt.get(sid) || 0
+      if (now - last >= _TURN_COMMIT_THROTTLE_MS) {
+        _turnEndHookFired.add(turnId)
+        if (_turnEndHookFired.size > _TURN_END_HOOK_MAX) {
+          const first = _turnEndHookFired.values().next().value
+          if (first !== undefined) _turnEndHookFired.delete(first)
+        }
+        _turnLastCommitAt.set(sid, now)
+        const summary = blocks.filter(b => b.type === 'say').map(b => String(b.text || '')).join(' / ').slice(0, 200)
+        void runHook('BeforeDoneFinal', { loopId: '', round: 0, startCommit: '', reason: 'executor-final-tm', doneSummary: summary }).catch(() => {})
+      }
+    }
   }
 
   /** [workspace-mode-v1] 探测工作区状态：无工作区时渲染引导页；网络失败默认放行 */

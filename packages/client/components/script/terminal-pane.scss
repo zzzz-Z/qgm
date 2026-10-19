@@ -239,6 +239,38 @@
   gap: 6px;
   margin-top: 10px;
 }
+/* [ask-hotkey-v1] 选项序号徽章：数字键快捷选择的视觉锚点 */
+.question-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.question-opt-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--primary, #58a6ff) 14%, transparent);
+  color: var(--primary, #58a6ff);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.question-opt:disabled .question-opt-num {
+  background: color-mix(in srgb, var(--text-3, #888) 14%, transparent);
+  color: var(--text-3, #888);
+}
+.question-opt-label {
+  flex: 1;
+}
+.question-hotkey-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-3, #888);
+}
 .question-opt {
   padding: 8px 12px;
   text-align: left;
@@ -539,9 +571,20 @@
   background: var(--text-3, #888);
   flex-shrink: 0;
 }
+/* [status-bar-inline-v1] running 态用旋转环，比脉动更明确表达「正在进行」 */
 .status-bar-inline.kind-running .status-dot {
-  background: var(--primary, #3b82f6);
-  animation: status-pulse 1.4s ease-in-out infinite;
+  background: transparent;
+  border: 2px solid color-mix(in srgb, var(--primary, #3b82f6) 24%, transparent);
+  border-top-color: var(--primary, #3b82f6);
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  animation: status-spin 0.9s linear infinite;
+}
+@keyframes status-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .status-bar-inline.kind-waiting .status-dot,
 .status-bar-inline.kind-feedback .status-dot {
@@ -591,4 +634,18 @@
   border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 30%, transparent);
   color: var(--text-2, #c9d1d9);
   font-size: 12px;
+}
+
+/* [task-progress-panel-v1] 运行中状态点：与阶段条同色系（primary 蓝脉动） */
+.tp-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary, #3b82f6);
+  animation: status-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.tp-running-tag {
+  color: var(--primary, #58a6ff);
+  font-weight: 600;
 }

@@ -105,7 +105,7 @@ test('items: 四态渲染（执行中 / 待办 / 失败 / 已完成），失败�
   const w = mount(TaskProgressPanel)
   await flushPromises()
   // 计数只算 done（1/4），失败不计入完成
-  expect(w.find('.tp-count').text()).toBe('1/4')
+  expect(w.find('.tp-count').text()).toBe('1/4 · 执行中')
   const failed = w.find('.tp-item.failed')
   expect(failed.exists()).toBe(true)
   expect(failed.text()).toContain('失败的任务')
