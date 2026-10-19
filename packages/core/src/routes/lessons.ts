@@ -80,3 +80,40 @@ lessonsHono.post('/lessons/match', async (c) => {
     return c.json({ ok: true, query, scope, matches: [], requestedLimit, appliedLimit: limit })
   }
 })
+
+/**
+ * GET /lessons/distill：蒸馏候选分析。
+ * [WHY] lessons.md 无界增长（177KB），BM25 只取 top-3 ⇒ 大量低价值条目挤占检索质量。
+ *   蒸馏去路在文件头部已声明（VERIFIED→MEMORY.md/skills），但缺可执行出口。
+ * [CONSTRAINT] 纯统计，不写盘、不改状态；只给候选与建议，处置由人工/复核方决定。
+ */
+lessonsHono.get('/lessons/distill', (c) => {
+  try {
+    const docs = listLessonDocs(getRoot())
+    const byState: Record<string, number> = { verified: 0, rejected: 0, stale: 0, pending: 0 }
+    let totalBytes = 0
+    const longPending: { title: string, bytes: number }[] = []
+    const noEvidence: string[] = []
+    for (const d of docs) {
+      byState[d.state] = (byState[d.state] || 0) + 1
+      const bytes = Buffer.byteLength(d.body || '', 'utf8')
+      totalBytes += bytes
+      if (d.state === 'pending' && bytes > 2000) longPending.push({ title: d.title, bytes })
+      if (d.state !== 'pending' && !/\d{4}-\d{2}-\d{2}/.test(d.body || '')) noEvidence.push(d.title)
+    }
+    const candidates: { kind: string, title: string, reason: string }[] = []
+    for (const t of noEvidence.slice(0, 50)) candidates.push({ kind: 'evidence-missing', title: t, reason: '状态标记缺日期证据' })
+    for (const t of longPending.slice(0, 50)) candidates.push({ kind: 'long-pending', title: t.title, reason: `${t.bytes} 字节待复核，建议拆分或复核` })
+    return c.json({
+      ok: true,
+      total: docs.length,
+      byState,
+      totalBytes,
+      avgBytes: docs.length ? Math.round(totalBytes / docs.length) : 0,
+      candidates,
+      suggestion: candidates.length ? '先处理 evidence-missing（可直接补证或降级），再拆分 long-pending' : '无蒸馏候选',
+    })
+  } catch (e) {
+    return c.json({ ok: false, error: String((e as { message?: string } | undefined)?.message || e) })
+  }
+})

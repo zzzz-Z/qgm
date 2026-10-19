@@ -45,4 +45,24 @@ async function match(query, limit) {
   }
 }
 
-module.exports = { match }
+/**
+ * [lessons-distill-v1] 蒸馏候选分析：统计三态分布 + 标出缺证据 / 超长待复核条目。
+ * [WHY] lessons.md 无界增长会挤占检索质量；蒸馏去路已声明但缺可执行出口。
+ * [CONSTRAINT] 走 HTTP 端点而非直读盘——解析 SSOT 在服务端，直读会造第二套口径。
+ * @returns {Promise<{ok: boolean, total?: number, byState?: object, candidates?: object[], suggestion?: string, error?: string}>} 统计结果或错误对象
+ */
+async function distill() {
+  const port = Number(process.env.AIR_SERVER_PORT || process.env.AIR_RUNNER_SERVER_PORT) || 5175
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/__ai/lessons/distill`, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+    })
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+    return await res.json()
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) }
+  }
+}
+
+module.exports = { match, distill }
