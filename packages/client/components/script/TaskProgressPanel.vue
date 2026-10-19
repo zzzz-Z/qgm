@@ -336,6 +336,8 @@ function onVis() {
     </button>
     <!-- [refresh-leftover-hint-v1] 遗留任务提示：不自动续跑，等用户发送提问；
          [leftover-clear-fix-v1] 文案按循环实际状态分叉（原文案在循环已死时仍说「将继续处理」） -->
+    <!-- [loop-badge-coverage-v1] 循环状态徽章：13 态各有专属文案，非 idle 态不得回落「未运行」 -->
+    <span class="tp-loop" :class="loopBadge.cls" role="status">{{ loopBadge.text }}</span>
     <div v-if="hasLeftover" class="tp-leftover" role="status">
       <template v-if="isLoopActive">
         检测到 {{ pendingRows.length }} 项未完成任务 · 循环运行中，发送提问后将继续处理（或点上方「清空」放弃）

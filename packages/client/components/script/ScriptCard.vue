@@ -56,7 +56,8 @@ const lineCount = computed(() => (cleanedOutput.value ? cleanedOutput.value.spli
 const hasBody = computed(() => props.card.changes.length > 0 || Boolean(props.card.stderrText) || Boolean(fullOutput.value))
 // [script-card-l3-v1] L2 折叠区是否有内容：why / 失败原因 / 耗时行数。全空则不渲染折叠区，避免空箭头。
 // [script-card-detail-v1] reason 已移到展开区元信息栏，不再参与 L2 判空
-const hasL2 = computed(() => Boolean(props.card.why) || props.card.durationMs != null)
+// [script-card-reason-v1] reason 参与 L2 判空：失败态即使无 why、无耗时，也必须能展开看到失败原因
+const hasL2 = computed(() => Boolean(props.card.why) || Boolean(props.card.reason) || props.card.durationMs != null)
 // [timeline-denoise-v1] 结果摘要只在终态出现，运行中 / 等待中不占位
 const isFinal = computed(() => props.card.phaseClass === 'phase-done' || props.card.phaseClass === 'phase-error')
 const isFailed = computed(() => props.card.phaseClass === 'phase-error')
@@ -164,6 +165,10 @@ function toggle(): void { expanded.value = !expanded.value }
             <span class="why-label">WHY</span>
             <span v-overflow-tip="card.why" class="why-text">{{ card.why }}</span>
           </span>
+          <span v-if="card.reason" class="script-card-reason">
+            <span class="reason-label">失败原因</span>
+            <span v-overflow-tip="card.reason" class="reason-text">{{ card.reason }}</span>
+          </span>
           <span v-if="card.durationMs != null" class="script-card-dur">{{ lineCount }} 行 · {{ durLabel }}</span>
         </span>
         <span v-if="!hasL2 && resultLabel" class="script-card-stat" :class="resultClass">{{ resultLabel }}</span>
@@ -179,10 +184,6 @@ function toggle(): void { expanded.value = !expanded.value }
         <span v-if="card.durationMs != null" class="tail-meta-item">耗时 {{ durLabel }}</span>
         <span v-if="lineCount" class="tail-meta-item">{{ lineCount }} 行输出</span>
         <span v-if="card.changeCount" class="tail-meta-item">{{ card.changeCount }} 文件变更</span>
-      </div>
-      <div v-if="card.reason" class="tail-reason">
-        <span class="reason-label">失败原因</span>
-        <span class="reason-text">{{ card.reason }}</span>
       </div>
       <div v-if="fullOutput" class="sc-out">
         <!-- eslint-disable-next-line vue/no-v-html -- ansiToHtml 已严格转义，仅注入白名单色 span -->
