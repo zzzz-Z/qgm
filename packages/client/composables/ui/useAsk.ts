@@ -68,7 +68,10 @@ export function askUser(payload: AskPayload): Promise<string | null> {
  * @returns 是否成功建立活跃提问（已有活跃提问时返回 false，不抢占）
  */
 export function restoreAsk(id: string, question: string, options: Array<{ id: string, label: string }>): boolean {
-  if (askState.value) return false
+  // [ask-restore-v2] 抢占式重建：已有活跃提问时先 resolve(null) 释放，再重建。
+  //   [WHY] 原实现 `if (askState.value) return false` 在用户点第二张卡片时直接失败——
+  //   表现为「选项点击无反应」（实测）。点哪张卡片，哪张就该成为活跃提问。
+  if (askState.value) askState.value.resolve(null)
   let resolveFn: (v: string | null) => void = () => {}
   const _p = new Promise<string | null>((r) => { resolveFn = r })
   void _p

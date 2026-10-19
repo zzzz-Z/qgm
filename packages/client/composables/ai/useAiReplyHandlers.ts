@@ -506,6 +506,12 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     }
     // [remote-generating-v1] turn-end 是「本轮收口」的权威信号：强制复位生成态，防 generating:false 帧丢失导致按钮永久卡转
     setRemoteGenerating(false)
+    // [stop-btn-reset-v1] 终轮（awaiting=none）时关闭自动接管：
+    //   [WHY] 停止按钮可见性判据含 autoTakeoverEnabled；该标志不关 ⇒ 总结后按钮永久显示（用户实测「不重置」）。
+    //   [CONSTRAINT] 只在 awaiting=none 时关：results / user 两种待续状态必须保留接管意图。
+    if (awaiting === 'none' && autoTakeover.enabled.value) {
+      autoTakeover.disable()
+    }
     try { emitBus('ai:turn-end', titles[awaiting] || '本轮结束', { payload: { end } }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
   }
 

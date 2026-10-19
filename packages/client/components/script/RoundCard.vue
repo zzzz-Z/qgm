@@ -56,11 +56,13 @@ const isQuestion = computed(() => props.card.type === 'question')
 const isAskActive = computed(() => {
   if (!isQuestion.value) return false
   const c = qCard.value
-  // [ask-restore-v1] 刷新后 askState 为空但卡片未回答 ⇒ 仍可交互（点击时用 restoreAsk 重建）
+  // [ask-active-v3] 可交互只看「卡片是否已回答」——不与全局 askState 比对。
+  //   [WHY] 原判据 askState.value.id === c.askId 在 askUser 被重复调用（重放 / 多通道）时，
+  //   旧卡片的 id 与最新 askState.id 不符 ⇒ 按钮永久 disabled，用户点选项无反应（实测）。
+  //   [CONSTRAINT] 点击时由 submitAnswer 调 restoreAsk 抢占活跃提问，无需事先比对。
   if (c.answered) return false
   if (!c.askId) return false
-  if (!askState.value) return true
-  return askState.value.id === c.askId
+  return true
 })
 
 // [ask-hotkey-v2] 只在 ASK 活跃期挂监听：失效/已回答即撤，避免长期占用全局数字键。

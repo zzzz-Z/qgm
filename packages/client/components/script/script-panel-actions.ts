@@ -193,8 +193,18 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
         return
       }
       enableAutoTakeover()
-      toast('已开启自动接管：立即执行当前脚本 → 结果发 AI → AI 回填后自动执行', 'success', TOAST_LONG)
-      void runSmart()
+      // [toast-race-fix-v1] 原实现在 runSmart 之前就 toast「已开启」，若 runSmart 失败会再弹一条
+      //   「发送失败」，两条堆叠用户容易漏看后一条（实测「点了没反应」）。
+      //   改为：先执行，成功后才提示「已开启」。
+      void (async () => {
+        try {
+          await runSmart()
+          toast('已开启自动接管：已发送当前内容，AI 回填后自动执行', 'success', TOAST_LONG)
+        } catch (e) {
+          // runSmart 内部已 toast 具体失败原因，这里只补充接管状态
+          toast('自动接管已开启，但本次发送失败（见上方提示）', 'warn', TOAST_LONG)
+        }
+      })()
     }
   }
 
