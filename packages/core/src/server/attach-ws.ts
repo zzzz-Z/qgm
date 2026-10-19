@@ -14,11 +14,19 @@ import { appendLessons, extractLessons } from '../post-run/lesson-extract.js'
 import { writeChannelLog } from '../state/snapshot.js'
 // [turn-envelope-v1] 信封 → 块帧的映射是纯函数（reply/turn-frames.ts），此处只负责发与留痕
 import { turnToFrames } from '../reply/turn-frames.js'
+import { runHook } from '../utils/hooks.js'
 import type { RawBlock } from '../reply/turn-frames.js'
 // [replay-buffer-v1] 重放缓冲与可重放帧清单（抽出去是为了能被单独断言）
 import { createBufferOut } from './replay-buffer.js'
 import { AI_CAPS } from './protocol.js'
 import type { ServerMessage, TransportMessage } from './protocol.js'
+
+/** [post-done-gate-v2] 已触发终轮 hook 的 turnId，防重连重放重复提交；有界（超 100 删最早） */
+const _doneHookFired = new Set<number>()
+const _DONE_HOOK_MAX = 100
+/** [post-done-gate-v2] 每 sid 最近一次提交时间：30s 节流，防连续普通对话刷出大量 commit */
+const _lastCommitAt = new Map<string, number>()
+const _COMMIT_THROTTLE_MS = 30_000
 // Vite 可能是 HttpServer | Http2SecureServer，取交集的最小子集
 
 // [p1-2-v1] 宽档：HttpServer 与 Http2SecureServer 的公共最小子集；用 Pick 避免显式 any
@@ -141,6 +149,31 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         }
         if (frames.length === 0) {
           try { writeChannelLog('turns', { kind: 'turn.empty', sid, turnId: typeof reply.turnId === 'number' ? reply.turnId : 0, reason: 'no-usable-block' }) } catch { /* swallow */ }
+        }
+        // [post-done-gate-v2] 执行器终轮也要触发 BeforeDoneFinal：原实现只认 AI 页面回字面 DONE
+        //   （useAiReplyHandlers kind==='done' 分支），执行器在信封里写总结时该分支永不命中 ⇒ git 从不提交。
+        //   判据 awaiting==='none'：本轮既无脚本待执行、也无提问待回答 ⇒ 执行器不会自动续跑，等价于终轮。
+        //   同一 turnId 只触发一次（客户端可能重连重放）。
+        {
+          const endFrame = frames.find(m => m.t === 'ai:turn-end')
+          const end = endFrame && endFrame.t === 'ai:turn-end' ? endFrame.end : null
+          const now = Date.now()
+          const last = _lastCommitAt.get(sid) || 0
+          if (end && end.awaiting === 'none' && !_doneHookFired.has(end.turnId) && now - last >= _COMMIT_THROTTLE_MS) {
+            _doneHookFired.add(end.turnId)
+            if (_doneHookFired.size > _DONE_HOOK_MAX) {
+              const first = _doneHookFired.values().next().value
+              if (first !== undefined) _doneHookFired.delete(first)
+            }
+            _lastCommitAt.set(sid, now)
+            const summary = frames
+              .filter(m => m.t === 'ai:block' && m.block.type === 'say')
+              .map(m => (m.t === 'ai:block' && m.block.type === 'say' ? String(m.block.text || '') : ''))
+              .join(' / ')
+              .slice(0, 200)
+            void runHook('BeforeDoneFinal', { loopId: '', round: 0, startCommit: '', reason: 'executor-final', doneSummary: summary })
+              .catch(() => { /* hook 自身 fail-open */ })
+          }
         }
         return
       }

@@ -8,6 +8,7 @@ import type { Ref } from 'vue'
 import { useToast } from '../../composables/ui/useToast'
 import { emit as emitBus } from '../../composables/ui/useEventStream'
 import { copyAndFill, sendStop } from '../../composables/ai/useAiWindow'
+import { onStopAck } from '../../composables/ai/useAiReplyHandlers'
 import { useAutoTakeover } from '../../composables/ai/useAutoTakeover'
 import { useAiWaiting } from '../../composables/ai/useAiWaiting'
 // [runtime-kind-ssot-v1] 运行态单一真相源：用户点停止时置 stopped
@@ -84,7 +85,7 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
   const { enable: enableAutoTakeover, disable: disableAutoTakeover, cancelAutoRun } = useAutoTakeover()
   // [loop-consolidation-P2] 摘除 isLoopActive（恒 false，无剩余使用点）
   // [loop-consolidation-P3b] softPause / loopPaused / clearSoftPause 已迁至 useAiWaiting（随 auto-loop 退役）
-  const { loopPaused, clearSoftPause, stopWaiting } = useAiWaiting()
+  const { loopPaused, clearSoftPause, stopWaiting, remoteGenerating } = useAiWaiting()
   const { stop } = useRunner()
   const { stop: runtimeStop } = useRuntime()
 
@@ -202,7 +203,31 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
    * [pause-order-v1] 分支优先级：loopPaused 恢复 > 活跃循环软暂停 > 纯接管关闭 > 停止。
    * 原实现 autoTakeoverEnabled 分支在前：发送路径后点暂停只关接管不暂停循环，需点两次才生效。
    */
-  function pauseAll(): void {
+  /**
+   * [stop-ack-v1] 等油猴 stop-ack 回执，最多 ms 毫秒。
+   * @returns true=点到了停止按钮 / false=没找到 / null=超时（旧版油猴无此帧）
+   */
+  function waitStopAck(ms: number): Promise<boolean | null> {
+    return new Promise((resolve) => {
+      let done = false
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const off = onStopAck((hit) => {
+        if (done) return
+        done = true
+        off()
+        if (timer) clearTimeout(timer)
+        resolve(hit)
+      })
+      timer = setTimeout(() => {
+        if (done) return
+        done = true
+        off()
+        resolve(null)
+      }, ms)
+    })
+  }
+
+  async function pauseAll(): Promise<void> {
     // [pause-really-stops-v2] running 判定**必须最优先**：原实现把它放在 loopPaused 分支内，
     //   而 exec-flow 在发送成功后即调 softPause() ⇒ 脚本一跑起来 loopPaused 就已是 true，
     //   首次点击命中的是第一分支（只 clearSoftPause 就 return），stop() 永远执行不到 ⇒
@@ -211,7 +236,7 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
     //   本轮 overlay 不落盘 = 丢弃）；② 通知站点停止生成；③ 复位「暂停 / 等待」标志。
     // [pause-any-phase-v1] 三个「进行中」相位都要能终止：脚本在跑 / 等 AI 回包 / 回传窗未收口。
     //   原判定只看 running ⇒ AI 已在生成但脚本已结束时，点停止不调 sendStop，站点继续吐字（用户报告）。
-    if (running.value || aiWaiting.value || delivering.value) {
+    if (running.value || aiWaiting.value || delivering.value || remoteGenerating.value) {
       // [stop-diagnostic-v1] 临时诊断：三态判定与 sendStop 返回值全部回显，
       //   用于定位「AI 端停不了」的断点（分支没进 / 窗口引用丢 / origin 空 / 油猴旧版）。
       const _phase = `running=${running.value} aiWaiting=${aiWaiting.value} delivering=${delivering.value}`
@@ -223,7 +248,15 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
       // [runtime-kind-ssot-v1] 用户显式停止 ⇒ 运行态 stopped（须在 stopWaiting 之后：
       //   后者只把「等待」态收回 idle，不能覆盖 stopped）
       runtimeStop()
-      toast(`已停止 [${_phase}] sendStop=${_sent}`, 'info', TOAST_LONG)
+      // [stop-ack-v1] 等油猴回执再定 toast：hit=false 表示没找到停止按钮（AI 可能仍在生成）
+      const ok = await waitStopAck(2000)
+      if (ok === null) {
+        toast(`已停止脚本 [${_phase}] sendStop=${_sent}；AI 侧无回执（油猴版本可能过旧）`, 'warn', TOAST_LONG)
+      } else if (ok) {
+        toast(`已停止 [${_phase}]`, 'info', TOAST_DEFAULT)
+      } else {
+        toast('脚本已停；AI 侧未找到停止按钮，请手动停止生成', 'warn', TOAST_LONG)
+      }
       return
     }
     if (loopPaused.value) {

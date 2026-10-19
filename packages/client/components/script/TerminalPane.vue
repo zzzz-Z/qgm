@@ -19,11 +19,8 @@ import { stripScriptBlocks } from '../../utils/strip-script-blocks'
 // [turn-block-frame-v1] buildOneCard 亦从该模块引入：块帧建卡规则只有一份，本组件不再内联复写
 import { ASK_PREVIEW, buildOneCard, DONE_PREVIEW, TAIL_KEEP_LINES, TAIL_MAX_CHARS, TEXT_PREVIEW } from '../../utils/timeline-build'
 // [eventbus-name-clash-v1] 显式 import（原因同 ScriptPanel.vue）
-import { useEventBus } from '../../composables/ui/useEventStream'
 // [terminal-actions-v1] 显式 import：本组件此前无 toast 调用，auto-import 在 vitest/tsc 下不生效
-import { useToast } from '../../composables/ui/useToast'
 // [runtime-kind-ssot-v1] 等待 banner 的判据改读运行态单一真相源（不再由父级透传 props）
-import { useRuntime } from '../../composables/ai/useRuntime'
 
 // [timeline-denoise-v1] 长文本卡片共用的「预览 + 折叠」字段
 // [WHY] text / ask / done 三类卡片都要"超长才折叠"，字段同构可复用同一套折叠逻辑与样式
@@ -125,16 +122,19 @@ const props = defineProps<{
   liveStdout: string
   liveStderr: string
   doneSummary?: string
-  /** [ctx-usage-v1] 本会话累计轮次（runIds 长度）；0 表示尚未运行 */
+  // [status-bar-move-v1] 顶部阶段条迁到时间线底部：状态由 ScriptPanel 传入
+  statusText?: string
+  statusClass?: string
+  statusKind?: string
+  statusElapsed?: string
   runCount?: number
-  /** [ctx-usage-v1] 估算的累计 prompt 字节数（前端按轮粗估，仅用于量级感知） */
-  tokenEstimate?: number
+  tokenLabel?: string
 }>()
 // [script-card-changes-v1] 冒泡 ScriptCard 的预览点击 → 由 ScriptPanel 打开浮层
 // [terminal-actions-v1] stop：终端「关闭进程」按钮与 Esc 快捷键向父级冒泡，复用 useRunner.stop
 const emit = defineEmits<{ preview: [path: string], stop: [] }>()
 
-let _copiedTimer: ReturnType<typeof setTimeout> | null = null
+const _copiedTimer: ReturnType<typeof setTimeout> | null = null
 /** 阶段中文标签表；未命中回退为原值 */
 const PHASE_LABEL: Record<string, string> = {
   pending: '等待执行',
@@ -171,13 +171,6 @@ let _innerRo: ResizeObserver | null = null
  */
 const GUIDE_KEY = '__ai_empty_guide_seen'
 
-/** [terminal-actions-v1] 复制内容的瞬时反馈位（按钮文字在 1.5s 内变「已复制」） */
-const copiedFlash = ref(false)
-// 等待时长本地计时：waitBanner（useRuntime.kind 的 waiting/feedback）为 true 时启动，false 时停止并归零
-// [WHY] 用本地 interval 而非改 useAiWaiting 契约（避免污染其他消费方）；仅用于展示层
-// [CONSTRAINT] useIntervalFn 组件卸载自动清理；watch 双向同步启停
-// [CHANGE-IMPACT] 与 wait-banner 模板成对；去掉 watch 会让秒数永远为 0
-const waitElapsed = ref(0)
 /** 列表 */
 const chatListRef = ref<HTMLElement | null>(null)
 // [panel-resize-scroll-v1] TaskProgressPanel 宿主容器：监听其尺寸变化补偿滚动
@@ -189,18 +182,14 @@ const guideSeen = ref(readGuideSeen())
 
 const { toast } = useToast()
 const { events: busEvents } = useEventBus()
-// [runtime-kind-ssot-v1] 等待态读单一真相源：waiting（等 AI 回复）/ feedback（结果回传窗）
-// [WHY] 此前由父级透传 aiWaiting + delivering 两个 props，二者是并行真相源，
-//   且都没覆盖「脚本执行中」的真实阶段 —— 状态显示会落后于实际。
+// [runtime-kind-ssot-v1] 等待态读单一真相源：waiting / feedback
 const { state: runtimeState } = useRuntime()
-const { pause: pauseWaitTimer, resume: resumeWaitTimer } = useIntervalFn(() => {
-  waitElapsed.value += 1
-}, 1000, { immediate: false })
 
-const waitBanner = computed(() => {
-  const k = runtimeState.value.kind
-  return k === 'waiting' || k === 'feedback'
-})
+// [phase-clock-v1] 等待计时与文案上提到 useAiPhaseClock（模块级单例）：
+//   顶部阶段条与这里读同一份，来源唯一；本组件不再自持计时器。
+
+/** [event-archive-v1] 时间线里是否存在刷新前归档的事件（stale:true） */
+const hasStaleEvents = computed(() => busEvents.value.some(e => (e.payload as Record<string, unknown> | undefined)?.stale === true))
 const timelineItems = computed(() => {
   const out: Array<ScriptItem | TextItem | DoneItem | AskItem | QuestionItem> = []
   for (const ev of busEvents.value) {
@@ -341,12 +330,6 @@ const latestScriptKey = computed(() => {
   return ''
 })
 
-// [deliver-window-v1] 回传窗（feedback）同样算「等待」——扩展原 loading 时长，不新增文案。
-// [runtime-kind-ssot-v1] 判据改读 useRuntime.kind（waiting / feedback），不再依赖 props 透传
-watch(waitBanner, (v) => {
-  if (v) { waitElapsed.value = 0; resumeWaitTimer() }
-  else { pauseWaitTimer(); waitElapsed.value = 0 }
-}, { immediate: true })
 watch(
   () => [props.doneSummary, timelineItems.value.length] as const,
   async ([v]) => {
@@ -439,10 +422,7 @@ async function copyContent(): Promise<void> {
       document.body.removeChild(ta)
     } catch { ok = false }
   }
-  if (!ok) { toast('复制失败，请手动选择文本复制', 'error', TOAST_MEDIUM); return }
-  copiedFlash.value = true
-  if (_copiedTimer) clearTimeout(_copiedTimer)
-  _copiedTimer = setTimeout(() => { copiedFlash.value = false }, 1500)
+  if (!ok) { toast('复制失败，请手动选择文本复制', 'error', TOAST_MEDIUM) }
 }
 /**
  * [terminal-actions-v1] 关闭进程：仅在 running 时可用，向父级冒泡 stop。
@@ -569,47 +549,10 @@ function reopenGuide(): void {
   guideSeen.value = false
   try { window.localStorage.removeItem(GUIDE_KEY) } catch { /* 存储不可用：仅本次生效 */ }
 }
-/**
- * [ctx-usage-v1] 字节数 → 易读量级（K / M）。
- * [WHY] 精确值无意义（前端拿不到真实 token 计数），用户只需要「大致用了多少」。
- */
-function fmtTokens(bytes: number): string {
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)}M`
-  if (bytes >= 1_000) return `${Math.round(bytes / 1_000)}K`
-  return String(bytes)
-}
 </script>
 
 <template>
   <section class="terminal" tabindex="0" @keydown="onTerminalKeydown">
-    <!-- [ctx-usage-v1] 上下文消耗指示：用户唯一能感知「该开新会话了」的信号。
-         刻意不做精确 token 计数（前端拿不到权威值），只给量级。 -->
-    <!-- [terminal-actions-v1] 操作条：左侧上下文量级，右侧复制 / 关闭进程。
-         不常驻空行——无轮次且未运行时整条隐藏，避免占用首屏高度。 -->
-    <div v-if="(runCount || 0) > 0 || running" class="ctx-usage" role="status">
-      <span v-if="(runCount || 0) > 0" class="ctx-rounds">{{ runCount }} 轮</span>
-      <span v-if="tokenEstimate" class="ctx-tokens">~{{ fmtTokens(tokenEstimate) }}</span>
-      <span class="ctx-actions">
-        <button
-          v-tooltip="'复制终端内容 (Ctrl+Shift+C)'"
-          class="ctx-btn"
-          type="button"
-          :disabled="!liveStdout && !liveStderr"
-          @click="copyContent"
-        >
-          {{ copiedFlash ? '已复制' : '复制' }}
-        </button>
-        <button
-          v-tooltip="'关闭当前进程 (Esc)'"
-          class="ctx-btn danger"
-          type="button"
-          :disabled="!running"
-          @click="closeProcess"
-        >
-          关闭进程
-        </button>
-      </span>
-    </div>
     <!-- [flow-timeline] 全流程时间线 -->
     <div class="flow-timeline">
       <!-- [task-progress-panel-v1] 任务完成详情：待办 + 已完成划线，替代原「已完成 N/M 步」 -->
@@ -623,6 +566,10 @@ function fmtTokens(bytes: number): string {
              文本卡到达等都会让内容长高但无人滚动 ⇒ 最新一条被顶出视野（用户实测截图）。
              [CONSTRAINT] 只在 atBottom（贴底/未上翻）时跟随，用户上翻查看历史不被拽回。 -->
         <div ref="chatInnerRef" class="chat-list-inner">
+          <!-- [event-archive-v1] 刷新归档提示：时间线保留但对应窗口已关，不可续跑 -->
+          <div v-if="hasStaleEvents" class="archive-notice">
+            以下为刷新前的历史记录（对应窗口已关闭，无法继续执行）
+          </div>
           <!-- 每轮脚本 desc：Markdown 渲染；来源 busEvents（已持久化到 localStorage） -->
           <template v-for="card in timelineItems" :key="card.key">
             <ScriptCard
@@ -639,6 +586,22 @@ function fmtTokens(bytes: number): string {
             />
           </template>
 
+          <!-- [status-bar-inline-v1] 阶段条：作为消息流最后一条。
+               无脚本运行时占位显示当前状态；脚本运行中由 ScriptCard 取代（v-if="!running"）。 -->
+          <div
+            v-if="!running && (statusText || statusElapsed || statusKind === 'waiting' || statusKind === 'feedback')"
+            class="status-bar-inline"
+            :class="[statusClass, `kind-${statusKind}`]"
+            aria-live="polite"
+          >
+            <span class="status-dot" aria-hidden="true" />
+            <span class="status-text">{{ statusText }}</span>
+            <span v-if="statusElapsed" class="status-sep">·</span>
+            <span v-if="statusElapsed" class="status-elapsed">脚本 {{ statusElapsed }}</span>
+            <span class="status-spacer" />
+            <span v-if="runCount && runCount > 0" class="status-meta">{{ runCount }} 轮</span>
+            <span v-if="tokenLabel" class="status-meta">~{{ tokenLabel }}</span>
+          </div>
           <!-- 空态：无卡片 / 无输出 / 无总结 -->
           <div v-if="!running && !liveStdout && !liveStderr && timelineItems.length === 0" class="tree-empty">
             <!-- [ui-empty-guide-v2] 引导记忆化：首访展示完整三步，之后只留一行。
@@ -694,15 +657,6 @@ function fmtTokens(bytes: number): string {
             </template>
           </div>
         </div>
-      </div>
-      <!-- 等待 AI 回复指示条：由 useRuntime.kind（waiting / feedback）驱动，其余态隐藏。
-           [wait-banner-overlay-v1] 已浮层化（absolute 悬浮于时间线底部安全带内），
-           出现/消失不再把 chat-list 压矮 ⇒ 最新一条不再被顶出视野（用户实测截图）。 -->
-      <div v-if="waitBanner" class="wait-banner" role="status" aria-live="polite">
-        <span class="wait-spinner" aria-hidden="true" />
-        <span class="wait-text">{{ waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中' }}</span>
-        <span class="wait-dots" aria-hidden="true" />
-        <span v-if="waitElapsed > 0" class="wait-elapsed" aria-hidden="true">{{ waitElapsed }}s</span>
       </div>
     </div>
   </section>

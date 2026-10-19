@@ -15,6 +15,7 @@ import { runHook } from './loop-hooks'
 import { useAutoTakeover } from './useAutoTakeover'
 import { modelIdFromSid, sidForUrl, useAiSite } from './useAiSite'
 import { useAiWaiting } from './useAiWaiting'
+
 import { resetRulesForSessionBoot, useAiWindow } from './useAiWindow'
 import { transportKind } from './useAiTransport'
 import { activeSessionId } from '../ui/useAppStorage'
@@ -40,6 +41,21 @@ import {
 import { beginAutoResume, decideOnResumeTimeout, decideOnStopped, endAutoResume, MAX_AUTO_RESUME } from './stop-resume'
 // [workspace-nav-confirm-v1] 导航确认：收到任意 url-updated 即视为「导航已落地」
 import { confirmNav } from '../data/useWorkspaces'
+
+// [stop-ack-v1] 停止回执订阅者：pauseAll 等 ack 决定 toast 文案
+const stopAckListeners: Array<(hit: boolean) => void> = []
+// [stop-diag-v1] 停止诊断订阅者：排查「为什么没点到停止键」
+const stopDiagListeners: Array<(p: Record<string, unknown>) => void> = []
+/** 订阅 stop-ack；返回退订函数 */
+export function onStopAck(cb: (hit: boolean) => void): () => void {
+  stopAckListeners.push(cb)
+  return () => { const i = stopAckListeners.indexOf(cb); if (i >= 0) stopAckListeners.splice(i, 1) }
+}
+/** 订阅 stop-diag；返回退订函数 */
+export function onStopDiag(cb: (p: Record<string, unknown>) => void): () => void {
+  stopDiagListeners.push(cb)
+  return () => { const i = stopDiagListeners.indexOf(cb); if (i >= 0) stopDiagListeners.splice(i, 1) }
+}
 
 type EventKindStr = 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary' | 'ai:ask' | 'ai:feedback' | 'ai:decision' | 'ai:need-files' | 'ai:stream'
 
@@ -122,7 +138,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   const scriptInbox = useScriptInbox()
   const autoTakeover = useAutoTakeover()
   const { url: siteUrl, setUrl: setSiteUrl, modelId, MODELS } = useAiSite()
-  const { stopWaiting: stopAiWaiting } = useAiWaiting()
+  const { stopWaiting: stopAiWaiting, setRemoteGenerating } = useAiWaiting()
   const aiWindow = useAiWindow()
 
   /** 校验消息来源：仅信任来自任一已注册 AI 窗口的消息 */
@@ -488,6 +504,8 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       user: '等待用户回答',
       none: '本轮结束',
     }
+    // [remote-generating-v1] turn-end 是「本轮收口」的权威信号：强制复位生成态，防 generating:false 帧丢失导致按钮永久卡转
+    setRemoteGenerating(false)
     try { emitBus('ai:turn-end', titles[awaiting] || '本轮结束', { payload: { end } }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
   }
 
@@ -629,6 +647,22 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     if (t === 'ai-runner:turn-end') return handleTurnEndMsg(payload, e)
     if (t === 'ai-runner:new-session-created') return handleNewSessionCreated(payload)
     if (t === 'ai-runner:url-updated') return handleUrlUpdated(payload)
+    // [remote-generating-v1] 生成态帧：驱动按钮常转 / 复位（需求 1 + 需求 3）
+    if (t === 'ai-runner:generating-state') {
+      setRemoteGenerating(Boolean((payload as { generating?: unknown }).generating))
+      return
+    }
+    // [stop-ack-v1] 停止回执：hit=false 表示油猴没找到停止按钮，前端据此提示而非假装成功
+    if (t === 'ai-runner:stop-ack') {
+      const hit = Boolean((payload as { hit?: unknown }).hit)
+      stopAckListeners.forEach((cb) => { try { cb(hit) } catch { /* swallow */ } })
+      return
+    }
+    // [stop-diag-v1] 油猴通道停止诊断：与无头通道 headless:stop-diag 对齐
+    if (t === 'ai-runner:stop-diag') {
+      stopDiagListeners.forEach((cb) => { try { cb(payload as Record<string, unknown>) } catch { /* swallow */ } })
+      return
+    }
     if (t === 'ai-runner:session-id' && payload.id) handleSessionIdUpdate(payload)
   }
 

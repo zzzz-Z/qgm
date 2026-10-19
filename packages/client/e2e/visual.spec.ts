@@ -31,7 +31,6 @@ const MASK_SELECTORS = [
   '.tt-host',
   '.script-card-time',
   '.tp-time',
-  '.wait-elapsed',
 ]
 
 /** 侧栏 tab 的 aria-label（与 components/panels/SidePane.vue 的按钮一致） */

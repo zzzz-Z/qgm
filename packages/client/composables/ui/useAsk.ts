@@ -60,6 +60,21 @@ export function askUser(payload: AskPayload): Promise<string | null> {
  * [CHANGE-IMPACT] 回答写回同一条事件（updateKey 原地更新），使卡片转为「已回答」态并禁用按钮
  * @param answer 用户回答；null 表示取消 / 作废
  */
+/**
+ * [ask-restore-v1] 刷新后恢复提问卡的可交互态。
+ * [WHY] askState 是内存 ref，刷新即丢；原实现据此把所有历史未回答的提问判为「已失效」，
+ *   用户再也点不了选项（实测截图三个选项全灰）。「未被回答」与「被新提问取代」必须区分：
+ *   前者应可恢复，后者才失效。判据交给调用方（卡片未 answered 且当前无活跃提问）。
+ * @returns 是否成功建立活跃提问（已有活跃提问时返回 false，不抢占）
+ */
+export function restoreAsk(id: string, question: string, options: Array<{ id: string, label: string }>): boolean {
+  if (askState.value) return false
+  let resolveFn: (v: string | null) => void = () => {}
+  const _p = new Promise<string | null>((r) => { resolveFn = r })
+  void _p
+  askState.value = { id, question, options, resolve: resolveFn }
+  return true
+}
 export function resolveAsk(answer: string | null): void {
   const s = askState.value
   if (!s) return
@@ -88,5 +103,5 @@ function summarize(q: string): string {
 
 /** useAsk 组合式入口；直接透传模块级单例 */
 export function useAsk() {
-  return { askState, askUser, resolveAsk }
+  return { askState, askUser, resolveAsk, restoreAsk }
 }

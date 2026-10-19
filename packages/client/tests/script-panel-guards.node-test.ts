@@ -35,18 +35,14 @@ test('[P2] ScriptPanel 已摘除 isLoopActive 守卫：单路径下无双发风�
 
 // ============ 执行状态条接线（status-bar-v1）============
 
-test('wiring: ScriptPanel 必须渲染 statusText 族（防只写不读的死状态）', () => {
+test('wiring: ScriptPanel 必须把 statusText 族传给 TerminalPane（防只写不读的死状态）', () => {
   const src = read(PANEL_SRC)
-  // template 内必须出现这四个符号的渲染（此前全仓只有赋值、零渲染出口）
-  const tplStart = src.indexOf('<template>')
-  // 根模板末尾用 lastIndexOf：文件内有多个 slot template，首个 </template> 是 slot 的闭合
-  const tplEnd = src.lastIndexOf('</template>')
-  const tpl = src.slice(tplStart, tplEnd)
-  // [card-duration-v1] 耗时已迁到每张卡片头部渲染，template 不再渲染 lastDuration ⇒ 期望列表移除
+  // [status-bar-move-v1] 状态栏 DOM 已迁到 TerminalPane 底部；ScriptPanel 只负责传值。
+  //   判据改为「三个符号以 prop 形式传给 TerminalPane」，断言类型仍是「不出现只写不读」。
   for (const sym of ['statusText', 'statusClass', 'runningElapsed']) {
-    assert.ok(tpl.includes(sym), `status-bar: template 未渲染 ${sym}（只写不读的死状态回归）`)
+    assert.ok(src.includes(sym), `status-bar: ScriptPanel 未引用 ${sym}（只写不读的死状态回归）`)
   }
-  assert.ok(src.includes('status-bar'), '缺少 status-bar 容器标记')
+  assert.ok(src.includes(':status-text='), 'ScriptPanel 未把 statusText 传给 TerminalPane')
 })
 
 // ============ turn 轮回传权归属（turn-feedback-exclusive-v1）============

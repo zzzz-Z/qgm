@@ -5,4 +5,4 @@
 // AIRUNNER-BATCH19-2-SPLIT-EVENT-STREAM: 实现已外移至 event-stream.ts，此处 re-export 保 API 稳定
 export type { EventKind, StreamEvent } from './event-stream.js'
 
-export { clearEvents, emit, peekPendingAskKey, setPendingAskKey, takePendingAskKey, useEventBus } from './event-stream.js'
+export { archiveEvents, clearEvents, emit, peekPendingAskKey, setPendingAskKey, takePendingAskKey, useEventBus } from './event-stream.js'

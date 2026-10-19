@@ -12,6 +12,8 @@ defineProps<{
   // [deliver-window-v1] 回传窗未收口（结果已产出但还没发出去）：同样转 spinner，
   //   否则「脚本成功 → 几秒空白 → 突然发出去」这段在按钮上完全看不出来
   delivering?: boolean
+  // [remote-generating-v1] AI 页面侧真实生成态：DONE 已到但 AI 仍吐字时必须继续显示停止按钮
+  remoteGenerating?: boolean
 }>()
 /** 派发 */
 const emit = defineEmits<{
@@ -42,12 +44,12 @@ const emit = defineEmits<{
     <!-- [pause-really-stops-v1] 两态：未运行 .takeover 蓝（开始）/ 运行中 .pause 琥珀（停止）。
           守卫见 tests/toolbar-ctrl-colors.node-test.ts -->
     <button
-      v-if="running || autoTakeoverEnabled || aiWaiting || delivering"
+      v-if="running || autoTakeoverEnabled || aiWaiting || delivering || remoteGenerating"
       v-tooltip="'停止：终止后台脚本 + 暂停 AI 生成'"
       aria-label="停止运行"
       class="primary-btn pause head-run"
-      :class="{ 'is-waiting': aiWaiting || delivering }"
-      :aria-busy="aiWaiting || delivering"
+      :class="{ 'is-waiting': aiWaiting || delivering || remoteGenerating }"
+      :aria-busy="aiWaiting || delivering || remoteGenerating"
       @click="emit('pauseAll')"
     >
       <svg

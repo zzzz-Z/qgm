@@ -94,6 +94,22 @@ export function emit(kind: EventKind, summary: string, opts?: { round?: number, 
  * [CONSTRAINT] seq 归零是必要的 —— 否则下次刷新页面从存储恢复时峰值计算会错位
  * [CHANGE-IMPACT] 调用方多为用户手动清屏，不涉及业务数据回滚
  */
+/**
+ * [event-archive-v1] 刷新后归档而非清空：保留时间线供用户回看，但标记 stale 表示「这些是刷新前的记录，
+ *   对应的油猴窗口已关、脚本已停，不可续跑」。
+ * [WHY] 原 clearEvents 把「会话上下文」和「运行时噪音」一起清了，用户刷新后看不到任何历史（实测）。
+ *   归档保留可读性，同时 stale 标记避免「以为还能续跑」的假象。
+ * [CONSTRAINT] 只标一次；已 stale 的事件不重复写盘。
+ */
+export function archiveEvents(): void {
+  if (events.value.length === 0) return
+  if (events.value.every(e => (e.payload as Record<string, unknown> | undefined)?.stale === true)) return
+  events.value = events.value.map(e => ({
+    ...e,
+    payload: { ...((e.payload as Record<string, unknown>) || {}), stale: true },
+  }))
+  saveEvents(events.value)
+}
 export function clearEvents(): void {
   // [event-save-throttle-v1] 取消挂起的节流写盘：否则清空后 250ms 内 flush 会把 [] 写回，键复活
   if (_saveTimer !== null) { clearTimeout(_saveTimer); _saveTimer = null }

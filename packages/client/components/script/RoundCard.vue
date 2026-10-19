@@ -47,7 +47,7 @@ const expanded = ref(
 )
 const askDraft = ref('')
 
-const { askState, resolveAsk } = useAsk()
+const { askState, resolveAsk, restoreAsk } = useAsk()
 
 const collapsed = computed(() => props.card.truncated && !expanded.value)
 const html = computed(() => renderMarkdown(collapsed.value ? props.card.preview : props.card.text))
@@ -56,7 +56,11 @@ const isQuestion = computed(() => props.card.type === 'question')
 const isAskActive = computed(() => {
   if (!isQuestion.value) return false
   const c = qCard.value
-  return !c.answered && Boolean(c.askId) && askState.value?.id === c.askId
+  // [ask-restore-v1] 刷新后 askState 为空但卡片未回答 ⇒ 仍可交互（点击时用 restoreAsk 重建）
+  if (c.answered) return false
+  if (!c.askId) return false
+  if (!askState.value) return true
+  return askState.value.id === c.askId
 })
 
 // [ui-p2c-render-probe-v1] mount/update 各打一次；判据①用 update delta 算单事件重渲染卡数
@@ -67,6 +71,8 @@ function toggle(): void { expanded.value = !expanded.value }
 function submitAnswer(text: string): void {
   const t = String(text || '').trim()
   if (!t || !isAskActive.value) return
+  // [ask-restore-v1] 刷新后无活跃提问：先重建，否则 resolveAsk 会静默返回
+  if (!askState.value && qCard.value.askId) restoreAsk(qCard.value.askId, qCard.value.text, qCard.value.options)
   askDraft.value = ''
   resolveAsk(t)
 }
@@ -118,7 +124,6 @@ function submitAnswer(text: string): void {
   <section
     v-else-if="card.type === 'ask'"
     class="text-card"
-    :class="card.role === 'user-answer' ? 'answer-card' : 'ask-card'"
   >
     <header class="text-card-head">
       <span class="text-card-badge" :class="card.role === 'user-answer' ? 'answer-badge' : 'ask-badge'">你</span>

@@ -178,6 +178,14 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 - **承重测试**：`packages/core/tests/discover-targets.node-test.ts`（7 用例：env 解析 / 配置端口 / 端口探测 / 自动发现 / 漏验判定 / 宿主始终在列 / 排除宿主区间），改此机制必跑。
 - **相关文件**：`packages/core/src/headless/discover-targets.ts`、`packages/core/src/headless/smoke.ts`、`packages/core/src/routes/run.ts`、`packages/core/src/routes/selfcheck.ts`、`packages/core/src/post-run/run-compliance.ts`、`bin/run-all.cjs`。
 
+### 跨机部署归因（cross-host-fallback-v1）
+
+> 通用原则（「禁止用 exit 0 / 构建成功当生效证据」）见 `packages/core/SYSTEM.md` §13；本节只列本项目的宿主机制细节。
+
+- **机制**：`stdout-lag-attrib-v1` 的配对依赖「宿主与后端同机」——`Date.now()` 同源才能用时间戳对齐 fetch 与 summary。
+- **退化路径**：跨机部署或时钟回拨时 `_elapsed < 1`，配对自动退化为「到达序」——`running` 守卫保证 fetch 串行，故第 k 次到达的 summary 恒属第 k 次 run。
+- **适用判据**：`_elapsed >= 1` 走时间戳配对；`_elapsed < 1` 走到达序。两条路径都不得引入并发 fetch。
+
 ### 视觉回归资产
 
 - **基线资产**：`packages/client/e2e/visual.spec.ts-snapshots/`（6 视图 × 2 主题 = 12 张 PNG）。**基线 PNG 是判据资产，不是构建产物**。

@@ -14,7 +14,7 @@ import { promiseTimeout, useStorage } from '@vueuse/core'
 import type { SessionEntry } from './useAppStorage'
 import { activeSessionId, loadActiveSessionIdBySite } from './useAppStorage'
 import { useToast } from './useToast'
-import { clearEvents } from './useEventStream'
+import { archiveEvents } from './useEventStream'
 import { clearInbox } from '../runner/useScriptInbox'
 import { pushTerminalNotice } from '../runner/useRunner'
 // [turn-collect-v1] 信封流水线接线：累积器单例（归本文件所有，避免给消息分发模块再加一条 import）
@@ -284,8 +284,8 @@ export function useAppStartup(deps: AppStartupDeps) {
   async function reconnectAfterRefresh(): Promise<void> {
     await nextTick()
     await promiseTimeout(800)
-    // [no-noise-v1] 清噪音：刷新后时间线与收件箱不应残留
-    try { clearEvents() } catch { /* 未就绪忽略 */ }
+    // [event-archive-v1] 归档而非清空：保留时间线供回看，但标记 stale（对应窗口已关，不可续跑）
+    try { archiveEvents() } catch { /* 未就绪忽略 */ }
     try { clearInbox() } catch { /* 未就绪忽略 */ }
     // 仅确认窗口表连通，不发任何 postMessage（避免触发油猴重发历史消息）
     void aiWin.listWindows()

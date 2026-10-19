@@ -188,6 +188,8 @@ function handleStop(e: MessageEvent): void {
 
   const stopHit = clickStopGenerating()
   console.log('[ai-runner] stop received, stop-btn hit =', stopHit)
+  // [stop-ack-v1] 停止结果必须回传：前端据 hit 决定 toast 文案
+  if (window.opener && !window.opener.closed) window.opener.postMessage({ type: 'ai-runner:stop-ack', hit: stopHit, site: location.origin }, '*')
 
   _msgBuf.length = 0
   _pending.length = 0
@@ -195,6 +197,8 @@ function handleStop(e: MessageEvent): void {
   if (closureRetryTimer) { clearTimeout(closureRetryTimer); closureRetryTimer = null }
   if (genRetryTimer) { clearTimeout(genRetryTimer); genRetryTimer = null }
   pauseReplyObserver()
+  // [stop-resume-observer-v1] 停止后 1.5s 自动重挂，防 observer 永久断开
+  setTimeout(() => { try { resumeReplyObserver() } catch { /* body 未就绪下次再试 */ } }, 1500)
 }
 
 /** 主监听器：按 type 分发到各自 handler；未知类型静默忽略（协议向前兼容） */

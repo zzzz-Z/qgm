@@ -73,6 +73,7 @@ declare global {
   const ansiToHtml: typeof import('./utils/ansi-render').ansiToHtml
   const appendCapped: typeof import('./composables/runner/live-output').appendCapped
   const applyToEditor: typeof import('./composables/runner/useScriptInbox').applyToEditor
+  const archiveEvents: typeof import('./composables/ui/useEventStream').archiveEvents
   const askUser: typeof import('./composables/ui/useAsk').askUser
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
@@ -248,6 +249,8 @@ declare global {
   const onScopeDispose: typeof import('vue').onScopeDispose
   const onServerPrefetch: typeof import('vue').onServerPrefetch
   const onStartTyping: typeof import('@vueuse/core').onStartTyping
+  const onStopAck: typeof import('./composables/ai/useAiReplyHandlers').onStopAck
+  const onStopDiag: typeof import('./composables/ai/useAiReplyHandlers').onStopDiag
   const onUnmounted: typeof import('vue').onUnmounted
   const onUpdated: typeof import('vue').onUpdated
   const onWatcherCleanup: typeof import('vue').onWatcherCleanup
@@ -290,6 +293,7 @@ declare global {
   const refManualReset: typeof import('@vueuse/core').refManualReset
   const refThrottled: typeof import('@vueuse/core').refThrottled
   const refWithControl: typeof import('@vueuse/core').refWithControl
+  const remoteGenerating: typeof import('./composables/ai/useAiWaiting').remoteGenerating
   const removeWindowBySid: typeof import('./composables/ai/useAiWindow').removeWindowBySid
   const removeWindowBySidImpl: typeof import('./composables/ai/useAiWindowTable').removeWindowBySidImpl
   const renderFileContent: typeof import('./composables/useFileContentHtml').renderFileContent
@@ -301,6 +305,7 @@ declare global {
   const resolveAsk: typeof import('./composables/ui/useAsk').resolveAsk
   const resolveComponent: typeof import('vue').resolveComponent
   const resolveConfirm: typeof import('./composables/ui/useToast').resolveConfirm
+  const restoreAsk: typeof import('./composables/ui/useAsk').restoreAsk
   const revealSideTab: typeof import('./composables/ui/useSidePaneTab').revealSideTab
   const runHook: typeof import('./composables/ai/loop-hooks').runHook
   const runIds: typeof import('./composables/runner/useRunner').runIds
@@ -337,6 +342,7 @@ declare global {
   const setActiveWinSidImpl: typeof import('./composables/ai/useAiWindowTable').setActiveWinSidImpl
   const setLastAutoFilled: typeof import('./composables/runner/useScriptInbox').setLastAutoFilled
   const setPendingAskKey: typeof import('./composables/ui/useEventStream').setPendingAskKey
+  const setRemoteGenerating: typeof import('./composables/ai/useAiWaiting').setRemoteGenerating
   const setSessionModelScope: typeof import('./composables/ai/useSessionManager').setSessionModelScope
   const setTransportKind: typeof import('./composables/ai/useAiTransport').setTransportKind
   const setTurnFillSink: typeof import('./composables/runner/useTurnRunner').setTurnFillSink
@@ -391,6 +397,7 @@ declare global {
   const updateUserscript: typeof import('./composables/ui/useUserscriptUpdate').updateUserscript
   const url: typeof import('./composables/ai/useAiSite').url
   const useActiveElement: typeof import('@vueuse/core').useActiveElement
+  const useAiPhaseClock: typeof import('./composables/ai/useAiPhaseClock').useAiPhaseClock
   const useAiReplyHandlers: typeof import('./composables/ai/useAiReplyHandlers').useAiReplyHandlers
   const useAiSite: typeof import('./composables/ai/useAiSite').useAiSite
   const useAiTransport: typeof import('./composables/ai/useAiTransport').useAiTransport
@@ -784,6 +791,7 @@ declare module 'vue' {
     readonly ansiToHtml: UnwrapRef<typeof import('./utils/ansi-render')['ansiToHtml']>
     readonly appendCapped: UnwrapRef<typeof import('./composables/runner/live-output')['appendCapped']>
     readonly applyToEditor: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['applyToEditor']>
+    readonly archiveEvents: UnwrapRef<typeof import('./composables/ui/useEventStream')['archiveEvents']>
     readonly askUser: UnwrapRef<typeof import('./composables/ui/useAsk')['askUser']>
     readonly asyncComputed: UnwrapRef<typeof import('@vueuse/core')['asyncComputed']>
     readonly autoResetRef: UnwrapRef<typeof import('@vueuse/core')['autoResetRef']>
@@ -959,6 +967,8 @@ declare module 'vue' {
     readonly onScopeDispose: UnwrapRef<typeof import('vue')['onScopeDispose']>
     readonly onServerPrefetch: UnwrapRef<typeof import('vue')['onServerPrefetch']>
     readonly onStartTyping: UnwrapRef<typeof import('@vueuse/core')['onStartTyping']>
+    readonly onStopAck: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['onStopAck']>
+    readonly onStopDiag: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['onStopDiag']>
     readonly onUnmounted: UnwrapRef<typeof import('vue')['onUnmounted']>
     readonly onUpdated: UnwrapRef<typeof import('vue')['onUpdated']>
     readonly onWatcherCleanup: UnwrapRef<typeof import('vue')['onWatcherCleanup']>
@@ -1001,6 +1011,7 @@ declare module 'vue' {
     readonly refManualReset: UnwrapRef<typeof import('@vueuse/core')['refManualReset']>
     readonly refThrottled: UnwrapRef<typeof import('@vueuse/core')['refThrottled']>
     readonly refWithControl: UnwrapRef<typeof import('@vueuse/core')['refWithControl']>
+    readonly remoteGenerating: UnwrapRef<typeof import('./composables/ai/useAiWaiting')['remoteGenerating']>
     readonly removeWindowBySid: UnwrapRef<typeof import('./composables/ai/useAiWindow')['removeWindowBySid']>
     readonly removeWindowBySidImpl: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['removeWindowBySidImpl']>
     readonly renderFileContent: UnwrapRef<typeof import('./composables/useFileContentHtml')['renderFileContent']>
@@ -1012,6 +1023,7 @@ declare module 'vue' {
     readonly resolveAsk: UnwrapRef<typeof import('./composables/ui/useAsk')['resolveAsk']>
     readonly resolveComponent: UnwrapRef<typeof import('vue')['resolveComponent']>
     readonly resolveConfirm: UnwrapRef<typeof import('./composables/ui/useToast')['resolveConfirm']>
+    readonly restoreAsk: UnwrapRef<typeof import('./composables/ui/useAsk')['restoreAsk']>
     readonly revealSideTab: UnwrapRef<typeof import('./composables/ui/useSidePaneTab')['revealSideTab']>
     readonly runHook: UnwrapRef<typeof import('./composables/ai/loop-hooks')['runHook']>
     readonly runIds: UnwrapRef<typeof import('./composables/runner/useRunner')['runIds']>
@@ -1048,6 +1060,7 @@ declare module 'vue' {
     readonly setActiveWinSidImpl: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['setActiveWinSidImpl']>
     readonly setLastAutoFilled: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['setLastAutoFilled']>
     readonly setPendingAskKey: UnwrapRef<typeof import('./composables/ui/useEventStream')['setPendingAskKey']>
+    readonly setRemoteGenerating: UnwrapRef<typeof import('./composables/ai/useAiWaiting')['setRemoteGenerating']>
     readonly setSessionModelScope: UnwrapRef<typeof import('./composables/ai/useSessionManager')['setSessionModelScope']>
     readonly setTransportKind: UnwrapRef<typeof import('./composables/ai/useAiTransport')['setTransportKind']>
     readonly setTurnFillSink: UnwrapRef<typeof import('./composables/runner/useTurnRunner')['setTurnFillSink']>
@@ -1102,6 +1115,7 @@ declare module 'vue' {
     readonly updateUserscript: UnwrapRef<typeof import('./composables/ui/useUserscriptUpdate')['updateUserscript']>
     readonly url: UnwrapRef<typeof import('./composables/ai/useAiSite')['url']>
     readonly useActiveElement: UnwrapRef<typeof import('@vueuse/core')['useActiveElement']>
+    readonly useAiPhaseClock: UnwrapRef<typeof import('./composables/ai/useAiPhaseClock')['useAiPhaseClock']>
     readonly useAiReplyHandlers: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['useAiReplyHandlers']>
     readonly useAiSite: UnwrapRef<typeof import('./composables/ai/useAiSite')['useAiSite']>
     readonly useAiTransport: UnwrapRef<typeof import('./composables/ai/useAiTransport')['useAiTransport']>

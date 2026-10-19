@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.28
+// @version      1.9.29
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
 // @match        https://chatglm.cn/*
@@ -2661,6 +2661,9 @@ function handleStop(e) {
     }
     const stopHit = clickStopGenerating();
     console.log('[ai-runner] stop received, stop-btn hit =', stopHit);
+    // [stop-ack-v1] 停止结果必须回传：前端据 hit 决定 toast 文案
+    if (window.opener && !window.opener.closed)
+        window.opener.postMessage({ type: 'ai-runner:stop-ack', hit: stopHit, site: location.origin }, '*');
     _msgBuf.length = 0;
     _pending.length = 0;
     if (observerDebounce) {
@@ -2676,6 +2679,11 @@ function handleStop(e) {
         genRetryTimer = null;
     }
     pauseReplyObserver();
+    // [stop-resume-observer-v1] 停止后 1.5s 自动重挂，防 observer 永久断开
+    setTimeout(() => { try {
+        resumeReplyObserver();
+    }
+    catch { /* body 未就绪下次再试 */ } }, 1500);
 }
 /** 主监听器：按 type 分发到各自 handler；未知类型静默忽略（协议向前兼容） */
 window.addEventListener('message', (e) => {

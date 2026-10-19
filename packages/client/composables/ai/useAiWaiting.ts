@@ -8,6 +8,18 @@ const WATCHDOG_MS = 180_000
 /** 是否处于等待 AI 回复状态；内存态，不持久化 */
 const waiting = ref(false)
 
+/**
+ * [remote-generating-v1] AI 页面侧的真实生成态（由油猴 ai-runner:generating-state 帧驱动）。
+ * [WHY] waiting 是「等工作台回包」的短窗口 + 看门狗超时；running 是「脚本执行中」。
+ *   两者都无法表达「AI 仍在吐字」——DONE 已到但 AI 还在深度思考时，按钮会提前消失。
+ * [CONSTRAINT] 只由 transport 层 setRemoteGenerating 写；组件只读。
+ */
+export const remoteGenerating = ref(false)
+/** 设置远程生成态；由 useAiTransport 消费 generating-state / turn-end 帧时调用 */
+export function setRemoteGenerating(v: boolean): void {
+  remoteGenerating.value = Boolean(v)
+}
+
 // [module-scope-vueuse-timer] vueuse 定时器需在 effectScope 内创建；本模块为跨组件单例
 // [WHY] useTimeoutFn 在组件 setup 内会注册 onScopeDispose；若模块首次导入发生在某组件 setup 中，
 //       该组件卸载会连带清理 watchdog → 3 分钟兜底失效
@@ -103,6 +115,8 @@ export function useAiWaiting() {
     softPause,
     clearSoftPause,
     waiting,
+    remoteGenerating,
+    setRemoteGenerating,
     // [runtime-kind-ssot-v1] 复用模块级同名函数：返回对象与导出函数语义必须一致（避免两套实现分叉）
     startWaiting,
     stopWaiting,

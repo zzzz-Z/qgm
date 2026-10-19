@@ -20,6 +20,7 @@ import { createExecFlow } from './exec-flow'
 //   留存路径的回传窗信号是 feedbackPending（feedback-merge 的 onFeedbackPending 回调）。
 // 组件内定时器统一走 vueuse：随组件卸载自动清理，省去手动 clear
 // [script-panel-utils-v2-extracted]
+import { useAiPhaseClock } from '../../composables/ai/useAiPhaseClock'
 import TerminalPane from './TerminalPane.vue'
 import ScriptEditor from './ScriptEditor.vue'
 import ScriptToolbar from './ScriptToolbar.vue'
@@ -103,9 +104,35 @@ const attachedFiles = ref<AttachedFile[]>([])
 // ── 状态栏 ref ──
 
 /** 状态文本（短暂提示，如「已发送」） */
-const statusText = ref('')
-/** 状态样式类（ok/err） */
-const statusClass = ref('')
+// [status-unify-v1] 阶段条单一真相源：statusText 不再自己算，由 useRuntime.kind 派生。
+// 原实现 running 落 false 即置「成功」，而回传窗（feedback）还在跑 ⇒ 顶栏「成功」与
+// 底部「回传中」同时出现（用户实测）。
+// lastResult 只在 idle 态显示上一次执行结果，3s 后淡出。
+const lastResult = ref<{ text: string, cls: string } | null>(null)
+let lastResultTimer: ReturnType<typeof setTimeout> | undefined
+function setLastResult(text: string, cls: string): void {
+  lastResult.value = { text, cls }
+  if (lastResultTimer) clearTimeout(lastResultTimer)
+  lastResultTimer = setTimeout(() => { lastResult.value = null }, 3000)
+}
+const { state: runtimeState } = useRuntime()
+const { waitBanner, waitText, waitElapsed } = useAiPhaseClock()
+const statusKind = computed(() => String(runtimeState.value.kind))
+const statusText = computed(() => {
+  const k = statusKind.value
+  if (k === 'running') return '运行中…'
+  if (k === 'waiting') return '等待 AI 回复…'
+  if (k === 'feedback') return '回传中…'
+  if (k === 'paused') return '已暂停'
+  if (k === 'stopped') return '已停止'
+  return lastResult.value?.text || ''
+})
+const statusClass = computed(() => {
+  const k = statusKind.value
+  if (k === 'running' || k === 'waiting' || k === 'feedback') return ''
+  if (k === 'idle') return lastResult.value?.cls || ''
+  return k === 'stopped' ? 'muted' : ''
+})
 /**
  * [deliver-window-v1] 非循环自动回传合并窗内是否还有待出站结果。
  * [WHY] 由 exec-flow 的 feedbackMerge 经 onFeedbackPending 回调驱动（feedback-merge 刻意零 vue 依赖）。
@@ -134,7 +161,7 @@ const changeViewProxy = computed<'round' | 'cumulative'>({
 const { enabled: autoTakeoverEnabled, scheduleAutoRun } = useAutoTakeover()
 // ── 领域 composable ──
 // [loop-consolidation-P3b] softPause / loopPaused 已迁至 useAiWaiting（随 auto-loop 退役）
-const { waiting: aiWaiting, startWaiting: startAiWaiting, softPause, loopPaused } = useAiWaiting()
+const { waiting: aiWaiting, startWaiting: startAiWaiting, softPause, loopPaused, remoteGenerating } = useAiWaiting()
 const { events: busEvents } = useEventBus()
 const { stripComments, stripBlankLines } = useCodeCleaner()
 // [tw-removed-v1] 已删 useTwDisplay（打字机缓冲链）：twLines/twErrLines 解构后零消费，
@@ -305,8 +332,7 @@ function handleRunResult(): void {
   //   isLoopActive 恒 false ⇒ 该守卫失效。pendingScriptCount 属循环内队列信号，留存路径无队列概念。
   if (r.dryRunFailed) {
     // [ui-icon-discipline-v1] chrome 层去 emoji：语义由 statusClass 承担（'err' 已上色）
-    statusText.value = '预检失败 · 未落盘'
-    statusClass.value = 'err'
+    setLastResult('预检失败 · 未落盘', 'err')
     toast(
       `预检未通过：脚本本想改 ${r.dryRunChangeCount ?? 0} 个文件，已丢弃，磁盘零改动；错误已入 prompt`,
       'warn',
@@ -324,8 +350,7 @@ function handleRunResult(): void {
     return
   }
   // [ui-icon-discipline-v1] 同上：成功/失败由 statusClass('ok'/'err') 上色表达
-  statusText.value = r.ok ? '成功' : '失败'
-  statusClass.value = r.ok ? 'ok' : 'err'
+  setLastResult(r.ok ? '成功' : '失败', r.ok ? 'ok' : 'err')
   // autoAskOnResult: 失败或只读诊断（成功无改动、非循环）时延迟 3s 自动复制并发给 AI（主动停止除外）
   // [loop-consolidation-P2] isLoopActive 恒 false（非循环路径始终按非循环口径判定只读）
   const isReadonlyProbe = isReadonlyResult(r, false)
@@ -357,8 +382,7 @@ function handleRunResult(): void {
 watch(running, (v) => {
   if (v) {
     runStartAt = performance.now()
-    statusText.value = '运行中…'
-    statusClass.value = ''
+    lastResult.value = null
     runningElapsed.value = '0.0s'
     // resume 等价 setInterval 启动；重复 resume 幂等（内部判断 isActive）
     resumeElapsed()
@@ -440,6 +464,15 @@ function onHtmlDrop(e: DragEvent) {
  * [CONSTRAINT] 3KB 来自实测均值（send.jsonl 的 promptBytes p50≈1.7KB / p90≈5.9KB），取中偏上。
  */
 const tokenEstimate = computed(() => runIds.value.length * 3000)
+/**
+ * [ctx-usage-v1] 字节数 → 易读量级（K / M）。
+ * [WHY] 精确值无意义（前端拿不到真实 token 计数），用户只需要「大致用了多少」。
+ */
+function fmtTokens(bytes: number): string {
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)}M`
+  if (bytes >= 1_000) return `${Math.round(bytes / 1_000)}K`
+  return String(bytes)
+}
 </script>
 
 <template>
@@ -467,26 +500,18 @@ const tokenEstimate = computed(() => runIds.value.length * 3000)
       ref="mainRef" class="flex flex-col pane-main flex-1 min-w-0 overflow-hidden" :class="{ 'is-success': fileSuccess }"
       @dragover="onHtmlDragOver" @drop="onHtmlDrop"
     >
-      <!-- [status-bar-v1] 执行状态条：statusText / statusClass / runningElapsed 的渲染出口。
-           三个 ref 此前只有赋值、零渲染出口（script-panel-guards 守：防只写不读的死状态）。
-           视觉上仅在「有状态文本或运行中」时出现，通过 :class 上色（ok/err），无状态时 v-show 隐藏。 -->
-      <div
-        v-show="statusText || runningElapsed"
-        class="status-bar"
-        :class="statusClass"
-        aria-live="polite"
-      >
-        <span class="status-text">{{ statusText }}</span>
-        <span v-if="runningElapsed" class="status-elapsed">{{ runningElapsed }}</span>
-      </div>
       <!-- 终端 (上方) -->
       <TerminalPane
         :running="running"
         :live-stdout="liveStdout"
         :live-stderr="liveStderr"
         :done-summary="doneSummary"
+        :status-text="statusText"
+        :status-class="statusClass"
+        :status-kind="statusKind"
+        :status-elapsed="runningElapsed"
         :run-count="runIds.length"
-        :token-estimate="tokenEstimate"
+        :token-label="tokenEstimate ? fmtTokens(tokenEstimate) : ''"
         @preview="onPreviewFile"
         @stop="stop"
       />
@@ -510,6 +535,7 @@ const tokenEstimate = computed(() => runIds.value.length * 3000)
             :attached-files-count="attachedFiles.length"
             :ai-waiting="aiWaiting"
             :delivering="delivering"
+            :remote-generating="remoteGenerating"
             @clear-all="clearAll"
             @pause-all="pauseAll"
             @toggle-auto-takeover="toggleAutoTakeover"
