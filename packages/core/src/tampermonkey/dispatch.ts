@@ -99,7 +99,7 @@ function classifyAndPost(): void {
     if (currGen) {
       // [stopped-btn-v1] 进入 generating 时记录 roots 计数与最后根身份
     if (!prevGenerating) { genEnterRoots = countAssistantRoots(); genEnterRootId = assistantRootId() }
-      prevGenerating = currGen
+      setPrevGenerating(currGen)
       // 「生成结束」常非 DOM 事件（按钮变灰/光标移除），若无后续 DOM 变更就再也没人唤醒它
       // [generating-gate-v2] 生成结束常非 DOM 事件：单飞自巡检定时器兜底唤醒
       if (!genRetryTimer) {
@@ -130,11 +130,11 @@ function classifyAndPost(): void {
           sessionId: extractSidFromHash(),
           text: `${STOPPED_GENERIC}${reasonSuffix}`,
         })
-        prevGenerating = false
+        setPrevGenerating(false)
         return
       }
       // 根增长了 / 最后根身份变了 ⇒ 正常完成或 regenerate，不是中断
-      prevGenerating = false
+      setPrevGenerating(false)
     }
 
     // limit：两条通道拆开——增长通道自限不 gate；存量兜底不依赖增长，必须 gate

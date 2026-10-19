@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.29
+// @version      1.9.30
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
 // @match        https://chatglm.cn/*
@@ -950,9 +950,22 @@ let genRetryTimer = null;
  *   否则旧回复会被重判为新回复重新推送。
  * [CHANGE-IMPACT] 后续新增任何「随轮次失效」的状态，一律加进本函数，不要加在调用方。
  */
+/**
+ * [generating-state-v1] 生成态变化的唯一出口：值变即推帧。
+ * [WHY] 前端 remoteGenerating 依赖它判断「AI 是否还在吐字」——影响停止按钮可见性与超时告警分流。
+ * [CONSTRAINT] 必须用包装函数而非裸赋值，否则 4 处赋值点都要各自记得推帧。
+ */
+function setPrevGenerating(v) {
+    const next = Boolean(v);
+    if (next === prevGenerating)
+        return;
+    prevGenerating = next;
+    post({ type: 'ai-runner:generating-state', generating: next, site: location.origin });
+}
 function resetRoundState() {
     stopPosted = false;
-    prevGenerating = false;
+    // [generating-state-v1] 走统一出口（值变会推帧；复位到 false 时前端能收到）
+    setPrevGenerating(false);
     genEnterRoots = 0;
     genEnterRootId = '';
     limitPosted = false;
@@ -1908,7 +1921,7 @@ function classifyAndPost() {
                 genEnterRoots = countAssistantRoots();
                 genEnterRootId = assistantRootId();
             }
-            prevGenerating = currGen;
+            setPrevGenerating(currGen);
             // 「生成结束」常非 DOM 事件（按钮变灰/光标移除），若无后续 DOM 变更就再也没人唤醒它
             // [generating-gate-v2] 生成结束常非 DOM 事件：单飞自巡检定时器兜底唤醒
             if (!genRetryTimer) {
@@ -1937,11 +1950,11 @@ function classifyAndPost() {
                     sessionId: extractSidFromHash(),
                     text: `${STOPPED_GENERIC}${reasonSuffix}`,
                 });
-                prevGenerating = false;
+                setPrevGenerating(false);
                 return;
             }
             // 根增长了 / 最后根身份变了 ⇒ 正常完成或 regenerate，不是中断
-            prevGenerating = false;
+            setPrevGenerating(false);
         }
         // limit：两条通道拆开——增长通道自限不 gate；存量兜底不依赖增长，必须 gate
         const limitCount = countLimitMarkers();

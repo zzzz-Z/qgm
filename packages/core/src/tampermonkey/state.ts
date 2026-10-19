@@ -74,9 +74,22 @@ let genRetryTimer: ReturnType<typeof setTimeout> | null = null
  *   否则旧回复会被重判为新回复重新推送。
  * [CHANGE-IMPACT] 后续新增任何「随轮次失效」的状态，一律加进本函数，不要加在调用方。
  */
+/**
+ * [generating-state-v1] 生成态变化的唯一出口：值变即推帧。
+ * [WHY] 前端 remoteGenerating 依赖它判断「AI 是否还在吐字」——影响停止按钮可见性与超时告警分流。
+ * [CONSTRAINT] 必须用包装函数而非裸赋值，否则 4 处赋值点都要各自记得推帧。
+ */
+function setPrevGenerating(v: boolean): void {
+  const next = Boolean(v)
+  if (next === prevGenerating) return
+  prevGenerating = next
+  post({ type: 'ai-runner:generating-state', generating: next, site: location.origin })
+}
+
 function resetRoundState(): void {
   stopPosted = false
-  prevGenerating = false
+  // [generating-state-v1] 走统一出口（值变会推帧；复位到 false 时前端能收到）
+  setPrevGenerating(false)
   genEnterRoots = 0
   genEnterRootId = ''
   limitPosted = false

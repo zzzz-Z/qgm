@@ -28,7 +28,20 @@ export function setRemoteGenerating(v: boolean): void {
 const scope = effectScope(true)
 const timeoutFn = scope.run(() => useTimeoutFn(() => {
   // [runtime-kind-ssot-v1] 超时也须走 stopWaiting：只清 waiting 会让运行态/banner 永久卡在 waiting
+  const wasGenerating = remoteGenerating.value
   stopWaiting()
+  // [watchdog-visible-v1] 超时必须让用户知道发生了什么：
+  //   [WHY] 原实现只 stopWaiting()，横幅消失得像「正常完成」，用户无从判断是卡死还是慢任务。
+  //   [CONSTRAINT] 按 remoteGenerating 分流：仍在生成 = 慢任务（不报错）；已停但无回复 = 真卡死。
+  try {
+    void import('../ui/useToast').then(({ toast }) => {
+      if (wasGenerating) {
+        toast('AI 仍在生成中，等待已超过 3 分钟——可继续等待或手动刷新页面', 'info', 6000)
+      } else {
+        toast('AI 未回复：3 分钟内没有收到任何输出，可能页面卡死或未登录，请刷新页面后重试', 'error', 8000)
+      }
+    })
+  } catch { /* swallow: toast 未就绪不影响状态复位 */ }
 }, WATCHDOG_MS, { immediate: false }))!
 
 /**
