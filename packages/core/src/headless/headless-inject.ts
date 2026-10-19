@@ -358,55 +358,7 @@ export function detectReplyInPage(siteCfg = {}) {
     return null
   }
 
-  // [code-text-clean-v1] 从 <code class="language-xxx"> 直接判语言
-  // [WHY] DeepSeek 代码块头的语言标签/复制按钮不进入 <code> 元素，取 className 比邻近 DOM 探测更可靠
-  // [CONSTRAINT] 只认 js/bash 两种（与 extractLatestScript 白名单一致），其余返回 null 交给后续探测
-  // [CHANGE-IMPACT] 与 guessLangFromDom / guessLangFromContent 组成三级回退，改单级不影响其他级；
-  //                与 scripts/tampermonkey-session-id.user.js 同名函数保持同步，避免双通道行为分叉
-  function guessLangFromClass(el: Element | null): string | null {
-    if (!el || !el.className) return null
-    const m = String(el.className).match(/(?:language|lang)-([a-z0-9+#-]+)/i)
-    if (!m) return null
-    const raw = m[1].toLowerCase()
-    if (raw === 'bash' || raw === 'sh' || raw === 'shell' || raw === 'zsh') return 'bash'
-    if (raw === 'js' || raw === 'javascript' || raw === 'node' || raw === 'mjs' || raw === 'cjs') return 'js'
-    return null
-  }
-  function guessLangFromDom(pre) {
-    let sib = pre.previousElementSibling
-    for (let i = 0; i < 3 && sib; i++, sib = sib.previousElementSibling) {
-      const r = langFromText(sib.textContent)
-      if (r) return r
-    }
-    const wrap = pre.closest('[class*="code"], [class*="md"], [class*="markdown"], [class*="block"]')
-    if (wrap) {
-      const cands = wrap.querySelectorAll('[class*="lang"], [class*="header"], [class*="title"], [class*="label"]')
-      for (const c of cands) {
-        const r = langFromText(c.textContent)
-        if (r) return r
-      }
-    }
-    return null
-  }
-
-  function guessLangFromContent(text) {
-    const head = text.slice(0, 300)
-    if (/^#!\s*\/usr\/bin\/env\s+bash/.test(head) || /^#!\s*\/bin\/bash/.test(head)) return 'bash'
-    if (/^#!\s*\/usr\/bin\/env\s+node/.test(head)) return 'js'
-    if (/\brequire\s*\(/.test(head)) return 'js'
-    if (/\bmodule\.exports\b/.test(head)) return 'js'
-    if (/\bprocess\.(?:exit|argv|env)\b/.test(head)) return 'js'
-    // [js-content-broaden-v1] 补常见 Node/fs/语法特征（与 tampermonkey-session-id.user.js 保持同构）
-    // WHY: 千问等站点直接输出 `fs.readdirSync(...)` / `const x = ...` 无 require → 旧特征全 null → 代码块被跳过降级为 plain 文本
-    // CONSTRAINT: 只加高置信特征；避免误伤纯 JSON/配置代码块
-    if (/\bfs\.(?:readFileSync|writeFileSync|readdirSync|existsSync|statSync|mkdirSync|unlinkSync)\b/.test(head)) return 'js'
-    if (/\bconsole\.log\s*\(/.test(head)) return 'js'
-    if (/\bJSON\.(?:parse|stringify)\s*\(/.test(head)) return 'js'
-    if (/^(?:const|let)\s+\w+\s*=/.test(head)) return 'js'
-    if (/^\s*(?:echo|cd\s|ls\s|mkdir|git\s|pnpm\s|npm\s|yarn\s|rm\s)/m.test(head)) return 'bash'
-    if (/\bif\s+\[\s/.test(head) || /\bfi\b/.test(head) || /\$\(/.test(head)) return 'bash'
-    return null
-  }
+  // [script-fence-guess-removed-v1] guessLang* 三件套已删：只服务于已删除的 extractLatestScript。
 
   /** 检测文本是否含 js 代码块（接收端容错） */
   function hasJsFence(text: string): boolean {
@@ -455,169 +407,9 @@ export function detectReplyInPage(siteCfg = {}) {
     return out
   }
 
-  // [script-fence-gate-v1] 判定 SCRIPT 标记存在但本回复从未推出过有效 js 代码块（裸写无围栏 / 块未被识别为 js）。
-  // 返回 'report'（首次报 error）| 'suppress'（已报过，抑制 plain 噪音）| 'none'（无需处理）。
-  // [WHY] 旧逻辑让 SCRIPT+无有效块的回复落到 plain 分支 → 前端收一张只有"SCRIPT"文本或裸代码的卡 → 静默空转。
-  // [CONSTRAINT] **必须内联在 detectReplyInPage 内部**：本函数经 page.evaluate 序列化到浏览器执行，
-  //   顶层引用会随模块边界丢失（ReferenceError: decideScriptFence is not defined，实测 2026-10-14），
-  //   与本文件内 hasUnclosedStructureJs / scanReplyMarks 的既有内联模式一致。
-  // [CHANGE-IMPACT] 调用方负责"正文已稳定"前提（headless: _stableCount>=3；油猴: 已出 isGenerating 分支），本函数不重复判稳定。
-  function decideScriptFence(scriptMarkPositive, seenHashesLen, alreadyReported) {
-    if (!scriptMarkPositive) return 'none'
-    if (seenHashesLen > 0) return 'none' // 已成功推过脚本：走噪音抑制，不报 fence
-    if (alreadyReported) return 'suppress'
-    return 'report'
-  }
+  // [script-fence-guess-removed-v1] decideScriptFence 已删：无围栏不再视为异常。
 
-  function extractLatestScript() {
-    // [script-closure-gate-v1] 结构闭合门 —— 未闭合的块不当作完整脚本推送。
-    // [WHY] 此前唯一屏障是调用方的稳定判据（2 帧同 hash / 油猴 350ms 防抖 + 生成中门），两者都只要求「文本没变」、
-    //   不要求块闭合 ⇒ 任何超窗停顿都让半截块被判完整，下游报 `Unexpected end of input`（与 max_tokens 截断同形）。
-    // [CONSTRAINT] 只延迟、不丢弃：连续 CLOSURE_ACCEPT_TICKS 次不变仍未闭合 ⇒ 判为真截断，照旧放行；
-    //   门状态挂 window（不用 dedup）⇒ 双通道逐字同构；扫描器语义须与 post-run/script-check.ts 的 hasUnclosedStructure 一致（语料对拍）。
-    function hasUnclosedStructureJs(src) {
-      const stack = []
-      let state = 'code'
-      for (let i = 0; i < src.length; i++) {
-        const ch = src[i]
-        const nx = src[i + 1]
-        if (state === 'line-comment') { if (ch === '\n' || ch === '\r') state = 'code'; continue }
-        if (state === 'block-comment') { if (ch === '*' && nx === '/') { state = 'code'; i++ } continue }
-        if (state === 'single' || state === 'double' || state === 'template') {
-          const q = state === 'single' ? '\'' : state === 'double' ? '"' : '`'
-          if (ch === '\\') { i++; continue }
-          if (ch === q) state = 'code'
-          continue
-        }
-        if (ch === '/' && nx === '/') { state = 'line-comment'; i++; continue }
-        if (ch === '/' && nx === '*') { state = 'block-comment'; i++; continue }
-        if (ch === '\'') { state = 'single'; continue }
-        if (ch === '"') { state = 'double'; continue }
-        if (ch === '`') { state = 'template'; continue }
-        if (ch === '{' || ch === '(' || ch === '[') { stack.push(ch); continue }
-        if (ch === '}' || ch === ')' || ch === ']') {
-          const want = ch === '}' ? '{' : ch === ')' ? '(' : '['
-          if (stack.length === 0 || stack[stack.length - 1] !== want) return true
-          stack.pop()
-        }
-      }
-      if (state === 'single' || state === 'double' || state === 'template' || state === 'block-comment') return true
-      return stack.length > 0
-    }
-    // [script-content-gate-v1] 脚本完整性门：剔除 shebang / 注释 / 空白后必须还有可执行内容。
-    // [WHY] 括号闭合门对「只有头部注释」的文本天然为 false（注释里不含括号），流式中途任一停顿
-    //   都会让半成品头部被判为完整脚本推出去 → 前端执行两次（2026-10-07 22:18:14 实测）。
-    // [CONSTRAINT] 判据与 packages/client/composables/runner/inbox-parse.ts 的 normalizeForHash 同构；
-    //   与 scripts/tampermonkey-session-id.user.js 的同名函数逐字同构，改一处必须同步另一处。
-    function hasExecutableContent(src) {
-      const stripped = String(src || '')
-        .split('\n')
-        .map(l => l.trim())
-        .filter((l) => {
-          if (!l) return false
-          if (l.startsWith('#!')) return false
-          if (l.startsWith('//')) return false
-          if (l.startsWith('#')) return false
-          return true
-        })
-        .join('')
-      return stripped.length > 0
-    }
-    /** 正文长度变了 ⇒ 回复仍在增长，继续等；连续 3 次等长 ⇒ 判定为「上游真截断」并放行 */
-    function stillStreamingReply() {
-      const body = String((document.body && document.body.textContent) || '')
-      const gate = window.__aiRunnerClosureGate
-      if (!gate || gate.len !== body.length) {
-        window.__aiRunnerClosureGate = { len: body.length, ticks: 0 }
-        return true
-      }
-      gate.ticks++
-      // [closure-timeout-v1] 放行瞬间打点：事后可区分「上游真截断被放行」与「完整块正常放行」
-      // [CONSTRAINT] releasedAt 仅在此写入，被 detectReplyInPage 一次性消费后置 null
-      if (gate.ticks >= 3) {
-        gate.releasedAt = Date.now()
-        return false
-      }
-      return true
-    }
-    // 只扫最后一条 assistant 消息，排除历史/用户消息
-    // [no-root-no-reply-v1] 容器缺失 ⇒ 不扫整页（用户消息里的代码块会被当脚本候选；
-    //   与油猴通道 latestAssistantRoot() 语义同构，假 DOM 对拍见 multi-script-blocks）
-    const blocks = document.querySelectorAll('.ds-assistant-message-main-content')
-    const root = blocks.length > 0 ? blocks[blocks.length - 1] : null
-    const pres = root ? Array.from(root.querySelectorAll('pre')) : []
-    // [multi-script-v1] 一条回复允许携带多个脚本：本函数每帧只放行**一个**尚未推送的块，
-    //   由调用方的「连续 2 帧同 hash」稳定判据逐块送出，前端再串行执行。
-    // [WHY] 旧实现 `lastMarked || last` 只取最后一块，前面所有块被**静默丢弃**；
-    //   而最后一块恰恰是上游截断最可能切中的那一块 → 一整轮白跑（用户实测的「脚本被截断」）。
-    // [CONSTRAINT] 仍优先取「带脚本头契约标记」的块（shebang / @desc），避免把正文里的示例代码当脚本；
-    //   无标记块只在没有任何未见过的标记块时才兜底。seenHashes 去重保证同一块不会重复放行。
-    const seenHashes = dedup.seenHashes
-    let firstUnseen = null
-    let firstUnseenMarked = null
-    // [fragment-guard-v1] 本回复内是否存在任意标记块（含已被 seen 记过的）——
-    //   存在则无标记块一律视为说明性片段，不再兜底推送。
-    let hasAnyMarked = false
-    for (const pre of pres) {
-      // [code-text-clean-v1] 优先从 <pre><code> 取文本，避开代码块头的语言标签与「复制/下载」按钮文字
-      // [WHY] pre.textContent 会把头部按钮文字并入首行，污染后 #! 锚点失配、语言判定失败导致整块跳过
-      // [CONSTRAINT] 无 code 子元素时回退 pre 本身；text 变量名保持，后续 hash/done 提取均复用同一字符串
-      const codeEl = pre.querySelector('code') || pre
-      const text = (codeEl.textContent || '').replace(/^\n+|\n+$/g, '')
-      if (!text) continue
-      if (!text.includes('\n') && text.length < 120) continue
-      // [code-text-clean-v1] 语言判定三级回退：className → DOM 邻近探测 → 内容特征
-      let lang = guessLangFromClass(codeEl) || guessLangFromDom(pre) || guessLangFromContent(text) || null
-      // [script-head-contract-fallback-v1] 脚本头契约：shebang 或 @desc 注释是脚本强特征
-      // [WHY] AI 有时用非白名单语言标签（如 ```javascript / ```node / 无标签），三级判定得 null → script 被漏识别 →
-      //   前端只收到 plain 走渲染不执行。命中契约特征时兜底认定 js，让符合脚本头契约的脚本能被无差别识别
-      // [CONSTRAINT] 只认脚本头契约允许的两种形式（shebang / @desc）；误伤面：AI 复述 SYSTEM.md 示例会被当成脚本候选，
-      //   由 lastMarked 优先级与 dedup hash 共同约束
-      // [CHANGE-IMPACT] 影响 detectReplyInPage 的 kind 分流：修复后符合契约的脚本块稳定走 script 分支
-      const _marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
-        || /^\s*\/\/\s*@desc\b/m.test(text)
-        || /^\s*#\s*@desc\b/m.test(text)
-      if (!lang && _marked) lang = 'js'
-      // [script-lang-whitelist-v2] 语言白名单收紧为 js / bash，并**取消**「首行声明 SCRIPT 即无条件放行」。
-      // [WHY] 旧判据在白名单之外还挂了一个 declared 豁免开关：声明 SCRIPT 时连语言**判不出来**
-      //   的块（```python / ```json / 无语言标签）也一并收下 → attach-ws 把 null 折算成 'js' →
-      //   前端按 cjs 交给 node → 必然语法错，白烧一轮。合法脚本不受影响：脚本头契约（shebang / @desc）
-      //   已由上方 _marked 兜底成 js，纯内容特征命中的块也各有 js/bash 归属。
-      // [CONSTRAINT] 与 scripts/tampermonkey-session-id.user.js 的 extractLatestScript 逐字同构
-      //   （守卫测试 reply-mark-parity）；本函数不再接收任何参数，调用处不得传 declared。
-      // [CHANGE-IMPACT] 语言不可判定的声明块不再进 script 分支（降级为 plain 走 Markdown 渲染）；
-      //   bash 仍可采集（供自动循环的 /exec 通道），但不再有「被当成 js 交给 /run」的错路。
-      if (lang !== 'js' && lang !== 'bash') continue
-      // [script-content-gate-v1] 非注释内容非空门：只有头部注释的残缺块不算完整脚本。
-      // [WHY] 2026-10-07 22:18:14 实测：AI 流式中途只吐出 #! + @desc + @why + @plan 的头部，
-      //   括号闭合门对纯注释天然返回 false ⇒ 被判「完整」推送 → 前端跑一次空脚本（1.53s），
-      //   完整块到达后再跑一次（1.55s）→ 用户看到同 desc 执行两次（间隔 1.8s）。
-      if (!hasExecutableContent(text)) continue
-      // [script-closure-gate-v1] 未闭合 ⇒ 极可能仍在流式生成中途（或站点把回复切断了）：
-      //   继续等下一帧；只有「正文长度连续 N 次不变」才判定为上游真截断并放行（约束见函数头）
-      if (hasUnclosedStructureJs(text)) {
-        if (stillStreamingReply()) continue
-      }
-      let _h
-      const _cached = dedup._preCache.get(pre)
-      if (_cached && _cached.len === text.length) { _h = _cached.hash }
-      else { _h = hash32(text); dedup._preCache.set(pre, { len: text.length, hash: _h }) }
-      const item = { lang, code: text, hash: _h }
-      // [fragment-guard-v1] marked 须在 seen 跳过**之前**计算：
-      //   已推送过的标记块也要计入 hasAnyMarked（否则第二次 pick 会误判「本回复无标记块」而兜底推片段）。
-      const marked = /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
-        || /^\s*\/\/\s*@desc\b/m.test(text)
-        || /^\s*#\s*@desc\b/m.test(text)
-      if (marked) hasAnyMarked = true
-      // [multi-script-v1] 已推送过的块不再参与选取，否则「首个未见」会永远卡在同一块上
-      if (seenHashes.includes(_h)) continue
-      if (!firstUnseen) firstUnseen = item
-      if (marked && !firstUnseenMarked) firstUnseenMarked = item
-    }
-    if (firstUnseenMarked) return firstUnseenMarked
-    if (hasAnyMarked) return null
-    return firstUnseen
-  }
+  // [script-fence-guess-removed-v1] extractLatestScript 已删：脚本意图由 turn 信封决定，不再按围栏语言猜。
 
   // 取当前页面主文本（AI 回复区）
   function getMainText() {
@@ -1204,35 +996,11 @@ export function detectReplyInPage(siteCfg = {}) {
   const marks = scanReplyMarks(extractReplyMd(replyRoot))
   const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0
 
-  // script 需连续 2 次相同 hash 才推，避开流式中途残缺
-  // [script-lang-whitelist-v2] 不再传 declared：语言白名单恒为 js/bash（见 extractLatestScript）
-  const script = markedNonScript || stoppedThisRound ? null : extractLatestScript()
-  // [generating-gate-v1] 无头通道补「生成中门」（与油猴 350ms 防抖 + 生成中门 parity）。
-  // [WHY] 原判据是三层弱条件叠加（2 帧同 hash + hasUnclosedStructureJs 结构闭合 + stillStreamingReply 用 body.length 判稳定），
-  //   三者都是「必要不充分」却被当充分条件 ⇒ AI 写完完整函数后停顿 >800ms（或思考期长度不变 3 帧）即误推脚本。
-  // [CONSTRAINT] 只拦「有脚本块 + 生成中」；markedNonScript（DONE/ASK/TEXT）不受影响（否则 DONE 首行写在生成中会被推迟）。
-  // [CONSTRAINT] 清 _pendingScriptHash 避免生成完成后因 hash 相同直接跳过 2 帧判据；isGeneratingInPage 失配 fail-open（不误判生成中）。
-  // [CHANGE-IMPACT] 站点改版致探针恒 false 时退化为原三层判据（非「永不放行」）。
-  if (script && isGeneratingInPage()) {
-    dedup._pendingScriptHash = null
-    return null
-  }
-  if (script && !dedup.seenHashes.includes(script.hash)) {
-    if (dedup._pendingScriptHash === script.hash) {
-      dedup._pendingScriptHash = null
-      dedup.seenHashes.push(script.hash)
-      dedup.lastBodySig = bodySignature()
-      const gateNow = window.__aiRunnerClosureGate
-      if (gateNow && gateNow.releasedAt) {
-        const info = { closureRelease: true, closureTicks: gateNow.ticks, closureLen: gateNow.len }
-        gateNow.releasedAt = null
-        return { kind: 'script', code: script.code, lang: script.lang, hash: script.hash, ...info }
-      }
-      return { kind: 'script', code: script.code, lang: script.lang, hash: script.hash }
-    }
-    dedup._pendingScriptHash = script.hash
-    return null
-  }
+  // [script-fence-guess-removed-v1] 删除「按 ```lang 围栏猜脚本」的旧通道。
+  // [WHY] 旧逻辑在无 ASK/DONE/HANDOFF/TEXT 标记时无条件调 extractLatestScript() 扫页面所有 <pre>，
+  //   把任意 ```js 围栏当待执行脚本推下去 —— AI 正文里贴示例代码就会被真执行（用户实测）。
+  //   脚本意图必须由 turn 信封的 content[].type 决定（readTurnBlocks 通道），不能靠围栏语言猜。
+  // [CHANGE-IMPACT] 本函数不再产出 kind:"script"。
 
   const doneMarker = findNewDone()
   if (doneMarker) {
@@ -1301,12 +1069,7 @@ export function detectReplyInPage(siteCfg = {}) {
   //   这是「裸写代码无围栏」或「代码块未被识别为 js」的静默失败：立即报 error 而非降级 plain 文本卡。
   // [CONSTRAINT] 用 dedup._scriptFenceReported 去重只报一次；已推过脚本（seenHashes 非空）走上方噪音抑制。
   // [CONSTRAINT] error kind 前端渲染为 toast 并让循环继续（类 BASH_CHANNEL_REMOVED，exit 2 不终止）。
-  const _fence = decideScriptFence(marks.script > 0, dedup.seenHashes.length, dedup._scriptFenceReported)
-  if (_fence === 'report') {
-    dedup._scriptFenceReported = true
-    return { kind: 'error', text: 'SCRIPT 载荷不是有效的 js/cjs 代码块：必须用 ```js 围栏包裹代码，且脚本头用 // @desc / // @why（参考 packages/core/SYSTEM.md §1 状态 A）。' }
-  }
-  if (_fence === 'suppress') { dedup._hitFenceSuppress = (dedup._hitFenceSuppress || 0) + 1; return null }
+  // [script-fence-guess-removed-v1] 围栏报错块已删：新架构下脚本只走信封，无围栏不再视为异常。
   dedup._plainSentInCycle = true
   // [text-mark-v1] TEXT 标记的载荷：取 DOM→Markdown 反推正文并剥掉标记行。
   // [WHY] getMainText() 是 textContent——块级标签之间不插换行，标记行会与正文粘成一行，

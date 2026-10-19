@@ -238,36 +238,8 @@ test('reply-mark: 浏览器侧 plain 门槛必须复用首行标记扫描', () =
   )
 })
 
-test('reply-mark: script 分类必须让位于标记行', () => {
-  const src = read(BROWSER_SRC)
-  // [stopped-no-autorun-v1] 停止后不得再推脚本（否则残余块会走「循环外自动执行」旁路），
-  //   与「标记让位」共用同一处三元表达式；两条语义必须**同时**在位
-  assert.ok(/markedNonScript \|\| stoppedThisRound \? null : extractLatestScript/.test(src), '带 ASK / DONE / HANDOFF 标记的回复不得再走 script 分支（否则 DONE 总结里的示例代码块会被重新执行）')
-  assert.ok(src.includes('const stoppedThisRound = Boolean(dedup._stoppedReported)'), 'stoppedThisRound 必须派生自 _stoppedReported（否则该分支恒假，旁路灯仍亮）')
-  // [text-mark-v1] TEXT 同理：纯文本里贴一段示例代码不得被当脚本执行
-  assert.ok(src.includes('marks.handoff > 0 || marks.text > 0'), 'markedNonScript 应纳入 marks.text（否则带代码块的 TEXT 回复会被当脚本）')
-  assert.ok(src.includes('extractLatestScript()'), '声明 SCRIPT 不再放宽语言过滤（白名单恒为 js/bash）')
-})
-
-// [script-lang-whitelist-v2] 采集侧语言白名单契约：两端逐字同构，且**不存在**「声明即豁免」通道。
-// [WHY] 旧判据 `&& !declared` 让声明块的**语言不可判定**内容（```python / ```json / 无标签）也被收下 →
-//   attach-ws 把 null 折算成 'js' → 前端按 cjs 交给 node → 必然语法错。这类 bug 的失败方式是「静默收下 +
-//   跑到执行侧才炸」，只断言「函数还在」抓不到，必须断言那条白名单语句本身。
-test('reply-mark: 脚本语言白名单两端同构，且已无「声明即豁免」', () => {
-  const WHITELIST_RE = /if \(lang !== 'js' && lang !== 'bash'\)\s*continue;?/
-  for (const rel of [BROWSER_SRC, TAMPERMONKEY_SRC]) {
-    const src = read(rel)
-    assert.ok(WHITELIST_RE.test(src), `${rel} 的 extractLatestScript 白名单应为 js/bash 两项`)
-    assert.ok(
-      !src.includes('&& !declared'),
-      `${rel} 仍保留「声明 SCRIPT 即无条件放行」→ 语言不可判定的块会被当 js 交给 node`,
-    )
-    assert.ok(
-      !/extractLatestScript\([^)]/.test(src),
-      `${rel} 的调用处仍在传 declared 参数 → 白名单可被重新打开`,
-    )
-  }
-})
+// [script-fence-guess-removed-v1] 旧「按围栏猜脚本」通道已彻底删除，原两条用例（标记让位 / 白名单同构）
+// 断言的对象已不存在。新架构下脚本意图只由 turn 信封 content[].type 决定，不再有围栏语言猜测。
 
 test('reply-mark: findNewDone 不得退回自写的首行 DONE 判据', () => {
   const src = read(BROWSER_SRC)
@@ -281,13 +253,17 @@ test('reply-mark: findNewDone 不得退回自写的首行 DONE 判据', () => {
 test('reply-mark: 油猴通道同样不得自写判据', () => {
   const src = read(TAMPERMONKEY_SRC)
   assert.ok(src.includes('scanReplyMarks(summary).done'), '油猴 findNewDone 应使用统一扫描')
-  // [stopped-no-autorun-v1] 同上：停止轮不再推脚本，与标记让位共用一处三元表达式
+  // [script-fence-guess-removed-v1] 旧「脚本分类让位于标记」的三元/if 分支已整体删除（含 extractLatestScript 调用）。
+  //   本断言改为守护「旧通道不复活」——一旦回来，正文里的示例代码又会被真执行。
+  // [script-fence-guess-removed-v1] 判活调用而非文本出现：注释里提到函数名不算复活。
+  const activeLines = src.split(String.fromCharCode(10)).filter((l) => {
+    const t = l.trim()
+    return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/**')
+  }).join(String.fromCharCode(10))
   assert.ok(
-    /markedNonScript \|\| stopPosted\) \? null : \(extractLatestScript/.test(src)
-    || /if \(!markedNonScript && !stopPosted\) \{/.test(src),
-    '油猴通道的脚本分类应让位于首行标记，且 stopped 后须停推脚本',
+    !/extractLatestScript\s*\(/.test(activeLines),
+    '油猴通道仍调用 extractLatestScript → 按围栏猜脚本的旧通道被复活了',
   )
-  assert.ok(src.includes('let stopPosted = false'), '油猴缺 stopPosted 标志（停止轮无法拦住残余脚本）')
   assert.ok(
     !src.includes('/^\\s*DONE\\s*$/.test(firstLine)'),
     '油猴通道保留自写的「首行严格 DONE」判据 → 走该通道时行为与主链路分叉',
