@@ -219,6 +219,7 @@
   - **结构化反思（`reflect-v1`）**：`reflect(opts?)` → `{changed, shouldTest, untested, risks, nextStep}`；聚合变更集 / 受影响测试 / 看板状态（board 由调用方传入，纯函数无网络），把三类静默失效（改了没测 / 看板有失败 / 变更集为空）变成显式风险项与下一步建议。
   - **知识库蒸馏（`lessons-distill-v1`）**：`__AI__.lessons.distill()` → `{total, byState, totalBytes, avgBytes, candidates, suggestion}`；统计 lessons.md 四态分布并标出「缺证据」（已标状态但无日期证据）与「超长待复核」（>2000 字节）两类候选，纯统计不写盘。用于治理知识库无界增长挤占检索质量。
   - **隔离会话（`helpers-session-v1`）**：`__AI__.session.create({sandbox?})` → 派生独立 REPL 子进程（独立 overlay/toolLog，sandbox 缺省 `read-only`）；`.frame(sid, code, opts?)` → 发帧取结果；`.close(sid)` → 幂等关闭。**子任务隔离的后端地基**：每会话独立进程与临时产物，互不污染。门面只做 HTTP 转发不持有状态（服务端 sessions Map 是唯一真值，本地缓存必漂移）。
+  - **子智能体编排（`subagent-orchestrator-v1`）**：`__AI__.subagent.submit(description, opts?)` → `{task}`（立即返回 pending，异步执行）；`.get(id)` / `.list(status?)` / `.cancel(id)`。编排层（`subagent/orchestrator.ts`）只负责任务契约、状态机、并发槽与结果协议，**执行体是可插拔策略**（TaskExecutor 接口）：当前内置 `repl-script`（复用隔离会话跑同步脚本，结果经 `__AI__.ok` 回传，只回 ≤500 字符摘要），宿主侧接入 LLM 执行体时只需实现同一契约，编排逻辑零改动。**边界**：编排层不直接调 LLM——LLM 是宿主侧依赖，这保证编排层可在纯 Node 环境完整测试。
 
 **后台长任务（>180s / 流式输出）**：`await __AI__.shell(cmd, {background:true})` 立即返回 `{ok:true,background:true,id,pid,logPath}`（detached，不阻塞 `/run`，绕开 180s SIGTERM）。跨轮用 `shellStatus(id)` / `readShell(id, {from})`（按字节偏移取增量，返回 `{text,next,done}`）/ `killShell(id)` 管控。子进程退出会自写 `[@shell-done exit=N …]` 哨兵——`done:true` 即结束。`BG_ID=<id>` 自动打到 stdout 供前端秒级流式上屏（AI **不需要** `readShell` 再打印；收口判断仍须 `shellStatus(id)`）。
 

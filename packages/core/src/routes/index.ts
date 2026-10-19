@@ -30,6 +30,8 @@ import { shellLogHono } from './shell-log.js'
 // [arrive-log-v1] 脚本到达前端的留痕入口（页面通道每推一条上报一次 ⇒ logs/arrive.jsonl）
 import { arriveLogHono } from './arrive-log.js'
 import { videoHono } from './video.js'
+// [subagent-route-v1] 子智能体编排入口（任务提交/查询/取消）
+import { subagentHono } from './subagent.js'
 
 /** 所有子路由 Hono 应用实例列表 */
 export const HONO_SUB_APPS = [
@@ -58,6 +60,7 @@ export const HONO_SUB_APPS = [
   shellLogHono,
   arriveLogHono,
   videoHono,
+  subagentHono,
 ]
 
 // 已迁移到 Hono 的路径前缀——dispatchHono 只对这些前缀做 bridge

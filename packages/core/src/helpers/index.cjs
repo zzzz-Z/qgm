@@ -54,6 +54,9 @@ const tasksApi = require('./tasks.cjs')
 /** [helpers-session-v1] 隔离会话族（HTTP，服务端 session-manager 托管）。 */
 const sessionApi = require('./session.cjs')
 
+/** [helpers-subagent-v1] 子智能体编排族（HTTP，服务端单例编排器托管）。 */
+const subagentApi = require('./subagent.cjs')
+
 /** [helpers-browser-v1] 无头浏览器（cssom / screenshot 走 CLI 子进程）。 */
 const browserApi = require('./browser.cjs')
 
@@ -192,6 +195,7 @@ const __AI__ = {
   lessons: lessonsApi,
   tasks: tasksApi,
   session: sessionApi,
+  subagent: subagentApi,
   browser: browserApi,
 }
 /**
