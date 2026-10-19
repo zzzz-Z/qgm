@@ -221,6 +221,8 @@
   - **隔离会话（`helpers-session-v1`）**：`__AI__.session.create({sandbox?})` → 派生独立 REPL 子进程（独立 overlay/toolLog，sandbox 缺省 `read-only`）；`.frame(sid, code, opts?)` → 发帧取结果；`.close(sid)` → 幂等关闭。**子任务隔离的后端地基**：每会话独立进程与临时产物，互不污染。门面只做 HTTP 转发不持有状态（服务端 sessions Map 是唯一真值，本地缓存必漂移）。
   - **子智能体编排（`subagent-orchestrator-v1`）**：`__AI__.subagent.submit(description, opts?)` → `{task}`（立即返回 pending，异步执行）；`.get(id)` / `.list(status?)` / `.cancel(id)`。编排层（`subagent/orchestrator.ts`）只负责任务契约、状态机、并发槽与结果协议，**执行体是可插拔策略**（TaskExecutor 接口）：当前内置 `repl-script`（复用隔离会话跑同步脚本，结果经 `__AI__.ok` 回传，只回 ≤500 字符摘要），宿主侧接入 LLM 执行体时只需实现同一契约，编排逻辑零改动。**边界**：编排层不直接调 LLM——LLM 是宿主侧依赖，这保证编排层可在纯 Node 环境完整测试。
 
+  **REPL 异步帧（`repl-async-frame-v1`）**：`repl-loop.cjs` 现支持异步脚本——`vm.runInThisContext` 返回 thenable 时先 `await` 再 emit。**串行保证**：帧入队后按序消费，前一帧完全结束（含 await）才处理下一帧，因此帧顺序与 logs 隔离不被破坏。同步脚本行为完全不变（不引入额外微任务延迟）。这条改造让 `repl-script` 执行体可直接跑 `await` 任务，不再受「只能同步」限制。
+
 **后台长任务（>180s / 流式输出）**：`await __AI__.shell(cmd, {background:true})` 立即返回 `{ok:true,background:true,id,pid,logPath}`（detached，不阻塞 `/run`，绕开 180s SIGTERM）。跨轮用 `shellStatus(id)` / `readShell(id, {from})`（按字节偏移取增量，返回 `{text,next,done}`）/ `killShell(id)` 管控。子进程退出会自写 `[@shell-done exit=N …]` 哨兵——`done:true` 即结束。`BG_ID=<id>` 自动打到 stdout 供前端秒级流式上屏（AI **不需要** `readShell` 再打印；收口判断仍须 `shellStatus(id)`）。
 
 **前台流式（fg-stream-v1）**：`await __AI__.shell(cmd, {stream:true})` 会把子进程 stdout/stderr 实时 tee 到脚本自身 stdout ⇒ 随 `/run` chunk 帧秒级上屏，不必等命令结束。**仍受 180s 外层 SIGTERM 限制**，只解决「看得到进度」，不解决「跑不完」。超过 180s 的任务仍须 `{background:true}` + 轮询。默认（不传 `stream:true`）行为完全不变。

@@ -37,22 +37,19 @@ export const replScriptExecutor: TaskExecutor = {
       await closeSession(info.sid).catch(() => false)
       throw new Error('aborted after create')
     }
-    // [subagent-script-wrap-v1] REPL 帧丢弃 vm 返回值（repl-loop.cjs: vm.runInThisContext 结果未回传），
-    // 脚本产出只能经 __AI__.ok 进 logs 再随帧回传。故统一包装：执行描述后把结果 JSON 打印出来。
+    // [subagent-async-wrap-v1] 无条件包 async IIFE（repl-loop 已支持 await Promise 后再 emit）。
+    // [WHY] 不做「已包装则跳过」判断：raw 的 `;(async` 前缀与 await 括号会拼成非法语法（实测多次）。
+    // [CONSTRAINT] 结果经 __AI__.ok 输出——REPL 丢弃 vm 返回值，logs 是唯一回传通道。
     const raw = String(task.description || '')
-    // [subagent-sync-wrap-v1] 同步包装：repl-loop 的 emit 在 vm.runInThisContext 返回后立即触发，
-    //   异步 .then 的回调来不及进 logs（实测 logs=undefined）。故脚本必须同步产出结果。
-    // [CONSTRAINT] 需要异步能力的任务应改用未来宿主侧接入的 llm 执行体，而非本执行体。
-    const body = /^\s*(?:;\s*)?\(\s*\)\s*=>/.test(raw) || /^\s*(?:;\s*)?\(async\s*\(\)\s*=>/.test(raw)
-      ? raw
-      : `(() => {\n${raw}\n})()`
-    const code = `;(() => { const __r = (${body}); __AI__.ok(JSON.stringify({ __subagent: true, result: __r === undefined ? null : __r })); })()`
+    const body = `(async () => {
+${raw}
+})()`
+    const code = `;(async () => { const __r = await (${body}); __AI__.ok(JSON.stringify({ __subagent: true, result: __r === undefined ? null : __r })); })().catch(e => __AI__.err(String(e && e.message ? e.message : e)))`
     entry.handle.send({ id: task.id, code })
     const frame = await entry.handle.nextFrame(120000) as { ok?: boolean, error?: string, logs?: string[] }
     if (frame && frame.ok === false) throw new Error(String(frame.error || 'frame failed'))
     const logs = (frame.logs || []).map(l => String(l))
-    // [subagent-logs-parse-v1] __AI__.ok 输出带 ANSI 颜色前缀（\u001b[32m✓\u001b[39m ），
-    // 解析时须找第一个 '{' 起截，不能假设 logs 以 JSON 开头（实测踩过）。
+    // [subagent-logs-parse-v1] __AI__.ok 输出带 ANSI 前缀，从第一个 '{ ' 起截再 JSON.parse。
     const tag = logs.find(l => l.includes('"__subagent":true'))
     if (!tag) return { summary: '(no __subagent output)', artifacts: [], meta: { logs: logs.slice(-3) } }
     const braceAt = tag.indexOf('{')

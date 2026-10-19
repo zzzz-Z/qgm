@@ -47,22 +47,45 @@ function emit(base) {
 
 let buf = ''
 process.stdin.setEncoding('utf8')
+// [repl-async-frame-v1] 支持异步脚本：vm 返回 Promise 时 await 后再 emit。
+// [WHY] 原实现同步 emit，异步 .then 的回调进不了 logs（实测 logs=undefined）；
+//   子智能体需要跑异步脚本，且主会话脚本本就可以是异步的。
+// [CONSTRAINT] 必须串行：前一帧 await 结束才处理下一帧，否则两帧的 logs 会混在一起、
+//   帧顺序也会错位（协议要求严格一帧进一帧出）。
+const queue = []
+let draining = false
+
+/** 串行消费队列：每帧执行完（含 await）再处理下一帧。 */
+async function drain() {
+  if (draining) return
+  draining = true
+  while (queue.length) {
+    const line = queue.shift()
+    if (!line.trim()) continue
+    let id
+    try {
+      const f = JSON.parse(line)
+      id = f && f.id
+      const ret = vm.runInThisContext(String(f.code || ''))
+      // [repl-async-frame-v1] 仅当返回值确实是 thenable 才 await，避免给同步脚本引入微任务延迟
+      if (ret && typeof ret.then === 'function') {
+        try { await ret } catch (e) { emit({ id, ok: false, error: String(e && e.message ? e.message : e) }); continue }
+      }
+      emit({ id, ok: true })
+    } catch (e) {
+      emit({ id, ok: false, error: String(e && e.message ? e.message : e) })
+    }
+  }
+  draining = false
+}
+
 process.stdin.on('data', (c) => {
   buf += c
   let i = buf.indexOf(String.fromCharCode(10))
   while (i >= 0) {
-    const line = buf.slice(0, i); buf = buf.slice(i + 1)
-    if (line.trim()) {
-      let id
-      try {
-        const f = JSON.parse(line)
-        id = f && f.id
-        vm.runInThisContext(String(f.code || ''))
-        emit({ id, ok: true })
-      } catch (e) {
-        emit({ id, ok: false, error: String(e && e.message ? e.message : e) })
-      }
-    }
+    queue.push(buf.slice(0, i))
+    buf = buf.slice(i + 1)
     i = buf.indexOf(String.fromCharCode(10))
   }
+  void drain()
 })

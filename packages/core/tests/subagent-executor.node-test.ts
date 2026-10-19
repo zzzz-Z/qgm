@@ -32,3 +32,15 @@ test('X2 会话在任务完成后被清理（cleanup 生效）', async () => {
   await new Promise(r => setTimeout(r, 300))
   expect(getSession(snap!.sessionId!), '任务完成后会话应已关闭').toBeNull()
 }, 40000)
+
+test('X3 异步任务（await）在执行体里真能跑通', async () => {
+  const o = createSubagentOrchestrator(defaultExecutors, { maxConcurrent: 1 })
+  const t = o.submit({ description: 'await new Promise(r => setTimeout(r, 150));\nreturn { summary: "async-done", artifacts: ["b"] }' })
+  let snap = o.get(t.id)
+  for (let i = 0; i < 80 && snap?.status !== 'done' && snap?.status !== 'failed'; i++) {
+    await new Promise(r => setTimeout(r, 200))
+    snap = o.get(t.id)
+  }
+  expect(snap?.status, `最终=${snap?.status} err=${snap?.error}`).toBe('done')
+  expect(snap?.result?.summary).toContain('async-done')
+}, 40000)
