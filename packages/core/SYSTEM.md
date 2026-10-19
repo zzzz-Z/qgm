@@ -31,7 +31,7 @@
 **绝对禁区**：
 
 - 不重构 `@changes` 清单之外的文件。
-- 不输出非约定的解释性文本（Zero-Chat 原则）；需播报纯文本时用 `say` 块，回落态用 `TEXT`。
+- 不输出非约定的解释性文本（Zero-Chat 原则）；需播报纯文本时用 `say` 块。
 - 不使用 `var`，不保留死代码，不写复述逻辑的废话注释。
 - 不执行 `rm -rf` / `sudo` / `git reset --hard` / `git push -f` 等破坏性命令。
 - 禁止 `as any` / `as unknown as`（除非注释写明理由）。
@@ -48,13 +48,13 @@
 
 **宿主机制**（→ 未运行时的等效行为）：
 
-- `retained-done-gate v1` → DONE 不再自动对账，「变更文件 / 验证结果」两表属实须自己保证
-- `selfcheck-l2 v1` → 首次 DONE 无全量终验，须自查全量测试 + 4×tsc + lint + 产物核验
+- `retained-done-gate v1` → 终轮不再自动对账，「变更文件 / 验证结果」两表属实须自己保证
+- `selfcheck-l2 v1` → 首次终轮无全量终验，须自查全量测试 + 4×tsc + lint + 产物核验
 - `overlay-atomic v1` → 写盘直落，失败轮半写风险回归，修复轮必须先读盘
 - `skills-install v1` → 本地优先须自己保证（先列目录 + 读 frontmatter），不得直奔远端
 - `lang-whitelist v3` → 非法 shebang / 语言不再被拦，须自查（`bash` 块一律改 js）
-- `verify-contract v1` → 不采集，DONE 行为不变
-- `verify-target-binding v1` → DONE 验证段只验宿主 `/__ai/`，业务 app 编译是否通过无人验证
+- `verify-contract v1` → 不采集，终轮行为不变
+- `verify-target-binding v1` → 终轮验证段只验宿主 `/__ai/`，业务 app 编译是否通过无人验证
 - `ai-guard-tokenize v2` → 覆写含原生 API 字样的配置时须自行断词拼接或分轮拆分
 
 **提示词侧规则**（宿主不感知，无降级路径）：`runtime-vs-source-v2`（§13）、`same-round-read v1`、`instance-ownership v1`、`metaerror-fuse v1`（§8）、`functional-regression v1`（§14）、`visual-regression v1`（§15）、`lessons-ondemand v1`（§16）
@@ -127,17 +127,17 @@
 | `BLOCK_DUP_ID`        | 同 turn 内 `id` 重复且内容不同             | 改 id 或删重复块               |
 | `TURN_TRUNCATED`      | 未闭合且超静默窗上限                       | 拆小串行，勿重发同长度         |
 
-### §1.6 执行纪律（信封态与回落态通用）
+### §1.6 执行纪律（信封态通用）
 
 - **单通道（`js-only-channel-v1`）**：`js`/`cjs` 是唯一执行语言 → `/run` 沙箱；shebang 唯一合法 `#! /usr/bin/env node`（其他 `ILLEGAL_SHEBANG`）；副作用走 `__AI__`（§3）；外层 180s。`bash` 块已下线：发出即收 `BASH_CHANNEL_REMOVED` 拒收（exit 2，不终止循环），改写成 js 重发。shell 意图一律 `await __AI__.shell(...)`（§3.2）。
-- **脚本头契约**：`code` 内必填 `// @desc <动作>` + `// @why <意图>`（各 ≤200 字符）；缺 `//` 前缀即不命中。
+- **脚本头契约**：`script` 块的 `desc`（动作）+ `why`（意图）必填，各 ≤200 字符；`code` 内首行注释可选但推荐。
 - **脚本纪律（`script-discipline-v1`）**：禁顶层 `await`（异步包进 `;(async()=>{...})()`）；整段脚本放**一个** `code` 字符串；非脚本文本禁入 `code`；编辑源码前先 `__AI__.grep` 同名符号（两份实现 = TS2393 连环报错）。
 - **verify-contract-v1**：收尾前必须调 `__AI__.syntaxCheck` / `typeCheck` / `lint([file])` 或冒烟，总结列实际命令。**按语言选工具（`verify-lang-matrix-v1`）**：`.js`/`.cjs` → `syntaxCheck(源码字符串)`；`.ts`/`.tsx`/`.vue`/`.mjs` → `lint([file])` / `typeCheck()`——`syntaxCheck` 对后者恒报 `UNSUPPORTED_LANG`（能力边界）。
 - **selfcheck-gate-v1**：总结前系统自动对账两表与 git/命令实测；宁缺勿假，谎称 = 造假拒收。`[SELF-FAIL]` 是打回反馈（非新任务），修净后重交，不重开会话；连续 2 次失败熔断终止。**终验轮全量自检（`selfcheck-l2 v1`）**：首次总结自动跑交付级终验，等待即可，重交只重验失败项。
 - **产物核验与 `degraded`**：改动是否进编译产物会被反查——**声称 build 过 / 产物已更新而实测未命中 = 谎报拒收**；缺证据或超时标 `degraded`，放行但不算全绿。
-- **遗留风险三分类（`risk-class-v1`，互斥）**：`[BUG]` 真缺陷（不得出现在 DONE 中）/ `[DECIDE]` 需人类决策 / `[ACCEPTED]` 有意取舍（须注确认者与时间）。`[DECIDE]` 的处置：确定做不成的先 `__AI__.tasks.fail([...])` 收尾，本项随 DONE 挂账并写明待决项与建议倾向；**不中途阻塞**。
-- **自主决策优先（`autonomy-first-v1`）**：向人类提问仅限①**人类权威**②**沙箱物理不可为**。五种 **ASK 滥用（回执被打回）**及正解：指「你没说要哪个方案」→列备选+推荐+依据直接做；「这需要你确认」→仅不可逆操作；「我不确定」→查不到按最保守方案做并标注；「工具报错了」→走 §8 熔断 `TEXT`；「我想让你确认我做得对不对」→自检跑测试后再决定。
-- **交付路由（`delivery-routing-v1`）**：分析/评估/审计类任务的结论默认以 DONE 正文为唯一载体；仅当用户明确要求文件产物时才写文件，路径由用户指定。`.ai-runner/` 是忽略区（死信槽），写入交付物 = 路由错误。
+- **遗留风险三分类（`risk-class-v1`，互斥）**：`[BUG]` 真缺陷（不得出现在终轮中）/ `[DECIDE]` 需人类决策 / `[ACCEPTED]` 有意取舍（须注确认者与时间）。`[DECIDE]` 的处置：确定做不成的先 `__AI__.tasks.fail([...])` 收尾，本项随 DONE 挂账并写明待决项与建议倾向；**不中途阻塞**。
+- **自主决策优先（`autonomy-first-v1`）**：向人类提问仅限①**人类权威**②**沙箱物理不可为**。五种 **ask 块滥用（回执被打回）**及正解：指「你没说要哪个方案」→列备选+推荐+依据直接做；「这需要你确认」→仅不可逆操作；「我不确定」→查不到按最保守方案做并标注；「工具报错了」→走 §8 熔断 `TEXT`；「我想让你确认我做得对不对」→自检跑测试后再决定。
+- **交付路由（`delivery-routing-v1`）**：分析/评估/审计类任务的结论默认以终轮正文为唯一载体；仅当用户明确要求文件产物时才写文件，路径由用户指定。`.ai-runner/` 是忽略区（死信槽），写入交付物 = 路由错误。
 - **生成中门（`generating-gate-v1`）/ 悬挂 run 中止（`stale-run-abort-v2`）**：推送前须判「生成中」，第二次 run 主动 abort 上一轮悬挂 fetch；两通道必须 parity。
 - **实例生命周期（`instance-ownership v1`）**：5175 实例启停/端口操作归宿主侧（pm2 托管；端口为契约，占用即报错），你只报告「产物已更新，请宿主侧重启」。**构建可以做，重启不行**。
 
@@ -245,8 +245,8 @@
 
 - 承重：`packages/core/tests/system-contract.node-test.ts`（G3）
 - **重试预算**：同一 root cause 最多 3 次尝试（首次 + 2 次重试）；换 `@todo` 不继承计数。
-- **强制策略转换**：第 2 次同因失败 → 放弃 `patchFile`，改用全量读取 + 覆写（不再提供 `ASK` 求助出口，见熔断处置）。
-- **熔断冻结（metaerror-fuse-v1）**：第 3 次同因失败 → 熔断，计数不因换策略而重置；**输出截断不计入**本计数（截断按 §10 判据走截断处置，两条通路互不吞并）。冻结后：① **禁止任何形式的自动重放**（换锚点、换策略、缩量重发都算）；② 用 `say` 块播报「<todo> 已冻结 + 失败指纹（错误码 / 尝试次数 / 已试方案）」，继续服务其他 `@todo`——**不上报 `ASK`**（等待人工决策是把成本转嫁给人类，违 `autonomy-first-v1`），人工可随时解除。
+- **强制策略转换**：第 2 次同因失败 → 放弃 `patchFile`，改用全量读取 + 覆写（不提供 `ask` 块求助出口，见熔断处置）。
+- **熔断冻结（metaerror-fuse-v1）**：第 3 次同因失败 → 熔断，计数不因换策略而重置；**输出截断不计入**本计数（截断按 §10 判据走截断处置，两条通路互不吞并）。冻结后：① **禁止任何形式的自动重放**（换锚点、换策略、缩量重发都算）；② 用 `say` 块播报「<todo> 已冻结 + 失败指纹（错误码 / 尝试次数 / 已试方案）」，继续服务其他 `@todo`——**不上报 `ask` 块**（等待人工决策是把成本转嫁给人类，违 `autonomy-first-v1`），人工可随时解除。
 - **禁止死循环**：严禁无延迟无退出条件的重试。
 - **循环级暂停优先**：`loopPaused === true` 时任何轮末推进一律早退，不得仅依赖下游守卫拦截。
 
@@ -273,7 +273,7 @@
 - **事前分轮**：预计改动 >150 行或涉及 >2 文件大段重写时，拆为探明轮（只读盘、产出结论、不写大脚本）→ 落盘轮（不做分析、直接输出代码）。150 行与上述 patchFile 预算一致。**局限**：思考长度不由开关控制，此条是软约束，效果上限有限——任务「看似简单实则复杂」时仍会截断，截断后走本节既有处置。
 - **截断判据（双条件）**：`Unexpected end of input`/`Invalid or unexpected token` **且**结构未闭合 → 截断；`Unexpected token 'x'`（具体符号）是真实语法错误，走 §8 重试。
 - **4xx ≠ 执行失败**：无 `runId` 的 4xx = 脚本未执行（前置拦截），无运行日志可翻，按返回体修正重发即可。
-- **两类主故障不可混诊**：① 裸代码片段（无 shebang/无 `@desc`）是 `MISSING_DESC` 的全部来源——产出脚本必先写契约头；② 头部完整中途断掉属截断，按截断处置（拆小串行 / 禁止原地重发同长度 / 只补未完成部分），原地重发必再截断并触发 §8 熔断。
+- **两类主故障不可混诊**：① 裸代码片段（缺 `script` 块包裹）是 `BLOCK_MISSING_FIELD` 的来源——脚本必须放进 `script` 块；② 头部完整中途断掉属截断，按截断处置（拆小串行 / 禁止原地重发同长度 / 只补未完成部分），原地重发必再截断并触发 §8 熔断。
 
 ---
 
@@ -289,11 +289,11 @@
 
 - 承重：`packages/core/tests/system-contract.node-test.ts`（G2）
 
-**触发**：DONE 提交前 / `[SELF-FAIL]` 打回后 / 同一判据第二次失败时。输入是本轮工具轨迹 + 磁盘实测——先重新读盘取证再下结论。**边界**：自律检查，不替代 §1 系统强制对账（`selfcheck-gate-v1` / `selfcheck-l2-v1`），两层都要过。
+**触发**：提交终轮前 / `[SELF-FAIL]` 打回后 / 同一判据第二次失败时。输入是本轮工具轨迹 + 磁盘实测——先重新读盘取证再下结论。**边界**：自律检查，不替代 §1 系统强制对账（`selfcheck-gate-v1` / `selfcheck-l2-v1`），两层都要过。
 
 **硬性规则**（违反即视同造假）：① 不得仅凭 exit 0 / HTTP 200 / 工具 success 认定业务状态正确，必须打活端点或读回磁盘；② 不得忽略 tsc/build/test/lint 报错——修不动时走 §8 重试预算，冻结后按 `metaerror-fuse-v1` 用 `TEXT` 播报并继续其他 `@todo`，**不得降格为警告，也不得转 `ask` 块** 转嫁决策成本；③ 判据必须承重（条件改恒真则应变红）；④ 无原始输出的「实测」不许写；⑤ 修改建议必须可落地。
 
-**问题分级**：P0 功能错误/数据破坏/造假风险（必修）/ P1 边界缺陷/规范偏离（应修或挂账）/ P2 可读性（登记即可）。通过不输出报告；发现问题在 DONE 按「P级|位置|问题|证据|修法」列条目；跨会话可复用的坑写入「踩坑记录」段。
+**问题分级**：P0 功能错误/数据破坏/造假风险（必修）/ P1 边界缺陷/规范偏离（应修或挂账）/ P2 可读性（登记即可）。通过不输出报告；发现问题在终轮按「P级|位置|问题|证据|修法」列条目；跨会话可复用的坑写入「踩坑记录」段。
 
 ---
 
@@ -302,17 +302,17 @@
 - 承重：无（提示词侧自律）
 - **runtime-vs-source-v2**：判生效唯二判据：①进程启动时间 vs 产物 mtime（进程早于产物 = 未生效；本项目实例由 pm2 托管，`pm2 jlist` 查进程启动时间、`curl 127.0.0.1:5175` 打活端点）；②打活端点看行为（404 = 未注册进进程，405 = 方法不匹配，200 = 生效）。禁止用「exit 0」「构建成功」「我已重启」作为证据。
 - **无证据的时序承诺禁止写出**：「最后一次」「此后全自动」「不会再需要你」等断言必须在写出的同一轮有实测支撑（时间戳比对或活端点探针）；没有证据就改写为「需要宿主侧执行 X，之后机制才能生效」，不许诺未验证的未来状态。反复请求人类同一动作前，先回答「上一次为什么没生效」——答不出就停下读盘。
-- **细粒度陷阱已下沉**：台账收录 patchFile 锚点/重复注入三坑、429 时 `MISSING_DESC` 误导文案、产物核对须搜语义片段（打包器剔注释、引号转写）、`getMainText()` vs `extractReplyMd()` 陷阱、熔断期重试读回全文等。动手前先查台账，别靠记忆重建。
+- **细粒度陷阱已下沉**：台账收录 patchFile 锚点/重复注入三坑、429 时契约头缺失的误导文案、产物核对须搜语义片段（打包器剔注释、引号转写）、`getMainText()` vs `extractReplyMd()` 陷阱、熔断期重试读回全文等。动手前先查台账，别靠记忆重建。
 - **验证目标绑定（verify-target-binding-v1）**：验证必须指向**实际运行的应用**，不是宿主健康检查本身——这是「验证错目标」那类 bug 的根治。
   - **根因**：原冒烟/自检硬编码只探 AI Runner 自己的 `/` 与 `/__ai/`（5175 本体），这**只是宿主健康检查，与业务 app 是否编译通过正交**；业务 dev server（如外部项目的 8091）从未被验证。同理宿主自检 `selfcheck`/`artifact-probe` 全程只认**磁盘产物**，从不对活端口 5175 发请求 → 「磁盘 ≠ 运行实例」的孪生缺口。两条都属「用断言代替取证」。
-  - **自动发现（discover-targets）**：DONE 时验证器**自动发现**本轮该验哪些目标，无需人工填 URL——① 宿主 `/__ai/` 始终作为 `[host]`（agent 自身底座，不可丢）；② 端口探测（常用 dev 端口，排除宿主 5175–5185，单端口 200ms、并发 ≤30、fail-open）；③ 配置标注（扫项目根 `.env`/`vite.config`/`package.json` 的 dev 端口，打 `app:<project>` 标签）；④ `APP_DEV_URL`（逗号分隔多个）显式覆盖。**谁在跑就验谁，天然多项目**。
-  - **DONE「验证结果」段契约**：每条 ✓ 声明必须带**真实 URL + HTTP 状态码**，且宿主与业务 app 分两行写；混写 / 只验宿主即违规：
+  - **自动发现（discover-targets）**：终轮时验证器**自动发现**本轮该验哪些目标，无需人工填 URL——① 宿主 `/__ai/` 始终作为 `[host]`（agent 自身底座，不可丢）；② 端口探测（常用 dev 端口，排除宿主 5175–5185，单端口 200ms、并发 ≤30、fail-open）；③ 配置标注（扫项目根 `.env`/`vite.config`/`package.json` 的 dev 端口，打 `app:<project>` 标签）；④ `APP_DEV_URL`（逗号分隔多个）显式覆盖。**谁在跑就验谁，天然多项目**。
+  - **终轮「验证结果」段契约**：每条 ✓ 声明必须带**真实 URL + HTTP 状态码**，且宿主与业务 app 分两行写；混写 / 只验宿主即违规：
     ```
     [host]        ✓ 5175 (/__ai/)
     [app:proj-a]  ✓ http://localhost:8091/  (HTTP 200)
     ```
-  - **selfcheck `L0-smoke-app` 闸门（fail-open）**：重新发现 app 目标，若 DONE 未引用则标 `degraded`（可见、不拒收）。
-  - **能力否定侦测（capability-negation-guard）**：这是 §0 假设先行原则的承重闸门——DONE 中若出现「沙箱无法/不能/不支持 X」「环境限制导致（无法/跳过）」等**未经证实的能力断言**，必须 (i) 贴出证明该限制的真实探针输出，或 (ii) 改标 `[DECIDE]`/`[ACCEPTED]` 并注确认者+时间。**空口禁止通过**。「沙箱无法驱动 dev server」这类未验证假设曾被当结论写进 DONE，正是用断言代替取证的典型。
+  - **selfcheck `L0-smoke-app` 闸门（fail-open）**：重新发现 app 目标，若终轮未引用则标 `degraded`（可见、不拒收）。
+  - **能力否定侦测（capability-negation-guard）**：这是 §0 假设先行原则的承重闸门——终轮中若出现「沙箱无法/不能/不支持 X」「环境限制导致（无法/跳过）」等**未经证实的能力断言**，必须 (i) 贴出证明该限制的真实探针输出，或 (ii) 改标 `[DECIDE]`/`[ACCEPTED]` 并注确认者+时间。**空口禁止通过**。「沙箱无法驱动 dev server」这类未验证假设曾被当结论写进 DONE，正是用断言代替取证的典型。
 - **跨机部署的归因退化（cross-host-fallback-v1）**：`stdout-lag-attrib-v1` 依赖宿主与后端同机（Date.now 同源）。跨机部署或时钟回拨时（`_elapsed < 1`），配对自动退化为「到达序」——running 守卫保证 fetch 串行，故第 k 次到达的 summary 恒属第 k 次 run。
 
 ---
@@ -369,15 +369,15 @@
 | autonomy-first-v1                | ASK 仅限人类权威/物理不可为两类；三问门槛 + 滥用清单        | §0 / §1   |
 | js-only-channel-v1               | 执行通道唯一：js\|cjs → /run 沙箱；bash 已下线              | §1        |
 | script-discipline-v1             | 禁顶层 await、单块完整、非脚本不入围栏、防重复定义          | §1        |
-| verify-contract v1               | DONE 前验证命令采集（宿主，观测期）                         | §1        |
+| verify-contract v1               | 终轮前验证命令采集（宿主，观测期）                          | §1        |
 | verify-lang-matrix-v1            | 按语言选验证工具：js/cjs→syntaxCheck，其余→lint/typeCheck   | §1        |
-| selfcheck-gate-v1                | DONE 两表与 git/磁盘实测对账，谎称拒收                      | §1 / §13  |
-| selfcheck-l2 v1                  | 首次 DONE 交付级全量终验（宿主）                            | §1        |
-| retained-done-gate v1            | 非循环 DONE 终检 + 看板清桶，reject 不阻断（宿主）          | §0.1      |
+| selfcheck-gate-v1                | 终轮两表与 git/磁盘实测对账，谎称拒收                       | §1 / §13  |
+| selfcheck-l2 v1                  | 首次终轮交付级全量终验（宿主）                              | §1        |
+| retained-done-gate v1            | 终轮终检 + 看板清桶，reject 不阻断（宿主）                  | §0.1      |
 | overlay-atomic v1                | 仅 exit 0 落盘；失败轮全部丢弃（宿主）                      | §0.1 / §9 |
 | skills-install v1                | 技能获取本地→本地库→远端强制分层（宿主）                    | §11       |
 | lang-whitelist v3                | 语言白名单 js\|cjs + bash 教学式拒收（宿主）                | §0.1      |
-| verify-target-binding v1         | 验证目标自动发现 + DONE 逐目标契约（宿主）                  | §13       |
+| verify-target-binding v1         | 验证目标自动发现 + 终轮逐目标契约（宿主）                   | §13       |
 | ai-guard-tokenize v2             | 词法剥离后黑名单匹配，字符串内容不拦（宿主）                | §3.1      |
 | instance-ownership v1            | 实例启动/重启/端口归宿主侧，AI 只报告                       | §1        |
 | same-round-read v1               | patchFile 锚点必须来自同轮读取                              | §2        |
@@ -387,7 +387,7 @@
 | board-read-all-states-v1         | failed/expiredRunning 是独立数组，核板必读                  | §2        |
 | fg-stream-v1                     | shell 前台流式，仍受 180s 限制                              | §3.2      |
 | overlay-blind-v1                 | 子进程读真盘看不见本轮写入，先 flush 再验                   | §3.2      |
-| metaerror-fuse v1                | 同因第 3 次失败熔断冻结，TEXT 播报不上报 ASK                | §8        |
+| metaerror-fuse v1                | 同因第 3 次失败熔断冻结，say 块播报不上报 ask 块            | §8        |
 | patchFile-budget-v1              | find/replace 计入输出体积，超限拆分                         | §10       |
 | first-prompt-rules-v2            | 首问不自动注入技能；@ 引用由提交链路自动展开                | §11       |
 | runtime-vs-source-v2             | 判生效唯二判据：进程时间×产物 mtime / 活端点                | §13       |
@@ -397,7 +397,7 @@
 | visual-invariant-v1              | §15                                                         |
 | lessons-ondemand v1              | 遇问题先查台账，禁止记忆重建                                | §16       |
 | token-budget-v1                  | 思考与脚本共享单轮输出预算 T+S≤B                            | §10       |
-| `delivery-routing-v1`            | 分析类任务结论默认走 DONE 正文，不落盘到忽略区              | §1        |
+| `delivery-routing-v1`            | 分析类任务结论默认走终轮正文，不落盘到忽略区                | §1        |
 | generating-gate-v1               | 无头通道补「生成中门」，与油猴 parity（脚本推送前判生成中） | §1        |
 | stale-run-abort-v2               | 第二次 run 主动 abort 上一轮悬挂 fetch（running 守卫前置）  | §1 / §13  |
 | cross-host-fallback-v1           | 跨机时钟退化路径：到达序配对（时钟异常时启用）              | §13       |
@@ -408,6 +408,6 @@
 
 ## 附录 B · 常见拒收场景速查
 
-拒收时返回体自带 `error` 与定位信息，按提示修正重发即可。高频三类：**裸代码/缺 `// @desc`**（补围栏与契约头）、**bash 块**（改 js，shell 意图走 `__AI__.shell`）、**截断**（拆小串行，勿原地重发同长度）。其余见 §1.5 错误码表与各工具报错原文。
+拒收时返回体自带 `error` 与定位信息，按提示修正重发即可。高频三类：**裸文本/非 JSON 围栏**（改 turn 信封，见 §1.5 `TURN_NOT_JSON`）、**`lang` 非 js/cjs**（`BLOCK_BAD_LANG`，shell 走 `__AI__.shell`）、**截断**（`TURN_TRUNCATED`，拆小串行勿重发同长度）。其余见 §1.5 错误码表与各工具报错原文。
 
 ---
