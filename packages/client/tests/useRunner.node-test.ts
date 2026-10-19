@@ -49,6 +49,7 @@ Object.defineProperty(globalThis, 'window', {
     get sessionStorage() { return globalThis.sessionStorage },
     addEventListener: (): void => {},
     removeEventListener: (): void => {},
+    dispatchEvent: (): boolean => true,
   },
 })
 
