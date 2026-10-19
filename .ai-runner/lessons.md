@@ -3782,3 +3782,31 @@ DeepSeek 在上下文触顶时渲染的文案匹配了 busy 正则，于是被�
 [VERIFIED] 2026-10-19 本轮实测 · 客户端 7 个失败看似可疑，`git stash push -u` 后重跑同样 7 failed / 33 passed，一次定性为存量。
 
 注意 `-u` 要带上（新测试文件是 untracked），且必须在同一轮内 `stash pop` 回来并核对 `git status`，否则改动会滞留 stash。
+
+## 正则写在脚本里必被多层转义吃掉，改用 fromCharCode 拼反斜杠
+[VERIFIED] 2026-10-20 本会话实测三次踩中（grep 模式 / 标识符校验 / 依赖抽取）
+
+JSON 字符串 → 脚本 code → 写盘内容 → `new RegExp()`，每层都消耗反斜杠。落盘后 `\\w` 会变成字面「反斜杠 + w」而非字符类，`buildSearchApi` 这类合法标识符直接被判非法。
+
+可靠解法：`String.fromCharCode(92)` 拼反斜杠；或干脆零正则——按行切分后用 `indexOf` / `includes` 抽引号内容（本会话 `depsOf` 最终就是纯字符串实现）。
+
+## 文档图例的状态词常与代码类型不一致
+[VERIFIED] 2026-10-20 本会话实测（TS2367 no overlap）
+
+`lessons.md` 图例写 `[VERIFIED]` 大写，但 `d.state` 的真实类型是 `'pending' | 'verified' | 'rejected' | 'stale'` 小写。照图例写判定条件必触发 TS2367「两个类型无重叠」。
+
+改代码前先看类型定义（`tsc` 会立刻告诉你），不要看文档示例。文档是给人看的显示形态，类型是给编译器看的存储形态。
+
+## 多行锚点在 JSON→脚本链路上不可靠，逐行改
+[VERIFIED] 2026-10-20 本会话实测两次 block anchor 失败
+
+`replaceInFile` 的 `oldString` 若跨多行且含引号/正则/缩进，转义层数极难对齐，报 `anchor not found` 后很难判断是「没这段」还是「转义错了」。
+
+解法：先 `readText` + `split(String.fromCharCode(10))` 定位行号，再用**该行原文**做锚点逐行替换。单行锚点几乎不会失配。
+
+## 「物理基础已存在，缺的只是出口」是最常见的假缺口
+[VERIFIED] 2026-10-20 本会话实测（session-manager 早就有隔离能力）
+
+评估「要不要做子任务隔离」时以为要大改架构，实际 `session-manager.ts` 早就提供：每会话独立 REPL 子进程 + 独立 overlay/toolLog + 可指定 sandbox。缺的只是门面出口（`__AI__.session.*`），一个 60 行的 HTTP 转发文件就够了。
+
+结论：判断缺口大小前先读现有实现，别按名字猜。
