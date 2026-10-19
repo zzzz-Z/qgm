@@ -46,7 +46,18 @@ ${raw}
 })()`
     const code = `;(async () => { const __r = await (${body}); __AI__.ok(JSON.stringify({ __subagent: true, result: __r === undefined ? null : __r })); })().catch(e => __AI__.err(String(e && e.message ? e.message : e)))`
     entry.handle.send({ id: task.id, code })
-    const frame = await entry.handle.nextFrame(120000) as { ok?: boolean, error?: string, logs?: string[] }
+    // [subagent-frame-timeout-v1] 帧等待与 abort 竞速：取消立即生效，不必等满 nextFrame 超时。
+    // [WHY] 原先只有 nextFrame(120000) 硬编码兜底，cancel 后仍要等满 120s 才退出（实测缺陷）。
+    // [CONSTRAINT] abort 只影响等待，不杀会话——清理仍走 cleanup 关闭会话。
+    const FRAME_TIMEOUT_MS = Number(process.env.AI_RUNNER_SUBAGENT_FRAME_TIMEOUT_MS) || 120000
+    const frame = await Promise.race([
+      entry.handle.nextFrame(FRAME_TIMEOUT_MS),
+      new Promise<never>((_, reject) => {
+        if (signal.aborted) { reject(new Error('aborted while waiting frame')); return }
+        const onAbort = () => { reject(new Error('aborted while waiting frame')) }
+        signal.addEventListener('abort', onAbort, { once: true })
+      }),
+    ]) as { ok?: boolean, error?: string, logs?: string[] }
     if (frame && frame.ok === false) throw new Error(String(frame.error || 'frame failed'))
     const logs = (frame.logs || []).map(l => String(l))
     // [subagent-logs-parse-v1] __AI__.ok 输出带 ANSI 前缀，从第一个 '{ ' 起截再 JSON.parse。

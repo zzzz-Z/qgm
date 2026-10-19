@@ -61,6 +61,8 @@ export interface OrchestratorOptions {
   maxConcurrent?: number
   /** 排队超时（ms），缺省 30s；超时后仍会执行，只是不再等槽 */
   queueTimeoutMs?: number
+  /** 单个任务整体超时（ms），缺省 10 分钟；超时 abort 执行体并标 failed */
+  taskTimeoutMs?: number
 }
 
 let _seq = 0
@@ -73,6 +75,7 @@ function newTaskId(): string {
 export function createSubagentOrchestrator(executors: TaskExecutor[], opts: OrchestratorOptions = {}) {
   const maxConcurrent = Math.max(1, opts.maxConcurrent ?? 3)
   const queueTimeoutMs = Math.max(1000, opts.queueTimeoutMs ?? 30000)
+  const taskTimeoutMs = Math.max(1000, opts.taskTimeoutMs ?? 600000)
   const tasks = new Map<string, SubagentTask>()
   const controllers = new Map<string, AbortController>()
   const execMap = new Map<ExecutorKind, TaskExecutor>()
@@ -97,11 +100,29 @@ export function createSubagentOrchestrator(executors: TaskExecutor[], opts: Orch
     if (slot.isFull(running)) await slot.acquire()
     running += 1
     const ctrl = new AbortController()
+    // [subagent-task-timeout-v1] 区分「超时触发 abort」与「用户取消」：两者都走 abort，但终态不同。
+    let timedOut = false
     controllers.set(task.id, ctrl)
     task.status = 'running'
     task.startedAt = Date.now()
     try {
-      const result = await ex.run(task, ctrl.signal)
+      // [subagent-task-timeout-v1] 整体超时与执行竞速：超时 abort 执行体并标 failed。
+      // [WHY] 执行体若不响应 abort（如卡在不支持中断的 await），任务会永久挂起；
+      //   编排层必须有兜底，否则看板永远停在 running。
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const timeoutGuard = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true
+          ctrl.abort()
+          reject(new Error(`task timeout after ${taskTimeoutMs}ms`))
+        }, taskTimeoutMs)
+      })
+      let result: SubagentResult
+      try {
+        result = await Promise.race([ex.run(task, ctrl.signal), timeoutGuard])
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
       if (ctrl.signal.aborted) {
         task.status = 'cancelled'
       } else {
@@ -109,8 +130,8 @@ export function createSubagentOrchestrator(executors: TaskExecutor[], opts: Orch
         task.result = result
       }
     } catch (e) {
-      task.status = ctrl.signal.aborted ? 'cancelled' : 'failed'
-      if (!ctrl.signal.aborted) task.error = String((e as { message?: string })?.message || e)
+      task.status = timedOut ? 'failed' : (ctrl.signal.aborted ? 'cancelled' : 'failed')
+      if (!ctrl.signal.aborted || timedOut) task.error = String((e as { message?: string })?.message || e)
     } finally {
       task.finishedAt = Date.now()
       controllers.delete(task.id)
