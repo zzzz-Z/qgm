@@ -139,13 +139,8 @@ function handleReplay(): void {
  */
 function handleRescan(): void {
   try {
-    const item = extractLatestScript()
-    if (item && item.code) {
-      window.opener && window.opener.postMessage({
-        type: 'ai-runner:reply', kind: 'script', code: item.code, lang: item.lang,
-        hash: item.hash, site: location.origin, sessionId: extractSidFromHash(), rescan: true,
-      }, '*')
-    } else {
+    // [script-fence-guess-removed-v1] rescan 不再抓脚本：脚本下发只走 turn 信封通道。
+    {
       const txt = extractLatestReplyText()
       if (txt && txt.length > 20) {
         window.opener && window.opener.postMessage({

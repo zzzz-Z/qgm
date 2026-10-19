@@ -48,18 +48,4 @@ function emitPlain(md: string, marks: ReplyMarks): void {
   })
 }
 
-/**
- * 推送围栏契约错误。
- * [CONSTRAINT] 文案必须能直接指导修复（写明围栏语言与头部契约），
- *   应用端拿到这条消息时没有上下文可推断。
- */
-function emitFenceError(): void {
-  _scriptFenceReported = true
-  post({
-    type: 'ai-runner:reply',
-    kind: 'error',
-    site: location.origin,
-    sessionId: extractSidFromHash(),
-    text: 'SCRIPT 载荷不是有效的 js/cjs 代码块：必须用 js 围栏包裹代码，且脚本头用 // @desc / // @why（参考 packages/core/SYSTEM.md §1 状态 A）。',
-  })
-}
+// [script-fence-guess-removed-v1] emitFenceError 已删：无围栏不再视为异常。

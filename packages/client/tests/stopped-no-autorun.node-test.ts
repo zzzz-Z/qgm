@@ -4,8 +4,6 @@
 //   完整代码块，脚本仍会被推出并被 `autoTakeover.scheduleAutoRun`（无条件立即 fn()）执行 ⇒
 //   不在任何轮次记账、不进本轮 commit、无自检闸门、无预算反馈。
 //   判据承重：摘掉任一处守卫 ⇒ 对应用例变红。
-import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { expect, test, vi } from 'vitest'
 import { ref } from 'vue'
 
@@ -113,19 +111,4 @@ test('④ 反例：窗口外的脚本 ⇒ 照常自动执行（新一轮真实�
   vi.useRealTimers()
 })
 
-test('⑤ [parity] 三处守卫同源且均 anchored 到同一 tag', () => {
-  const um = readFileSync('scripts/tampermonkey-session-id.user.js', 'utf8')
-  assert.ok(um.includes('[stopped-no-autorun-v1]'), '油猴缺 script 分支守卫')
-  assert.ok(/if \(!markedNonScript && !stopPosted\)/.test(um), '油猴 script 分支未串入 stopPosted（tsc 转译后为 if 取反块）')
-
-  const hj = readFileSync('packages/core/src/headless/headless-inject.ts', 'utf8')
-  assert.ok(hj.includes('[stopped-no-autorun-v1]'), 'headless 缺 script 分支守卫')
-  assert.ok(/const script = markedNonScript \|\| stoppedThisRound/.test(hj), 'headless script 分支未串入 stoppedThisRound')
-
-  const fe = readFileSync('packages/client/composables/ai/useAiReplyHandlers.ts', 'utf8')
-  assert.ok((fe.match(/if \(inStoppedWindow\(sid\)\)/g) || []).length >= 3, '前端三处买入点均须判 stopped 窗口')
-  // legacy 通道的判据必须在 await 之后（否则 3-7s 延迟期间到达的 stopped 拦不住）
-  const awaitLine = fe.indexOf('await promiseTimeout(delayMs)')
-  const legacyGuard = fe.indexOf('if (inStoppedWindow(sid)) {', awaitLine)
-  assert.ok(awaitLine > 0 && legacyGuard > awaitLine, 'legacy 通道的 stopped 判据必须在 await promiseTimeout 之后')
-})
+// [legacy-script-removed-v1] 旧 ai-runner:script 通道已删，本用例随之移除。

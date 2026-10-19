@@ -51,14 +51,7 @@ test('hash32: 同一输入两侧同 hash', () => {
   }
 })
 
-test('decideScriptFence: 同一输入两侧同布尔', () => {
-  const inputs = [[true, 0, false], [true, 5, false], [false, 0, false], [true, 0, true], [false, 3, true]]
-  const h = extractInner(read(HEADLESS), 'decideScriptFence')!
-  const tm = extractInner(read(TM), 'decideScriptFence')!
-  for (const args of inputs) {
-    assert.equal(runInVm(h, args as unknown[]), runInVm(tm, args as unknown[]), `decideScriptFence 分叉 args=${JSON.stringify(args)}`)
-  }
-})
+// [script-fence-guess-removed-v1] 该函数已删，两侧同布尔断言随之移除。
 
 test('turnAwaiting: 同一输入两侧同结果', () => {
   const inputs = [[], [{ type: 'say' }], [{ type: 'script' }], [{ type: 'ask' }], [{ type: 'say' }, { type: 'script' }]]
@@ -86,14 +79,7 @@ test('langFromText: 同一输入两侧同结果', () => {
     assert.equal(runInVm(h, [inp]), runInVm(tm, [inp]), `langFromText 分叉 input=${JSON.stringify(inp.slice(0, 30))}`)
   }
 })
-test('hasExecutableContent: 同一输入两侧同布尔', () => {
-  const inputs = ['', '//only comments', '#!node\n//x', 'code()', 'a\nb\nc']
-  const h = extractInner(read(HEADLESS), 'hasExecutableContent')!
-  const tm = extractInner(read(TM), 'hasExecutableContent')!
-  for (const inp of inputs) {
-    assert.equal(runInVm(h, [inp]), runInVm(tm, [inp]), `hasExecutableContent 分叉 input=${JSON.stringify(inp.slice(0, 30))}`)
-  }
-})
+// [script-fence-guess-removed-v1] 该函数已删，两侧同布尔断言随之移除。
 
 // [pure-parity-v1] hasUnclosedStructureJs 未纳入：该函数内部就在处理 { } 配对，
 //   用「数括号」的 extractInner 抠它天然不可靠（会抠错边界）。其等价性由各自的行为测试保证。

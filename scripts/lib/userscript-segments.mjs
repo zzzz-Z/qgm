@@ -25,11 +25,8 @@ export const SEGMENTS = [
   'limits',
   'state',
   'stop',
-  'script-extract',
   'detect',
-  'fence',
   'emit',
-  // [turn-emit-v1] 信封分帧（复用 script-extract 的 codeTextOf，函数声明提升所以顺序安全）
   'turn-emit',
   'dispatch',
   'observer',

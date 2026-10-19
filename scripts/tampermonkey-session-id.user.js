@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version 1.9.31
+// @version      1.9.33
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
 // @match        https://chatglm.cn/*
@@ -496,7 +496,74 @@ function langFromText(s) {
         return 'js';
     return null;
 }
-// [script-fence-guess-removed-v1] guessLangFromContent 已删。
+/**
+ * 从 <code class="language-xxx"> 直接判语言。
+ * [WHY] 代码块头的语言标签/复制按钮不进 <code>，取 className 比邻近 DOM 探测更可靠。
+ */
+function guessLangFromClass(el) {
+    if (!el || !el.className)
+        return null;
+    const m = String(el.className).match(/(?:language|lang)-([a-z0-9+#-]+)/i);
+    if (!m)
+        return null;
+    const raw = m[1].toLowerCase();
+    if (raw === 'bash' || raw === 'sh' || raw === 'shell' || raw === 'zsh')
+        return 'bash';
+    if (raw === 'js' || raw === 'javascript' || raw === 'node' || raw === 'mjs' || raw === 'cjs')
+        return 'js';
+    return null;
+}
+/** 向前找最多 3 个兄弟节点里的标签文本，再看包裹容器的头部元素 */
+function guessLangFromDom(pre) {
+    let sib = pre.previousElementSibling;
+    for (let i = 0; i < 3 && sib; i++, sib = sib.previousElementSibling) {
+        const r = langFromText(sib.textContent);
+        if (r)
+            return r;
+    }
+    const wrap = pre.closest('[class*="code"], [class*="md"], [class*="markdown"], [class*="block"]');
+    if (wrap) {
+        const cands = wrap.querySelectorAll('[class*="lang"], [class*="header"], [class*="title"], [class*="label"]');
+        for (const c of cands) {
+            const r = langFromText(c.textContent);
+            if (r)
+                return r;
+        }
+    }
+    return null;
+}
+/**
+ * 按内容特征猜语言。
+ * [WHY] 站点输出常直接 `fs.readdirSync(...)` / `const x = ...`，无 require/module.exports，
+ *   三级判定全 null ⇒ 整块被跳过降级为 plain 文本。
+ * [CONSTRAINT] 只加高置信特征，避免把普通 Markdown 代码块（如纯 JSON 配置）误判为 js。
+ */
+function guessLangFromContent(text) {
+    const head = text.slice(0, 300);
+    if (/^#!\s*\/usr\/bin\/env\s+bash/.test(head) || /^#!\s*\/bin\/bash/.test(head))
+        return 'bash';
+    if (/^#!\s*\/usr\/bin\/env\s+node/.test(head))
+        return 'js';
+    if (/\brequire\s*\(/.test(head))
+        return 'js';
+    if (/\bmodule\.exports\b/.test(head))
+        return 'js';
+    if (/\bprocess\.(?:exit|argv|env)\b/.test(head))
+        return 'js';
+    if (/\bfs\.(?:readFileSync|writeFileSync|readdirSync|existsSync|statSync|mkdirSync|unlinkSync)\b/.test(head))
+        return 'js';
+    if (/\bconsole\.log\s*\(/.test(head))
+        return 'js';
+    if (/\bJSON\.(?:parse|stringify)\s*\(/.test(head))
+        return 'js';
+    if (/^(?:const|let)\s+\w+\s*=/.test(head))
+        return 'js';
+    if (/^(?:echo|cd\s|ls\s|mkdir|git\s|pnpm\s|npm\s|yarn\s|rm\s)/m.test(head))
+        return 'bash';
+    if (/\bif\s+\[\s/.test(head) || /\bfi\b/.test(head) || /\$\(/.test(head))
+        return 'bash';
+    return null;
+}
 /**
  * 取代码块的纯文本，剔除语法高亮行号。
  * [WHY] 部分站点每行前有 <span class="linenumber">N</span>，textContent 会把行号粘进代码，
@@ -1099,19 +1166,6 @@ function hasStoppedLabel() {
     return false;
 }
 
-// [script-fence-guess-removed-v1] hasUnclosedStructureJs 已删。
-// [script-fence-guess-removed-v1] hasExecutableContent 已删。
-// [script-fence-guess-removed-v1] stillStreamingReply 已删。
-/** 脚本头契约：shebang 或 @desc 头 —— 站点漏标语言时据此兜底为 js */
-function hasScriptHead(text) {
-    return /^#!\s*\/usr\/bin\/env\s+(?:node|bash)\b/m.test(text)
-        || /^\s*\/\/\s*@desc\b/m.test(text)
-        || /^\s*#\s*@desc\b/m.test(text);
-}
-// [script-fence-guess-removed-v1] extractLatestScript 已删。
-// [script-fence-guess-removed-v1] hasMoreUnseenBlocks 已删：脚本意图由 turn 信封决定。
-// [script-fence-guess-removed-v1] extractScriptFromMarkdown 已删：脚本意图由 turn 信封决定。
-
 /**
  * 回复检测 —— dispatch 的三个输入源：DONE 标记、正文签名、最新回复全文。
  *
@@ -1169,8 +1223,6 @@ function extractLatestReplyText() {
     }
 }
 
-// [script-fence-guess-removed-v1] decideScriptFence 已删：脚本意图由 turn 信封决定。
-
 /**
  * 三条推送路径：script / plain / error。
  * [WHY] 噪音抑制条件集中在调用方（classifyAndPost），但每条路径各自的守卫
@@ -1215,7 +1267,7 @@ function emitPlain(md, marks) {
         text,
     });
 }
-// [script-fence-guess-removed-v1] emitFenceError 已删：脚本意图由 turn 信封决定。
+// [script-fence-guess-removed-v1] emitFenceError 已删：无围栏不再视为异常。
 
 /**
  * turn 信封 → 块帧 / 结束帧（油猴侧，P3）。
@@ -1680,28 +1732,35 @@ function classifyAndPost() {
         }
         const marks = scanReplyMarks(replyRoot ? extractReplyMd(replyRoot) : '');
         const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0;
-        // [script-fence-guess-removed-v1] 删除「按围栏猜脚本」的旧通道。
-        // [WHY] 旧逻辑在无 ASK/DONE/HANDOFF/TEXT 标记时，调 extractLatestScript() / extractScriptFromMarkdown()
-        //   扫页面或正文围栏，把任意 ```js 围栏当待执行脚本推下去 —— AI 正文里贴示例代码就会被真执行。
-        //   脚本意图必须由 turn 信封的 content[].type 决定（readTurnFromRoot 通道），不能靠围栏语言猜。
-        // plain：仅在正文真的变了时推
-        const sig = bodySignature();
-        if (sig === lastBodySig)
-            return;
-        lastBodySig = sig;
-        // 容器缺失 ⇒ 变化来自思考面板/搜索卡的流式抖动，此时整页反推会产出噪音卡
-        if (!replyRoot)
-            return;
-        // [stopped-plain-noise-v1] 已推过 stopped ⇒ 之后的 plain 必为半截回复的补发
-        if (stopPosted)
-            return;
-        // 首行是 SCRIPT 且脚本已推成功 ⇒ 此处 plain 必为 DOM 抖动引起的重复补发
-        if (marks.script > 0 && seenHashes.size > 0)
-            return;
-        // [script-fence-guess-removed-v1] 围栏报错块已删：无围栏不再视为异常。
+        // script：标记行为非脚本类时整轮不走脚本分类（否则带示例代码块的 DONE 总结会被当脚本执行）
+        // stopped 后残余块一律不推：前端已 finish 循环，此时推出去会形成「循环外自动执行」旁路
+        // [stopped-no-autorun-v1] 停止轮不再推脚本：残余块会落到「循环外自动执行」旁路
+        // [script-fence-guess-removed-v1] 删除「按围栏猜脚本」的旧通道：脚本下发只走信封（readTurnFromRoot）。
+        // [WHY] 旧逻辑调 extractLatestScript / extractScriptFromMarkdown 扫页面与正文围栏，
+        //   把任意 ```js 围栏当待执行脚本推下去 —— AI 正文里贴示例代码就会被真执行。
     }
-    catch { /* 页面导航/关闭期间的 DOM 异常：本轮放弃，下轮自然重试 */ }
+    // plain：仅在正文真的变了时推
+    finally {
+    }
+    // plain：仅在正文真的变了时推
+    const sig = bodySignature();
+    if (sig === lastBodySig)
+        return;
+    lastBodySig = sig;
+    // 容器缺失 ⇒ 变化来自思考面板/搜索卡的流式抖动，此时整页反推会产出噪音卡
+    if (!replyRoot)
+        return;
+    // [stopped-plain-noise-v1] 已推过 stopped ⇒ 之后的 plain 必为半截回复的补发
+    if (stopPosted)
+        return;
+    // 首行是 SCRIPT 且脚本已推成功 ⇒ 此处 plain 必为 DOM 抖动引起的重复补发
+    if (marks.script > 0 && seenHashes.size > 0)
+        return;
+    // [script-fence-guess-removed-v1] 围栏报错块已删：无围栏不再视为异常。
+    emitPlain(extractLatestReplyText() || '', marks);
 }
+try { }
+catch { /* 页面导航/关闭期间的 DOM 异常：本轮放弃，下轮自然重试 */ }
 
 /**
  * 回复观察 —— 什么时候该跑一次 classifyAndPost。

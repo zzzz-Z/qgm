@@ -91,28 +91,6 @@ test('冷静期内：不带 rescan 的 script 也不执行（只回填）', () =
   vi.useRealTimers()
 })
 
-// [a6-legacy-guard-v1] A6 承重判据（WO-20261006-04 段一）：旧油猴路径（ai-runner:script）的冷静期守卫。
-//   载荷**不带 rescan** —— 旧油猴本来就没有该字段，这正是 A6 只能靠时间窗判断的原因。
-test('A6①：冷静期内 ai-runner:script 不执行（只回填）', async () => {
-  vi.useFakeTimers()
-  vi.setSystemTime(PAGE_BOOT_TS + 1)
-  const handlers = mkHandlers()
-  const payload = { type: 'ai-runner:script', code: '// @desc a\n// @why b', lang: 'js', sessionId: 's1' }
-  handlers.onSessionIdMessage({ data: payload, origin: 'https://x', source: null } as unknown as MessageEvent)
-  await vi.advanceTimersByTimeAsync(8000)
-  expect(h.pushCalls.length).toBe(1)
-  expect(h.runCalls.length).toBe(0)
-  vi.useRealTimers()
-})
+// [legacy-script-removed-v1] 旧 ai-runner:script 通道已删，本用例随之移除。
 
-test('A6②：冷静期外 ai-runner:script 执行（runner.run 被调用）', async () => {
-  vi.useFakeTimers()
-  vi.setSystemTime(PAGE_BOOT_TS + REFRESH_GUARD_MS + 1)
-  const handlers = mkHandlers()
-  const payload = { type: 'ai-runner:script', code: '// @desc a\n// @why b', lang: 'js', sessionId: 's1' }
-  handlers.onSessionIdMessage({ data: payload, origin: 'https://x', source: null } as unknown as MessageEvent)
-  await vi.advanceTimersByTimeAsync(8000)
-  expect(h.pushCalls.length).toBe(1)
-  expect(h.runCalls.length).toBe(1)
-  vi.useRealTimers()
-})
+// [legacy-script-removed-v1] 旧 ai-runner:script 通道已删，本用例随之移除。

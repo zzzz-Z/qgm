@@ -203,14 +203,9 @@ function classifyAndPost(): void {
     // script：标记行为非脚本类时整轮不走脚本分类（否则带示例代码块的 DONE 总结会被当脚本执行）
     // stopped 后残余块一律不推：前端已 finish 循环，此时推出去会形成「循环外自动执行」旁路
     // [stopped-no-autorun-v1] 停止轮不再推脚本：残余块会落到「循环外自动执行」旁路
-    if (!markedNonScript && !stopPosted) {
-      // [multi-script-v1] 一条回复可带多块：只放行首个未推送块，推完再跑一次分类
-      const item = extractLatestScript() || extractScriptFromMarkdown()
-      if (item && emitScript(item)) {
-        // 同一回复里还有未推送的块 ⇒ 主动再跑一次（observer 此时已静止）
-        if (hasMoreUnseenBlocks()) setTimeout(classifyAndPost, 80)
-        return
-      }
+    // [script-fence-guess-removed-v1] 删除「按围栏猜脚本」的旧通道：脚本下发只走信封（readTurnFromRoot）。
+    // [WHY] 旧逻辑调 extractLatestScript / extractScriptFromMarkdown 扫页面与正文围栏，
+    //   把任意 ```js 围栏当待执行脚本推下去 —— AI 正文里贴示例代码就会被真执行。
     }
 
     // plain：仅在正文真的变了时推
@@ -225,9 +220,7 @@ function classifyAndPost(): void {
     // 首行是 SCRIPT 且脚本已推成功 ⇒ 此处 plain 必为 DOM 抖动引起的重复补发
     if (marks.script > 0 && seenHashes.size > 0) return
 
-    const fence = decideScriptFence(marks.script > 0, seenHashes.size, _scriptFenceReported)
-    if (fence === 'report') { emitFenceError(); return }
-    if (fence === 'suppress') return
+    // [script-fence-guess-removed-v1] 围栏报错块已删：无围栏不再视为异常。
 
     emitPlain(extractLatestReplyText() || '', marks)
   } catch { /* 页面导航/关闭期间的 DOM 异常：本轮放弃，下轮自然重试 */ }

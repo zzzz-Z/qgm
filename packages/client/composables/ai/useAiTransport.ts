@@ -130,7 +130,7 @@ export function createTampermonkeyTransport(): AiTransport {
       const payload = (d as { reply?: unknown }).reply
       const raw = payload !== undefined ? payload : d
       for (const cb of replyCbs) cb(raw, sid)
-    } else if (t === 'ai-runner:script') { for (const cb of replyCbs) cb({ kind: 'script', item: (d as { item?: unknown }).item }, sid) }
+    }
     else if (t === 'ai-runner:summary') { for (const cb of summaryCbs) cb(String((d as { text?: string }).text || ''), sid, Boolean((d as { degraded?: boolean }).degraded)) }
     else if (t === 'ai-runner:new-session-created') { for (const cb of newSidCbs) cb(String((d as { url?: string }).url || ''), String((d as { id?: string }).id || '')) }
   }

@@ -2,7 +2,7 @@
 // [WHY] App.vue 超 §4 组件 500 行红线；消息分发与 7 个 handler 自成体系，可独立为 composable。
 // [CONSTRAINT] 只注入 App 局部状态（sessionHistory / saveHistoryScoped / addSessionToHistory / isMockMode）；
 //              其余依赖全部走模块级 composable 单例，避免 20+ 参数注入。
-// [CHANGE-IMPACT] App.vue 中 onSessionIdMessage / handleAiReply / handleLegacyScript /
+// [CHANGE-IMPACT] App.vue 中 onSessionIdMessage / handleAiReply / handleSummaryMsg /
 //                 handleSummaryMsg / handleNewSessionCreated / handleUrlUpdated / handleSessionIdUpdate /
 //                 isFromActiveAiSite 全部下沉到本模块。
 
@@ -24,7 +24,6 @@ import { askUser } from '../ui/useAsk'
 import { parseAsk } from '../../utils/ask-parser'
 import { scanReplyMarks } from '../../utils/reply-mark'
 import { uid } from '../../utils/id'
-import { promiseTimeout } from '@vueuse/core'
 import { log } from '../../utils/log'
 // [reply-toasts-v1] toast 相关 imports 已收口到 reply-toasts.ts（§4 单文件唯一 import ≤ 20）
 import {
@@ -439,35 +438,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     // [loop-consolidation-P2] 摘除 routedToLoop 分支（恒 false）
   }
 
-  /** 处理旧版油猴 ai-runner:script 单脚本消息 */
-  async function handleLegacyScript(payload: MessageEvent['data'], e: MessageEvent): Promise<void> {
-    if (!isFromActiveAiSite(e)) return
-    stopAiWaiting()
-    const code = String(payload.code || '')
-    const lang = (payload.lang === 'bash' ? 'bash' : payload.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
-    const site = String(payload.site || e.origin || '')
-    const item = scriptInbox.push({ code, lang, site, hash: payload.hash ? String(payload.hash) : undefined })
-    if (item) {
-      const sid = String(payload.sessionId || '')
-      // [loop-consolidation-P2] 摘除 routedToLoop 分支（恒 false）；只保留留存路径（原 else 体）
-      {
-        // [refresh-no-autorun-v1] 旧油猴路径同样受冷静期约束（其 payload 无 rescan 字段，
-        //   故只需时间窗判断）；防刷新后旧版脚本被无条件执行。
-        if (Date.now() - PAGE_BOOT_TS < REFRESH_GUARD_MS) return
-        const runKey = uid('run')
-        const delayMs = 3000 + Math.random() * 4000
-        await promiseTimeout(delayMs)
-        // [stopped-no-autorun-v1] 窗口判据放在 await **之后**：本路径固有 3-7s 延迟，
-        //   stopped 完全可能在等待期间到达并让循环 finish；若只在 await 前判，残余脚本照样被跑。
-        if (inStoppedWindow(sid)) {
-          notifyStoppedScriptHint()
-          return
-        }
-        // [run-queue-v1] 与 handleAiReply 路径同：上一轮未结束时排队，不轮询不等超时
-        void runner.run({ script: code, runKey, autoFeedback: true, queueIfBusy: true })
-      }
-    }
-  }
+  // [legacy-script-removed-v1] handleLegacyScript 已删：旧油猴单脚本消息通道不存在了。
 
   /**
    * [turn-block-frame-v1] 块帧 → 总线事件（只渲染，不执行）。
@@ -650,10 +621,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     if (!payload) return
     const t = String(payload.type || '')
     if (t === 'ai-runner:reply') { handleAiReply(payload, e); return }
-    if (t === 'ai-runner:script') {
-      handleLegacyScript(payload, e).catch(error => log.error('[legacy-script] failed:', error))
-      return
-    }
+    // [legacy-script-removed-v1] ai-runner:script 旧通道已删：油猴已改发 ai-runner:reply。
     if (t === 'ai-runner:summary') return handleSummaryMsg(payload)
     // [turn-block-frame-v1] 块帧路由：无头侧由 useAppStartup 把 WS `ai:block` 包成同形假事件，
     //   油猴侧（P3）直接发这个 type —— 两条通道共用同一个处理点，与 reply/script 同构。
@@ -682,5 +650,5 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     if (t === 'ai-runner:session-id' && payload.id) handleSessionIdUpdate(payload)
   }
 
-  return { onSessionIdMessage, handleAiReply, handleLegacyScript, handleSummaryMsg, handleNewSessionCreated, handleUrlUpdated, handleSessionIdUpdate, isFromActiveAiSite }
+  return { onSessionIdMessage, handleAiReply, handleSummaryMsg, handleNewSessionCreated, handleUrlUpdated, handleSessionIdUpdate, isFromActiveAiSite }
 }
