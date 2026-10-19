@@ -148,13 +148,13 @@ const emit = defineEmits<{
 .tpl-bar button.primary-btn.takeover {
   background: var(--primary, #3b82f6);
   border: 1px solid var(--primary, #3b82f6);
-  color: #fff;
+  color: var(--on-primary, #fff);
   box-shadow: 0 1px 2px rgb(0 0 0 / 25%);
 }
 .tpl-bar button.primary-btn.takeover:hover:not(:disabled) {
   background: var(--primary-hover, #60a5fa);
   border-color: var(--primary-hover, #60a5fa);
-  color: #fff;
+  color: var(--on-primary, #fff);
   box-shadow: 0 4px 12px rgb(88 166 255 / 35%);
   transform: translateY(-1px);
 }
@@ -220,7 +220,7 @@ const emit = defineEmits<{
 .primary-btn.head-run,
 .primary-btn.run {
   background: var(--primary, #4176e6);
-  color: #fff;
+  color: var(--on-primary, #fff);
   border-color: transparent;
 }
 .primary-btn.head-run:hover:not(:disabled),

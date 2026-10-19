@@ -42,6 +42,11 @@
       "url": "https://github.com/antfu/skills/blob/HEAD/skills/nuxt/SKILL.md"
     },
     {
+      "name": "oil-ui",
+      "source": "(unknown)",
+      "url": "(unknown)"
+    },
+    {
       "name": "pinia",
       "source": "antfu/skills",
       "url": "https://github.com/antfu/skills/blob/HEAD/skills/pinia/SKILL.md"

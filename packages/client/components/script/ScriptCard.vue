@@ -560,7 +560,7 @@ function toggle(): void { expanded.value = !expanded.value }
   padding: 4px 10px;
   border-radius: 999px;
   background: var(--primary, #58a6ff);
-  color: #fff;
+  color: var(--on-primary, #fff);
   border: none;
   font-size: 11px;
   cursor: pointer;

@@ -222,7 +222,7 @@
 }
 .question-badge {
   background: var(--primary, #2563eb);
-  color: #fff;
+  color: var(--on-primary, #fff);
 }
 .question-state {
   margin-left: auto;
@@ -316,7 +316,7 @@
   padding: 8px 14px;
   font-size: 12.5px;
   font-weight: 500;
-  color: #fff;
+  color: var(--on-primary, #fff);
   background: var(--primary, #2563eb);
   border: none;
   border-radius: 8px;

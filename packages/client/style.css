@@ -34,6 +34,8 @@
   --text-5: #5a5a5a;
 
   --primary: #4d6bfe;
+  /* [on-primary-v1] 主色背景上的文字色；两套主题都是白字（对比度均 ≥ 4.9:1） */
+  --on-primary: #fff;
   --primary-hover: #6b83ff;
   --primary-bg: rgb(77 107 254 / 15%);
 
@@ -145,6 +147,7 @@
   --text-5: #afb8c1;
 
   --primary: #0969da;
+  --on-primary: #fff;
   --primary-hover: #0550ae;
   --primary-bg: rgb(9 105 218 / 10%);
 
