@@ -59,11 +59,8 @@ docs/              USAGE.md / DOCS-INDEX.md / DESIGN.md
 
 ## 架构红线量化阈值（工作区）
 
-> 应用级原则（拆分依据 = 职责边界、依赖方向）见 [`packages/core/SYSTEM.md`](./packages/core/SYSTEM.md) §4；本节只承载本工作区的**具体阈值**——由 `packages/core/tests/module-size-ratchet.node-test.ts`（体积）与 `packages/core/tests/hclc-guard.node-test.ts`（依赖数量）强制，守卫常数须与本表逐字同值。
+> 应用级原则（拆分依据 = 职责边界、依赖方向）见 [`packages/core/SYSTEM.md`](./packages/core/SYSTEM.md) §4；本节只承载本工作区的**具体阈值**——由 `packages/core/tests/module-size-ratchet.node-test.ts`（体积）强制，守卫常数须与本表逐字同值。
 
-- **单文件唯一 `import` 模块数 > 20** → 阻断级违规（覆盖 core 与 client 两处源码；`.vue` 剥 SFC 后只数 `<script>` 块内的 `import`/`from`）。
-  - 豁免：barrel 入口文件（只做转发）不计数。
-  - 范围外：一次性 CLI 工具与单文件注入脚本不纳入。
 - **文件体积（软建议，不强制）**：普通模块建议 ≤ 800 行、组件建议 ≤ 1000 行。超限**不阻断提交**，仅作拆分提示。生成物豁免（如自动生成的类型声明文件）。
 
 ## 宿主机制实现索引

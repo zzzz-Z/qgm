@@ -41,9 +41,12 @@ const CLIENT_ENTRY = path.join(PKG_ROOT, 'dist', 'client', 'index.html')
 const IS_REPO = fs.existsSync(REPO_CORE_SRC)
 
 // 参与判定源码新旧的扩展名；产物与依赖不参与
-const SRC_EXT_RE = /\.(?:ts|tsx|vue|cjs|mjs|js|html|css)$/
+// [src-ext-dts-v1] 排除 .d.ts（auto-imports.d.ts 等生成物）：生成物 mtime 会被构建/启动刷新，
+//   纳入判定会让 air-server 每次启动都误判「源码更新」并触发构建
+const SRC_EXT_RE = /(?<!\.d)\.(?:ts|tsx|vue|cjs|mjs|js|html|css)$/
 // 遍历时要跳过的目录名
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'tests'])
+// [src-skip-dirs-v1] 追加 e2e/playwright-report/test-results/.ai-runner：测试产物 mtime 会被每次跑测试刷新
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'tests', 'e2e', 'playwright-report', 'test-results', '.ai-runner'])
 
 /**
  * 遍历目录取最新 mtime

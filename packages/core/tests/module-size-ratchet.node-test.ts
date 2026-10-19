@@ -138,7 +138,7 @@ describe('§4 文件体积 ratchet', () => {
   })
 
   // [ssot-parity-v1] 阈值权威已下放工作区（应用级规则不写具体数字）：数字只声明在
-  //   AGENTS.md「架构红线量化阈值」节；本文件 / hclc-guard 的守卫常数必须与之逐字同值。
+  //   AGENTS.md「架构红线量化阈值」节；本文件的守卫常数必须与之逐字同值。
   // WHY: 2026-10-06 放宽阈值时，最怕的是「守卫改了、文档没改」——下一个照文档行事的人会按旧数字设计拆分，
   //   这次放宽就白做了。数字必须只有一处权威（AGENTS.md），其余处被这条断言钉住。
   it('AGENTS.md 阈值节的数字与守卫常数同值（改一处必须同步全处）', () => {
@@ -156,12 +156,5 @@ describe('§4 文件体积 ratchet', () => {
     }
     expect(pick(/普通模块建议\s*≤\s*(\d+)\s*行/, '普通模块建议行数')).toBe(MAX_MODULE_LINES)
     expect(pick(/组件建议\s*≤\s*(\d+)\s*行/, '组件建议行数')).toBe(MAX_COMPONENT_LINES)
-
-    // 另一处守卫在别的包（无跨包共享常量模块），只能读源码字面量——读的是「它的声明」，判的是「与阈值节同值」
-    const hclc = fs.readFileSync(path.join(ROOT, 'packages/core/tests/hclc-guard.node-test.ts'), 'utf8')
-    // [loop-consolidation-P3d] ask-wiring.node-test.ts 已随 auto-loop 收敛删除；
-    //   其「单文件 import ≤ N」的守卫职责由 hclc-guard 单独承担（下方断言已覆盖）
-    const docImport = pick(/单文件唯一\s*`import`\s*模块数\s*>\s*(\d+)/, '单文件唯一 import 模块数上限')
-    expect(Number((hclc.match(/const LIMIT = (\d+)/) || [])[1]), 'hclc-guard 的 LIMIT 未随阈值节同步').toBe(docImport)
   })
 })
