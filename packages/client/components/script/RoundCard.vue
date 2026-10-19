@@ -46,6 +46,10 @@ const expanded = ref(
   (props.card.type === 'question' || props.card.type === 'ask') && props.card.truncated,
 )
 const askDraft = ref('')
+// [ask-ime-v1] 中文输入法组字保护：
+//   [WHY] IME 组字期间 @input 会触发但值是拼音，此时若点「发送」会发出拼音而非汉字。
+//   组字期间不更新 askDraft，compositionend 才同步最终文本。
+const _imeComposing = ref(false)
 
 const { askState, resolveAsk, restoreAsk } = useAsk()
 
@@ -96,6 +100,15 @@ function onKeydown(e: KeyboardEvent): void {
   submitAnswer(qCard.value.options[n - 1].label)
 }
 function toggle(): void { expanded.value = !expanded.value }
+function onImeStart(): void { _imeComposing.value = true }
+function onImeEnd(e: CompositionEvent): void {
+  _imeComposing.value = false
+  askDraft.value = (e.target as HTMLInputElement).value
+}
+function onAskInput(e: Event): void {
+  if (_imeComposing.value) return
+  askDraft.value = (e.target as HTMLInputElement).value
+}
 function submitAnswer(text: string): void {
   const t = String(text || '').trim()
   if (!t || !isAskActive.value) return
@@ -218,7 +231,9 @@ function submitAnswer(text: string): void {
         class="question-input"
         :value="askDraft"
         :placeholder="qCard.options.length ? '或输入自定义回答…' : '输入你的回答…'"
-        @input="askDraft = ($event.target as HTMLInputElement).value"
+        @compositionstart="onImeStart"
+        @compositionend="onImeEnd"
+        @input="onAskInput"
       >
       <button class="question-send" type="submit" :disabled="!askDraft.trim()">
         发送

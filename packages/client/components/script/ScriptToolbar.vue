@@ -41,10 +41,13 @@ const emit = defineEmits<{
       </svg>
     </button>
 
-    <!-- [pause-really-stops-v1] 两态：未运行 .takeover 蓝（开始）/ 运行中 .pause 琥珀（停止）。
+    <!-- [stop-btn-loop-only-v1] 停止按钮只在「有活可停」时显示：running / aiWaiting / delivering / remoteGenerating。
+         去掉 autoTakeoverEnabled —— 它只是开关状态，不代表有任务在跑（用户实测「总结后按钮还在」）。
+         接管开着但空闲时显示「开始」按钮，点击即关闭接管（合理：空闲时点它 = 收工）。
+         [pause-really-stops-v1] 两态：未运行 .takeover 蓝（开始）/ 运行中 .pause 琥珀（停止）。
           守卫见 tests/toolbar-ctrl-colors.node-test.ts -->
     <button
-      v-if="running || autoTakeoverEnabled || aiWaiting || delivering || remoteGenerating"
+      v-if="running || aiWaiting || delivering || remoteGenerating"
       v-tooltip="'停止：终止后台脚本 + 暂停 AI 生成'"
       aria-label="停止运行"
       class="primary-btn pause head-run"
