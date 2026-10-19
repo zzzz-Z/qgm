@@ -24,14 +24,11 @@ const { workspaces, activeId, loading, load, activate, register, remove, pickPat
 const matrix = useSiteMatrix()
 
 const items = computed(() => workspaces.value.map((w) => {
-  const m = matrix.matrixFor(w.id)
   return {
     id: w.id,
     label: w.label,
     root: w.root,
     active: w.id === activeId.value,
-    siteLabel: m.siteLabel,
-    winOpen: m.winOpen,
   }
 }))
 
@@ -245,11 +242,6 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
         <span class="awl-dot" aria-hidden="true" />
         <div class="awl-meta">
           <span class="awl-label">{{ w.label }}</span>
-          <span class="awl-sub">
-            <!-- [site-select-row-removed-v1] 行内站点下拉已移除：站点绑定只能由「首次使用该工作区」隐式形成，
-                 需要换站点时用顶部站点切换 / 重新打开该工作区。保留窗口状态指示。 -->
-            <span v-if="w.siteLabel" class="awl-win" :class="{ open: w.winOpen }">{{ w.winOpen ? '● 已开窗' : '○ 未开窗' }}</span>
-          </span>
         </div>
         <button
           v-tooltip="'在该工作区开新会话'"
@@ -346,24 +338,35 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 .awl-new-workspace {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 8px 8px;
-  padding: 8px 10px;
-  border: 0;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 8px 10px;
+  padding: 7px 10px;
+  /* [workspace-list-ui-v3] 实心主色块改为描边态：左栏主体应是工作区列表，
+     按钮只作辅助入口，悬停才升为主色实心。 */
+  border: 1px dashed color-mix(in srgb, var(--primary) 45%, transparent);
   border-radius: 8px;
-  background: var(--primary-bg);
+  background: transparent;
   color: var(--primary);
   font-size: 12.5px;
   font-weight: 500;
+  letter-spacing: 0.2px;
   cursor: pointer;
   transition:
-    background 0.12s,
-    color 0.12s;
+    background 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
   flex-shrink: 0;
 }
 .awl-new-workspace:hover {
+  border-color: var(--primary);
+  border-style: solid;
   background: var(--primary);
   color: #fff;
+}
+.awl-new-workspace:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 
 .hdr-collapse-btn {
@@ -490,12 +493,14 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 }
 
 .awl-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
-  /* [workspace-panel-ui-v2] 7px → 8px：单行高度约 36px，接近 40px 触达下限 */
-  padding: 8px;
-  border-radius: 8px;
+  /* [workspace-list-ui-v3] 8px → 7px 纵向、10px 横向：压缩行高至约 34px，
+     换取同屏更多工作区，同时保留 7px 圆角与左侧点击热区。 */
+  padding: 7px 10px 7px 12px;
+  border-radius: 7px;
   cursor: pointer;
   transition:
     background 0.12s ease,
@@ -513,40 +518,44 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 .awl-item:not(.active) .awl-label {
   color: var(--text-2);
 }
-.awl-item:not(.active) .awl-sub {
-  color: var(--text-3);
-  opacity: 0.7;
-}
-.awl-item {
-  position: relative;
+/* [workspace-list-ui-v3] 激活项标题升为主色，与左侧激活条呼应。 */
+.awl-item.active .awl-label {
+  color: var(--primary, #58a6ff);
+  font-weight: 600;
 }
 .awl-item.active {
   /* [ui-color-token-v1] 硬编码 primary → 语义变量 */
   background: var(--primary-bg);
-  /* [workspace-panel-ui-v2] 激活项加一圈极淡描边，与 hover 态拉开层级（不依赖颜色深浅） */
   box-shadow: inset 0 0 0 1px rgb(88 166 255 / 22%);
 }
+/* [workspace-list-ui-v3] 激活条由浮空 2px 改为贴左内缘 3px 实心条，
+   与卡片圆角贴合，选中感更明确。 */
 .awl-item.active::before {
   content: '';
   position: absolute;
-  left: -6px;
+  left: 0;
   top: 6px;
   bottom: 6px;
-  width: 2px;
-  border-radius: 1px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
   background: var(--primary, #58a6ff);
 }
 
 .awl-dot {
-  width: 8px;
-  height: 8px;
+  /* [workspace-list-ui-v3] 状态点兼作色标：未激活为中性灰，激活为主色。
+     尺寸由 8px 收到 7px，配合压缩后的行高不显臃肿。 */
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: rgba(127, 127, 127, 0.28);
+  background: rgba(127, 127, 127, 0.3);
   flex-shrink: 0;
+  transition:
+    background 0.14s ease,
+    box-shadow 0.14s ease;
 }
 .awl-item.active .awl-dot {
   background: var(--primary, #58a6ff);
-  box-shadow: 0 0 6px var(--primary);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--primary) 60%, transparent);
 }
 
 .awl-meta {
@@ -565,18 +574,6 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.awl-sub {
-  /* [ui-type-scale-v1] 辅助下限 11px */
-  font-size: var(--font-11);
-  color: var(--text-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.awl-item.active .awl-sub {
-  color: var(--primary, #58a6ff);
-  opacity: 0.9;
 }
 
 .awl-open-new {
@@ -633,28 +630,14 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
   color: var(--danger, #f85149);
 }
 
-/* [multi-site-matrix-v1] 工作区行内的窗口状态（矩阵视图）
-   [site-select-row-removed-v1] 行内站点下拉已按用户要求移除（2026-10-18），.awl-site-select 样式一并删除 */
-.awl-sub .awl-win {
-  margin-left: 6px;
-  color: var(--text-3);
-}
-.awl-sub .awl-win.open {
-  color: var(--success, #3fb950);
-}
-.awl-sub .awl-nosite {
-  color: var(--text-3);
-  opacity: 0.7;
-}
-
 .awl-empty {
   /* [workspace-panel-ui-v2] 空态给虚线容器，让「尚无注册工作区」看起来是提示位而非渲染失败 */
-  margin: 4px 2px;
-  padding: 16px 10px;
+  margin: 2px 8px;
+  padding: 14px 10px;
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: 7px;
   font-size: 11.5px;
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--text-3);
   text-align: center;
   cursor: default;

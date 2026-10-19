@@ -15,7 +15,7 @@ import { isAutoResuming, markUserStop, resetResumeCount } from './stop-resume'
  * [CONSTRAINT] 只需本轮内唯一（时间戳 + 自增序），不要求全局唯一；不带 ts 避免与协议字段混淆。
  */
 let _outboundMsgSeq = 0
-function nextFillMsgId(): string {
+export function nextFillMsgId(): string {
   _outboundMsgSeq = (_outboundMsgSeq + 1) >>> 0
   return `f_${Date.now().toString(36)}-${_outboundMsgSeq.toString(36)}`
 }
@@ -140,8 +140,10 @@ export function sendFillImpl(payload: FillPayloadImpl, sid?: string): boolean {
  *   循环轮次内路径仍用 sendFillToImpl（行为不变）
  * [fail-reason-v1] 可选第 4 参 out 回传失败原因（no-input-box / no-window / no-origin / post-threw）：
  *   返回值三态保持字符串不变以兼容既有断言；上层据此区分「暂时未就绪（可重试）」与真失败。
+ * [fill-msgid-reuse-v1] 可选第 5 参 msgId：调用方（fillWithDegrade）为「一次逻辑投递」生成一次并在重试间复用。
+ *   油猴 _seenInbound 按 msgId 去重 ⇒ 已消费的重试帧被 dedup-skip；不传时每次自生成（默认行为不变）。
  */
-export function sendFillToAsync(sid: string, payload: FillPayloadImpl, timeoutMs = 5000, out?: { reason?: string }): Promise<'sent' | 'failed' | 'unacked'> {
+export function sendFillToAsync(sid: string, payload: FillPayloadImpl, timeoutMs = 5000, out?: { reason?: string }, msgId?: string): Promise<'sent' | 'failed' | 'unacked'> {
   const win = getWindowBySid(sid)
   if (!win) { if (out) out.reason = 'no-window'; log.warn('[sendFillToAsync] win=null sid=', sid); return Promise.resolve('failed') }
   const origin = targetOriginFor(sid)
@@ -169,6 +171,11 @@ export function sendFillToAsync(sid: string, payload: FillPayloadImpl, timeoutMs
       //   归入 unacked 走 fillWithDegrade 的降级路径，避免「提问实际已发却弹首问未送达」的误报。
       // [CONSTRAINT] 与 unacked 分支共用同一次 _unackedHintShown 去重提示，不新增分支
       if (!m.ok && _ackReason === 'send-verify-failed') finish('unacked')
+      // [dedup-skip-is-delivered-v1] dedup-skip = 油猴 _seenInbound 已含该 msgId ⇒ 更早的同 msgId
+      //   尝试已被填入输入框（属「已投递」），绝非「发送失败」。原实现按 ok:false 一律归 failed，
+      //   使 send-verify-failed→unacked→重试(复用 msgId)→dedup-skip 的链路弹出硬错误
+      //   「发送失败：AI 窗口未打开或已关闭」，而消息其实已到达（用户实测 2026-10-19「流程正常却报错」）。
+      else if (!m.ok && _ackReason === 'dedup-skip') finish('sent')
       else finish(m.ok ? 'sent' : 'failed')
     }
     // [send-trace-v1] source 只服务留痕：剥掉后再上线，避免污染协议载荷
@@ -176,7 +183,7 @@ export function sendFillToAsync(sid: string, payload: FillPayloadImpl, timeoutMs
     let posted = false
     try {
       window.addEventListener('message', onMsg)
-      win.postMessage({ type: 'ai-runner:fill', ...wire, ackId, msgId: nextFillMsgId() }, origin)
+      win.postMessage({ type: 'ai-runner:fill', ...wire, ackId, msgId: msgId || nextFillMsgId() }, origin)
       posted = true
     } catch (e) {
       log.warn('[sendFillToAsync] postMessage threw', e)

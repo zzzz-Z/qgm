@@ -10,6 +10,8 @@ import { emit as emitBus } from '../../composables/ui/useEventStream'
 import { copyAndFill, sendStop } from '../../composables/ai/useAiWindow'
 import { useAutoTakeover } from '../../composables/ai/useAutoTakeover'
 import { useAiWaiting } from '../../composables/ai/useAiWaiting'
+// [runtime-kind-ssot-v1] 运行态单一真相源：用户点停止时置 stopped
+import { useRuntime } from '../../composables/ai/useRuntime'
 import { useRunner } from '../../composables/runner/useRunner'
 import { parseErrorLocations } from '../../utils/context-error-locations'
 import {
@@ -84,6 +86,7 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
   // [loop-consolidation-P3b] softPause / loopPaused / clearSoftPause 已迁至 useAiWaiting（随 auto-loop 退役）
   const { loopPaused, clearSoftPause, stopWaiting } = useAiWaiting()
   const { stop } = useRunner()
+  const { stop: runtimeStop } = useRuntime()
 
   /** 拼装 AI 回填 prompt（含失败源码 / 反馈摘要 / 变更列表 / 基线对比 / 原始输出） */
   async function buildAiPrompt(): Promise<string> {
@@ -217,6 +220,9 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
       stop()
       clearSoftPause()
       stopWaiting()
+      // [runtime-kind-ssot-v1] 用户显式停止 ⇒ 运行态 stopped（须在 stopWaiting 之后：
+      //   后者只把「等待」态收回 idle，不能覆盖 stopped）
+      runtimeStop()
       toast(`已停止 [${_phase}] sendStop=${_sent}`, 'info', TOAST_LONG)
       return
     }

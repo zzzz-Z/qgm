@@ -209,6 +209,72 @@ function mergeBlock(acc, block) {
 }
 
 /**
+ * 把 JSON **字符串字面量内部**的裸控制字符改写成合法转义，再交给 JSON.parse。
+ *
+ * [WHY] 模型写 script.code 时经常图省事，直接在 `"code": "..."` 里敲**真换行**（U+000A）
+ *   而不是两字符的 `\n`。这不是排版问题而是转义问题：`JSON.parse` 对字符串字面量里的
+ *   裸控制字符直接抛 `Bad control character in string literal`，整条信封解析不出对象
+ *   ⇒ 油猴回落 plain 把 JSON 原文整坨推上屏、script 块零执行（用户实测 2026-10-19，
+ *   对照组：同结构的单行/合法转义信封一切正常）。
+ *   所以「能跑的」和「不能跑的」两份信封差异**不在块结构，只在 code 里换行的形态**。
+ *
+ * [CONSTRAINT] 必须字符串感知：只改字符串内部的控制字符，且跳过 `\"` 已消费的位置。
+ *   否则代码里的引号会被误判成字符串边界，把结构字符（`{` `}` `,`）也转义掉，
+ *   修好一个坏两个。
+ * [CONSTRAINT] 只在 JSON.parse 已经失败时兜底调用（见 safeJsonParse），正常信封零开销、
+ *   且严格 JSON 的行为完全不变（严格解析成功时压根不进这里）。
+ * [CONSTRAINT] 幂等：已转义文本再过一次不产生变化（`\` 已消费 ⇒ 下一个字符不处理）。
+ * @param text 待解析的 JSON 文本
+ * @returns 修正后的 JSON 文本
+ */
+export function escapeControlCharsInStrings(text) {
+  let out = ''
+  let inStr = false
+  let esc = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charAt(i)
+    if (inStr) {
+      if (esc) { out += ch; esc = false; continue }
+      if (ch === '\\') { out += ch; esc = true; continue }
+      if (ch === '"') { inStr = false; out += ch; continue }
+      const code = text.charCodeAt(i)
+      // JSON 规范：字符串字面量内只允许码位 ≥ 0x20，其余必须转义
+      if (code < 0x20) {
+        if (ch === '\n') out += '\\n'
+        else if (ch === '\r') out += '\\r'
+        else if (ch === '\t') out += '\\t'
+        else if (ch === '\b') out += '\\b'
+        else if (ch === '\f') out += '\\f'
+        else out += `\\u${code.toString(16).padStart(4, '0')}`
+        continue
+      }
+      out += ch
+      continue
+    }
+    if (ch === '"') inStr = true
+    out += ch
+  }
+  return out
+}
+
+/**
+ * JSON.parse 的宽容包装：严格解析失败时，转义字符串内的裸控制字符再试一次。
+ *
+ * [WHY] 不直接无条件转义：严格 JSON 是契约基线，先严格试能保证「本来就能解析的输入
+ *   走的是零改写的原路径」，宽容只作为**救 malformed 输出**的兜底，不放宽块结构校验
+ *   （字段缺失 / 未知类型仍然照常报错，不会因为宽容而静默通过）。
+ * @param text JSON 文本
+ * @returns 解析结果；两次都失败抛错（由调用方按既有 try/catch 处理）
+ */
+export function safeJsonParse(text) {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return JSON.parse(escapeControlCharsInStrings(text))
+  }
+}
+
+/**
  * 解析一条完整的 turn 信封。
  * @param md 回复原文（Markdown 或裸 JSON 均可）
  * @returns {turn, blocks, truncated, errors}；解析不出对象时 errors 含
@@ -231,7 +297,7 @@ export function parseTurn(md) {
     const end = scanObjectEnd(text, cands[i])
     if (end < 0) { out.truncated = true; continue }
     let parsed = null
-    try { parsed = JSON.parse(text.slice(cands[i], end)) } catch { continue }
+    try { parsed = safeJsonParse(text.slice(cands[i], end)) } catch { continue }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
     obj = parsed
     break
@@ -275,7 +341,7 @@ export function parseTurnPartial(md) {
   const elems = sliceContentElements(text)
   for (let i = 0; i < elems.length; i++) {
     let parsed = null
-    try { parsed = JSON.parse(elems[i]) } catch { continue }
+    try { parsed = safeJsonParse(elems[i]) } catch { continue }
     const r = validateBlock(parsed, i)
     for (let k = 0; k < r.errors.length; k++) out.errors.push(r.errors[k])
     if (r.block) mergeBlock(out, r.block)

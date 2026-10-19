@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { sendFillToAsync } from '../composables/ai/useAiWindowSend.js'
 import { isBlankRefImpl as isBlankRef, removeWindowBySidImpl as removeWindowBySid, setWindowEntry } from '../composables/ai/useAiWindowTable.js'
 
-interface AckFrame { type: string, ackId?: string, ok?: boolean }
+interface AckFrame { type: string, ackId?: string, ok?: boolean, reason?: string }
 interface FillFrame extends AckFrame { prompt?: string, context?: string, images?: string[] }
 
 /** 宿主页 window 的消息监听桩：捕获 sendFillToAsync 注册/注销的 listener */
@@ -85,6 +85,19 @@ describe('sendFillToAsync（WO-20261006-01 fill-ack 闭环，宿主侧动态补�
     const pending = sendFillToAsync('s1', { prompt: 'p' })
     dispatch({ type: 'ai-runner:fill-ack', ackId: sent[0].msg.ackId, ok: false })
     assert.equal(await pending, 'failed')
+  })
+
+  // [dedup-skip-is-delivered-v1] dedup-skip 证明更早的同 msgId 尝试已被油猴消费（已投递）；
+  //   若归 failed，就会在 unacked 重试链路上误弹硬错误「发送失败」（用户实测 2026-10-19）。
+  it('ACK ok:false reason=dedup-skip（同 msgId 已被消费）→ sent，不得误报发送失败', async () => {
+    stubHostWindow()
+    const { win, sent } = makeTarget()
+    setWindowEntry('s1', { win, url: URL_OK })
+    const out: { reason?: string } = {}
+    const pending = sendFillToAsync('s1', { prompt: 'p' }, 5000, out)
+    dispatch({ type: 'ai-runner:fill-ack', ackId: sent[0].msg.ackId, ok: false, reason: 'dedup-skip' })
+    assert.equal(await pending, 'sent', 'dedup-skip = 已投递，不得归 failed（否则误弹「发送失败」）')
+    assert.equal(out.reason, 'dedup-skip')
   })
 
   it('ackId 不匹配的回执被忽略（并发防串话的前提）→ 走超时 unacked', async () => {
@@ -243,9 +256,11 @@ describe('fill-ack reason 通道与 no-input-box 重试（fail-reason-v1 / no-in
     // 判据承重：删掉重试分支 / 改判据字符串 / 去掉第二次调用，本条均应变红
     assert.ok(/out\.reason === 'no-input-box'/.test(src), '未按 no-input-box 分流')
     assert.ok(/no-input-retry-v1/.test(src), '重试分支标记缺失')
+    assert.ok(/fill-msgid-reuse-v1/.test(src), 'msgId 复用标记缺失')
+    assert.ok(/const msgId = nextFillMsgId\(\)/.test(src), '一次逻辑投递必须只生成一个 msgId')
     assert.ok(
-      /await sendFillToAsync\(sid, payload, ackTimeout, out\)[\s\S]{0,600}?no-input-retry-v1[\s\S]{0,600}?r = await sendFillToAsync\(sid, payload, ackTimeout, out\)/.test(src),
-      '重试必须真的再调一次 sendFillToAsync（含同一 out 以刷新 reason）',
+      /await sendFillToAsync\(sid, payload, ackTimeout, out, msgId\)[\s\S]{0,600}?no-input-retry-v1[\s\S]{0,600}?r = await sendFillToAsync\(sid, payload, ackTimeout, out, msgId\)/.test(src),
+      '重试必须真的再调一次 sendFillToAsync，且复用同一 msgId（否则油猴判重失效、同一提问连发两遍）',
     )
   })
 })

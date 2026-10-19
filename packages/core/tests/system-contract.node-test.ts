@@ -64,19 +64,27 @@ test('G6-a 每个 §N 章必须含「- 承重：」标注（承重覆盖可机�
   assert.deepEqual(missing, [], `缺「- 承重：」标注的章：${missing.join(', ')}（每章须声明有无机器守卫）`)
 })
 
-test('G6-b 标注行里以行内代码写出的守卫路径必须在磁盘真实存在', () => {
-  // 变异：把路径写成 `packages/core/tests/not-exist.node-test.ts` ⇒ 红
-  // [CONSTRAINT] 只从标注行抽路径，不扫全文；只认 .node-test.ts / .cjs / .json
+test('G6-b 项目索引的「承重实现对照」表引用的守卫路径必须在磁盘真实存在', () => {
+  // [WHY] SYSTEM.md 的「承重：」行只留契约名（应用级规则不得含工作区路径），路径统一登记在
+  //   AGENTS.md 的「SYSTEM.md 各章承重实现对照」；本判据守住那张表，让「换守卫 / 改名」当场变红，
+  //   而不是把守卫真空掉。
+  // [CONSTRAINT] 只从该节抽路径（到下一个 `## ` 标题为止），避免全文误报；只认三种后缀。
+  const agents = fs.readFileSync(path.join(process.cwd(), 'AGENTS.md'), 'utf8')
+  const head = '## SYSTEM.md 各章承重实现对照'
+  const a = agents.indexOf(head)
+  assert.ok(a > -1, `AGENTS.md 找不到「${head}」节`)
+  const rest = agents.slice(a)
+  const b = rest.indexOf('\n## ')
+  const block = b > -1 ? rest.slice(0, b) : rest
   const re = /`([a-zA-Z][\w./-]*\.(?:node-test\.ts|cjs|json))`/g
   const missing: string[] = []
-  for (const c of chapters()) {
-    const line = c.body.match(/^- 承重：.*$/m)
-    if (!line) continue
-    for (const p of line[0].matchAll(re)) {
-      if (!fs.existsSync(path.join(process.cwd(), p[1]))) missing.push(`${c.num} → ${p[1]}`)
-    }
+  let count = 0
+  for (const p of block.matchAll(re)) {
+    count++
+    if (!fs.existsSync(path.join(process.cwd(), p[1]))) missing.push(p[1])
   }
-  assert.deepEqual(missing, [], `标注引用了不存在的守卫文件（改名后须同步）：\n${missing.join('\n')}`)
+  assert.ok(count >= 5, `对照表只抽到 ${count} 个守卫路径，扫描器可能失效`)
+  assert.deepEqual(missing, [], `对照表引用了不存在的守卫文件（改名后须同步）：\n${missing.join('\n')}`)
 })
 
 // ── [system-md-examples-v1] G10：契约文档的 JSON 示例 ⟺ 解析器行为 ──

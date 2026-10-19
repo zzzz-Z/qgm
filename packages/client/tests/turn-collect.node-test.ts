@@ -168,6 +168,54 @@ function readSrc(rel: string): string {
   return fs.readFileSync(path.join(process.cwd(), rel), 'utf8')
 }
 
+/**
+ * [body-slice-v1] 按**花括号配平**切出函数体，而不是按固定字符窗口。
+ *
+ * [WHY] 固定窗口（`slice(at, at + 1200)`）把「函数体有多大」和「判据在不在里面」
+ *   焊在了一起：函数里多插一段无关代码（本次是插入回程诊断帧的 toast 分支），
+ *   真实存在的接线就会被窗口截断而报红—— 守卫于是变成了「不许改这个函数」的锁，
+ *   逼着人把诊断代码删掉，或者去调大魔法数字。
+ *   按配平切则与长度无关：判据只要在这个函数里就一定看得到。
+ *
+ * [CONSTRAINT] 朴素配对（与仓库既有做法一致）：不解析字符串/模板字面量。
+ *   代价是函数体里的字符串中若含不成对的 `{` 会提前截断—— 那种情况会表现为
+ *   「断言找不到」，而不是假绿，仍能被 review 看见。
+ * [CONSTRAINT] 从**函数体的开括号**起配平，且该开括号必须**在参数列表的右括号之后**：
+ *   TS 签名可以带对象类型的花括号（`f(p: { end?: X })`），它自身开合并平衡，
+ *   若从它起算会在签名结束处depth 归零、只切出一个空壳。
+ *   做法：先找`)` 的匹配终点，再往后找第一个 `{`。
+ */
+function bodyOf(src: string, fnStart: string): string {
+  const at = src.indexOf(fnStart)
+  assert.ok(at > 0, `缺 ${fnStart}`)
+  // 参数列表：从 fnStart 后第一个 '(' 起做配平（签名里可能有嵌套括号）
+  const parenAt = src.indexOf('(', at)
+  assert.ok(parenAt > 0, `${fnStart} 缺参数列表`)
+  let pd = 0
+  let bodyOpen = -1
+  for (let i = parenAt; i < src.length; i++) {
+    const ch = src[i]
+    if (ch === '(') { pd += 1
+    }
+    else if (ch === ')') {
+      pd -= 1
+      if (pd === 0) { bodyOpen = src.indexOf('{', i); break }
+    }
+  }
+  if (bodyOpen < 0) return src.slice(at)
+  let depth = 0
+  for (let i = bodyOpen; i < src.length; i++) {
+    const ch = src[i]
+    if (ch === '{') { depth += 1
+    }
+    else if (ch === '}') {
+      depth -= 1
+      if (depth === 0) return src.slice(at, i + 1)
+    }
+  }
+  return src.slice(at)
+}
+
 test('wiring: ai-runner:turn-end 必须路由到 handleTurnEndMsg（否则油猴/无头的结束帧无人消费）', () => {
   const src = readSrc('packages/client/composables/ai/useAiReplyHandlers.ts')
   assert.match(src, /if \(t === 'ai-runner:turn-end'\) return handleTurnEndMsg\(payload, e\)/, '结束帧未接线：累积器永远收不到口')
@@ -178,11 +226,9 @@ test('wiring: ai-runner:turn-end 必须路由到 handleTurnEndMsg（否则油猴
 //   挂在某个 handler 内部 ⇒ 只能覆盖其中一条；挂在分发器**入参处**才两条都覆盖。
 test('wiring: dispatchInbound 收到块帧必须喂给累积器（否则帧渲染了但脚本永不执行）', () => {
   const src = readSrc('packages/client/composables/ui/useAppStartup.ts')
-  const at = src.indexOf('function dispatchInbound')
-  assert.ok(at > 0, '缺 dispatchInbound：块帧没有统一收口点')
-  const body = src.slice(at, at + 900)
+  const body = bodyOf(src, 'function dispatchInbound')
   assert.match(body, /t === 'ai-runner:block' && supportsBlock\(/, '块未过握手闸门 ⇒ 能力清单形同虚设')
-  assert.match(body, /\) turnCollector\.add\(/, '块未进入累积器：渲染有、执行无')
+  assert.match(body, /turnCollector\.add\(p\.block\)/, '块未进入累积器：渲染有、执行无')
   assert.match(body, /onSessionIdMessage\(e\)/, '喂完累积器必须继续走分发器，否则不渲染')
   // [WHY 连 App.vue 一起断言] 归组挂在 dispatchInbound 上，若 window 通道仍注册裸 handler ⇒ 漏喂
   assert.match(readSrc('packages/client/App.vue'), /useEventListener\(window, 'message', dispatchInbound\)/, 'window 通道未走收口点')
@@ -190,11 +236,17 @@ test('wiring: dispatchInbound 收到块帧必须喂给累积器（否则帧渲�
 
 test('wiring: 回放帧（replayed）只丢弃桶、不触发执行', () => {
   const src = readSrc('packages/client/composables/ui/useAppStartup.ts')
-  const at = src.indexOf('function dispatchInbound')
-  assert.ok(at > 0, '缺 dispatchInbound')
-  const body = src.slice(at, at + 900)
-  assert.match(body, /replayed === true\) turnCollector\.drop\(/, '缺 replayed 闸门：回放帧会驱动执行')
-  assert.match(body, /turn-end'\) turnCollector\.end\(/, '非回放帧必须收口，否则脚本永不执行')
+  const body = bodyOf(src, 'function dispatchInbound')
+  assert.match(body, /replayed === true\)[\s\S]{0,60}turnCollector\.drop\(/, '缺 replayed 闸门：回放帧会驱动执行')
+  // [runtime-kind-ssot-v1] 非回放帧收口改经 settleTurnEnd：它同时负责「无 script 块 ⇒ 运行态归 idle」。
+  //   [body-slice-v1] 路由断言属于 dispatchInbound；「真的调 end()」属于 settleTurnEnd 自己的函数体——
+  //   原断言把两者都放在 dispatchInbound 的固定窗口里，靠窗口溢出到下一个函数才够得着，
+  //   那是在断言一个不属于该函数的实现细节（函数一挪位就假红）。按职责分到各自函数里。
+  assert.match(body, /turn-end'\)[\s\S]{0,20}settleTurnEnd\(/, '非回放帧必须收口，否则脚本永不执行')
+  const settle = bodyOf(src, 'function settleTurnEnd')
+  assert.match(settle, /turnCollector\.end\(p\.end\)/, '收口必须真的调 end()：否则桶不清、下一轮拿到旧块重跑')
+  // settleTurnEnd 的第二职责：没有 script 块时把运行态归位，否则等待 banner 永不消失
+  assert.match(settle, /!hasScript\) rt\.settleIdle\(\)/, '无 script 块的 turn 必须归位运行态，否则永久停在「思考中」')
 })
 
 // [WHY 这条锚点是本轮真正要闭合的缺口] 油猴 P3 已开始发 `ai-runner:block` / `turn-end`，
@@ -257,5 +309,23 @@ test('wiring: useAppStartup 订阅 transport.onTurnEnd 且 replayed 透传进假
   //   注册只是一个引用赋值，真正的接线是回调里那次发送。
   const sinkAt = src.indexOf('setTurnFillSink(')
   assert.ok(sinkAt > 0, '未注册回灌通道：执行完 AI 收不到结果，循环断在这里')
-  assert.match(src.slice(sinkAt, sinkAt + 200), /copyAndFill\(text, \{ skipRules: true \}\)/, '回灌回调必须是真的发送（skipRules 与 feedbackMerge 出站口一致）')
+  const sinkBody = src.slice(sinkAt, sinkAt + 1400)
+  assert.match(sinkBody, /copyAndFill\(text, \{ skipRules: true \}\)/, '回灌回调必须是真的发送（skipRules 与 feedbackMerge 出站口一致）')
+  // [turn-feedback-delay-v1] 出站前必须先静默 TURN_FEEDBACK_DELAY_MS，否则连续轮次回传把频率打到平台限流。
+  // [CONSTRAINT] 断言的是「先等后发」的顺序 —— 只断言两者都存在会被「先发再等」的实现骗过去。
+  assert.match(
+    sinkBody,
+    /await promiseTimeout\(TURN_FEEDBACK_DELAY_MS\)[\s\S]*?await copyAndFill\(text, \{ skipRules: true \}\)/,
+    '回传前必须等待 TURN_FEEDBACK_DELAY_MS（脚本跑完 → 出站之间）',
+  )
+  // [turn-feedback-epoch-v1] 静默窗是异步悬挂的 ⇒ 窗口结束后必须复检会话是否仍有效，
+  //   否则切工作区 / 点停止后回传会投进别处（用户实测切工作区后回传串到别处）。
+  assert.match(sinkBody, /ctx\.stillValid\(\)/, '静默窗后未复检会话有效性：悬挂回传会投进新会话')
+  // [turn-feedback-result-v1] 投递结果必须回流（否则 submitTurn 无法在失败时回滚去重位）。
+  assert.match(sinkBody, /return r/, '回灌回调必须返回投递结果，否则失败无法回流')
+})
+
+test('turn-feedback-delay-v1：静默窗常量 = 3000ms（改值必须同步本断言）', () => {
+  const src = readSrc('packages/client/composables/runner/useTurnRunner.ts')
+  assert.match(src, /export const TURN_FEEDBACK_DELAY_MS = 3000/, '静默窗常量被改动或删除')
 })

@@ -41,6 +41,29 @@ export interface RuntimeState {
 /** sessionStorage 存储键：运行时状态的持久化位置 */
 const STORAGE_KEY = 'ai-runner-runtime'
 
+/**
+ * [runtime-boot-reset-v1] 刷新 / 重开后，进行中态（waiting / running / feedback / …）无法跨会话存活
+ * —— 脚本执行器与回传窗都随页面销毁，残留的 kind 读回后会让「AI 思考中」banner 永久卡住
+ * （用户实测 2026-10-19）。此处把 transient 态收敛为 idle，只保留用户显式置的终态。
+ * [WHY 抽成纯函数] 既供 createRuntime 在 boot 时同步调用，又便于单测直接钉死判定，
+ *   避免依赖 vi.resetModules + 动态重灌模块带来的时序不稳。
+ * @returns 收敛后的 kind：transient → idle；idle / paused / stopped / interrupted 原样返回。
+ */
+const TRANSIENT_KINDS = new Set<RuntimeKind>([
+  'running',
+  'preparing',
+  'waiting',
+  'parsing',
+  'executing',
+  'feedback',
+  'handoff',
+  'budget-limited',
+  'waiting-input',
+])
+export function reconcileBootKind(kind: RuntimeKind): RuntimeKind {
+  return TRANSIENT_KINDS.has(kind) ? 'idle' : kind
+}
+
 /** 初始运行时状态：所有字段取默认值（idle 空闲态） */
 const INITIAL: RuntimeState = {
   kind: 'idle',
@@ -57,6 +80,11 @@ function createRuntime() {
   // 传 undefined 让 vueuse 用默认 storage（浏览器 window.sessionStorage / SSR 下内存兜底）；
   // mergeDefaults:true 让旧快照缺字段时用 INITIAL 补齐，避免 schema 演进后 undefined。
   const state = useStorage<RuntimeState>(STORAGE_KEY, { ...INITIAL }, undefined, { mergeDefaults: true })
+
+  // [runtime-boot-reset-v1] 刷新 / 重开后，进行中态无法跨会话存活（执行器/回传窗随页面销毁），
+  //   残留 kind 读回会让「AI 思考中」banner 永久卡住（用户实测 2026-10-19）。boot 时收敛回 idle。
+  // [CONSTRAINT] 必须在 watch(mute) 之前执行：否则 transient 态会先被静音逻辑跳过。
+  state.value.kind = reconcileBootKind(state.value.kind)
 
   const isPaused = computed(() => state.value.kind === 'paused')
   const isActive = computed(() => state.value.kind === 'running' || state.value.kind === 'waiting')
@@ -85,6 +113,23 @@ function createRuntime() {
 
   /** 进入等待态：等待 AI 回复或脚本回包 */
   function enterWaiting(): void { state.value.kind = 'waiting' }
+
+  /** [runtime-kind-ssot-v1] 进入执行态：收到 script 块 / 开始跑脚本时置入 */
+  function enterExecuting(): void { state.value.kind = 'executing' }
+
+  /** [runtime-kind-ssot-v1] 进入回传态：脚本跑完、结果尚未出站（3s 静默窗内） */
+  function enterFeedback(): void { state.value.kind = 'feedback' }
+
+  /**
+   * [runtime-kind-ssot-v1] 收口归位：把「进行中」态收回到 idle。
+   * [WHY] 不得无条件覆写 paused / stopped / interrupted —— 用户显式停过的状态
+   *   不能被一次自然收口抹掉（否则「已停止」会自己变回「未运行」）。
+   */
+  function settleIdle(): void {
+    const k = state.value.kind
+    if (k === 'paused' || k === 'stopped' || k === 'interrupted') return
+    state.value.kind = 'idle'
+  }
 
   /** 暂停：置为 paused（watch 触发 transport 静音） */
   function pause(): void { state.value.kind = 'paused' }
@@ -131,6 +176,9 @@ function createRuntime() {
     isStopped,
     start,
     enterWaiting,
+    enterExecuting,
+    enterFeedback,
+    settleIdle,
     pause,
     resume,
     stop,

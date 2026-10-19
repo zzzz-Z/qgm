@@ -81,6 +81,11 @@ function makeRoot(pres: unknown[]): unknown {
   return { querySelectorAll: (sel: string) => (sel === 'pre' ? pres : []) }
 }
 
+/** [no-fence-envelope-v1] 无 <pre>（回复未加 ```json 围栏）时，回退读取整条回复文本 */
+function makeRootText(text: string): unknown {
+  return { querySelectorAll: () => [], textContent: text }
+}
+
 /** 信封原文（真实页面上就是 pre > code 的 textContent） */
 function envelope(obj: unknown): string {
   return `\`\`\`json\n${JSON.stringify(obj, null, 2)}\n\`\`\``
@@ -167,5 +172,28 @@ describe('readTurnBlocks：从页面读信封', () => {
     const got = reader(makeRoot([makePre(envelope({ v: 1, turn: 8, content: [C1] }))]))
     const flat = JSON.parse(JSON.stringify(got))
     expect(flat.blocks[0]).toEqual({ type: 'script', id: 'c1', lang: 'js', desc: '统计 md 分布', why: '决定先改哪几个', code: 'console.log(1)' })
+  })
+
+  test('无 <pre> 围栏（裸 JSON）⇒ 回退解析整条回复文本 [no-fence-envelope-v1]', () => {
+    const bare = JSON.stringify({ v: 1, turn: 11, content: [C1, SAY] })
+    const got = reader(makeRootText(bare))
+    expect(got).not.toBeNull()
+    expect(got!.turnId).toBe(11)
+    expect(got!.blocks.map(b => b.id)).toEqual(['c1', 'say_2'])
+  })
+
+  test('回退分支不误吞：普通文本 / 非信封 JSON / 未闭合 ⇒ null', () => {
+    expect(reader(makeRootText('普通回复，没有任何 JSON。'))).toBeNull()
+    expect(reader(makeRootText('{ "a": 1, "b": [2, 3] }'))).toBeNull()
+    const half = JSON.stringify({ v: 1, turn: 12, content: [C1] }).slice(0, -6)
+    expect(reader(makeRootText(half))).toBeNull()
+  })
+
+  test('<pre> 命中时优先于文本回退（既有围栏路径行为不变）', () => {
+    const root = {
+      querySelectorAll: (sel: string) => (sel === 'pre' ? [makePre(envelope({ v: 1, turn: 13, content: [C1] }))] : []),
+      textContent: JSON.stringify({ v: 1, turn: 88, content: [C2] }),
+    }
+    expect(reader(root)!.turnId).toBe(13)
   })
 })

@@ -19,6 +19,7 @@ declare global {
   const DEFAULT_SITE_URL: typeof import('./composables/ai/useAiSite').DEFAULT_SITE_URL
   const DEFAULT_TURN_CONCURRENCY: typeof import('./composables/runner/turn-runner').DEFAULT_TURN_CONCURRENCY
   const DONE_PREVIEW: typeof import('./utils/timeline-build').DONE_PREVIEW
+  const ERR_MAX_CHARS: typeof import('./composables/runner/turn-runner').ERR_MAX_CHARS
   const EffectScope: typeof import('vue').EffectScope
   const KEY_BASH_POLICY: typeof import('./composables/ui/useAppStorage').KEY_BASH_POLICY
   const KEY_SANDBOX: typeof import('./composables/ui/useAppStorage').KEY_SANDBOX
@@ -33,6 +34,8 @@ declare global {
   const MAX_PENDING_RUNS: typeof import('./composables/runner/run-queue').MAX_PENDING_RUNS
   const MODELS: typeof import('./composables/ai/useAiSite').MODELS
   const NAV_CONFIRM_TIMEOUT_MS: typeof import('./composables/data/useWorkspaces').NAV_CONFIRM_TIMEOUT_MS
+  const OUT_TAIL_CHARS: typeof import('./composables/runner/turn-runner').OUT_TAIL_CHARS
+  const OUT_TAIL_LINES: typeof import('./composables/runner/turn-runner').OUT_TAIL_LINES
   const PAGE_BOOT_TS: typeof import('./composables/ai/useAiReplyHandlers').PAGE_BOOT_TS
   const PHASE_DONE_CLASS: typeof import('./utils/timeline-build').PHASE_DONE_CLASS
   const PHASE_ERROR_CLASS: typeof import('./utils/timeline-build').PHASE_ERROR_CLASS
@@ -57,6 +60,7 @@ declare global {
   const TOAST_SHORT_MEDIUM: typeof import('./utils/toast-durations').TOAST_SHORT_MEDIUM
   const TOAST_VERY_LONG: typeof import('./utils/toast-durations').TOAST_VERY_LONG
   const TURN_BLOCK_TYPES: typeof import('./utils/turn-schema').TURN_BLOCK_TYPES
+  const TURN_FEEDBACK_DELAY_MS: typeof import('./composables/runner/useTurnRunner').TURN_FEEDBACK_DELAY_MS
   const TURN_SCHEMA_VERSION: typeof import('./utils/turn-schema').TURN_SCHEMA_VERSION
   const TURN_SCRIPT_LANGS: typeof import('./utils/turn-schema').TURN_SCRIPT_LANGS
   const _getResumeCount: typeof import('./composables/ai/stop-resume')._getResumeCount
@@ -140,6 +144,8 @@ declare global {
   const emit: typeof import('./composables/ui/useEventStream').emit
   const emitTreeDrop: typeof import('./composables/ui/drag-bus').emitTreeDrop
   const endAutoResume: typeof import('./composables/ai/stop-resume').endAutoResume
+  const ensureScriptHead: typeof import('./utils/scriptMeta').ensureScriptHead
+  const escapeControlCharsInStrings: typeof import('./utils/turn-schema').escapeControlCharsInStrings
   const escapeHtml: typeof import('./composables/useHljs').escapeHtml
   const evaluateUserscriptInfo: typeof import('./composables/ui/useUserscriptUpdate').evaluateUserscriptInfo
   const expandAtRefs: typeof import('./composables/ai/expand-at-refs').expandAtRefs
@@ -211,6 +217,7 @@ declare global {
   const migrateIfNeeded: typeof import('./composables/ui/useSitesStore').migrateIfNeeded
   const modelIdFromSid: typeof import('./composables/ai/useAiSite').modelIdFromSid
   const moveTooltip: typeof import('./composables/ui/useTooltip').moveTooltip
+  const nextFillMsgId: typeof import('./composables/ai/useAiWindowSend').nextFillMsgId
   const nextTick: typeof import('vue').nextTick
   const normalizeAskOptions: typeof import('./utils/timeline-build').normalizeAskOptions
   const normalizeForHash: typeof import('./composables/runner/inbox-parse').normalizeForHash
@@ -275,6 +282,7 @@ declare global {
   const readAsText: typeof import('./utils/format').readAsText
   const readNdjson: typeof import('./utils/stream').readNdjson
   const readonly: typeof import('vue').readonly
+  const reconcileBootKind: typeof import('./composables/ai/useRuntime').reconcileBootKind
   const ref: typeof import('vue').ref
   const refAutoReset: typeof import('@vueuse/core').refAutoReset
   const refDebounced: typeof import('@vueuse/core').refDebounced
@@ -296,6 +304,7 @@ declare global {
   const revealSideTab: typeof import('./composables/ui/useSidePaneTab').revealSideTab
   const runHook: typeof import('./composables/ai/loop-hooks').runHook
   const runIds: typeof import('./composables/runner/useRunner').runIds
+  const safeJsonParse: typeof import('./utils/turn-schema').safeJsonParse
   const sandboxMode: typeof import('./composables/ui/useAppStorage').sandboxMode
   const saveActiveSessionIdBySite: typeof import('./composables/ui/useAppStorage').saveActiveSessionIdBySite
   const saveHistoryBySite: typeof import('./composables/ui/useAppStorage').saveHistoryBySite
@@ -342,6 +351,7 @@ declare global {
   const sidePaneTab: typeof import('./composables/ui/useSidePaneTab').sidePaneTab
   const softPause: typeof import('./composables/ai/useAiWaiting').softPause
   const startWaiting: typeof import('./composables/ai/useAiWaiting').startWaiting
+  const stopWaiting: typeof import('./composables/ai/useAiWaiting').stopWaiting
   const stripScriptBlocks: typeof import('./utils/strip-script-blocks').stripScriptBlocks
   const submitTurn: typeof import('./composables/runner/useTurnRunner').submitTurn
   const subscribeTreeDrop: typeof import('./composables/ui/drag-bus').subscribeTreeDrop
@@ -374,6 +384,7 @@ declare global {
   const turnRunKey: typeof import('./composables/runner/turn-runner').turnRunKey
   const turnRunnerView: typeof import('./composables/runner/useTurnRunner').turnRunnerView
   const uid: typeof import('./utils/id').uid
+  const unfoldEscapedLog: typeof import('./utils/timeline-preview').unfoldEscapedLog
   const unref: typeof import('vue').unref
   const unrefElement: typeof import('@vueuse/core').unrefElement
   const until: typeof import('@vueuse/core').until
@@ -651,7 +662,7 @@ declare global {
   export type { InboxItem } from './composables/runner/useScriptInbox'
   import('./composables/runner/useScriptInbox')
   // @ts-ignore
-  export type { SubmitTurnOptions } from './composables/runner/useTurnRunner'
+  export type { TurnFillResult, TurnFillCtx, TurnFillSink, SubmitTurnOptions } from './composables/runner/useTurnRunner'
   import('./composables/runner/useTurnRunner')
   // @ts-ignore
   export type { TreeDropDetail } from './composables/ui/drag-bus'
@@ -719,6 +730,7 @@ declare module 'vue' {
     readonly DEFAULT_SITE_URL: UnwrapRef<typeof import('./composables/ai/useAiSite')['DEFAULT_SITE_URL']>
     readonly DEFAULT_TURN_CONCURRENCY: UnwrapRef<typeof import('./composables/runner/turn-runner')['DEFAULT_TURN_CONCURRENCY']>
     readonly DONE_PREVIEW: UnwrapRef<typeof import('./utils/timeline-build')['DONE_PREVIEW']>
+    readonly ERR_MAX_CHARS: UnwrapRef<typeof import('./composables/runner/turn-runner')['ERR_MAX_CHARS']>
     readonly EffectScope: UnwrapRef<typeof import('vue')['EffectScope']>
     readonly KEY_BASH_POLICY: UnwrapRef<typeof import('./composables/ui/useAppStorage')['KEY_BASH_POLICY']>
     readonly KEY_SANDBOX: UnwrapRef<typeof import('./composables/ui/useAppStorage')['KEY_SANDBOX']>
@@ -733,6 +745,8 @@ declare module 'vue' {
     readonly MAX_PENDING_RUNS: UnwrapRef<typeof import('./composables/runner/run-queue')['MAX_PENDING_RUNS']>
     readonly MODELS: UnwrapRef<typeof import('./composables/ai/useAiSite')['MODELS']>
     readonly NAV_CONFIRM_TIMEOUT_MS: UnwrapRef<typeof import('./composables/data/useWorkspaces')['NAV_CONFIRM_TIMEOUT_MS']>
+    readonly OUT_TAIL_CHARS: UnwrapRef<typeof import('./composables/runner/turn-runner')['OUT_TAIL_CHARS']>
+    readonly OUT_TAIL_LINES: UnwrapRef<typeof import('./composables/runner/turn-runner')['OUT_TAIL_LINES']>
     readonly PAGE_BOOT_TS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['PAGE_BOOT_TS']>
     readonly PHASE_DONE_CLASS: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_DONE_CLASS']>
     readonly PHASE_ERROR_CLASS: UnwrapRef<typeof import('./utils/timeline-build')['PHASE_ERROR_CLASS']>
@@ -757,6 +771,7 @@ declare module 'vue' {
     readonly TOAST_SHORT_MEDIUM: UnwrapRef<typeof import('./utils/toast-durations')['TOAST_SHORT_MEDIUM']>
     readonly TOAST_VERY_LONG: UnwrapRef<typeof import('./utils/toast-durations')['TOAST_VERY_LONG']>
     readonly TURN_BLOCK_TYPES: UnwrapRef<typeof import('./utils/turn-schema')['TURN_BLOCK_TYPES']>
+    readonly TURN_FEEDBACK_DELAY_MS: UnwrapRef<typeof import('./composables/runner/useTurnRunner')['TURN_FEEDBACK_DELAY_MS']>
     readonly TURN_SCHEMA_VERSION: UnwrapRef<typeof import('./utils/turn-schema')['TURN_SCHEMA_VERSION']>
     readonly TURN_SCRIPT_LANGS: UnwrapRef<typeof import('./utils/turn-schema')['TURN_SCRIPT_LANGS']>
     readonly _getResumeCount: UnwrapRef<typeof import('./composables/ai/stop-resume')['_getResumeCount']>
@@ -840,6 +855,8 @@ declare module 'vue' {
     readonly emit: UnwrapRef<typeof import('./composables/ui/useEventStream')['emit']>
     readonly emitTreeDrop: UnwrapRef<typeof import('./composables/ui/drag-bus')['emitTreeDrop']>
     readonly endAutoResume: UnwrapRef<typeof import('./composables/ai/stop-resume')['endAutoResume']>
+    readonly ensureScriptHead: UnwrapRef<typeof import('./utils/scriptMeta')['ensureScriptHead']>
+    readonly escapeControlCharsInStrings: UnwrapRef<typeof import('./utils/turn-schema')['escapeControlCharsInStrings']>
     readonly escapeHtml: UnwrapRef<typeof import('./composables/useHljs')['escapeHtml']>
     readonly evaluateUserscriptInfo: UnwrapRef<typeof import('./composables/ui/useUserscriptUpdate')['evaluateUserscriptInfo']>
     readonly expandAtRefs: UnwrapRef<typeof import('./composables/ai/expand-at-refs')['expandAtRefs']>
@@ -911,6 +928,7 @@ declare module 'vue' {
     readonly migrateIfNeeded: UnwrapRef<typeof import('./composables/ui/useSitesStore')['migrateIfNeeded']>
     readonly modelIdFromSid: UnwrapRef<typeof import('./composables/ai/useAiSite')['modelIdFromSid']>
     readonly moveTooltip: UnwrapRef<typeof import('./composables/ui/useTooltip')['moveTooltip']>
+    readonly nextFillMsgId: UnwrapRef<typeof import('./composables/ai/useAiWindowSend')['nextFillMsgId']>
     readonly nextTick: UnwrapRef<typeof import('vue')['nextTick']>
     readonly normalizeAskOptions: UnwrapRef<typeof import('./utils/timeline-build')['normalizeAskOptions']>
     readonly normalizeForHash: UnwrapRef<typeof import('./composables/runner/inbox-parse')['normalizeForHash']>
@@ -975,6 +993,7 @@ declare module 'vue' {
     readonly readAsText: UnwrapRef<typeof import('./utils/format')['readAsText']>
     readonly readNdjson: UnwrapRef<typeof import('./utils/stream')['readNdjson']>
     readonly readonly: UnwrapRef<typeof import('vue')['readonly']>
+    readonly reconcileBootKind: UnwrapRef<typeof import('./composables/ai/useRuntime')['reconcileBootKind']>
     readonly ref: UnwrapRef<typeof import('vue')['ref']>
     readonly refAutoReset: UnwrapRef<typeof import('@vueuse/core')['refAutoReset']>
     readonly refDebounced: UnwrapRef<typeof import('@vueuse/core')['refDebounced']>
@@ -996,6 +1015,7 @@ declare module 'vue' {
     readonly revealSideTab: UnwrapRef<typeof import('./composables/ui/useSidePaneTab')['revealSideTab']>
     readonly runHook: UnwrapRef<typeof import('./composables/ai/loop-hooks')['runHook']>
     readonly runIds: UnwrapRef<typeof import('./composables/runner/useRunner')['runIds']>
+    readonly safeJsonParse: UnwrapRef<typeof import('./utils/turn-schema')['safeJsonParse']>
     readonly sandboxMode: UnwrapRef<typeof import('./composables/ui/useAppStorage')['sandboxMode']>
     readonly saveActiveSessionIdBySite: UnwrapRef<typeof import('./composables/ui/useAppStorage')['saveActiveSessionIdBySite']>
     readonly saveHistoryBySite: UnwrapRef<typeof import('./composables/ui/useAppStorage')['saveHistoryBySite']>
@@ -1042,6 +1062,7 @@ declare module 'vue' {
     readonly sidePaneTab: UnwrapRef<typeof import('./composables/ui/useSidePaneTab')['sidePaneTab']>
     readonly softPause: UnwrapRef<typeof import('./composables/ai/useAiWaiting')['softPause']>
     readonly startWaiting: UnwrapRef<typeof import('./composables/ai/useAiWaiting')['startWaiting']>
+    readonly stopWaiting: UnwrapRef<typeof import('./composables/ai/useAiWaiting')['stopWaiting']>
     readonly stripScriptBlocks: UnwrapRef<typeof import('./utils/strip-script-blocks')['stripScriptBlocks']>
     readonly submitTurn: UnwrapRef<typeof import('./composables/runner/useTurnRunner')['submitTurn']>
     readonly subscribeTreeDrop: UnwrapRef<typeof import('./composables/ui/drag-bus')['subscribeTreeDrop']>
@@ -1074,6 +1095,7 @@ declare module 'vue' {
     readonly turnRunKey: UnwrapRef<typeof import('./composables/runner/turn-runner')['turnRunKey']>
     readonly turnRunnerView: UnwrapRef<typeof import('./composables/runner/useTurnRunner')['turnRunnerView']>
     readonly uid: UnwrapRef<typeof import('./utils/id')['uid']>
+    readonly unfoldEscapedLog: UnwrapRef<typeof import('./utils/timeline-preview')['unfoldEscapedLog']>
     readonly unref: UnwrapRef<typeof import('vue')['unref']>
     readonly unrefElement: UnwrapRef<typeof import('@vueuse/core')['unrefElement']>
     readonly until: UnwrapRef<typeof import('@vueuse/core')['until']>

@@ -102,6 +102,49 @@ export function tailTextPreview(raw: string, keepLines = 5, maxChars = 400): Tai
 }
 
 /**
+ * [log-unfold-v1] JSON 转义串展开：把「被 JSON.stringify 过的字符串」还原成真实文本。
+ * [WHY] 脚本 stdout 偶尔整段是转义串——真实换行全成了字面量 `\n`、ANSI 色码成了
+ *   字面量 `\u001b[...m`（2026-10-19 vue-tsc 输出实测）：展示层表现为
+ *   「1 行 · 59.24s」的一坨不可读转义文本，行数统计与 ANSI 剥离双双失效。
+ *   先展开再交回 denoiseLog / tailTextPreview，两者即自然恢复生效。
+ * [CONSTRAINT] 保守触发——仅当字面量转义序列足够多（`\n` ≥ 2 且不少于真实换行，
+ *   或 `\u001b` ≥ 2）才展开，避免误伤恰好打印转义示教的正常输出；
+ *   外层带引号的合法 JSON 字符串优先走 JSON.parse（语义最准），失败再手工展开。
+ */
+const LITERAL_NL_RE = /\\n/g
+const LITERAL_ESC_RE = /\\u001b/gi
+const BSLASH_PLACEHOLDER = '\u0000\u0001'
+
+export function unfoldEscapedLog(raw: string): string {
+  const src = String(raw ?? '')
+  if (!src) return ''
+  const realNl = (src.match(/\n/g) || []).length
+  const escNl = (src.match(LITERAL_NL_RE) || []).length
+  const escEsc = (src.match(LITERAL_ESC_RE) || []).length
+  const escapedHeavy = (escNl >= 2 && escNl >= realNl) || escEsc >= 2
+  if (!escapedHeavy) return src
+  const t = src.trim()
+  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
+    try {
+      const parsed: unknown = JSON.parse(t)
+      if (typeof parsed === 'string') return parsed
+    } catch { /* 非法 JSON 字符串 → 落入手工展开 */ }
+  }
+  // 手工展开常见转义序列；`\\\\` 先占位再还原，避免被后续 `\\n` 规则吃掉
+  const ESC = String.fromCharCode(27)
+  return src
+    .replace(/\\\\/g, BSLASH_PLACEHOLDER)
+    .replace(/\\u001b\[/gi, `${ESC}[`)
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, '\'')
+    .replace(new RegExp(BSLASH_PLACEHOLDER, 'g'), '\\')
+}
+
+/**
  * [timeline-denoise-v1] 执行日志降噪：过滤无信息量的噪声行。
  * [WHY] 脚本执行日志里进度条残留、重复分隔线、连续空行会淹没「这轮改了什么」；
  *   成熟智能体的信息流默认只呈可扫读内容。

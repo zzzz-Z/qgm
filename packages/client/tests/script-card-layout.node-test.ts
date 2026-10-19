@@ -31,10 +31,15 @@ function templateOf(vue: string): string {
   return m[1]
 }
 
-/** 取某条 CSS 规则的规则体（从 `sel {` 到首个 `}`） */
+/**
+ * 取某条 CSS 规则的规则体（从 `sel {` 到首个 `}`）。
+ * [WHY 必须锚定行首裸选择器] 后代选择器（`.script-card-l1 > .script-card-desc {`）里也含子串
+ *   `.script-card-desc {`：裸 indexOf 会先命中它（body 只有 flex），让判据对着错误的规则断言
+ *   —— 实测 desc 规则明明有 nowrap 仍被判红（2026-10-19 复核）。
+ */
 function ruleBody(css: string, sel: string): string {
-  const at = css.indexOf(`${sel} {`)
-  assert.ok(at >= 0, `样式里找不到规则 ${sel}`)
+  const at = css.indexOf(`\n${sel} {`)
+  assert.ok(at >= 0, `样式里找不到行首裸选择器规则 ${sel}`)
   const end = css.indexOf('}', at)
   assert.ok(end > at, `规则 ${sel} 未闭合`)
   return css.slice(at, end)

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, it, vi } from 'vitest'
 
 import { useWorkspaces } from '../composables/data/useWorkspaces'
 
-const { clearRulesCache } = vi.hoisted(() => ({ clearRulesCache: vi.fn() }))
+const { clearRulesCache, resetTurnRunner } = vi.hoisted(() => ({ clearRulesCache: vi.fn(), resetTurnRunner: vi.fn() }))
 vi.mock('../composables/ai/load-rules', () => ({
   clearRulesCache,
   loadRulesParts: vi.fn(),
@@ -16,12 +16,14 @@ vi.mock('../composables/ai/load-rules', () => ({
 vi.mock('../composables/ai/useSessionManager', () => ({ useSessionManager: () => ({ resetSession: vi.fn() }) }))
 vi.mock('../composables/ui/useEventStream', () => ({ clearEvents: vi.fn() }))
 vi.mock('../composables/runner/useScriptInbox', () => ({ clearInbox: vi.fn() }))
+// [turn-feedback-epoch-v1] 切 root 必须重置执行账本：账本与 root 无关，不清则新工作区 turnId 回绕会拒跑。
+vi.mock('../composables/runner/useTurnRunner', () => ({ resetTurnRunner }))
 
 const okJson = (body: unknown): Response => new Response(JSON.stringify(body), { status: 200 })
 
 describe('rules-cache-invalidate-v1：切工作区必须失效 SYSTEM.md / AGENTS.md 的 Promise 缓存', () => {
   const origFetch = globalThis.fetch
-  beforeEach(() => { clearRulesCache.mockClear() })
+  beforeEach(() => { clearRulesCache.mockClear(); resetTurnRunner.mockClear() })
   afterEach(() => { globalThis.fetch = origFetch })
 
   it('register(activate=true) → clearRulesCache 被调用', async () => {
@@ -35,6 +37,7 @@ describe('rules-cache-invalidate-v1：切工作区必须失效 SYSTEM.md / AGENT
     const r = await register('/b', true)
     assert.equal(r.ok, true)
     assert.equal(clearRulesCache.mock.calls.length >= 1, true, '切工作区未清规则缓存：新工作区首问会带上一工作区的 AGENTS.md')
+    assert.equal(resetTurnRunner.mock.calls.length >= 1, true, '切工作区未重置执行账本：悬挂的 3 秒窗回传会串到新工作区')
   })
 
   it('remove(active) → clearRulesCache 被调用（服务端已回退 root）', async () => {
@@ -65,6 +68,7 @@ describe('rules-cache-invalidate-v1：切工作区必须失效 SYSTEM.md / AGENT
     assert.ok(i > 0, 'applyRootChanged 缺失：模块结构已变，本守卫需同步')
     const tail = s.slice(i, i + 1600)
     assert.ok(/clearRulesCache/.test(tail), 'applyRootChanged 未清规则缓存：首问仍带上一工作区 AGENTS.md')
+    assert.ok(/resetTurnRunner\(\)/.test(tail), 'applyRootChanged 未重置执行账本：新工作区 turnId 回绕会拒跑脚本')
     assert.ok(/bumpWorkspaceEpoch\(\)/.test(tail), 'applyRootChanged 未自增 epoch：面板停在旧 root')
   })
 

@@ -41,6 +41,7 @@ import { TOAST_LONG, TOAST_LONGEST } from '../../utils/toast-durations'
 import {
   isHeadless,
   loadTransport,
+  nextFillMsgId,
   sendFillImpl as sendFill,
   sendFillToImpl as sendFillTo,
   sendFillToAsync,
@@ -335,14 +336,19 @@ async function fillWithDegrade(sid: string, payload: { prompt: string, images?: 
   //   大图场景会在真正送达前就走降级分支，弹出「未回执」误导提示。
   const ackTimeout = payload.images?.length ? 60_000 : undefined
   const out: { reason?: string } = {}
-  let r = await sendFillToAsync(sid, payload, ackTimeout, out)
+  // [fill-msgid-reuse-v1] 一次逻辑投递只生成一个 msgId，重试复用：
+  //   油猴 _seenInbound 据此判重 —— 「已消费」的重试（send-verify-failed：文本已填入、仅发送未确认）
+  //   被 dedup-skip，避免同一提问连发两遍（用户实测：两张相同的「会话首问规则」卡片）；
+  //   「未消费」的失败（no-input-box / 丢帧）在油猴侧不登记 msgId，重试仍能真正注入。
+  const msgId = nextFillMsgId()
+  let r = await sendFillToAsync(sid, payload, ackTimeout, out, msgId)
   // [no-input-retry-v1] no-input-box = 该页输入框尚未渲染（导航 / 新会话切换后常见），
   //   属「暂时未就绪」而非真失败：原实现直接判 failed → B1 弹误导性「首问未送达」。
   //   重试一次即可覆盖绝大多数渲染延迟，避免用户被假错误驱赶去按 F5。
   if (r === 'failed' && out.reason === 'no-input-box') {
     log.warn('[copyAndFill] 输入框未就绪，800ms 后重试一次 sid=', sid)
     await promiseTimeout(800)
-    r = await sendFillToAsync(sid, payload, ackTimeout, out)
+    r = await sendFillToAsync(sid, payload, ackTimeout, out, msgId)
   }
   if (r !== 'unacked') return r
   // [unacked-retry-v1] 未回执 ≠ 已送达：油猴的消息监听是页面级的，切会话/切路由/站点重渲染
@@ -352,7 +358,7 @@ async function fillWithDegrade(sid: string, payload: { prompt: string, images?: 
   for (let attempt = 0; attempt < 2 && r === 'unacked'; attempt++) {
     log.warn('[copyAndFill] fill 未回执，800ms 后重试 attempt=', attempt + 1, 'sid=', sid)
     await promiseTimeout(800)
-    r = await sendFillToAsync(sid, payload, ackTimeout, out)
+    r = await sendFillToAsync(sid, payload, ackTimeout, out, msgId)
   }
   if (r !== 'unacked') return r
   log.warn('[copyAndFill] fill 重试后仍未回执（该页可能未运行油猴脚本 / 油猴为旧版），降级按已发送处理 sid=', sid)

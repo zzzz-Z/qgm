@@ -14,9 +14,54 @@
  *   若探针先跑就会误推 stopped，而 stopped 会让前端直接 finish 整个循环。
  */
 
-function classifyAndPost(): void {
+/**
+ * [tm-diag-v1] 回程链路自诊断：**每轮都发**，无论成败。
+ *
+ * [WHY 需要它] 「脚本零执行」这条故障有三种完全不同的断点，且**都不产生任何错误**：
+ *   ① 信封解析不出来（readTurnFromRoot 返 null）——用户看到整坨 JSON 上屏；
+ *   ② 解析出来了但 postMessage 送不到工作台（window.opener 为 null / 已closed）——
+ *      工作台侧零日志、零报错，只是永远转圈；
+ *   ③ 帧送到了但被执行器闸门拦掉。
+ *   ①②③ 在服务端日志里长得**一模一样**（runner.jsonl 就是不增长），
+ *   所以必须由油猴侧主动把判据报出来，否则只能靠猜（2026-10-19 就在这上面耗了两轮）。
+ *
+ * [CONSTRAINT] 直发 e.source/opener 而不走 post() 的断链队列：诊断信息在断链时**最需要**送达，
+ *   走队列等于在最需要的时候必然丢失。
+ * [CONSTRAINT] 只报判据与长度，不报正文（避免把用户内容复制进日志）。
+ */
+function _tmDiag(stage: string, extra: Record<string, unknown>): void {
   try {
-    if (!window.opener || window.opener.closed) return
+    const opener = window.opener as Window | null
+    const payload = {
+      type: 'ai-runner:tm-diag',
+      stage,
+      hasOpener: !!opener,
+      openerClosed: !!(opener && opener.closed),
+      href: location.href.slice(0, 160),
+      ts: Date.now(),
+      ...extra,
+    }
+    // [diag-best-effort] 三条路都试：事件源 → opener → 父窗口
+    const targets: Array<Window | null> = [(window as any).__aiDiagSource || null, opener, window.parent]
+    for (const t of targets) {
+      if (!t) continue
+      try { t.postMessage(payload, '*'); return } catch { /* 换下一条路 */ }
+    }
+  } catch { /* 诊断自身失败不得影响主链路 */ }
+}
+
+function classifyAndPost(): void {
+  // [tm-diag-v1] 诊断在**门之前**发：opener 缺失导致第19 行早退时，诊断仍能送达，
+  //   这正是要抓的那种失败（放在门之后就永远抓不到了）。
+  _tmDiag('enter', { hasRoot: typeof latestAssistantRoot === 'function' })
+
+  try {
+    if (!window.opener || window.opener.closed) {
+      // [tm-diag-v1] 这是最常见的静默断点：直接在地址栏/书签打开的站点页 opener 为 null，
+      //   下行靠工作台主动 postMessage 仍然通（只要有窗口引用），上行却全灭。
+      _tmDiag('opener-missing', { note: 'classifyAndPost 第一行即return，未做任何分类' })
+      return
+    }
 
     // ---------- ① 门 ----------
 
@@ -141,6 +186,14 @@ function classifyAndPost(): void {
     // [CONSTRAINT] stopPosted 后不推：前端已 finish 循环，此时推块等于「循环外自动执行」旁路。
     if (!stopPosted) {
       const turn = readTurnFromRoot(replyRoot)
+      // [tm-diag-v1] 诊断读判据；`if (turn && emitTurn(turn)) return` 这一行是
+      //   turn-emit-parity 守卫的字面量判据（emitTurn 返回值必须中断分流），**不要改写它**。
+      _tmDiag(turn ? 'turn-read' : 'turn-miss', {
+        turnId: turn ? turn.turnId : undefined,
+        blocks: turn ? turn.blocks.length : 0,
+        errors: turn ? (turn.errors || []).length : 0,
+        replyRootFound: !!replyRoot,
+      })
       if (turn && emitTurn(turn)) return
     }
 

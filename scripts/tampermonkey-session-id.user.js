@@ -2,19 +2,9 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.21
-// @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]；接收 fill/stop；[reply-mark-v1] 回复标记统一为「首行标记行 + 第二行起载荷」：SCRIPT / ASK / DONE / HANDOFF（@ask、# 任务 保留为过渡别名）
+// @version      1.9.28
+// @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
-// @match        https://chatgpt.com/*
-// @match        https://chat.openai.com/*
-// @match        https://claude.ai/*
-// @match        https://kimi.moonshot.cn/*
-// @match        https://gemini.google.com/*
-// @match        *://*.qianwen.com/*
-// @match        *://*.qianwen.ai/*
-// @match        *://*.aliyun.com/*
-// @match        *://*.tongyi.cn/*
-// @match        *://*.qianwen.cn/*
 // @match        https://chatglm.cn/*
 // @run-at       document-idle
 // @grant        none
@@ -62,7 +52,7 @@ function hash32(s) {
     return (h >>> 0).toString(16).padStart(8, '0');
 }
 
-/* @turn-schema:aeefb0a64575f427 */
+/* @turn-schema:5f70fe35f55c21c0 */
 // 由 scripts/sync-turn-schema.mjs 从 packages/core/src/reply/turn-schema.ts 生成，请勿手改。
 // @ts-nocheck
 // >>> BEGIN turn-schema
@@ -309,6 +299,90 @@ function mergeBlock(acc, block) {
     acc.errors.push({ code: 'BLOCK_DUP_ID', block: block.id, field: 'id', detail: 'superseded' });
 }
 /**
+ * 把 JSON **字符串字面量内部**的裸控制字符改写成合法转义，再交给 JSON.parse。
+ *
+ * [WHY] 模型写 script.code 时经常图省事，直接在 `"code": "..."` 里敲**真换行**（U+000A）
+ *   而不是两字符的 `\n`。这不是排版问题而是转义问题：`JSON.parse` 对字符串字面量里的
+ *   裸控制字符直接抛 `Bad control character in string literal`，整条信封解析不出对象
+ *   ⇒ 油猴回落 plain 把 JSON 原文整坨推上屏、script 块零执行（用户实测 2026-10-19，
+ *   对照组：同结构的单行/合法转义信封一切正常）。
+ *   所以「能跑的」和「不能跑的」两份信封差异**不在块结构，只在 code 里换行的形态**。
+ *
+ * [CONSTRAINT] 必须字符串感知：只改字符串内部的控制字符，且跳过 `\"` 已消费的位置。
+ *   否则代码里的引号会被误判成字符串边界，把结构字符（`{` `}` `,`）也转义掉，
+ *   修好一个坏两个。
+ * [CONSTRAINT] 只在 JSON.parse 已经失败时兜底调用（见 safeJsonParse），正常信封零开销、
+ *   且严格 JSON 的行为完全不变（严格解析成功时压根不进这里）。
+ * [CONSTRAINT] 幂等：已转义文本再过一次不产生变化（`\` 已消费 ⇒ 下一个字符不处理）。
+ * @param text 待解析的 JSON 文本
+ * @returns 修正后的 JSON 文本
+ */
+function escapeControlCharsInStrings(text) {
+    let out = '';
+    let inStr = false;
+    let esc = false;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text.charAt(i);
+        if (inStr) {
+            if (esc) {
+                out += ch;
+                esc = false;
+                continue;
+            }
+            if (ch === '\\') {
+                out += ch;
+                esc = true;
+                continue;
+            }
+            if (ch === '"') {
+                inStr = false;
+                out += ch;
+                continue;
+            }
+            const code = text.charCodeAt(i);
+            // JSON 规范：字符串字面量内只允许码位 ≥ 0x20，其余必须转义
+            if (code < 0x20) {
+                if (ch === '\n')
+                    out += '\\n';
+                else if (ch === '\r')
+                    out += '\\r';
+                else if (ch === '\t')
+                    out += '\\t';
+                else if (ch === '\b')
+                    out += '\\b';
+                else if (ch === '\f')
+                    out += '\\f';
+                else
+                    out += `\\u${code.toString(16).padStart(4, '0')}`;
+                continue;
+            }
+            out += ch;
+            continue;
+        }
+        if (ch === '"')
+            inStr = true;
+        out += ch;
+    }
+    return out;
+}
+/**
+ * JSON.parse 的宽容包装：严格解析失败时，转义字符串内的裸控制字符再试一次。
+ *
+ * [WHY] 不直接无条件转义：严格 JSON 是契约基线，先严格试能保证「本来就能解析的输入
+ *   走的是零改写的原路径」，宽容只作为**救 malformed 输出**的兜底，不放宽块结构校验
+ *   （字段缺失 / 未知类型仍然照常报错，不会因为宽容而静默通过）。
+ * @param text JSON 文本
+ * @returns 解析结果；两次都失败抛错（由调用方按既有 try/catch 处理）
+ */
+function safeJsonParse(text) {
+    try {
+        return JSON.parse(text);
+    }
+    catch {
+        return JSON.parse(escapeControlCharsInStrings(text));
+    }
+}
+/**
  * 解析一条完整的 turn 信封。
  * @param md 回复原文（Markdown 或裸 JSON 均可）
  * @returns {turn, blocks, truncated, errors}；解析不出对象时 errors 含
@@ -335,7 +409,7 @@ function parseTurn(md) {
         }
         let parsed = null;
         try {
-            parsed = JSON.parse(text.slice(cands[i], end));
+            parsed = safeJsonParse(text.slice(cands[i], end));
         }
         catch {
             continue;
@@ -388,7 +462,7 @@ function parseTurnPartial(md) {
     for (let i = 0; i < elems.length; i++) {
         let parsed = null;
         try {
-            parsed = JSON.parse(elems[i]);
+            parsed = safeJsonParse(elems[i]);
         }
         catch {
             continue;
@@ -1478,17 +1552,63 @@ function emitFenceError() {
  *   这条判据承重的原因：一旦某端多带一个字段（例如 say 帧带上 code），前端的「采信守卫」
  *   就再也测不出「值是从别的字段抄来的」。
  *
- * [CONSTRAINT] 去重键是 `turn|blockId` 而非内容 hash：同一信封会被 MutationObserver
+ * [CONSTRAINT] 去重键是 `<sid>|<turnId>|<blockId>` 而非内容 hash：同一信封会被 MutationObserver
  *   反复扫到，按内容 hash 去重会把「同 id 改了内容」的块也一并挡掉（R2 要求后到覆盖先到）。
+ *   sid 前缀承重：不同会话的 turnId 各自从 1 起算，不带 sid 会让两个会话的「turn 3」互相顶掉。
  */
-/** 已推送过的 `turn|blockId`；跨 poll 保留（turnId 单调递增，旧条目自然失效） */
-const seenTurnBlocks = new Set();
-/** 已推过结束帧的 turnId；同一信封重复扫到时不得重复发 */
-const endedTurnIds = new Set();
-/** 去重集合上限；超了整体清空（信封 turnId 单调递增，清空不会造成重推） */
+/**
+ * [turn-emit-dedup-persist-v1] 去重集合落 sessionStorage。
+ * [WHY] 集合此前只在页面内存里：刷新后 MutationObserver 会重新扫到同一条 AI 回复，
+ *   集合已随页面清空 ⇒ 同一信封被重推 ⇒ 前端执行账本同样为空 ⇒ **上一轮脚本被重跑**（P0-1b）。
+ *   sessionStorage 与页面同生命周期但跨刷新存活，正好覆盖「只跨刷新、不跨新标签」的缺口。
+ */
+const TURN_SEEN_STORE = 'aiRunner.turnSeenBlocks.v1';
+const TURN_ENDED_STORE = 'aiRunner.turnEndedIds.v1';
+/** 读回持久化的去重集合；不可用（隐私模式 / 非浏览器上下文）⇒ 空集，降级为纯内存去重 */
+function loadKeySet(storeKey) {
+    const out = new Set();
+    try {
+        if (typeof sessionStorage === 'undefined')
+            return out;
+        const raw = sessionStorage.getItem(storeKey);
+        if (!raw)
+            return out;
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr))
+            return out;
+        for (let i = 0; i < arr.length; i++) {
+            if (typeof arr[i] === 'string')
+                out.add(arr[i]);
+        }
+        return out;
+    }
+    catch {
+        return new Set();
+    }
+}
+/** 写回去重集合；写失败只影响「跨刷新去重」这一增益，不影响本轮行为 */
+function persistKeySet(storeKey, set) {
+    try {
+        if (typeof sessionStorage === 'undefined')
+            return;
+        sessionStorage.setItem(storeKey, JSON.stringify(Array.from(set)));
+    }
+    catch { /* 配额 / 隐私模式：降级为纯内存去重 */ }
+}
+/** 已推送过的 `<sid>|<turnId>|<blockId>`；跨 poll 且跨刷新保留 */
+const seenTurnBlocks = loadKeySet(TURN_SEEN_STORE);
+/** 已推过结束帧的 `<sid>|<turnId>`；同一信封重复扫到时不得重复发 */
+const endedTurnIds = loadKeySet(TURN_ENDED_STORE);
+/** 去重集合上限；超了淘汰最旧（信封 turnId 单调递增，淘汰最旧不会造成重推） */
 const TURN_SEEN_MAX = 800;
-function turnBlockKey(turnId, blockId) {
-    return `${turnId}|${blockId}`;
+/** 淘汰最旧条目：Set 保持插入序，values().next() 即最早插入的那个 */
+function evictOldest(set) {
+    const oldest = set.values().next().value;
+    if (typeof oldest === 'string')
+        set.delete(oldest);
+}
+function turnBlockKey(sid, turnId, blockId) {
+    return `${sid}|${turnId}|${blockId}`;
 }
 /**
  * 本轮结束后循环等什么。优先级 **script > ask > none**（与核心 deriveAwaiting 同构）。
@@ -1598,20 +1718,32 @@ function readTurnFromRoot(root) {
         if (!root || typeof root.querySelectorAll !== 'function')
             return null;
         const pres = root.querySelectorAll('pre');
-        if (!pres || !pres.length)
-            return null;
-        for (let i = pres.length - 1; i >= 0; i--) {
-            const pre = pres[i];
-            const codeEl = pre && typeof pre.querySelector === 'function' ? pre.querySelector('code') : null;
-            const raw = (codeEl && codeTextOf(codeEl)) || (pre && pre.textContent) || '';
-            if (!raw)
-                continue;
-            const r = parseTurn(raw);
-            if (!r || !r.blocks || r.blocks.length === 0)
-                continue;
-            if (r.truncated)
-                return null;
-            return { turnId: typeof r.turn === 'number' ? r.turn : 0, blocks: r.blocks, errors: r.errors || [] };
+        if (pres && pres.length) {
+            for (let i = pres.length - 1; i >= 0; i--) {
+                const pre = pres[i];
+                const codeEl = pre && typeof pre.querySelector === 'function' ? pre.querySelector('code') : null;
+                const raw = (codeEl && codeTextOf(codeEl)) || (pre && pre.textContent) || '';
+                if (!raw)
+                    continue;
+                const r = parseTurn(raw);
+                if (!r || !r.blocks || r.blocks.length === 0)
+                    continue;
+                if (r.truncated)
+                    return null;
+                return { turnId: typeof r.turn === 'number' ? r.turn : 0, blocks: r.blocks, errors: r.errors || [] };
+            }
+        }
+        // [no-fence-envelope-v1] 无 <pre> 信封（回复未加 ```json 围栏）⇒ 回退解析整条回复文本。
+        //   无围栏时裸 JSON 不进 <pre>，只扫 <pre> 会整轮找不到信封 ⇒ 回落 plain 把 JSON 正文推上屏、
+        //   脚本零执行（用户实测 2026-10-19）。parseTurn 已支持以左花括号开头的裸 JSON，
+        //   且要求存在非空 content ⇒ 普通文本 / 非信封 JSON 仍返回 null，不误吞。
+        // [CONSTRAINT] 函数体内注释不得出现字面花括号：守卫抠函数体时会做朴素花括号配对，会被注释里的括号带偏。
+        const rawText = String((root && root.textContent) || '');
+        if (rawText) {
+            const r = parseTurn(rawText);
+            if (r && r.blocks && r.blocks.length > 0 && !r.truncated) {
+                return { turnId: typeof r.turn === 'number' ? r.turn : 0, blocks: r.blocks, errors: r.errors || [] };
+            }
         }
         return null;
     }
@@ -1635,16 +1767,16 @@ function emitTurn(turn) {
         return false;
     const sid = extractSidFromHash();
     let sent = 0;
+    let dirty = false;
     for (let i = 0; i < frames.blocks.length; i++) {
         const block = frames.blocks[i];
-        const key = turnBlockKey(block.turnId, block.blockId);
+        const key = turnBlockKey(sid, block.turnId, block.blockId);
         if (seenTurnBlocks.has(key))
             continue;
         seenTurnBlocks.add(key);
-        if (seenTurnBlocks.size > TURN_SEEN_MAX) {
-            seenTurnBlocks.clear();
-            seenTurnBlocks.add(key);
-        }
+        dirty = true;
+        if (seenTurnBlocks.size > TURN_SEEN_MAX)
+            evictOldest(seenTurnBlocks);
         post({
             type: 'ai-runner:block',
             block,
@@ -1653,13 +1785,12 @@ function emitTurn(turn) {
         });
         sent++;
     }
-    const endKey = turn.turnId;
+    const endKey = `${sid}|${turn.turnId}`;
     if (!endedTurnIds.has(endKey)) {
         endedTurnIds.add(endKey);
-        if (endedTurnIds.size > TURN_SEEN_MAX) {
-            endedTurnIds.clear();
-            endedTurnIds.add(endKey);
-        }
+        dirty = true;
+        if (endedTurnIds.size > TURN_SEEN_MAX)
+            evictOldest(endedTurnIds);
         post({
             type: 'ai-runner:turn-end',
             end: frames.end,
@@ -1669,6 +1800,11 @@ function emitTurn(turn) {
     }
     if (sent > 0)
         lastBodySig = bodySignature();
+    // [turn-emit-dedup-persist-v1] 只有真新增了去重键才落盘：无新帧的重复扫描不该写存储。
+    if (dirty) {
+        persistKeySet(TURN_SEEN_STORE, seenTurnBlocks);
+        persistKeySet(TURN_ENDED_STORE, endedTurnIds);
+    }
     return true;
 }
 
@@ -1683,10 +1819,58 @@ function emitTurn(turn) {
  * [WHY] 门必须在探针之前：AI 正常生成时正文里可能自指命中停止/触顶词表，
  *   若探针先跑就会误推 stopped，而 stopped 会让前端直接 finish 整个循环。
  */
-function classifyAndPost() {
+/**
+ * [tm-diag-v1] 回程链路自诊断：**每轮都发**，无论成败。
+ *
+ * [WHY 需要它] 「脚本零执行」这条故障有三种完全不同的断点，且**都不产生任何错误**：
+ *   ① 信封解析不出来（readTurnFromRoot 返 null）——用户看到整坨 JSON 上屏；
+ *   ② 解析出来了但 postMessage 送不到工作台（window.opener 为 null / 已closed）——
+ *      工作台侧零日志、零报错，只是永远转圈；
+ *   ③ 帧送到了但被执行器闸门拦掉。
+ *   ①②③ 在服务端日志里长得**一模一样**（runner.jsonl 就是不增长），
+ *   所以必须由油猴侧主动把判据报出来，否则只能靠猜（2026-10-19 就在这上面耗了两轮）。
+ *
+ * [CONSTRAINT] 直发 e.source/opener 而不走 post() 的断链队列：诊断信息在断链时**最需要**送达，
+ *   走队列等于在最需要的时候必然丢失。
+ * [CONSTRAINT] 只报判据与长度，不报正文（避免把用户内容复制进日志）。
+ */
+function _tmDiag(stage, extra) {
     try {
-        if (!window.opener || window.opener.closed)
+        const opener = window.opener;
+        const payload = {
+            type: 'ai-runner:tm-diag',
+            stage,
+            hasOpener: !!opener,
+            openerClosed: !!(opener && opener.closed),
+            href: location.href.slice(0, 160),
+            ts: Date.now(),
+            ...extra,
+        };
+        // [diag-best-effort] 三条路都试：事件源 → opener → 父窗口
+        const targets = [window.__aiDiagSource || null, opener, window.parent];
+        for (const t of targets) {
+            if (!t)
+                continue;
+            try {
+                t.postMessage(payload, '*');
+                return;
+            }
+            catch { /* 换下一条路 */ }
+        }
+    }
+    catch { /* 诊断自身失败不得影响主链路 */ }
+}
+function classifyAndPost() {
+    // [tm-diag-v1] 诊断在**门之前**发：opener 缺失导致第19 行早退时，诊断仍能送达，
+    //   这正是要抓的那种失败（放在门之后就永远抓不到了）。
+    _tmDiag('enter', { hasRoot: typeof latestAssistantRoot === 'function' });
+    try {
+        if (!window.opener || window.opener.closed) {
+            // [tm-diag-v1] 这是最常见的静默断点：直接在地址栏/书签打开的站点页 opener 为 null，
+            //   下行靠工作台主动 postMessage 仍然通（只要有窗口引用），上行却全灭。
+            _tmDiag('opener-missing', { note: 'classifyAndPost 第一行即return，未做任何分类' });
             return;
+        }
         // ---------- ① 门 ----------
         const doneMarker = findNewDone();
         if (doneMarker) {
@@ -1805,6 +1989,14 @@ function classifyAndPost() {
         // [CONSTRAINT] stopPosted 后不推：前端已 finish 循环，此时推块等于「循环外自动执行」旁路。
         if (!stopPosted) {
             const turn = readTurnFromRoot(replyRoot);
+            // [tm-diag-v1] 诊断读判据；`if (turn && emitTurn(turn)) return` 这一行是
+            //   turn-emit-parity 守卫的字面量判据（emitTurn 返回值必须中断分流），**不要改写它**。
+            _tmDiag(turn ? 'turn-read' : 'turn-miss', {
+                turnId: turn ? turn.turnId : undefined,
+                blocks: turn ? turn.blocks.length : 0,
+                errors: turn ? (turn.errors || []).length : 0,
+                replyRootFound: !!replyRoot,
+            });
             if (turn && emitTurn(turn))
                 return;
         }
@@ -2278,21 +2470,25 @@ function clickNewSession() {
  *   否则工作台 sendFillToAsync 会一直等到超时（表现为「工作台卡住」）。
  */
 /**
- * 入站去重：同一 msgId 只消费一次。
+ * 入站去重：查 msgId 是否已消费（**不登记**）。
  * [WHY] postMessage 可能因重连重发、多窗口广播而重复到达；
  *   重复执行 fill 会把同一段 prompt 发两遍。
+ * [CONSTRAINT] 登记（markSeenInbound）必须延后到「确认可消费」之后：若在到达时就登记，
+ *   失败路径（no-input-box / empty-prompt）会烧掉 msgId ⇒ 工作台复用同一 msgId 的重试
+ *   会被 dedup-skip 而永远填不进去。延后登记后，「已消费」的重复帧被挡、「未消费」的重试仍可注入。
  * [CONSTRAINT] 集合上限 200，超出后淘汰最早一条 —— 单轮消息量远小于此值，
  *   限制只是防止长时间运行的无界增长。
  */
-function seenInboundOnce(msgId) {
-    if (!msgId)
-        return false;
-    if (_seenInbound.has(msgId))
-        return true;
+function isSeenInbound(msgId) {
+    return !!msgId && _seenInbound.has(msgId);
+}
+/** 标记 msgId 已消费（仅在确认可消费后调用；见 handleFill / handleRotate 的顺序约束） */
+function markSeenInbound(msgId) {
+    if (!msgId || _seenInbound.has(msgId))
+        return;
     _seenInbound.add(msgId);
     if (_seenInbound.size > 200)
         _seenInbound.delete(_seenInbound.values().next().value);
-    return false;
 }
 /** 发送后轮询 URL 变化并回传（最多 8 秒）。站点发消息常伴随 URL 跳转到具体会话页 */
 function watchUrlChange(prevHref, replySrc) {
@@ -2320,7 +2516,7 @@ function watchUrlChange(prevHref, replySrc) {
  */
 function handleFill(d, e) {
     resetRoundState();
-    if (seenInboundOnce(d.msgId)) {
+    if (isSeenInbound(d.msgId)) {
         ackFill(false, 'dedup-skip', d.ackId);
         return;
     }
@@ -2335,6 +2531,10 @@ function handleFill(d, e) {
         ackFill(false, 'no-input-box', d.ackId);
         return;
     }
+    // [fill-msgid-reuse-v1] 到这里才登记 msgId：上面两条失败路径不烧号，工作台复用同一 msgId 的
+    //   重试（no-input-box / 丢帧）仍能真正注入；而「已消费」后的重试（send-verify-failed：
+    //   文本已填入、仅发送未确认）被上面的 dedup-skip 挡住，避免同一提问连发两遍。
+    markSeenInbound(d.msgId);
     const prevHref = location.href;
     const imgs = Array.isArray(d.images) ? d.images : [];
     // 图片先于文本注入：上传多为异步，先占位可避免文本覆盖图片区
@@ -2353,7 +2553,7 @@ function handleFill(d, e) {
  */
 function handleRotate(d) {
     resetRoundState();
-    if (seenInboundOnce(d.msgId))
+    if (isSeenInbound(d.msgId))
         return;
     const instruction = String(d.instruction || '');
     if (!instruction)
@@ -2363,6 +2563,7 @@ function handleRotate(d) {
         console.warn('[ai-runner] rotate: 未找到输入框');
         return;
     }
+    markSeenInbound(d.msgId);
     fillInput(box, instruction);
     setTimeout(doSend, 300, box);
 }

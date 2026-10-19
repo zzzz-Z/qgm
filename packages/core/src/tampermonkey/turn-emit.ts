@@ -15,21 +15,61 @@
  *   这条判据承重的原因：一旦某端多带一个字段（例如 say 帧带上 code），前端的「采信守卫」
  *   就再也测不出「值是从别的字段抄来的」。
  *
- * [CONSTRAINT] 去重键是 `turn|blockId` 而非内容 hash：同一信封会被 MutationObserver
+ * [CONSTRAINT] 去重键是 `<sid>|<turnId>|<blockId>` 而非内容 hash：同一信封会被 MutationObserver
  *   反复扫到，按内容 hash 去重会把「同 id 改了内容」的块也一并挡掉（R2 要求后到覆盖先到）。
+ *   sid 前缀承重：不同会话的 turnId 各自从 1 起算，不带 sid 会让两个会话的「turn 3」互相顶掉。
  */
 
-/** 已推送过的 `turn|blockId`；跨 poll 保留（turnId 单调递增，旧条目自然失效） */
-const seenTurnBlocks: Set<string> = new Set()
+/**
+ * [turn-emit-dedup-persist-v1] 去重集合落 sessionStorage。
+ * [WHY] 集合此前只在页面内存里：刷新后 MutationObserver 会重新扫到同一条 AI 回复，
+ *   集合已随页面清空 ⇒ 同一信封被重推 ⇒ 前端执行账本同样为空 ⇒ **上一轮脚本被重跑**（P0-1b）。
+ *   sessionStorage 与页面同生命周期但跨刷新存活，正好覆盖「只跨刷新、不跨新标签」的缺口。
+ */
+const TURN_SEEN_STORE = 'aiRunner.turnSeenBlocks.v1'
+const TURN_ENDED_STORE = 'aiRunner.turnEndedIds.v1'
 
-/** 已推过结束帧的 turnId；同一信封重复扫到时不得重复发 */
-const endedTurnIds: Set<number> = new Set()
+/** 读回持久化的去重集合；不可用（隐私模式 / 非浏览器上下文）⇒ 空集，降级为纯内存去重 */
+function loadKeySet(storeKey: string): Set<string> {
+  const out: Set<string> = new Set()
+  try {
+    if (typeof sessionStorage === 'undefined') return out
+    const raw = sessionStorage.getItem(storeKey)
+    if (!raw) return out
+    const arr = JSON.parse(raw) as unknown
+    if (!Array.isArray(arr)) return out
+    for (let i = 0; i < arr.length; i++) {
+      if (typeof arr[i] === 'string') out.add(arr[i] as string)
+    }
+    return out
+  } catch { return new Set<string>() }
+}
 
-/** 去重集合上限；超了整体清空（信封 turnId 单调递增，清空不会造成重推） */
+/** 写回去重集合；写失败只影响「跨刷新去重」这一增益，不影响本轮行为 */
+function persistKeySet(storeKey: string, set: Set<string>): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return
+    sessionStorage.setItem(storeKey, JSON.stringify(Array.from(set)))
+  } catch { /* 配额 / 隐私模式：降级为纯内存去重 */ }
+}
+
+/** 已推送过的 `<sid>|<turnId>|<blockId>`；跨 poll 且跨刷新保留 */
+const seenTurnBlocks: Set<string> = loadKeySet(TURN_SEEN_STORE)
+
+/** 已推过结束帧的 `<sid>|<turnId>`；同一信封重复扫到时不得重复发 */
+const endedTurnIds: Set<string> = loadKeySet(TURN_ENDED_STORE)
+
+/** 去重集合上限；超了淘汰最旧（信封 turnId 单调递增，淘汰最旧不会造成重推） */
 const TURN_SEEN_MAX = 800
 
-function turnBlockKey(turnId: number, blockId: string): string {
-  return `${turnId}|${blockId}`
+/** 淘汰最旧条目：Set 保持插入序，values().next() 即最早插入的那个 */
+function evictOldest(set: Set<string>): void {
+  const oldest: unknown = set.values().next().value
+  if (typeof oldest === 'string') set.delete(oldest)
+}
+
+function turnBlockKey(sid: string, turnId: number, blockId: string): string {
+  return `${sid}|${turnId}|${blockId}`
 }
 
 /**
@@ -129,16 +169,29 @@ function readTurnFromRoot(root: any): any {
   try {
     if (!root || typeof root.querySelectorAll !== 'function') return null
     const pres = root.querySelectorAll('pre')
-    if (!pres || !pres.length) return null
-    for (let i = pres.length - 1; i >= 0; i--) {
-      const pre = pres[i]
-      const codeEl = pre && typeof pre.querySelector === 'function' ? pre.querySelector('code') : null
-      const raw = (codeEl && codeTextOf(codeEl)) || (pre && pre.textContent) || ''
-      if (!raw) continue
-      const r = parseTurn(raw)
-      if (!r || !r.blocks || r.blocks.length === 0) continue
-      if (r.truncated) return null
-      return { turnId: typeof r.turn === 'number' ? r.turn : 0, blocks: r.blocks, errors: r.errors || [] }
+    if (pres && pres.length) {
+      for (let i = pres.length - 1; i >= 0; i--) {
+        const pre = pres[i]
+        const codeEl = pre && typeof pre.querySelector === 'function' ? pre.querySelector('code') : null
+        const raw = (codeEl && codeTextOf(codeEl)) || (pre && pre.textContent) || ''
+        if (!raw) continue
+        const r = parseTurn(raw)
+        if (!r || !r.blocks || r.blocks.length === 0) continue
+        if (r.truncated) return null
+        return { turnId: typeof r.turn === 'number' ? r.turn : 0, blocks: r.blocks, errors: r.errors || [] }
+      }
+    }
+    // [no-fence-envelope-v1] 无 <pre> 信封（回复未加 ```json 围栏）⇒ 回退解析整条回复文本。
+    //   无围栏时裸 JSON 不进 <pre>，只扫 <pre> 会整轮找不到信封 ⇒ 回落 plain 把 JSON 正文推上屏、
+    //   脚本零执行（用户实测 2026-10-19）。parseTurn 已支持以左花括号开头的裸 JSON，
+    //   且要求存在非空 content ⇒ 普通文本 / 非信封 JSON 仍返回 null，不误吞。
+    // [CONSTRAINT] 函数体内注释不得出现字面花括号：守卫抠函数体时会做朴素花括号配对，会被注释里的括号带偏。
+    const rawText = String((root && root.textContent) || '')
+    if (rawText) {
+      const r = parseTurn(rawText)
+      if (r && r.blocks && r.blocks.length > 0 && !r.truncated) {
+        return { turnId: typeof r.turn === 'number' ? r.turn : 0, blocks: r.blocks, errors: r.errors || [] }
+      }
     }
     return null
   } catch { return null }
@@ -158,15 +211,14 @@ function emitTurn(turn: any): boolean {
   if (!frames.blocks.length) return false
   const sid = extractSidFromHash()
   let sent = 0
+  let dirty = false
   for (let i = 0; i < frames.blocks.length; i++) {
     const block = frames.blocks[i]
-    const key = turnBlockKey(block.turnId, block.blockId)
+    const key = turnBlockKey(sid, block.turnId, block.blockId)
     if (seenTurnBlocks.has(key)) continue
     seenTurnBlocks.add(key)
-    if (seenTurnBlocks.size > TURN_SEEN_MAX) {
-      seenTurnBlocks.clear()
-      seenTurnBlocks.add(key)
-    }
+    dirty = true
+    if (seenTurnBlocks.size > TURN_SEEN_MAX) evictOldest(seenTurnBlocks)
     post({
       type: 'ai-runner:block',
       block,
@@ -175,13 +227,11 @@ function emitTurn(turn: any): boolean {
     })
     sent++
   }
-  const endKey = turn.turnId
+  const endKey = `${sid}|${turn.turnId}`
   if (!endedTurnIds.has(endKey)) {
     endedTurnIds.add(endKey)
-    if (endedTurnIds.size > TURN_SEEN_MAX) {
-      endedTurnIds.clear()
-      endedTurnIds.add(endKey)
-    }
+    dirty = true
+    if (endedTurnIds.size > TURN_SEEN_MAX) evictOldest(endedTurnIds)
     post({
       type: 'ai-runner:turn-end',
       end: frames.end,
@@ -190,5 +240,10 @@ function emitTurn(turn: any): boolean {
     })
   }
   if (sent > 0) lastBodySig = bodySignature()
+  // [turn-emit-dedup-persist-v1] 只有真新增了去重键才落盘：无新帧的重复扫描不该写存储。
+  if (dirty) {
+    persistKeySet(TURN_SEEN_STORE, seenTurnBlocks)
+    persistKeySet(TURN_ENDED_STORE, endedTurnIds)
+  }
   return true
 }

@@ -8,7 +8,10 @@ import { test } from 'vitest'
 import {
   createTurnRunner,
   DEFAULT_TURN_CONCURRENCY,
+  ERR_MAX_CHARS,
   formatTurnResults,
+  OUT_TAIL_CHARS,
+  OUT_TAIL_LINES,
   pickScriptBlocks,
   turnRunKey,
 } from '../composables/runner/turn-runner.js'
@@ -473,6 +476,46 @@ test('formatTurnResults：结构化摘要，含成功数与逐块状态；空结
   assert.match(text, /1\. ✅ b0 \[ok\] exit=0/)
   assert.match(text, /2\. ❌ b1 \[error\] exit=1 err=TypeError/)
   assert.match(text, /3\. ❌ b2 \[aborted\]$/)
+})
+
+// [turn-out-feedback-v1] AI 侧没有任何别的通道能看到脚本输出 ⇒ 回灌必须带 stdout。
+// [WHY 钉死截断] 实测单块 stdout 可达 5 万~11 万字符；不截断会打爆上下文并加重平台限流，
+//   而「不截断」这个改法在功能上「更全」，只有断言上限才拦得住。
+test('回灌携带 stdout：尾部 %d 行 / %d 字，超限标注省略', () => {
+  assert.equal(OUT_TAIL_LINES, 40)
+  assert.equal(OUT_TAIL_CHARS, 2000)
+  // ① 有输出 ⇒ 摘要行下方紧跟围栏正文
+  const withOut = formatTurnResults(7, [{ id: 'c1', seq: 0, status: 'ok', exit: 0, out: 'hello\nworld' }])
+  assert.match(withOut, /1\. ✅ c1 \[ok\] exit=0\n```\nhello\nworld\n```/)
+  // ② 全空白输出 ⇒ 不挂空围栏（否则每块都多两行噪音）
+  const blank = formatTurnResults(7, [{ id: 'c2', seq: 0, status: 'ok', exit: 0, out: '  \n ' }])
+  assert.match(blank, /1\. ✅ c2 \[ok\] exit=0$/)
+  // ③ 超行数 ⇒ 只留末 40 行并标注省略量
+  const many = Array.from({ length: 100 }, (_, i) => `L${i}`).join('\n')
+  const clipped = formatTurnResults(8, [{ id: 'c3', seq: 0, status: 'ok', exit: 0, out: many }])
+  assert.match(clipped, /…（省略前 60 行）/)
+  assert.ok(clipped.includes('L99'), '必须保留尾部行（排错看末尾）')
+  assert.ok(!clipped.includes('\nL0\n'), '头部行应被丢弃')
+})
+
+// [turn-err-feedback-v1] err 此前被硬切 200 字且不折叠换行：栈最有用的中段被截、且换行撕裂文案。
+test('[turn-err-feedback-v1] err 折叠成单行并限长 ERR_MAX_CHARS', () => {
+  assert.equal(ERR_MAX_CHARS, 600)
+  // 换行折叠成空格：err 是「一行摘要」，不得在各块行之间插空行
+  const multiline = formatTurnResults(9, [{ id: 'e1', seq: 0, status: 'error', exit: 1, err: 'line1\nline2\nline3' }])
+  assert.match(multiline, /err=line1 line2 line3/)
+  // 超限补省略号
+  const long = formatTurnResults(9, [{ id: 'e2', seq: 0, status: 'error', exit: 1, err: 'x'.repeat(1000) }])
+  assert.match(long, /err=x{600}…/)
+})
+
+// [turn-out-fence-v1] stdout 自带 ``` 时固定 3 反引号围栏会被内容提前闭合 ⇒ 回灌文案裂成两段。
+test('[turn-out-fence-v1] 围栏按内容最长连续反引号自适应加长', () => {
+  const out = 'before\n```\ninner\n```\nafter'
+  const text = formatTurnResults(10, [{ id: 'c1', seq: 0, status: 'ok', exit: 0, out }])
+  // 内容里最长连续反引号是 3 ⇒ 围栏取 4；否则内容里的 ``` 会把开围栏提前闭合
+  assert.match(text, /exit=0\n````\n/, '开围栏必须是 4 反引号（内容含 3 连反引号时固定 3 会被闭合）')
+  assert.match(text, /\nafter\n````$/, '闭围栏须与开围栏同长')
 })
 
 test('turnRunKey：`turn|id` 与 runKey 同形', () => {

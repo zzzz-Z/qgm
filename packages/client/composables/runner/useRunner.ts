@@ -230,6 +230,14 @@ const visibleChanges = computed<ChangeEntry[]>(() =>
 // [auto-feedback] 一次性标志：AI 直接返回的脚本执行后无条件回传结果
 /** 是否已请求执行后自动回传（一次性，消费后由 clearAutoFeedback 重置） */
 const autoFeedbackRequested = ref(false)
+/**
+ * [turn-feedback-exclusive-v1] 本轮 run 是否由 turn 管线发起。
+ * [WHY] turn 管线在 turn 收口后统一回灌 `# turn N 执行结果`；若 ScriptPanel 的旧回传通道
+ *   （copyOutput/feedbackMerge）对同一轮**也**回传，就会「1 轮 = 2 次提问」——实测日志
+ *   同一段内 `# turn N 执行结果` 与 `# 脚本执行结果` 交替出现。
+ * [CONSTRAINT] 每次 run() 开始重置（与 autoFeedbackRequested 同点），保证只对「本轮」生效。
+ */
+const turnDrivenRun = ref(false)
 /** [git-commit-always-on-v1] git 提交常开：开关已移除，每轮运行后自动存档 */
 const gitCommit = ref(true)
 
@@ -385,7 +393,7 @@ function guessDesc(code: string): string {
  * [CHANGE-IMPACT] 会写 lastRunCode / running / result / changes，UI 状态依赖此路径；异常走 catch 置 error 帧
  * @param opts 选项对象；script 覆盖编辑器内容、runKey 聚合事件、autoFeedback 置位后本轮结束自动回传
  */
-async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boolean, queueIfBusy?: boolean }): Promise<RunResponse | 'skipped' | 'queued' | null> {
+async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boolean, queueIfBusy?: boolean, turnDriven?: boolean }): Promise<RunResponse | 'skipped' | 'queued' | null> {
   const code = (opts?.script ?? script.value).trim()
   // [run-skip-identifiable-v1] 被守卫吞掉时返回可辨识标记（R2）；调用方据此判定重试，不读 result
   if (!code) return 'skipped'
@@ -404,6 +412,8 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
   // [CONSTRAINT] 重置在前、置位在后 —— 保证「本轮想要」才算数
   autoFeedbackRequested.value = false
   if (opts?.autoFeedback) autoFeedbackRequested.value = true
+  // [turn-feedback-exclusive-v1] 与 autoFeedbackRequested 同点重置：只对本轮生效，杜绝跨轮漂移
+  turnDrivenRun.value = opts?.turnDriven === true
   const myToken = ++activeRunToken
   const isStale = () => myToken !== activeRunToken
   lastRunCode.value = code
@@ -790,6 +800,8 @@ export function useRunner() {
     pipelineFromServer: () => result.value?.pipeline,
     autoFeedbackRequested,
     clearAutoFeedback: () => { autoFeedbackRequested.value = false },
+    // [turn-feedback-exclusive-v1] 只读：ScriptPanel 据此对 turn 轮让出回传权（避免 1 轮 2 次提问）
+    turnDrivenRun,
     run,
     stop,
     rollback,

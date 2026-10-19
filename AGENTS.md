@@ -1,11 +1,11 @@
 # AGENTS.md
 
-> **本文件是项目索引**：这个仓库是什么、代码在哪、提交前跑什么。
+> **本文件是项目索引**：这个仓库是什么、代码在哪、提交前跑什么；并登记 SYSTEM.md 每章「承重：」判据对应的守卫文件。
 >
 > 它**不重述执行规则**。输出契约与状态机、运行时沙箱与 `__AI__` API、架构红线的通用上限与拆分纪律
 > （HCLC）、注释与命名、重试预算、跨文件级联、输出预算、技能加载协议——这些的唯一来源（SSOT）是
 > [`packages/core/SYSTEM.md`](./packages/core/SYSTEM.md)，冲突时一律以它为准。
-> **例外**：本仓库的依赖方向与特化禁则由本文「monorepo 结构铁律」一节承载（工作区级内容，见该节说明）。
+> **工作区级例外**：依赖方向与特化禁则由本文「monorepo 结构铁律」承载；SYSTEM.md 各章「承重：」行的测试路径由本文「SYSTEM.md 各章承重实现对照」承载。
 >
 > 本文件缺失仅警告，不中断会话。
 
@@ -48,7 +48,7 @@ docs/              USAGE.md / DOCS-INDEX.md / DESIGN.md
 ## monorepo 结构铁律
 
 > **应用级通用红线**（行数 / import 上限、职责边界拆分纪律）见 `packages/core/SYSTEM.md` §4；
-> 本节承载**工作区级**的依赖方向与本项目特化禁则（2026-10-14 自 SYSTEM.md §4 迁入并去重——原两处各写一份，且违反 SYSTEM.md「不含工作区特定信息」的自我定位）。
+> 本节承载**工作区级**的依赖方向与本项目特化禁则。
 
 由 `packages/core/tests/workspace-guard.node-test.ts` 强制，违反即测试失败：
 
@@ -56,6 +56,15 @@ docs/              USAGE.md / DOCS-INDEX.md / DESIGN.md
 - **本项目特化禁则**：`packages/*` 里禁止 `listen` / `createServer` / `import vite` / `@hono/node-server`。
   - 豁免：`vite.config.ts` / `uno.config.ts` 属构建配置。
   - 强制：宿主专属入口（`apps/standalone/src/server.ts` 等，含 `listen` / `createServer` 的装配代码）必须留在 `apps/`，不得回流 `packages/core`。
+
+## 架构红线量化阈值（工作区）
+
+> 应用级原则（拆分依据 = 职责边界、依赖方向）见 [`packages/core/SYSTEM.md`](./packages/core/SYSTEM.md) §4；本节只承载本工作区的**具体阈值**——由 `packages/core/tests/module-size-ratchet.node-test.ts`（体积）与 `packages/core/tests/hclc-guard.node-test.ts`（依赖数量）强制，守卫常数须与本表逐字同值。
+
+- **单文件唯一 `import` 模块数 > 20** → 阻断级违规（覆盖 core 与 client 两处源码；`.vue` 剥 SFC 后只数 `<script>` 块内的 `import`/`from`）。
+  - 豁免：barrel 入口文件（只做转发）不计数。
+  - 范围外：一次性 CLI 工具与单文件注入脚本不纳入。
+- **文件体积（软建议，不强制）**：普通模块建议 ≤ 800 行、组件建议 ≤ 1000 行。超限**不阻断提交**，仅作拆分提示。生成物豁免（如自动生成的类型声明文件）。
 
 ## 宿主机制实现索引
 
@@ -73,11 +82,28 @@ docs/              USAGE.md / DOCS-INDEX.md / DESIGN.md
 - `turn-envelope-v2`：`packages/core/src/reply/turn-schema.ts`（契约唯一源）+ `turn-frames.ts`（块→帧纯映射）+ `packages/client/composables/runner/useTurnRunner.ts`（幂等执行器）+ `packages/core/src/server/replay-buffer.ts`（断线重放）
 - `hello-caps-v1`：`packages/core/src/server/protocol.ts`（`AI_CAPS` 唯一源）+ `attach-ws.ts`（hello 帧广播）+ `packages/client/composables/ai/useAiTransport.ts`（`caps()` 消费）
 
-## 自动循环子系统已退役（loop-consolidation P3e）
+## SYSTEM.md 各章承重实现对照
 
-`packages/client/composables/ai/auto-loop/` 与 `loopLogic.ts` **已整体删除，禁止据 git 历史恢复**（考古用 `git log -S startLoop --all`）。守卫：`packages/client/tests/loop-single-path.node-test.ts`（`PHASE_VALUE === 'B'`，断言目录不存在 + 全仓零调用点）。
+> SYSTEM.md 每章的「承重：」行只声明契约名与判据范围；**测试文件路径一律在此登记**——换守卫 / 改名时改这里，不改 SYSTEM.md。
 
-**当前形态（单路径）**：脚本到达 → `useAiReplyHandlers.ts` 分流 → `runner.run({ autoFeedback: true })`。无循环计数、无硬轮上限、无 `finish(inst, ...)` 终止。仍生效的三条闸门（`retained-done-gate` / `stopped·refresh·dedup` 守卫 / `loopPaused`）语义见 `SYSTEM.md` §0.1 与 §8。
+- §1 输出契约与 turn 信封：`packages/core/tests/system-contract.node-test.ts`（G1/G4–G10）+ `packages/core/tests/overlay-flush-and-lang-check.node-test.ts`
+- §2 读写协议：`packages/client/tests/board-mirror.node-test.ts` + `packages/core/tests/limit-marker-guard.node-test.ts`
+- §3.2 `__AI__` API 速查：`packages/core/tests/api-surface-parity.node-test.ts`
+- §4 架构红线：`packages/core/tests/module-size-ratchet.node-test.ts` + `packages/core/tests/hclc-guard.node-test.ts`
+- §8 重试预算：`packages/core/tests/system-contract.node-test.ts`（G3）
+- §9 跨文件级联：`packages/core/tests/tmp-reaper.node-test.ts`
+- §12 提交前自复检：`packages/core/tests/system-contract.node-test.ts`（G2）
+- §14 功能回归：`packages/core/tests/ssot-boundary-guard.node-test.ts`（G3）
+- §15 视觉回归：`packages/core/tests/ssot-boundary-guard.node-test.ts`（G3）+ `packages/client/tests/visual-spec-guard.node-test.ts`
+- §16 知识库：`packages/core/tests/ssot-boundary-guard.node-test.ts`（G3）
+
+## 自动执行单路径（loop-single-path）
+
+脚本到达 → `useAiReplyHandlers.ts` 分流 → `runner.run({ autoFeedback: true })`。**无循环计数、无硬轮上限、无 `finish(inst, ...)` 终止**；`composables/ai/auto-loop/` 与 `loopLogic.ts` 整体不存在。
+
+仍生效的三条闸门（`retained-done-gate` / `stopped·refresh·dedup` 守卫 / `loopPaused`）语义见 `SYSTEM.md` §0.1 与 §8。
+
+守卫：`packages/client/tests/loop-single-path.node-test.ts`（断言 `auto-loop/` 目录不存在 + 全仓零调用点）。
 
 ## 常用命令
 
@@ -117,30 +143,35 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 - **L2 全量闸门（交付前）**：`pnpm verify`（展开顺序见「常用命令」）。四套 tsc 缺一不可——只跑 `pnpm tsc` 只覆盖 `packages/core/src`，前端与测试的类型错误会静默绕过。
 - **L3 契约 / e2e（真实装配）**：`pnpm test:e2e`（Playwright，`baseURL=http://localhost:5274/__ai/`，webServer 自动起 `pnpm dev:web`，`reuseExistingServer: true`；webServer 只探活前端根路径，后端由具体 spec 的 `beforeAll` 独立拉起）。改路由、状态码、NDJSON 帧结构、请求体契约时，**补一条 e2e 契约用例**（范式见 `e2e/baseline-diff.spec.ts`：先造真实 `runId`，再断言响应结构与错误码），不要只用单测把 transport mock 掉。
 - **改哪层跑哪层**：逻辑/类型改动 → L1 + 受影响包单测；新增导出/改签名 → L2 并 grep 调用方；改路由/契约/装配 → L1 + L3；改 UI → L1 + L2 + 视觉回归（见下节）。
-- **命令名先与 `package.json` 对账**：文档与回执里写的脚本名必须真实存在（`web:dev` 从未存在、只因复用已运行实例而长期未暴露，是这类的前车之鉴）。
+- **命令名先与 `package.json` 对账**：文档与回执里写的脚本名必须真实存在于 `package.json`。
 - **批量删除保护是环境垫片误报**：宿主侧跑全量 vitest 若撞上（报错栈出现 `node-safe-delete-shim`，表现为「单跑绿、合跑红」），加 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 重跑，不是你引入的回归。
 
-**本会话新增守卫（2026-10-17）**：
+**守卫索引（承重测试——改对应实现即必跑）**：
 
-- `packages/core/tests/tmp-reaper.node-test.ts`：`.ai-runner/tmp` 过期产物清理（3 过期 + 1 新鲜 → 剩 1）。改 `reapStaleTmp` 必跑。
-- `packages/core/tests/reply-extract-parity.node-test.ts`：`elToMd` / `extractReplyMd` 双通道（headless-inject.ts ↔ tampermonkey）tag 分支集与骨架一致性。改任一侧必跑。
-- `packages/core/tests/script-closure-gate.node-test.ts` 新增 `generating-gate` 用例：无头通道「生成中门」位置与形态断言。删门 / 挪位置即红。
-- `packages/client/tests/useRunner.node-test.ts` 新增 `stale-run-abort-v2` 用例：第二次 run 必须 abort 上一轮悬挂 fetch。
-- `packages/core/tests/hclc-guard.node-test.ts` 已扩至 `packages/client`：单文件 import ≤ 20 现在覆盖前端；`.vue` 剥 SFC 后只数 `<script>` 内 import；side-effect `import "x"` 形态亦计入。
+- `packages/core/tests/system-contract.node-test.ts`：SYSTEM.md 段间契约（信封骨架 / 错误码 / 语言矩阵）。
+- `packages/core/tests/ssot-boundary-guard.node-test.ts`：文档边界——SYSTEM.md 正文禁工作区路径与端口、本文具名常量须在源码存在、承重对照路径须在磁盘存在。
+- `packages/core/tests/module-size-ratchet.node-test.ts`：体积阈值与守卫常量同值（ssot-parity）。
+- `packages/core/tests/api-surface-parity.node-test.ts`：`__AI__` 名与 arity 双向对账（T1–T7）。
+- `packages/core/tests/hclc-guard.node-test.ts`：单文件 import ≤ 20，覆盖 core 与 client；`.vue` 剥 SFC 后只数 `<script>` 内 import；side-effect `import "x"` 亦计入。
+- `packages/core/tests/workspace-guard.node-test.ts`：monorepo 结构铁律（依赖方向 + 特化禁则）。
+- `packages/core/tests/tmp-reaper.node-test.ts`：`.ai-runner/tmp` 过期产物清理（改 `reapStaleTmp` 必跑）。
+- `packages/core/tests/reply-extract-parity.node-test.ts`：`elToMd` / `extractReplyMd` 双通道 tag 分支集与骨架一致性（改任一侧必跑）。
+- `packages/core/tests/script-closure-gate.node-test.ts`：含 `generating-gate` 用例——无头通道「生成中门」位置与形态（删门 / 挪位置即红）。
+- `packages/core/tests/short-reply-gate.node-test.ts`：极短回复（去空白 <6 字）不得被永久丢弃（`[short-reply-gate-v1]`）。
+- `packages/core/tests/fill-verify-guard.node-test.ts`：`[fill-verify-v3]` / `[no-new-session-per-fill-v1]` / `[rules-keep-v1]`。
+- `packages/core/tests/discover-targets.node-test.ts`：验证目标自动发现（见「验证目标绑定」）。
+- `packages/client/tests/useRunner.node-test.ts`：`stale-run-abort-v2`——第二次 run 必须 abort 上一轮悬挂 fetch。
+- `packages/client/tests/loop-single-path.node-test.ts`：单路径不变量（见「自动执行单路径」）。
+- `packages/client/tests/visual-spec-guard.node-test.ts`：视觉遮罩选择器双向守卫。
+- `packages/client/tests/rules-cache-invalidate.node-test.ts`：`applyRootChanged` 单一出口（见「状态与副作用收敛」）。
 
-**本会话新增守卫（2026-10-18）**：
-
-- `packages/core/tests/short-reply-gate.node-test.ts`：极短回复（去空白 <6 字）不得被永久丢弃。直接调**真实** `detectReplyInPage`（桩 window/document）逐 tick 断言：生成中/静止窗未满 ⇒ 不交付，静止窗满 ⇒ 交付一次且不重复。改 `[short-reply-gate-v1]` 必跑（已做变异验证：出口改回恒 null ⇒ 3 条变红）。
-- `packages/core/tests/fill-verify-guard.node-test.ts` 新增 `[fill-verify-v3]` 两用例：极短回复会在 verify 完成前渲染，末条已是 assistant 气泡时仍须判「已发送」；只有 AI 气泡增量仍判未发送。
-- `packages/core/tests/fill-verify-guard.node-test.ts` 新增 `[no-new-session-per-fill-v1]` / `[rules-keep-v1]` 两用例：`handleFill` 在 **fill 之前**不得调 `newSession`（先剥注释再判；`extractFnBody('handleFill')` 会把嵌套的触顶 poll 回调一并抠出，故只能约束 fill 之前那一段）；触顶分支不得再发裸 `'继续'`，必须把留存规则块拼回 `fillPrompt`，且 `headless:close` 要清 `rulesBlocks`。均已对 HEAD 做变异验证（全红）。
-
-**会话不能隐式轮转**（`[no-new-session-per-fill-v1]`，2026-10-18）：系统提示词（SYSTEM.md + AGENTS.md ≈ 42K 码元）**只在会话首问注入一次**。`handleFill` 每次 fill 前调 `pool.newSession` ⇒ 每条提问都落进空对话、全程无系统提示词（实测 `promptBytes` 只有 6~14 字节）。要新会话只能显式发 `headless:new-session`。首问闸门是**持久化**的（`~/.ai-runner/workspace.json` 的 `firstPromptSent[model]`），历史 bug 会让它「已发但实际没进任何存活对话」——只改代码不复位则永不重新注入，复位命令见 `.workbuddy/memory/2026-10-18.md`。
+**会话不能隐式轮转**（`[no-new-session-per-fill-v1]`）：系统提示词（SYSTEM.md + AGENTS.md ≈ 42K 码元）**只在会话首问注入一次**。`handleFill` 在 fill 之前不得调 `pool.newSession`——否则每条提问都落进空对话、全程无系统提示词。要新会话只能显式发 `headless:new-session`。首问闸门持久化在 `~/.ai-runner/workspace.json` 的 `firstPromptSent[model]`；需要重新注入时改该键后重启。
 
 ### 验证目标绑定（verify-target-binding-v1）
 
 > 根因、DONE 契约与能力否定侦测见 `packages/core/SYSTEM.md` §13；本节只列本项目的命令、测试与文件。
 
-- **问题**：原冒烟/自检只探 AI Runner 自己的 `/__ai/`（5175），业务 dev server（如外部项目的 8091）从未被验——即「验证错目标」那次 bug；宿主自检也只认磁盘产物、不探活端口（「磁盘 ≠ 运行实例」孪生缺口）。两条都属「用断言代替取证」。
+- **问题**：冒烟/自检只探宿主自身的 `/__ai/`（5175），这只是宿主健康检查，与业务 dev server（如外部项目的 8091）是否编译通过正交；宿主自检也只认磁盘产物、不探活端口（「磁盘 ≠ 运行实例」孪生缺口）。两条都属「用断言代替取证」。
 - **自动发现**：DONE 时 `discoverTargets()` 自动发现目标——宿主 `[host]` + 端口探测（排除 5175–5185）+ 配置标注（`app:<project>`）+ `APP_DEV_URL` 覆盖；**谁在跑验谁，多项目天然覆盖**。
 - **DONE 验证段契约**：每条 ✓ 带真实 URL + HTTP 状态码，宿主与 app 分两行；混写 / 只验宿主即违规（示例见 SYSTEM.md §13）。
 - **selfcheck `L0-smoke-app` 闸门**（fail-open）：发现 app 目标而 DONE 未引用 → 标 `degraded`（可见、不拒收）。
@@ -173,8 +204,7 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
   - 同步：`pnpm skills:gen`（幂等：逐文件比对，一致则不动；源码位删掉的文件会从运行位一并清理）
   - 校验：`pnpm skills:check`（不一致 exit 2，供守卫与 CI 调用）
 - **验证**：`curl -sS http://127.0.0.1:5175/__ai/skills` 能列出该技能即安装成功——**不看生成脚本 exit code**。
-- **判据**：运行位为空 = 宿主看不到 = `@` 选择器与 `/skills/match` 都命中不了（2026-10-17 实测：补运行位前 `match` 返回 `matches: []`，补后 pm-agent score 41.4 / qa-agent 20.9 均命中）。
-- **历史**：早期用 `pm-agent-generate.cjs` / `qa-agent-generate.cjs` 以「内容块拼字符串」方式生成，改一次要跑两次、两处必然漂移，两个脚本均已删除；现行方案只复制不生成。
+- **判据**：运行位为空 = 宿主看不到 = `@` 选择器与 `/skills/match` 都命中不了（`match` 返回 `matches: []`）。
 - **已装清单唯一事实来源是磁盘**：`GET /__ai/skills` 扫前 64 行返回元数据；`.registry.json` 只是来源标注（服务端 `reconcileRegistry` 自动收敛，不手工编辑）。
 - **检索**：`POST /__ai/skills/match`（BM25，按任务文本）。消费方 `skill-registry.ts`。
 - **入口**：输入框 `@` 选择器（`file-picker.ts`，`@skill/<name>`）；编辑时插入标记，**提交时**由 `copyAndFill` 走 `expand-at-refs.ts` 展开为 `<file>` 块（AI 收到的 prompt 已含正文）。
@@ -191,12 +221,21 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 
 ## 本项目独有约束
 
-这几条都是踩过坑后固化的，SYSTEM.md 里没有。按域分组，新增条目归入对应域。
+以下为本工作区专属约束（SYSTEM.md 里没有）。按域分组，新增条目归入对应域。
+
+### 命名与注释
+
+> SYSTEM.md §6 只留语言中立原则（命名一致性、不可变优先、注释写为什么、路径/端口/密钥不硬编码）；本工作区的具体风格在此定义，lint 兜底见「构建与工具链」段。
+
+- 文件 / 目录名 `kebab-case`；变量 / 函数名 `camelCase`；常量用全大写下划线风格（UPPER_SNAKE_CASE）；禁单字母变量（循环索引 `i/j/k` 除外）。
+- 优先 `const`，禁 `var`（由 eslint `no-var` / `prefer-const` 兜底）。
+- 注释只写**为什么**（约束、权衡、技术债），不复述代码；用 `/** */`，删除注释掉的死代码。
+- 路径 / 端口 / 密钥提为常量或 env 注入，禁止硬编码。
 
 ### 构建与工具链
 
-- **批量改文件前先落兜底，顺序固定为「git 优先」**：`pnpm git:archive -- --path <目标>`。有 git → 用临时索引存档到 `ai-archive` 分支（`git checkout ai-archive -- <path>` 取回）；非 git / 空仓库 → 自动改落 `.ai-runner/runs/archive-<ts>/`（`pnpm recover <runId>` 取回）。**不要再手写 tar 到 `.ai-runner/backup`**——那是两路都缺位时的遗留做法。
-- **[post-done-gate-v1] DONE 后自动提交（2026-10-16 用户授权，推翻原「方案 C」）**：每次 DONE 由 `bin/post-done.cjs`（挂 `BeforeDoneFinal` hook，`onFail: warn`）自动 `git add -A && git commit` 到当前分支，随后 **detached 后台**执行 `pnpm build && pm2 restart ai-runner`。后台而非同步的原因：hook 由 5175 自身执行，同步 restart 会杀掉正在跑 hook 的进程 → DONE 回执与构建日志全丢（见 `pm2-ecosystem-v1` 注释）。`hooks.json` 在 `.ai-runner/`（gitignored）⇒ 此配置属本地运行态，新 clone / 新工作区需重建。
+- **批量改文件前先落兜底，顺序固定为「git 优先」**：`pnpm git:archive -- --path <目标>`。有 git → 用临时索引存档到 `ai-archive` 分支（`git checkout ai-archive -- <path>` 取回）；非 git / 空仓库 → 自动改落 `.ai-runner/runs/archive-<ts>/`（`pnpm recover <runId>` 取回）。
+- **[post-done-gate-v1] DONE 事件后自动提交**：DONE 是宿主侧**事件，不是循环终止条件**（见「自动执行单路径」段：无 `finish(inst, ...)` 终止）。宿主判定为 DONE 时，由 `bin/post-done.cjs`（挂 `BeforeDoneFinal` hook，`onFail: warn`）自动 `git add -A && git commit` 到当前分支，随后 **detached 后台**执行 `pnpm build && pm2 restart ai-runner`。必须后台而非同步：hook 由 5175 自身执行，同步 restart 会杀掉正在跑 hook 的进程 → DONE 回执与构建日志全丢。`hooks.json` 在 `.ai-runner/`（gitignored）⇒ 此配置属本地运行态，新 clone / 新工作区需重建。
 - **auto-import 会掩盖导入错误**：`unplugin-auto-import` 覆盖 vue / `@vueuse/core` 及项目内 composables 与 utils（生成物 `auto-imports.d.ts`）。依赖它的显式 import 被删后 **app 仍能跑**，但 vitest 与 `tsc` 没有该插件 → `Cannot find name`。清理「未使用导入」前必须先确认该模块能在 vitest 下裸跑；**任何导入改动后必跑 `pnpm test:tsc`**。
 - **模板里不要对 auto-import 符号赋值**：会生成 `__unimport_xxx`，dev 不报错但 build 阶段抛 `Cannot assign to this expression`。需要可变就显式 import。
 - **内联常量必须同构**：headless 注入函数经 `page.evaluate` 序列化后在浏览器执行，不能引用模块级常量，所以同一份正则刻意多写一份。会话触顶正则 3 处（`headless-inject.ts` / `headless-inject-simple.ts` / `scripts/tampermonkey-session-id.user.js`，`limit-marker-guard` 守卫）；发送频控正则 3 处（同前两者 + `resetReplyDedupInPage` 基线，`rate-marker-guard` 守卫）。改一处必须全处同步。
@@ -220,24 +259,24 @@ dev 模式前后端分进程（`scripts/dev-all.mjs`，端口取 `AIR_WEB_PORT` 
 
 ### 运维与运行时
 
-- **`scripts/anchors.json` 的 `file` 必须是相对仓库根的完整路径**：校验器只做 `path.join(ROOT, file)`，短路径直接 MISS（曾一次 44 条同时失败）。**全量 vitest 不覆盖锚点**（`anchors:verify` 是独立闸门）⇒ 交付前单跑 `pnpm anchors:verify` 或 `pnpm session:start`；vitest 全绿 ≠ preflight 全绿（实测删被锚点引用字串后 1380 passed 仍 2 条 MISS）。
-- **端口是契约，不再有端口文件**（port-contract-v1）：dev 前端 5274 / 后端 5275（dev-port-isolation-v1）、prod 恒 5175、userscript 分发 5178。`apps/standalone/src/server.ts` 遇 EADDRINUSE **拒绝自动漂移**（报错并给出处置命令），不落端口文件。`pnpm test:e2e` 报 ECONNREFUSED 时先确认 dev 进程是否真的在跑（`lsof -nP -iTCP:5275 -sTCP:LISTEN`），别去找端口文件；prod 探活 `curl 5175` 或 `pm2 jlist`。
-- **pm2 重启**（instance-ownership-v1 边界，2026-10-16 更新）：**本工作区已获用户显式授权**——DONE 后由 `bin/post-done.cjs` 自动 `pnpm build && pm2 restart ai-runner`（detached，见上「构建与工具链」段）。SYSTEM.md 的「重启归宿主侧」默认规则在本工作区不适用。手工 `pm2 restart` 仍须记录授权来源（①可指②回执如实）。**代执行当轮 `Failed to fetch` 属预期**（实例重启通道瞬断），下一轮探活即恢复，重试须**跨轮**。
+- **`scripts/anchors.json` 的 `file` 必须是相对仓库根的完整路径**：校验器只做 `path.join(ROOT, file)`，短路径直接 MISS。**全量 vitest 不覆盖锚点**（`anchors:verify` 是独立闸门）⇒ 交付前单跑 `pnpm anchors:verify` 或 `pnpm session:start`；vitest 全绿 ≠ preflight 全绿（实测删被锚点引用字串后 1380 passed 仍 2 条 MISS）。
+- **端口是契约，无端口文件**（port-contract-v1）：dev 前端 5274 / 后端 5275（dev-port-isolation-v1）、prod 恒 5175、userscript 分发 5178。`apps/standalone/src/server.ts` 遇 EADDRINUSE **拒绝自动漂移**（报错并给出处置命令），不落端口文件。`pnpm test:e2e` 报 ECONNREFUSED 时先确认 dev 进程是否真的在跑（`lsof -nP -iTCP:5275 -sTCP:LISTEN`），别去找端口文件；prod 探活 `curl 5175` 或 `pm2 jlist`。
+- **pm2 重启**（instance-ownership-v1 边界）：**本工作区已获用户显式授权**——DONE 后由 `bin/post-done.cjs` 自动 `pnpm build && pm2 restart ai-runner`（detached，见上「构建与工具链」段）。SYSTEM.md 的「重启归宿主侧」默认规则在本工作区不适用。手工 `pm2 restart` 仍须记录授权来源（①可指②回执如实）。**代执行当轮 `Failed to fetch` 属预期**（实例重启通道瞬断），下一轮探活即恢复，重试须**跨轮**。
 
 ### 状态与副作用收敛（workspace-root-single-exit-v1）
 
 - **执行 root 变更后的前端副作用只有一个出口：`useWorkspaces.applyRootChanged()`**。它依次清会话上下文 / 时间线事件 / 脚本收件箱 / **`load-rules` 的 Promise 缓存**，并自增 `workspaceEpoch`。`activate` / `register(activate)` / `remove(active)` / `create(activate)` 四个入口各自只写一行 `await applyRootChanged()`。
-  - **为什么**：这五项原先散在四个入口各写一遍，任何新增切换路径只要漏抄一项就静默漏配。实测过的形态就是 `load-rules` 的规则缓存跨工作区泄漏——新工作区首问仍带上一个工作区的 `AGENTS.md`。
+  - **为什么**：五项副作用必须同生同灭；散在各入口各写一遍时，任何新增切换路径漏抄一项就静默漏配（`load-rules` 规则缓存跨工作区泄漏即典型形态）。
   - **新增需要随 root 失效的模块级状态时，加在 `applyRootChanged` 里，不要加在调用方**。
   - 守卫：`packages/client/tests/rules-cache-invalidate.node-test.ts`（断言四路入口各命中一次、函数体内不得内联 `bumpWorkspaceEpoch`、不得残留旧名）。
 
 - **`load-rules` 的 Promise 缓存是模块级单例，与 root 无关**（`rules-promise-cache-v1`）：它只在加载失败时清缓存重试，**不会因切工作区而失效**，必须显式调 `clearRulesCache()`。凡在 `composables/**` 里写模块级 `let _xxxPromise` / 顶层 `ref()` 单例，都要先问「它的作用域是页面还是上下文」；作用域是上下文的，就必须挂进 `applyRootChanged`。
 
-- **切工作区禁止整页 `window.location.reload()`**（`workspace-switch-inplace-v1` / `workspace-guide-inplace-v1`）：reload 靠重建组件树「暴力兜住」所有模块级缓存，看起来能用，实则让单一出口形同虚设——一旦缓存项增加就会漏，且 reload 会触发启动期的自动开窗。引导页（`WorkspaceGuide.vue`）已改为原地 `register(path, true)`，成功后 `emit('ready')` 让 `App.vue` 翻转 `hasWorkspace`，**不要靠刷新让引导页消失**。
+- **切工作区禁止整页 `window.location.reload()`**（`workspace-switch-inplace-v1` / `workspace-guide-inplace-v1`）：reload 靠重建组件树「暴力兜住」所有模块级缓存，看起来能用，实则让单一出口形同虚设——一旦缓存项增加就会漏，且 reload 会触发启动期的自动开窗。引导页（`WorkspaceGuide.vue`）必须原地 `register(path, true)`，成功后 `emit('ready')` 让 `App.vue` 翻转 `hasWorkspace`，**不要靠刷新让引导页消失**。
 
 - **`/workspace/pick` 与 `/workspace/pick-path` 语义不同，别混用**：`pick` 服务端内部就 `registerWorkspace(path, true)`（**自行 setRoot**，绕开前端清理）；`pick-path` 只返回路径、不入册不激活。需要「选完再决定」一律用 `pick-path`。
 
-- **`sessionStorage` 的 `__ai_switch_project` 是死键**：全仓只有 `getItem` / `removeItem`，没有任何 `setItem`。原 `useAppStartup.reopenAfterSwitchProject` / `maybeScheduleReopen` 因此已删除——它们是切 root 清理的第三份残缺实现（漏 `clearInbox` / 规则缓存 / epoch）。**不要重新引入基于该键的启动期清理**。
+- **`sessionStorage` 的 `__ai_switch_project` 是死键**：全仓只有 `getItem` / `removeItem`，无任何 `setItem`。**禁止引入基于该键的启动期清理**——它承载不了「切 root 清理」的任一项（`clearInbox` / 规则缓存 / epoch），唯一出口见上条。
 
 - **收尾 residual 断言必须排除注释行**：改造中常用 `if (/旧标识符/.test(全文)) exit(2)` 做防残留，但若当轮刚在注释里复述了该标识符，断言会自绊，白烧一轮。要么断言前剥注释，要么注释里不复述标识符。
 

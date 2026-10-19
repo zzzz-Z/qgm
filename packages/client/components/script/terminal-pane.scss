@@ -16,7 +16,9 @@
 
 /* ── 容器 ─────────────────────────────────────────── */
 .terminal {
-  padding: 0 50px;
+  /* [terminal-shell-ui-v1] 左右 50px → 16px：原值与 chat-list 内部 padding 叠加，
+     实际可用宽度被压缩近 150px；外壳只保留最小安全边距，具体留白交由内层按断点控制。 */
+  padding: 0 16px;
   flex: 1 1 0;
   min-height: 0;
   @apply flex flex-col overflow-hidden;
@@ -45,14 +47,26 @@
 /* [panel-dock-right-v1] 靠右固定：居中悬浮会遮挡消息流中心；右上角常驻更贴近工具面板语义 */
 .panel-host {
   position: absolute;
-  top: 8px;
-  right: 12px;
+  /* [terminal-shell-ui-v1] 顶部/右侧边距随外壳收紧同步下调，避免与首条消息压叠。 */
+  top: 6px;
+  right: 8px;
   z-index: 20;
   width: fit-content;
-  max-width: min(420px, calc(100% - 24px));
+  max-width: min(380px, calc(100% - 16px));
   border-radius: var(--radius-8);
   overflow: hidden;
   box-shadow: var(--shadow-md);
+  /* 浮层自身不拦截滚轮，避免鼠标滑过面板时消息流停滚 */
+  pointer-events: auto;
+}
+@media (max-width: 720px) {
+  .panel-host {
+    /* 窄屏：面板降为次级浮层，宽度与阴影一并收缩，把主体让给消息流。 */
+    top: 4px;
+    right: 4px;
+    max-width: calc(100% - 8px);
+    box-shadow: var(--shadow-sm, 0 1px 4px rgb(0 0 0 / 25%));
+  }
 }
 
 /* ── 消息流 ─────────────────────────────────────────── */
@@ -65,10 +79,15 @@
   align-items: stretch;
   justify-content: flex-start;
   width: 100%;
-  max-width: 820px;
+  /* [terminal-shell-ui-v1] 820 → 900：宽屏阅读行长略放宽；padding 按断点收放，
+     窄屏不再出现「外壳 16 + 内层 24」的二次挤压。 */
+  max-width: 900px;
   margin: 0 auto;
-  padding: 14px 24px 20px;
-  gap: 6px;
+  padding: 16px 20px 24px;
+  gap: 10px;
+  @media (max-width: 900px) {
+    padding: 14px 8px 20px;
+  }
   text-align: left;
   background: transparent;
   font-family:
@@ -92,7 +111,14 @@
   flex: 1 1 0;
   min-height: 0;
   width: 100%;
-  gap: 6px;
+  /* [terminal-shell-ui-v1] 等距 6px → 10px：条目之间需要基础呼吸，
+     再由下方「换组」规则给文本卡 ↔ 脚本卡交界处更大留白，形成节奏。 */
+  gap: 10px;
+}
+/* 换组加大留白：AI 文本（RoundCard）与脚本卡交替出现，交界处是天然分段点。 */
+.chat-list-inner > .terminal-card + .script-card,
+.chat-list-inner > .script-card + .terminal-card {
+  margin-top: 6px;
 }
 
 /* ── 空态 ─────────────────────────────────────────── */
@@ -594,16 +620,74 @@
 }
 
 /* [ctx-usage-v1] 会话消耗指示：弱化存在感，仅作量级提示，不抢时间线注意力 */
+/* [terminal-shell-ui-v1] 上下文状态由「裸文字贴在内容区左上」改为右侧轻量状态行：
+   轮次与 token 估计各成一枚小胶囊，与消息流之间加一道极淡分隔线，
+   既保持可扫读，又不与正文抢注意力。 */
 .ctx-usage {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 12px;
+  /* [terminal-actions-v1] 由纯右对齐改为两端：左侧上下文量级、右侧复制/关闭进程操作组。 */
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px 6px;
+  margin: 0 0 2px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-1, #30363d) 55%, transparent);
   font-size: var(--font-11);
   color: var(--text-4);
   flex-shrink: 0;
-  opacity: 0.75;
+  opacity: 0.8;
+}
+/* 操作组：按钮默认极淡，hover 才浮出，保持状态条的低存在感。 */
+.ctx-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.ctx-btn {
+  padding: 1px 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 10.5px;
+  line-height: 1.6;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.ctx-btn:hover:not(:disabled) {
+  background: rgba(127, 127, 127, 0.14);
+  color: var(--text-1);
+}
+.ctx-btn:focus-visible {
+  outline: 2px solid var(--primary, #58a6ff);
+  outline-offset: 1px;
+}
+.ctx-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+/* 危险操作（关闭进程）用文字色表达，不铺红底：它只在运行中出现，铺底色会过于抢眼。 */
+.ctx-btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger-1, #f85149) 14%, transparent);
+  color: var(--danger-1, #f85149);
+}
+.ctx-rounds,
+.ctx-tokens {
+  padding: 0 6px;
+  border-radius: 4px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  background: rgba(127, 127, 127, 0.1);
+}
+.ctx-rounds {
+  color: var(--text-3);
 }
 .ctx-tokens {
-  color: var(--text-5);
+  color: var(--text-4);
+  font-family: var(--mono, ui-monospace, monospace);
 }

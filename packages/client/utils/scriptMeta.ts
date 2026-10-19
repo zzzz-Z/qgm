@@ -40,6 +40,33 @@ export function parseScriptMeta(code: string): ScriptMeta {
   }
 }
 
+/**
+ * [script-head-autofill-v1] 用信封的 desc/why 补齐脚本头注释（`// @desc` / `// @why`）。
+ * [WHY] 信封路径下 desc/why 是 JSON 字段：AI 按 §1.4 只填信封、`code` 不写头时，脚本到达
+ *   /run 会被头契约（scanScriptHead）以 MISSING_DESC 400 拒收——实测该原因占全部拒收首位
+ *   （473 次）。在接线层统一补齐，下游（头契约 / parseScriptMeta / 去重指纹 / 卡片）零改动。
+ * [CONSTRAINT] 幂等：已有 @desc/@why 的项不重复补；两值均空则原样返回（手动运行路径不受影响）。
+ *   头注释必须落在 shebang **之后**——shebang 只在首行合法，抢在它前面会让头校验失真。
+ * @param code 脚本原文
+ * @param desc 信封 desc 字段
+ * @param why 信封 why 字段
+ */
+export function ensureScriptHead(code: string, desc?: string, why?: string): string {
+  const src = String(code ?? '')
+  if (!src) return src
+  const oneLine = (v?: string): string => String(v ?? '').split(/\r?\n/)[0].trim().slice(0, 200)
+  const hasField = (name: string): boolean => new RegExp(`^[ \\t]*(?://|#)[ \\t]*@${name}\\b`, 'm').test(src)
+  const head: string[] = []
+  const descText = oneLine(desc)
+  const whyText = oneLine(why)
+  if (descText && !hasField('desc')) head.push(`// @desc ${descText}`)
+  if (whyText && !hasField('why')) head.push(`// @why ${whyText}`)
+  if (!head.length) return src
+  const lines = src.split(/\r?\n/)
+  const shebang = lines[0].startsWith('#!') ? String(lines.shift() ?? '') : ''
+  return `${[shebang, ...head].filter(Boolean).join('\n')}\n${lines.join('\n')}`
+}
+
 /** [meta-schema-unify-v1] 语言判据与 core/post-run/shebang.ts + 脚本头契约对齐：基于首行 shebang，不用注释前缀 */
 export function detectLang(code: string): 'js' | 'bash' {
   let first = String(code).split(/\r?\n/, 1)[0] || ''

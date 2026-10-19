@@ -119,7 +119,8 @@ const { toast, confirmDialog } = useToast()
 // U.3: CodeMirror 全家桶懒加载——首建编辑器时才 await import，CM 打进独立 chunk
 
 // 已删 persistWarning：文件内无消费点
-const { script, lastRunCode, runIds, running, result, changes, rolling, busyAll, liveStdout, liveStderr, doneSummary, run, rollback, rollbackAll, save, autoFeedbackRequested, clearAutoFeedback, changeView, cumulativeLoading, cumulativeError, visibleChanges, setChangeView } = useRunner()
+// [terminal-actions-v1] 补解构 stop：终端面板的「关闭进程」按钮与 Esc 快捷键复用同一停止链路
+const { script, lastRunCode, runIds, running, result, changes, rolling, busyAll, liveStdout, liveStderr, doneSummary, run, rollback, rollbackAll, save, stop, autoFeedbackRequested, clearAutoFeedback, turnDrivenRun, changeView, cumulativeLoading, cumulativeError, visibleChanges, setChangeView } = useRunner()
 /**
  * [cumulative-baseline-v1] 视图切换的写入口必须收敛到 useRunner.setChangeView
  * [WHY] 若把 v-model 直接绑到 changeView，切换只改了值、不触发累积拉取——面板会停在上一次的
@@ -311,10 +312,14 @@ function handleRunResult(): void {
       'warn',
       5000,
     )
-    if (autoTakeoverEnabled.value) {
-      scheduleAutoRun(() => { void copyOutput(autoFeedbackRequested.value) })
-    } else {
-      void copyOutput(autoFeedbackRequested.value)
+    // [turn-feedback-exclusive-v1] turn 轮的回传权归 turn 管线（fillSink 发 `# turn N 执行结果`），
+    //   此处旧通道再发一次即为「1 轮 2 次提问」——预检失败同样由 turn 结果承载。
+    if (!turnDrivenRun.value) {
+      if (autoTakeoverEnabled.value) {
+        scheduleAutoRun(() => { void copyOutput(autoFeedbackRequested.value) })
+      } else {
+        void copyOutput(autoFeedbackRequested.value)
+      }
     }
     return
   }
@@ -335,7 +340,9 @@ function handleRunResult(): void {
       || r.test?.ok === false
   // [loop-feedback-authority-v2] 循环活动时回传权归循环引擎，ScriptPanel 一律不再发：
   //   本块执行完时循环引擎也会发（且已按队列是否清空合并成一次），两处都发即为同轮双发。
-  if (shouldAutoAsk && r.error !== '已取消') {
+  // [turn-feedback-exclusive-v1] 同语义扩展到 turn 管线：turn 轮由 fillSink 统一回灌
+  //   `# turn N 执行结果`（只读探测轮同样被覆盖），此处再发即为「1 轮 2 次提问」。
+  if (shouldAutoAsk && !turnDrivenRun.value && r.error !== '已取消') {
     if (forceFeedback) clearAutoFeedback()
     if (autoTakeoverEnabled.value) scheduleAutoRun(() => { void copyOutput(forceFeedback) })
     else void copyOutput(forceFeedback)
@@ -478,11 +485,10 @@ const tokenEstimate = computed(() => runIds.value.length * 3000)
         :live-stdout="liveStdout"
         :live-stderr="liveStderr"
         :done-summary="doneSummary"
-        :ai-waiting="aiWaiting"
-        :delivering="delivering"
         :run-count="runIds.length"
         :token-estimate="tokenEstimate"
         @preview="onPreviewFile"
+        @stop="stop"
       />
       <!-- 编辑器 (下方) -->
       <ScriptEditor

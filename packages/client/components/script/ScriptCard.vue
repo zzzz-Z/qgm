@@ -3,7 +3,7 @@
 import { nextTick, onMounted, onUpdated, watch } from 'vue'
 import { probeRender } from '../../composables/ui/render-probe'
 import { ansiToHtml } from '../../utils/ansi-render'
-import { denoiseOutput } from '../../utils/timeline-preview'
+import { denoiseOutput, unfoldEscapedLog } from '../../utils/timeline-preview'
 // [script-card-split-v1] 从 TerminalPane 拆出的脚本卡片子组件
 // [WHY] TerminalPane 行数超架构红线上限；卡片是最大块，可自持展开状态，优先独立
 // [CHANGE-IMPACT] TerminalPane 的 script 分支改为 <ScriptCard :card="card" />；样式随迁
@@ -42,8 +42,9 @@ const atBottom = ref(true)
 
 const fullOutput = computed(() => props.liveStdout || props.card.stdoutText)
 /** 输出区 HTML（ANSI 转义安全着色）；[ansi-render-v1] 内容先转义再注入色标签 */
-/** [output-denoise-v1] 输出区渲染：先降噪（去空行/分隔线/重复/控制码，保 SGR），再转色 */
-const cleanedOutput = computed(() => denoiseOutput(fullOutput.value))
+/** [output-denoise-v1] 输出区渲染：先展开 JSON 转义串（liveStdout 流式路径的原始文本未经
+ *   TerminalPane 预处理，字面量 \n / \u001b 会在此原样上屏），再降噪（保 SGR），再转色 */
+const cleanedOutput = computed(() => denoiseOutput(unfoldEscapedLog(fullOutput.value)))
 const outputHtml = computed(() => ansiToHtml(cleanedOutput.value))
 const isRunning = computed(() => props.card.phaseClass === 'phase-running')
 const lineCount = computed(() => (cleanedOutput.value ? cleanedOutput.value.split('\n').length : 0))
@@ -54,10 +55,10 @@ const lineCount = computed(() => (cleanedOutput.value ? cleanedOutput.value.spli
 // [script-card-changes-v1] 展开条件改为「有变更文件 或 有 stderr」：
 //   stdout 里的 ✓ ok(...) 打点是噪音，成功无变更的步骤不应长出可点开的箭头。
 const hasBody = computed(() => props.card.changes.length > 0 || Boolean(props.card.stderrText) || Boolean(fullOutput.value))
-// [script-card-l3-v1] L2 折叠区是否有内容：why / 失败原因 / 耗时行数。全空则不渲染折叠区，避免空箭头。
-// [script-card-detail-v1] reason 已移到展开区元信息栏，不再参与 L2 判空
-// [script-card-reason-v1] reason 参与 L2 判空：失败态即使无 why、无耗时，也必须能展开看到失败原因
-const hasL2 = computed(() => Boolean(props.card.why) || Boolean(props.card.reason) || props.card.durationMs != null)
+// [script-card-l3-v1] L2 折叠区是否有内容：why / 失败原因。全空则不渲染折叠区，避免空箭头。
+// [sc-meta-dedupe-v1] 耗时行已从 L2 移除（只在展开区元信息栏出现），durationMs 不再参与判空
+// [script-card-reason-v1] reason 参与 L2 判空：失败态即使无 why，也必须能展开看到失败原因
+const hasL2 = computed(() => Boolean(props.card.why) || Boolean(props.card.reason))
 // [timeline-denoise-v1] 结果摘要只在终态出现，运行中 / 等待中不占位
 const isFinal = computed(() => props.card.phaseClass === 'phase-done' || props.card.phaseClass === 'phase-error')
 const isFailed = computed(() => props.card.phaseClass === 'phase-error')
@@ -159,19 +160,17 @@ function toggle(): void { expanded.value = !expanded.value }
           <span v-if="resultLabel" class="script-card-stat" :class="resultClass">{{ resultLabel }}</span>
           <span class="script-card-time">{{ card.timeLabel }}</span>
         </span>
-        <!-- L2 折叠：why / 失败原因 / 耗时与行数——需要时按 ▸ 展开，不占常驻视觉位 -->
+        <!-- L2 折叠：why / 失败原因。耗时与行数只在展开区元信息栏出现一次（[sc-meta-dedupe-v1]） -->
         <span v-if="expanded && hasL2" class="script-card-l2">
           <span v-if="card.why" class="script-card-why">
-            <span class="why-label">WHY</span>
             <span v-overflow-tip="card.why" class="why-text">{{ card.why }}</span>
           </span>
           <span v-if="card.reason" class="script-card-reason">
             <span class="reason-label">失败原因</span>
             <span v-overflow-tip="card.reason" class="reason-text">{{ card.reason }}</span>
           </span>
-          <span v-if="card.durationMs != null" class="script-card-dur">{{ lineCount }} 行 · {{ durLabel }}</span>
         </span>
-        <span v-if="!hasL2 && resultLabel" class="script-card-stat" :class="resultClass">{{ resultLabel }}</span>
+        <!-- [card-info-converge-v1] 原此处的 stat 兜底渲染与 L1 重复，已删除：状态徽标只在 L1 出现一次。 -->
       </span>
     </div>
     <!-- [script-card-head-v2] 展开区只剩原始输出（why 已上提到头部）：
@@ -191,10 +190,10 @@ function toggle(): void { expanded.value = !expanded.value }
         <button v-if="!atBottom" class="sc-jump" @click="jumpBottom">
           ↓ 回到底部
         </button>
-        <div class="sc-out-bar">
-          <span>行数 {{ lineCount }}</span>
-          <span v-if="card.durationMs != null">耗时 {{ durLabel }}</span>
-          <span v-if="isRunning" class="sc-running">运行中…</span>
+        <!-- [sc-meta-dedupe-v1] 底栏不再重复行数/耗时（与展开区元信息栏三处重复已收敛为一处）；
+             仅运行中保留状态提示 -->
+        <div v-if="isRunning" class="sc-out-bar">
+          <span class="sc-running">运行中…</span>
         </div>
       </div>
       <!-- [script-card-changes-v1] 变更文件列表：点击打开预览浮层（由父组件承接） -->
@@ -222,35 +221,35 @@ function toggle(): void { expanded.value = !expanded.value }
 
 <style scoped>
 .script-card {
-  margin: 0;
-  padding: 4px 0;
+  position: relative;
+  margin: 0 0 2px;
+  padding: 5px 0 5px 10px;
   border: 0;
   background: transparent;
-  border-radius: 10px;
+  border-radius: 8px;
   transition: background-color 0.14s ease;
 }
-/* [script-card-fail-quiet-v1] 失败降噪：红边收细到 1px、去掉淡红底。
-   失败仍有图标 + exit 码可辨，但不再整卡染色（四重提示叠加是本轮要解决的噪音源）。 */
-.script-card.phase-error {
-  border-left: 1px solid color-mix(in srgb, var(--danger-1, #f85149) 45%, transparent);
-  padding-left: 6px;
-}
+/* [sc-drop-left-bar-v1] 移除左侧 2px 状态色条（用户指定：图标左侧竖线干扰视线）；
+   成功/失败语义仍由阶段图标颜色 + 状态徽标承载，信息不丢失。 */
 /* [card-bg-on-expand-v1] 展开时显示背景（替代 hover 变色，避免与头部 hover 叠成两层） */
+/* [card-info-converge-v1] 展开态不再整块铺灰底（与左色条、hover 叠加后浑浊），
+   改为极淡描边标示「这块是展开的」。 */
 .script-card.is-expanded {
-  background: rgba(127, 127, 127, 0.045);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(127, 127, 127, 0.14);
 }
 /* [ui-codex-align-v1] 4px 网格：gap 6→8、margin 2→4；层级靠灰度不靠色块 */
 .script-card-head {
   display: flex;
-  /* [script-card-head-v2] 由 center 改 flex-start：文本区变成 1–3 行的纵向块后，
-     居中会让 14px 状态图标浮在整个块的中腰、与「它描述的那一行」脱开。
-     顶部对齐后图标/徽章/时间都挂在第一行（desc）上，纵向扫读更稳。 */
+  /* [script-card-head-v2] 顶部对齐：图标/徽章/时间都挂在 desc 那一行上，纵向扫读更稳。 */
   align-items: flex-start;
   gap: 8px;
-  padding: 4px 8px;
-  border-radius: 8px;
+  /* [card-info-converge-v1] 横向内边距 8 → 4：卡片本体已有 10px 左内边距，
+     再叠 8 会让 desc 起点离色条过远；行高 16 → 18 给 13px 主信息留呼吸。 */
+  padding: 3px 4px;
+  border-radius: 6px;
   font-size: var(--font-11);
-  line-height: 16px;
+  line-height: 18px;
   color: var(--text-3, #8b949e);
 }
 .script-card-head.is-clickable {
@@ -272,23 +271,17 @@ function toggle(): void { expanded.value = !expanded.value }
 .script-card-head.is-clickable[aria-expanded='true']::after {
   transform: rotate(90deg);
 }
-.script-card-dur {
-  flex: 0 0 auto;
-  font-family: var(--mono, ui-monospace, monospace);
-  font-size: 11px;
-  color: var(--text-3, #8b949e);
-  opacity: 0.6;
-  font-variant-numeric: tabular-nums;
-}
 /* [script-card-compact-v1] 时间不再独占一行：跟随状态徽标成组，靠 head 的 gap 控制间距 */
 .script-card-time {
   flex: 0 0 auto;
   font-family: var(--mono, ui-monospace, monospace);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 400;
   color: var(--text-3, #8b949e);
-  opacity: 0.55;
+  /* [card-info-converge-v1] 时间只在需要精确定位时才有价值，默认淡到近乎背景。 */
+  opacity: 0.45;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
 }
 /* [script-card-head-v2] 文本区（列方向）：① desc ② why ③ 失败原因，
    整体吃掉 head 的剩余宽度（原 desc 的 flex:1 职责上移到这里）。 */
@@ -300,11 +293,23 @@ function toggle(): void { expanded.value = !expanded.value }
   gap: 1px;
 }
 /* [script-card-l3-v1] L1：desc + 结果摘要同一行，常驻可见；L2 缩进在其下方，仅展开时出现 */
+/* [card-info-converge-v1] L1 一行三类信息：desc 吃满剩余宽度成为主信息，
+   状态徽标与时间整体靠右成组（margin-left:auto），视觉上退为附属。 */
 .script-card-l1 {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
+}
+.script-card-l1 > .script-card-desc {
+  flex: 1 1 auto;
+}
+.script-card-l1 > .script-card-stat,
+.script-card-l1 > .script-card-time {
+  flex: 0 0 auto;
+}
+.script-card-l1 > .script-card-stat:first-of-type {
+  margin-left: auto;
 }
 .script-card-l2 {
   display: flex;
@@ -321,9 +326,11 @@ function toggle(): void { expanded.value = !expanded.value }
   display: block;
   width: 100%;
   min-width: 0;
-  color: var(--text-2, #c9d1d9);
-  font-size: 12.5px;
-  font-weight: 400;
+  /* [card-info-converge-v1] desc 是每张卡片唯一的视觉焦点：提亮到 text-1、
+     字号 13px、字重 450；状态徽标与时间整体降到 11px 次级色，避免三者平权抢读。 */
+  color: var(--text-1, #e6edf3);
+  font-size: 13px;
+  font-weight: 450;
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
@@ -335,9 +342,14 @@ function toggle(): void { expanded.value = !expanded.value }
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font: 400 11px/16px var(--mono, ui-monospace, monospace);
+  gap: 4px;
+  font: 400 10.5px/16px var(--mono, ui-monospace, monospace);
   white-space: nowrap;
+  /* [card-info-converge-v1] 徽标只作状态备注，默认半透明；hover 卡片时才浮出完整亮度。 */
+  opacity: 0.8;
+}
+.script-card:hover .script-card-stat {
+  opacity: 1;
 }
 .script-card-stat::before {
   content: '';
@@ -367,7 +379,8 @@ function toggle(): void { expanded.value = !expanded.value }
   min-width: 0;
   line-height: 1.35;
 }
-.why-label,
+/* [sc-drop-why-label-v1] WHY 字样标签已移除（用户指定）：why 文本自身即说明用途，
+   只保留「失败原因」标签——它是用户意想不到的内容，需要显式标注。 */
 .reason-label {
   flex: 0 0 auto;
   font-family: var(--mono, ui-monospace, monospace);

@@ -130,6 +130,11 @@ function makeRoot(pres: unknown[]): unknown {
   return { querySelectorAll: (sel: string) => (sel === 'pre' ? pres : []) }
 }
 
+/** [no-fence-envelope-v1] 无 <pre>（回复未加 ```json 围栏）时，回退读取整条回复文本 */
+function makeRootText(text: string): unknown {
+  return { querySelectorAll: () => [], textContent: text }
+}
+
 function envelope(obj: unknown): string {
   return `\`\`\`json\n${JSON.stringify(obj, null, 2)}\n\`\`\``
 }
@@ -176,6 +181,28 @@ describe('readTurnFromRoot：从最后一条回复读信封', () => {
     const closed = envelope({ v: 1, turn: 3, content: [FULL[1]] })
     const got = oil.readTurnFromRoot(makeRoot([makePre(`${closed}\n\n以上是这轮的交付。`)]))
     expect(got!.turnId).toBe(3)
+  })
+
+  test('无 <pre> 围栏（裸 JSON）⇒ 回退解析整条回复文本 [no-fence-envelope-v1]', () => {
+    const bare = JSON.stringify({ v: 1, turn: 21, content: [FULL[1], FULL[0]] })
+    const got = oil.readTurnFromRoot(makeRootText(bare))
+    expect(got!.turnId).toBe(21)
+    expect((got!.blocks as { id: string }[]).map(b => b.id)).toEqual(['c1', 'say_1'])
+  })
+
+  test('回退分支不误吞：普通文本 / 非信封 JSON / 未闭合 ⇒ null', () => {
+    expect(oil.readTurnFromRoot(makeRootText('普通回复，没有信封'))).toBeNull()
+    expect(oil.readTurnFromRoot(makeRootText('{"foo":1}'))).toBeNull()
+    const half = JSON.stringify({ v: 1, turn: 22, content: [FULL[1]] }).slice(0, -6)
+    expect(oil.readTurnFromRoot(makeRootText(half))).toBeNull()
+  })
+
+  test('<pre> 命中时优先于文本回退（既有围栏路径行为不变）', () => {
+    const root = {
+      querySelectorAll: (sel: string) => (sel === 'pre' ? [makePre(envelope({ v: 1, turn: 31, content: [FULL[0]] }))] : []),
+      textContent: JSON.stringify({ v: 1, turn: 99, content: [FULL[1]] }),
+    }
+    expect(oil.readTurnFromRoot(root)!.turnId).toBe(31)
   })
 })
 
@@ -260,4 +287,14 @@ test('片段清单含 turn-schema 与 turn-emit，且 turn-schema 在 turn-emit 
   assert.ok(schemaAt > 0, 'SEGMENTS 缺 turn-schema：油猴产物里没有 parseTurn，信封永远读不出来')
   assert.ok(emitAt > 0, 'SEGMENTS 缺 turn-emit')
   assert.ok(schemaAt < emitAt, 'turn-schema 必须在 turn-emit 之前（const 声明不提升，TDZ）')
+})
+
+// [turn-emit-dedup-persist-v1] 去重键须带 sid（跨会话 turnId 会互相顶掉），
+//   且集合跨刷新持久化 —— 否则刷新后同一信封被重推、前端账本为空 ⇒ 上一轮脚本被重跑（P0-1b）。
+test('[turn-emit-dedup-persist-v1] 去重键含 sid 且落 sessionStorage', () => {
+  const src = read(SEGMENT)
+  assert.match(src, /function turnBlockKey\(sid: string, turnId: number, blockId: string\)/, '块去重键必须带 sid：不同会话的 turnId 各自从 1 起算，会互相顶掉')
+  assert.match(src, /\$\{sid\}\|\$\{turn\.turnId\}/, '结束帧去重键也必须带 sid')
+  assert.match(src, /loadKeySet\(/, '未从 sessionStorage 读回已推送集合：刷新后同一信封会被重推')
+  assert.match(src, /sessionStorage\.setItem/, '去重集合未持久化：刷新后上一轮脚本会被重跑')
 })

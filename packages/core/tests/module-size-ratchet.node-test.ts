@@ -13,7 +13,7 @@
 //     例：轮内结果合并窗的时序留在 pending-scripts.ts、文案上收到 loop-result-prompt.ts、
 //     接线留在 reply-handlers.ts，唯一原因是 reply-handlers 冻结在 426 行、只减不增。
 //   新判据：阈值只作最后一道防线；该不该拆看「这里是不是两件事」，不看行数。
-// [CONSTRAINT] 上限值与 SYSTEM.md §4 必须逐字同值，由本文件最后一条断言守住（防文档与守卫各说各话）。
+// [CONSTRAINT] 上限值与 AGENTS.md「架构红线量化阈值」节必须逐字同值，由本文件最后一条断言守住（防文档与守卫各说各话）。
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,14 +24,14 @@ const ROOT = path.resolve(HERE, '..', '..', '..')
 const NL = String.fromCharCode(10)
 
 // [CONSTRAINT] 阈值写成字面量而非从基线推导——否则「改基线 → 期望值同步变 → 永不红」。
-//   [cohesion-over-budget-v1] 放宽后的取值必须与 SYSTEM.md §4 逐字一致（文末 ssot-parity 断言）。
+//   [cohesion-over-budget-v1] 放宽后的取值必须与 AGENTS.md 阈值节逐字一致（文末 ssot-parity 断言）。
 const MAX_MODULE_LINES = 800
 const MAX_COMPONENT_LINES = 1000
 
 const SCAN_ROOTS = ['packages', 'apps']
 // [scripts-exempt-v1] 2026-10-17 有意不纳入 scripts/：
 //   ① 那里是一次性 CLI 工具（analyze-*.cjs / board-*.cjs / verify-*.cjs），
-//      §4「模块 ≤ 800 行」的语义针对的是长期维护的业务模块，不是工具脚本；
+//      「模块建议 ≤ 800 行」的语义针对的是长期维护的业务模块，不是工具脚本；
 //   ② scripts/tampermonkey-session-id.user.js 受油猴**单文件注入模型**约束——
 //      油猴只安装一个 .user.js，无法拆分（1566 行，是已知且可接受的例外）。
 //   若未来 scripts/ 出现长期维护的模块化工具，应先把该工具迁至 packages/，再纳入本表。
@@ -40,7 +40,7 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.ai-runner', 'covera
 
 /**
  * [冻结清单 2026-10-06] 越线文件 → 当时实测行数。数字只允许下调，不允许上调。
- * 判据：超出 §4 阈值（模块 800 / 组件 1000）。
+ * 判据：超出阈值节（模块 800 / 组件 1000）。
  * [cohesion-over-budget-v1] 阈值放宽后，原 9 条里 8 条已合法 ⇒ 一并移出清单。
  *   留着它们会让清单同时扮演两个角色（既成事实记账 + 隐性低阈值），而那正是「为行数拆功能」的来源；
  *   且下一条断言要求「清单里的每条都必须确实越线」，混着放会直接红。
@@ -137,30 +137,31 @@ describe('§4 文件体积 ratchet', () => {
     expect(Array.isArray(drifted)).toBe(true)
   })
 
-  // [ssot-parity-v1] 阈值共声明 4 处：SYSTEM.md §4 / 本文件 / hclc-guard / ask-wiring。
+  // [ssot-parity-v1] 阈值权威已下放工作区（应用级规则不写具体数字）：数字只声明在
+  //   AGENTS.md「架构红线量化阈值」节；本文件 / hclc-guard 的守卫常数必须与之逐字同值。
   // WHY: 2026-10-06 放宽阈值时，最怕的是「守卫改了、文档没改」——下一个照文档行事的人会按旧数字设计拆分，
-  //   这次放宽就白做了。数字必须只有一处权威（§4），其余三处被这条断言钉住。
-  it('SYSTEM.md §4 的阈值与三处守卫常数同值（改一处必须同步全处）', () => {
-    const md = fs.readFileSync(path.join(ROOT, 'packages/core/SYSTEM.md'), 'utf8')
-    const from = md.indexOf('## §4')
-    const to = md.indexOf('## §5')
-    expect(from, 'SYSTEM.md 里找不到 §4 段落').toBeGreaterThan(-1)
-    expect(to, 'SYSTEM.md 里找不到 §5 段落（§4 的截断锚点）').toBeGreaterThan(from)
-    const sec = md.slice(from, to)
+  //   这次放宽就白做了。数字必须只有一处权威（AGENTS.md），其余处被这条断言钉住。
+  it('AGENTS.md 阈值节的数字与守卫常数同值（改一处必须同步全处）', () => {
+    const doc = fs.readFileSync(path.join(ROOT, 'AGENTS.md'), 'utf8')
+    const from = doc.indexOf('## 架构红线量化阈值')
+    expect(from, 'AGENTS.md 里找不到「架构红线量化阈值」节').toBeGreaterThan(-1)
+    const rest = doc.slice(from)
+    const nextAt = rest.indexOf('\n## ')
+    const sec = nextAt > -1 ? rest.slice(0, nextAt) : rest
 
     const pick = (re: RegExp, label: string): number => {
       const m = sec.match(re)
-      expect(m, `§4 里读不到「${label}」的阈值（换了措辞就要同步本断言的取数正则）`).not.toBeNull()
+      expect(m, `阈值节里读不到「${label}」的阈值（换了措辞就要同步本断言的取数正则）`).not.toBeNull()
       return Number((m as RegExpMatchArray)[1])
     }
     expect(pick(/普通模块建议\s*≤\s*(\d+)\s*行/, '普通模块建议行数')).toBe(MAX_MODULE_LINES)
     expect(pick(/组件建议\s*≤\s*(\d+)\s*行/, '组件建议行数')).toBe(MAX_COMPONENT_LINES)
 
-    // 另两处守卫在别的包（无跨包共享常量模块），只能读源码字面量——读的是「它的声明」，判的是「与 §4 同值」
+    // 另一处守卫在别的包（无跨包共享常量模块），只能读源码字面量——读的是「它的声明」，判的是「与阈值节同值」
     const hclc = fs.readFileSync(path.join(ROOT, 'packages/core/tests/hclc-guard.node-test.ts'), 'utf8')
     // [loop-consolidation-P3d] ask-wiring.node-test.ts 已随 auto-loop 收敛删除；
     //   其「单文件 import ≤ N」的守卫职责由 hclc-guard 单独承担（下方断言已覆盖）
     const docImport = pick(/单文件唯一\s*`import`\s*模块数\s*>\s*(\d+)/, '单文件唯一 import 模块数上限')
-    expect(Number((hclc.match(/const LIMIT = (\d+)/) || [])[1]), 'hclc-guard 的 LIMIT 未随 §4 同步').toBe(docImport)
+    expect(Number((hclc.match(/const LIMIT = (\d+)/) || [])[1]), 'hclc-guard 的 LIMIT 未随阈值节同步').toBe(docImport)
   })
 })

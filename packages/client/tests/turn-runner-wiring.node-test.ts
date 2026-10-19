@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 import { beforeEach, test, vi } from 'vitest'
 // vi.mock 会被 hoist 到所有 import 之前，故静态 import 一样拿到假 useRunner
 import {
+  abortAllTurns,
   abortTurn,
   resetTurnRunner,
   seedTurnLedger,
@@ -20,6 +21,22 @@ const h = vi.hoisted(() => ({
   stopCalls: 0,
   /** 每块返回的结果；null 元素 ⇒ 该块返回 'skipped' */
   scripted: [] as Array<{ ok: boolean, code: number, stdout: string, stderr: string } | null>,
+}))
+
+// [runtime-kind-ssot-v1] useRuntime 是跨组件单例且真实模块会碰 transport / storage；
+//   这里替身化以便真跑接线并断言阶段转移（同 task-progress-panel.node-test.ts 的做法）。
+const rt = vi.hoisted(() => ({ state: { value: { kind: 'idle' as string } } }))
+
+vi.mock('../composables/ai/useRuntime', () => ({
+  useRuntime: () => ({
+    state: rt.state,
+    enterExecuting: () => { rt.state.value.kind = 'executing' },
+    enterFeedback: () => { rt.state.value.kind = 'feedback' },
+    enterWaiting: () => { rt.state.value.kind = 'waiting' },
+    settleIdle: () => { rt.state.value.kind = 'idle' },
+    stop: () => { rt.state.value.kind = 'stopped' },
+    reset: () => { rt.state.value.kind = 'idle' },
+  }),
 }))
 
 vi.mock('../composables/runner/useRunner', () => ({
@@ -43,6 +60,7 @@ beforeEach(() => {
   h.runCalls.length = 0
   h.scripted.length = 0
   h.stopCalls = 0
+  rt.state.value.kind = 'idle'
   setTurnFillSink(null)
 })
 
@@ -138,4 +156,75 @@ test('seed 灌入的账本挡住重跑（跨刷新重放的唯一防线）', asy
   assert.equal(h.runCalls.length, 1, '只有 b1 该跑')
   assert.deepEqual(h.runCalls.map(c => c.runKey), ['11|b1'])
   assert.deepEqual(out.map(r => r.out), ['from-server', 'fresh'])
+})
+
+// [turn-feedback-result-v1] 只 try/catch 吞掉投递结果的话，`failed` 会让这一轮结果永久丢失、
+//   且界面无提示（filledTurns 已置位 ⇒ 之后不再重发）。判据：失败必须回滚去重位。
+test('fill 返回 \'failed\' ⇒ 回滚去重位，同 turn 再进入会重发（脚本不重跑）', async () => {
+  h.scripted.push(ok('x'))
+  let calls = 0
+  setTurnFillSink(() => { calls += 1; return 'failed' })
+  await submitTurn(20, blocks(1))
+  assert.equal(calls, 1)
+  await submitTurn(20, blocks(1))
+  assert.equal(calls, 2, 'failed 后未回滚去重位：这一轮结果永久丢失且用户无任何提示')
+  assert.equal(h.runCalls.length, 1, '回滚去重位不得导致脚本重跑（执行账本仍幂等）')
+})
+
+// [turn-feedback-epoch-v1] 3 秒静默窗是异步悬挂的：窗口内点停止 / 切工作区后，
+//   该 turn 的回灌必须被 ctx.stillValid() 挡住，不得投进别处（用户实测切工作区后回传串到别处）。
+test('ctx.stillValid：正常有效；abort 该 turn 后失效', async () => {
+  h.scripted.push(ok())
+  const ctxs: Array<() => boolean> = []
+  setTurnFillSink((_t, ctx) => { ctxs.push(ctx.stillValid) })
+  await submitTurn(21, blocks(1))
+  assert.equal(ctxs.length, 1, 'sink 必须收到 ctx（生产 sink 靠它复检会话）')
+  assert.equal(ctxs[0]!(), true)
+  abortTurn(21)
+  assert.equal(ctxs[0]!(), false, 'abort 后悬挂回传未被挡：点停止仍会回传')
+})
+
+test('ctx.stillValid：resetTurnRunner（切工作区）后旧 ctx 失效（纪元自增）', async () => {
+  h.scripted.push(ok())
+  const ctxs: Array<() => boolean> = []
+  setTurnFillSink((_t, ctx) => { ctxs.push(ctx.stillValid) })
+  await submitTurn(22, blocks(1))
+  assert.equal(ctxs[0]!(), true)
+  resetTurnRunner()
+  assert.equal(ctxs[0]!(), false, '切 root 纪元未自增：悬挂回传会投进新工作区')
+})
+
+// ── [runtime-kind-ssot-v1] 运行态（useRuntime.kind）阶段转移 ──
+//
+// [WHY] 等待 banner / 任务看板此前读的是并行真相源（props.aiWaiting + delivering），
+//   两处都不覆盖「脚本执行中」的真实阶段 ⇒ 界面状态落后于实际。执行器是本项目脚本阶段的唯一写入方，
+//   这里逐条钉死它的写点，避免状态机再次退化成「无人写、只有人读」。
+
+test('submitTurn：回传窗内为 feedback，出站后回到 waiting', async () => {
+  h.scripted.push(ok())
+  const seen: string[] = []
+  setTurnFillSink(() => { seen.push(rt.state.value.kind); return undefined })
+  await submitTurn(30, blocks(1))
+  assert.deepEqual(seen, ['feedback'], '回传窗运行态应为 feedback（此前无任何写入方）')
+  assert.equal(rt.state.value.kind, 'waiting', '回传出站后应回到「等待下一轮回复」')
+})
+
+test('submitTurn：fill:false 无待发 ⇒ 收口回 idle', async () => {
+  h.scripted.push(ok())
+  await submitTurn(31, blocks(1), { fill: false })
+  assert.equal(rt.state.value.kind, 'idle', '无回传通道时不得把运行态挂在 executing/feedback')
+})
+
+test('无 script 块不触碰运行态（总结轮不驱动执行）', async () => {
+  rt.state.value.kind = 'waiting'
+  await submitTurn(32, [{ type: 'say', id: 's1', text: 'done' }])
+  assert.equal(rt.state.value.kind, 'waiting', '无执行块时不应改写运行态')
+})
+
+test('abortAllTurns ⇒ stopped；resetTurnRunner ⇒ idle', () => {
+  rt.state.value.kind = 'waiting'
+  abortAllTurns()
+  assert.equal(rt.state.value.kind, 'stopped', '用户停止后运行态须为 stopped（不得自己变回 idle）')
+  resetTurnRunner()
+  assert.equal(rt.state.value.kind, 'idle', '切 root 后运行态必须归零，否则 stale kind 会继续误导 UI')
 })

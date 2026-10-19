@@ -6,7 +6,7 @@
 // [WHY 改成显式 import] vitest.config.ts **没有挂 AutoImport 插件** ⇒ 在测试里它们是 ReferenceError，
 //   于是本模块此前**根本没有任何用例**（想测也起不来）。显式 import 对 vite 完全无害
 //   （已显式导入的符号插件不会重复注入），代价是两行，收益是「这个模块终于可被断言」。
-import { clampTextPreview, tailTextPreview } from './timeline-preview.js'
+import { clampTextPreview, denoiseLog, tailTextPreview, unfoldEscapedLog } from './timeline-preview.js'
 
 export interface PreviewFields {
   text: string
@@ -190,8 +190,10 @@ export function buildOneCard(ev: { id: number, kind: string, ts: number, payload
   if (!why && (!desc || desc === '执行脚本')) return null
   const langLabel = lang === 'bash' ? 'BASH' : lang === 'cjs' ? 'CJS' : 'JS'
   const timeLabel = hmsLabel(ev.ts)
-  const outTail = tailTextPreview(String(p.stdoutTail || ''), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
-  const errTail = tailTextPreview(String(p.stderrTail || ''), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
+  // [log-unfold-v1] 先展开 JSON 转义串（字面量 \n / \u001b），再降噪折叠——
+  //   否则「被 stringify 过的输出」行数恒为 1 且转义码原样上屏（与 TerminalPane 活构建路径同构）
+  const outTail = tailTextPreview(denoiseLog(unfoldEscapedLog(String(p.stdoutTail || ''))), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
+  const errTail = tailTextPreview(denoiseLog(unfoldEscapedLog(String(p.stderrTail || ''))), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
   return {
     type: 'script',
     key,

@@ -193,3 +193,76 @@ describe('turn-schema: 契约边界', () => {
     expect(/Math\.random|new Date\(/.test(CODE)).toBe(false)
   })
 })
+
+// [raw-control-char-v1] 2026-10-19 用户实测：模型在 script.code 里敲**真换行**（U+000A）
+//   而不是两字符的 `\n` 转义 ⇒ JSON.parse 抛 Bad control character ⇒ 整条信封解析不出对象
+//   ⇒ 油猴回落 plain 把 JSON 原文整坨推上屏、script 零执行。
+//   对照组（能跑的那份）只有 say 块、或 code 是合法转义 —— 差异**不在块结构，只在换行形态**。
+//   本组断言把「裸控制字符必须仍能解析出块」钉死，并保证修复不误伤结构校验与幂等性。
+describe('turn-schema: 字符串内裸控制字符（模型常见坏输出）', () => {
+  // 真换行版信封：与用户实测载荷同构（code 内含真实 U+000A + 合法 \\n 转义两种换行）
+  const RAW_NEWLINE_ENVELOPE = [
+    '{',
+    '"v": 1,',
+    '"turn": 6,',
+    '"content": [',
+    '{',
+    '"type": "say",',
+    '"id": "s1",',
+    '"text": "先读 AGENTS.md 确认锚点。"',
+    '},',
+    '{',
+    '"type": "script",',
+    '"id": "c1",',
+    '"lang": "js",',
+    '"desc": "读锚点",',
+    '"why": "确认插入位置",',
+    // code 里用真换行分行（非 \n 转义）—— 这正是让 JSON.parse 失败的形态
+    '"code": "const a = 1;\nconst b = a + 1;\nconsole.log(b)"',
+    '}',
+    ']',
+    '}',
+  ].join('\n')
+
+  it('真换行的 code仍解析出 script 块（修复前 blocks=0 / TURN_NOT_JSON）', () => {
+    const r = parseTurn(RAW_NEWLINE_ENVELOPE)
+    expect(r.errors).toEqual([])
+    expect(r.blocks.map(b => b.type)).toEqual(['say', 'script'])
+    expect(r.turn).toBe(6)
+  })
+
+  it('code 回读是真换行的可执行 JS（转义与缩进都还原）', () => {
+    const r = parseTurn(RAW_NEWLINE_ENVELOPE)
+    const script = r.blocks.find(b => b.type === 'script')
+    expect(script?.code).toBe('const a = 1;\nconst b = a + 1;\nconsole.log(b)')
+    expect(script?.code?.split('\n').length).toBe(3)
+  })
+
+  it('混合形态（部分 \n 转义 + 部分真换行）也能解析', () => {
+    const mixed = '{"v":1,"turn":9,"content":[{"type":"script","id":"c1","lang":"js","desc":"d","why":"w","code":"a();\\nb();\nc()"}]}'
+    const r = parseTurn(mixed)
+    expect(r.errors).toEqual([])
+    expect(r.blocks[0].code).toBe('a();\nb();\nc()')
+  })
+
+  it('严格 JSON 走原路径、结果不变（宽容只兜底，不改严格行为）', () => {
+    const strict = fence({ v: 1, turn: 4, content: [SAY, C1] })
+    const r = parseTurn(strict)
+    expect(r.errors).toEqual([])
+    expect(r.blocks.map(b => b.id)).toEqual(['say_1', 'c1'])
+    expect(r.blocks[1].code).toBe('console.log(1)')
+  })
+
+  it('结构错误仍精确报错（宽容不得放宽块校验）', () => {
+    // code 里塞裸换行，但 lang 非法 ⇒ 仍必须报 BLOCK_BAD_LANG，不能因转义被放过
+    const bad = '{"v":1,"turn":1,"content":[{"type":"script","id":"c1","lang":"python","desc":"d","why":"w","code":"x = 1\ny = 2"}]}'
+    const r = parseTurn(bad)
+    expect(r.errors.some(e => e.code === 'BLOCK_BAD_LANG')).toBe(true)
+  })
+
+  it('增量解析对裸换行 code 同样出块（流式路径不能只修一半）', () => {
+    const r = parseTurnPartial(RAW_NEWLINE_ENVELOPE)
+    expect(r.blocks.map(b => b.type)).toEqual(['say', 'script'])
+    expect(r.blocks[1].code).toBe('const a = 1;\nconst b = a + 1;\nconsole.log(b)')
+  })
+})

@@ -86,6 +86,13 @@ async function applyRootChanged(): Promise<void> {
     const { clearRulesCache } = await import('../ai/load-rules')
     clearRulesCache()
   } catch { /* 未就绪：忽略 */ }
+  // [turn-feedback-epoch-v1] 执行 root 变更 ⇒ 清空 turn 执行账本 + 自增会话纪元。
+  // [WHY] 账本是模块级单例、与 root 无关：不重置则新工作区里 turnId 回绕时命中旧账本
+  //   （判成「已跑过」而拒跑本应执行的脚本）；且 3 秒静默窗里悬挂的旧会话回灌会投进新工作区。
+  try {
+    const { resetTurnRunner } = await import('../runner/useTurnRunner')
+    resetTurnRunner()
+  } catch { /* 未就绪：忽略 */ }
   // [workspace-epoch-v1] root 已变更 ⇒ 通知依赖 root 的面板重拉（否则它们停在旧 root）
   bumpWorkspaceEpoch()
 }

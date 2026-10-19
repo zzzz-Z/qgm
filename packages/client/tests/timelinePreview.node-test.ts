@@ -3,7 +3,7 @@
 //   上游已按字符截断）必须有断言守护，否则改动阈值时会静默改变用户可见信息量。
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { clampTextPreview, denoiseLog, tailTextPreview } from '../../../packages/client/utils/timeline-preview'
+import { clampTextPreview, denoiseLog, tailTextPreview, unfoldEscapedLog } from '../../../packages/client/utils/timeline-preview'
 
 /** 生成 n 行文本，每行 `L<i>` */
 function lines(n: number): string {
@@ -167,4 +167,48 @@ test('denoiseLog: 剥离行首 [AI] 前缀，保留内容', () => {
   assert.equal(denoiseLog('a\n[AI]\nb'), 'a\nb')
   // 非行首的 [AI] 不动
   assert.equal(denoiseLog('x [AI] y'), 'x [AI] y')
+})
+
+// ============ unfoldEscapedLog（[log-unfold-v1]）============
+
+test('unfoldEscapedLog: 带引号的合法 JSON 字符串经 JSON.parse 还原', () => {
+  const src = '"line1\\nline2\\nline3"'
+  assert.equal(unfoldEscapedLog(src), 'line1\nline2\nline3')
+})
+
+test('unfoldEscapedLog: 无引号但转义换行充足 → 手工展开', () => {
+  const src = 'a\\nb\\nc'
+  assert.equal(unfoldEscapedLog(src), 'a\nb\nc')
+})
+
+test('unfoldEscapedLog: 字面量 \\u001b 色码还原为真实 ESC（交由 denoiseLog 剥离）', () => {
+  const ESC = String.fromCharCode(27)
+  const src = 'x \\u001b[91m y \\u001b[0m'
+  assert.equal(unfoldEscapedLog(src), `x ${ESC}[91m y ${ESC}[0m`)
+  // 与 denoiseLog 组合后色码消失（ESC[0m 前的空格保留）
+  assert.equal(denoiseLog(unfoldEscapedLog(src)), 'x  y ')
+})
+
+test('unfoldEscapedLog: 保守触发——转义序列不足时不改写原文', () => {
+  // 单个 \n 字面量（如打印代码示教）不展开
+  assert.equal(unfoldEscapedLog('a\\nb'), 'a\\nb')
+  // 真实换行为主、字面量 \n 少，不动
+  assert.equal(unfoldEscapedLog('a\nb\\nc'), 'a\nb\\nc')
+  // 普通文本原样
+  assert.equal(unfoldEscapedLog('plain text'), 'plain text')
+  assert.equal(unfoldEscapedLog(''), '')
+})
+
+test('unfoldEscapedLog: 空串与空输入', () => {
+  assert.equal(unfoldEscapedLog(''), '')
+  assert.equal(unfoldEscapedLog(undefined as unknown as string), '')
+})
+
+test('unfoldEscapedLog: 组合 tailTextPreview 后行数统计恢复正常（回归 2026-10-19 vue-tsc 案例）', () => {
+  // 此前：整段 vue-tsc 输出被 stringify 成 1 行 →「1 行 · 59.24s」
+  const src = '"src/a.ts(1,1): error TS1\\nsrc/b.ts(2,2): error TS2\\nsrc/c.ts(3,3): error TS3\\nsrc/d.ts(4,4): error TS4"'
+  const unfolded = unfoldEscapedLog(src)
+  const tp = tailTextPreview(denoiseLog(unfolded), 5, 400)
+  assert.equal(tp.text.split('\n').length, 4)
+  assert.equal(tp.hiddenLines, 0)
 })

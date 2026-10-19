@@ -48,6 +48,11 @@
 
 - **`/__ai/video/*` 域** —— `POST /video/tasks`（建任务）、`GET /video/tasks`（列任务）、`GET|DELETE /video/tasks/:id`、`POST /video/tasks/:id/script|terms`、`GET /video/tasks/:id/download`、`GET|PUT /video/config`、`GET|POST /video/musics`、`GET|POST /video/materials`、`POST /video/scripts`。字段以源文件为 SSOT。
 
+## shell（后台任务，SSOT：`packages/core/src/helpers/shell.cjs`，路由定义 `routes/shell-log.ts`，消费方 `TerminalPane.vue`）
+
+- **GET /\__ai/shell-log** —— 只读，按 `id` + 字节偏移 `from` 增量读取后台任务日志（`{ok, id, text, next, size, done, running, exitCode}`）。`id` 形态白名单 `^sh-[\w-]+$` 堵路径穿越；缺 id 返 400，找不到返 404。工作区根优先、进程 cwd 兜底。消费方 TerminalPane 的流式输出轮询。
+- **POST /\__ai/shell-kill**（shell-kill-v1）—— 写操作，终止后台任务（`killShell`：先 SIGTERM 整个进程组 `-pid`，失败回退单 pid）。`id` 可走 query 或 JSON body `{id}`，形态白名单同 shell-log。返回 `{ok, id, killed}`；无此任务 404，helpers 未加载 503。helpers 早已导出 killShell 但 HTTP 层此前只有只读端点 ⇒ 前端无法提供「关闭进程」入口。消费方 TerminalPane 的「关闭进程」按钮与 Esc 快捷键。
+
 ## WebSocket 帧（不适用 routes-registry-v1，单列以免误判漏登记）
 
 > 本注册表只覆盖 `/__ai/*` HTTP 端点。以下为 **WS 帧**，由 `attach-ws.ts` 发出，客户端经 `useAiTransport` 订阅。

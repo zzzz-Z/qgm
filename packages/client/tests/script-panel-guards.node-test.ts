@@ -48,3 +48,38 @@ test('wiring: ScriptPanel 必须渲染 statusText 族（防只写不读的死状
   }
   assert.ok(src.includes('status-bar'), '缺少 status-bar 容器标记')
 })
+
+// ============ turn 轮回传权归属（turn-feedback-exclusive-v1）============
+// [turn-feedback-exclusive-v1] turn 管线在收口后统一回灌 `# turn N 执行结果`；
+//   若 ScriptPanel 的旧回传（copyOutput）对同一轮**也**执行 ⇒ 回归为「1 turn = 2 次提问」
+//   （实测日志：同一段内 `# turn N 执行结果` 与 `# 脚本执行结果` 交替出现）。
+// [VARIANT] 若摘掉 ScriptPanel 的 !turnDrivenRun.value 守卫，或 useTurnRunner 不再标记 turnDriven ⇒ 本条应红。
+
+test('[turn-feedback-exclusive-v1] ScriptPanel 的两处回传分支都必须对 turn 轮让权', () => {
+  const guarded = stripComments(read(PANEL_SRC))
+  assert.ok(
+    guarded.includes('shouldAutoAsk && !turnDrivenRun.value'),
+    '主回传分支未对 turn 轮让权（copyOutput 应加 !turnDrivenRun.value 守卫）',
+  )
+  assert.ok(
+    guarded.includes('if (!turnDrivenRun.value) {'),
+    '预检失败回传分支未对 turn 轮让权（copyOutput 应加 !turnDrivenRun.value 守卫）',
+  )
+  assert.ok(
+    guarded.includes('turnDrivenRun'),
+    'ScriptPanel 未接入 turnDrivenRun（回传权归属判据缺失）',
+  )
+})
+
+test('[turn-feedback-exclusive-v1] turn 管线把 run 标记为 turnDriven 且 useRunner 如实记账', () => {
+  assert.ok(
+    read('packages/client/composables/runner/useTurnRunner.ts').includes('turnDriven: true'),
+    'useTurnRunner 未把 run 标记为 turnDriven（回传权判据无处生效）',
+  )
+  const runner = read('packages/client/composables/runner/useRunner.ts')
+  assert.ok(
+    runner.includes('turnDrivenRun.value = opts?.turnDriven === true'),
+    'useRunner 未在 run() 内按 opts.turnDriven 记账（标志不随每轮重置）',
+  )
+  assert.ok(runner.includes('turnDrivenRun,'), 'useRunner 未导出 turnDrivenRun')
+})

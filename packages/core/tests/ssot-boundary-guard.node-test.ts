@@ -76,3 +76,23 @@ test('G3 SYSTEM.md §0 之后的正文不得引用工作区级的 AGENTS.md', ()
     'SYSTEM.md §0 之后的正文引用了工作区级的 AGENTS.md（应用级规则不得反向依赖）',
   )
 })
+
+test('G4 SYSTEM.md §0 之后的正文不得含工作区专属信息（路径 / 端口 / 宿主命令）', () => {
+  // [WHY] 文件头自述「不含任何工作区特定信息」；曾把测试路径、源码路径、端口与宿主命令
+  //   散在各章「承重：」行与正文里，换工作区即失效。本判据把该承诺钉成机器可检项。
+  // [CONSTRAINT] 只扫 §0 之后的正文（头部说明块允许声明层级关系）；端口按本仓契约值列举。
+  const system = fs.readFileSync(path.join(ROOT, 'packages/core/SYSTEM.md'), 'utf8')
+  const at = system.indexOf('## §0')
+  assert.ok(at > -1, 'SYSTEM.md 找不到 §0 标题')
+  const body = system.slice(at)
+  const banned: Array<[string, RegExp]> = [
+    ['工作区路径 packages/', /packages\//],
+    ['工作区路径 apps/', /apps\//],
+    ['宿主命令 session:start', /session:start/],
+    ['进程管理器 pm2', /pm2/],
+    ['回环地址', /127\.0\.0\.1|localhost/],
+    ['宿主端口', /\b(?:5175|5178|5274|5275|8091)\b/],
+  ]
+  const hits = banned.filter(([, re]: [string, RegExp]) => re.test(body)).map(([name]: [string, RegExp]) => name)
+  assert.deepEqual(hits, [], `SYSTEM.md §0 之后正文含工作区专属信息：${hits.join('、')}`)
+})

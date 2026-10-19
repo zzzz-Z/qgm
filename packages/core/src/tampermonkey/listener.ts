@@ -16,18 +16,24 @@
  */
 
 /**
- * 入站去重：同一 msgId 只消费一次。
+ * 入站去重：查 msgId 是否已消费（**不登记**）。
  * [WHY] postMessage 可能因重连重发、多窗口广播而重复到达；
  *   重复执行 fill 会把同一段 prompt 发两遍。
+ * [CONSTRAINT] 登记（markSeenInbound）必须延后到「确认可消费」之后：若在到达时就登记，
+ *   失败路径（no-input-box / empty-prompt）会烧掉 msgId ⇒ 工作台复用同一 msgId 的重试
+ *   会被 dedup-skip 而永远填不进去。延后登记后，「已消费」的重复帧被挡、「未消费」的重试仍可注入。
  * [CONSTRAINT] 集合上限 200，超出后淘汰最早一条 —— 单轮消息量远小于此值，
  *   限制只是防止长时间运行的无界增长。
  */
-function seenInboundOnce(msgId: string | undefined): boolean {
-  if (!msgId) return false
-  if (_seenInbound.has(msgId)) return true
+function isSeenInbound(msgId: string | undefined): boolean {
+  return !!msgId && _seenInbound.has(msgId)
+}
+
+/** 标记 msgId 已消费（仅在确认可消费后调用；见 handleFill / handleRotate 的顺序约束） */
+function markSeenInbound(msgId: string | undefined): void {
+  if (!msgId || _seenInbound.has(msgId)) return
   _seenInbound.add(msgId)
   if (_seenInbound.size > 200) _seenInbound.delete(_seenInbound.values().next().value as string)
-  return false
 }
 
 /** 发送后轮询 URL 变化并回传（最多 8 秒）。站点发消息常伴随 URL 跳转到具体会话页 */
@@ -54,12 +60,16 @@ function watchUrlChange(prevHref: string, replySrc: MessageEventSource | null): 
  */
 function handleFill(d: FillMessage, e: MessageEvent): void {
   resetRoundState()
-  if (seenInboundOnce(d.msgId)) { ackFill(false, 'dedup-skip', d.ackId); return }
+  if (isSeenInbound(d.msgId)) { ackFill(false, 'dedup-skip', d.ackId); return }
 
   const prompt = String(d.prompt || '')
   if (!prompt) { ackFill(false, 'empty-prompt', d.ackId); return }
   const box = findInputBox()
   if (!box) { console.warn('[ai-runner] 未找到输入框'); ackFill(false, 'no-input-box', d.ackId); return }
+  // [fill-msgid-reuse-v1] 到这里才登记 msgId：上面两条失败路径不烧号，工作台复用同一 msgId 的
+  //   重试（no-input-box / 丢帧）仍能真正注入；而「已消费」后的重试（send-verify-failed：
+  //   文本已填入、仅发送未确认）被上面的 dedup-skip 挡住，避免同一提问连发两遍。
+  markSeenInbound(d.msgId)
 
   const prevHref = location.href
   const imgs = Array.isArray(d.images) ? d.images : []
@@ -79,12 +89,13 @@ function handleFill(d: FillMessage, e: MessageEvent): void {
  */
 function handleRotate(d: RotateMessage): void {
   resetRoundState()
-  if (seenInboundOnce(d.msgId)) return
+  if (isSeenInbound(d.msgId)) return
 
   const instruction = String(d.instruction || '')
   if (!instruction) return
   const box = findInputBox()
   if (!box) { console.warn('[ai-runner] rotate: 未找到输入框'); return }
+  markSeenInbound(d.msgId)
   fillInput(box, instruction)
   setTimeout(doSend, 300, box)
 }

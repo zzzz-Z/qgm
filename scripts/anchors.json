@@ -150,7 +150,7 @@
     },
     {
       "file": "AGENTS.md",
-      "contains": "自动循环子系统已退役"
+      "contains": "自动执行单路径"
     },
     {
       "file": "packages/core/tests/limit-marker-guard.node-test.ts",

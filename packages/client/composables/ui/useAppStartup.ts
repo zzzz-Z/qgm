@@ -20,12 +20,14 @@ import { pushTerminalNotice } from '../runner/useRunner'
 // [turn-collect-v1] 信封流水线接线：累积器单例（归本文件所有，避免给消息分发模块再加一条 import）
 import { createTurnCollector, supportsBlock } from '../runner/turn-collect.js'
 import type { CollectBlock, CollectTurnEnd } from '../runner/turn-collect.js'
-import { setTurnFillSink, submitTurn } from '../runner/useTurnRunner.js'
+import { setTurnFillSink, submitTurn, TURN_FEEDBACK_DELAY_MS } from '../runner/useTurnRunner.js'
+// [runtime-kind-ssot-v1] 运行态单一真相源：入站帧是「脚本即将执行」的最早信号，在此提前置 executing
+import { useRuntime } from '../ai/useRuntime.js'
 import { copyAndFill, useAiWindow } from '../ai/useAiWindow'
 import { getTransport, transportKind } from '../ai/useAiTransport'
 import { useAiSite } from '../ai/useAiSite'
 import { log } from '../../utils/log'
-import { TOAST_LONG } from '../../utils/toast-durations'
+import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
 
 // [loop-consolidation-P3a] 内联 AiReply（原 import('../ai/auto-loop/types').AiReply）；
 //   该目录将随 P3b 删除，此处仅用作 onReply 回调的形参断言。
@@ -76,12 +78,34 @@ let turnWired = false
 function wireTurnPipeline(): void {
   if (turnWired) return
   turnWired = true
+  // [turn-feedback-result-v1] toast 是模块级单例，但 wireTurnPipeline 在 composable 之外，
+  //   拿不到 useAppStartup 内解构的局部 toast，须在这里自行取一次。
+  const { toast } = useToast()
   turnCollector.setOnSubmit((turnId, blocks) => {
     // 不 await：收口是同步回调，执行时长由脚本决定，阻塞它会让后续帧排队
     void submitTurn(turnId, blocks).catch(error => log.error('[turn-runner] 提交失败:', error))
   })
-  setTurnFillSink(async (text: string) => {
-    await copyAndFill(text, { skipRules: true })
+  setTurnFillSink(async (text, ctx) => {
+    // [turn-feedback-delay-v1] 脚本跑完到回传之间强制静默 TURN_FEEDBACK_DELAY_MS：
+    //   防连续轮次回传把出站频率打到平台限流（turn 主路径此前 0 延迟）。
+    // [CONSTRAINT] 这一段不是无声等待：turnRunning 由 submitTurn 在 fillSink 返回后才收口，
+    //   故窗口内 UI 仍显示「执行中」（同 [deliver-window-v1] 的可见性诉求）。
+    await promiseTimeout(TURN_FEEDBACK_DELAY_MS)
+    // [turn-feedback-epoch-v1] 静默窗是异步悬挂的：窗口内可能已点停止 / 切工作区 / 切会话，
+    //   此时本轮结果已不属于任何会话，必须丢弃而不是投进别处（用户实测切工作区后回传串到别处）。
+    if (!ctx.stillValid()) {
+      log.warn('[turn-feedback] 静默窗内会话已变更或被取消，丢弃本轮回传 turn=', ctx.turnId)
+      return 'failed'
+    }
+    // [runtime-kind-ssot-v1] 结果出站即回传态；copyAndFill 返回后由执行器置回 waiting
+    useRuntime().enterFeedback()
+    const r = await copyAndFill(text, { skipRules: true })
+    // [turn-feedback-result-v1] 投递失败必须回流并提示：只静默 await 的话，这一轮结果永久丢失
+    //   且界面无任何痕迹（用户无从判断是没跑完还是没送到）。
+    if (r === 'failed' || r === 'unacked') {
+      toast('脚本结果回传未送达：AI 窗口未就绪或已关闭，本轮结果未送达 AI', 'warn', TOAST_MEDIUM)
+    }
+    return r
   })
 }
 
@@ -91,6 +115,10 @@ export function useAppStartup(deps: AppStartupDeps) {
   const { toast } = useToast()
   const aiWin = useAiWindow()
   const { url: siteUrl, setUrl: setSiteUrl } = useAiSite()
+  // [runtime-kind-ssot-v1] 运行态单一真相源（跨组件单例）
+  const rt = useRuntime()
+  // [tm-diag-dedup-v1] 已播报过的诊断键（阶段|note），避免高频重推刷屏
+  const seenDiagKeys = new Set<string>()
   wireTurnPipeline()
 
   /**
@@ -110,14 +138,63 @@ export function useAppStartup(deps: AppStartupDeps) {
     const p = (e && e.data) as { type?: string, block?: CollectBlock, end?: CollectTurnEnd, replayed?: boolean } | undefined
     if (p && typeof p === 'object') {
       const t = String(p.type || '')
+      // [tm-diag-v1] 油猴回程自诊断帧：只消费不转发。
+      //   [WHY 必须在这里] 这是唯一能收到「油猴页opener 断了」的通道——那类失败下
+      //     块帧/plain 一个都到不了工作台，服务端日志零增长，光看日志永远只能猜。
+      if (t === 'ai-runner:tm-diag') {
+        const d = p as unknown as Record<string, unknown>
+        const parts = [
+          `阶段=${String(d.stage)}`,
+          `opener=${d.hasOpener ? (d.openerClosed ? '已关闭' : '就绪') : '缺失'}`,
+        ]
+        if (d.turnId !== undefined) parts.push(`turn=${String(d.turnId)}`)
+        if (d.blocks !== undefined) parts.push(`块=${String(d.blocks)}`)
+        if (d.errors !== undefined) parts.push(`错误=${String(d.errors)}`)
+        if (d.emitted !== undefined) parts.push(`已投递=${String(d.emitted)}`)
+        if (d.replyRootFound !== undefined) parts.push(`回复根=${String(d.replyRootFound)}`)
+        if (d.note) parts.push(String(d.note))
+        // [tm-diag-v1] 用 toast 而非 doneSummary：诊断是瞬时信号，
+        //   写进 doneSummary 会覆盖用户真正该看到的执行摘要。
+        // [diag-toast-local-v1] toast 是 useToast() 的返回值（模块级单例但需在作用域内解构），
+        //   dispatchInbound 不在那个持有 toast 的函数体内，必须就地取一次。
+        log.warn(`[tm-diag] ${parts.join(' · ')}`)
+        // [tm-diag-dedup-v1] 同一「阶段 + note」只播报一次：油猴在 turn-miss / enter 阶段会高频重推，
+        //   每条都弹 TOAST_LONG 会刷屏淹没真正的执行摘要。日志仍逐条保留。
+        const diagKey = `${String(d.stage)}|${String(d.note ?? '')}`
+        if (!seenDiagKeys.has(diagKey)) {
+          seenDiagKeys.add(diagKey)
+          // try { useToast().toast(`油猴诊断：${parts.join(' · ')}`, 'warn', TOAST_LONG) } catch { /* toast 未就绪时只留 console */ }
+        }
+        return
+      }
       // [hello-caps-v1] 握手闸门：服务端明确宣告过能力清单且不含该类型 ⇒ 这块对端根本不认，
       //   留着只会让它被静默丢弃（丢在看不见的地方）。未握手（null）一律放行。
-      if (t === 'ai-runner:block' && supportsBlock(getTransport().caps(), String(p.block?.type || ''))) turnCollector.add(p.block)
+      if (t === 'ai-runner:block' && supportsBlock(getTransport().caps(), String(p.block?.type || ''))) {
+        turnCollector.add(p.block)
+        // [runtime-kind-ssot-v1] script 块到达 ⇒ 运行态进入 executing。
+        // [WHY] 这也是刷新后 stale 的校准点：sessionStorage 恢复的 stopped/interrupted 会被首个真实帧覆盖。
+        if (String(p.block?.type || '') === 'script') rt.enterExecuting()
+      }
       // [CONSTRAINT] 回放帧只丢桶：跨刷新时执行账本是空的，让回放帧收口会把整轮脚本重跑一遍
-      else if (t === 'ai-runner:turn-end' && p.replayed === true) turnCollector.drop(Number(p.end && p.end.turnId) || 0)
-      else if (t === 'ai-runner:turn-end') turnCollector.end(p.end)
+      else if (t === 'ai-runner:turn-end' && p.replayed === true) { turnCollector.drop(Number(p.end && p.end.turnId) || 0)
+      }
+      else if (t === 'ai-runner:turn-end') { settleTurnEnd(p)
+      }
     }
     onSessionIdMessage(e)
+  }
+
+  /**
+   * [runtime-kind-ssot-v1] 结束帧收口 + 运行态归位。
+   * [WHY] 无 script 块的 turn（总结 / 提问轮）根本不会进执行器，若不在此处收口，
+   *   运行态会永久停在 waiting —— 等待 banner 再也不消失。
+   * [CONSTRAINT] 必须在 end() 前判定：end() 会清掉该 turn 的桶，之后再问就永远是空。
+   */
+  function settleTurnEnd(p: { end?: CollectTurnEnd }): void {
+    const turnId = Number(p.end && p.end.turnId) || 0
+    const hasScript = turnCollector.pending(turnId).some(b => b.type === 'script')
+    turnCollector.end(p.end)
+    if (!hasScript) rt.settleIdle()
   }
 
   /** [workspace-mode-v1] 探测工作区状态：无工作区时渲染引导页；网络失败默认放行 */

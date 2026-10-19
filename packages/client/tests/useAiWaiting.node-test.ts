@@ -75,3 +75,26 @@ test('useAiWaiting().startWaiting 与模块级 startWaiting 等价', () => {
   r.stopWaiting()
   assert.equal(r.waiting.value, false)
 })
+
+// ── [runtime-kind-ssot-v1] 等待态与运行态唯一真相源的同步 ──
+//
+// [WHY] waiting 曾是和 useRuntime 并行的第二个真相源（banner 读 props、看板读 runtime）⇒ 状态显示会落后。
+//   现在 waiting 只作输入框闸门，运行态一律写 useRuntime；这里钉住两向同步，防止又退化成双源。
+
+test('[runtime-kind-ssot-v1] startWaiting → waiting；stopWaiting → idle', async () => {
+  const { useRuntime } = await import('../composables/ai/useRuntime.js')
+  mod.startWaiting()
+  assert.equal(useRuntime().state.value.kind, 'waiting', '等待态必须同步进运行态唯一真相源')
+  mod.stopWaiting()
+  assert.equal(useRuntime().state.value.kind, 'idle', '回复/停止后运行态应收口为 idle')
+})
+
+test('[runtime-kind-ssot-v1] stopWaiting 不得覆盖脚本执行态', async () => {
+  const { useRuntime } = await import('../composables/ai/useRuntime.js')
+  const rt = useRuntime()
+  mod.startWaiting()
+  rt.enterExecuting()
+  mod.stopWaiting()
+  assert.equal(rt.state.value.kind, 'executing', '回复帧与脚本执行交错到达时不得抹掉执行态')
+  rt.reset()
+})

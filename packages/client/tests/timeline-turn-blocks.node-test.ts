@@ -9,6 +9,9 @@
 // 一旦模型换了排版就丢选项；块帧让选项成为**字段**，这条断言钉的就是「没退回猜」。
 
 import { describe, expect, test } from 'vitest'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
 import { buildOneCard } from '../utils/timeline-build.js'
 import type { QuestionItem, ScriptItem, TextItem } from '../utils/timeline-build.js'
 
@@ -97,6 +100,17 @@ describe('ai:block → 卡片：顺序与 key', () => {
     const b = buildOneCard(blockEvent({ turnId: 2, blockId: 'say_1', type: 'say', text: 'b' }))
     expect(a?.key).not.toBe(b?.key)
   })
+})
+
+// [turn-block-frame-v1] 采信守卫必须钉**活渲染路径**，而非只钉纯函数。
+// [WHY] 上文全部断言都打 buildOneCard，但 UI 只跑 TerminalPane 的内联 timelineItems builder，
+//   两者此前不一致（内联版无 ai:block 分支）⇒ say 块在渲染时被静默丢弃，本文件却依旧全绿——
+//   这正是文件头写的「解析对了、字段也传了，但渲染时被丢掉」那类缺陷，只是丢在了纯函数之后。
+//   故补源码级断言：活路径必须消费 ai:block 且**委托** buildOneCard（建卡规则单一来源）。
+test('活渲染路径（TerminalPane.timelineItems）消费 ai:block 且委托 buildOneCard', () => {
+  const tp = fs.readFileSync(path.join(process.cwd(), 'packages/client/components/script/TerminalPane.vue'), 'utf8')
+  assert.ok(/\bev\.kind === 'ai:block'/.test(tp), 'TerminalPane 活构建路径应分支处理 ai:block')
+  assert.ok(/buildOneCard\(ev\)/.test(tp), 'ai:block 分支应委托 buildOneCard，不得另写一份建卡规则')
 })
 
 // 反向：确保这次改动没有动到旧路径的判据（旧 kind 的卡片形状不变）

@@ -12,13 +12,18 @@ import ScriptCard from './ScriptCard.vue'
 import RoundCard from './RoundCard.vue'
 // [timeline-denoise-v1] 长文本预览 / 原始输出尾部折叠（纯函数，见 utils/timeline-preview.ts）
 // [CONSTRAINT] 显式 import 而非依赖 auto-import：vitest 与 tsc 没有 auto-import 插件
-import { clampTextPreview, denoiseLog, tailTextPreview } from '../../utils/timeline-preview'
+import { clampTextPreview, denoiseLog, tailTextPreview, unfoldEscapedLog } from '../../utils/timeline-preview'
 // [strip-script-blocks-v1] 剥离误分类进 plain 的脚本围栏块（消除脚本正文渲染成文本卡的噪音）
 import { stripScriptBlocks } from '../../utils/strip-script-blocks'
 // [preview-ssot-v1] 预览阈值统一定义在 timeline-build（单一定义，防两处分叉）
-import { ASK_PREVIEW, DONE_PREVIEW, TAIL_KEEP_LINES, TAIL_MAX_CHARS, TEXT_PREVIEW } from '../../utils/timeline-build'
+// [turn-block-frame-v1] buildOneCard 亦从该模块引入：块帧建卡规则只有一份，本组件不再内联复写
+import { ASK_PREVIEW, buildOneCard, DONE_PREVIEW, TAIL_KEEP_LINES, TAIL_MAX_CHARS, TEXT_PREVIEW } from '../../utils/timeline-build'
 // [eventbus-name-clash-v1] 显式 import（原因同 ScriptPanel.vue）
 import { useEventBus } from '../../composables/ui/useEventStream'
+// [terminal-actions-v1] 显式 import：本组件此前无 toast 调用，auto-import 在 vitest/tsc 下不生效
+import { useToast } from '../../composables/ui/useToast'
+// [runtime-kind-ssot-v1] 等待 banner 的判据改读运行态单一真相源（不再由父级透传 props）
+import { useRuntime } from '../../composables/ai/useRuntime'
 
 // [timeline-denoise-v1] 长文本卡片共用的「预览 + 折叠」字段
 // [WHY] text / ask / done 三类卡片都要"超长才折叠"，字段同构可复用同一套折叠逻辑与样式
@@ -120,19 +125,16 @@ const props = defineProps<{
   liveStdout: string
   liveStderr: string
   doneSummary?: string
-  // 等待 AI 回复中；由 ScriptPanel 透传 useAiWaiting().waiting
-  aiWaiting?: boolean
-  // [deliver-window-v1] 结果已产出但回传窗未收口（脚本跑完 → 真正发出去之间那几秒）。
-  //   此前这段完全不可见：界面显示「成功」却什么都没发生，用户以为卡住或漏发。
-  delivering?: boolean
   /** [ctx-usage-v1] 本会话累计轮次（runIds 长度）；0 表示尚未运行 */
   runCount?: number
   /** [ctx-usage-v1] 估算的累计 prompt 字节数（前端按轮粗估，仅用于量级感知） */
   tokenEstimate?: number
 }>()
 // [script-card-changes-v1] 冒泡 ScriptCard 的预览点击 → 由 ScriptPanel 打开浮层
-const emit = defineEmits<{ preview: [path: string] }>()
+// [terminal-actions-v1] stop：终端「关闭进程」按钮与 Esc 快捷键向父级冒泡，复用 useRunner.stop
+const emit = defineEmits<{ preview: [path: string], stop: [] }>()
 
+let _copiedTimer: ReturnType<typeof setTimeout> | null = null
 /** 阶段中文标签表；未命中回退为原值 */
 const PHASE_LABEL: Record<string, string> = {
   pending: '等待执行',
@@ -169,7 +171,9 @@ let _innerRo: ResizeObserver | null = null
  */
 const GUIDE_KEY = '__ai_empty_guide_seen'
 
-// 等待时长本地计时：aiWaiting 为 true 时启动，false 时停止并归零
+/** [terminal-actions-v1] 复制内容的瞬时反馈位（按钮文字在 1.5s 内变「已复制」） */
+const copiedFlash = ref(false)
+// 等待时长本地计时：waitBanner（useRuntime.kind 的 waiting/feedback）为 true 时启动，false 时停止并归零
 // [WHY] 用本地 interval 而非改 useAiWaiting 契约（避免污染其他消费方）；仅用于展示层
 // [CONSTRAINT] useIntervalFn 组件卸载自动清理；watch 双向同步启停
 // [CHANGE-IMPACT] 与 wait-banner 模板成对；去掉 watch 会让秒数永远为 0
@@ -183,11 +187,20 @@ const atBottom = ref(true)
 const chatInnerRef = ref<HTMLElement | null>(null)
 const guideSeen = ref(readGuideSeen())
 
+const { toast } = useToast()
 const { events: busEvents } = useEventBus()
+// [runtime-kind-ssot-v1] 等待态读单一真相源：waiting（等 AI 回复）/ feedback（结果回传窗）
+// [WHY] 此前由父级透传 aiWaiting + delivering 两个 props，二者是并行真相源，
+//   且都没覆盖「脚本执行中」的真实阶段 —— 状态显示会落后于实际。
+const { state: runtimeState } = useRuntime()
 const { pause: pauseWaitTimer, resume: resumeWaitTimer } = useIntervalFn(() => {
   waitElapsed.value += 1
 }, 1000, { immediate: false })
 
+const waitBanner = computed(() => {
+  const k = runtimeState.value.kind
+  return k === 'waiting' || k === 'feedback'
+})
 const timelineItems = computed(() => {
   const out: Array<ScriptItem | TextItem | DoneItem | AskItem | QuestionItem> = []
   for (const ev of busEvents.value) {
@@ -257,6 +270,16 @@ const timelineItems = computed(() => {
       out.push({ type: 'text', key: `text-${ev.id}`, timeLabel: hmsLabel(ev.ts), text, ...pv })
       continue
     }
+    // [turn-block-frame-v1] 块帧建卡：say / handoff / ask 一律委托 buildOneCard（与 timeline-build 同源）。
+    // [WHY] 本组件此前只内联处理 ai:question / ai:ask / ai:done / ai:plain / run:start，
+    //   `ai:block` 落到下方 `!== 'run:start'` 被静默丢弃 —— 用户实见「say 的内容没有被使用」。
+    // [CONSTRAINT] 只借块分支：文本/脚本两类仍走内联逻辑，因其额外做了 stripScriptBlocks 与 denoiseLog，
+    //   一并替换会退回那两个噪声问题。script 块由 buildOneCard 返 null（真卡由 run:start 建）。
+    if (ev.kind === 'ai:block') {
+      const blockCard = buildOneCard(ev)
+      if (blockCard) out.push(blockCard)
+      continue
+    }
     if (ev.kind !== 'run:start') continue
     const p = (ev.payload || {}) as Record<string, unknown>
     const desc = String(p.desc || '').trim()
@@ -273,8 +296,10 @@ const timelineItems = computed(() => {
     const timeLabel = hmsLabel(ev.ts)
     // [timeline-denoise-v1] 原始输出折叠：只留尾部若干行，省略量由卡片显式标注
     // [WHY] 原实现对 payload.stdoutTail 原样展示且无省略提示，安装/构建类输出会整段刷屏
-    const outTail = tailTextPreview(denoiseLog(String(p.stdoutTail || '')), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
-    const errTail = tailTextPreview(denoiseLog(String(p.stderrTail || '')), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
+    // [log-unfold-v1] 先展开 JSON 转义串（字面量 \n / \u001b）再降噪：
+    //   被 stringify 过的输出此前行数恒为 1 且转义码原样上屏（vue-tsc 60 行实测）
+    const outTail = tailTextPreview(denoiseLog(unfoldEscapedLog(String(p.stdoutTail || ''))), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
+    const errTail = tailTextPreview(denoiseLog(unfoldEscapedLog(String(p.stderrTail || ''))), TAIL_KEEP_LINES, TAIL_MAX_CHARS)
     out.push({
       type: 'script',
       key,
@@ -316,8 +341,9 @@ const latestScriptKey = computed(() => {
   return ''
 })
 
-// [deliver-window-v1] delivering 期同样算「等待」——扩展原 loading 时长，不新增文案。
-watch(() => props.aiWaiting || Boolean(props.delivering), (v) => {
+// [deliver-window-v1] 回传窗（feedback）同样算「等待」——扩展原 loading 时长，不新增文案。
+// [runtime-kind-ssot-v1] 判据改读 useRuntime.kind（waiting / feedback），不再依赖 props 透传
+watch(waitBanner, (v) => {
   if (v) { waitElapsed.value = 0; resumeWaitTimer() }
   else { pauseWaitTimer(); waitElapsed.value = 0 }
 }, { immediate: true })
@@ -377,12 +403,74 @@ onMounted(async () => {
     _innerRo.observe(chatInnerRef.value)
   }
 })
+onBeforeUnmount(() => { if (_copiedTimer) clearTimeout(_copiedTimer) })
 onBeforeUnmount(() => {
   // [panel-resize-scroll-v1] 卸载时断开 ResizeObserver，防内存泄漏
   if (_panelRo) { _panelRo.disconnect(); _panelRo = null }
   if (_innerRo) { _innerRo.disconnect(); _innerRo = null }
 })
 
+/**
+ * [terminal-actions-v1] 复制当前终端内容。
+ * [WHY] 终端输出分散在三处：本轮实时 stdout/stderr（props）与最终 doneSummary（Markdown）。
+ * 只复制「用户当前看得到的部分」，按 stdout → stderr → 总结的顺序拼，空段自动跳过。
+ * [CONSTRAINT] 优先用 navigator.clipboard；非安全上下文（http 非 localhost）下回退 textarea + execCommand，
+ * 否则按钮点了没有任何反应且不报错——比不提供更糟。
+ */
+async function copyContent(): Promise<void> {
+  const parts: string[] = []
+  if (props.liveStdout) parts.push(props.liveStdout.trimEnd())
+  if (props.liveStderr) parts.push(props.liveStderr.trimEnd())
+  const text = parts.filter(Boolean).join('\n')
+  if (!text) { toast('当前没有可复制的内容', 'info', TOAST_SHORT); return }
+  let ok = false
+  try {
+    await navigator.clipboard.writeText(text)
+    ok = true
+  } catch {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+    } catch { ok = false }
+  }
+  if (!ok) { toast('复制失败，请手动选择文本复制', 'error', TOAST_MEDIUM); return }
+  copiedFlash.value = true
+  if (_copiedTimer) clearTimeout(_copiedTimer)
+  _copiedTimer = setTimeout(() => { copiedFlash.value = false }, 1500)
+}
+/**
+ * [terminal-actions-v1] 关闭进程：仅在 running 时可用，向父级冒泡 stop。
+ * [CONSTRAINT] 不做二次确认——停止是可恢复操作（用户可重新发送指令），
+ * 加确认弹窗会让「想立刻停下」的场景多一次点击。
+ */
+function closeProcess(): void {
+  if (!props.running) return
+  emit('stop')
+  toast('已请求停止当前执行', 'info', TOAST_SHORT)
+}
+/**
+ * [terminal-actions-v1] 终端快捷键：Esc 关闭运行中进程 / Ctrl(⌘)+Shift+C 复制内容。
+ * [CONSTRAINT] 只在终端区域聚焦时生效（@keydown 绑在 section 上），不抢全局快捷键；
+ * 输入框内按 Esc 时不拦截——那里 Esc 的语义是取消输入。
+ */
+function onTerminalKeydown(e: KeyboardEvent): void {
+  const target = e.target as HTMLElement | null
+  const inField = !!target && (/^(?:INPUT|TEXTAREA)$/.test(target.tagName) || target.isContentEditable)
+  if (e.key === 'Escape' && !inField) {
+    if (props.running) { e.preventDefault(); closeProcess() }
+    return
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+    e.preventDefault()
+    void copyContent()
+  }
+}
 // [ui-p2c-stable-ref-fix-v1] 判别联合转 Record 需走 unknown 两步（TS2352）
 function asRecord(card: AnyCard): Record<string, unknown> {
   return card as unknown as Record<string, unknown>
@@ -493,12 +581,34 @@ function fmtTokens(bytes: number): string {
 </script>
 
 <template>
-  <section class="terminal">
+  <section class="terminal" tabindex="0" @keydown="onTerminalKeydown">
     <!-- [ctx-usage-v1] 上下文消耗指示：用户唯一能感知「该开新会话了」的信号。
          刻意不做精确 token 计数（前端拿不到权威值），只给量级。 -->
-    <div v-if="(runCount || 0) > 0" class="ctx-usage" role="status">
-      <span class="ctx-rounds">{{ runCount }} 轮</span>
+    <!-- [terminal-actions-v1] 操作条：左侧上下文量级，右侧复制 / 关闭进程。
+         不常驻空行——无轮次且未运行时整条隐藏，避免占用首屏高度。 -->
+    <div v-if="(runCount || 0) > 0 || running" class="ctx-usage" role="status">
+      <span v-if="(runCount || 0) > 0" class="ctx-rounds">{{ runCount }} 轮</span>
       <span v-if="tokenEstimate" class="ctx-tokens">~{{ fmtTokens(tokenEstimate) }}</span>
+      <span class="ctx-actions">
+        <button
+          v-tooltip="'复制终端内容 (Ctrl+Shift+C)'"
+          class="ctx-btn"
+          type="button"
+          :disabled="!liveStdout && !liveStderr"
+          @click="copyContent"
+        >
+          {{ copiedFlash ? '已复制' : '复制' }}
+        </button>
+        <button
+          v-tooltip="'关闭当前进程 (Esc)'"
+          class="ctx-btn danger"
+          type="button"
+          :disabled="!running"
+          @click="closeProcess"
+        >
+          关闭进程
+        </button>
+      </span>
     </div>
     <!-- [flow-timeline] 全流程时间线 -->
     <div class="flow-timeline">
@@ -585,10 +695,10 @@ function fmtTokens(bytes: number): string {
           </div>
         </div>
       </div>
-      <!-- 等待 AI 回复指示条：收到首个回复后由 stopAiWaiting 关闭。
+      <!-- 等待 AI 回复指示条：由 useRuntime.kind（waiting / feedback）驱动，其余态隐藏。
            [wait-banner-overlay-v1] 已浮层化（absolute 悬浮于时间线底部安全带内），
            出现/消失不再把 chat-list 压矮 ⇒ 最新一条不再被顶出视野（用户实测截图）。 -->
-      <div v-if="props.aiWaiting || props.delivering" class="wait-banner" role="status" aria-live="polite">
+      <div v-if="waitBanner" class="wait-banner" role="status" aria-live="polite">
         <span class="wait-spinner" aria-hidden="true" />
         <span class="wait-text">{{ waitElapsed >= 30 ? 'AI 仍在处理' : 'AI 思考中' }}</span>
         <span class="wait-dots" aria-hidden="true" />

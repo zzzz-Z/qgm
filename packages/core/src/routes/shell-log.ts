@@ -9,8 +9,15 @@ import { Hono } from 'hono'
 import { createRequire } from 'node:module'
 import { getRoot } from '../config.js'
 
-/** readShell / shellStatus 的返回面（只声明本路由用到的字段） */
+/** readShell / shellStatus / killShell 的返回面（只声明本路由用到的字段） */
 interface ShellLogApi {
+  /** [shell-kill-v1] 终止后台任务：SIGTERM 进程组，失败回退单 pid */
+  killShell: (id: string, opts?: { cwd?: string }) => {
+    ok: boolean
+    killed?: number
+    error?: string
+    code?: number
+  }
   readShell: (id: string, opts?: { from?: number, cwd?: string }) => {
     ok: boolean
     text?: string
@@ -67,4 +74,31 @@ shellLogHono.get('/shell-log', (c) => {
     running: Boolean(r.running),
     exitCode: r.exitCode ?? null,
   })
+})
+
+/**
+ * [shell-kill-v1] 终止后台任务。
+ *
+ * [WHY] helpers/shell.cjs 早已导出 killShell（SIGTERM 进程组 → 回退单 pid），
+ * 但 HTTP 层只有只读的 /shell-log ⇒ 前端无法提供「关闭进程」入口，
+ * 用户只能等任务自然结束或重启服务。
+ *
+ * [CONSTRAINT] 与 /shell-log 共用 id 形态白名单（^sh-[w-]+$）：既防路径穿越，
+ * 也保证前端两处操作指向同一命名空间；工作区根优先、进程 cwd 兜底（同 /shell-log）。
+ */
+shellLogHono.post('/shell-kill', async (c) => {
+  if (!shellApi) return c.json({ ok: false, error: 'helpers/shell.cjs 未加载（运行时文件缺失）' }, 503)
+  let id = String(c.req.query('id') || '').trim()
+  if (!id) {
+    try {
+      const body = await c.req.json()
+      id = String((body && body.id) || '').trim()
+    } catch { /* 无 body 时忽略 */ }
+  }
+  if (!id) return c.json({ ok: false, error: 'missing id' }, 400)
+  if (!/^sh-[\w-]+$/.test(id)) return c.json({ ok: false, error: '非法 id' }, 400)
+  let r = shellApi.killShell(id, { cwd: getRoot() })
+  if (!r.ok && r.code === 404) r = shellApi.killShell(id)
+  if (!r.ok) return c.json({ ok: false, error: r.error || 'kill failed', code: r.code ?? 400 }, r.code === 404 ? 404 : 400)
+  return c.json({ ok: true, id, killed: r.killed ?? null })
 })

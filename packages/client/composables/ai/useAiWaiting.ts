@@ -1,5 +1,6 @@
 import { effectScope, ref } from 'vue'
 import { useTimeoutFn } from '@vueuse/core'
+import { useRuntime } from './useRuntime'
 /** 跨组件共享的「等待 AI 回复」（单一数据源） */
 
 // 3 分钟无回复则复位 waiting，避免永久卡死
@@ -14,8 +15,8 @@ const waiting = ref(false)
 // [CHANGE-IMPACT] 原 watchdogTimer 显式句柄语义由 timeoutFn.start()/stop() 等价替代
 const scope = effectScope(true)
 const timeoutFn = scope.run(() => useTimeoutFn(() => {
-  if (!waiting.value) return
-  waiting.value = false
+  // [runtime-kind-ssot-v1] 超时也须走 stopWaiting：只清 waiting 会让运行态/banner 永久卡在 waiting
+  stopWaiting()
 }, WATCHDOG_MS, { immediate: false }))!
 
 /**
@@ -54,7 +55,21 @@ export function clearSoftPause(): void {
  */
 export function startWaiting(): void {
   waiting.value = true
+  // [runtime-kind-ssot-v1] 等待 AI 回复是运行时的独立阶段：同步写唯一真相源
+  useRuntime().enterWaiting()
   armWatchdog()
+}
+
+/**
+ * 取消等待 AI 回复状态；幂等
+ * [runtime-kind-ssot-v1] 同步收口 useRuntime：回复到达 / 用户停止时，只把「等待」态收回 idle；
+ *   脚本执行 / 回传中的收口归执行器（回复帧可能与它们交错到达，此处不得抹掉）。
+ */
+export function stopWaiting(): void {
+  waiting.value = false
+  clearWatchdog()
+  const rt = useRuntime()
+  if (rt.state.value.kind === 'waiting') rt.settleIdle()
 }
 
 /**
@@ -88,13 +103,8 @@ export function useAiWaiting() {
     softPause,
     clearSoftPause,
     waiting,
-    startWaiting() {
-      waiting.value = true
-      armWatchdog()
-    },
-    stopWaiting() {
-      waiting.value = false
-      clearWatchdog()
-    },
+    // [runtime-kind-ssot-v1] 复用模块级同名函数：返回对象与导出函数语义必须一致（避免两套实现分叉）
+    startWaiting,
+    stopWaiting,
   }
 }

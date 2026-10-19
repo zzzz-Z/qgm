@@ -34,6 +34,7 @@ vi.mock('../composables/ai/load-rules.js', () => ({
 vi.mock('../composables/ai/useAiWindowSend', () => ({
   isHeadless: () => false,
   loadTransport: async () => ({}),
+  nextFillMsgId: () => 'test-fill-msg',
   sendFill: vi.fn(() => true),
   sendFillTo: vi.fn(() => true),
   sendFillToAsync: h.sendFillToAsync,

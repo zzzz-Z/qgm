@@ -141,10 +141,67 @@ export function pickScriptBlocks(blocks: unknown): TurnScriptBlock[] {
 }
 
 /**
+ * [turn-out-feedback-v1] 回灌携带的脚本输出上限：尾部 40 行 / 2000 字符。
+ * [WHY] 旧实现只回 id/status/exit/err ⇒ AI 只看到 `exit=0`，一个字符的打印内容都拿不到，
+ *   只能靠猜或重跑（用户实测 2026-10-19「回执通道不返回脚本输出」）。
+ * [CONSTRAINT] 必须截断：实测单块 stdout 可达 5 万~11 万字符，全量回灌会打爆上下文并加重平台限流。
+ *   取尾部而非头部 —— 排错最需要的是末尾的报错 / 汇总行。
+ */
+export const OUT_TAIL_LINES = 40
+export const OUT_TAIL_CHARS = 2000
+
+/**
+ * [turn-err-feedback-v1] err 回灌上限（折叠成单行后计长）。
+ * [WHY] 原实现把 err 硬切 200 字（`r.err.slice(0, 200)`）而 stdout 给 2000 —— 报错栈最有用的中段
+ *   常常在第一个 frame 就被切断；且 err 里的换行会撕裂回灌文案的行结构（AI 读到半截栈且错位）。
+ */
+export const ERR_MAX_CHARS = 600
+
+/** err 折叠为单行并限长；超限补省略号（保留可辨识的首段） */
+function foldErr(raw: string): string {
+  const one = raw.replace(/\s+/g, ' ').trim()
+  return one.length > ERR_MAX_CHARS ? `${one.slice(0, ERR_MAX_CHARS)}…` : one
+}
+
+/**
+ * [turn-out-fence-v1] 按内容里最长连续反引号动态取围栏长度（≥3）。
+ * [WHY] stdout 内容自带 ``` 时会把固定 3 反引号围栏提前闭合，回灌文案裂成两段、
+ *   AI 看到的输出被截半（且结构错位）。取「最长连续反引号 + 1」才不会被内容闭合。
+ */
+function fenceFor(text: string): string {
+  const runs = text.match(/`+/g)
+  let longest = 0
+  if (runs) {
+    for (const run of runs) {
+      if (run.length > longest) longest = run.length
+    }
+  }
+  return '`'.repeat(Math.max(3, longest + 1))
+}
+
+/**
+ * 取文本尾部（行 + 字符双上限）。
+ * [WHY] 本模块零依赖纪律（见文件头 [CONSTRAINT]）⇒ 不能 import utils/timeline-preview，
+ *   故自带一份最小实现；语义与 tailTextPreview 一致：只保尾部，超限删头部。
+ * @returns `text` = 保留的尾部正文；`omittedLines` = 被删掉的整行数（供回灌标注省略量）
+ */
+function tailOf(raw: string, keepLines: number, maxChars: number): { text: string, omittedLines: number } {
+  const lines = raw.replace(/\r\n?/g, '\n').split('\n')
+  const kept = lines.length > keepLines ? lines.slice(lines.length - keepLines) : lines
+  let omittedLines = lines.length - kept.length
+  let text = kept.join('\n')
+  if (text.length > maxChars) {
+    text = text.slice(text.length - maxChars)
+    omittedLines = lines.length - text.split('\n').length
+  }
+  return { text, omittedLines }
+}
+
+/**
  * 回灌文案（一次 fill 覆盖一个 turn 的全部块结果）。
  * [WHY] 契约 §2.2：1 turn = 1 轮 —— 若按块逐条回传，N 个脚本会放大成 N 次提问。
- * [CONSTRAINT] 只做结构化摘要、不内联源码：源码由各块的脚本卡承载，回灌文本重复一遍
- *   会让上下文体积随块数线性膨胀。
+ * [CONSTRAINT] 不内联**源码**：源码由各块的脚本卡承载，重复一遍会让上下文体积随块数线性膨胀。
+ *   但**输出**必须带（[turn-out-feedback-v1]）：AI 侧没有任何其他通道能看到脚本跑出了什么。
  */
 export function formatTurnResults(turnId: number, results: TurnRunOutcome[]): string {
   if (!results.length) return ''
@@ -153,8 +210,16 @@ export function formatTurnResults(turnId: number, results: TurnRunOutcome[]): st
   const lines = results.map((r, i) => {
     const tag = r.status === 'ok' ? '✅' : r.status === 'skipped' ? '⏭' : '❌'
     const exit = typeof r.exit === 'number' ? ` exit=${r.exit}` : ''
-    const err = r.err ? ` err=${r.err.slice(0, 200)}` : ''
-    return `${i + 1}. ${tag} ${r.id} [${r.status}]${exit}${err}`
+    const err = r.err ? ` err=${foldErr(r.err)}` : ''
+    const summary = `${i + 1}. ${tag} ${r.id} [${r.status}]${exit}${err}`
+    const outRaw = typeof r.out === 'string' ? r.out : ''
+    if (!outRaw.trim()) return summary
+    const tail = tailOf(outRaw, OUT_TAIL_LINES, OUT_TAIL_CHARS)
+    const omitted = tail.omittedLines > 0 ? `…（省略前 ${tail.omittedLines} 行）\n` : ''
+    const body = `${omitted}${tail.text}`
+    // [turn-out-fence-v1] 围栏长度随内容自适应：stdout 自带 ``` 时不得用它闭合外层围栏
+    const fence = fenceFor(body)
+    return `${summary}\n${fence}\n${body}\n${fence}`
   })
   return [head, ...lines].join('\n')
 }
