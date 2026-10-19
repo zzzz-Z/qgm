@@ -89,6 +89,7 @@ const _rulesInjectedSids = _rulesInit.set
 const _rulesInjectedOrder = _rulesInit.order
 /** [rules-pending-lock-v1] 并发锁：判定通过到投递结果之间的 await 窗口期占位，避免双调各注入一次 */
 const _rulesPendingSids = new Set<string>()
+
 /**
  * [programmatic-nav-boot-guard-v1] 编程式导航（切工作区）触发的 boot 帧不视为全新 AI 上下文：
  *  目标工作区回到同一会话 URL，聊天历史里仍有 SYSTEM.md；误清首问闸门会让用户切回后再提问重带一次规则。
