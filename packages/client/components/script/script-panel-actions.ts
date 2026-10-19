@@ -276,6 +276,10 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
       toast('已关闭自动接管', 'info', TOAST_DEFAULT)
       return
     }
+    // [stop-after-summary-v1] 兜底路径（总结后 running/waiting/delivering/remoteGenerating 全 false）：
+    //   原实现只 stop() 脚本、不发 sendStop() → AI 仍在吐字时点停止无效（用户实测）。
+    //   此处补一次 sendStop()：不论前端状态如何，只要用户点停止就通知站点。
+    try { sendStop() } catch { /* swallow: 窗口已关时静默 */ }
     disableAutoTakeover()
     stop()
   }
