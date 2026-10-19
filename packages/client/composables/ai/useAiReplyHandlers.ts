@@ -599,6 +599,16 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     const parsed = parseSessionUrl(u, MODELS)
     if (!parsed) return
     void persistSessionBinding(u, parsed.sessionId)
+    // [newsession-history-v1] 新会话入历史列表：无头侧 new-session 时 SPA 尚未分配 id，
+    //   前端跳过 sessionHistory 写入（handleNewSessionCreated 的 url && id 双条件）。
+    //   首次 fill 后 URL 变成真会话 URL，本处补写。
+    //   [CONSTRAINT] 只在该 id 尚未入册时写：否则每次 URL 变化都会刷一条重复。
+    if (!sessionHistory.value.some(x => x.id === parsed.sessionId)) {
+      const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      const entry = { id: parsed.sessionId, url: u, title: `会话 · ${hhmm}`, createdAt: Date.now() }
+      sessionHistory.value = [entry, ...sessionHistory.value].slice(0, 50)
+      saveHistoryScoped()
+    }
   }
 
   /** 处理 ai-runner:session-id 会话 ID 回写 */
