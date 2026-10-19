@@ -427,7 +427,14 @@ export async function copyAndFill(prompt: string, opts?: { forceRules?: boolean,
     //   ③ 工作区已发（wsSent=true）且非 forceRules → 不注入（硬短路）
     // [rules-pending-lock-v1] 除已注入集合外，还须排除「正在 prepend 中」的 sid：
     //   并发双调（同一秒内两次 copyAndFill）原判据都能通过，各自 prepend + 各自投递 → 双注入。
-    const shouldInject = opts?.forceRules === true || (!wsSent && !_rulesInjectedSids.has(sid) && !_rulesPendingSids.has(sid))
+    // [headless-rules-inject-v1] 无头通道必须绕过 wsSent 短路：
+    //   [WHY] wsSent 是工作区维度（同工作区用油猴发过即 true），但无头是**全新会话**
+    //   （独立 profile、独立对话历史），SYSTEM.md 从未注入过 ⇒ AI 不知道自己是执行器。
+    //   [CONSTRAINT] 仍用窗口维度 _rulesInjectedSids 去重：同一浏览器会话内只注入一次。
+    const windowLevelOk = !_rulesInjectedSids.has(sid) && !_rulesPendingSids.has(sid)
+    const shouldInject = opts?.forceRules === true
+      || (isHeadless() && windowLevelOk)
+      || (!wsSent && windowLevelOk)
     if (sid && !opts?.skipRules && shouldInject) {
       // [rules-add-order-v1] add 必须在 prepend 成功之后：原实现在 await 前登记，
       // 若 prepend 后续抛错，sid 会被永久标记为「已注入」，规则静默丢失

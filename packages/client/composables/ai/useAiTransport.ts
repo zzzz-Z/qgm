@@ -311,6 +311,13 @@ export function createHeadlessTransport(wsUrl?: string): AiTransport {
       else if (msg.t === 'headless:script') { for (const cb of replyCbs) cb({ kind: 'script', item: msg.item }, sid, replayed) }
       else if (msg.t === 'headless:summary') { for (const cb of summaryCbs) cb(String(msg.text || ''), sid, Boolean(msg.degraded)) }
       else if (msg.t === 'headless:new-session-created') { for (const cb of newSidCbs) cb(String(msg.url || ''), String(msg.id || '')) }
+      // [headless-error-consume-v1] headless:error 是服务端消息处理的兜底异常帧（attach-ws.ts:486 的 try/catch）。
+      //   [WHY] 原实现前端零消费 ⇒ 任何处理逻辑崩溃都静默丢弃（用户实测「完全没反应」）。
+      //   [CONSTRAINT] 该帧不带 sid（与其他 headless:xxx 不同构），synthesize 成 state=error 复用 onState 通道。
+      else if (msg.t === 'headless:error') {
+        const detail = String((msg as Record<string, unknown>).error || '无头链路内部错误')
+        for (const cb of stateCbs) { try { cb('error', detail, '') } catch { /* swallow: 单订阅者异常不阻断其他 */ } }
+      }
       else if (msg.t === 'headless:state') {
         // [P3-1c] 收到服务端 state 即视为 sendFill 已 ACK
         const sid = String((msg as Record<string, unknown>).sid || '')
