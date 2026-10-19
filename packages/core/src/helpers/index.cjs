@@ -51,6 +51,9 @@ const lessonsApi = require('./lessons.cjs')
 /** [helpers-tasks-v1] 任务看板（HTTP，sid 由服务端按会话分桶）。 */
 const tasksApi = require('./tasks.cjs')
 
+/** [helpers-session-v1] 隔离会话族（HTTP，服务端 session-manager 托管）。 */
+const sessionApi = require('./session.cjs')
+
 /** [helpers-browser-v1] 无头浏览器（cssom / screenshot 走 CLI 子进程）。 */
 const browserApi = require('./browser.cjs')
 
@@ -188,6 +191,7 @@ const __AI__ = {
   /** 无 __AI__ 自引用的族：直接引用导出对象。 */
   lessons: lessonsApi,
   tasks: tasksApi,
+  session: sessionApi,
   browser: browserApi,
 }
 /**
