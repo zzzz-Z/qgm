@@ -1,4 +1,9 @@
 // [pure-parity-v1] 油猴侧与 headless 侧同名纯函数的行为等价守卫。
+// [NOT-TESTED] 以下函数因 harness 局限未纳入：
+//   - hasUnclosedStructureJs / scanReplyMarks / scanObjectEnd：内部含 `{` `}` 字符字面量，
+//     extractInner 的「数括号」启发式会抠错边界。
+//   - safeJsonParse：内部调用同文件另一函数（escapeControlCharsInStrings），runInVm 只注入单函数。
+//   它们的等价性由各自的独立行为测试保证。
 // [WHY] 同一份逻辑在两处独立实现，一旦某侧单独修改另一侧会静默分叉。
 // [CONSTRAINT] 只覆盖输入/输出为原始类型的函数。
 import { readFileSync } from 'node:fs'
@@ -46,6 +51,41 @@ test('hash32: 同一输入两侧同 hash', () => {
   }
 })
 
+test('decideScriptFence: 同一输入两侧同布尔', () => {
+  const inputs = [[true, 0, false], [true, 5, false], [false, 0, false], [true, 0, true], [false, 3, true]]
+  const h = extractInner(read(HEADLESS), 'decideScriptFence')!
+  const tm = extractInner(read(TM), 'decideScriptFence')!
+  for (const args of inputs) {
+    assert.equal(runInVm(h, args as unknown[]), runInVm(tm, args as unknown[]), `decideScriptFence 分叉 args=${JSON.stringify(args)}`)
+  }
+})
+
+test('turnAwaiting: 同一输入两侧同结果', () => {
+  const inputs = [[], [{ type: 'say' }], [{ type: 'script' }], [{ type: 'ask' }], [{ type: 'say' }, { type: 'script' }]]
+  const h = extractInner(read(HEADLESS), 'turnAwaiting')!
+  const tm = extractInner(read(TM), 'turnAwaiting')!
+  for (const blocks of inputs) {
+    assert.equal(runInVm(h, [blocks]), runInVm(tm, [blocks]), `turnAwaiting 分叉 blocks=${JSON.stringify(blocks)}`)
+  }
+})
+
+test('escapeControlCharsInStrings: 同一输入两侧同结果', () => {
+  const inputs = ['', 'plain', 'with \\n', '{"a":"b\nc"}', 'tab\there']
+  const h = extractInner(read(HEADLESS), 'escapeControlCharsInStrings')!
+  const tm = extractInner(read(TM), 'escapeControlCharsInStrings')!
+  for (const inp of inputs) {
+    assert.equal(runInVm(h, [inp]), runInVm(tm, [inp]), `escapeControlChars 分叉 input=${JSON.stringify(inp.slice(0, 30))}`)
+  }
+})
+
+test('langFromText: 同一输入两侧同结果', () => {
+  const inputs = ['', '#!/usr/bin/env node\ncode()', 'const x = 1', 'print(1)', 'function foo() {}']
+  const h = extractInner(read(HEADLESS), 'langFromText')!
+  const tm = extractInner(read(TM), 'langFromText')!
+  for (const inp of inputs) {
+    assert.equal(runInVm(h, [inp]), runInVm(tm, [inp]), `langFromText 分叉 input=${JSON.stringify(inp.slice(0, 30))}`)
+  }
+})
 test('hasExecutableContent: 同一输入两侧同布尔', () => {
   const inputs = ['', '//only comments', '#!node\n//x', 'code()', 'a\nb\nc']
   const h = extractInner(read(HEADLESS), 'hasExecutableContent')!

@@ -397,6 +397,9 @@ export function attachWs(httpServer: HttpServer | AnyHttpServer, opts: AttachWsO
         send({ t: 'headless:state', sid, state: 'idle', detail: 'closed' })
         break
       }
+      // [headless-list-e2e-v1] 生产代码零消费，唯一调用方是 e2e/headless-ws.spec.ts 的 WS 握手回环测试。
+      //   [WHY] 真实状态变化由 headless:state 主动推送，无需前端轮询。本帧保留是为 e2e 提供一个
+      //   「无害且必定响应」的回环请求，验证 WS 通路。删掉会让 e2e 失去握手验证手段。
       case 'headless:list': {
         send({ t: 'headless:list', sessions: pool.list() })
         break
