@@ -298,3 +298,24 @@ test('[turn-emit-dedup-persist-v1] 去重键含 sid 且落 sessionStorage', () =
   assert.match(src, /loadKeySet\(/, '未从 sessionStorage 读回已推送集合：刷新后同一信封会被重推')
   assert.match(src, /sessionStorage\.setItem/, '去重集合未持久化：刷新后上一轮脚本会被重跑')
 })
+
+// [turn-coldstart-bypass-v1] 冷启动守卫只该拦「本轮新增」的增量探针；信封是**整轮交付**。
+//   [WHY 必须钉死] 守卫只在收到过 fill/rotate 后解除。那一帧若没被本页收到（用户在 AI 页
+//   手动提问 / 工作台的窗口引用指向了另一个窗口），守卫永不解除 ⇒ 油猴零回传、工作台时间线
+//   全空白，而服务端日志零痕迹（用户实测 2026-10-20，排查耗时远超必要的两轮）。
+test('[turn-coldstart-bypass-v1] 冷启动守卫期内仍放行信封交付', () => {
+  const src = read('packages/core/src/tampermonkey/dispatch.ts')
+  const at = src.indexOf('if (!_roundBaselinesReady)')
+  assert.ok(at > 0, 'dispatch 缺冷启动守卫（被整体删除？）')
+  const open = src.indexOf('{', at)
+  let depth = 0
+  let end = -1
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++
+    else if (src[i] === '}') { depth--; if (depth === 0) { end = i; break } }
+  }
+  assert.ok(end > open, '冷启动守卫块未闭合（朴素配对失败 ⇒ 括号被注释带偏）')
+  const body = src.slice(open, end)
+  assert.match(body, /emitTurn\(/, '守卫期内必须放行信封：fill 未被收到时守卫永不解除 ⇒ 整轮零回传')
+  assert.match(body, /isGenerating/, '守卫期内放行信封仍须保留生成中门（否则会推出半截块）')
+})

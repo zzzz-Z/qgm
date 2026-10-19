@@ -91,6 +91,28 @@ function classifyAndPost(): void {
     // 历史恢复的存量标记若被当成本轮新增，刷新页面就会立刻误报
     if (!_roundBaselinesReady) {
       limitMarkerBaseline = countLimitMarkers()
+      // [turn-coldstart-bypass-v1] 信封是「整轮交付」，不是「本轮新增」的增量判定，
+      //   因此不受本守卫约束——守卫期内仍放行信封，其余探针（stopped / limit / plain）维持原样。
+      // [WHY 必须放行] 本守卫只在收到过 fill/rotate 后才解除。若那一帧没被本页收到
+      //   （用户在 AI 页手动提问 / 工作台的窗口引用指向了另一个窗口），守卫永不解除
+      //   ⇒ 油猴零回传、工作台时间线全空白，而服务端日志**零痕迹**（用户实测 2026-10-20）。
+      //   守卫的初衷只是防「历史存量标记被当成本轮新增」，信封 JSON 是显式结构化交付，
+      //   不存在该误报面，故放行它是零风险的。
+      // [CONSTRAINT] 与下方主路径同构：`if (turn && emitTurn(turn)) return` 是
+      //   turn-emit-parity 守卫的字面量判据，此处必须逐字相同。
+      // [CONSTRAINT] 保留生成中门：流式未结束时读到的信封是半截的，推出去等于交付残缺块。
+      if (!stopPosted && !isGenerating()) {
+        const coldRoot = latestAssistantRoot()
+        const coldTurn = readTurnFromRoot(coldRoot)
+        // [WHY 每轮都发] 「守卫期内卡住」在服务端完全不可见，只能靠油猴自己报出来。
+        _tmDiag(coldTurn ? 'turn-read-cold' : 'coldstart-hold', {
+          turnId: coldTurn ? coldTurn.turnId : undefined,
+          blocks: coldTurn ? coldTurn.blocks.length : 0,
+          replyRootFound: !!coldRoot,
+          note: '冷启动守卫期内：仅信封可交付，其余探针挂起',
+        })
+        if (coldTurn && emitTurn(coldTurn)) return
+      }
       return
     }
 

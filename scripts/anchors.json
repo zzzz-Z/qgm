@@ -190,15 +190,11 @@
     },
     {
       "file": "packages/core/src/headless/headless-inject.ts",
-      "contains": "if (lang !== 'js' && lang !== 'bash')"
+      "contains": "else if (!TURN_SCRIPT_LANGS.includes(lang))"
     },
     {
       "file": "scripts/tampermonkey-session-id.user.js",
-      "contains": "if (lang !== 'js' && lang !== 'bash')"
-    },
-    {
-      "file": "packages/core/tests/reply-mark-parity.node-test.ts",
-      "contains": "脚本语言白名单两端同构"
+      "contains": "if (lang !== 'js' && lang !== 'cjs')"
     },
     {
       "file": "packages/core/src/skills/registry.ts",

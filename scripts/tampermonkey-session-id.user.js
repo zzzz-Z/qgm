@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.33
+// @version      1.9.36
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
 // @match        https://chatglm.cn/*
@@ -1628,6 +1628,29 @@ function classifyAndPost() {
         // 历史恢复的存量标记若被当成本轮新增，刷新页面就会立刻误报
         if (!_roundBaselinesReady) {
             limitMarkerBaseline = countLimitMarkers();
+            // [turn-coldstart-bypass-v1] 信封是「整轮交付」，不是「本轮新增」的增量判定，
+            //   因此不受本守卫约束——守卫期内仍放行信封，其余探针（stopped / limit / plain）维持原样。
+            // [WHY 必须放行] 本守卫只在收到过 fill/rotate 后才解除。若那一帧没被本页收到
+            //   （用户在 AI 页手动提问 / 工作台的窗口引用指向了另一个窗口），守卫永不解除
+            //   ⇒ 油猴零回传、工作台时间线全空白，而服务端日志**零痕迹**（用户实测 2026-10-20）。
+            //   守卫的初衷只是防「历史存量标记被当成本轮新增」，信封 JSON 是显式结构化交付，
+            //   不存在该误报面，故放行它是零风险的。
+            // [CONSTRAINT] 与下方主路径同构：`if (turn && emitTurn(turn)) return` 是
+            //   turn-emit-parity 守卫的字面量判据，此处必须逐字相同。
+            // [CONSTRAINT] 保留生成中门：流式未结束时读到的信封是半截的，推出去等于交付残缺块。
+            if (!stopPosted && !isGenerating()) {
+                const coldRoot = latestAssistantRoot();
+                const coldTurn = readTurnFromRoot(coldRoot);
+                // [WHY 每轮都发] 「守卫期内卡住」在服务端完全不可见，只能靠油猴自己报出来。
+                _tmDiag(coldTurn ? 'turn-read-cold' : 'coldstart-hold', {
+                    turnId: coldTurn ? coldTurn.turnId : undefined,
+                    blocks: coldTurn ? coldTurn.blocks.length : 0,
+                    replyRootFound: !!coldRoot,
+                    note: '冷启动守卫期内：仅信封可交付，其余探针挂起',
+                });
+                if (coldTurn && emitTurn(coldTurn))
+                    return;
+            }
             return;
         }
         // 生成中门：流式未结束时 script/plain 一律推迟
@@ -1774,6 +1797,10 @@ catch { /* 页面导航/关闭期间的 DOM 异常：本轮放弃，下轮自然
  *
  * [WHY] 通道 ③ 是实测补出来的：用户滚动一下页面就立刻收到 → 滚动引发的 DOM 变动才是唤醒源。
  *   无头通道是 800ms 轮询，天然无此症；本通道对齐该频率。
+ *
+ * [headless-collector-v1] 稳定契约与无头注入侧同构：无头侧 waitForSignal 用静默窗判定「回复已稳定」，
+ *   本通道的 350ms 防抖是它的前置归并。静默窗特意设为 400ms —— 比 350ms 防抖再多留 50ms 余量，
+ *   两者相等时防抖刚触发就可能被判为稳定，半截正文会先于补全内容交付。改任一侧都必须重新核对这条余量。
  * [CONSTRAINT] attributeFilter 刻意不含 'class'：流式光标动画下 class 变更极高频，
  *   会制造 observer 回调风暴。停止按钮的态变走 disabled / aria-label / data-state 已足够覆盖。
  */

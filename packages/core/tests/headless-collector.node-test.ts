@@ -12,7 +12,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..', '..')
 const INJECT = path.join(ROOT, 'packages/core/src/headless/headless-inject.ts')
 const HEADLESS = path.join(ROOT, 'packages/core/src/headless/ai-headless.ts')
-const FENCE_SRC = path.join(ROOT, 'packages/core/src/tampermonkey/fence.ts')
+const FENCE_SRC = path.join(ROOT, 'packages/core/src/tampermonkey/observer.ts')
 
 test('collector: observer 必须三通道且写 _lastMutationAt', () => {
   const s = fs.readFileSync(INJECT, 'utf8')
