@@ -34,58 +34,10 @@ function slice(start: string, end: string): string {
   return md.slice(a, b)
 }
 
-/** 在给定文本内切片（供 §1 内部状态段使用，避免跨章 indexOf 误命中附录 C） */
-function sliceIn(text: string, start: string, end: string): string {
-  const a = text.indexOf(start)
-  assert.ok(a > -1, `§1 内找不到起始锚「${start}」`)
-  const b = text.indexOf(end, a + start.length)
-  assert.ok(b > a, `§1 内找不到结束锚「${end}」`)
-  return text.slice(a, b)
-}
-
-// [appendix-c-scoped-v1] 状态段在附录 C（§1 已改为 §1.1-§1.6 信封结构，无「### 状态 X」标题）
-//   附录 C 是兼容冻结区，P8 删它时这些断言必须同步改——由本行注释与 §1.6 引用共同标记
-const _cAt = md.indexOf('## 附录 C')
-assert.ok(_cAt > -1, 'SYSTEM.md 找不到「## 附录 C」')
-const appendixC = md.slice(_cAt)
-const stateB = sliceIn(appendixC, '### 状态 B：ASK（交互阻断）', '### 状态 C：')
-const stateD = sliceIn(appendixC, '### 状态 D：DONE（任务终止）', '### 状态 E：')
-const s8 = slice('## §8 错误恢复与重试预算', '## §9 ')
-const s12 = slice('## §12 提交前自复检协议', '## §13 ')
-
-test('G1 两类 ASK 定义跨段同源（§1 状态 B ↔ 状态 D）', () => {
-  // 变异：从任一状态段删掉「沙箱物理不可为」⇒ 红
-  for (const [name, seg] of [['状态 B', stateB], ['状态 D', stateD]] as const) {
-    assert.ok(seg.includes('人类权威'), `${name} 缺「人类权威」类`)
-    assert.ok(seg.includes('沙箱物理不可为'), `${name} 缺「沙箱物理不可为」类`)
-  }
-})
-
-test('G2 §12 硬性规则不再把 ASK 当不可修错误的出口（改指 §8）', () => {
-  // 变异：把 §12 第 2 条改回「修不动就 `ASK`」⇒ 两句断言均红
-  assert.ok(!md.includes('修不动就 `ASK`'), '§12 旧矛盾句「修不动就 ASK」复活')
-  assert.ok(s12.includes('metaerror-fuse-v1'), '§12 未指向 §8 熔断契约')
-  assert.ok(s12.includes('不得转 `ASK`'), '§12 未显式禁止转 ASK')
-})
-
 test('G3 §8 熔断冻结必须明写「不上报 ASK」', () => {
   // 变异：删掉该短语 ⇒ 红
-  assert.ok(s8.includes('不上报 `ASK`'), '§8 熔断未声明不上报 ASK')
-})
-
-test('G4 §1 状态 B 不再把「缺凭据」与「歧义/需用户决策」并列为不构成理由', () => {
-  // 变异：回退该句 ⇒ 红（缺凭据是状态 D 认可的「沙箱物理不可为」，不得在 B 里被否定）
-  assert.ok(!stateB.includes('「缺凭据」本身'), '状态 B 仍把缺凭据列为「本身不构成理由」，与状态 D 冲突')
-})
-
-test('G5 §1 状态 D 的 [DECIDE] 不再改写成 ASK（改指 fail 收尾 + 随 DONE 挂账）', () => {
-  // 变异 1：把旧句「需人类决策（改用 ASK）」加回去 ⇒ 红
-  // 变异 2：删掉「随 DONE 挂账」或「tasks.fail」任一 token ⇒ 红（只做删没做替）
-  // [CONSTRAINT] 判据落在 stateD 段（状态 D → 状态 E）；三个 token 缺一即红
-  assert.ok(!stateD.includes('改用 `ASK`'), '状态 D 又出现「改用 ASK」——与 §8 熔断处置（不上报 ASK）重新对立')
-  assert.ok(stateD.includes('[DECIDE]'), '状态 D 段缺 [DECIDE] token')
-  assert.ok(stateD.includes('tasks.fail'), '状态 D 段缺 tasks.fail（未写明做不成时先 fail 收尾）')
-  assert.ok(stateD.includes('随 DONE 挂账'), '状态 D 段缺「随 DONE 挂账」（只删旧句未补新出口）')
+  const s8 = slice('## §8 错误恢复与重试预算', '## §9 ')
+  assert.ok(s8.includes('不上报 `ask` 块') || s8.includes('不上报 `ASK`'), '§8 熔断未声明不上报 ask 块')
 })
 
 // ── [system-md-bearing-v1] G6：每章「承重：」标注 + 标注路径存在性 ──

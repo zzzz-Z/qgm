@@ -241,10 +241,6 @@
       "contains": "恒等"
     },
     {
-      "file": "packages/core/SYSTEM.md",
-      "contains": "状态 C：TEXT（纯文本回执）"
-    },
-    {
       "file": "packages/core/src/headless/headless-inject.ts",
       "contains": "marks.handoff < 0 && marks.text < 0"
     },

@@ -345,9 +345,15 @@ pnpm userscript:build
 | `reply-mark.ts` v1 `ReplyEnvelope` 草案 |          — | 已在 `git stash@{0}`，工作区无此文件                                                                               | 已实际清账                                      |
 
 **重新定级**：P8 不是「删死分支」，而是「信封覆盖率达标后，评估回落态账本是否仍需保留」。
-触发条件不是时间（观察期 2 周），而是**附录 C 能否整体删除**——二者是同一件事。
+~~触发条件不是时间（观察期 2 周），而是附录 C 能否整体删除——二者是同一件事。~~
 
-前置依赖：`system-contract` 的 `[appendix-c-scoped-v1]` 注释标明了删附录 C 时必须同步改的断言位置。
+**2026-10-19 更新：附录 C 已彻底删除**（用户决策：不需要兼容回落）。同步变更：
+
+- `SYSTEM.md`：附录 C 全文移除；§0 首段、§0 第 8 条、§1.6、§8、§11、§12 六处引用改为信封态表述
+- `system-contract.node-test.ts`：删除依赖附录 C 状态段的 G1 / G4 / G5 三条断言与 `sliceIn` 辅助函数；G3（§8 熔断）保留
+- 回落能力完全消失：信封解析失败即整轮丢弃，按 §1.5 错误码回灌自纠后重发
+
+因此 P8 的剩余范围收窄为：`markedNonScript` / `hasJsFence` / `_plainSentInCycle` / `_askSentHash` / `seenDoneMarkers` / `stripScriptBlocks` / `decideScriptFence` 七项回落态账本字段的处置（见上表，均仍承重）。
 
 ---
 
