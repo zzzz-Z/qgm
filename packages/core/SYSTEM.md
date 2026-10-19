@@ -130,7 +130,7 @@
 ### §1.6 执行纪律（信封态通用）
 
 - **执行通道（`js-only-channel-v1`）**：`script.lang` 只能是 `js` / `cjs`（§1.4）→ `/run` 沙箱，副作用走 `__AI__`（§3），外层 180s；`code` 若写 shebang，唯一合法值是 `#! /usr/bin/env node`。需要 shell 语义一律 `await __AI__.shell(...)`（§3.2）——**不要**用 `bash` 当 `lang`。
-- **`script` 块必填字段**：`desc`（动作）+ `why`（意图），各 ≤200 字符，写在信封 JSON 里（§1.4）；`code` 是纯脚本正文，**不需要** `// @desc` / `// @why` 注释。
+- **`script` 块必填字段**：`desc`（动作）+ `why`（意图），各 ≤200 字符，位于信封 JSON 内（§1.4）；`code` 只放脚本正文。
 - **脚本纪律（`script-discipline-v1`）**：禁顶层 `await`（异步包进 `;(async()=>{...})()`）；整段脚本放**一个** `code` 字符串；非脚本文本禁入 `code`；编辑源码前先 `__AI__.grep` 同名符号（两份实现 = TS2393 连环报错）。
 - **verify-contract-v1**：收尾前必须调 `__AI__.syntaxCheck` / `typeCheck` / `lint([file])` 或冒烟，总结列实际命令。**按语言选工具（`verify-lang-matrix-v1`）**：`.js`/`.cjs` → `syntaxCheck(源码字符串)`；`.ts`/`.tsx`/`.vue`/`.mjs` → `lint([file])` / `typeCheck()`——`syntaxCheck` 对后者恒报 `UNSUPPORTED_LANG`（能力边界）。
 - **selfcheck-gate-v1**：总结前系统自动对账两表与 git/命令实测；宁缺勿假，谎称 = 造假拒收。`[SELF-FAIL]` 是打回反馈（非新任务），修净后重交，不重开会话；连续 2 次失败熔断终止。**终验轮全量自检（`selfcheck-l2 v1`）**：首次总结自动跑交付级终验，等待即可，重交只重验失败项。
