@@ -621,8 +621,8 @@
   border: 2px solid color-mix(in srgb, var(--primary, #3b82f6) 24%, transparent);
   border-top-color: var(--primary, #3b82f6);
   box-sizing: border-box;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   animation: status-spin 0.9s linear infinite;
 }
 @keyframes status-spin {
@@ -632,8 +632,15 @@
 }
 .status-bar-inline.kind-waiting .status-dot,
 .status-bar-inline.kind-feedback .status-dot {
-  background: var(--warning, #f59e0b);
-  animation: status-pulse 1.4s ease-in-out infinite;
+  /* [loading-spinner-v1] 黄点脉冲 → 环形旋转：与运行态一致的 loading 语义，
+     不再用「警告色圆点」暗示等待（易被误读为出错）。 */
+  background: transparent;
+  border: 2px solid color-mix(in srgb, var(--primary, #3b82f6) 24%, transparent);
+  border-top-color: var(--primary, #3b82f6);
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  animation: status-spin 0.9s linear infinite;
 }
 .status-bar-inline.ok .status-dot {
   background: var(--success, #22c55e);
