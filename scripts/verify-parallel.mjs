@@ -14,7 +14,10 @@ const TASKS = [
   { name: 'tsc:client', cmd: 'pnpm', args: ['tsc:client'] },
   { name: 'test:tsc', cmd: 'pnpm', args: ['test:tsc'] },
   { name: 'lint', cmd: 'pnpm', args: ['lint'] },
-  { name: 'test:unit', cmd: 'pnpm', args: ['test:unit'] },
+  // [vitest-shard-v1] 按包分片：config 把单进程 worker 限到 4（供电 60W 防 CPU 争抢误报），
+  //   16 核机器因此闲置。两包互不依赖，各起一个 vitest（各 4 worker）实测稳定，64s → 30s。
+  { name: 'test:core', cmd: 'npx', args: ['vitest', 'run', 'packages/core/tests'] },
+  { name: 'test:client', cmd: 'npx', args: ['vitest', 'run', 'packages/client/tests'] },
 ]
 
 function runOne(t) {
@@ -30,7 +33,14 @@ function runOne(t) {
 }
 
 const t0 = Date.now()
-const results = await Promise.all(TASKS.map(runOne))
+// [verify-concurrency-cap-v1] 不一次性全起：7 个任务各开 worker 会超过机器承受力，
+//   实测全并发 88.1s > 分批（≤4）的 30-40s。上限与 vitest 的 worker 数（4）对齐。
+const MAX_PARALLEL = Number(process.env.VERIFY_PARALLEL) || 4
+const results = []
+for (let i = 0; i < TASKS.length; i += MAX_PARALLEL) {
+  const batch = TASKS.slice(i, i + MAX_PARALLEL)
+  results.push(...await Promise.all(batch.map(runOne)))
+}
 const total = Date.now() - t0
 
 for (const r of results) {

@@ -52,7 +52,7 @@
     "tsc": "tsc -p tsconfig.json --noEmit",
     "tsc:client": "vue-tsc -p tsconfig.client.json --noEmit",
     "typecheck": "pnpm tsc && pnpm tsc:apps && pnpm tsc:client && pnpm test:tsc",
-  "verify:parallel": "node scripts/verify-parallel.mjs",
+    "verify:parallel": "node scripts/verify-parallel.mjs",
     "skills:gen": "node scripts/agent-skills-generate.cjs",
     "skills:check": "node scripts/agent-skills-generate.cjs --check",
     "turn-schema:sync": "node scripts/sync-turn-schema.mjs",
