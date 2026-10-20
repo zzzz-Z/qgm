@@ -219,60 +219,58 @@ function onLoginGui() {
     <a href="#main-content" class="skip-link">跳到主内容</a>
     <AiWindowList />
     <div class="app-body">
-      <header class="hdr">
-        <div class="hdr-right">
-          <button
-            v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
-            class="theme-toggle" aria-label="切换主题"
-            @click="theme = theme === 'dark' ? 'light' : 'dark'"
-          >
-            <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
-            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
-          </button>
-          <!-- [hdr-transport-group-v1] 传输链路控组合一：把「油猴 / 无头」选择、无头引导登录、更新油猴脚本
+      <div class="hdr-right">
+        <button
+          v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
+          class="theme-toggle" aria-label="切换主题"
+          @click="theme = theme === 'dark' ? 'light' : 'dark'"
+        >
+          <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
+        </button>
+        <!-- [hdr-transport-group-v1] 传输链路控组合一：把「油猴 / 无头」选择、无头引导登录、更新油猴脚本
            收进同一个分段控件（原先是三个各自描边的独立控件，视觉上零散且高度不一）。
            结构： [ 链路选择 ▾ | (无头时) 引导登录 | 更新脚本 ] -->
-          <div class="transport-switch" role="group" aria-label="AI 传输链路（切换后自动刷新）" title="AI 传输链路（切换后自动刷新）">
-            <select
-              class="transport-select"
-              :value="transportKind"
-              aria-label="AI 传输链路"
-              @change="onTransportChange"
-            >
-              <option value="tampermonkey">
-                油猴
-              </option>
-              <option value="headless">
-                无头
-              </option>
-            </select>
-            <!-- [headless-login-gui-v1] 无头模式下引导用户在有头窗口完成一次登录 -->
-            <template v-if="transportKind === 'headless'">
-              <span class="transport-sep" aria-hidden="true" />
-              <button
-                v-tooltip="'引导登录：打开有头窗口，登录后关窗即可（登录态落盘复用）'"
-                aria-label="引导登录"
-                class="login-gui-toggle"
-                @click="onLoginGui"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
-              </button>
-            </template>
+        <div class="transport-switch" role="group" aria-label="AI 传输链路（切换后自动刷新）" title="AI 传输链路（切换后自动刷新）">
+          <select
+            class="transport-select"
+            :value="transportKind"
+            aria-label="AI 传输链路"
+            @change="onTransportChange"
+          >
+            <option value="tampermonkey">
+              油猴
+            </option>
+            <option value="headless">
+              无头
+            </option>
+          </select>
+          <!-- [headless-login-gui-v1] 无头模式下引导用户在有头窗口完成一次登录 -->
+          <template v-if="transportKind === 'headless'">
             <span class="transport-sep" aria-hidden="true" />
-            <!-- [userscript-update-v1] 安装 / 更新油猴脚本：打开本地分发端点，Tampermonkey 拦截并弹更新页 -->
             <button
-              v-tooltip="'安装 / 更新油猴脚本（打开本地分发端点，Tampermonkey 会弹出安装或更新确认）'"
-              :aria-label="userscriptBadge.hasUpdate.value ? '油猴脚本有新版本，点击更新' : '更新油猴脚本'"
-              class="userscript-toggle"
-              :class="{ 'has-update': userscriptBadge.hasUpdate.value }"
-              @click="onUpdateUserscript"
+              v-tooltip="'引导登录：打开有头窗口，登录后关窗即可（登录态落盘复用）'"
+              aria-label="引导登录"
+              class="login-gui-toggle"
+              @click="onLoginGui"
             >
-              <span v-if="userscriptBadge.hasUpdate.value" class="userscript-dot" aria-hidden="true" />
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
             </button>
-          </div>
+          </template>
+          <span class="transport-sep" aria-hidden="true" />
+          <!-- [userscript-update-v1] 安装 / 更新油猴脚本：打开本地分发端点，Tampermonkey 拦截并弹更新页 -->
+          <button
+            v-tooltip="'安装 / 更新油猴脚本（打开本地分发端点，Tampermonkey 会弹出安装或更新确认）'"
+            :aria-label="userscriptBadge.hasUpdate.value ? '油猴脚本有新版本，点击更新' : '更新油猴脚本'"
+            class="userscript-toggle"
+            :class="{ 'has-update': userscriptBadge.hasUpdate.value }"
+            @click="onUpdateUserscript"
+          >
+            <span v-if="userscriptBadge.hasUpdate.value" class="userscript-dot" aria-hidden="true" />
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
+          </button>
         </div>
-      </header>
+      </div>
 
       <div class="layout-row">
         <div class="layout-main">

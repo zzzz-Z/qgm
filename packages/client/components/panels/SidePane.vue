@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { sidePaneRevealTick, sidePaneTab } from '../../composables/ui/useSidePaneTab'
-import FileTree from './FileTree.vue'
-import FileList from './FileList.vue'
-import type { ChangeEntry } from '../../types'
+import { sidePaneRevealTick, sidePaneTab } from '../../composables/ui/useSidePaneTab';
+import FileTree from './FileTree.vue';
+import FileList from './FileList.vue';
+import type { ChangeEntry } from '../../types';
 
 /** 标签页类型：从 _tabAllowed 派生，保证与运行时白名单一致 */
 // [WHY] TS 类型别名编译期惰性求值，`typeof _tabAllowed` 引用后置 const 无 TDZ 风险
@@ -122,6 +122,22 @@ defineExpose({ selectTab })
   <div v-if="model && isNarrow" class="side-drawer-backdrop bg-[rgb(15_30_60_/_35%)] inset-0 fixed z-30" @click="model = false" />
   <aside class="pane-side h-full relative overflow-hidden" :class="{ 'translate-x-0!': model, 'is-collapsed': collapsed }" :style="{ width: collapsed ? '40px' : `${displayWidth}px` }">
     <div class="side-tabs p-1.5 px-2 border-b border-[var(--border)] bg-[var(--surface)] flex shrink-0 gap-1.5 items-center">
+      <!-- [fix-side-collapse] 收起/展开 -->
+      <button
+        v-tooltip="collapsed ? '展开侧栏' : '收起侧栏'"
+        class="side-collapse-btn"
+        :aria-label="collapsed ? '展开侧栏' : '收起侧栏'"
+        @click="collapsed = !collapsed"
+      >
+        <!-- [fix-side-icon] 侧栏切换图标：圆角矩形 + 左竖线 -->
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="3" ry="3" />
+          <line x1="9" y1="4" x2="9" y2="20" />
+          <line v-if="collapsed" x1="13" y1="12" x2="17" y2="12" />
+          <polyline v-else points="17 9 14 12 17 15" />
+        </svg>
+      </button>
+
       <button aria-label="文件树" :class="{ 'side-tab-active': sideTab === 'tree' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('tree')">
         <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg></span>
       </button>
@@ -147,22 +163,6 @@ defineExpose({ selectTab })
       <!-- [video-panel-v1] 视频生成 tab：主题提交 + 任务进度（懒加载，同 kb 范式） -->
       <button v-tooltip="'视频生成'" aria-label="视频生成" :class="{ 'side-tab-active': sideTab === 'video' }" class="side-tab text-[var(--text-3)] p-0 border-0 rounded-md bg-transparent inline-flex gap-0 h-8 w-8 cursor-pointer transition-colors items-center justify-center relative hover:text-[var(--text-2)] hover:bg-[rgb(255_255_255_/_6%)]" @click="selectTab('video')">
         <span class="side-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg></span>
-      </button>
-
-      <!-- [fix-side-collapse] 收起/展开 -->
-      <button
-        v-tooltip="collapsed ? '展开侧栏' : '收起侧栏'"
-        class="side-collapse-btn"
-        :aria-label="collapsed ? '展开侧栏' : '收起侧栏'"
-        @click="collapsed = !collapsed"
-      >
-        <!-- [fix-side-icon] 侧栏切换图标：圆角矩形 + 左竖线 -->
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="4" width="18" height="16" rx="3" ry="3" />
-          <line x1="9" y1="4" x2="9" y2="20" />
-          <line v-if="collapsed" x1="13" y1="12" x2="17" y2="12" />
-          <polyline v-else points="17 9 14 12 17 15" />
-        </svg>
       </button>
     </div>
     <div v-show="sideTab === 'tree'" class="side-tree text-sm flex flex-col flex-1 min-h-0 overflow-hidden">
