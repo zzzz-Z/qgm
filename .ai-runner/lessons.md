@@ -2478,6 +2478,8 @@ TypeScript 控制流分析把 `const` 字面量收窄为 `'A'`，于是 `if (PHA
 
 ## `git rm` 对有本地修改的文件会拒绝
 
+[VERIFIED] 2026-10-20 实测：mktemp 临时仓库中 `echo b >> f.txt && git rm f.txt` → EXIT=1，报「如下文件有本地修改」并提示 `-f` 强制
+
 `git rm packages/client/composables/ai/auto-loop/hooks.ts` 报「has local modifications」。因为该文件已被前序轮次改过（加 `Impl` 后缀）。需用 `git rm -f` 强制。
 
 ## 迁移文件时，子目录内所有引用者都要改相对路径深度
