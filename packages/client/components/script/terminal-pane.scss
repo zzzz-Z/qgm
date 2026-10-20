@@ -82,7 +82,7 @@
   max-width: 900px;
   margin: 0 auto;
   padding: 16px 20px 24px;
-  gap: 10px;
+  gap: 6px;
   @media (max-width: 900px) {
     padding: 14px 8px 20px;
   }
@@ -92,7 +92,7 @@
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui,
     sans-serif;
   font-size: 13px;
-  line-height: 1.7;
+  line-height: 1.55;
   color: var(--text-2);
   /* 滚动条细淡（替代 4 条 ::-webkit-scrollbar 规则） */
   @apply scroll-thin;
@@ -201,8 +201,8 @@
 /* [card-unify-v1] 卡片统一风格：用户提问/回答、AI 提问卡共用 12px 圆角卡片 */
 .done-summary,
 .text-card {
-  margin: 8px 0;
-  padding: 12px 0;
+  margin: 6px 0;
+  padding: 8px 0;
 }
 
 /* [card-flat-v1] AI 输出卡（文本 / 总结）去气泡外框：只保留文字渲染，
@@ -465,7 +465,7 @@
 .done-summary-body {
   margin: 0;
   font:
-    13px/1.75 -apple-system,
+    13px/1.55 -apple-system,
     BlinkMacSystemFont,
     'Segoe UI',
     'PingFang SC',
@@ -474,27 +474,27 @@
   word-break: break-word;
 }
 .done-summary-body :deep(p) {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
 }
 .done-summary-body :deep(p:last-child) {
   margin-bottom: 0;
 }
 .done-summary-body :deep(h1) {
-  margin: 22px 0 12px;
+  margin: 16px 0 8px;
   font-size: 20px;
   font-weight: 400;
   color: var(--text, #e6edf3);
   line-height: 1.35;
 }
 .done-summary-body :deep(h2) {
-  margin: 20px 0 10px;
+  margin: 14px 0 7px;
   font-size: 18px;
   font-weight: 400;
   color: var(--text, #e6edf3);
   line-height: 1.4;
 }
 .done-summary-body :deep(h3) {
-  margin: 18px 0 8px;
+  margin: 12px 0 6px;
   font-size: 16px;
   font-weight: 400;
   color: var(--text, #e6edf3);
@@ -511,11 +511,11 @@
 }
 .done-summary-body :deep(ul),
 .done-summary-body :deep(ol) {
-  margin: 6px 0 10px;
-  padding-left: 22px;
+  margin: 4px 0 6px;
+  padding-left: 20px;
 }
 .done-summary-body :deep(li) {
-  margin: 3px 0;
+  margin: 2px 0;
 }
 .done-summary-body :deep(blockquote) {
   margin: 8px 0;
@@ -524,13 +524,13 @@
   color: var(--text-2, #c9d1d9);
 }
 .done-summary-body :deep(hr) {
-  margin: 14px 0;
+  margin: 10px 0;
   border: 0;
   border-top: 1px solid var(--border, #30363d);
 }
 .done-summary-body :deep(.md-pre) {
-  margin: 10px 0;
-  padding: 12px 14px;
+  margin: 8px 0;
+  padding: 8px 12px;
   background: var(--surface-2, #0d1117);
   border: 1px solid var(--border, #30363d);
   border-radius: 6px;
