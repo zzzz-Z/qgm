@@ -191,16 +191,25 @@ export function useAppStartup(deps: AppStartupDeps) {
       }
       // [hello-caps-v1] 握手闸门：服务端明确宣告过能力清单且不含该类型 ⇒ 这块对端根本不认，
       //   留着只会让它被静默丢弃（丢在看不见的地方）。未握手（null）一律放行。
-      if (t === 'ai-runner:block' && supportsBlock(getTransport().caps(), String(p.block?.type || ''))) {
-        turnCollector.add(p.block)
-        // [runtime-kind-ssot-v1] script 块到达 ⇒ 运行态进入 executing。
-        // [WHY] 这也是刷新后 stale 的校准点：sessionStorage 恢复的 stopped/interrupted 会被首个真实帧覆盖。
-        if (String(p.block?.type || '') === 'script') rt.enterExecuting()
-      }
-      // [CONSTRAINT] 回放帧只丢桶：跨刷新时执行账本是空的，让回放帧收口会把整轮脚本重跑一遍
-      else if (t === 'ai-runner:turn-end' && p.replayed === true) { turnCollector.drop(Number(p.end && p.end.turnId) || 0)
-      }
-      else if (t === 'ai-runner:turn-end') { settleTurnEnd(p)
+      // [block-dedup-v2] 源头去重：重放或重复帧可能多次投递同一个块，只处理一次。
+      // [CONSTRAINT] dispatchInbound 是逐帧回调（不在循环里），这里只能条件守卫，
+      //   不能用 continue —— 那会让 Vite 编译整模块失败、工作台白屏。
+      const blockKey = p.block ? `${p.block.turnId}-${p.block.blockId}` : ''
+      const isDuplicateBlock = blockKey !== '' && seenBlockKeys.has(blockKey)
+      if (blockKey) seenBlockKeys.add(blockKey)
+
+      if (!isDuplicateBlock) {
+        if (t === 'ai-runner:block' && supportsBlock(getTransport().caps(), String(p.block?.type || ''))) {
+          turnCollector.add(p.block)
+          // [runtime-kind-ssot-v1] script 块到达 ⇒ 运行态进入 executing。
+          // [WHY] 这也是刷新后 stale 的校准点：sessionStorage 恢复的 stopped/interrupted 会被首个真实帧覆盖。
+          if (String(p.block?.type || '') === 'script') rt.enterExecuting()
+        }
+        // [CONSTRAINT] 回放帧只丢桶：跨刷新时执行账本是空的，让回放帧收口会把整轮脚本重跑一遍
+        else if (t === 'ai-runner:turn-end' && p.replayed === true) { turnCollector.drop(Number(p.end && p.end.turnId) || 0)
+        }
+        else if (t === 'ai-runner:turn-end') { settleTurnEnd(p)
+        }
       }
     }
     onSessionIdMessage(e)
@@ -315,7 +324,7 @@ export function useAppStartup(deps: AppStartupDeps) {
     } catch (error) { log.error('[headless-reply] 订阅失败:', error) }
   }
 
-  onUnmounted(() => {
+  function cleanupSubscriptions() {
     try { _offHeadlessReply?.() } catch { /* swallow: 退订竞态 */ }
     try { _offHeadlessState?.() } catch { /* swallow: 退订竞态 */ }
     try { _offHeadlessUrl?.() } catch { /* swallow: 退订竞态 */ }
@@ -328,7 +337,15 @@ export function useAppStartup(deps: AppStartupDeps) {
     _offHeadlessNewSid = null
     _offHeadlessBlock = null
     _offHeadlessTurnEnd = null
-  })
+  }
+
+  onUnmounted(cleanupSubscriptions)
+
+  // [hmr-cleanup-v1] 防止 Vite HMR 导致旧回调堆积，造成消息处理多次触发（界面刷屏）
+  const _hmr = (import.meta as unknown as { hot?: { dispose: (cb: () => void) => void } }).hot
+  if (_hmr) {
+    _hmr.dispose(cleanupSubscriptions)
+  }
 
   /**
    * [refresh-reconnect-only-v1] 刷新后只重连油猴：**不发 request-replay / request-rescan**，

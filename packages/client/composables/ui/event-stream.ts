@@ -72,6 +72,15 @@ const pendingAskKey = ref('')
 export function emit(kind: EventKind, summary: string, opts?: { round?: number, payload?: Record<string, unknown>, updateKey?: string }): void {
   const { updateKey, round, payload: rawPayload } = opts || {}
   const payload: Record<string, unknown> = { ...(rawPayload || {}), ...(updateKey ? { updateKey } : {}) }
+  // [stream-text-dedup-v1] 纯文本内容级去重：有些场景（比如重放）updateKey 会变，但内容一模一样
+  if (kind === 'ai:block' && payload && (payload as any).block?.type === 'say') {
+    const txt = String((payload as any).block.text || '').trim()
+    if (txt) {
+      const existing = events.value.find(e => e.kind === 'ai:block' && (e.payload as any)?.block?.type === 'say' && String((e.payload as any)?.block?.text || '').trim() === txt)
+      if (existing) return
+    }
+  }
+
   if (updateKey) {
     // [updatekey-fix] 只按 updateKey 匹配，允许跨 kind 覆盖（ai:ask → run:start 同一张卡）
     const idx = events.value.findIndex(e => String((e.payload as Record<string, unknown>)?.updateKey || '') === updateKey)

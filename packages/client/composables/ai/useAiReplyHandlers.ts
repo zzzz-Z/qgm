@@ -45,23 +45,16 @@ const stopAckListeners: Array<(hit: boolean) => void> = []
 // [stop-diag-v1] 停止诊断订阅者：排查「为什么没点到停止键」
 const stopDiagListeners: Array<(p: Record<string, unknown>) => void> = []
 /** 订阅 stop-ack；返回退订函数 */
-export function onStopAck(cb: (hit: boolean) => void): () => void {
-  stopAckListeners.push(cb)
+export function onStopAck(cb: (hit: boolean) => void): () => void { stopAckListeners.push(cb)
   return () => { const i = stopAckListeners.indexOf(cb); if (i >= 0) stopAckListeners.splice(i, 1) }
 }
 /** 订阅 stop-diag；返回退订函数 */
-export function onStopDiag(cb: (p: Record<string, unknown>) => void): () => void {
-  stopDiagListeners.push(cb)
+export function onStopDiag(cb: (p: Record<string, unknown>) => void): () => void { stopDiagListeners.push(cb)
   return () => { const i = stopDiagListeners.indexOf(cb); if (i >= 0) stopDiagListeners.splice(i, 1) }
 }
 
 /** App.vue 局部状态注入面 */
-export interface AiReplyHandlersDeps {
-  sessionHistory: Ref<SessionEntry[]>
-  saveHistoryScoped: () => void
-  addSessionToHistory: (id: string, url: string, title: string) => void
-  isMockMode?: () => boolean
-}
+export interface AiReplyHandlersDeps { sessionHistory: Ref<SessionEntry[]>, saveHistoryScoped: () => void, addSessionToHistory: (id: string, url: string, title: string) => void, isMockMode?: () => boolean }
 
 // [refresh-no-autorun-v1] 页面加载时刻 + 冷静期：工作台刷新后 replay/rescan 会重发
 //   历史脚本（带不带 rescan 标记取决于油猴版本）。冷静期内一律不自动执行（仍回填编辑器），
@@ -98,10 +91,8 @@ const correctionCountBySid = new Map<string, number>()
  *   反解失败（首页 / 陌生 URL）返回 null —— 调用方据此**跳过持久化**，避免首页覆盖既有好绑定（Q2）。
  * [CONSTRAINT] 模板形如 `https://host/path/{id}`：按 `{id}` 切成前后缀，URL 必须同时以两者包夹。
  */
-export function parseSessionUrl(u: string, models: { id: string, url: string, sessionTemplate?: string }[]): { modelId: string, sessionId: string } | null {
-  if (!u) return null
-  for (const m of models) {
-    const tpl = m.sessionTemplate
+export function parseSessionUrl(u: string, models: { id: string, url: string, sessionTemplate?: string }[]): { modelId: string, sessionId: string } | null { if (!u) return null
+  for (const m of models) { const tpl = m.sessionTemplate
     if (!tpl) continue
     const at = tpl.indexOf('{id}')
     if (at < 0) continue
@@ -118,8 +109,9 @@ export function parseSessionUrl(u: string, models: { id: string, url: string, se
 }
 
 /** 组装 AI 回复消息处理族（onSessionIdMessage 及 7 个 handler） */
-export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
-  const { sessionHistory, saveHistoryScoped, addSessionToHistory, isMockMode } = deps
+const seenTexts = new Set<string>()
+
+export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionHistory, saveHistoryScoped, addSessionToHistory, isMockMode } = deps
   // [reply-toasts-v1] useToast 已收口到 reply-toasts.ts（本文件不再直接 toast）
   const autoTakeover = useAutoTakeover()
   const { url: siteUrl, setUrl: setSiteUrl, modelId, MODELS } = useAiSite()
@@ -127,28 +119,23 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   const aiWindow = useAiWindow()
 
   /** 校验消息来源：仅信任来自任一已注册 AI 窗口的消息 */
-  function isFromActiveAiSite(e: MessageEvent): boolean {
-    if (isMockMode && isMockMode()) return true
+  function isFromActiveAiSite(e: MessageEvent): boolean { if (isMockMode && isMockMode()) return true
     // 无头模式：WS 内部消息，跳过 origin/source 校验
     if (transportKind.value === 'headless') return true
     const AI_ORIGINS = MODELS
       .map((m) => { try { return new URL(m.url).origin } catch { return '' } })
       .filter(Boolean)
-    if (!AI_ORIGINS.includes(e.origin)) {
-      log.warn('[ai-runner] 来源 origin 非 AI 站点，已忽略', e.origin)
+    if (!AI_ORIGINS.includes(e.origin)) { log.warn('[ai-runner] 来源 origin 非 AI 站点，已忽略', e.origin)
       return false
     }
     // e.source 可能为 null（窗口已关 / 跨域限制）；只在非 null 时比对
-    if (e.source !== null) {
-      const wins = aiWindow.listWindows()
+    if (e.source !== null) { const wins = aiWindow.listWindows()
       if (wins.length === 0) return true
       let matched = false
-      for (const { sid } of wins) {
-        const w = aiWindow.getWindowBySid(sid)
+      for (const { sid } of wins) { const w = aiWindow.getWindowBySid(sid)
         if (w && w === e.source) { matched = true; break }
       }
-      if (!matched) {
-        log.warn('[ai-runner] source 非任一注册窗口，已忽略')
+      if (!matched) { log.warn('[ai-runner] source 非任一注册窗口，已忽略')
         return false
       }
     }
@@ -164,42 +151,35 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
    * [CONSTRAINT] 任何 kind 的真实回复到达即解除；sid 维度隔离，不跨窗口误报。
    *   重试走同一条 setTimeout 延迟路径，避免与站点按钮状态切换竞争。
    */
-  function armResumeWatchdog(sid: string): void {
-    if (!sid) return
+  function armResumeWatchdog(sid: string): void { if (!sid) return
     disarmResumeWatchdog(sid)
-    resumeWatchdogBySid.set(sid, setTimeout(() => {
-      resumeWatchdogBySid.delete(sid)
+    resumeWatchdogBySid.set(sid, setTimeout(() => { resumeWatchdogBySid.delete(sid)
       const d = decideOnResumeTimeout(sid)
-      if (d.retry) {
-        beginAutoResume(sid)
-        setTimeout(() => {
-          void aiWindow
-            .copyAndFill('继续', { skipRules: true })
-            .then((r) => { if (r === 'failed') notifyResumeFailed() })
-            .catch(() => notifyResumeFailed())
-            .finally(() => endAutoResume(sid))
-          armResumeWatchdog(sid)
+      if (d.retry) { beginAutoResume(sid)
+        setTimeout(() => { void aiWindow
+          .copyAndFill('继续', { skipRules: true })
+          .then((r) => { if (r === 'failed') notifyResumeFailed() })
+          .catch(() => notifyResumeFailed())
+          .finally(() => endAutoResume(sid))
+        armResumeWatchdog(sid)
         }, 1500)
         return
       }
-      try {
-        if (d.reason === 'max-reached') notifyResumeExhausted(MAX_AUTO_RESUME)
-        else notifyResumeTimeout(Math.round(RESUME_WATCHDOG_MS / 1000))
+      try { if (d.reason === 'max-reached') notifyResumeExhausted(MAX_AUTO_RESUME)
+      else notifyResumeTimeout(Math.round(RESUME_WATCHDOG_MS / 1000))
       } catch { /* swallow: toast 未就绪 */ }
     }, RESUME_WATCHDOG_MS))
   }
 
   /** [resume-watchdog-v1] 解除续推看门狗；幂等 */
-  function disarmResumeWatchdog(sid: string): void {
-    const t = resumeWatchdogBySid.get(sid)
+  function disarmResumeWatchdog(sid: string): void { const t = resumeWatchdogBySid.get(sid)
     if (t === undefined) return
     clearTimeout(t)
     resumeWatchdogBySid.delete(sid)
   }
 
   /** 处理统一回复通道 ai-runner:reply */
-  function handleAiReply(payload: MessageEvent['data'], e: MessageEvent): void {
-    if (!isFromActiveAiSite(e)) return
+  function handleAiReply(payload: MessageEvent['data'], e: MessageEvent): void { if (!isFromActiveAiSite(e)) return
     stopAiWaiting()
     // [resume-watchdog-v1] 任何非 stopped 的真实回复都说明续推已被响应
     // [resume-sid-align-v1] 解除看门狗必须与 arm 侧同源（窗口 sid）：
@@ -209,14 +189,28 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     // [loop-consolidation-P2] 摘除 routedToLoop：auto-loop 子系统零调用点，判定恒 false，
     //   分支已无意义（详见 docs/plan/loop-consolidation.md 段五 P2）。
     const kind = String(payload.kind || '')
+    // [reply-dedup-v1] 拦截重复的 plain / multi 文本，防止流式重复推送导致界面刷屏
+    if (kind === 'plain' || kind === 'multi') {
+      const txt = String(payload.text || '').trim()
+      if (txt) {
+        if (seenTexts.has(txt)) return
+        seenTexts.add(txt)
+        if (seenTexts.size > 1000) seenTexts.clear() // 防内存泄漏
+      }
+    }
+    // [reply-dedup-v1] 拦截重复的 plain / multi 文本，防止流式重复推送导致界面刷屏
+    if (kind === 'plain' || kind === 'multi') { const txt = String(payload.text || '').trim()
+      if (txt) { if (seenTexts.has(txt)) return
+        seenTexts.add(txt)
+        if (seenTexts.size > 1000) seenTexts.clear() // 防内存泄漏
+      }
+    }
 
-    if (kind === 'error') {
-      notifySiteError(String(payload.text || ''))
+    if (kind === 'error') { notifySiteError(String(payload.text || ''))
       return
     }
 
-    if (kind === 'stopped') {
-      // [stopped-toast-quote-v1] 带上页面侧命中原文（口径同触顶的 formatLimitToast）：
+    if (kind === 'stopped') { // [stopped-toast-quote-v1] 带上页面侧命中原文（口径同触顶的 formatLimitToast）：
       //   停止词表与我们自己的 UI 文案同形 ⇒ 误报几乎必然发生，不带原文就永远无从定位是哪段文本命中。
       notifyStopped(payload.text)
       // [stop-resume-v1] 续推决策（stop-resume.ts 单一入口）：
@@ -226,28 +220,24 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       //   user-stop 标记永远消费不到、且空值被误判成用户停止（2026-10-18 实测）。
       const _resumeSid = aiWindow.getActiveWinSid?.() || sid
       const _d = decideOnStopped(_resumeSid)
-      if (_d.resume) {
-        beginAutoResume(_resumeSid)
+      if (_d.resume) { beginAutoResume(_resumeSid)
         log.info('[stop-resume] 平台中断，自动续推', { sid: _resumeSid })
         // 延迟 1.5s：等站点按钮/输入框状态稳定（停止后立即 fill 会与状态切换竞争）
-        setTimeout(() => {
-          void aiWindow
-            .copyAndFill('继续', { skipRules: true })
-            .then((r) => { if (r === 'failed') notifyResumeFailed() })
-            .catch(() => notifyResumeFailed())
-            .finally(() => endAutoResume(_resumeSid))
+        setTimeout(() => { void aiWindow
+          .copyAndFill('继续', { skipRules: true })
+          .then((r) => { if (r === 'failed') notifyResumeFailed() })
+          .catch(() => notifyResumeFailed())
+          .finally(() => endAutoResume(_resumeSid))
           // [resume-watchdog-v1] 续推后迟迟无任何回复 ⇒ 明确告知，不再静默干等。
           // [WHY] 续推的回复若落进 stopped 抑制窗口、或探针静默失效（选择器改版），
           //   用户看到的是「自动续推后页面毫无反应」；没有兜底提示就完全无从判断。
           // [CONSTRAINT] 只提示不改抑制逻辑——放行续推的 plain 会让「停止前发出、
           //   停止后到达」的残余脚本一起逃逸（stopped-no-autorun 守卫判据）。
-          armResumeWatchdog(_resumeSid)
+        armResumeWatchdog(_resumeSid)
         }, 1500)
-      } else if (_d.reason === 'max-reached') {
-        // 达上限：明确告知用户，不再静默
+      } else if (_d.reason === 'max-reached') { // 达上限：明确告知用户，不再静默
         notifyResumeExhausted(MAX_AUTO_RESUME)
-      } else if (_d.reason === 'user-stop') {
-        // [resume-user-stop-visible-v1] 行为不变（尊重用户意图），但必须留痕：
+      } else if (_d.reason === 'user-stop') { // [resume-user-stop-visible-v1] 行为不变（尊重用户意图），但必须留痕：
         //   否则「平台中断但没续推」与「刚点过停止所以按设计不续推」在日志上完全同形。
         log.info('[stop-resume] 用户主动停止，跳过自动续推', { sid })
       }
@@ -259,19 +249,15 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     // [limit-toast-quote-v1] 附带页面侧命中原文：正则扫的是整页 textContent，
     //   侧栏常驻「开启新对话」按钮与正文拼接会造成假命中（页面无 banner 也弹）⇒
     //   不回显命中串就无法定位误报源。组装逻辑见 utils/limit-notice.ts（裸测 limit-notice.node-test.ts）
-    if (kind === 'limit') {
-      notifyLimit(payload.text)
+    if (kind === 'limit') { notifyLimit(payload.text)
       return
     }
 
     // [ask-any-kind-v1] 提问卡优先：任意 kind 只要含 ASK 就触发
     // [ask-card-v1] 呈现方式已由弹窗改为对话流内卡片（TerminalPane）；此处仍是 await 回答后回填
-    if (typeof payload.text === 'string' && payload.text) {
-      const _ask = parseAsk(payload.text)
-      if (_ask) {
-        stopAiWaiting()
-        void askUser(_ask).then((answer) => {
-          if (answer === null) return
+    if (typeof payload.text === 'string' && payload.text) { const _ask = parseAsk(payload.text)
+      if (_ask) { stopAiWaiting()
+        void askUser(_ask).then((answer) => { if (answer === null) return
           try { emitBus('ai:ask', `回答：${String(answer).slice(0, 40)}`, { payload: { text: String(answer), role: 'user-answer' } }) } catch { /* swallow: 事件流失败不阻断发送 */ }
           void aiWindow.copyAndFill(`【ASK 回答】${answer}`, { skipRules: true })
         })
@@ -279,8 +265,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       }
     }
 
-    if (kind === 'done') {
-      // [done-to-loop-v1] 循环内的 DONE 交由循环引擎全权处理（BeforeDone 自检 + finish + 清空看板）
+    if (kind === 'done') { // [done-to-loop-v1] 循环内的 DONE 交由循环引擎全权处理（BeforeDone 自检 + finish + 清空看板）
       // [WHY] 原实现此处无条件 killCurrent + return，使 reply-handlers 的 done 分支（含 finish）成为死代码，
       //   自检闸门（hooks.json BeforeDone）与看板清空从未真正触发过
       // [CHANGE-IMPACT] 循环内 DONE 时引擎自带 done-summary-archive 通知；本处不再重复 emitBus
@@ -306,30 +291,18 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       //   取前 5 个非空行、截断 200 字符——commit subject 不宜过长。
       const doneSummary = cleanSummary.split(/\r?\n/).filter(l => l.trim()).slice(0, 5).join(' / ').slice(0, 200)
       void runHook('BeforeDoneFinal', { loopId: '', round: 0, startCommit: '', reason: 'retained-path', doneSummary })
-        .then((gate) => {
-          if (gate.action === 'reject') notifySelfcheckReject(gate.reason)
+        .then((gate) => { if (gate.action === 'reject') notifySelfcheckReject(gate.reason)
         })
         .catch(() => { /* runHook 自身 fail-open，此处兜底 */ })
       // [board-clear-on-done-v1] 看板清桶：sid 空则跳过（对齐 taskboard-sid-guard-v1 ——
       //   多窗口下全局桶=别家数据，宁残留旧数据不可误清他窗）
-      if (doneSid) {
-        void fetch('/__ai/tasks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: 'set', sid: doneSid, todo: [], done: [], clear: 'finish' }),
-        }).catch(() => { /* fire-and-forget：失败不阻断 DONE 收尾 */ })
+      if (doneSid) { void fetch('/__ai/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'set', sid: doneSid, todo: [], done: [], clear: 'finish' }), }).catch(() => { /* fire-and-forget：失败不阻断 DONE 收尾 */ })
       }
-      try {
-        emitBus('ai:done', '任务完成 · 总结', { payload: { kind: 'done', text: cleanSummary } })
+      try { emitBus('ai:done', '任务完成 · 总结', { payload: { kind: 'done', text: cleanSummary } })
       } catch (err) { log.error('[done-emit] failed:', err) }
       // [lesson-autocapture-v1] 前端会话的 DONE 不经 headless 轮询，须回传后端采集踩坑记录。
       // 落盘与去重由 POST /__ai/lessons 统一处理；失败静默，不阻断主链路。
-      if (cleanSummary) {
-        void fetch('/__ai/lessons', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text: doneText }),
-        }).catch(() => { /* swallow: 采集失败不影响任务完成 */ })
+      if (cleanSummary) { void fetch('/__ai/lessons', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: doneText }), }).catch(() => { /* swallow: 采集失败不影响任务完成 */ })
       }
       const display = cleanSummary ? `[任务完成]\n\n${cleanSummary}` : '[任务完成] AI 回复 DONE'
       pushTerminalNotice(display, { divider: true })
@@ -347,8 +320,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
    * [CONSTRAINT] 坏块静默丢弃但不抛：一条畸形帧不该让整条时间线中断；
    *   服务端已把坏块记进 turns.jsonl 的 `skipped`，排查有据。
    */
-  function handleBlockMsg(payload: MessageEvent['data'], e?: MessageEvent): void {
-    // [CONSTRAINT] 与 handleAiReply 同一道「是否来自当前 AI 站点」的门（无头侧的假事件 origin 是
+  function handleBlockMsg(payload: MessageEvent['data'], e?: MessageEvent): void { // [CONSTRAINT] 与 handleAiReply 同一道「是否来自当前 AI 站点」的门（无头侧的假事件 origin 是
     //   `ws://headless`，与 reply 路径完全同形，因此这里不会把块滤掉）：
     //   少了它，多工作区并行时 A 窗口的块会渲染进 B 窗口的时间线。
     if (e && !isFromActiveAiSite(e)) return
@@ -369,26 +341,20 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
    *   本模块若直接持有它会多一条静态 import，而本文件的**唯一 import 模块数已到 HCLC
    *   阻断阈值（≤20）** —— 再加一条就红。
    */
-  function handleTurnEndMsg(payload: MessageEvent['data'], e?: MessageEvent): void {
-    if (e && !isFromActiveAiSite(e)) return
+  function handleTurnEndMsg(payload: MessageEvent['data'], e?: MessageEvent): void { if (e && !isFromActiveAiSite(e)) return
     const end = payload ? (payload as { end?: unknown }).end : null
     if (!end || typeof end !== 'object') return
     const sid = String(payload.sessionId || '')
     // [correction-policy-v1] 收到合法 turn 收口 ⇒ 该 sid 的连续纠正计数清零（「连续」语义：纠正后 AI 已合规即重置）。
     if (sid) correctionCountBySid.delete(sid)
     const awaiting = String((end as { awaiting?: string }).awaiting || 'none')
-    const titles: Record<string, string> = {
-      results: '等待执行结果',
-      user: '等待用户回答',
-      none: '本轮结束',
-    }
+    const titles: Record<string, string> = { results: '等待执行结果', user: '等待用户回答', none: '本轮结束', }
     // [remote-generating-v1] turn-end 是「本轮收口」的权威信号：强制复位生成态，防 generating:false 帧丢失导致按钮永久卡转
     setRemoteGenerating(false)
     // [stop-btn-reset-v1] 终轮（awaiting=none）时关闭自动接管：
     //   [WHY] 停止按钮可见性判据含 autoTakeoverEnabled；该标志不关 ⇒ 总结后按钮永久显示（用户实测「不重置」）。
     //   [CONSTRAINT] 只在 awaiting=none 时关：results / user 两种待续状态必须保留接管意图。
-    if (awaiting === 'none' && autoTakeover.enabled.value) {
-      autoTakeover.disable()
+    if (awaiting === 'none' && autoTakeover.enabled.value) { autoTakeover.disable()
     }
     try { emitBus('ai:turn-end', titles[awaiting] || '本轮结束', { payload: { end } }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
   }
@@ -402,22 +368,19 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
    *   正文签名去重（油猴侧 _invalidReportedSig）。
    * [CONSTRAINT] 人工会话（loopActive=false）只通知不回灌，避免惊扰用户。
    */
-  function handleTurnInvalidMsg(payload: MessageEvent['data'], e?: MessageEvent): void {
-    if (e && !isFromActiveAiSite(e)) return
+  function handleTurnInvalidMsg(payload: MessageEvent['data'], e?: MessageEvent): void { if (e && !isFromActiveAiSite(e)) return
     const code = String(payload.code || '')
     const sid = String(payload.sessionId || '')
     const count = correctionCountBySid.get(sid) || 0
     const decision = decideCorrection({ code, loopActive: autoTakeover.enabled.value, correctionCount: count })
-    if (decision.action === 'reinject' && decision.prompt) {
-      correctionCountBySid.set(sid, count + 1)
+    if (decision.action === 'reinject' && decision.prompt) { correctionCountBySid.set(sid, count + 1)
       void aiWindow.copyAndFill(decision.prompt, { skipRules: true })
         .then((r) => { if (r === 'failed') notifySiteError('纠正提示发送失败，AI 回复格式问题未自动处理') })
         .catch(() => { /* 发送失败不阻断主链路，下一拍会再判定 */ })
-    } else if (decision.action === 'notify') {
-      pushTerminalNotice(
-        `AI 回复未使用信封格式（${code}），已按契约丢弃${decision.exhausted ? '；连续纠正已达上限，请手动干预' : ''}。`,
-        { divider: true },
-      )
+    } else if (decision.action === 'notify') { pushTerminalNotice(
+      `AI 回复未使用信封格式（${code}），已按契约丢弃${decision.exhausted ? '；连续纠正已达上限，请手动干预' : ''}。`,
+      { divider: true },
+    )
     }
     // action === 'skip'：既不回灌也不额外通知（如 TEXT_OUTSIDE_FENCE 已回收）。
   }
@@ -427,8 +390,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   //   在本函数里路由该诊断帧是不可达的死代码，故删除（见 turn-invalid-consumer 守卫）。
 
   /** 处理 ai-runner:summary 摘要回包 */
-  function handleSummaryMsg(payload: MessageEvent['data']): void {
-    const text = String(payload.text || '')
+  function handleSummaryMsg(payload: MessageEvent['data']): void { const text = String(payload.text || '')
     const sid = String(payload.sessionId || '')
     const degraded = Boolean(payload.degraded)
     // [loop-consolidation-P2] 摘除 autoLoop.onSummary：会话轮转在实盘不存在（段四 C6 三重死因），
@@ -437,36 +399,30 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   }
 
   /** 处理 ai-runner:new-session-created 新会话建立 */
-  function handleNewSessionCreated(payload: MessageEvent['data']): void {
-    const url = String(payload.url || '')
+  function handleNewSessionCreated(payload: MessageEvent['data']): void { const url = String(payload.url || '')
     const id = String(payload.id || '')
     // [multi-site-parallel-v1] 由 frame sid 判定目标站点：非当前站点时直接写对应桶，
     //   不碰 sessionHistory/activeSessionId/siteUrl——否则 A 窗口的回复会串进 B 的视图（G7）
     const frameSid = String(payload.sessionId || '')
     const targetModel = frameSid ? modelIdFromSid(frameSid) : ''
     const isCurrentSite = !targetModel || targetModel === modelId.value
-    if (!isCurrentSite) {
-      if (url && id) {
-        const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-        const entry = { id, url, title: `轮转 · ${hhmm}`, createdAt: Date.now() }
-        const existing = loadHistoryBySite(targetModel)
-        const updated = [entry, ...existing.filter(s => s.id !== id)].slice(0, 50)
-        saveHistoryBySite(targetModel, updated)
-        void persistSessionBinding(url, id)
-      }
-      return
+    if (!isCurrentSite) { if (url && id) { const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      const entry = { id, url, title: `轮转 · ${hhmm}`, createdAt: Date.now() }
+      const existing = loadHistoryBySite(targetModel)
+      const updated = [entry, ...existing.filter(s => s.id !== id)].slice(0, 50)
+      saveHistoryBySite(targetModel, updated)
+      void persistSessionBinding(url, id)
+    }
+    return
     }
     const oldId = activeSessionId.value
-    if (oldId) {
-      const i = sessionHistory.value.findIndex(x => x.id === oldId)
-      if (i >= 0 && !sessionHistory.value[i].handedOff) {
-        sessionHistory.value[i] = { ...sessionHistory.value[i], handedOff: true }
+    if (oldId) { const i = sessionHistory.value.findIndex(x => x.id === oldId)
+      if (i >= 0 && !sessionHistory.value[i].handedOff) { sessionHistory.value[i] = { ...sessionHistory.value[i], handedOff: true }
         sessionHistory.value = [...sessionHistory.value]
         saveHistoryScoped()
       }
     }
-    if (url && id) {
-      const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    if (url && id) { const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
       addSessionToHistory(id, url, `轮转 · ${hhmm}`)
       activeSessionId.value = id
       setSiteUrl(url)
@@ -481,30 +437,26 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
    * [WHY] 用户在站点里手动切会话时，若不回写，下次切 tab 会导航回旧会话（用户报告）。
    * [CONSTRAINT] 无活跃工作区 / 无 url 时跳过；失败静默（回写属旁路，不阻断主流程）。
    */
-  async function persistSessionBinding(url: string, sessionId: string): Promise<void> {
-    try {
-      if (!url) return
-      const { useWorkspaces } = await import('../data/useWorkspaces')
-      const { sidForUrl } = await import('../ai/useAiSite')
-      const ws = useWorkspaces()
-      // [multi-site-parallel-v1] 由 url 反推 frame sid → 反查所属工作区；
-      //   原用 activeId：并行时窗口 A 的回写会落进当前激活的工作区 B（G6）
-      const frameSid = sidForUrl(url)
-      // [workspace-schema-v2] 精确 URL 优先（同站点多工作区可唯一定位）
-      const wid = (await ws.findWorkspaceBySid(frameSid, url)) ?? ws.activeId.value
-      if (!wid) {
-        // [workspace-bind-visibility-v1] 不再全静默：回写落空是「绑定不生效」的首要可观测信号
-        log.warn('[workspace-bind] 回写找不到工作区，已跳过：url=', url, 'sid=', frameSid)
-        return
-      }
-      const ok = await ws.setSession(wid, { kind: 'session', sessionUrl: url, sessionId: String(sessionId || '') })
-      if (!ok) log.warn('[workspace-bind] 服务端拒绝写入（工作区可能已出册）：wid=', wid, 'url=', url)
-    } catch (e) { log.warn('[workspace-bind] 回写异常：', e) }
+  async function persistSessionBinding(url: string, sessionId: string): Promise<void> { try { if (!url) return
+    const { useWorkspaces } = await import('../data/useWorkspaces')
+    const { sidForUrl } = await import('../ai/useAiSite')
+    const ws = useWorkspaces()
+    // [multi-site-parallel-v1] 由 url 反推 frame sid → 反查所属工作区；
+    //   原用 activeId：并行时窗口 A 的回写会落进当前激活的工作区 B（G6）
+    const frameSid = sidForUrl(url)
+    // [workspace-schema-v2] 精确 URL 优先（同站点多工作区可唯一定位）
+    const wid = (await ws.findWorkspaceBySid(frameSid, url)) ?? ws.activeId.value
+    if (!wid) { // [workspace-bind-visibility-v1] 不再全静默：回写落空是「绑定不生效」的首要可观测信号
+      log.warn('[workspace-bind] 回写找不到工作区，已跳过：url=', url, 'sid=', frameSid)
+      return
+    }
+    const ok = await ws.setSession(wid, { kind: 'session', sessionUrl: url, sessionId: String(sessionId || '') })
+    if (!ok) log.warn('[workspace-bind] 服务端拒绝写入（工作区可能已出册）：wid=', wid, 'url=', url)
+  } catch (e) { log.warn('[workspace-bind] 回写异常：', e) }
   }
 
   /** 处理 ai-runner:url-updated URL 回写 */
-  function handleUrlUpdated(payload: MessageEvent['data']): void {
-    const u = String(payload.url || '')
+  function handleUrlUpdated(payload: MessageEvent['data']): void { const u = String(payload.url || '')
     if (u && u !== siteUrl.value) setSiteUrl(u)
     // [workspace-nav-confirm-v1] 收到 URL 变更即视为「导航已落地」，**必须在反解 return 之前**：
     //   会话 URL 失效时站点会静默重定向回首页，此时反解必失败——若把确认放在反解之后，
@@ -520,8 +472,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     //   前端跳过 sessionHistory 写入（handleNewSessionCreated 的 url && id 双条件）。
     //   首次 fill 后 URL 变成真会话 URL，本处补写。
     //   [CONSTRAINT] 只在该 id 尚未入册时写：否则每次 URL 变化都会刷一条重复。
-    if (!sessionHistory.value.some(x => x.id === parsed.sessionId)) {
-      const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    if (!sessionHistory.value.some(x => x.id === parsed.sessionId)) { const hhmm = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
       const entry = { id: parsed.sessionId, url: u, title: `会话 · ${hhmm}`, createdAt: Date.now() }
       sessionHistory.value = [entry, ...sessionHistory.value].slice(0, 50)
       saveHistoryScoped()
@@ -529,8 +480,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   }
 
   /** 处理 ai-runner:session-id 会话 ID 回写 */
-  function handleSessionIdUpdate(payload: MessageEvent['data']): void {
-    // [session-boot-v1] AI 窗口刚加载（油猴首发，boot:true）→ 全新 AI 上下文，
+  function handleSessionIdUpdate(payload: MessageEvent['data']): void { // [session-boot-v1] AI 窗口刚加载（油猴首发，boot:true）→ 全新 AI 上下文，
     //   清规则去重 + 工作区首问标记，否则刷新恢复的集合会命中 → 新上下文永久漏注入 SYSTEM.md。
     // [CONSTRAINT] 必须在 frameSid early-return 之前执行：清规则与该窗口是否属当前站点视图无关，
     //   多站点并行时其他窗口重载同样需要清规则。
@@ -556,8 +506,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   }
 
   /** 消息分发入口：按 data.type 路由到各 handler */
-  function onSessionIdMessage(e: MessageEvent): void {
-    const payload = e.data
+  function onSessionIdMessage(e: MessageEvent): void { const payload = e.data
     if (!payload) return
     const t = String(payload.type || '')
     if (t === 'ai-runner:reply') { handleAiReply(payload, e); return }
@@ -576,19 +525,16 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     if (t === 'ai-runner:new-session-created') return handleNewSessionCreated(payload)
     if (t === 'ai-runner:url-updated') return handleUrlUpdated(payload)
     // [remote-generating-v1] 生成态帧：驱动按钮常转 / 复位（需求 1 + 需求 3）
-    if (t === 'ai-runner:generating-state') {
-      setRemoteGenerating(Boolean((payload as { generating?: unknown }).generating))
+    if (t === 'ai-runner:generating-state') { setRemoteGenerating(Boolean((payload as { generating?: unknown }).generating))
       return
     }
     // [stop-ack-v1] 停止回执：hit=false 表示油猴没找到停止按钮，前端据此提示而非假装成功
-    if (t === 'ai-runner:stop-ack') {
-      const hit = Boolean((payload as { hit?: unknown }).hit)
+    if (t === 'ai-runner:stop-ack') { const hit = Boolean((payload as { hit?: unknown }).hit)
       stopAckListeners.forEach((cb) => { try { cb(hit) } catch { /* swallow */ } })
       return
     }
     // [stop-diag-v1] 油猴通道停止诊断：与无头通道 headless:stop-diag 对齐
-    if (t === 'ai-runner:stop-diag') {
-      stopDiagListeners.forEach((cb) => { try { cb(payload as Record<string, unknown>) } catch { /* swallow */ } })
+    if (t === 'ai-runner:stop-diag') { stopDiagListeners.forEach((cb) => { try { cb(payload as Record<string, unknown>) } catch { /* swallow */ } })
       return
     }
     if (t === 'ai-runner:session-id' && payload.id) handleSessionIdUpdate(payload)
