@@ -96,7 +96,6 @@ function createFsApi(deps) {
     const o = opts || {}
     const cwd = process.cwd()
     const testsDir = o.testsDir || 'packages/core/tests'
-    const srcDir = o.srcDir || 'packages/core/src'
     const norm = p => path.relative(cwd, path.resolve(cwd, p)).replace(/\\/g, '/')
     const noExt = p => p.replace(/\.(ts|tsx|js|cjs|mjs)$/, '')
     const changedFull = new Set((changedFiles || []).map(p => norm(p)))

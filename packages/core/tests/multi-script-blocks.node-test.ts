@@ -49,7 +49,7 @@ test('removed: 不再有「标记块优先 / 无标记兜底」的选取语义',
 test('kept: 信封通道仍在（脚本下发的唯一路径）', () => {
   for (const rel of SOURCES) {
     const src = read(rel)
-    assert.ok(/function\s+readTurn(Blocks|FromRoot)\s*\(/.test(src), `${rel} 缺少信封读取函数`)
+    assert.ok(/function\s+readTurn(?:Blocks|FromRoot)\s*\(/.test(src), `${rel} 缺少信封读取函数`)
   }
 })
 

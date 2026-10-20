@@ -59,7 +59,7 @@ test('kept: 信封通道仍在（脚本下发唯一路径）', () => {
   for (const rel of SOURCES) {
     const src = read(rel)
     assert.ok(
-      /function\s+(readTurnBlocks|readTurnFromRoot)\s*\(/.test(src),
+      /function\s+(?:readTurnBlocks|readTurnFromRoot)\s*\(/.test(src),
       `${rel} 缺少信封读取函数 → 脚本彻底下发不了`,
     )
   }

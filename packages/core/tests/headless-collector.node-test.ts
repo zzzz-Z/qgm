@@ -60,8 +60,8 @@ test('collector: 短回复闸门与 plain / done 交付通道已一并删除', (
   // [CONSTRAINT] 只看「作为字段/赋值/使用」的出现（`dedup._shortSentHash` 或 `..._shortSentHash`），
   //   注释里提及不算——下方注释本就要记录「哪些字段已删」，误命中会假红。
   assert.ok(!/\b_shortSentHash\s*[:=]/.test(s) && !/dedup\._shortSentHash/.test(s), '短回复去重 _shortSentHash 应已随 plain 通道删除（仅剩注释提及）')
-  assert.ok(!/kind: 'plain'/.test(s), "detectReplyInPage 不得再产出 kind:'plain'：裸文本按契约整轮丢弃")
-  assert.ok(!/kind: 'done'/.test(s), "detectReplyInPage 不得再产出 kind:'done'：首行标记架构已删")
+  assert.ok(!/kind: 'plain'/.test(s), 'detectReplyInPage 不得再产出 kind:\'plain\'：裸文本按契约整轮丢弃')
+  assert.ok(!/kind: 'done'/.test(s), 'detectReplyInPage 不得再产出 kind:\'done\'：首行标记架构已删')
 })
 
 test('collector: waitForSignal 必须是模块级函数而非 pool 方法', () => {

@@ -10,8 +10,8 @@ import { probeRender } from '../../composables/ui/render-probe'
 //   超阈值内容只剩 12 行预览（TEXT_PREVIEW）且无法展开（2026-10-09 用户截图「回答被截断」根因）。
 // [CONSTRAINT] 由 tests/component-binding-guard.node-test.ts 守卫：删掉本行即变红。
 import FoldToggle from './FoldToggle.vue'
-import { useAsk } from '../../composables/ui/useAsk.ts'
-import { renderMarkdown } from '../../composables/useMarkdown.ts'
+import { useAsk } from '../../composables/ui/useAsk'
+import { renderMarkdown } from '../../composables/useMarkdown'
 // [round-card-v1] 从 TerminalPane 抽出：done / text / ask / question 四类非脚本卡片
 // [WHY] TerminalPane 超 HCLC 500 红线；四类卡片共用 text-card 布局
 // [CHANGE-IMPACT] expanded 态下沉到卡片内（不再用父级 expandedCards 集合）

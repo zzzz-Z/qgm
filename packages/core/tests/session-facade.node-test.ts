@@ -45,6 +45,6 @@ test('E4 服务端三个端点均已注册且已挂载（防端点被摘除）',
 
 test('E5 门面只做 HTTP 转发，不持有会话状态（防本地缓存与服务端漂移）', () => {
   const src = fs.readFileSync(path.join(ROOT, 'packages/core/src/helpers/session.cjs'), 'utf8')
-  expect(src).not.toMatch(/new Map|new Set|var/)
+  expect(src).not.toMatch(/new Map|new Set|\bvar\b/)
   expect(src).toContain('fetch(')
 })

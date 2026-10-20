@@ -291,7 +291,7 @@ test('[legacy-marks-removed-v1] 旧标记扫描与 script/plain 通道不得复�
   for (const dead of ['scanReplyMarks', 'emitPlain', 'emitScript', 'seenDoneMarkers', 'markedNonScript']) {
     assert.ok(!src.includes(dead), `${dead} 在 dispatch.ts 复活：旧首行标记架构已删，回复只认 \`\`\`json 围栏信封`)
   }
-  for (const dead of ["'marks'", "'emit'"]) {
+  for (const dead of ['\'marks\'', '\'emit\'']) {
     assert.ok(!seg.includes(dead), `SEGMENTS 又出现 ${dead}：旧片段文件已删，拼装会因缺文件而失败`)
   }
 })
@@ -327,7 +327,8 @@ test('[turn-coldstart-bypass-v1] 冷启动守卫期内仍放行信封交付', ()
   let depth = 0
   let end = -1
   for (let i = open; i < src.length; i++) {
-    if (src[i] === '{') depth++
+    if (src[i] === '{') { depth++
+    }
     else if (src[i] === '}') { depth--; if (depth === 0) { end = i; break } }
   }
   assert.ok(end > open, '冷启动守卫块未闭合（朴素配对失败 ⇒ 括号被注释带偏）')
