@@ -104,7 +104,30 @@ function summarize(q: string): string {
   return t ? `AI 提问 · ${t.slice(0, 40)}` : 'AI 提问'
 }
 
+/**
+ * [ask-answer-key-v2] 按**卡片 askId**（turn 块 id）回填回答。
+ * [WHY] askUser 的活跃提问 id 是 a1/a2 自增序号，与卡片 updateKey（askq-<blockId>）不是同一套；
+ *   若沿用 resolveAsk，回答事件匹配不到卡片，界面永远不转「已回答」（用户实测点了没反应）。
+ * [CONSTRAINT] 若当前活跃提问就是这张卡，一并兑现其 Promise，通知 await 方。
+ */
+export function answerAsk(askId: string, answer: string): void {
+  const id = String(askId || '')
+  if (!id) return
+  const s = askState.value
+  if (s && s.id === id) askState.value = null
+  emit('ai:question', 'AI 提问', {
+    updateKey: `${ASK_KEY_PREFIX}${id}`,
+    payload: {
+      answered: true,
+      canceled: false,
+      answer: String(answer),
+      answeredAt: Date.now(),
+    },
+  })
+  if (s && s.id === id) s.resolve(answer)
+}
+
 /** useAsk 组合式入口；直接透传模块级单例 */
 export function useAsk() {
-  return { askState, askUser, resolveAsk, restoreAsk }
+  return { askState, askUser, resolveAsk, restoreAsk, answerAsk }
 }

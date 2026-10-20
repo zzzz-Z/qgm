@@ -53,7 +53,7 @@ const askDraft = ref('')
 //   组字期间不更新 askDraft，compositionend 才同步最终文本。
 const _imeComposing = ref(false)
 
-const { askState, resolveAsk, restoreAsk } = useAsk()
+const { askState, resolveAsk, restoreAsk, answerAsk } = useAsk()
 
 const collapsed = computed(() => props.card.truncated && !expanded.value)
 const html = computed(() => renderMarkdown(collapsed.value ? props.card.preview : props.card.text))
@@ -131,9 +131,12 @@ function submitAnswer(text: string): void {
   //   历史卡片（刷新后 / 被新提问取代过）仍应可点击回答——否则表现为「点了没反应」（用户实测）。
   //   只需 askId 存在即可尝试重建活跃提问。
   if (!qCard.value.askId) return
+  // [ask-answer-key-v2] 回答事件的 updateKey 必须用**卡片的 askId**（= turn 块 id）：
+  //   askUser 旧路径的 id 是 a1/a2 自增序号，与卡片 updateKey（askq-<blockId>）不同 ⇒
+  //   resolveAsk 发出的更新匹配不上卡片，卡片永远不转「已回答」（用户实测点了没反应）。
   if (!askState.value) restoreAsk(qCard.value.askId, qCard.value.text, qCard.value.options)
   askDraft.value = ''
-  resolveAsk(t)
+  answerAsk(qCard.value.askId, t)
 }
 </script>
 

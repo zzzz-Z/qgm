@@ -71,6 +71,7 @@ declare global {
   const activeSessionId: typeof import('./composables/ui/useAppStorage').activeSessionId
   const aiWindowListCollapsed: typeof import('./composables/ui/useAiWindowListCollapse').aiWindowListCollapsed
   const ansiToHtml: typeof import('./utils/ansi-render').ansiToHtml
+  const answerAsk: typeof import('./composables/ui/useAsk').answerAsk
   const appendCapped: typeof import('./composables/runner/live-output').appendCapped
   const applyToEditor: typeof import('./composables/runner/useScriptInbox').applyToEditor
   const archiveEvents: typeof import('./composables/ui/useEventStream').archiveEvents
@@ -793,6 +794,7 @@ declare module 'vue' {
     readonly activeSessionId: UnwrapRef<typeof import('./composables/ui/useAppStorage')['activeSessionId']>
     readonly aiWindowListCollapsed: UnwrapRef<typeof import('./composables/ui/useAiWindowListCollapse')['aiWindowListCollapsed']>
     readonly ansiToHtml: UnwrapRef<typeof import('./utils/ansi-render')['ansiToHtml']>
+    readonly answerAsk: UnwrapRef<typeof import('./composables/ui/useAsk')['answerAsk']>
     readonly appendCapped: UnwrapRef<typeof import('./composables/runner/live-output')['appendCapped']>
     readonly applyToEditor: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['applyToEditor']>
     readonly archiveEvents: UnwrapRef<typeof import('./composables/ui/useEventStream')['archiveEvents']>
