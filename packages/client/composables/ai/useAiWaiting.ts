@@ -15,9 +15,27 @@ const waiting = ref(false)
  * [CONSTRAINT] 只由 transport 层 setRemoteGenerating 写；组件只读。
  */
 export const remoteGenerating = ref(false)
+
+// [remote-generating-watchdog-v1] remoteGenerating 的看门狗。
+// [WHY] 它只有 turn-end / generating-state 两个复位源，而 turn-frames 明确「0 块不发帧」：
+//   「脚本执行完、AI 不再输出」这条路径永远等不到 turn-end ⇒ 按钮永久显示「停止」（用户实测）。
+//   waiting 早有 WATCHDOG_MS 兜底，remoteGenerating 一直裸奔。
+// [CONSTRAINT] 收到任何 generating-state 帧都重置计时（仍活着就续期）；超时才复位。
+const REMOTE_WATCHDOG_MS = 180_000
+const remoteScope = effectScope(true)
+const remoteTimeout = remoteScope.run(() => useTimeoutFn(() => {
+  if (!remoteGenerating.value) return
+  remoteGenerating.value = false
+  try { void import('../ui/useToast').then(({ toast }) => toast('AI 生成态长时间无更新，已自动复位停止按钮', 'info', 5000)) } catch { /* swallow */ }
+}, REMOTE_WATCHDOG_MS))
+
 /** 设置远程生成态；由 useAiTransport 消费 generating-state / turn-end 帧时调用 */
 export function setRemoteGenerating(v: boolean): void {
   remoteGenerating.value = Boolean(v)
+  if (remoteTimeout) {
+    remoteTimeout.stop()
+    if (remoteGenerating.value) remoteTimeout.start()
+  }
 }
 
 // [module-scope-vueuse-timer] vueuse 定时器需在 effectScope 内创建；本模块为跨组件单例
