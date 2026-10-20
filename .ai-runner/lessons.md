@@ -1147,6 +1147,7 @@ userscript 改动需用户手动重装才生效，而工作台 SPA 改完构建�
 
 ## 回执乱序时不能假设「上批已按预期落盘」
 
+[VERIFIED] 2026-10-21 本会话实证：第 458 轮确认守卫未写入（false/1226B）、第 486 轮读 SYSTEM.md 第 240 行仍是原样 ⇒ 上轮改动确实未落盘
 本会话多次出现回执批次乱序（例如 APPENDED_CONCLUSION 显示在 WROTE_HEAD 之前到达）。追加式写入（`readText` + `writeText(cur + seg)`）在乱序回执下会覆盖前序内容。规避：追加前先 `readText` 校验当前内容含预期锚点，缺锚点即视为未落盘重做。
 
 ## vm 沙箱加载子模块：共享 context 下 const 会重复声明
@@ -2170,6 +2171,7 @@ UI 剥离类改动必须以真实站点 DOM 反推的文本为测试样本，不
 
 ## 构建须走后台任务
 
+[VERIFIED] 2026-10-21 本会话实证：`pnpm verify:parallel` 前台 175s exit=129（SIGTERM 截断）；改 background 后正常完成
 `pnpm build` 全量耗时约 11s，但 dev 环境存在潜在长尾（大仓 tsc + 4 个 vite 产物）可能触达 `/run` 沙箱 180s 外层 SIGTERM。用 `{background: true}` 起后台再轮询 `shellStatus`，可绕开该限制并保留 `[@shell-done exit=N]` 哨兵作为收口判据。
 
 ## 「消除告警」先要判清告警的可消除性：unimport 的 `Duplicated imports` 有真噪音（门面 re-export 与实现文件同名，指向同一绑定）与真依赖（消费方全靠 auto-import，排除即断）。判据只有一条承重测试
@@ -2355,6 +2357,7 @@ Vue 的 `watch` 拿到 `undefined` 作为源时会静默失效或抛错（取决
 
 ## 「我上一轮改过」不等于「当前状态」——这是我在本会话第二次犯
 
+[VERIFIED] 2026-10-21 本会话实证：第 479 轮改 §3.3 路径、第 486 轮复查第 240 行仍为原样，重做并读回才落盘
 上轮我把已回滚的 `fileFilter` 排除当成现状，本轮又犯同类错（断言 `fileFilter` 含 4 个排除）。根因是我用「记忆中的改动」代替「读盘实测」。凡断言「当前 X 是什么」，必须先 `readText`；凡引用「我改过 Y」，必须复读该文件确认改动仍在。
 
 ## 影响面清单必须从「import 语句」反查，不能从「已知耦合」正推

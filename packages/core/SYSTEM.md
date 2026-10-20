@@ -237,7 +237,7 @@
 ### §3.3 会话启动 API 摘要（必读）
 
 > **本段在整个会话中只出现一次**（随 SYSTEM.md 首问注入）。它回答「有哪些 API、哪个容易用错」，**不替代**完整签名——不确定时先查：
-> `__AI__.grep('function xxx')` 或 `readText('packages/core/src/helpers/<file>.cjs')`。
+> `__AI__.grep('function xxx')` 或在门面实现文件里读源码（文件路径见项目索引）。
 > **禁止凭记忆写签名**：`syntaxCheck` 返对象不是布尔、`shell` 没有 `exit` 字段、`readText` 是同步没有 `.catch`、`patchFile` 是位置参数——每一条都曾导致返工。
 
 **基础**：`readText(p)` / `writeText(p,s)` / `readJSON(p)` / `exists(p)` / `readFiles(glob)` / `grep(pattern, opts?)` / `walk(dir, {ext?,skip?})` / `dump(file, from, to)` / `log` / `ok` / `warn` / `err` / `skip` / `exit(code, msg?)`
