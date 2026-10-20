@@ -320,7 +320,8 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
    * [CONSTRAINT] 坏块静默丢弃但不抛：一条畸形帧不该让整条时间线中断；
    *   服务端已把坏块记进 turns.jsonl 的 `skipped`，排查有据。
    */
-  function handleBlockMsg(payload: MessageEvent['data'], e?: MessageEvent): void { // [CONSTRAINT] 与 handleAiReply 同一道「是否来自当前 AI 站点」的门（无头侧的假事件 origin 是
+  function handleBlockMsg(payload: MessageEvent['data'], e?: MessageEvent): void {
+    // [CONSTRAINT] 与 handleAiReply 同一道「是否来自当前 AI 站点」的门（无头侧的假事件 origin 是
     //   `ws://headless`，与 reply 路径完全同形，因此这里不会把块滤掉）：
     //   少了它，多工作区并行时 A 窗口的块会渲染进 B 窗口的时间线。
     if (e && !isFromActiveAiSite(e)) return
@@ -332,6 +333,18 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
     //   用 turnId + blockId 作为 updateKey，利用 event-stream 的原地替换机制保证幂等。
     const b = block as { turnId?: number, blockId?: string }
     const updateKey = b.turnId !== undefined && b.blockId ? `blk-${b.turnId}-${b.blockId}` : undefined
+    // [ask-block-v1] 块帧形式的 ask 也必须唤醒 askUser，否则点击选项无法 resolve Promise
+    if (type === 'ask') {
+      const askBlock = block as { id?: string, question?: string, options?: { id: string, label: string }[] }
+      if (askBlock.question && askBlock.options) {
+        void askUser({ question: askBlock.question, options: askBlock.options }).then((answer) => {
+          if (answer === null) return
+          try { emitBus('ai:ask', `回答：${String(answer).slice(0, 40)}`, { payload: { text: String(answer), role: 'user-answer' } }) } catch {}
+          void aiWindow.copyAndFill(`【ASK 回答】${answer}`, { skipRules: true })
+        })
+      }
+    }
+
     try { emitBus('ai:block', titles[type] || 'AI 块', { payload: { block }, updateKey }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
   }
 
