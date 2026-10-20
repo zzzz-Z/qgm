@@ -62,6 +62,9 @@ const AI_JSDOC = [
   ' *       grep(pattern, opts?) / walk(dir, {ext?,skip?}) / dump(file, from, to)',
   ' *       log / ok / warn / err / skip / exit(code, msg?)',
   ' *       shell(cmd, opts?) ← 异步须 await；字符串不做 shell 解析',
+  ' *       shellStatus(id) / shellWait(id, {timeoutMs?}) ← 后者内部轮询到结束，勿手写 sleep 循环',
+  ' *       probe(port, {path?,timeoutMs?}) ← 进程内 fetch 探活，勿用 curl（沙箱内会返 000）',
+  ' *       testRun(files?, {timeoutMs?}) → {passed,failed,failedFiles[]}，勿从 stdout 截取判断',
   ' *',
   ' * 易错项（务必记住）：',
   ' *   patchFile(file, anchor, replacement, opts?) ← 位置参数；失配抛异常，不返 {ok:false}',
@@ -69,6 +72,7 @@ const AI_JSDOC = [
   ' *   tryReadFile(p) → {ok, content?} 对象；readState() → 对象；两者都不是字符串',
   ' *   syntaxCheck(code, filename) ← 仅 CJS/JS；TS/ESM 返 UNSUPPORTED_LANG（能力边界非语法错）',
   ' *   flush() ← 沙箱内子进程读真盘，写入后先 flush 再让子进程校验',
+  ' *   shell(\'sh\',\'-c\',\'cat x\') → 直接 readText(x) / dump(x,a,b)；shell 读文件多一层进程与转义风险',
   ' */',
 ].join('\n')
 
