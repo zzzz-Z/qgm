@@ -76,14 +76,32 @@ export function isHeadless(): boolean {
  * [WHY] transport 动态 import 是异步的，此函数 fire-and-forget 不阻塞调用方
  * [CONSTRAINT] fn 在 transport 上不存在时静默忽略；新增协议字段时旧 transport 缺方法不应抛错
  */
+// [headlesssend-name-map-v1] 调用方沿用 *Impl 语义名（与油猴侧 impl 命名对齐），
+//   但 transport 接口暴露的是短名（sendStop / sendFill / sendRotate / sendNewSession）。
+//   原实现直接按 methodName 反射取键 ⇒ headless 通道下四个发送全部落空且被 catch 静默吞掉，
+//   表现为「点停止无效 / 状态不变」（用户实测）。此表是两套命名的唯一桥接点。
+const HEADLESS_METHOD_ALIAS: Record<string, string> = {
+  sendFillImpl: 'sendFill',
+  sendStopImpl: 'sendStop',
+  sendRotateImpl: 'sendRotate',
+  sendNewSessionImpl: 'sendNewSession',
+}
+
 function headlessSend(methodName: string, ...args: unknown[]) {
   void loadTransport().then((mod) => {
     try {
       const transport = mod.useAiTransport()
+      const resolved = HEADLESS_METHOD_ALIAS[methodName] || methodName
       // [dynamic-method-v1] 按名动态取 transport 方法；transport 接口未暴露索引签名，此处收窄一次
-      const method = (transport.transport as unknown as Record<string, (...a: unknown[]) => unknown>)[methodName]
-      if (typeof method === 'function') void method.apply(transport.transport, args)
-    } catch { /* swallow: transport 未就绪 / 方法缺失，headless 发送本就 fire-and-forget */ }
+      const method = (transport.transport as unknown as Record<string, (...a: unknown[]) => unknown>)[resolved]
+      if (typeof method !== 'function') {
+        // [headless-orphan-warn-v1] 方法缺失必须留痕：静默吞会让停止类操作永远「看起来成功」
+        log.warn('[headlessSend] transport 无此方法', { methodName, resolved })
+        return
+      }
+      const r = method.apply(transport.transport, args)
+      if (r && typeof (r as Promise<unknown>).then === 'function') void (r as Promise<unknown>).catch(() => {})
+    } catch (e) { log.warn('[headlessSend] 发送失败', { methodName, detail: String((e as Error)?.message || e) }) }
   })
 }
 
@@ -200,16 +218,19 @@ export function sendFillToAsync(sid: string, payload: FillPayloadImpl, timeoutMs
 
 /** 通知油猴停止（清 lastScript / Observer / 监听） */
 export function sendStopToImpl(sid: string): boolean {
+  // [stop-send-diag-v1] 三条失败路径原为静默 return false，上层只 toast 不阻断 ⇒
+  //   用户看到「已停止」而站点仍在吐字。改为逐路径留痕，使 stop 无效可直接定位到断点。
   const win = getWindowBySid(sid)
-  if (!win) return false
+  if (!win) { log.warn('[sendStopToImpl] win=null', { sid, active: getActiveWinSid() }); return false }
   const origin = targetOriginFor(sid)
-  if (!origin) return false
+  if (!origin) { log.warn('[sendStopToImpl] origin=""', { sid }); return false }
   try {
     win.postMessage({ type: 'ai-runner:stop' }, origin)
     // [stop-resume-v1] 用户主动停止：打标记供 stopped 分支消费（不续推）
     markUserStop(sid)
     return true
-  } catch {
+  } catch (e) {
+    log.warn('[sendStopToImpl] postMessage threw', { sid, detail: String((e as Error)?.message || e) })
     return false
   }
 }
