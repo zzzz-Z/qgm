@@ -24,6 +24,8 @@ export interface CollectBlock {
 export interface CollectTurnEnd {
   turnId?: number
   awaiting?: string
+  /** [turn-mode-v1] 本轮性质的显式标记；旧服务端不传时按 awaiting 降级推断 */
+  mode?: 'summary' | 'results' | 'user'
   blocks?: number
   skipped?: string[]
 }
@@ -90,6 +92,16 @@ export function collectAwaiting(blocks: readonly CollectBlock[]): 'results' | 'u
   if (hasScript) return 'results'
   if (hasAsk) return 'user'
   return 'none'
+}
+
+/**
+ * [turn-mode-v1] 与核心 `deriveTurnMode` 同构：把「无 script 且无 ask ⇒ 总结轮」固化。
+ * [CONSTRAINT] 本仓 `turn-collect` 与 `turn-frames` 是刻意的两份同构实现（一份可在浏览器裸跑，
+ *   一份在服务端），改一处必须同步另一处，否则两侧对「总结轮」的判定会漂移。
+ */
+export function collectTurnMode(blocks: readonly CollectBlock[]): 'summary' | 'results' | 'user' {
+  const awaiting = collectAwaiting(blocks)
+  return awaiting === 'none' ? 'summary' : awaiting
 }
 
 export function createTurnCollector(opts: TurnCollectorOptions = {}): TurnCollector {

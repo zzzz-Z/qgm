@@ -57,6 +57,16 @@ export function deriveAwaiting(blocks: readonly AiBlockDto[]): AiTurnEndDto['awa
   return 'none'
 }
 
+/**
+ * [turn-mode-v1] 本轮性质的显式标记，与 `deriveAwaiting` 同源但语义更明确：
+ * `awaiting === 'none'` 就是总结轮，`mode` 把这个推断**固化成字段**，
+ * 让消费方不必各自重写「无 script 且无 ask ⇒ 总结」这条规则。
+ */
+export function deriveTurnMode(blocks: readonly AiBlockDto[]): 'summary' | 'results' | 'user' {
+  const awaiting = deriveAwaiting(blocks)
+  return awaiting === 'none' ? 'summary' : awaiting
+}
+
 /** 是否有 handoff 块（轮转会话）。与 awaiting 正交：轮转与「等结果/等用户」可以同时成立 */
 export function deriveRotate(blocks: readonly AiBlockDto[]): boolean {
   return blocks.some(b => b.type === 'handoff')
@@ -91,7 +101,7 @@ export function blocksToFrames(turnId: number, raw: readonly RawBlock[]): TurnFr
     blocks.push(frame)
   }
 
-  const end: AiTurnEndDto = { turnId, awaiting: deriveAwaiting(blocks), blocks: blocks.length }
+  const end: AiTurnEndDto = { turnId, awaiting: deriveAwaiting(blocks), mode: deriveTurnMode(blocks), blocks: blocks.length }
   if (skipped.length > 0) end.skipped = skipped
   return { blocks, end }
 }

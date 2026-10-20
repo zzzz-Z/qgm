@@ -96,6 +96,7 @@ declare global {
   const clearRulesCache: typeof import('./composables/ai/load-rules').clearRulesCache
   const clearSoftPause: typeof import('./composables/ai/useAiWaiting').clearSoftPause
   const collectAwaiting: typeof import('./composables/runner/turn-collect').collectAwaiting
+  const collectTurnMode: typeof import('./composables/runner/turn-collect').collectTurnMode
   const computeAffectedDirs: typeof import('./composables/data/useFileTree').computeAffectedDirs
   const computeCompensatedScrollTop: typeof import('./utils/panel-resize-scroll').computeCompensatedScrollTop
   const computed: typeof import('vue').computed
@@ -819,6 +820,7 @@ declare module 'vue' {
     readonly clearRulesCache: UnwrapRef<typeof import('./composables/ai/load-rules')['clearRulesCache']>
     readonly clearSoftPause: UnwrapRef<typeof import('./composables/ai/useAiWaiting')['clearSoftPause']>
     readonly collectAwaiting: UnwrapRef<typeof import('./composables/runner/turn-collect')['collectAwaiting']>
+    readonly collectTurnMode: UnwrapRef<typeof import('./composables/runner/turn-collect')['collectTurnMode']>
     readonly computeAffectedDirs: UnwrapRef<typeof import('./composables/data/useFileTree')['computeAffectedDirs']>
     readonly computeCompensatedScrollTop: UnwrapRef<typeof import('./utils/panel-resize-scroll')['computeCompensatedScrollTop']>
     readonly computed: UnwrapRef<typeof import('vue')['computed']>

@@ -98,6 +98,14 @@ export interface AiBlockDto {
 export interface AiTurnEndDto {
   turnId: number
   awaiting: 'results' | 'user' | 'none'
+  /**
+   * [turn-mode-v1] 本轮性质的**显式标记**（不再由 awaiting 反推）。
+   * - `summary`：无 script 且无 ask ⇒ 本 turn 即总结轮（末块 say 是总结正文）
+   * - `results`：有 script，执行后回灌
+   * - `user`：有 ask，停循环等用户
+   * [CONSTRAINT] 可选：旧服务端不传时消费方须降级回 awaiting 推断，不得当作错误。
+   */
+  mode?: 'summary' | 'results' | 'user'
   /** 本轮发出的块数（含被跳过的未知类型不算），用于前端对账「说好的块到齐没有」 */
   blocks: number
   /** 被跳过的块（未知 type 等）——宁可上报也不静默丢弃 */

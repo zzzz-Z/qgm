@@ -12,7 +12,7 @@
 //   ⑤ 纯函数：同输入同输出，且不修改入参
 
 import { describe, expect, test } from 'vitest'
-import { blocksToFrames, deriveAwaiting, deriveRotate, turnToFrames } from '../src/reply/turn-frames.js'
+import { blocksToFrames, deriveAwaiting, deriveRotate, deriveTurnMode, turnToFrames } from '../src/reply/turn-frames.js'
 
 const SAY = { type: 'say', id: 'say_1', text: '先同时探两路。' }
 const C1 = { type: 'script', id: 'c1', lang: 'js', desc: '统计 md 文件分布', why: '决定先改哪几个', code: 'console.log(1)' }
@@ -26,13 +26,13 @@ describe('blocksToFrames：顺序与 seq', () => {
     expect(r.blocks.map(b => b.blockId)).toEqual(['say_1', 'c1', 'c2', 'q1'])
     expect(r.blocks.map(b => b.seq)).toEqual([0, 1, 2, 3])
     expect(r.blocks.every(b => b.turnId === 7)).toBe(true)
-    expect(r.end).toEqual({ turnId: 7, awaiting: 'results', blocks: 4 })
+    expect(r.end).toEqual({ turnId: 7, awaiting: 'results', mode: 'results', blocks: 4 })
   })
 
   test('空数组 ⇒ 零帧 + awaiting none（不制造空 turn 的 phantom 帧）', () => {
     const r = blocksToFrames(1, [])
     expect(r.blocks).toEqual([])
-    expect(r.end).toEqual({ turnId: 1, awaiting: 'none', blocks: 0 })
+    expect(r.end).toEqual({ turnId: 1, awaiting: 'none', mode: 'summary', blocks: 0 })
   })
 
   test('跳过的块在 seq 上留洞，后续块不错位', () => {
@@ -149,6 +149,25 @@ describe('turnToFrames：发帧序列', () => {
     const frames = turnToFrames('w', 2, [SAY, { type: 'lane', id: 'x' }])
     const end = frames[frames.length - 1] as { end: { skipped?: string[] } }
     expect(end.end.skipped).toEqual(['x:type'])
+  })
+})
+
+describe('[turn-mode-v1] 总结轮显式标记', () => {
+  test('仅 say 块 ⇒ mode summary（不再靠 awaiting 反推）', () => {
+    const r = blocksToFrames(5, [SAY])
+    expect(r.end.mode).toBe('summary')
+    expect(r.end.awaiting).toBe('none')
+  })
+
+  test('有 script ⇒ results；有 ask ⇒ user', () => {
+    expect(blocksToFrames(6, [SAY, C1]).end.mode).toBe('results')
+    expect(blocksToFrames(7, [SAY, ASK]).end.mode).toBe('user')
+  })
+
+  test('deriveTurnMode 与 deriveAwaiting 同源（none ⇒ summary）', () => {
+    const frames = blocksToFrames(8, [SAY]).blocks
+    expect(deriveTurnMode(frames)).toBe('summary')
+    expect(deriveAwaiting(frames)).toBe('none')
   })
 })
 
