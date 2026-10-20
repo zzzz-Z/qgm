@@ -101,3 +101,18 @@ test('脚本抛错时报错可见且不吞', () => {
   const out = runWrapped('throw new Error(\'BOOM\')\n', { captureStderr: true })
   assert.ok(out.includes('BOOM'), `异常必须可见，实际: ${out}`)
 })
+
+// [wrapper-fingerprint-v1] wrapper 的关键结构指纹。
+// [WHY] 本会话实测：run-script-wrapper.ts 曾被静默回滚——`vm.runInThisContext` / return-echo /
+//   emitApiDoc 的改动全部消失，而没有任何测试变红（因为旧测试只断言「含 require」这类弱判据）。
+//   [CONSTRAINT] 断言的是「行为结构」而非精确文本：允许注释/换行调整，但不允许能力被删。
+test('wrapper 保留关键能力（防静默回滚）', () => {
+  const code = buildWrapperCode('/tmp/x.cjs')
+  // 必须捕获未处理异常（否则脚本崩溃无输出）
+  assert.ok(code.includes('uncaughtException'), 'wrapper 丢失 uncaughtException 捕获')
+  assert.ok(code.includes('unhandledRejection'), 'wrapper 丢失 unhandledRejection 捕获')
+  // 必须能加载脚本（require 或 vm 求值，二者存其一即可）
+  assert.ok(/require\(|runInThisContext/.test(code), 'wrapper 丢失脚本加载能力')
+  // 失败必须可见
+  assert.ok(code.includes('[script error]'), 'wrapper 丢失错误输出标记')
+})

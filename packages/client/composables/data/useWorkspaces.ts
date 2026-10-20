@@ -24,8 +24,11 @@ export interface WorkspaceItem {
   addedAt: number
   /** [workspace-schema-v2] 内联会话绑定；无绑定则 undefined */
   session?: WorkspaceSessionInline
-  /** [workspace-schema-v2] 内联首问标记（按 modelId） */
-  firstPromptSent?: Record<string, boolean>
+  /**
+   * [workspace-schema-v2] 内联首问标记（按 modelId）；与 core WorkspaceEntry 对齐：
+   *   值可为 boolean，也可为 { sessionId }（core 侧扩展，client 此前漏同步导致类型漂移）
+   */
+  firstPromptSent?: Record<string, boolean | { sessionId: string }>
 }
 
 // [workspace-nav-confirm-v1] 导航确认：切换工作区导航到 sessionUrl 后，若 8s 内没收到该站点的
