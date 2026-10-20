@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.47
+// @version      1.9.48
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
 // @match        https://chatglm.cn/*
@@ -1247,6 +1247,7 @@ function turnBlockKey(sid, turnId, blockId) {
  *  [WHY] 检测 turnId 回退即轮转代际；gen 持久化，跨刷新去重不受影响。 */
 const CONV_GEN_STORE = 'aiRunner.convGen.v1';
 const CONV_MAXTURN_STORE = 'aiRunner.convMaxTurn.v1';
+const CONV_LASTSID_STORE = 'aiRunner.convLastSid.v1';
 function loadConvGen() {
     try {
         if (typeof sessionStorage === 'undefined')
@@ -1267,13 +1268,40 @@ function loadConvMaxTurn() {
         return 0;
     }
 }
+function loadConvLastSid() {
+    try {
+        if (typeof sessionStorage === 'undefined')
+            return '';
+        return sessionStorage.getItem(CONV_LASTSID_STORE) || '';
+    }
+    catch {
+        return '';
+    }
+}
 let convGen = loadConvGen();
-function bumpConvGenIfNewConversation(turnId) {
+function bumpConvGenIfNewConversation(turnId, sid) {
     if (typeof turnId !== 'number')
         return;
+    let bumped = false;
+    // 主判据：会话标识变化（与 turnId 编号方式无关）
+    if (sid) {
+        const lastSid = loadConvLastSid();
+        if (lastSid && lastSid !== sid) {
+            convGen += 1;
+            bumped = true;
+        }
+        try {
+            sessionStorage.setItem(CONV_LASTSID_STORE, sid);
+        }
+        catch { }
+    }
+    // 兜底：拿不到 sid 时退回 turnId 回退判据
     const maxTurn = loadConvMaxTurn();
-    if (maxTurn > 0 && turnId < maxTurn) {
+    if (!bumped && maxTurn > 0 && turnId < maxTurn) {
         convGen += 1;
+        bumped = true;
+    }
+    if (bumped) {
         try {
             sessionStorage.setItem(CONV_GEN_STORE, String(convGen));
         }
@@ -1500,7 +1528,7 @@ function emitTurn(turn) {
     if (!frames.blocks.length)
         return false;
     const sid = extractSidFromHash();
-    bumpConvGenIfNewConversation(turn.turnId);
+    bumpConvGenIfNewConversation(turn.turnId, sid);
     let sent = 0;
     let dirty = false;
     for (let i = 0; i < frames.blocks.length; i++) {

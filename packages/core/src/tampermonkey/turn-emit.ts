@@ -76,6 +76,7 @@ function turnBlockKey(sid: string, turnId: number, blockId: string): string {
  *  [WHY] 检测 turnId 回退即轮转代际；gen 持久化，跨刷新去重不受影响。 */
 const CONV_GEN_STORE = 'aiRunner.convGen.v1'
 const CONV_MAXTURN_STORE = 'aiRunner.convMaxTurn.v1'
+const CONV_LASTSID_STORE = 'aiRunner.convLastSid.v1'
 function loadConvGen(): number {
   try {
     if (typeof sessionStorage === 'undefined') return 0
@@ -90,12 +91,34 @@ function loadConvMaxTurn(): number {
   }
   catch { return 0 }
 }
+function loadConvLastSid(): string {
+  try {
+    if (typeof sessionStorage === 'undefined') return ''
+    return sessionStorage.getItem(CONV_LASTSID_STORE) || ''
+  }
+  catch { return '' }
+}
 let convGen = loadConvGen()
-function bumpConvGenIfNewConversation(turnId: number): void {
+function bumpConvGenIfNewConversation(turnId: number, sid?: string): void {
   if (typeof turnId !== 'number') return
+  let bumped = false
+  // 主判据：会话标识变化（与 turnId 编号方式无关，可真正区分「换了对话」）
+  if (sid) {
+    const lastSid = loadConvLastSid()
+    if (lastSid && lastSid !== sid) {
+      convGen += 1
+      bumped = true
+    }
+    try { sessionStorage.setItem(CONV_LASTSID_STORE, sid) }
+    catch {}
+  }
+  // 兜底：拿不到 sid 时退回 turnId 回退判据（历史行为）
   const maxTurn = loadConvMaxTurn()
-  if (maxTurn > 0 && turnId < maxTurn) {
+  if (!bumped && maxTurn > 0 && turnId < maxTurn) {
     convGen += 1
+    bumped = true
+  }
+  if (bumped) {
     try { sessionStorage.setItem(CONV_GEN_STORE, String(convGen)) }
     catch {}
   }
@@ -293,7 +316,7 @@ function emitTurn(turn: any): boolean {
   const frames = turnBlocksToFrames(turn.turnId, turn.blocks)
   if (!frames.blocks.length) return false
   const sid = extractSidFromHash()
-  bumpConvGenIfNewConversation(turn.turnId)
+  bumpConvGenIfNewConversation(turn.turnId, sid)
   let sent = 0
   let dirty = false
   for (let i = 0; i < frames.blocks.length; i++) {
