@@ -356,7 +356,11 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     if (!block || typeof block !== 'object') return
     const type = String((block as { type?: string }).type || '')
     const titles: Record<string, string> = { say: 'AI 说明', script: 'AI 脚本', ask: 'AI 提问', handoff: '交班摘要' }
-    try { emitBus('ai:block', titles[type] || 'AI 块', { payload: { block } }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
+    // [block-dedup-v1] 断线重连时 replay-buffer 会重发 ai:block 帧，若不去重会导致时间线刷屏。
+    //   用 turnId + blockId 作为 updateKey，利用 event-stream 的原地替换机制保证幂等。
+    const b = block as { turnId?: number, blockId?: string }
+    const updateKey = b.turnId !== undefined && b.blockId ? `blk-${b.turnId}-${b.blockId}` : undefined
+    try { emitBus('ai:block', titles[type] || 'AI 块', { payload: { block }, updateKey }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
   }
 
   /**
