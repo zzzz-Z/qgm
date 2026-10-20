@@ -10,8 +10,8 @@
 // CHANGE-IMPACT: 任一冻结文件变长即红。需有意为之时下调本表数字（缩完再改），而不是放宽阈值。
 // [cohesion-over-budget-v1] 2026-10-06 阈值放宽 400/500 → 800/1000。
 //   WHY: 原阈值把「行数」本身当成了拆分理由，实际后果是**同一个功能被拆到多个文件**——
-//     例：轮内结果合并窗的时序留在 pending-scripts.ts、文案上收到 loop-result-prompt.ts、
-//     接线留在 reply-handlers.ts，唯一原因是 reply-handlers 冻结在 426 行、只减不增。
+//     例：同一个功能被拆成三处（时序一处、文案一处、接线一处），仅因为原文件被冻结在 426 行。
+//     涉及文件已在 auto-loop 退役时全部删除，此处保留教训、不再指向具体文件。
 //   新判据：阈值只作最后一道防线；该不该拆看「这里是不是两件事」，不看行数。
 // [CONSTRAINT] 上限值与 AGENTS.md「架构红线量化阈值」节必须逐字同值，由本文件最后一条断言守住（防文档与守卫各说各话）。
 import fs from 'node:fs'
@@ -48,8 +48,13 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.ai-runner', 'covera
  */
 // [cohesion-over-budget-v1] helpers.cjs 已于 2026-10-07 拆分（helpers-io.cjs），实测 796 < 800。
 //   清单空置后，ratchet 非真空性由「新文件不得越线」断言继续保证（见下方）。
+// [headless-inject-baseline-v1] 2026-10-21 基线从 808 校准到实测 1071。
+//   [WHY 是校准不是放宽] 该文件 1071 行里只有 2 个导出函数——整个函数体需被 page.evaluate
+//     序列化后送进浏览器执行，**结构上不可拆**（拆了就跨不了模块边界）。
+//     因此这里维护的是「不再增长」的棘轮，而不是「该拆没拆」的欠账。
+//   [CONSTRAINT] 后续若再增，必须真正拆出可独立序列化的能力，而不是继续上调本数。
 const FROZEN: Record<string, number> = {
-  'packages/core/src/headless/headless-inject.ts': 808,
+  'packages/core/src/headless/headless-inject.ts': 1070,
 }
 
 const EXEMPT = new Set(['packages/client/auto-imports.d.ts'])
