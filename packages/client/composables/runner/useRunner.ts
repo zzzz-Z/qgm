@@ -525,8 +525,22 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
     // [P3-2c] summary 帧消费
     let _summaryDecision: DecisionPayload | null = null
     let _summaryNeedFiles: string[] | null = null
+    // [first-frame-timeout-v1] 首帧超时守卫：派发后 N 秒内一个帧都没收到 ⇒ 主动 abort 并明示。
+    // [WHY] 实测多次出现「脚本已发出、执行器已起 runId，但前端一帧未收到」——
+    //   此时 readNdjson 会无限等待，循环就卡死在这，用户只看到「没反应」。
+    //   服务端超时只覆盖「脚本跑太久」，不覆盖「一个帧都没回来」。
+    // [CONSTRAINT] 收到任意帧即清除计时（正常执行可能很久才出 summary，但 chunk 会持续到达）。
+    const FIRST_FRAME_MS = 30_000
+    let _gotFirstFrame = false
+    const _firstFrameTimer = setTimeout(() => {
+      if (_gotFirstFrame || isStale()) return
+      try { abortController?.abort() } catch { /* swallow: 可能已结束 */ }
+      log.warn('[run] 首帧超时：30s 内未收到任何执行帧，已主动中止')
+    }, FIRST_FRAME_MS)
+
     await readNdjson<Record<string, unknown>>(res.body, (frame) => {
       if (isStale()) return
+      if (!_gotFirstFrame) { _gotFirstFrame = true; clearTimeout(_firstFrameTimer) }
       if (frame.type === 'summary') {
         if (frame.decision && typeof frame.decision === 'object') {
           _summaryDecision = frame.decision as DecisionPayload
@@ -548,6 +562,8 @@ async function run(opts?: { script?: string, runKey?: string, autoFeedback?: boo
         flushChunk()
       }
     }, abortController.signal)
+    // [first-frame-timeout-v1] 流正常结束也必须清计时，否则定时器泄漏
+    clearTimeout(_firstFrameTimer)
     // [frames-tail-fix-v1] 原取 frames 尾帧作为 summary；但 stage 帧也会 push，
     // 若 summary 帧之后还有 stage 帧（服务端顺序不保证），会错把 stage 当 summary，
     // 导致 runId/changes/ok 全部缺失。改为按 type === 'summary' 精确匹配。
