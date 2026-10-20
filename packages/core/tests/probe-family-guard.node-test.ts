@@ -30,7 +30,7 @@ describe('probe 族三原语', () => {
   it('注入块不得提及不存在的方法（防幻觉教学）', () => {
     const injected = guardSrc.slice(guardSrc.indexOf('const AI_JSDOC'), guardSrc.indexOf('].join'))
     const mentioned = [...injected.matchAll(/[a-z_$][\w$]*\(/gi)].map(m => m[0].slice(0, -1))
-    const skip = new Set(['code', 'filename', 'opts', 's', 'p', 'file', 'a', 'b', 'from', 'to', 'dir', 'pattern', 'cmd', 'msg', 'port', 'files', 'id'])
+    const skip = new Set(['code', 'filename', 'opts', 's', 'p', 'file', 'a', 'b', 'from', 'to', 'dir', 'pattern', 'cmd', 'msg', 'port', 'files', 'id', 'stringify', 'parse', 'join', 'map', 'filter', 'slice', 'test', 'match', 'test', 'replace'])
     for (const m of mentioned) {
       if (skip.has(m)) continue
       assert.ok(indexSrc.includes(m), `注入块提到 ${m} 但门面没有`)

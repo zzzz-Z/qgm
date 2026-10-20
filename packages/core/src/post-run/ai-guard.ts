@@ -4,6 +4,8 @@
 export interface ScanResult {
   hit: boolean
   matches: string[]
+  /** [advisory-v1] 软提示：不阻断执行，随回执附给 AI */
+  warnings?: string[]
 }
 
 export interface HeadResult {
@@ -26,6 +28,13 @@ const FORBIDDEN: { name: string, re: RegExp }[] = [
   //        旧正则把任意裸提及都判为命中而拦下合规脚本。
   //   [CHANGE-IMPACT] 引用式 const e = 'process.exit' 不再拦截（极罕见），其余路径不变。
   { name: 'process.exit', re: /\bprocess\s*\.\s*exit\s*\(/ },
+]
+// [advisory-v1] 软规则：命中只提示不拦截。全量日志（16,348 脚本）里这两类手写极高频，
+//   但历史上确实存在合法用法（如需原始字节的 cat），故不能进 FORBIDDEN 的 400 通道。
+const ADVISORY: { name: string, re: RegExp, hint: string }[] = [
+  // [WHY] literals 存的是**去引号后的内容**（'sh'/-c/'cat foo.txt'），不是源码形态；正则按裸内容写。
+  { name: 'shell-cat-file', re: /(?:^|\0)\s*(?:cat|head|tail)\s+\S/, hint: '读文件请用 __AI__.readText / dump，别用 sh -c cat（多一层进程与转义风险）' },
+  { name: 'hardcoded-abs-path', re: /^\/Users\/[\w.-]+\//, hint: '硬编码绝对路径换机即废，请用 __AI__.getProjectRoot() 拼路径' },
 ]
 
 /** 降级协议标记匹配：`// __AI__.xxx not found` 形式的显式豁免注释 */
@@ -326,7 +335,14 @@ export function scanNativeApisWithFallback(code: string): ScanResult {
     }
   }
   if (DYNAMIC_EXEC_RE.test(skeleton)) scanLiterals(literals, matches)
-  return { hit: matches.length > 0, matches }
+  // [advisory-v1] 软提示：只收集不阻断
+  const warnings: string[] = []
+  for (const a of ADVISORY) {
+    // [advisory-literal-v1] 必须匹配 literals 而非 skeleton：tokenize 会把字符串内容剥成空格，
+    //   而 `sh -c cat` 与 `/Users/...` 恰恰都在字符串里（实测骨架为 `shell([    ,     ,    ])`）。
+    if (a.re.test(literals.join(' \u0000 '))) warnings.push(`${a.name}: ${a.hint}`)
+  }
+  return { hit: matches.length > 0, matches, warnings }
 }
 
 /** 将 __AI__ 速查 JSDoc 幂等注入脚本头部；保留 shebang 行在其后 */

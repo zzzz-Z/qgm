@@ -59,6 +59,11 @@ export async function runScript(
       }
     }
     const scan = scanNativeApisWithFallback(raw)
+    // [advisory-v1] 软提示随回执输出：不阻断执行，但让 AI 看到「这里可以改用原生 API」
+    if (scan.warnings && scan.warnings.length > 0) {
+      for (const w of scan.warnings) console.error(`[advisory] ${w}`)
+    }
+
     if (scan.hit) {
       return {
         code: 2,
