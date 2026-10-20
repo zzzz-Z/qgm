@@ -189,7 +189,11 @@ function turnBlocksToFrames(turnId: number, raw: any[]): any {
     }
     blocks.push(frame)
   }
-  const end: any = { turnId, awaiting: turnAwaiting(blocks), blocks: blocks.length }
+  // [turn-mode-v1] mode 与核心 deriveTurnMode 同构：awaiting==='none' ⇒ 总结轮。
+  // [CONSTRAINT] 本片段不可 import（IIFE 物理切分），只能逐字同构；
+  //   漏掉本字段会让油猴通道的 turn-end 缺失 mode，前端退化为按 awaiting 推断。
+  const awaiting = turnAwaiting(blocks)
+  const end: any = { turnId, awaiting, mode: awaiting === 'none' ? 'summary' : awaiting, blocks: blocks.length }
   if (skipped.length > 0) end.skipped = skipped
   return { blocks, end }
 }
