@@ -7,7 +7,7 @@ if (process.env.NODE_TEST_CONTEXT) { process.exit(0) }
 test.describe('AI Runner', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForSelector('.hdr', { timeout: 10_000 })
+    await page.waitForSelector('.layout-row', { timeout: 10_000 })
   })
 
   test('工作区侧栏存在（左栏容器挂载）', async ({ page }) => {

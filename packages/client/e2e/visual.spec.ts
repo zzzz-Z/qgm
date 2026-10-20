@@ -18,7 +18,7 @@ if (process.env.NODE_TEST_CONTEXT) { process.exit(0) }
 
 /** 稳定等待：等首帧骨架退场、字体加载完成 */
 async function settle(page: import('@playwright/test').Page): Promise<void> {
-  await page.waitForSelector('.hdr', { timeout: 10_000 })
+  await page.waitForSelector('.layout-row', { timeout: 10_000 })
   await page.waitForLoadState('networkidle')
   await page.evaluate(() => document.fonts && document.fonts.ready)
   await page.waitForTimeout(200)

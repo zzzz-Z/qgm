@@ -8,7 +8,7 @@ test.describe('V9 render probe', () => {
       ;(window as unknown as { __AI_RENDER_PROBE__?: boolean }).__AI_RENDER_PROBE__ = true
     })
     await page.goto('/')
-    await page.waitForSelector('.hdr', { timeout: 10_000 })
+    await page.waitForSelector('.layout-row', { timeout: 10_000 })
     await page.waitForSelector('.terminal', { timeout: 10_000 })
   })
 

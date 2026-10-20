@@ -87,17 +87,6 @@
   background: var(--surface-2);
 }
 
-.hdr-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  /* [hdr-group-dock-right-v1] 左下 → 右下：按钮组落在右侧面板底部区域。 */
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 50;
-}
-
 .ds-url {
   position: absolute;
   left: 50%;
@@ -384,12 +373,6 @@
   text-transform: uppercase !important;
   letter-spacing: 0.5px !important;
   line-height: 1.4 !important;
-}
-
-.hdr-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
 .hdr button:not(.btn),

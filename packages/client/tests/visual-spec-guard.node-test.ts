@@ -68,7 +68,8 @@ function stringArray(code: string, name: string): string[] {
 
 /** spec 引用的类选择器 / 类名 token：与 visual.spec.ts 同构，改一处必须改两处 */
 const SPEC_CLASS_TOKENS = [
-  '.hdr',
+  // [hdr-group-dock-sidepane-v1] `.hdr` 已随 header 删除，改用仍存在的布局锚点
+  '.layout-row',
   '.side-tab',
   '.side-tab-active',
   '.side-changes',

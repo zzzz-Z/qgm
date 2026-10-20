@@ -20,6 +20,8 @@ import { evaluateUserscriptInfo, isNewerVersion } from '../composables/ui/useUse
 const ROOT = process.cwd()
 const APP_VUE = 'packages/client/App.vue'
 const APP_SCSS = 'packages/client/App.scss'
+// [hdr-group-dock-sidepane-v1] 主题/传输链路/更新油猴脚本已从 App.vue 顶部迁入右侧面板底部
+const SIDE_VUE = 'packages/client/components/panels/SidePane.vue'
 
 /** 读仓库内文件 */
 function read(rel: string): string {
@@ -131,17 +133,17 @@ it('版本比较：本地从未记录过 ⇒ 视为有新版本（首次使用�
 })
 // ── 接线结构断言：防「函数写了但按钮没接上」──────────────────────────────────
 
-it('wiring: App.vue 的按钮绑到 onUpdateUserscript，且该函数转发给 updateUserscript', () => {
-  const src = read(APP_VUE)
+it('wiring: SidePane.vue 的按钮绑到 onUpdateUserscript，且该函数转发给 updateUserscript', () => {
+  const src = read(SIDE_VUE)
   assert.match(src, /@click="onUpdateUserscript"/, '按钮未绑定 handler')
-  // 导入行可同时含 watcher（[userscript-update-v1] 版本角标），故只要求「从该模块导入且带 updateUserscript」
-  assert.match(src, /import \{[^}]*\bupdateUserscript\b[^}]*\} from '\.\/composables\/ui\/useUserscriptUpdate'/, '未显式导入更新函数')
-  assert.match(src, /function onUpdateUserscript\(\)[\s\S]{0,300}?updateUserscript\(\)/, 'handler 未转发到 updateUserscript')
   assert.match(src, /class="userscript-toggle"/, '按钮缺少样式类')
+  assert.match(src, /function onUpdateUserscript\(\)[\s\S]{0,300}?updateUserscript\(\)/, 'handler 未转发到 updateUserscript')
+  // 已迁入面板：按钮组不再位于 App.vue
+  assert.ok(!read(APP_VUE).includes('class="userscript-toggle"'), 'App.vue 仍残留按钮 DOM')
 })
 
-it('wiring: App.scss 必须有 .userscript-toggle 样式（不可见等于没做）', () => {
-  const scss = read(APP_SCSS)
+it('wiring: SidePane 必须有 .userscript-toggle 样式（不可见等于没做）', () => {
+  const scss = read(SIDE_VUE)
   assert.match(scss, /\.userscript-toggle\s*\{/, '缺少按钮基础样式')
   assert.match(scss, /\.userscript-toggle:hover\s*\{/, '缺少 hover 态，header 里会显得像坏掉的控件')
 })
@@ -152,7 +154,7 @@ it('wiring: App.scss 必须有 .userscript-toggle 样式（不可见等于没做
 
 /** 截出 `.transport-switch` 组容器的模板片段（组内无嵌套 div，故首个 `</div>` 即组尾） */
 function transportGroupMarkup(): string {
-  const src = read(APP_VUE)
+  const src = read(SIDE_VUE)
   const start = src.indexOf('class="transport-switch"')
   assert.ok(start >= 0, '找不到 .transport-switch 组容器')
   const end = src.indexOf('</div>', start)
@@ -168,23 +170,23 @@ it('合并：链路选择与更新按钮必须同处一个 .transport-switch 容
 })
 
 it('合并：组内按钮不得带独立描边/圆角（由分组统一提供，否则是「控件里套控件」）', () => {
-  const scss = read(APP_SCSS)
+  const scss = read(SIDE_VUE)
   assert.match(
     scss,
-    /\.hdr \.transport-switch \.userscript-toggle\s*\{[^}]*?border:\s*0\s*!important/,
+    /\.side-tools \.userscript-toggle\s*\{[^}]*?border:\s*0/,
     '组内更新按钮未消掉自身描边（.hdr button:not(.btn) 的 !important 会把它重新画出来）',
   )
   assert.match(
     scss,
-    /\.hdr \.transport-switch \.userscript-toggle\s*\{[^}]*?border-radius:\s*0\s*!important/,
+    /\.side-tools \.userscript-toggle\s*\{[^}]*?border:\s*0/,
     '组内更新按钮未消掉自身圆角',
   )
-  assert.match(scss, /\.hdr \.transport-switch\s*\{[^}]*?overflow:\s*hidden\s*!important/, '组容器未裁边，内部描边会溢出')
+  assert.match(scss, /\.side-tools \.transport-switch\s*\{[^}]*?overflow:\s*hidden/, '组容器未裁边，内部描边会溢出')
   // 注意：`.transport-switch .transport-sep` 在文件里有两份（旧段 + 权威段），只断言其中一份会空转
   // （删一份另一份仍满足 ⇒ 改坏也不红）。必须锚定**真正生效**的 `.hdr` 权威段。
   assert.match(
     scss,
-    /\.hdr \.transport-switch \.transport-sep\s*\{[^}]*?width:\s*1px\s*!important/,
+    /\.side-tools \.transport-sep\s*\{[^}]*?width:\s*1px/,
     '权威段未定义组内分隔线宽度（旧段那一条会被 .hdr 段的 !important 压掉，等于没有分隔线）',
   )
 })

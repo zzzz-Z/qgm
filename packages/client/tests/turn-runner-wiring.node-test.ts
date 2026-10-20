@@ -15,6 +15,8 @@ import {
   submitTurn,
   useTurnRunner,
 } from '../composables/runner/useTurnRunner.js'
+// [board-mirror-turn-v1] 用例需重置看板抓取缓存
+import { resetBoardMirror } from '../composables/ai/board-mirror.js'
 
 const h = vi.hoisted(() => ({
   runCalls: [] as Array<{ script?: string, runKey?: string, autoFeedback?: boolean }>,

@@ -5,7 +5,7 @@ if (process.env.NODE_TEST_CONTEXT) { process.exit(0) }
 test.describe('strip-script-blocks 端到端', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForSelector('.hdr', { timeout: 10_000 })
+    await page.waitForSelector('.layout-row', { timeout: 10_000 })
     await page.waitForSelector('.terminal', { timeout: 10_000 })
     await page.evaluate(() => {
       const w = window as unknown as { __AI_EVENT_HOOKS__?: { clear: () => void } }

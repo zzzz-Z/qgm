@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { TOAST_LONGEST, TOAST_MEDIUM } from './utils/toast-durations'
 import ScriptPanel from './components/script/ScriptPanel.vue'
 import AiWindowList from './components/panels/AiWindowList.vue'
 import { useAiReplyHandlers } from './composables/ai/useAiReplyHandlers'
 import { useAppStartup } from './composables/ui/useAppStartup'
-import { updateUserscript, useUserscriptUpdateWatcher } from './composables/ui/useUserscriptUpdate'
 import ToastHost from './components/feedback/ToastHost.vue'
 import TooltipHost from './components/feedback/TooltipHost.vue'
 import KeyboardHelp from './components/feedback/KeyboardHelp.vue'
@@ -29,7 +27,6 @@ setSessionModelScope(String(modelId.value || 'default'))
 
 const { toast } = useToast()
 /** [userscript-update-v1] 版本角标：脚本改完 build 后自动递增版本，这里轮询比对给出可点提示 */
-const userscriptBadge = useUserscriptUpdateWatcher()
 
 const { onSessionIdMessage } = useAiReplyHandlers({
   sessionHistory,
@@ -124,16 +121,6 @@ function addSessionToHistory(id: string, url: string, title: string) {
 }
 
 /**
- * [userscript-update-v1] 安装 / 更新油猴脚本
- * [WHY] 脚本改动后需让 Tampermonkey 重新拉取；分发端点每次请求都重读磁盘，
- *       故「打开端点 URL」即等价于「更新到最新版本」。
- * [CONSTRAINT] 判定与开窗逻辑在 useUserscriptUpdate 内（先同步开窗保手势），此处只转发。
- */
-function onUpdateUserscript() {
-  // [CONSTRAINT] 不必 await：失败原因由该函数内部 toast 呈现，这里不做二段处理
-  void updateUserscript().then(() => userscriptBadge.markSeen())
-}
-/**
  * 全局键盘快捷键：Shift+? 开关快捷键帮助、Escape 关闭
  * [WHY] 在输入框/可编辑元素内不劫持按键，避免用户输入问号时弹出帮助
  * [CONSTRAINT] 只响应 shiftKey=true 且无 ctrl/meta/alt；Escape 只在帮助打开时吞掉
@@ -176,37 +163,6 @@ async function activateWorkspaceFromQuery(): Promise<void> {
     } catch { /* 非关键路径 */ }
   } catch { /* 未就绪：忽略 */ }
 }
-
-function onTransportChange(e: Event) {
-  const v = (e.target as HTMLSelectElement).value
-  // [use-storage-v1] ref 赋值即持久化，无需手动 setItem
-  transportKind.value = v === 'headless' ? 'headless' : 'tampermonkey'
-  window.location.reload()
-}
-/**
- * [headless-login-gui-v1] 触发引导式登录
- * [WHY] 用户手动在有头窗口登录一次 → profile 落盘 → 后续 headless 复用同一 userDataDir 即已登录
- * [CONSTRAINT] [headless-login-gui-v2] sid 取 getActiveWinSid()，必须与 openSite 的
- *              无头 open 一致；硬编码 'default' 时多会话下 open 用会话 id 的 profile，
- *              登录态落不到同一目录 → 反复提示未登录。
- *              sendLoginGui 可选，tampermonkey 未实现时不弹窗，只提示。
- * [CHANGE-IMPACT] 依赖 getTransport 单例与 toast；不修改 transportKind，不触发 reload。
- */
-function onLoginGui() {
-  try {
-    const t = getTransport()
-    // [headless-login-gui-v2] 与无头 open 保持同一 sid：登录态落盘到 userDataDirFor(sid)，两处不一致则永久未登录
-    const sid = getActiveWinSid()
-    const ok = t.sendLoginGui?.(sid)
-    if (!ok) {
-      toast('当前通道不支持引导登录', 'warn', TOAST_MEDIUM)
-      return
-    }
-    toast('已打开有头窗口，请登录 DeepSeek 后关闭该窗口', 'info', TOAST_LONGEST)
-  } catch (e) {
-    log.error('[headless-login-gui] 触发失败:', e)
-  }
-}
 </script>
 
 <template>
@@ -219,59 +175,6 @@ function onLoginGui() {
     <a href="#main-content" class="skip-link">跳到主内容</a>
     <AiWindowList />
     <div class="app-body">
-      <div class="hdr-right">
-        <button
-          v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
-          class="theme-toggle" aria-label="切换主题"
-          @click="theme = theme === 'dark' ? 'light' : 'dark'"
-        >
-          <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
-          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
-        </button>
-        <!-- [hdr-transport-group-v1] 传输链路控组合一：把「油猴 / 无头」选择、无头引导登录、更新油猴脚本
-           收进同一个分段控件（原先是三个各自描边的独立控件，视觉上零散且高度不一）。
-           结构： [ 链路选择 ▾ | (无头时) 引导登录 | 更新脚本 ] -->
-        <div class="transport-switch" role="group" aria-label="AI 传输链路（切换后自动刷新）" title="AI 传输链路（切换后自动刷新）">
-          <select
-            class="transport-select"
-            :value="transportKind"
-            aria-label="AI 传输链路"
-            @change="onTransportChange"
-          >
-            <option value="tampermonkey">
-              油猴
-            </option>
-            <option value="headless">
-              无头
-            </option>
-          </select>
-          <!-- [headless-login-gui-v1] 无头模式下引导用户在有头窗口完成一次登录 -->
-          <template v-if="transportKind === 'headless'">
-            <span class="transport-sep" aria-hidden="true" />
-            <button
-              v-tooltip="'引导登录：打开有头窗口，登录后关窗即可（登录态落盘复用）'"
-              aria-label="引导登录"
-              class="login-gui-toggle"
-              @click="onLoginGui"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
-            </button>
-          </template>
-          <span class="transport-sep" aria-hidden="true" />
-          <!-- [userscript-update-v1] 安装 / 更新油猴脚本：打开本地分发端点，Tampermonkey 拦截并弹更新页 -->
-          <button
-            v-tooltip="'安装 / 更新油猴脚本（打开本地分发端点，Tampermonkey 会弹出安装或更新确认）'"
-            :aria-label="userscriptBadge.hasUpdate.value ? '油猴脚本有新版本，点击更新' : '更新油猴脚本'"
-            class="userscript-toggle"
-            :class="{ 'has-update': userscriptBadge.hasUpdate.value }"
-            @click="onUpdateUserscript"
-          >
-            <span v-if="userscriptBadge.hasUpdate.value" class="userscript-dot" aria-hidden="true" />
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
-          </button>
-        </div>
-      </div>
-
       <div class="layout-row">
         <div class="layout-main">
           <main id="main-content" class="main" tabindex="-1">
