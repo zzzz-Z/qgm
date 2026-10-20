@@ -82,7 +82,8 @@ const sideTab = computed<SideTab>({
 })
 const displayWidth = computed(() => props.sideWidth || 320)
 const collapsed = computed({
-  get: () => !fold.isOpen('expanded', true),
+  // [side-default-collapsed-v1] 默认折叠：未存值时 fallback=false（已手动展开过的用户不受影响）
+  get: () => !fold.isOpen('expanded', false),
   set: (v: boolean) => fold.setOpen('expanded', !v),
 })
 
