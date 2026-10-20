@@ -124,6 +124,9 @@ function submitAnswer(text: string): void {
 <template>
   <!-- done：任务完成 · 总结 -->
   <section v-if="card.type === 'done' && (card.text || card.preview).trim()" class="done-summary">
+    <div class="done-summary-head">
+      任务完成 · 总结
+    </div>
     <FoldToggle
       v-if="card.truncated"
       :expanded="expanded"

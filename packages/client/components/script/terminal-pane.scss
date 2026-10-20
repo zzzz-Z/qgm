@@ -214,6 +214,25 @@
   background: var(--surface-2, rgb(127 127 127 / 5%));
   border: 1px solid rgb(127 127 127 / 12%);
 }
+
+/* [summary-head-v1] 总结卡专用开盘：绿勾 + 「任务完成 · 总结」，紧凑版（原 14px/400/16px 距） */
+.done-summary-head {
+  @apply flex items-center gap-2;
+  font: 600 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+  color: var(--success, #3fb950);
+  margin: 0 0 10px;
+}
+.done-summary-head::before {
+  content: '\2713';
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgb(63 185 80 / 15%);
+  font-size: 11px;
+}
 /* [ask-card-v1] AI 提问卡：对话流内联卡片，替代旧弹窗；选项可点选、也可自由输入 */
 .question-card {
   margin: 8px 0;
