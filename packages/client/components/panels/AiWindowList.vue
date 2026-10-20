@@ -340,8 +340,10 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin: 0 8px 10px;
-  padding: 7px 10px;
+  margin: 0 8px 12px;
+  padding: 8px 10px;
+  /* [left-rail-ui-v4] 虚描边升级为柔和实底：主入口要能被一眼看见，虚线在高密度左栏里过弱 */
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
   /* [workspace-list-ui-v3] 实心主色块改为描边态：左栏主体应是工作区列表，
      按钮只作辅助入口，悬停才升为主色实心。 */
   border: 1px dashed color-mix(in srgb, var(--primary) 45%, transparent);
@@ -482,7 +484,7 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
   min-height: 0;
   margin: 0;
   /* [workspace-panel-ui-v2] 6px → 8px：与 48px 顶部条和卡片圆角对齐，减少贴边感 */
-  padding: 8px 6px;
+  padding: 8px 8px;
   list-style: none;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -499,15 +501,16 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
   gap: 8px;
   /* [workspace-list-ui-v3] 8px → 7px 纵向、10px 横向：压缩行高至约 34px，
      换取同屏更多工作区，同时保留 7px 圆角与左侧点击热区。 */
-  padding: 7px 10px 7px 12px;
-  border-radius: 7px;
+  padding: 8px 10px 8px 12px;
+  border-radius: 8px;
   cursor: pointer;
   transition:
     background 0.12s ease,
     box-shadow 0.12s ease;
 }
+/* [left-rail-ui-v4] 悬停与激活拉开层级：悬停中性底，激活项再加描边（原样式已有 box-shadow） */
 .awl-item:hover {
-  background: rgba(127, 127, 127, 0.12);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 /* [workspace-panel-ui-v2] 键盘可达：列表项可聚焦（role=option 已具备，补齐可见焦点环） */
 .awl-item:focus-visible {
@@ -526,7 +529,7 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 .awl-item.active {
   /* [ui-color-token-v1] 硬编码 primary → 语义变量 */
   background: var(--primary-bg);
-  box-shadow: inset 0 0 0 1px rgb(88 166 255 / 22%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 30%, transparent);
 }
 /* [workspace-list-ui-v3] 激活条由浮空 2px 改为贴左内缘 3px 实心条，
    与卡片圆角贴合，选中感更明确。 */
