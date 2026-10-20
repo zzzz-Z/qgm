@@ -19,14 +19,16 @@ export const SEGMENTS = [
   'turn-schema',
   'language',
   'markdown',
-  'marks',
+  // [legacy-marks-removed-v1] `marks`（首行 SCRIPT/ASK/DONE/HANDOFF/TEXT 扫描）已删：
+  //   契约 §1 只允许 ```json 围栏包住的 turn 信封，回复不再有「首行标记」这回事。
   'roots',
   'session',
   'limits',
   'state',
   'stop',
   'detect',
-  'emit',
+  // [legacy-marks-removed-v1] `emit`（旧 script / plain 两条回传通道）已删：
+  //   脚本只经 turn 信封下发（turn-emit），裸文本按契约整轮丢弃，不再回传。
   'turn-emit',
   'dispatch',
   'observer',

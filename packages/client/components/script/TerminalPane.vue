@@ -18,6 +18,11 @@ import { stripScriptBlocks } from '../../utils/strip-script-blocks'
 // [preview-ssot-v1] 预览阈值统一定义在 timeline-build（单一定义，防两处分叉）
 // [turn-block-frame-v1] buildOneCard 亦从该模块引入：块帧建卡规则只有一份，本组件不再内联复写
 import { ASK_PREVIEW, buildOneCard, DONE_PREVIEW, TAIL_KEEP_LINES, TAIL_MAX_CHARS, TEXT_PREVIEW } from '../../utils/timeline-build'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRuntime } from '../../composables/ai/useRuntime.ts'
+import { useToast } from '../../composables/ui/useToast.ts'
+import { TOAST_MEDIUM, TOAST_SHORT } from '../../utils/toast-durations.ts'
+import { useEventBus } from '../../composables/ui/event-stream.ts'
 // [eventbus-name-clash-v1] 显式 import（原因同 ScriptPanel.vue）
 // [terminal-actions-v1] 显式 import：本组件此前无 toast 调用，auto-import 在 vitest/tsc 下不生效
 // [runtime-kind-ssot-v1] 等待 banner 的判据改读运行态单一真相源（不再由父级透传 props）
@@ -571,7 +576,7 @@ function reopenGuide(): void {
             以下为刷新前的历史记录（对应窗口已关闭，无法继续执行）
           </div>
           <!-- 每轮脚本 desc：Markdown 渲染；来源 busEvents（已持久化到 localStorage） -->
-          <template v-for="card in timelineItems" :key="card.key">
+          <template v-for="card, n in timelineItems" :key="card.key">
             <ScriptCard
               v-if="card.type === 'script'"
               :key="card.key"
@@ -581,7 +586,7 @@ function reopenGuide(): void {
             />
             <RoundCard
               v-else
-              :key="card.key"
+              :key="card.key || n"
               :card="card"
             />
           </template>

@@ -30,6 +30,17 @@ import SidePane from '../panels/SidePane.vue'
 // [eventbus-name-clash-v1] 显式 import：与 @vueuse/core 的 useEventBus 同名，已在 vite
 //   AutoImport.ignore 中屏蔽 auto-import 源，此处必须显式引入（tsc/vitest 无该插件）。
 import { useEventBus } from '../../composables/ui/useEventStream'
+import { useIntervalFn, useTimeoutFn } from '@vueuse/core'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useAiWaiting } from '../../composables/ai/useAiWaiting.ts'
+import { useAutoTakeover } from '../../composables/ai/useAutoTakeover.ts'
+import { useRuntime } from '../../composables/ai/useRuntime.ts'
+import { isReadonlyResult } from '../../composables/runner/useRunFeedback.ts'
+import { useRunner } from '../../composables/runner/useRunner.ts'
+import { setLastAutoFilled } from '../../composables/runner/useScriptInbox.ts'
+import { useToast } from '../../composables/ui/useToast.ts'
+import { useCodeCleaner } from '../../composables/runner/useCodeCleaner.ts'
+import { LS_SIDE_WIDTH_KEY } from '../../utils/storage'
 
 defineOptions({ name: 'ScriptPanel' })
 

@@ -49,13 +49,19 @@ test('collector: 油猴副本注释已同步契约说明', () => {
   assert.ok(/静默窗特意设为 400ms/.test(s), '必须写明 400ms >= 350ms 的理由')
 })
 
-test('collector: 短回复闸门已退役 _stableCount<6，只保留 isGeneratingInPage', () => {
+// [legacy-plain-removed-v1] 短回复闸门随 plain 交付通道**整体删除**（与油猴侧同批）。
+//   [WHY] 契约 §1：裸文本与无围栏代码一律整轮丢弃。「AI 只回两个字」也必须写成信封（say 块），
+//   不能再靠文本闸门兜底放行 —— 那条闸门正是「不写围栏也能显示」的旁路，
+//   而它显示出来的文本里的脚本永远不执行（用户实测过的静默失效形态）。
+// 承重：把 `_shortSentHash` / `kind: 'plain'` / `kind: 'done'` 任一个加回来即变红。
+test('collector: 短回复闸门与 plain / done 交付通道已一并删除', () => {
   const s = fs.readFileSync(INJECT, 'utf8')
-  // [headless-collector-v1] 新模型由 waitForSignal 静默窗保证稳定，轮询时代的「连续 6 拍」补偿已无意义。
-  // 承重：把 `_stableCount < 6` 加回去即变红。
   assert.ok(!/\(dedup\._stableCount \|\| 0\) < 6/.test(s), '_stableCount < 6 应已退役（静默窗已隐含稳定）')
-  assert.ok(/if \(_h && isGeneratingInPage\(\)\)/.test(s), 'isGeneratingInPage 那一半必须保留（防生成中推半截）')
-  assert.ok(/_shortSentHash/.test(s), '短回复去重必须仍由 _shortSentHash 承担')
+  // [CONSTRAINT] 只看「作为字段/赋值/使用」的出现（`dedup._shortSentHash` 或 `..._shortSentHash`），
+  //   注释里提及不算——下方注释本就要记录「哪些字段已删」，误命中会假红。
+  assert.ok(!/\b_shortSentHash\s*[:=]/.test(s) && !/dedup\._shortSentHash/.test(s), '短回复去重 _shortSentHash 应已随 plain 通道删除（仅剩注释提及）')
+  assert.ok(!/kind: 'plain'/.test(s), "detectReplyInPage 不得再产出 kind:'plain'：裸文本按契约整轮丢弃")
+  assert.ok(!/kind: 'done'/.test(s), "detectReplyInPage 不得再产出 kind:'done'：首行标记架构已删")
 })
 
 test('collector: waitForSignal 必须是模块级函数而非 pool 方法', () => {

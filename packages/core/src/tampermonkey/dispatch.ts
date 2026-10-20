@@ -64,28 +64,11 @@ function classifyAndPost(): void {
     }
 
     // ---------- ① 门 ----------
-
-    const doneMarker = findNewDone()
-    if (doneMarker) {
-      // DONE 双门：生成中不推（首行可能流式中途出现）+ 2 帧稳定门兜底
-      if (isGenerating()) return
-      const doneSig = bodySignature()
-      if (_pendingDoneSig !== doneSig) {
-        _pendingDoneSig = doneSig
-        return
-      }
-      _pendingDoneSig = null
-      seenDoneMarkers.add(doneMarker.marker)
-      post({
-        type: 'ai-runner:reply',
-        kind: 'done',
-        site: location.origin,
-        sessionId: extractSidFromHash(),
-        text: doneMarker.text,
-      })
-      lastBodySig = doneSig
-      return
-    }
+    // [legacy-done-gate-removed-v1] 旧架构的「首行 DONE」门已删。
+    //   [WHY] 契约 §1：每次回复只能是一个 ```json 围栏包住的 turn 信封，围栏外零字符；
+    //   任务是否结束由宿主的 `retained-done-gate v1` / `post-done-gate v1` 判定，
+    //   SYSTEM.md §1 已明确「turn 总结 ≠ 任务 DONE」——不再由回复里的 DONE 标记派生。
+    //   留着它反而会让「总结轮」被当成任务收尾，循环提前结束。
 
     // 冷启动守卫：首个 fill/rotate 前只记基线，不报「本轮新增」——
     // 历史恢复的存量标记若被当成本轮新增，刷新页面就会立刻误报
@@ -203,8 +186,7 @@ function classifyAndPost(): void {
     // [turn-emit-v1] 信封优先（契约 §2.1）：命中即整轮按块交付，**不再**走 script / plain。
     // [WHY] 信封 JSON 在旧路径下的实际下场：语言判定把它归到 json ⇒ 白名单拒绝 ⇒
     //   整条回复降级 plain，用户看到一坨 JSON 且脚本一个都不执行（静默失效）。
-    // [CONSTRAINT] 必须先于 scanReplyMarks：旧标记扫描对 JSON 正文无意义，
-    //   命中 marks.text / marks.done 会让下面的 script 分支整轮跳过。
+    // [CONSTRAINT] 必须先于下面的 turn-invalid 探针：读得出信封即本轮合规，不该再报违规。
     // [CONSTRAINT] stopPosted 后不推：前端已 finish 循环，此时推块等于「循环外自动执行」旁路。
     if (!stopPosted) {
       const turn = readTurnFromRoot(replyRoot)
@@ -219,31 +201,34 @@ function classifyAndPost(): void {
       if (turn && emitTurn(turn)) return
     }
 
-    const marks = scanReplyMarks(replyRoot ? extractReplyMd(replyRoot) : '')
-    const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0
+    // [legacy-marks-removed-v1] 旧标记架构（首行 SCRIPT / ASK / DONE / HANDOFF / TEXT）与
+    //   script / plain 两条回传通道已整体删除：契约 §1 规定「裸文本与无围栏代码一律整轮丢弃」。
+    //   ⇒ 走到这里即本轮没有可用信封；除下面这条违规回传外，不再做任何推送。
 
-    // script：标记行为非脚本类时整轮不走脚本分类（否则带示例代码块的 DONE 总结会被当脚本执行）
-    // stopped 后残余块一律不推：前端已 finish 循环，此时推出去会形成「循环外自动执行」旁路
-    // [stopped-no-autorun-v1] 停止轮不再推脚本：残余块会落到「循环外自动执行」旁路
-    // [script-fence-guess-removed-v1] 删除「按围栏猜脚本」的旧通道：脚本下发只走信封（readTurnFromRoot）。
-    // [WHY] 旧逻辑调 extractLatestScript / extractScriptFromMarkdown 扫页面与正文围栏，
-    //   把任意 ```js 围栏当待执行脚本推下去 —— AI 正文里贴示例代码就会被真执行。
+    // [turn-invalid-v1] 有回复正文却读不出信封 ⇒ 回传一次违规帧，让工作台与 AI 都知道原因。
+    //   [WHY 必须回传] 丢弃是契约要求的正确行为，但**静默**丢弃会让「AI 写完总结 → 工作台一片空白
+    //   → 之后再无任何回传」变成无从下手的悬案：用户分不清是链路断了还是被契约丢了，
+    //   而两种成因的处置完全相反（截断须拆小串行重发，裸文本须改用信封重发）。
+    // [CONSTRAINT] 只回传判据（错误码 + 字节数 + 首部 80 字），不回传正文（不污染时间线）。
+    // [CONSTRAINT] 同一正文签名只回传一次：正文静止时 800ms 空转轮询会反复唤醒本函数。
+    if (replyRoot && !stopPosted && !isGenerating()) {
+      const invalidSig = bodySignature()
+      if (invalidSig !== _invalidReportedSig) {
+        const probeMd = extractReplyMd(replyRoot)
+        if (String(probeMd || '').trim()) {
+          const probe = parseTurn(probeMd)
+          const truncated = !!(probe && probe.truncated)
+          _invalidReportedSig = invalidSig
+          post({
+            type: 'ai-runner:turn-invalid',
+            code: truncated ? 'TURN_TRUNCATED' : 'TURN_NOT_JSON',
+            bytes: String(probeMd || '').length,
+            head: String(probeMd || '').slice(0, 80),
+            site: location.origin,
+            sessionId: extractSidFromHash(),
+          })
+        }
+      }
     }
-
-    // plain：仅在正文真的变了时推
-    const sig = bodySignature()
-    if (sig === lastBodySig) return
-    lastBodySig = sig
-
-    // 容器缺失 ⇒ 变化来自思考面板/搜索卡的流式抖动，此时整页反推会产出噪音卡
-    if (!replyRoot) return
-    // [stopped-plain-noise-v1] 已推过 stopped ⇒ 之后的 plain 必为半截回复的补发
-    if (stopPosted) return
-    // 首行是 SCRIPT 且脚本已推成功 ⇒ 此处 plain 必为 DOM 抖动引起的重复补发
-    if (marks.script > 0 && seenHashes.size > 0) return
-
-    // [script-fence-guess-removed-v1] 围栏报错块已删：无围栏不再视为异常。
-
-    emitPlain(extractLatestReplyText() || '', marks)
   } catch { /* 页面导航/关闭期间的 DOM 异常：本轮放弃，下轮自然重试 */ }
 }

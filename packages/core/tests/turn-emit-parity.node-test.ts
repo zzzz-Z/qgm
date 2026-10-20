@@ -270,14 +270,30 @@ describe('emitTurn：帧序列与去重', () => {
 
 // ── 接线守卫：dispatch 必须真的调它 ──
 
-test('dispatch 在分流最前面调 readTurnFromRoot + emitTurn，且信封优先于 marks 扫描', () => {
+// [legacy-marks-removed-v1] 旧首行标记架构（`scanReplyMarks` 扫描 + script/plain 两条回传通道）
+//   已于 2026-10-20 整体删除。原断言「信封分支必须排 scanReplyMarks 之前」随对象一起失效，
+//   故改为：① 信封分支仍须先于 turn-invalid 探针（读得出信封就不该报违规）；
+//   ② 反向钉死旧符号不得复活 —— 一旦有人把旧扫描/旧回传加回来，裸文本会被当成回复交付，
+//   直接违背契约 §1「裸文本与无围栏代码一律整轮丢弃」，而这正是本轮排查的成因。
+test('dispatch 在分流最前面调 readTurnFromRoot + emitTurn，且信封先于 turn-invalid 探针', () => {
   const src = read('packages/core/src/tampermonkey/dispatch.ts')
   const turnAt = src.indexOf('readTurnFromRoot(replyRoot)')
-  const marksAt = src.indexOf('scanReplyMarks(replyRoot')
+  const invalidAt = src.indexOf('ai-runner:turn-invalid')
   assert.ok(turnAt > 0, 'dispatch 未接线 readTurnFromRoot：P3 等于没做')
-  assert.ok(marksAt > 0, 'dispatch 缺 scanReplyMarks（旧路径被整体删除？）')
-  assert.ok(turnAt < marksAt, '信封分支必须在 marks 扫描之前：marks 会把信封 JSON 判成 text/done 而整轮跳过 script')
+  assert.ok(invalidAt > 0, 'dispatch 缺 turn-invalid 回传：违规丢弃又退回静默（用户无从分辨链路断 vs 被契约丢）')
+  assert.ok(turnAt < invalidAt, '信封分支必须在 turn-invalid 探针之前：读得出信封即本轮合规，不该报违规')
   assert.match(src, /if \(turn && emitTurn\(turn\)\) return/, 'emitTurn 的返回值必须被用来中断分流')
+})
+
+test('[legacy-marks-removed-v1] 旧标记扫描与 script/plain 通道不得复活', () => {
+  const src = read('packages/core/src/tampermonkey/dispatch.ts')
+  const seg = read('scripts/lib/userscript-segments.mjs')
+  for (const dead of ['scanReplyMarks', 'emitPlain', 'emitScript', 'seenDoneMarkers', 'markedNonScript']) {
+    assert.ok(!src.includes(dead), `${dead} 在 dispatch.ts 复活：旧首行标记架构已删，回复只认 \`\`\`json 围栏信封`)
+  }
+  for (const dead of ["'marks'", "'emit'"]) {
+    assert.ok(!seg.includes(dead), `SEGMENTS 又出现 ${dead}：旧片段文件已删，拼装会因缺文件而失败`)
+  }
 })
 
 test('片段清单含 turn-schema 与 turn-emit，且 turn-schema 在 turn-emit 之前', () => {

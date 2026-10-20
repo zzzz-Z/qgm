@@ -10,7 +10,7 @@
  *   · 控制类（new-session / replay / rescan / stop）：不重置状态，各自动作
  *
  * [CONSTRAINT] stop 刻意**不**走 resetRoundState：
- *   停止后必须保留 seenHashes / lastBodySig，否则旧回复会被重判为新回复重新推送。
+ *   停止后必须保留信封去重集合与 lastBodySig，否则旧回复会被重判为新回复重新推送。
  * [CONSTRAINT] 所有带 ackId 的指令在每条失败路径上都必须 ackFill(false, ...)，
  *   否则工作台 sendFillToAsync 会一直等到超时（表现为「工作台卡住」）。
  */
@@ -135,19 +135,19 @@ function handleReplay(): void {
 
 /**
  * request-rescan：油猴缓存丢失时从页面重新抓取最新回复。
- * [CONSTRAINT] 脚本与纯文本两条路径都带 rescan 标记，理由同 handleReplay。
+ * [legacy-plain-removed-v1] 不再回传 kind:'plain' 裸文本帧：契约 §1 规定「裸文本与无围栏代码
+ *   一律整轮丢弃」，rescan 不是绕过契约的旁路——旧实现把页面上任意正文（含信封 JSON 原文、
+ *   半截流式文本）当 plain 推给工作台渲染，等于用一条兜底通道复活了被契约禁止的东西。
+ *   ⇒ 改为按 turn 信封重投一次；读不出信封即本轮没有合规内容，静默结束。
+ * [CONSTRAINT] 重投**不**带任何「强制重发」标记：emitTurn 的去重集合跨刷新持久化
+ *   （[turn-emit-dedup-persist-v1]），已交付的块不会被重推 ⇒ 刷新页面不会把上一轮脚本重跑一遍。
  */
 function handleRescan(): void {
   try {
-    // [script-fence-guess-removed-v1] rescan 不再抓脚本：脚本下发只走 turn 信封通道。
-    {
-      const txt = extractLatestReplyText()
-      if (txt && txt.length > 20) {
-        window.opener && window.opener.postMessage({
-          type: 'ai-runner:reply', kind: 'plain', text: txt,
-          sessionId: extractSidFromHash(), rescan: true,
-        }, '*')
-      }
+    const root = latestAssistantRoot()
+    if (root) {
+      const turn = readTurnFromRoot(root)
+      if (turn) emitTurn(turn)
     }
     window.opener && window.opener.postMessage({ type: 'ai-runner:session-id', id: extractId(), sessionId: extractSidFromHash() }, '*')
   } catch { /* DOM 已卸载：放弃本次重扫 */ }
@@ -157,7 +157,7 @@ function handleRescan(): void {
  * stop：打断生成 + 清运行缓冲 + 摘观察器。
  * [CONSTRAINT] 顺序固定：先诊断回传（此时 DOM 还在，能采到候选按钮），
  *   再点停止，最后才清缓冲与摘观察器 —— 反过来会拿不到诊断数据。
- * [CONSTRAINT] 保留 seenHashes / seenDoneMarkers / lastBodySig：
+ * [CONSTRAINT] 保留信封去重集合与 lastBodySig：
  *   清空会让旧回复被重判为新回复；下次 fill/rotate 由 resumeReplyObserver 恢复观察。
  */
 function handleStop(e: MessageEvent): void {

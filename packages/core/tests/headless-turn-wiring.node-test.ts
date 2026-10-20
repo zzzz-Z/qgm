@@ -125,17 +125,19 @@ describe('detectReplyInPage：信封优先 / 标记回落（P2-b）', () => {
     assert.equal(env.tick(), null, '半截信封必须返回 null')
   })
 
-  it('无信封的普通文本 ⇒ 回落旧路径（稳定后交付 plain，行为不变）', () => {
+  // [legacy-plain-removed-v1] 原用例断言「无信封 ⇒ 回落旧路径交付 plain」。该回落通道已删，判据反转。
+  //   [WHY] 契约 §1：裸文本与无围栏代码一律整轮丢弃。回落通道正是「不写围栏照样能显示」的旁路，
+  //   留着它，模型不写围栏反而有出路，块交付永远推不动。丢弃本身不是问题，**静默**才是 ——
+  //   由 turn-invalid 诊断帧告知工作台（油猴侧 [turn-invalid-v1] 同构）。
+  it('无信封的普通文本 ⇒ 不交付（按契约静默丢弃，不再回落 plain）', () => {
     const text = '这是一条普通回复，不含任何信封结构。'
     const env = makeEnv([], text)
-    let firstHitAt = -1
-    let got: Record<string, any> | null = null
-    for (let i = 1; i <= 10 && firstHitAt < 0; i++) {
-      got = env.tick()
-      if (got) firstHitAt = i
+    const hits: Record<string, any>[] = []
+    for (let i = 0; i < 10; i++) {
+      const r = env.tick()
+      if (r) hits.push(r)
     }
-    assert.ok(firstHitAt > 0, '普通回复仍须交付（回落路径未断）')
-    assert.notEqual(got!.kind, 'turn', '无信封时不得走信封分支')
+    assert.equal(hits.length, 0, '裸文本按契约必须整轮丢弃：回落 plain 会复活「不写围栏也能显示」的旁路')
   })
 
   it('同一信封重复扫到 ⇒ 只交付一次（poll 每 800ms 重扫同一份 DOM）', () => {

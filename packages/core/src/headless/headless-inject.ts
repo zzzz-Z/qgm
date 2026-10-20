@@ -30,7 +30,12 @@ export {
 export function ensureCollectorInPage() {
   const w = window
   if (!w.__aiRunnerDedup) {
-    w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '', _pendingScriptHash: null, _pendingDoneSig: null, _plainSentInCycle: false, _shortSentHash: '', _askSentHash: '' }
+    // [legacy-plain-removed-v1] 已删 seenDoneMarkers / _pendingDoneSig（DONE 门）与
+    //   _plainSentInCycle / _shortSentHash / _askSentHash（plain 交付链路）。
+    //   新增 _hitTurnMiss / _hitTurnDup 承接「这一拍为什么没交付」的诊断 —— 旧的那一组
+    //   hits 计数（_hitShortGate / _hitPlainSent / _hitAskDup …）随旧路径删除后再无写入方，
+    //   留着会让 poll-miss 日志看起来「一切正常」（这正是 2026-10-20 排查时最耗时的形态）。
+    w.__aiRunnerDedup = { seenHashes: [], lastBodySig: '', _pendingScriptHash: null, _hitTurnMiss: 0, _hitTurnDup: 0 }
   }
   const dedup = w.__aiRunnerDedup
   if (dedup._collectorReady && dedup._observer && document.body) return true
@@ -59,7 +64,12 @@ export function ensureCollectorInPage() {
 export function detectReplyInPage(siteCfg = {}) {
   const w = window
   if (!w.__aiRunnerDedup) {
-    w.__aiRunnerDedup = { seenHashes: [], seenDoneMarkers: [], lastBodySig: '', _pendingScriptHash: null, _pendingDoneSig: null, _plainSentInCycle: false, _shortSentHash: '', _askSentHash: '' } // [fix-reply-dedup] [fix-plain-once] [short-reply-gate-v1]
+    // [legacy-plain-removed-v1] 已删 seenDoneMarkers / _pendingDoneSig（DONE 门）与
+    //   _plainSentInCycle / _shortSentHash / _askSentHash（plain 交付链路）。
+    //   新增 _hitTurnMiss / _hitTurnDup 承接「这一拍为什么没交付」的诊断 —— 旧的那一组
+    //   hits 计数（_hitShortGate / _hitPlainSent / _hitAskDup …）随旧路径删除后再无写入方，
+    //   留着会让 poll-miss 日志看起来「一切正常」（这正是 2026-10-20 排查时最耗时的形态）。
+    w.__aiRunnerDedup = { seenHashes: [], lastBodySig: '', _pendingScriptHash: null, _hitTurnMiss: 0, _hitTurnDup: 0 } // [fix-reply-dedup] [fix-plain-once] [short-reply-gate-v1]
   }
   const dedup = w.__aiRunnerDedup
 
@@ -100,8 +110,9 @@ export function detectReplyInPage(siteCfg = {}) {
   if (typeof dedup._bodyVersion !== 'number') dedup._bodyVersion = 0
   if (!dedup._sigCache) dedup._sigCache = { version: -1, sig: '' }
   if (!dedup._preCache) dedup._preCache = new WeakMap()
-  if (typeof dedup._seenGrowth !== 'boolean') dedup._seenGrowth = false
-  if (typeof dedup._stableCount !== 'number') dedup._stableCount = 0
+  // [legacy-plain-removed-v1] _seenGrowth / _stableCount 随 plain 交付链路一并删除：
+  //   「连续 N 拍 body 不变才算生成结束」是为文本交付服务的稳定门槛，
+  //   信封靠围栏闭合判定（readTurnBlocks 解析成功即完整），不需要拍数补偿。
   if (typeof dedup._lastMutationAt !== 'number') dedup._lastMutationAt = 0
   if (typeof dedup._collectorReady !== 'boolean') dedup._collectorReady = false
   // [script-closure-gate-v1] 结构闭合门的挂点（见 extractLatestScript）：跨轮不残留，
@@ -967,8 +978,8 @@ export function detectReplyInPage(siteCfg = {}) {
   // [WHY 要带 kind:'turn'] `ai-headless` 的转发门是 `reply.kind` 真值判定；不带 kind 会被当成
   //   「poll 未命中」并记一条 poll-miss 诊断，前端则一条回复都收不到 —— 比不发更糟。
   // [CONSTRAINT] stopped 之后不读信封：与油猴 stopPosted 同构，避免「循环外自动执行」旁路。
-  // [CONSTRAINT] 半截信封（truncated）由 readTurnBlocks 返回 null ⇒ 落到旧路径，等下一拍。
-  // [turn-envelope-v1] 信封路径的去重账本（旧路径继续用 seenHashes，两者并存互不干扰）。
+  // [CONSTRAINT] 半截信封（truncated）由 readTurnBlocks 返回 null ⇒ 返回 null 等下一拍（围栏闭合后再交付）。
+  // [turn-envelope-v1] 信封路径的去重账本：seenTurnIds 记录已交付的 turnId。
   // [WHY 必须去重] poll 每 800ms 重扫同一份 DOM，信封一旦闭合就会**每拍都命中**；
   //   不去重 ⇒ 前端每 800ms 收到一组同样的块帧 ⇒ 时间线持续多出重复卡片。
   // [WHY 防御式初始化] HMR / 旧页面 bundle 可能留下没有本字段的 dedup 对象，
@@ -977,9 +988,8 @@ export function detectReplyInPage(siteCfg = {}) {
   if (!stoppedThisRound && replyRoot) {
     const turn = readTurnBlocks(replyRoot)
     if (turn) {
-      // 同一 turn 只交付一次，且**必须 return null 而不是往下回落到旧路径**：
-      //   回落会让旧标记链路把信封 JSON 的正文再推一遍（plain 卡），比不发更糟。
-      if (dedup.seenTurnIds.includes(turn.turnId)) return null
+      // 同一 turn 只交付一次（信封一旦闭合，poll 每拍都会重新命中同一份 DOM）。
+      if (dedup.seenTurnIds.includes(turn.turnId)) { dedup._hitTurnDup = (dedup._hitTurnDup || 0) + 1; return null }
       dedup.seenTurnIds.push(turn.turnId)
       return {
         kind: 'turn',
@@ -991,114 +1001,22 @@ export function detectReplyInPage(siteCfg = {}) {
         errors: turn.errors || [],
       }
     }
+    // [legacy-plain-removed-v1] 有回复容器却读不出信封 ⇒ 按契约整轮丢弃，**只记诊断**。
+    //   [WHY 必须记] 这是「AI 写了东西、工作台却一片空白」的唯一服务端痕迹：turnMiss 持续增长
+    //   = 模型一直没写围栏（或写得不能被 parseTurn 解析）。旧架构会在这里回落成 plain 卡——
+    //   那正是「不写围栏也能显示」的旁路，也正是 2026-10-20 用户看到的「总结跑进正文就再无回传」形态。
+    dedup._hitTurnMiss = (dedup._hitTurnMiss || 0) + 1
   }
-
-  const marks = scanReplyMarks(extractReplyMd(replyRoot))
-  const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0
-
-  // [script-fence-guess-removed-v1] 删除「按 ```lang 围栏猜脚本」的旧通道。
-  // [WHY] 旧逻辑在无 ASK/DONE/HANDOFF/TEXT 标记时无条件调 extractLatestScript() 扫页面所有 <pre>，
-  //   把任意 ```js 围栏当待执行脚本推下去 —— AI 正文里贴示例代码就会被真执行（用户实测）。
-  //   脚本意图必须由 turn 信封的 content[].type 决定（readTurnBlocks 通道），不能靠围栏语言猜。
-  // [CHANGE-IMPACT] 本函数不再产出 kind:"script"。
-
-  const doneMarker = findNewDone()
-  if (doneMarker) {
-    // [done-gate-v1] 生成中不推（首行 DONE 可能流式中途出现）+ 2 帧稳定门兜底（marker 在 summary<200 字时随流式变）。2026-10-17 实测「分两段」真根因是缺前门。
-    if (isGeneratingInPage()) return null
-    const _doneSig = bodySignature()
-    if (dedup._pendingDoneSig !== _doneSig) {
-      dedup._pendingDoneSig = _doneSig
-      return null
-    }
-    dedup._pendingDoneSig = null
-    dedup.seenDoneMarkers.push(doneMarker.marker)
-    dedup.lastBodySig = _doneSig
-    return { kind: 'done', text: doneMarker.text } // [done-plain-v1] 允许纯 Markdown 总结
-  }
-
-  // 文本稳定检测：连续 3 次 body 不变 → 生成结束，推 plain + text
-  dedup._hitSig2 = (dedup._hitSig2 || 0) + 1
-  const sig2 = bodySignature()
-  if (sig2 !== dedup.lastBodySig) {
-    dedup._hitSigChanged = (dedup._hitSigChanged || 0) + 1
-    dedup.lastBodySig = sig2
-    dedup._stableCount = 0
-    dedup._seenGrowth = true
-    return null
-  }
-  if (!dedup._seenGrowth) { dedup._hitNoGrowth = (dedup._hitNoGrowth || 0) + 1; return null }
-  // [ask-any-cycle-v1] ASK 标记不受「本轮已推过 plain」约束：
-  //   流式回复常先出无标记文本（被推成 plain）再补 ASK 块，若一并被去重拦下，提问卡永不出现。
-  //   ASK 分支本身有 _stableCount>=3 稳定门槛，重复推的风险由该门槛承担。
-  if (dedup._plainSentInCycle && marks.ask < 0) { dedup._hitPlainSent = (dedup._hitPlainSent || 0) + 1; return null }
-  dedup._stableCount = (dedup._stableCount || 0) + 1
-  if (dedup._stableCount < 3) { dedup._hitStableLow = (dedup._hitStableLow || 0) + 1; return null }
-  const plainText = getMainText()
-  // [reply-mark-v1] 复用开头算好的 marks（与脚本判定同一口径，避免漂移）：HANDOFF / ASK / TEXT 放行，其余纯文本拦下；
-  //   [CONSTRAINT] 不能用 getMainText() 的 textContent 做标记扫描（无换行 ⇒ 整段被当「一行」，首行标记判据必失配）。
-  // [short-reply-gate-v1] 极短（去空白 <6 字）无标记回复不再恒丢：生成中或静止窗 <6tick ⇒ 等，否则交付。
-  // [WHY] 2026-10-18 实测「只回复两个字：收到」：body 铁定稳定（_stableCount=129）仍被旧闸门每 tick 丢弃 ⇒ 整轮无回复到 15s 告警。
-  // [CONSTRAINT] 交付不置 _plainSentInCycle（可能只是长回复前缀，锁死会让后续真答复被 _hitPlainSent 吞掉），去重用 _shortSentHash；
-  //   本轮已推过 stopped 时整闸门不参与（短文本同属「停止后补发」，先交付会绕开下方 stopped 守卫）。
-  if (marks.ask < 0 && marks.handoff < 0 && marks.text < 0 && !dedup._stoppedReported && !hasJsFence(plainText)) {
-    const _bare = plainText.replace(/\s+/g, '').length
-    const _h = _bare > 0 && _bare < 6 ? hash32(`short|${plainText}`) : ''
-    // [headless-collector-v1] _stableCount < 6 已退役：新模型由 waitForSignal 的静默窗（≥400ms）保证稳定，
-    //   轮询时代的「连续拍数」补偿意义消失。保留 isGeneratingInPage() 那一半——它防的是
-    //   「生成中推半截」，与唤醒机制无关；短回复去重仍由 _shortSentHash 承担。
-    if (_h && isGeneratingInPage()) { dedup._hitShortGate = (dedup._hitShortGate || 0) + 1; return null }
-    if (_h && dedup._shortSentHash !== _h) {
-      dedup._shortSentHash = _h; dedup._hitShortPass = (dedup._hitShortPass || 0) + 1
-      return { kind: 'plain', text: plainText }
-    }
-    if (_h) { dedup._hitShortDup = (dedup._hitShortDup || 0) + 1; return null }
-  }
-  // [stopped-plain-noise-v1] 本轮已推过 stopped ⇒ 之后的 plain 必为「已停止」半截回复的补发，跳过。
-  // [WHY] stopped 分支只推一次（_stoppedReported 置位），但停止横幅插入/按钮态变化仍会让 body 稳定判据（_stableCount>=3）
-  //   走到 plain 分支，把半截回复全文补发 ⇒ 前端多一张巨大文本卡（2026-10-08 实测）。[script-plain-noise-v1] 的 marks.script
-  //   守卫拦不住它（首行是普通文本）。_stoppedReported 随 fill 轮次重置，新一轮真实 plain 不受影响；油猴 stopPosted 同构。
-  if (dedup._stoppedReported) { dedup._hitStopped = (dedup._hitStopped || 0) + 1; return null }
-  // [script-plain-noise-v1] 首行 = SCRIPT 且本会话已成功推过脚本 ⇒ plain 必为噪音，跳过。
-  // [WHY] 按输出契约，SCRIPT 首行的回复「第二行起是代码块、块外零字符」，没有可展示正文；脚本已由上面的 script 分支推送，
-  //   此后 body 稳定（_stableCount>=3）到达此处会把整条回复反推全文（裸标记行 + 已推围栏）再发一遍
-  //   ⇒ 前端多一张正文只有「SCRIPT」的卡（stripScriptBlocks 剥不掉裸标记行）。
-  // [CONSTRAINT] 要求已推过脚本才跳过：脚本从未推成功时保留旧 plain 行为，避免「AI 说了话但应用端毫无反应」不可观测（油猴同构）。
-  if (marks.script > 0 && dedup.seenHashes.length > 0) { dedup._hitScriptNoise = (dedup._hitScriptNoise || 0) + 1; return null }
-  // [script-fence-gate-v1] SCRIPT 标记存在但本回复从未推出有效脚本块（body 已稳定，见上方 _stableCount>=3）⇒
-  //   这是「裸写代码无围栏」或「代码块未被识别为 js」的静默失败：立即报 error 而非降级 plain 文本卡。
-  // [CONSTRAINT] 用 dedup._scriptFenceReported 去重只报一次；已推过脚本（seenHashes 非空）走上方噪音抑制。
-  // [CONSTRAINT] error kind 前端渲染为 toast 并让循环继续（类 BASH_CHANNEL_REMOVED，exit 2 不终止）。
-  // [script-fence-guess-removed-v1] 围栏报错块已删：新架构下脚本只走信封，无围栏不再视为异常。
-  dedup._plainSentInCycle = true
-  // [text-mark-v1] TEXT 标记的载荷：取 DOM→Markdown 反推正文并剥掉标记行。
-  // [WHY] getMainText() 是 textContent——块级标签之间不插换行，标记行会与正文粘成一行，
-  //   前端 renderMarkdown 拿到的是「TEXTxxx」一整段，段落/列表全塌。
-  // [ask-card-newline-v1] ASK 标记回复同样必须用 extractReplyMd 保留换行。
-  // [WHY] 与 TEXT 同坑（见下）：getMainText 的 textContent 无换行，前端 parseAsk 的
-  //   「首个非空行 = 独占标记行」判据失配 → askUser 不触发 → ai:question 不入流 → 提问卡不渲染。
-  // [CONSTRAINT] 传 extractReplyMd(replyRoot) 原样（不剥标记行）：parseAsk 需按标记行定位问题正文。
-  if (marks.ask > 0) {
-    // [ask-dedup-v1] ASK 必须自带去重 —— 它是全链路上**唯一**没被 `_plainSentInCycle` 覆盖的出口。
-    // [WHY] 上面 :796 的 plain 去重**刻意豁免**了 ASK（[ask-any-cycle-v1]：流式回复常先出无标记文本
-    //   再补 ASK 块，一并拦下会让提问卡永不出现）。但豁免之后 ASK 分支自身零去重，
-    //   而 `_stableCount >= 3` 只是「最低稳定门槛」（涨到 3 就永远通过），不是去重。
-    //   ⇒ ASK 一旦稳定，**每一拍都会再推一次**。2026-10-18 实测：同一条 ASK 在 22 秒内被推了 23 次，
-    //   间隔 818ms（正好等于 tick 周期），前端表现为「同一段回复刷了十几遍」。
-    //   轮询时代 poll 只跑一拍，所以这个缺陷一直没暴露；循环续命修好后立刻刷屏。
-    // [CONSTRAINT] 用内容 hash 而非布尔位：ASK 正文会随流式补全增长，内容变了就应该再推一次
-    //   （否则提问卡停在半截旧文本）。同内容只推一次，内容变化才放行。
-    const askText = extractReplyMd(replyRoot)
-    const askHash = hash32(`ask|${askText}`)
-    if (dedup._askSentHash === askHash) { dedup._hitAskDup = (dedup._hitAskDup || 0) + 1; return null }
-    dedup._askSentHash = askHash
-    return { kind: 'plain', text: askText }
-  }
-  if (marks.text > 0) {
-    const body = extractReplyMd(replyRoot).split(/\r?\n/).slice(marks.text).join('\n').trim()
-    return { kind: 'plain', text: body || plainText }
-  }
-  return { kind: 'plain', text: plainText }
-
+  // [legacy-marks-removed-v1] 旧架构已整体删除：首行标记扫描（scanReplyMarks / findNewDone /
+  //   markedNonScript）、DONE 门、以及把页面正文反推成 kind:"plain" 的整条交付链路。
+  //   与油猴侧 [legacy-marks-removed-v1] 同批，两侧口径不再分叉。
+  // [WHY 必须删] 契约 §1：回复只能是 ```json 围栏包住的 turn 信封，裸文本与无围栏代码一律整轮丢弃。
+  //   旧 plain 路径把「从 DOM 反推出的正文」推给前端渲染，等于给契约开了一条永久旁路——
+  //   模型只要不写围栏，反而能绕过块交付直接显示文本（而其中的脚本永远不执行）。
+  // [script-fence-guess-removed-v1] 更早前已删「按 ```lang 围栏猜脚本」：脚本意图只能由
+  //   信封的 content[].type 决定，按围栏语言猜会让 AI 正文里的示例代码被真执行（用户实测）。
+  // [CHANGE-IMPACT] 本函数不再产出 kind:"script" / kind:"done" / kind:"plain"。
+  //   ASK 提问卡改由信封的 ask 块承载（前端 timeline-build 按块渲染，不再 parseAsk 文本）；
+  //   读不出信封 = 本轮没有合规内容 ⇒ 返回 null 等下一拍，由 readTurnBlocks 在闭合时交付。
   return null
 }

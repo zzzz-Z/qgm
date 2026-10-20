@@ -43,9 +43,7 @@ declare global {
   const REFRESH_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').REFRESH_GUARD_MS
   const RESUME_WATCHDOG_MS: typeof import('./composables/ai/useAiReplyHandlers').RESUME_WATCHDOG_MS
   const SOURCE_BUDGET_BYTES: typeof import('./utils/contextBuilder').SOURCE_BUDGET_BYTES
-  const STOPPED_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').STOPPED_GUARD_MS
   const STOPPED_HEAD: typeof import('./utils/stop-notice').STOPPED_HEAD
-  const STOPPED_PLAIN_GUARD_MS: typeof import('./composables/ai/useAiReplyHandlers').STOPPED_PLAIN_GUARD_MS
   const STOPPED_SCRIPT_HINT: typeof import('./utils/stop-notice').STOPPED_SCRIPT_HINT
   const STOPPED_TOAST_GENERIC: typeof import('./utils/stop-notice').STOPPED_TOAST_GENERIC
   const TAIL_MAX_CHARS: typeof import('./utils/timeline-build').TAIL_MAX_CHARS
@@ -761,9 +759,7 @@ declare module 'vue' {
     readonly REFRESH_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['REFRESH_GUARD_MS']>
     readonly RESUME_WATCHDOG_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['RESUME_WATCHDOG_MS']>
     readonly SOURCE_BUDGET_BYTES: UnwrapRef<typeof import('./utils/contextBuilder')['SOURCE_BUDGET_BYTES']>
-    readonly STOPPED_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['STOPPED_GUARD_MS']>
     readonly STOPPED_HEAD: UnwrapRef<typeof import('./utils/stop-notice')['STOPPED_HEAD']>
-    readonly STOPPED_PLAIN_GUARD_MS: UnwrapRef<typeof import('./composables/ai/useAiReplyHandlers')['STOPPED_PLAIN_GUARD_MS']>
     readonly STOPPED_SCRIPT_HINT: UnwrapRef<typeof import('./utils/stop-notice')['STOPPED_SCRIPT_HINT']>
     readonly STOPPED_TOAST_GENERIC: UnwrapRef<typeof import('./utils/stop-notice')['STOPPED_TOAST_GENERIC']>
     readonly TAIL_MAX_CHARS: UnwrapRef<typeof import('./utils/timeline-build')['TAIL_MAX_CHARS']>

@@ -338,25 +338,14 @@ export function collectPageDiagInPage() {
     circle: (() => { try { return document.querySelectorAll('[role="button"].ds-button--circle, button.ds-button--circle').length } catch { return -1 } })(),
     hasBox: (() => { try { return Boolean(document.querySelector('textarea:not([readonly]):not([disabled]), [contenteditable="true"]')) } catch { return false } })(),
     hits: {
-      sig2: dedup._hitSig2 || 0,
-      sigChanged: dedup._hitSigChanged || 0,
-      noGrowth: dedup._hitNoGrowth || 0,
-      plainSent: dedup._hitPlainSent || 0,
-      stableLow: dedup._hitStableLow || 0,
-      // [short-reply-gate-v1] 极短回复闸门三态计数：wait（继续等）/ pass（已交付）/ dup（同文本已交付）
-      // [改名] 旧字段 jsFence 名不副实：它统计的从来不是「js 围栏」，而是「极短文本被当噪音丢弃」的次数，
-      //   2026-10-18 排查时就因为这个名字把根因误判成 bodySignature 抖动，故改名并在新日志里弃用 jsFence。
-      shortGate: dedup._hitShortGate || 0,
-      shortPass: dedup._hitShortPass || 0,
-      shortDup: dedup._hitShortDup || 0,
-      stopped: dedup._hitStopped || 0,
-      scriptNoise: dedup._hitScriptNoise || 0,
-      fenceSuppress: dedup._hitFenceSuppress || 0,
-      // [ask-dedup-v1] ASK 同内容重复拦截次数。ASK 是唯一绕过 _plainSentInCycle 的出口，
-      //   这个计数持续增长 = 去重在工作；恒为 0 而 marks.ask=1 连拍多拍 = 每拍都在重复交付。
-      //   [WHY 必须单独记] 2026-10-18 刷屏事故里 marks.ask=1、stableCount 一路涨、却没有任何一个
-      //   既有 hit 计数变化，日志看起来「一切正常」，只能靠 reply 条数反推。
-      askDup: dedup._hitAskDup || 0,
+      // [legacy-plain-removed-v1] 旧路径的短回复 / ASK / plain 计数（sig2、shortGate、shortPass、
+      //   shortDup、stopped、scriptNoise、fenceSuppress、askDup …）随其交付链路整体删除，已全部无写入方，
+      //   留着只会让 poll-miss 日志恒为 0、「看起来一切正常」（正是 2026-10-20 排查时最耗时的形态）。
+      //   仅保留并新增信封路径的诊断：
+      //   · turnMiss = 有回复容器却读不出信封（模型没写围栏，或写得不能被 parseTurn 解析）；
+      //   · turnDup  = 同一 turn 重复命中（去重生效）。
+      turnMiss: dedup._hitTurnMiss || 0,
+      turnDup: dedup._hitTurnDup || 0,
     },
   }
 }

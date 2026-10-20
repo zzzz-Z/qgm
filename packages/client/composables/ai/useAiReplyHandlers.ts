@@ -8,8 +8,7 @@
 
 import type { Ref } from 'vue'
 import type { SessionEntry } from '../ui/useAppStorage'
-import { pushTerminalNotice, useRunner } from '../runner/useRunner'
-import { useScriptInbox } from '../runner/useScriptInbox'
+import { pushTerminalNotice } from '../runner/useRunner'
 // [hooks-relocate-v1] runHook 已从 auto-loop/hooks.ts 迁至 loop-hooks.ts（P1b），供非循环 DONE 分支使用
 import { runHook } from './loop-hooks'
 import { useAutoTakeover } from './useAutoTakeover'
@@ -19,11 +18,10 @@ import { useAiWaiting } from './useAiWaiting'
 import { resetRulesForSessionBoot, useAiWindow } from './useAiWindow'
 import { transportKind } from './useAiTransport'
 import { activeSessionId } from '../ui/useAppStorage'
-import { emit as emitBus, takePendingAskKey } from '../ui/useEventStream'
+import { emit as emitBus } from '../ui/useEventStream'
 import { askUser } from '../ui/useAsk'
 import { parseAsk } from '../../utils/ask-parser'
 import { scanReplyMarks } from '../../utils/reply-mark'
-import { uid } from '../../utils/id'
 import { log } from '../../utils/log'
 // [reply-toasts-v1] toast 相关 imports 已收口到 reply-toasts.ts（§4 单文件唯一 import ≤ 20）
 import {
@@ -34,7 +32,6 @@ import {
   notifySelfcheckReject,
   notifySiteError,
   notifyStopped,
-  notifyStoppedScriptHint,
 } from './reply-toasts'
 // [stop-resume-v1] 「停止→判定→续推」职责链的入站收口
 import { beginAutoResume, decideOnResumeTimeout, decideOnStopped, endAutoResume, MAX_AUTO_RESUME } from './stop-resume'
@@ -56,8 +53,6 @@ export function onStopDiag(cb: (p: Record<string, unknown>) => void): () => void
   return () => { const i = stopDiagListeners.indexOf(cb); if (i >= 0) stopDiagListeners.splice(i, 1) }
 }
 
-type EventKindStr = 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary' | 'ai:ask' | 'ai:feedback' | 'ai:decision' | 'ai:need-files' | 'ai:stream'
-
 /** App.vue 局部状态注入面 */
 export interface AiReplyHandlersDeps {
   sessionHistory: Ref<SessionEntry[]>
@@ -73,16 +68,9 @@ export interface AiReplyHandlersDeps {
 export const PAGE_BOOT_TS = Date.now()
 export const REFRESH_GUARD_MS = 3000
 
-// [stopped-plain-noise-v1] stopped 之后短窗口内到达的 plain 视为「已停止」半截回复的补发，整条丢弃。
-// [WHY] 采集侧守卫（油猴 stopPosted / headless _stoppedReported）之外的第二道防线：
-//   浏览器侧油猴需手动「检查更新」，旧版仍会把停止横幅/DOM 抖动触发的半截回复全文补发成 plain
-//   ⇒ 时间线多出一张巨大 AI 文本卡（2026-10-08 截图实测）。通道入口按「同 sid 刚推过 stopped」兜底。
-// [CONSTRAINT] 只拦 plain（半截回复没有脚本也没有 DONE）；窗口 10s —— 循环已随 stopped 终止，
-//   正常新一轮回复必须先经 fill/rotate 重开，到达时间必然超出窗口；模块级 Map 与 PAGE_BOOT_TS 同先例。
-export const STOPPED_PLAIN_GUARD_MS = 10_000
-/** [stopped-no-autorun-v1] 与 plain 抑制共用的停止后窗口（导出供测试推进时间） */
-export const STOPPED_GUARD_MS = STOPPED_PLAIN_GUARD_MS
-const stoppedAtBySid = new Map<string, number>()
+// [legacy-plain-guard-removed-v1] 旧「stopped 后窗口内 plain 一律丢弃」入口守卫已删：
+//   新契约（SYSTEM.md §1）下裸文本（含 stopped 后残余半截）整轮丢弃、永不渲染，无需通道入口守卫。
+//   油猴 stopPosted / 无头 _stoppedReported 仍照常拦「stopped 之后继续推送」——它们守的是信封/块通道，与 plain 无关。
 /** [resume-watchdog-v1] 续推看门狗句柄：sid → timer；收到任意真实回复即解除 */
 const resumeWatchdogBySid = new Map<string, ReturnType<typeof setTimeout>>()
 /** [resume-watchdog-v1] 续推后等待真实回复的上限；超过即提示用户手动继续 */
@@ -124,17 +112,10 @@ export function parseSessionUrl(u: string, models: { id: string, url: string, se
   return null
 }
 
-function inStoppedWindow(sid: string): boolean {
-  const t = stoppedAtBySid.get(sid)
-  return t !== undefined && Date.now() - t < STOPPED_PLAIN_GUARD_MS
-}
-
 /** 组装 AI 回复消息处理族（onSessionIdMessage 及 7 个 handler） */
 export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
   const { sessionHistory, saveHistoryScoped, addSessionToHistory, isMockMode } = deps
   // [reply-toasts-v1] useToast 已收口到 reply-toasts.ts（本文件不再直接 toast）
-  const runner = useRunner()
-  const scriptInbox = useScriptInbox()
   const autoTakeover = useAutoTakeover()
   const { url: siteUrl, setUrl: setSiteUrl, modelId, MODELS } = useAiSite()
   const { stopWaiting: stopAiWaiting, setRemoteGenerating } = useAiWaiting()
@@ -230,7 +211,6 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     }
 
     if (kind === 'stopped') {
-      stoppedAtBySid.set(sid, Date.now()) // [stopped-plain-noise-v1] 记录时刻，窗口内 plain 一律丢弃
       // [stopped-toast-quote-v1] 带上页面侧命中原文（口径同触顶的 formatLimitToast）：
       //   停止词表与我们自己的 UI 文案同形 ⇒ 误报几乎必然发生，不带原文就永远无从定位是哪段文本命中。
       notifyStopped(payload.text)
@@ -348,91 +328,6 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
       }
       const display = cleanSummary ? `[任务完成]\n\n${cleanSummary}` : '[任务完成] AI 回复 DONE'
       pushTerminalNotice(display, { divider: true })
-      return
-    }
-
-    if (kind === 'script') {
-      const code = String(payload.code || '')
-      const lang = (payload.lang === 'bash' ? 'bash' : payload.lang === 'cjs' ? 'cjs' : 'js') as 'js' | 'cjs' | 'bash'
-      const site = String(payload.site || e.origin || '')
-      const item = scriptInbox.push({ code, lang, site, hash: payload.hash ? String(payload.hash) : undefined })
-      // [arrive-log-v1] 到达探针：本分支此前**零落盘**——收件箱是内存态、到达播报已删，
-      //   于是「页面没推」与「推了被本分支静默吞掉」在服务端完全同形（都表现为「什么都没发生」），
-      //   只能靠猜。这里把「到达 + 最终命中哪条出口」上报，落 `.ai-runner/logs/arrive.jsonl`。
-      // [CONSTRAINT] fire-and-forget：不读响应、失败静默，绝不影响主链路（与 /__ai/lessons 同范式）。
-      const reportArrival = (reason: string): void => {
-        void fetch('/__ai/arrive-log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sid,
-            lang,
-            reason,
-            desc: (code.split('\n').find(l => /@desc/.test(l)) || '').trim().slice(0, 160),
-            lines: code.split('\n').length,
-            bytes: code.length,
-          }),
-        }).catch(() => { /* swallow: 探针失败不阻断主链路 */ })
-      }
-      if (item) {
-        // [script-toast-removed-v1] 2026-10-09 用户指定：删除「脚本 · js · N 行 · desc」到达 toast。
-        // [WHY] 该 toast 本轮到达即弹，与时间线里同一脚本的 ScriptCard（含 desc/why/耗时/结果）完全重复；
-        //   长循环下每个脚本都弹一次，把屏幕中央的注意力从真正要看的东西上抢走（截图实测）。
-        //   信息没有丢：脚本仍进 inbox、仍回填编辑器、仍进时间线由卡片承载。
-        // [CHANGE-IMPACT] 删除后本分支不再有"已到达"提示；「等待执行超时」「停止后不自动执行」
-        //   等**异常态**提示保留（那些是用户需要动手的信号，不是重复播报）。
-        // [WARNING] 守卫 script-arrival-toast.node-test.ts 按本文件**不含**该 toast 的图标前缀来判承重
-        //   ⇒ 本注释里也不要再写出那个前缀字符（写了会让守卫假红）。
-        // [rescan-no-autorun-v1] rescan 重扫只回填编辑器/面板，不进执行分流：
-        //   刷新后循环恒为 stopped，若照旧走 else 会无条件 runner.run(autoFeedback:true)
-        //   → 回传 → AI 生成新脚本 → 再执行，形成自增强环（工单 WO-20261006-03 段二）。
-        if (payload.rescan === true) {
-          reportArrival('rescan')
-          return
-        }
-        // [refresh-no-autorun-v1] 页面刚加载（刷新）后冷静期内到达的脚本不执行
-        if (Date.now() - PAGE_BOOT_TS < REFRESH_GUARD_MS) {
-          reportArrival('refresh-guard')
-          return
-        }
-        // [stopped-no-autorun-v1] 循环已随之终止 ⇒ 本轮的残余脚本只回填编辑器，不自动执行。
-        //   [WHY] 否则走 else 分支的 scheduleAutoRun（无条件立即 fn()）执行后再回传 AI，
-        //   形成没有任何记账/自检/预算反馈的「循环外自动执行」旁路（WO-20261005 段三）。
-        //   [CHANGE-IMPACT] 已回填完毕（push 已发生）；用户确认无误后可手动点运行，路径不丢。
-        if (inStoppedWindow(sid)) {
-          reportArrival('stopped-window')
-          notifyStoppedScriptHint()
-          return
-        }
-        // [arrive-log-v1] 走到这里 = 已排入执行分流（下面的调度入口立即调用回调，无延迟、不过开关）
-        reportArrival('run')
-        const runKey = takePendingAskKey() || uid('run')
-        // [loop-consolidation-P2] 摘除 routedToLoop 的 if/else：只保留留存路径（原 else 分支）
-
-        // [run-queue-v1] 上一轮未结束时排队等待（事件驱动），不再每秒轮询等超时。
-        //   [WHY] 原实现（retryRun 轮询 20 次 = 20s）超时后脚本滞留编辑器，而工作台无「执行编辑器内容」
-        //   入口 ⇒ 用户无从操作。排队方案：本轮 finally 里 dequeue 直接执行，无超时无滞留。
-        //   [CONSTRAINT] queueIfBusy 只影响「已 running」时的行为（排队而非 abort）；空闲时行为不变。
-        autoTakeover.scheduleAutoRun(() => {
-          void runner.run({ script: code, runKey, autoFeedback: true, queueIfBusy: true })
-        })
-      } else {
-        // [arrive-log-v1] 去重命中（同归一化 hash 已入队）⇒ push 返回 null，此后全链路零痕迹
-        reportArrival('dedup')
-      }
-      return
-    }
-
-    const text = payload.text !== undefined ? String(payload.text) : ''
-    // [stopped-plain-noise-v1] 第二道防线：stopped 后窗口内的 plain = 半截回复补发，丢弃不渲染。
-    // [CHANGE-IMPACT] 在 ASK 解析之后（半截回复不含完整 ASK）；done/multi 不受影响
-    if (kind === 'plain') {
-      if (inStoppedWindow(sid)) return
-    }
-    if (kind === 'plain' || kind === 'multi' || (kind === 'done' && text.trim() && text.trim() !== 'DONE')) {
-      emitBus((`ai:${kind}`) as EventKindStr, `AI 回复 · ${kind}`, { payload: { kind, text, count: Number(payload.count) || 0 } })
-    } else if (kind === 'done') {
-      emitBus('ai:done', 'AI 回复 DONE', { payload: { kind: 'done', text: 'DONE' } })
     }
 
     // [loop-consolidation-P2] 摘除 routedToLoop 分支（恒 false）

@@ -370,7 +370,7 @@ async function fillWithDegrade(sid: string, payload: { prompt: string, images?: 
     //   ① 用户自己开的 AI 页没有 opener，回执无处可发（工作台侧表现为永远收不到 ack）；
     //   ② Chrome 刚打开「允许运行用户脚本」时，**已加载**的旧页面不会自动补注入，必须重载。
     //   两种成因的处置都是「重载该页 / 改用工作台按钮开窗」，故按可操作顺序重写提示文案。
-    // [CONSTRAINT] 文案须保留「未回执」字样：e2e/fail-feedback-probe.spec.ts 用它判定回传出站阶段已抵达
+    // [CONSTRAINT] 文案须保留「未回执」字样：旧 e2e 回传探针用它在时间线判定「回传出站阶段已抵达」
     toast('AI 窗口未回执（已自动重试 2 次）：该页可能没运行油猴脚本。请在该窗口按 F5 重载后重试；若是你自己手动打开的页面则无法回传（无 opener），请改用工作台按钮重开。本条已按「已发送」处理', 'warn', TOAST_LONGEST)
   }
   return 'sent'

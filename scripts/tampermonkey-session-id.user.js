@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.36
+// @version      1.9.40
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
 // @match        https://chatglm.cn/*
@@ -648,40 +648,6 @@ function extractReplyMd(root) {
 }
 
 /**
- * 回复标记扫描：`SCRIPT` / `ASK` / `DONE` / `HANDOFF` / `TEXT` 共用「首个非空行 = 独占标记行」判据。
- * [WHY] 早期各链路对「DONE」的形态理解不一致（有的要求首行严格等于，有的任意位置命中），
- *   同一条回复在不同通道被分到不同类别，甚至整轮丢失。统一后只认首行。
- * [CONSTRAINT] 正文里写「DONE 之后…」不会命中——这是有意为之，避免 AI 在解释时自触发。
- *   与 headless-inject.ts、packages/client/utils/reply-mark.ts 逐句同构，
- *   由 reply-mark-parity 守卫三处对拍；改一处必须同步三处。
- */
-function scanReplyMarks(md) {
-    const out = { script: -1, ask: -1, done: -1, handoff: -1, text: -1 };
-    const lines = String(md || '').split(/\r?\n/);
-    let head = -1;
-    for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim().length > 0) {
-            head = i;
-            break;
-        }
-    }
-    if (head < 0)
-        return out;
-    const line = lines[head].trim();
-    if (/^SCRIPT$/.test(line))
-        out.script = head + 1;
-    else if (/^ASK$/.test(line))
-        out.ask = head + 1;
-    else if (/^DONE$/.test(line))
-        out.done = head + 1;
-    else if (/^HANDOFF$/.test(line))
-        out.handoff = head + 1;
-    else if (/^TEXT$/.test(line))
-        out.text = head + 1;
-    return out;
-}
-
-/**
  * AI 回复容器定位与身份指纹。
  * [WHY] 早期实现硬编码 DeepSeek 的 .ds-assistant-message-main-content；
  *   其它站点取不到 ⇒ 退回整页 document，而整页末 300 字符是输入框/页脚，
@@ -900,14 +866,15 @@ function syncLimitMarkerBaseline() {
  * [CONSTRAINT] 所有**随轮次失效**的状态必须集中在 resetRoundState() 里，
  *   不得散落到 fill / rotate 各自的分支——实测过漏抄一项就静默漏配。
  */
-/** 已推送过的脚本块指纹；避免同内容重复执行 */
-const seenHashes = new Set();
-/** 已推送过的 DONE 标记指纹（hash of 前 200 字） */
-const seenDoneMarkers = new Set();
-/** 上一次推送时的正文签名；plain 分支据此判断「正文是否真的变了」 */
+/** 上一次推送时的正文签名；stopped / limit 分支据此判断「本轮是否已处理过该正文」 */
 let lastBodySig = '';
-/** DONE 的 2 帧稳定门：首帧记下签名并返回，次帧相同才推送 */
-let _pendingDoneSig = null;
+/**
+ * [turn-invalid-v1] 已回传过 turn-invalid 的正文签名。
+ * [WHY] 违规回传必须去重：正文静止后 800ms 空转轮询每拍都会走到那个分支，
+ *   不去重会每 800ms 给工作台推一条一模一样的 TURN_NOT_JSON。
+ * [CONSTRAINT] 随轮次失效（新信封到来即应重新具备报警能力），故在 resetRoundState 里清空。
+ */
+let _invalidReportedSig = '';
 /** SCRIPT 标记存在但载荷不是合法代码块时，本轮只报一次错 */
 let _scriptFenceReported = false;
 /**
@@ -970,7 +937,8 @@ function resetRoundState() {
     genEnterRootId = '';
     limitPosted = false;
     _scriptFenceReported = false;
-    _pendingDoneSig = null;
+    // [turn-invalid-v1] 新一轮开始 ⇒ 重新具备违规报警能力（上一轮的正文已作废）
+    _invalidReportedSig = '';
     _roundBaselinesReady = true;
     window.__aiRunnerClosureGate = null;
     if (genRetryTimer) {
@@ -1167,32 +1135,16 @@ function hasStoppedLabel() {
 }
 
 /**
- * 回复检测 —— dispatch 的三个输入源：DONE 标记、正文签名、最新回复全文。
+ * 回复检测 —— dispatch 的输入源：正文签名、最新回复全文、DOM→Markdown 反推。
  *
- * [CONSTRAINT] 三者在「assistant 容器缺失」时必须一致地**什么都不做**：
+ * [legacy-marks-removed-v1] 旧架构的「首行 DONE 标记」检测已删：契约 §1 规定回复只能是
+ *   turn 信封，任务收尾由宿主机制判定（SYSTEM.md §1「turn 总结 ≠ 任务 DONE」）。
+ *
+ * [CONSTRAINT] 这些函数在「assistant 容器缺失」时必须一致地**什么都不做**：
  *   新会话首轮「已思考/搜索」阶段没有回复容器，此时整页反推会把侧栏历史会话标题
- *   与用户首条消息（SYSTEM.md 卡）拼成「回复」，表现为连续的噪音文本卡。
- *   这条约束在三个函数里各写一次，是有意为之——任何一个漏掉都会单独产生噪音。
+ *   与用户首条消息（SYSTEM.md 卡）拼成「回复」，表现为噪音。
+ *   这条约束在各函数里分别写一次，是有意为之——任何一个漏掉都会单独产生噪音。
  */
-/**
- * 本轮是否出现「首行 = DONE」的回复；命中返回去重标记与全文。
- * [CONSTRAINT] marker 只取前 200 字做 hash（不含长度）：短内容时前 200 字随流式变化，
- *   带上长度会让每帧都成新 marker，同一条 DONE 被推 N 次。
- */
-function findNewDone() {
-    const root = latestAssistantRoot();
-    if (!root)
-        return null;
-    // 用 DOM→Markdown 反推而非 textContent：后者会把块级元素粘成一行，首行判据失效
-    const summary = extractReplyMd(root);
-    if (summary && scanReplyMarks(summary).done > 0) {
-        const headMarker = hash32(`done-head|${summary.slice(0, 200)}`);
-        if (!seenDoneMarkers.has(headMarker)) {
-            return { marker: headMarker, text: summary };
-        }
-    }
-    return null;
-}
 /**
  * 正文签名 —— 判断「正文是否变了」的指纹。
  * [WHY] 优先用最后一条 AI 回复容器的文本：整页末 300 字符在多数站点是输入框/页脚，
@@ -1207,67 +1159,11 @@ function bodySignature() {
     return hash32(t.slice(-300));
 }
 /**
- * 最后一条回复的完整 Markdown。
- * [CONSTRAINT] 容器缺失返回空串，**不**退回整页：plain 分支拿到空串就不会推送，
- *   这正是「思考阶段不产生噪音卡」所需要的。
+ * [legacy-plain-removed-v1] 旧的 extractLatestReplyText（把最后一条回复的整段 Markdown 当
+ *   plain 文本回传）已删：它唯一的调用点是 listener 的 handleRescan，而契约 §1 要求裸文本
+ *   整轮丢弃。需要「最后一条回复的 Markdown」时走 extractReplyMd(latestAssistantRoot())，
+ *   且**只**用于读信封，不再用于回传。
  */
-function extractLatestReplyText() {
-    try {
-        const root = latestAssistantRoot();
-        if (!root)
-            return '';
-        return extractReplyMd(root);
-    }
-    catch {
-        return '';
-    }
-}
-
-/**
- * 三条推送路径：script / plain / error。
- * [WHY] 噪音抑制条件集中在调用方（classifyAndPost），但每条路径各自的守卫
- *   （去重、停止后不补发、标记行剥离）落在这里，便于逐条核对。
- * [CONSTRAINT] 所有推送都要带 site 与 sessionId：工作台按 (site, sessionId) 归窗，
- *   缺任一项都会让回传落到错误窗口。
- */
-/**
- * 推送脚本块。
- * [CONSTRAINT] 调用方必须已确认 !seenHashes.has(hash)；此处仍再查一次，
- *   因为多块续推路径会在同一 tick 内连调，去重集合是唯一可靠的交汇点。
- * @returns 是否真的推送了（调用方据此决定要不要继续找下一块）
- */
-function emitScript(item) {
-    if (seenHashes.has(item.hash))
-        return false;
-    seenHashes.add(item.hash);
-    post({
-        type: 'ai-runner:reply',
-        kind: 'script',
-        code: item.code,
-        lang: item.lang,
-        hash: item.hash,
-        site: location.origin,
-        sessionId: extractSidFromHash(),
-    });
-    lastBodySig = bodySignature();
-    return true;
-}
-/**
- * 推送纯文本回复。
- * [WHY] TEXT 标记的回复要剥掉首行标记只留正文，否则工作台会把「TEXT」这个词
- *   渲染进正文卡片（首行是标记不是内容）。
- */
-function emitPlain(md, marks) {
-    const text = marks.text > 0 ? md.split(/\r?\n/).slice(marks.text).join('\n').trim() : md;
-    post({
-        type: 'ai-runner:reply',
-        kind: 'plain',
-        site: location.origin,
-        sessionId: extractSidFromHash(),
-        text,
-    });
-}
-// [script-fence-guess-removed-v1] emitFenceError 已删：无围栏不再视为异常。
 
 /**
  * turn 信封 → 块帧 / 结束帧（油猴侧，P3）。
@@ -1602,28 +1498,11 @@ function classifyAndPost() {
             return;
         }
         // ---------- ① 门 ----------
-        const doneMarker = findNewDone();
-        if (doneMarker) {
-            // DONE 双门：生成中不推（首行可能流式中途出现）+ 2 帧稳定门兜底
-            if (isGenerating())
-                return;
-            const doneSig = bodySignature();
-            if (_pendingDoneSig !== doneSig) {
-                _pendingDoneSig = doneSig;
-                return;
-            }
-            _pendingDoneSig = null;
-            seenDoneMarkers.add(doneMarker.marker);
-            post({
-                type: 'ai-runner:reply',
-                kind: 'done',
-                site: location.origin,
-                sessionId: extractSidFromHash(),
-                text: doneMarker.text,
-            });
-            lastBodySig = doneSig;
-            return;
-        }
+        // [legacy-done-gate-removed-v1] 旧架构的「首行 DONE」门已删。
+        //   [WHY] 契约 §1：每次回复只能是一个 ```json 围栏包住的 turn 信封，围栏外零字符；
+        //   任务是否结束由宿主的 `retained-done-gate v1` / `post-done-gate v1` 判定，
+        //   SYSTEM.md §1 已明确「turn 总结 ≠ 任务 DONE」——不再由回复里的 DONE 标记派生。
+        //   留着它反而会让「总结轮」被当成任务收尾，循环提前结束。
         // 冷启动守卫：首个 fill/rotate 前只记基线，不报「本轮新增」——
         // 历史恢复的存量标记若被当成本轮新增，刷新页面就会立刻误报
         if (!_roundBaselinesReady) {
@@ -1737,8 +1616,7 @@ function classifyAndPost() {
         // [turn-emit-v1] 信封优先（契约 §2.1）：命中即整轮按块交付，**不再**走 script / plain。
         // [WHY] 信封 JSON 在旧路径下的实际下场：语言判定把它归到 json ⇒ 白名单拒绝 ⇒
         //   整条回复降级 plain，用户看到一坨 JSON 且脚本一个都不执行（静默失效）。
-        // [CONSTRAINT] 必须先于 scanReplyMarks：旧标记扫描对 JSON 正文无意义，
-        //   命中 marks.text / marks.done 会让下面的 script 分支整轮跳过。
+        // [CONSTRAINT] 必须先于下面的 turn-invalid 探针：读得出信封即本轮合规，不该再报违规。
         // [CONSTRAINT] stopPosted 后不推：前端已 finish 循环，此时推块等于「循环外自动执行」旁路。
         if (!stopPosted) {
             const turn = readTurnFromRoot(replyRoot);
@@ -1753,37 +1631,37 @@ function classifyAndPost() {
             if (turn && emitTurn(turn))
                 return;
         }
-        const marks = scanReplyMarks(replyRoot ? extractReplyMd(replyRoot) : '');
-        const markedNonScript = marks.ask > 0 || marks.done > 0 || marks.handoff > 0 || marks.text > 0;
-        // script：标记行为非脚本类时整轮不走脚本分类（否则带示例代码块的 DONE 总结会被当脚本执行）
-        // stopped 后残余块一律不推：前端已 finish 循环，此时推出去会形成「循环外自动执行」旁路
-        // [stopped-no-autorun-v1] 停止轮不再推脚本：残余块会落到「循环外自动执行」旁路
-        // [script-fence-guess-removed-v1] 删除「按围栏猜脚本」的旧通道：脚本下发只走信封（readTurnFromRoot）。
-        // [WHY] 旧逻辑调 extractLatestScript / extractScriptFromMarkdown 扫页面与正文围栏，
-        //   把任意 ```js 围栏当待执行脚本推下去 —— AI 正文里贴示例代码就会被真执行。
+        // [legacy-marks-removed-v1] 旧标记架构（首行 SCRIPT / ASK / DONE / HANDOFF / TEXT）与
+        //   script / plain 两条回传通道已整体删除：契约 §1 规定「裸文本与无围栏代码一律整轮丢弃」。
+        //   ⇒ 走到这里即本轮没有可用信封；除下面这条违规回传外，不再做任何推送。
+        // [turn-invalid-v1] 有回复正文却读不出信封 ⇒ 回传一次违规帧，让工作台与 AI 都知道原因。
+        //   [WHY 必须回传] 丢弃是契约要求的正确行为，但**静默**丢弃会让「AI 写完总结 → 工作台一片空白
+        //   → 之后再无任何回传」变成无从下手的悬案：用户分不清是链路断了还是被契约丢了，
+        //   而两种成因的处置完全相反（截断须拆小串行重发，裸文本须改用信封重发）。
+        // [CONSTRAINT] 只回传判据（错误码 + 字节数 + 首部 80 字），不回传正文（不污染时间线）。
+        // [CONSTRAINT] 同一正文签名只回传一次：正文静止时 800ms 空转轮询会反复唤醒本函数。
+        if (replyRoot && !stopPosted && !isGenerating()) {
+            const invalidSig = bodySignature();
+            if (invalidSig !== _invalidReportedSig) {
+                const probeMd = extractReplyMd(replyRoot);
+                if (String(probeMd || '').trim()) {
+                    const probe = parseTurn(probeMd);
+                    const truncated = !!(probe && probe.truncated);
+                    _invalidReportedSig = invalidSig;
+                    post({
+                        type: 'ai-runner:turn-invalid',
+                        code: truncated ? 'TURN_TRUNCATED' : 'TURN_NOT_JSON',
+                        bytes: String(probeMd || '').length,
+                        head: String(probeMd || '').slice(0, 80),
+                        site: location.origin,
+                        sessionId: extractSidFromHash(),
+                    });
+                }
+            }
+        }
     }
-    // plain：仅在正文真的变了时推
-    finally {
-    }
-    // plain：仅在正文真的变了时推
-    const sig = bodySignature();
-    if (sig === lastBodySig)
-        return;
-    lastBodySig = sig;
-    // 容器缺失 ⇒ 变化来自思考面板/搜索卡的流式抖动，此时整页反推会产出噪音卡
-    if (!replyRoot)
-        return;
-    // [stopped-plain-noise-v1] 已推过 stopped ⇒ 之后的 plain 必为半截回复的补发
-    if (stopPosted)
-        return;
-    // 首行是 SCRIPT 且脚本已推成功 ⇒ 此处 plain 必为 DOM 抖动引起的重复补发
-    if (marks.script > 0 && seenHashes.size > 0)
-        return;
-    // [script-fence-guess-removed-v1] 围栏报错块已删：无围栏不再视为异常。
-    emitPlain(extractLatestReplyText() || '', marks);
+    catch { /* 页面导航/关闭期间的 DOM 异常：本轮放弃，下轮自然重试 */ }
 }
-try { }
-catch { /* 页面导航/关闭期间的 DOM 异常：本轮放弃，下轮自然重试 */ }
 
 /**
  * 回复观察 —— 什么时候该跑一次 classifyAndPost。
@@ -1853,7 +1731,7 @@ resumeReplyObserver();
  *   后台标签页（document.hidden）不跑 —— 后台定时器被节流，跑了也没意义；
  *   防抖在途时不跑 —— 避免与 350ms 防抖抢同一轮；
  *   无 assistant 容器不跑 —— 此时变化只可能是思考面板抖动，classifyAndPost 也会自行返回。
- *   classifyAndPost 自身以 seenHashes / lastBodySig 幂等，即便误唤醒也不会重复推送。
+ *   classifyAndPost 自身以信封去重集合 / lastBodySig 幂等，即便误唤醒也不会重复推送。
  */
 // [idle-wake-poll-v1] 空转唤醒兜底：DOM 静止后 observer 不再触发，轮询保证未推送的块不滞留
 setInterval(() => {
@@ -2213,7 +2091,7 @@ function clickNewSession() {
  *   · 控制类（new-session / replay / rescan / stop）：不重置状态，各自动作
  *
  * [CONSTRAINT] stop 刻意**不**走 resetRoundState：
- *   停止后必须保留 seenHashes / lastBodySig，否则旧回复会被重判为新回复重新推送。
+ *   停止后必须保留信封去重集合与 lastBodySig，否则旧回复会被重判为新回复重新推送。
  * [CONSTRAINT] 所有带 ackId 的指令在每条失败路径上都必须 ackFill(false, ...)，
  *   否则工作台 sendFillToAsync 会一直等到超时（表现为「工作台卡住」）。
  */
@@ -2351,19 +2229,20 @@ function handleReplay() {
 }
 /**
  * request-rescan：油猴缓存丢失时从页面重新抓取最新回复。
- * [CONSTRAINT] 脚本与纯文本两条路径都带 rescan 标记，理由同 handleReplay。
+ * [legacy-plain-removed-v1] 不再回传 kind:'plain' 裸文本帧：契约 §1 规定「裸文本与无围栏代码
+ *   一律整轮丢弃」，rescan 不是绕过契约的旁路——旧实现把页面上任意正文（含信封 JSON 原文、
+ *   半截流式文本）当 plain 推给工作台渲染，等于用一条兜底通道复活了被契约禁止的东西。
+ *   ⇒ 改为按 turn 信封重投一次；读不出信封即本轮没有合规内容，静默结束。
+ * [CONSTRAINT] 重投**不**带任何「强制重发」标记：emitTurn 的去重集合跨刷新持久化
+ *   （[turn-emit-dedup-persist-v1]），已交付的块不会被重推 ⇒ 刷新页面不会把上一轮脚本重跑一遍。
  */
 function handleRescan() {
     try {
-        // [script-fence-guess-removed-v1] rescan 不再抓脚本：脚本下发只走 turn 信封通道。
-        {
-            const txt = extractLatestReplyText();
-            if (txt && txt.length > 20) {
-                window.opener && window.opener.postMessage({
-                    type: 'ai-runner:reply', kind: 'plain', text: txt,
-                    sessionId: extractSidFromHash(), rescan: true,
-                }, '*');
-            }
+        const root = latestAssistantRoot();
+        if (root) {
+            const turn = readTurnFromRoot(root);
+            if (turn)
+                emitTurn(turn);
         }
         window.opener && window.opener.postMessage({ type: 'ai-runner:session-id', id: extractId(), sessionId: extractSidFromHash() }, '*');
     }
@@ -2373,7 +2252,7 @@ function handleRescan() {
  * stop：打断生成 + 清运行缓冲 + 摘观察器。
  * [CONSTRAINT] 顺序固定：先诊断回传（此时 DOM 还在，能采到候选按钮），
  *   再点停止，最后才清缓冲与摘观察器 —— 反过来会拿不到诊断数据。
- * [CONSTRAINT] 保留 seenHashes / seenDoneMarkers / lastBodySig：
+ * [CONSTRAINT] 保留信封去重集合与 lastBodySig：
  *   清空会让旧回复被重判为新回复；下次 fill/rotate 由 resumeReplyObserver 恢复观察。
  */
 function handleStop(e) {

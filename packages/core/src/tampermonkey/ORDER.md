@@ -14,23 +14,24 @@
 2. `hash.ts` —— hash32 指纹
 3. `language.ts` —— 语言判定四级回退 + 行号剔除
 4. `markdown.ts` —— DOM→Markdown 反推
-5. `marks.ts` —— 回复标记扫描
-6. `roots.ts` —— AI 回复容器定位与身份指纹
-7. `session.ts` —— 会话 ID 提取与上报
-8. `limits.ts` —— 正文剥壳扫描与触顶探针
-9. `state.ts` —— 模块级状态 + resetRoundState
-10. `stop.ts` —— 生成中判定（三条判据互相隔离）
-11. `script-extract.ts` —— 脚本块提取（闭合门 + 内容门 + 多块续推）
-12. `detect.ts` —— DONE 检测 / 正文签名 / 最新回复文本
-13. `fence.ts` —— 围栏契约判定（纯函数）
-14. `emit.ts` —— script / plain / error 三条推送路径
-15. `dispatch.ts` —— 分类分发主流程
-16. `observer.ts` —— 回复观察器与空转唤醒
-17. `fill.ts` —— 输入框注入与发送复核
-18. `actions.ts` —— 停止生成 / 开新会话
-19. `listener.ts` —— 六类入站指令处理
-20. `channel.ts` —— 消息通道（外发缓冲 + 断链队列 + 回执）
-21. `bootstrap.ts` —— 启动序列（必须最后：直接调用 send()）
+5. `roots.ts` —— AI 回复容器定位与身份指纹
+6. `session.ts` —— 会话 ID 提取与上报
+7. `limits.ts` —— 正文剥壳扫描与触顶探针
+8. `state.ts` —— 模块级状态 + resetRoundState
+9. `stop.ts` —— 生成中判定（三条判据互相隔离）
+10. `detect.ts` —— 正文签名 / 最新回复文本
+11. `turn-emit.ts` —— turn 信封 → 块帧 / 结束帧（[legacy-marks-removed-v1] 脚本下发的唯一路径）
+12. `dispatch.ts` —— 分类分发主流程
+13. `observer.ts` —— 回复观察器与空转唤醒
+14. `fill.ts` —— 输入框注入与发送复核
+15. `actions.ts` —— 停止生成 / 开新会话
+16. `listener.ts` —— 入站指令处理
+17. `channel.ts` —— 消息通道（外发缓冲 + 断链队列 + 回执）
+18. `bootstrap.ts` —— 启动序列（必须最后：直接调用 send()）
+
+> [legacy-marks-removed-v1] 已删段：`marks.ts`（首行 SCRIPT/ASK/DONE/HANDOFF/TEXT 扫描）、
+> `emit.ts`（旧 script / plain 回传）、`script-extract.ts`（按围栏猜脚本）、`fence.ts`（围栏契约兜底）。
+> 契约 §1 只允许 ```json 围栏包住的 turn 信封，围栏外零字符，裸文本一律整轮丢弃。
 
 ## 拼回前置条件
 

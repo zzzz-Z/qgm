@@ -1,5 +1,6 @@
 // [exec-flow-v1] 从 ScriptPanel.vue 抽出：bash/cjs 命令执行 + 结果回传 AI
-import { TOAST_MEDIUM } from '../../utils/toast-durations'
+import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
+import { ref } from 'vue'
 import type { Ref } from 'vue'
 import type { ChangeType } from '../../types'
 // [auto-feedback-merge-v1] 非循环自动回传合并窗（显式 import，勿依赖 auto-import：vitest 裸跑）
@@ -9,6 +10,11 @@ import { createFeedbackMerge } from '../../composables/runner/feedback-merge'
 //   undefined → feedbackMerge flush 调用时抛 TypeError → 被 doFlush 的 try/catch 静默吞掉 →
 //   崩溃脚本的失败结果永不回传（与「出错应回传而非静默失败」原则相悖）。显式 import 修复。
 import { copyAndFill } from '../../composables/ai/useAiWindow'
+import { bashPolicy } from '../../composables/ui/useAppStorage'
+import { useToast } from '../../composables/ui/useToast'
+import { readNdjson } from '../../utils/stream'
+import { log } from '../../utils/log'
+import { emit } from '../../composables/ui/event-stream'
 
 /** 执行结果（ScriptPanel 用到的子集） */
 export interface ExecResult {

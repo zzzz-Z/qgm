@@ -3,32 +3,16 @@
 //   全部片段 TS 化完成、按拼回后的联合视图接线后再移除本 pragma。
 
 /**
- * 回复检测 —— dispatch 的三个输入源：DONE 标记、正文签名、最新回复全文。
+ * 回复检测 —— dispatch 的输入源：正文签名、最新回复全文、DOM→Markdown 反推。
  *
- * [CONSTRAINT] 三者在「assistant 容器缺失」时必须一致地**什么都不做**：
+ * [legacy-marks-removed-v1] 旧架构的「首行 DONE 标记」检测已删：契约 §1 规定回复只能是
+ *   turn 信封，任务收尾由宿主机制判定（SYSTEM.md §1「turn 总结 ≠ 任务 DONE」）。
+ *
+ * [CONSTRAINT] 这些函数在「assistant 容器缺失」时必须一致地**什么都不做**：
  *   新会话首轮「已思考/搜索」阶段没有回复容器，此时整页反推会把侧栏历史会话标题
- *   与用户首条消息（SYSTEM.md 卡）拼成「回复」，表现为连续的噪音文本卡。
- *   这条约束在三个函数里各写一次，是有意为之——任何一个漏掉都会单独产生噪音。
+ *   与用户首条消息（SYSTEM.md 卡）拼成「回复」，表现为噪音。
+ *   这条约束在各函数里分别写一次，是有意为之——任何一个漏掉都会单独产生噪音。
  */
-
-/**
- * 本轮是否出现「首行 = DONE」的回复；命中返回去重标记与全文。
- * [CONSTRAINT] marker 只取前 200 字做 hash（不含长度）：短内容时前 200 字随流式变化，
- *   带上长度会让每帧都成新 marker，同一条 DONE 被推 N 次。
- */
-function findNewDone(): { marker: string; text: string } | null {
-  const root = latestAssistantRoot()
-  if (!root) return null
-  // 用 DOM→Markdown 反推而非 textContent：后者会把块级元素粘成一行，首行判据失效
-  const summary = extractReplyMd(root)
-  if (summary && scanReplyMarks(summary).done > 0) {
-    const headMarker = hash32(`done-head|${summary.slice(0, 200)}`)
-    if (!seenDoneMarkers.has(headMarker)) {
-      return { marker: headMarker, text: summary }
-    }
-  }
-  return null
-}
 
 /**
  * 正文签名 —— 判断「正文是否变了」的指纹。
@@ -45,14 +29,8 @@ function bodySignature(): string {
 }
 
 /**
- * 最后一条回复的完整 Markdown。
- * [CONSTRAINT] 容器缺失返回空串，**不**退回整页：plain 分支拿到空串就不会推送，
- *   这正是「思考阶段不产生噪音卡」所需要的。
+ * [legacy-plain-removed-v1] 旧的 extractLatestReplyText（把最后一条回复的整段 Markdown 当
+ *   plain 文本回传）已删：它唯一的调用点是 listener 的 handleRescan，而契约 §1 要求裸文本
+ *   整轮丢弃。需要「最后一条回复的 Markdown」时走 extractReplyMd(latestAssistantRoot())，
+ *   且**只**用于读信封，不再用于回传。
  */
-function extractLatestReplyText(): string {
-  try {
-    const root = latestAssistantRoot()
-    if (!root) return ''
-    return extractReplyMd(root)
-  } catch { return '' }
-}

@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { SKILL_PICK_PREFIX, useFilePicker } from './file-picker'
-import type { Decoration, DecorationSet, EditorView, ViewUpdate } from '@codemirror/view'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { SKILL_PICK_PREFIX, useFilePicker } from './file-picker';
+import type { Decoration, DecorationSet, EditorView, ViewUpdate } from '@codemirror/view';
+import { fileBadge, fileToneStyle } from '../../utils/format';
 
 // CM 动态 import 聚合类型：从各包具名导出反推，杜绝 any
 interface CMModule {

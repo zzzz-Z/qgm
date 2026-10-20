@@ -11,17 +11,16 @@
  *   不得散落到 fill / rotate 各自的分支——实测过漏抄一项就静默漏配。
  */
 
-/** 已推送过的脚本块指纹；避免同内容重复执行 */
-const seenHashes: Set<string> = new Set()
-
-/** 已推送过的 DONE 标记指纹（hash of 前 200 字） */
-const seenDoneMarkers: Set<string> = new Set()
-
-/** 上一次推送时的正文签名；plain 分支据此判断「正文是否真的变了」 */
+/** 上一次推送时的正文签名；stopped / limit 分支据此判断「本轮是否已处理过该正文」 */
 let lastBodySig = ''
 
-/** DONE 的 2 帧稳定门：首帧记下签名并返回，次帧相同才推送 */
-let _pendingDoneSig: string | null = null
+/**
+ * [turn-invalid-v1] 已回传过 turn-invalid 的正文签名。
+ * [WHY] 违规回传必须去重：正文静止后 800ms 空转轮询每拍都会走到那个分支，
+ *   不去重会每 800ms 给工作台推一条一模一样的 TURN_NOT_JSON。
+ * [CONSTRAINT] 随轮次失效（新信封到来即应重新具备报警能力），故在 resetRoundState 里清空。
+ */
+let _invalidReportedSig = ''
 
 /** SCRIPT 标记存在但载荷不是合法代码块时，本轮只报一次错 */
 let _scriptFenceReported = false
@@ -94,7 +93,8 @@ function resetRoundState(): void {
   genEnterRootId = ''
   limitPosted = false
   _scriptFenceReported = false
-  _pendingDoneSig = null
+  // [turn-invalid-v1] 新一轮开始 ⇒ 重新具备违规报警能力（上一轮的正文已作废）
+  _invalidReportedSig = ''
   _roundBaselinesReady = true
   // 结构闭合门挂在 window 上：上一轮遗留的门会拿旧长度当基线，
   // 让新回复第一帧就被判「已静止」⇒ 未闭合块提前放行
