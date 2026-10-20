@@ -339,9 +339,11 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 5px;
+  gap: 8px;
+  /* [left-rail-align-v1] 与 .awl-item 左缘对齐：列表容器 padding 8 + 条目 padding-left 12 = 20px，
+     按钮 margin 8 + padding-left 12 才能对齐同一竖线。 */
   margin: 0 8px 10px;
-  padding: 4px 2px;
+  padding: 4px 10px 4px 12px;
   /* [left-rail-ui-v5] 通栏描边按钮 → 右对齐无边框文字入口：左栏主体是列表，按钮只作轻量入口 */
   border: 0;
   background: transparent;
