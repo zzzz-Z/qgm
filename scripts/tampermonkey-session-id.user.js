@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.46
+// @version      1.9.47
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
 // @match        https://chatglm.cn/*
@@ -1379,7 +1379,11 @@ function turnBlocksToFrames(turnId, raw) {
         }
         blocks.push(frame);
     }
-    const end = { turnId, awaiting: turnAwaiting(blocks), blocks: blocks.length };
+    // [turn-mode-v1] mode 与核心 deriveTurnMode 同构：awaiting==='none' ⇒ 总结轮。
+    // [CONSTRAINT] 本片段不可 import（IIFE 物理切分），只能逐字同构；
+    //   漏掉本字段会让油猴通道的 turn-end 缺失 mode，前端退化为按 awaiting 推断。
+    const awaiting = turnAwaiting(blocks);
+    const end = { turnId, awaiting, mode: awaiting === 'none' ? 'summary' : awaiting, blocks: blocks.length };
     if (skipped.length > 0)
         end.skipped = skipped;
     return { blocks, end };
