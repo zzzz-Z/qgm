@@ -127,8 +127,6 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
       const board = await fetchBoardMirror(undefined, { remindRegister: true })
       if (board) { p.push(''); p.push(board) }
     } catch { /* 看板不可用时不影响结果回传 */ }
-    p.push('')
-    p.push('下一个回答必须以 SCRIPT 开头且只输出脚本(参考system.md ## §1 输出契约与状态机)。')
     return p.join('\n')
   }
 
