@@ -12,8 +12,12 @@ const TASKS = [
   { name: 'tsc', cmd: 'pnpm', args: ['tsc'] },
   { name: 'tsc:apps', cmd: 'pnpm', args: ['tsc:apps'] },
   { name: 'tsc:client', cmd: 'pnpm', args: ['tsc:client'] },
+  // [lint-shard-v1] 全仓 lint 71.8s 是最长尾；按目录切三片各 27/30/11s，并行约 30s。
+  //   既有 13 个 error 全在 packages/client（.vue 内联样式 + 一条测试正则），属基线内。
   { name: 'test:tsc', cmd: 'pnpm', args: ['test:tsc'] },
-  { name: 'lint', cmd: 'pnpm', args: ['lint'] },
+  { name: 'lint:core', cmd: 'npx', args: ['eslint', 'packages/core'] },
+  { name: 'lint:client', cmd: 'npx', args: ['eslint', 'packages/client'] },
+  { name: 'lint:scripts', cmd: 'npx', args: ['eslint', 'scripts', 'bin', 'apps'] },
   // [vitest-shard-v1] 按包分片：config 把单进程 worker 限到 4（供电 60W 防 CPU 争抢误报），
   //   16 核机器因此闲置。两包互不依赖，各起一个 vitest（各 4 worker）实测稳定，64s → 30s。
   { name: 'test:core', cmd: 'npx', args: ['vitest', 'run', 'packages/core/tests'] },
