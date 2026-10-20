@@ -198,15 +198,15 @@
 .script-card:hover {
   background: rgb(127 127 127 / 3%);
 }
-/* [card-unify-v1] 卡片统一风格：AI 总结/文本、用户提问/回答、AI 提问卡共用 12px 圆角卡片，不再用气泡尖角区分 */
+/* [card-unify-v1] 卡片统一风格：用户提问/回答、AI 提问卡共用 12px 圆角卡片 */
 .done-summary,
 .text-card {
   margin: 8px 0;
-  padding: 12px 16px;
-  border-radius: 12px;
-  background: var(--surface-2, rgb(127 127 127 / 5%));
-  border: 1px solid rgb(127 127 127 / 12%);
+  padding: 12px 0;
 }
+
+/* [card-flat-v1] AI 输出卡（文本 / 总结）去气泡外框：只保留文字渲染，
+   不画背景与边框。交互卡（question-card / ask）仍保留卡片语义，不受此规则影响。 */
 /* [ask-card-v1] AI 提问卡：对话流内联卡片，替代旧弹窗；选项可点选、也可自由输入 */
 .question-card {
   margin: 8px 0;

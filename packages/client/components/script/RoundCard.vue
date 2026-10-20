@@ -123,7 +123,7 @@ function submitAnswer(text: string): void {
 
 <template>
   <!-- done：任务完成 · 总结 -->
-  <section v-if="card.type === 'done'" class="done-summary">
+  <section v-if="card.type === 'done' && (card.text || card.preview).trim()" class="done-summary">
     <div class="done-summary-head">
       任务完成 · 总结
     </div>
@@ -143,7 +143,7 @@ function submitAnswer(text: string): void {
   </section>
 
   <!-- text：AI 普通文本卡 -->
-  <section v-else-if="card.type === 'text'" class="text-card">
+  <section v-else-if="card.type === 'text' && (card.text || card.preview).trim()" class="text-card">
     <FoldToggle
       v-if="card.truncated"
       :expanded="expanded"

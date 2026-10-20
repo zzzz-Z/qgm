@@ -28,6 +28,7 @@ import { getTransport, transportKind } from '../ai/useAiTransport'
 import { useAiSite } from '../ai/useAiSite'
 import { log } from '../../utils/log'
 import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
+import { runHook } from '../ai/loop-hooks.js'
 
 /** [post-done-gate-v3] 已触发终轮 hook 的 turnId（油猴通道），防重连重放重复提交 */
 const _turnEndHookFired = new Set<number>()
