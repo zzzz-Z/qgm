@@ -114,7 +114,10 @@ export function answerAsk(askId: string, answer: string): void {
   const id = String(askId || '')
   if (!id) return
   const s = askState.value
-  if (s && s.id === id) askState.value = null
+  // [ask-answer-resolve-any-v1] 用户回答了任意一张 ask 卡，都应兑现 askUser 的 Promise：
+  //   活跃提问 id 是 a1/a2 自增序号，卡片 askId 是 turn 块 id（如 q1），两者不等 ⇒
+  //   原判据 s.id === id 恒假，Promise 永不 resolve，回答永远发不出去（用户实测点了没反应）。
+  if (s) askState.value = null
   emit('ai:question', 'AI 提问', {
     updateKey: `${ASK_KEY_PREFIX}${id}`,
     payload: {
@@ -124,7 +127,9 @@ export function answerAsk(askId: string, answer: string): void {
       answeredAt: Date.now(),
     },
   })
-  if (s && s.id === id) s.resolve(answer)
+  // [ask-answer-resolve-any-v1] 活跃提问 id（a1/a2）与卡片 askId（turn 块 id）不同套，
+  //   按 id 相等判据恒假 ⇒ Promise 永不兑现、回答永不发送。用户回答了任一张卡都应 resolve。
+  if (s) s.resolve(answer)
 }
 
 /** useAsk 组合式入口；直接透传模块级单例 */

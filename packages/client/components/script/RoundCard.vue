@@ -137,6 +137,9 @@ function submitAnswer(text: string): void {
   if (!askState.value) restoreAsk(qCard.value.askId, qCard.value.text, qCard.value.options)
   askDraft.value = ''
   answerAsk(qCard.value.askId, t)
+  // [ask-answer-send-v1] 回答发送由 answerAsk 无条件 resolve 活跃提问驱动：
+  //   askUser 的 .then(answer => copyAndFill(...)) 在 answerAsk 里被兑现，
+  //   本组件不再直接调 copyAndFill / emit，保持纯 UI（happy-dom 可测）。
 }
 </script>
 

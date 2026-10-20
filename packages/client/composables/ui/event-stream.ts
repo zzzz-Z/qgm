@@ -11,7 +11,7 @@ const IS_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).e
  */
 export type EventKind
   = | 'ai:script' | 'ai:done' | 'ai:plain' | 'ai:multi' | 'ai:summary'
-    | 'ai:ask' | 'ai:question' | 'ai:feedback'
+    | 'ai:ask' | 'ai:question' | 'ai:feedback' | 'ai:answer'
     // [turn-block-frame-v1] 块帧事件：一个块一条，payload 是 { block }。
     //   [CONSTRAINT] 与 ai:script / ai:plain 并列而非替代——旧通道仍在用它们，双读期内两者都会出现。
     | 'ai:block'
