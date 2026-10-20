@@ -23,6 +23,8 @@ import { askUser } from '../ui/useAsk'
 import { parseAsk } from '../../utils/ask-parser'
 import { scanReplyMarks } from '../../utils/reply-mark'
 import { log } from '../../utils/log'
+// [correction-policy-v1] turn-invalid 回灌决策（方案4）抽到纯模块，便于裸测；本文件只负责接线与发送。
+import { decideCorrection } from '../../utils/correction-policy'
 // [reply-toasts-v1] toast 相关 imports 已收口到 reply-toasts.ts（§4 单文件唯一 import ≤ 20）
 import {
   notifyLimit,
@@ -75,6 +77,9 @@ export const REFRESH_GUARD_MS = 3000
 const resumeWatchdogBySid = new Map<string, ReturnType<typeof setTimeout>>()
 /** [resume-watchdog-v1] 续推后等待真实回复的上限；超过即提示用户手动继续 */
 export const RESUME_WATCHDOG_MS = 45_000
+
+// [correction-policy-v1] 同 sid 连续纠正计数：达上限后停止回灌改通知（防循环）。
+const correctionCountBySid = new Map<string, number>()
 
 /**
  * [stopped-no-autorun-v1] 该 sid 是否处于「刚收到 stopped」窗口内
@@ -364,6 +369,9 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     if (e && !isFromActiveAiSite(e)) return
     const end = payload ? (payload as { end?: unknown }).end : null
     if (!end || typeof end !== 'object') return
+    const sid = String(payload.sessionId || '')
+    // [correction-policy-v1] 收到合法 turn 收口 ⇒ 该 sid 的连续纠正计数清零（「连续」语义：纠正后 AI 已合规即重置）。
+    if (sid) correctionCountBySid.delete(sid)
     const awaiting = String((end as { awaiting?: string }).awaiting || 'none')
     const titles: Record<string, string> = {
       results: '等待执行结果',
@@ -380,6 +388,39 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     }
     try { emitBus('ai:turn-end', titles[awaiting] || '本轮结束', { payload: { end } }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
   }
+
+  /**
+   * [correction-policy-v1] 消费 `ai-runner:turn-invalid`（方案4 回灌）：AI 回复不合规被契约丢弃后，
+   *   由本函数决定是否向 AI 回灌一段纠正提示词（经既有 ai-runner:fill 通道，复用循环引擎，不另建旁路）。
+   * [WHY 只回灌「信封彻底无效」] TEXT_OUTSIDE_FENCE 等已被 readTurnFromRoot 回收成 say 块的类别，
+   *   回灌会重投已交付的 turn（含 script）→ 风险，故 decideCorrection 直接 skip 不在此处理。
+   * [CONSTRAINT] 防循环三道闸由 decideCorrection + 本函数配合：仅活跃循环态自动回灌、同 sid 连续上限、
+   *   正文签名去重（油猴侧 _invalidReportedSig）。
+   * [CONSTRAINT] 人工会话（loopActive=false）只通知不回灌，避免惊扰用户。
+   */
+  function handleTurnInvalidMsg(payload: MessageEvent['data'], e?: MessageEvent): void {
+    if (e && !isFromActiveAiSite(e)) return
+    const code = String(payload.code || '')
+    const sid = String(payload.sessionId || '')
+    const count = correctionCountBySid.get(sid) || 0
+    const decision = decideCorrection({ code, loopActive: autoTakeover.enabled.value, correctionCount: count })
+    if (decision.action === 'reinject' && decision.prompt) {
+      correctionCountBySid.set(sid, count + 1)
+      void aiWindow.copyAndFill(decision.prompt, { skipRules: true })
+        .then((r) => { if (r === 'failed') notifySiteError('纠正提示发送失败，AI 回复格式问题未自动处理') })
+        .catch(() => { /* 发送失败不阻断主链路，下一拍会再判定 */ })
+    } else if (decision.action === 'notify') {
+      pushTerminalNotice(
+        `AI 回复未使用信封格式（${code}），已按契约丢弃${decision.exhausted ? '；连续纠正已达上限，请手动干预' : ''}。`,
+        { divider: true },
+      )
+    }
+    // action === 'skip'：既不回灌也不额外通知（如 TEXT_OUTSIDE_FENCE 已回收）。
+  }
+
+  // [text-outside-fence-v1] 围栏外文本回收的用户提示已改在 useAppStartup.dispatchInbound 的
+  //   [tm-diag-v1] 块内处理：tm-diag 帧在那里即被消费（return 前不转发 onSessionIdMessage），
+  //   在本函数里路由该诊断帧是不可达的死代码，故删除（见 turn-invalid-consumer 守卫）。
 
   /** 处理 ai-runner:summary 摘要回包 */
   function handleSummaryMsg(payload: MessageEvent['data']): void {
@@ -524,6 +565,10 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     // [turn-collect-v1] 结束帧路由：无头侧由 useAppStartup 把 WS `ai:turn-end` 包成同形假事件，
     //   油猴侧（P3）直接发这个 type。两条通道共用同一个处理点。
     if (t === 'ai-runner:turn-end') return handleTurnEndMsg(payload, e)
+    // [correction-policy-v1] 信封彻底无效时的回灌纠正（方案4）。
+    if (t === 'ai-runner:turn-invalid') return handleTurnInvalidMsg(payload, e)
+    // [text-outside-fence-v1] tm-diag 帧由 useAppStartup.dispatchInbound 的 [tm-diag-v1] 块消费，
+    //   不在此转发（在 onSessionIdMessage 里路由 tm-diag 是不可达死代码）。
     if (t === 'ai-runner:new-session-created') return handleNewSessionCreated(payload)
     if (t === 'ai-runner:url-updated') return handleUrlUpdated(payload)
     // [remote-generating-v1] 生成态帧：驱动按钮常转 / 复位（需求 1 + 需求 3）
@@ -545,5 +590,5 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) {
     if (t === 'ai-runner:session-id' && payload.id) handleSessionIdUpdate(payload)
   }
 
-  return { onSessionIdMessage, handleAiReply, handleSummaryMsg, handleNewSessionCreated, handleUrlUpdated, handleSessionIdUpdate, isFromActiveAiSite }
+  return { onSessionIdMessage, handleAiReply, handleTurnInvalidMsg, handleSummaryMsg, handleNewSessionCreated, handleUrlUpdated, handleSessionIdUpdate, isFromActiveAiSite }
 }

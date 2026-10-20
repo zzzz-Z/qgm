@@ -150,6 +150,16 @@ export function useAppStartup(deps: AppStartupDeps) {
       //     块帧/plain 一个都到不了工作台，服务端日志零增长，光看日志永远只能猜。
       if (t === 'ai-runner:tm-diag') {
         const d = p as unknown as Record<string, unknown>
+        // [text-outside-fence-v1] AI 把说明写在了信封外、已被油猴 readTurnFromRoot 回收成 say 块：
+        //   给一条用户可见提示，说明文本已回收（并提醒 AI 应把说明写进 content[].say）。
+        //   [WHY 在这里] tm-diag 帧在本函数即被消费（return 前不转发 onSessionIdMessage），
+        //     用户提示必须落在这里，放到 onSessionIdMessage 的路由是死代码。
+        if (String(d.stage) === 'text-outside-fence') {
+          pushTerminalNotice(
+            `⚠️ AI 把 ${Number(d.len || 0)} 字说明写在了信封外面，已自动回收为说明块（请提醒 AI 把说明写进 content[].say）。`,
+            { divider: true },
+          )
+        }
         const parts = [
           `阶段=${String(d.stage)}`,
           `opener=${d.hasOpener ? (d.openerClosed ? '已关闭' : '就绪') : '缺失'}`,

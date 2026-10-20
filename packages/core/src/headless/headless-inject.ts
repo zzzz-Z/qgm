@@ -917,6 +917,28 @@ export function detectReplyInPage(siteCfg = {}) {
   // [CONSTRAINT] 函数体内不得写 TS 注解（守卫用 vm 抠函数体真跑，注解会编译失败）；
   //   签名同理 —— 参数不加类型，靠文件级 @ts-nocheck。
   // [CHANGE-IMPACT] P2-b 起由下方「信封优先」分支调用；信封缺失时返回 null ⇒ 旧标记链路原样接管。
+  /**
+   * 收集围栏外的纯文本（DOM 文本节点，跳过 `<pre>` / `<script>` / `<style>`）。
+   * [WHY] AI 把说明写在 ```json 围栏之外时，parseTurn 只解析围栏内对象、对围栏外文本完全无视，
+   *   导致这段文本被静默丢弃。本函数把它回收成一个 say 块，让被丢弃的说明回到工作台时间线。
+   * [parity] 与油猴 turn-emit.ts 的 outsideFenceText 逐字符同构（pure-parity 守卫对拍）。
+   */
+  function outsideFenceText(root) {
+    if (!root || typeof root.childNodes === 'undefined') return ''
+    let out = ''
+    const walk = (node) => {
+      if (node.nodeType === 3) { out += node.nodeValue || ''; return }
+      if (node.nodeType === 1) {
+        const tag = (node.tagName || '').toUpperCase()
+        if (tag === 'PRE' || tag === 'SCRIPT' || tag === 'STYLE') return
+        const kids = node.childNodes
+        for (let i = 0; i < kids.length; i++) walk(kids[i])
+      }
+    }
+    walk(root)
+    return out.replace(/\s+/g, ' ').trim()
+  }
+
   function readTurnBlocks(root) {
     if (!root || typeof root.querySelectorAll !== 'function') return null
     const pres = root.querySelectorAll('pre')
@@ -934,7 +956,17 @@ export function detectReplyInPage(siteCfg = {}) {
         catch { continue }
         if (!r || !r.blocks || r.blocks.length === 0) continue
         if (r.truncated) return null
-        return { turnId: typeof r.turn === 'number' ? r.turn : 0, blocks: r.blocks, errors: r.errors || [] }
+        // [text-outside-fence-v1] 信封合法但围栏外有文本 ⇒ 回收成 say 块，避免被静默丢弃。
+        //   [parity] 与油猴 turn-emit.ts readTurnFromRoot 同构（outsideFenceText 由 pure-parity 对拍）。
+        //   [CONSTRAINT] 只走 `<pre>` 分支：裸 JSON 回退分支的 leading 文本会被 parseTurn 判 TURN_NOT_JSON，
+        //     交给 turn-invalid 通道由工作台纠正，不在此回收。
+        const outside = outsideFenceText(root)
+        const blocks = r.blocks.slice()
+        if (outside) {
+          blocks.push({ type: 'say', id: `outside_${typeof r.turn === 'number' ? r.turn : 0}`, text: outside })
+          r.errors = (r.errors || []).concat([{ code: 'TEXT_OUTSIDE_FENCE', detail: `围栏外文本 ${outside.length} 字已回收为 say 块` }])
+        }
+        return { turnId: typeof r.turn === 'number' ? r.turn : 0, blocks, errors: r.errors || [] }
       }
     }
     // [no-fence-envelope-v1] 与油猴 readTurnFromRoot 同构：无 <pre> 信封（回复未加 ```json 围栏）时

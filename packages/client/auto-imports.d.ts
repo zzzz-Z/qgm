@@ -31,6 +31,7 @@ declare global {
   const LS_CMD_HISTORY_KEY: typeof import('./utils/storage').LS_CMD_HISTORY_KEY
   const LS_SIDE_WIDTH_KEY: typeof import('./utils/storage').LS_SIDE_WIDTH_KEY
   const MAX_AUTO_RESUME: typeof import('./composables/ai/stop-resume').MAX_AUTO_RESUME
+  const MAX_CORRECTIONS: typeof import('./utils/correction-policy').MAX_CORRECTIONS
   const MAX_PENDING_RUNS: typeof import('./composables/runner/run-queue').MAX_PENDING_RUNS
   const MODELS: typeof import('./composables/ai/useAiSite').MODELS
   const NAV_CONFIRM_TIMEOUT_MS: typeof import('./composables/data/useWorkspaces').NAV_CONFIRM_TIMEOUT_MS
@@ -128,6 +129,7 @@ declare global {
   const customRef: typeof import('vue').customRef
   const debouncedRef: typeof import('@vueuse/core').debouncedRef
   const debouncedWatch: typeof import('@vueuse/core').debouncedWatch
+  const decideCorrection: typeof import('./utils/correction-policy').decideCorrection
   const decideOnResumeTimeout: typeof import('./composables/ai/stop-resume').decideOnResumeTimeout
   const decideOnStopped: typeof import('./composables/ai/stop-resume').decideOnStopped
   const defineAsyncComponent: typeof import('vue').defineAsyncComponent
@@ -706,6 +708,9 @@ declare global {
   export type { ContextFile, ContextCleanOptions } from './utils/contextBuilder'
   import('./utils/contextBuilder')
   // @ts-ignore
+  export type { CorrectionAction, CorrectionDecision, CorrectionInput } from './utils/correction-policy'
+  import('./utils/correction-policy')
+  // @ts-ignore
   export type { ReplyMarkScan } from './utils/reply-mark'
   import('./utils/reply-mark')
   // @ts-ignore
@@ -747,6 +752,7 @@ declare module 'vue' {
     readonly LS_CMD_HISTORY_KEY: UnwrapRef<typeof import('./utils/storage')['LS_CMD_HISTORY_KEY']>
     readonly LS_SIDE_WIDTH_KEY: UnwrapRef<typeof import('./utils/storage')['LS_SIDE_WIDTH_KEY']>
     readonly MAX_AUTO_RESUME: UnwrapRef<typeof import('./composables/ai/stop-resume')['MAX_AUTO_RESUME']>
+    readonly MAX_CORRECTIONS: UnwrapRef<typeof import('./utils/correction-policy')['MAX_CORRECTIONS']>
     readonly MAX_PENDING_RUNS: UnwrapRef<typeof import('./composables/runner/run-queue')['MAX_PENDING_RUNS']>
     readonly MODELS: UnwrapRef<typeof import('./composables/ai/useAiSite')['MODELS']>
     readonly NAV_CONFIRM_TIMEOUT_MS: UnwrapRef<typeof import('./composables/data/useWorkspaces')['NAV_CONFIRM_TIMEOUT_MS']>
@@ -844,6 +850,7 @@ declare module 'vue' {
     readonly customRef: UnwrapRef<typeof import('vue')['customRef']>
     readonly debouncedRef: UnwrapRef<typeof import('@vueuse/core')['debouncedRef']>
     readonly debouncedWatch: UnwrapRef<typeof import('@vueuse/core')['debouncedWatch']>
+    readonly decideCorrection: UnwrapRef<typeof import('./utils/correction-policy')['decideCorrection']>
     readonly decideOnResumeTimeout: UnwrapRef<typeof import('./composables/ai/stop-resume')['decideOnResumeTimeout']>
     readonly decideOnStopped: UnwrapRef<typeof import('./composables/ai/stop-resume')['decideOnStopped']>
     readonly defineAsyncComponent: UnwrapRef<typeof import('vue')['defineAsyncComponent']>

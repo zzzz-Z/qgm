@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.40
+// @version      1.9.41
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
 // @match        https://chatglm.cn/*
@@ -1335,6 +1335,35 @@ function turnBlocksToFrames(turnId, raw) {
     return { blocks, end };
 }
 /**
+ * 收集围栏外的纯文本（DOM 文本节点，跳过 `<pre>` / `<script>` / `<style>`）。
+ * [WHY] AI 把说明写在 ```json 围栏之外时，parseTurn 只解析围栏内对象、对围栏外文本完全无视，
+ *   导致这段文本被静默丢弃（用户实测：系统要求写在 say 里，AI 却写在围栏外）。
+ *   本函数把这段文本回收成一个 say 块，让被丢弃的说明回到工作台时间线。
+ * [CONSTRAINT] 只在信封已合法解析的前提下调用；无围栏的裸 JSON 回退分支不触发（避免把 JSON 自身算进 outside）。
+ * [CONSTRAINT] 不读全局状态、不依赖任何模块 —— 与 parseTurn 同属「可独立序列化」的纯逻辑。
+ */
+function outsideFenceText(root) {
+    if (!root || typeof root.childNodes === 'undefined')
+        return '';
+    let out = '';
+    const walk = (node) => {
+        if (node.nodeType === 3) {
+            out += node.nodeValue || '';
+            return;
+        }
+        if (node.nodeType === 1) {
+            const tag = (node.tagName || '').toUpperCase();
+            if (tag === 'PRE' || tag === 'SCRIPT' || tag === 'STYLE')
+                return;
+            const kids = node.childNodes;
+            for (let i = 0; i < kids.length; i++)
+                walk(kids[i]);
+        }
+    };
+    walk(root);
+    return out.replace(/\s+/g, ' ').trim();
+}
+/**
  * 从最后一条 AI 回复里读信封（与无头侧 readTurnBlocks 同构）。
  * [CONSTRAINT] 从后往前扫、命中即返回：一条回复里若有多个围栏，信封永远是最后交付的那个。
  * [CONSTRAINT] `truncated` ⇒ 返回 null 而不是把半截信封当完整交付。
@@ -1356,7 +1385,20 @@ function readTurnFromRoot(root) {
                     continue;
                 if (r.truncated)
                     return null;
-                return { turnId: typeof r.turn === 'number' ? r.turn : 0, blocks: r.blocks, errors: r.errors || [] };
+                // [text-outside-fence-v1] 信封合法但围栏外有文本 ⇒ 回收成 say 块，避免被静默丢弃。
+                //   [WHY] parseTurn 只解析围栏内对象，围栏外文本既不进块也不报错 ⇒ 用户写的说明蒸发且零诊断。
+                //   [CONSTRAINT] 回收块 id 用 `outside_<turnId>`：与信封内块不冲突，且刷新后同输入重算同 id ⇒ 去重不重推。
+                //   [CONSTRAINT] 只走 `<pre>` 分支：裸 JSON 回退分支里 leading 文本会被 parseTurn 判成 TURN_NOT_JSON，
+                //     走 turn-invalid 通道由工作台纠正（方案4），不在此回收（避免把 JSON 自身算进 outside）。
+                const outside = outsideFenceText(root);
+                const blocks = r.blocks.slice();
+                if (outside) {
+                    blocks.push({ type: 'say', id: `outside_${typeof r.turn === 'number' ? r.turn : 0}`, text: outside });
+                    r.errors = (r.errors || []).concat([{ code: 'TEXT_OUTSIDE_FENCE', detail: `围栏外文本 ${outside.length} 字已回收为 say 块` }]);
+                    if (typeof _tmDiag === 'function')
+                        _tmDiag('text-outside-fence', { turnId: typeof r.turn === 'number' ? r.turn : 0, len: outside.length, head: outside.slice(0, 80) });
+                }
+                return { turnId: typeof r.turn === 'number' ? r.turn : 0, blocks, errors: r.errors || [] };
             }
         }
         // [no-fence-envelope-v1] 无 <pre> 信封（回复未加 ```json 围栏）⇒ 回退解析整条回复文本。

@@ -79,6 +79,25 @@ test('langFromText: 同一输入两侧同结果', () => {
     assert.equal(runInVm(h, [inp]), runInVm(tm, [inp]), `langFromText 分叉 input=${JSON.stringify(inp.slice(0, 30))}`)
   }
 })
+
+// [text-outside-fence-v1] 油猴侧与 headless 侧的同名回收函数必须逐字符同构（pure-parity 守卫）。
+test('outsideFenceText: 同一输入两侧同结果', () => {
+  function makeRootWithProseOutside(preText: string, outsideText: string): unknown {
+    const pre = { nodeType: 1, tagName: 'PRE', textContent: preText, childNodes: [{ nodeType: 3, nodeValue: preText }] }
+    const text = { nodeType: 3, nodeValue: outsideText }
+    return { nodeType: 1, tagName: 'DIV', childNodes: [text, pre] }
+  }
+  const inputs = [
+    makeRootWithProseOutside('{"a":1}', '这是外面的说明'),
+    makeRootWithProseOutside('x', ''),
+    makeRootWithProseOutside('y', '  换行\n\n  说明  '),
+  ]
+  const h = extractInner(read(HEADLESS), 'outsideFenceText')!
+  const tm = extractInner(read(TM), 'outsideFenceText')!
+  for (const inp of inputs) {
+    assert.equal(runInVm(h, [inp]), runInVm(tm, [inp]), `outsideFenceText 分叉 input=${JSON.stringify(inp).slice(0, 40)}`)
+  }
+})
 // [script-fence-guess-removed-v1] 该函数已删，两侧同布尔断言随之移除。
 
 // [pure-parity-v1] hasUnclosedStructureJs 未纳入：该函数内部就在处理 { } 配对，

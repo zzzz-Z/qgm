@@ -57,6 +57,7 @@ function buildOil(): { oil: OilExports, posted: Posted[] } {
     location: { origin: 'https://example.com' },
     extractSidFromHash: () => 'sid-1',
     bodySignature: () => 'sig-1',
+    _tmDiag: () => {},
     console,
   }
   const oil = vm.runInNewContext(
@@ -203,6 +204,54 @@ describe('readTurnFromRoot：从最后一条回复读信封', () => {
       textContent: JSON.stringify({ v: 1, turn: 99, content: [FULL[1]] }),
     }
     expect(oil.readTurnFromRoot(root)!.turnId).toBe(31)
+  })
+})
+
+// ── [text-outside-fence-v1] 围栏外文本回收 ──
+
+describe('readTurnFromRoot: 围栏外文本回收 [text-outside-fence-v1]', () => {
+  /** 构造「信封在 <pre> 内、说明文本在 <pre> 外的文本节点」的 DOM 桩 */
+  function makeRootWithOutside(envelopeText: string, outsideText: string): unknown {
+    const codeEl = { textContent: envelopeText }
+    const pre = {
+      nodeType: 1,
+      tagName: 'PRE',
+      textContent: envelopeText,
+      querySelector: (sel: string) => (sel === 'code' ? codeEl : null),
+      childNodes: [{ nodeType: 3, nodeValue: envelopeText }],
+    }
+    const textNode = { nodeType: 3, nodeValue: outsideText }
+    return {
+      nodeType: 1,
+      tagName: 'DIV',
+      childNodes: [textNode, pre],
+      querySelectorAll: (sel: string) => (sel === 'pre' ? [pre] : []),
+    }
+  }
+
+  test('信封有效但围栏外有文本 ⇒ 回收成 say 块（id 形如 outside_<turnId>）', () => {
+    const env = envelope({ v: 1, turn: 7, content: [FULL[0]!] })
+    const got = oil.readTurnFromRoot(makeRootWithOutside(env, '这是被写在外面的说明。'))
+    expect(got!.turnId).toBe(7)
+    const blocks = got!.blocks as { id: string, type: string, text?: string }[]
+    const outside = blocks.find(b => b.id === 'outside_7')
+    expect(outside).toBeDefined()
+    expect(outside!.type).toBe('say')
+    expect(outside!.text).toBe('这是被写在外面的说明。')
+    // 原信封块仍在
+    expect(blocks.map(b => b.id)).toContain('say_1')
+  })
+
+  test('围栏外文本会被空白压缩并 trim', () => {
+    const env = envelope({ v: 1, turn: 8, content: [FULL[1]!] })
+    const got = oil.readTurnFromRoot(makeRootWithOutside(env, '  换行\n\n  说明文字  '))
+    const outside = (got!.blocks as { id: string, text?: string }[]).find(b => b.id === 'outside_8')
+    expect(outside!.text).toBe('换行 说明文字')
+  })
+
+  test('无围栏外文本时不做回收（行为不变）', () => {
+    const got = oil.readTurnFromRoot(makeRoot([makePre(envelope({ v: 1, turn: 5, content: [FULL[0]!] }))]))
+    expect((got!.blocks as { id: string }[]).map(b => b.id)).toEqual(['say_1'])
   })
 })
 

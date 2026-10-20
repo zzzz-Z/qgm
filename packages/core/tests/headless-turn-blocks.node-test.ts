@@ -58,9 +58,13 @@ function buildReader(): (root: unknown) => ParsedTurn | null {
   const turnParser = extractBody(src)
   assert.ok(turnParser, '无头内联段缺 BEGIN/END 标记')
   const inner = extractInner(src, 'readTurnBlocks')
+  // [text-outside-fence-v1] readTurnBlocks 现在会调用同文件的 outsideFenceText 回收围栏外文本，
+  //   vm 里必须把这个函数也一并抠进来，否则 ReferenceError: outsideFenceText is not defined。
+  const outsideInner = extractInner(src, 'outsideFenceText')
   // [CONSTRAINT] vm.runInNewContext 按「脚本」编译，顶层 return 非法 ⇒ 必须包一层 IIFE
   const code = `(function () {
 ${turnParser}
+function outsideFenceText(root) { ${outsideInner} }
 function readTurnBlocks(root) { ${inner} }
 return function (root) { return readTurnBlocks(root) }
 })()`
@@ -84,6 +88,26 @@ function makeRoot(pres: unknown[]): unknown {
 /** [no-fence-envelope-v1] 无 <pre>（回复未加 ```json 围栏）时，回退读取整条回复文本 */
 function makeRootText(text: string): unknown {
   return { querySelectorAll: () => [], textContent: text }
+}
+
+/** [text-outside-fence-v1] 带 childNodes 的假 DOM：root 下既有围栏外文本节点、又有 PRE 信封，
+ *   用于验证 outsideFenceText 能穿过 childNodes 把围栏外文本回收成 say 块。 */
+function makeRootWithOutside(outsideText: string, preText: string): unknown {
+  const pre = {
+    tagName: 'PRE',
+    childNodes: [] as unknown[],
+    textContent: preText,
+    querySelector: (sel: string) => (sel === 'code' ? { textContent: preText } : null),
+  }
+  return {
+    nodeType: 1,
+    tagName: 'DIV',
+    childNodes: [
+      { nodeType: 3, nodeValue: outsideText },
+      { nodeType: 1, tagName: 'PRE', childNodes: [], querySelector: pre.querySelector, textContent: preText },
+    ],
+    querySelectorAll: (sel: string) => (sel === 'pre' ? [pre] : []),
+  }
 }
 
 /** 信封原文（真实页面上就是 pre > code 的 textContent） */
@@ -195,5 +219,21 @@ describe('readTurnBlocks：从页面读信封', () => {
       textContent: JSON.stringify({ v: 1, turn: 88, content: [C2] }),
     }
     expect(reader(root)!.turnId).toBe(13)
+  })
+
+  // [text-outside-fence-v1] 无头侧与油猴 readTurnFromRoot 同构：围栏外文本回收成 outside_<turnId> say 块。
+  test('[text-outside-fence-v1] 信封合法但围栏外有文本 ⇒ 回收为 outside_<turnId> say 块 + TEXT_OUTSIDE_FENCE', () => {
+    const got = reader(makeRootWithOutside('这是写在信封外面的说明', envelope({ v: 1, turn: 21, content: [C1] })))
+    expect(got).not.toBeNull()
+    expect(got!.turnId).toBe(21)
+    expect(got!.blocks.map(b => b.id)).toEqual(['c1', 'outside_21'])
+    expect(got!.blocks.find(b => b.id === 'outside_21')).toEqual({ type: 'say', id: 'outside_21', text: '这是写在信封外面的说明' })
+    expect(got!.errors.some(e => e.code === 'TEXT_OUTSIDE_FENCE')).toBe(true)
+  })
+
+  test('[text-outside-fence-v1] 围栏外只有空白 ⇒ 不回收（trim 后为空）', () => {
+    const got = reader(makeRootWithOutside('   \n\t  ', envelope({ v: 1, turn: 22, content: [SAY] })))
+    expect(got!.blocks.map(b => b.id)).toEqual(['say_1'])
+    expect(got!.errors.some(e => e.code === 'TEXT_OUTSIDE_FENCE')).toBe(false)
   })
 })
