@@ -475,7 +475,7 @@ test('formatTurnResults：结构化摘要，含成功数与逐块状态；空结
   assert.match(text, /^# turn 5 执行结果（3 块 · 成功 1 · 未成功 2）/)
   assert.match(text, /1\. ✅ b0 \[ok\] exit=0/)
   assert.match(text, /2\. ❌ b1 \[error\] exit=1 err=TypeError/)
-  assert.match(text, /3\. ❌ b2 \[aborted\]$/)
+  assert.match(text, /3\. ❌ b2 \[aborted\]\n\n⚠/)
 })
 
 // [turn-out-feedback-v1] AI 侧没有任何别的通道能看到脚本输出 ⇒ 回灌必须带 stdout。
@@ -489,7 +489,7 @@ test('回灌携带 stdout：尾部 %d 行 / %d 字，超限标注省略', () => 
   assert.match(withOut, /1\. ✅ c1 \[ok\] exit=0\n```\nhello\nworld\n```/)
   // ② 全空白输出 ⇒ 不挂空围栏（否则每块都多两行噪音）
   const blank = formatTurnResults(7, [{ id: 'c2', seq: 0, status: 'ok', exit: 0, out: '  \n ' }])
-  assert.match(blank, /1\. ✅ c2 \[ok\] exit=0$/)
+  assert.match(blank, /1\. ✅ c2 \[ok\] exit=0\n\n⚠/)
   // ③ 超行数 ⇒ 只留末 40 行并标注省略量
   const many = Array.from({ length: 100 }, (_, i) => `L${i}`).join('\n')
   const clipped = formatTurnResults(8, [{ id: 'c3', seq: 0, status: 'ok', exit: 0, out: many }])
@@ -515,7 +515,8 @@ test('[turn-out-fence-v1] 围栏按内容最长连续反引号自适应加长', 
   const text = formatTurnResults(10, [{ id: 'c1', seq: 0, status: 'ok', exit: 0, out }])
   // 内容里最长连续反引号是 3 ⇒ 围栏取 4；否则内容里的 ``` 会把开围栏提前闭合
   assert.match(text, /exit=0\n````\n/, '开围栏必须是 4 反引号（内容含 3 连反引号时固定 3 会被闭合）')
-  assert.match(text, /\nafter\n````$/, '闭围栏须与开围栏同长')
+  assert.match(text, /\nafter\n````/, '闭围栏须与开围栏同长')
+  assert.match(text, /下一次回复必须是单个 json 围栏包住的 turn 信封/, '回灌末尾须带 json 围栏提醒（防止 AI 输出错格式触发循环暂停）')
 })
 
 test('turnRunKey：`turn|id` 与 runKey 同形', () => {
