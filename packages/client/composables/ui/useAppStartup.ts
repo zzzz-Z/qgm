@@ -229,9 +229,10 @@ export function useAppStartup(deps: AppStartupDeps) {
     if (!hasScript) rt.settleIdle()
     // [post-done-gate-v3] 油猴通道也要触发 BeforeDoneFinal：原实现只在服务端 attach-ws
     //   （无头通道）触发，油猴路径的终轮从不过 hook ⇒ git 从不提交。
-    //   判据 awaiting==='none'：无脚本待执行、无提问待回答 = 执行器不会自动续跑。
-    const awaiting = p.end && p.end.awaiting
-    if (awaiting === 'none' && !_turnEndHookFired.has(turnId)) {
+    //   判据：本轮为总结轮（无脚本待执行、无提问待回答 = 执行器不会自动续跑）。
+    // [turn-mode-v1] 优先读显式 `mode === 'summary'`，旧服务端不传时降级回 `awaiting === 'none'`。
+    const endMode = (p.end && p.end.mode) || ((p.end && p.end.awaiting === 'none') ? 'summary' : '')
+    if (endMode === 'summary' && !_turnEndHookFired.has(turnId)) {
       const sid = String(activeSessionId.value || '')
       const now = Date.now()
       const last = _turnLastCommitAt.get(sid) || 0

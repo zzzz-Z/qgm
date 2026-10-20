@@ -360,14 +360,18 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
     const sid = String(payload.sessionId || '')
     // [correction-policy-v1] 收到合法 turn 收口 ⇒ 该 sid 的连续纠正计数清零（「连续」语义：纠正后 AI 已合规即重置）。
     if (sid) correctionCountBySid.delete(sid)
+    // [turn-mode-v1] `mode` 与 `awaiting` 是**两套词表**（summary vs none），不得混用变量：
+    //   `awaiting` 用于标题查表与待续判定；`isSummary` 用显式 mode，旧服务端降级回 awaiting。
+    const rawMode = (end as { mode?: string }).mode
     const awaiting = String((end as { awaiting?: string }).awaiting || 'none')
+    const isSummary = rawMode ? rawMode === 'summary' : awaiting === 'none'
     const titles: Record<string, string> = { results: '等待执行结果', user: '等待用户回答', none: '本轮结束', }
     // [remote-generating-v1] turn-end 是「本轮收口」的权威信号：强制复位生成态，防 generating:false 帧丢失导致按钮永久卡转
     setRemoteGenerating(false)
     // [stop-btn-reset-v1] 终轮（awaiting=none）时关闭自动接管：
     //   [WHY] 停止按钮可见性判据含 autoTakeoverEnabled；该标志不关 ⇒ 总结后按钮永久显示（用户实测「不重置」）。
     //   [CONSTRAINT] 只在 awaiting=none 时关：results / user 两种待续状态必须保留接管意图。
-    if (awaiting === 'none' && autoTakeover.enabled.value) { autoTakeover.disable()
+    if (isSummary && autoTakeover.enabled.value) { autoTakeover.disable()
     }
     try { emitBus('ai:turn-end', titles[awaiting] || '本轮结束', { payload: { end } }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
   }
