@@ -21,6 +21,8 @@ import { useRuntime } from '../ai/useRuntime'
 // [script-head-autofill-v1] 信封 desc/why 是 JSON 字段，/run 的头契约要求它们出现在 code 首部
 //   （scanScriptHead 缺则 MISSING_DESC 400）——在接线层用信封字段补齐，避免 AI 两头都写。
 import { ensureScriptHead } from '../../utils/scriptMeta'
+// [board-mirror-turn-v1] turn 回灌附看板块（显式 import：vitest 无 auto-import 插件）
+import { fetchBoardMirror } from '../ai/board-mirror'
 
 /** 本 turn 是否还有块在跑（UI 显示「执行中」用；跨 useTurnRunner 调用共享） */
 const turnRunning = ref(false)
@@ -147,6 +149,17 @@ export async function submitTurn(
   try {
     const results = await ensureRunner().submit(turnId, list)
     const text = formatTurnResults(turnId, results)
+    // [board-mirror-turn-v1] turn 回灌末尾附看板块（未完成清单 / 空板登记提醒）。
+    // [WHY] board-mirror 原只接在旧面板回传（script-panel-actions.buildAiPrompt）上，turn 管线
+    //   这一主链路此前零注入——AI 每轮看不到看板，是「任务状态不同步」的架构性缺口
+    //   （2026-10-20 实证：说了提示词 AI 才调 tasks API，不说就 4 小时 161 脚本 0 写入）。
+    // [CONSTRAINT] 抓取失败/网络异常 ⇒ 原样回灌 text，绝不阻断结果通道（与旧路径同纪律）；
+    //   与旧路径互斥（[turn-feedback-exclusive-v1]），不会双重注入。
+    let fillText = text
+    try {
+      const board = await fetchBoardMirror(undefined, { remindRegister: true })
+      if (text && board) fillText = `${text}\n\n${board}`
+    } catch { /* 看板不可用不影响结果回传 */ }
     // [CONSTRAINT] 取成局部 const：条件里 `!!fillSink` 的窄化不会留到后面，
     //   直接引用模块级 fillSink 会被 TS 判为「可能为 null」（且它在等待窗内可能被置空）。
     const sink = fillSink
@@ -166,7 +179,7 @@ export async function submitTurn(
       // [turn-feedback-result-v1] 投递结果必须回流：只 try/catch 吞掉的话，`failed` 会让这一轮结果
       //   永久丢失且界面无提示（filledTurns 已置位 ⇒ 之后再也不重发）。故失败即回滚去重位。
       try {
-        const r = await enqueueFill(() => sink(text, ctx))
+        const r = await enqueueFill(() => sink(fillText, ctx))
         if (r === 'failed' || r === 'unacked') filledTurns.delete(turnId)
       }
       catch {

@@ -51,6 +51,11 @@ vi.mock('../composables/runner/useRunner', () => ({
   }),
 }))
 
+// [board-mirror-turn-v1] board-mirror 经 effectiveSessionId 取会话 sid；替身化避免碰真实 storage
+vi.mock('../composables/ui/useAppStorage', () => ({
+  effectiveSessionId: { value: 'sess-wiring' },
+}))
+
 function ok(stdout = 'ok'): { ok: boolean, code: number, stdout: string, stderr: string } {
   return { ok: true, code: 0, stdout, stderr: '' }
 }
@@ -227,4 +232,51 @@ test('abortAllTurns ⇒ stopped；resetTurnRunner ⇒ idle', () => {
   assert.equal(rt.state.value.kind, 'stopped', '用户停止后运行态须为 stopped（不得自己变回 idle）')
   resetTurnRunner()
   assert.equal(rt.state.value.kind, 'idle', '切 root 后运行态必须归零，否则 stale kind 会继续误导 UI')
+})
+
+// [board-mirror-turn-v1] 承重：turn 回灌必须附看板块——AI 每轮都要看见看板。
+// [WHY] 2026-10-20 实证：board-mirror 原只接在旧面板回传上，turn 主链路零注入 ⇒ AI 永远看不到
+//   看板（「说了提示词才同步」的架构性缺口）。本测试防回灌链路重构时再次静默丢注入。
+test('turn 回灌末尾附看板未完成清单（board-mirror-turn-v1）', async () => {
+  resetBoardMirror()
+  const g = globalThis as unknown as { fetch?: unknown }
+  const orig = g.fetch
+  g.fetch = (async () => ({
+    ok: true,
+    json: async () => ({ items: [{ id: 'zz9', desc: '任务 Z', status: 'pending' }] }),
+  })) as unknown as typeof fetch
+  const fills: string[] = []
+  setTurnFillSink((t) => { fills.push(t) })
+  h.scripted.push(ok())
+  try {
+    await submitTurn(40, blocks(1))
+    assert.equal(fills.length, 1)
+    assert.match(fills[0]!, /# turn 40 执行结果/, '执行结果头必须在')
+    assert.match(fills[0]!, /【任务看板 · 本会话】/, '回灌必须附看板块')
+    assert.match(fills[0]!, /zz9 \| 任务 Z/, '未完成项必须带 id 原样输出')
+  } finally {
+    g.fetch = orig
+    setTurnFillSink(null)
+    resetBoardMirror()
+  }
+})
+
+test('看板抓取失败 ⇒ turn 回灌原样送达（结果通道不被看板阻断）', async () => {
+  resetBoardMirror()
+  const g = globalThis as unknown as { fetch?: unknown }
+  const orig = g.fetch
+  g.fetch = (async () => { throw new Error('network down') }) as unknown as typeof fetch
+  const fills: string[] = []
+  setTurnFillSink((t) => { fills.push(t) })
+  h.scripted.push(ok('done'))
+  try {
+    await submitTurn(41, blocks(1))
+    assert.equal(fills.length, 1)
+    assert.match(fills[0]!, /# turn 41 执行结果/)
+    assert.ok(!fills[0]!.includes('任务看板'), '抓取失败不得附看板块')
+  } finally {
+    g.fetch = orig
+    setTurnFillSink(null)
+    resetBoardMirror()
+  }
 })
