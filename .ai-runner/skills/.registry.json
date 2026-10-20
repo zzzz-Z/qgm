@@ -32,6 +32,11 @@
       "url": "https://github.com/honojs/skills/blob/HEAD/skills/hono/SKILL.md"
     },
     {
+      "name": "log-driven-api-mining",
+      "source": "(unknown)",
+      "url": "(unknown)"
+    },
+    {
       "name": "nitro",
       "source": "antfu/skills",
       "url": "https://github.com/antfu/skills/blob/HEAD/skills/nitro/SKILL.md"
