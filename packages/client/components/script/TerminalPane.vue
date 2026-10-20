@@ -585,7 +585,7 @@ function reopenGuide(): void {
               @preview="(p) => emit('preview', p)"
             />
             <RoundCard
-              v-else
+              v-else-if="card.type === 'ask' || card.type === 'question' || (card.text || card.preview || '').trim()"
               :key="card.key || n"
               :card="card"
             />

@@ -198,3 +198,14 @@ test('最新 script 卡始终接 liveStdout，不得以 running 为闸门（跑�
     '模板未把 liveStdout 绑到「最新一张」卡 ⇒ 完整输出面板拿不到全量输出',
   )
 })
+
+// ---------- ⑦ 防空卡片渲染守卫 ----------
+
+test('空内容的 done / text 卡片不得渲染（RoundCard 内部 + TerminalPane 外层双重守卫）', () => {
+  const rc = read('packages/client/components/script/RoundCard.vue')
+  assert.ok(rc.includes('card.type === \'done\' && (card.text || card.preview).trim()'), 'RoundCard.vue done 分支缺少空内容守卫')
+  assert.ok(rc.includes('card.type === \'text\' && (card.text || card.preview).trim()'), 'RoundCard.vue text 分支缺少空内容守卫')
+
+  const pane = read('packages/client/components/script/TerminalPane.vue')
+  assert.match(pane, /v-else-if="card.type === 'ask' || card.type === 'question' || (card.text || card.preview || '').trim()"/, 'TerminalPane.vue 的 RoundCard 渲染缺少空值防御')
+})
