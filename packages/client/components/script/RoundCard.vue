@@ -124,9 +124,6 @@ function submitAnswer(text: string): void {
 <template>
   <!-- done：任务完成 · 总结 -->
   <section v-if="card.type === 'done' && (card.text || card.preview).trim()" class="done-summary">
-    <div class="done-summary-head">
-      任务完成 · 总结
-    </div>
     <FoldToggle
       v-if="card.truncated"
       :expanded="expanded"
@@ -162,7 +159,7 @@ function submitAnswer(text: string): void {
   <!-- ask：用户提问 / 回答卡 -->
   <section
     v-else-if="card.type === 'ask'"
-    class="text-card"
+    class="text-card is-bubble"
   >
     <header class="text-card-head">
       <span class="text-card-badge" :class="card.role === 'user-answer' ? 'answer-badge' : 'ask-badge'">你</span>
