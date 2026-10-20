@@ -13,6 +13,7 @@ declare global {
   const AT_SKILL_PREFIX: typeof import('./composables/ai/expand-at-refs').AT_SKILL_PREFIX
   const AT_TOTAL_MAX_BYTES: typeof import('./composables/ai/expand-at-refs').AT_TOTAL_MAX_BYTES
   const AUTO_FEEDBACK_MERGE_MS: typeof import('./composables/runner/feedback-merge').AUTO_FEEDBACK_MERGE_MS
+  const BOARD_REGISTER_HINT: typeof import('./composables/ai/board-mirror').BOARD_REGISTER_HINT
   const BOARD_STALE_ROUNDS: typeof import('./composables/ai/board-mirror').BOARD_STALE_ROUNDS
   const DEFAULT_MAX_COLLECT_TURNS: typeof import('./composables/runner/turn-collect').DEFAULT_MAX_COLLECT_TURNS
   const DEFAULT_MAX_TURNS: typeof import('./composables/runner/turn-runner').DEFAULT_MAX_TURNS
@@ -734,6 +735,7 @@ declare module 'vue' {
     readonly AT_SKILL_PREFIX: UnwrapRef<typeof import('./composables/ai/expand-at-refs')['AT_SKILL_PREFIX']>
     readonly AT_TOTAL_MAX_BYTES: UnwrapRef<typeof import('./composables/ai/expand-at-refs')['AT_TOTAL_MAX_BYTES']>
     readonly AUTO_FEEDBACK_MERGE_MS: UnwrapRef<typeof import('./composables/runner/feedback-merge')['AUTO_FEEDBACK_MERGE_MS']>
+    readonly BOARD_REGISTER_HINT: UnwrapRef<typeof import('./composables/ai/board-mirror')['BOARD_REGISTER_HINT']>
     readonly BOARD_STALE_ROUNDS: UnwrapRef<typeof import('./composables/ai/board-mirror')['BOARD_STALE_ROUNDS']>
     readonly DEFAULT_MAX_COLLECT_TURNS: UnwrapRef<typeof import('./composables/runner/turn-collect')['DEFAULT_MAX_COLLECT_TURNS']>
     readonly DEFAULT_MAX_TURNS: UnwrapRef<typeof import('./composables/runner/turn-runner')['DEFAULT_MAX_TURNS']>

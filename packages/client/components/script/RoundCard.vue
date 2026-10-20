@@ -143,7 +143,7 @@ function submitAnswer(text: string): void {
   </section>
 
   <!-- text：AI 普通文本卡 -->
-  <section v-else-if="card.type === 'text' && (card.text || card.preview).trim()" class="text-card">
+  <section v-else-if="card.type === 'text' && (card.text || card.preview).trim() !== 'json复制下载'" class="text-card">
     <FoldToggle
       v-if="card.truncated"
       :expanded="expanded"

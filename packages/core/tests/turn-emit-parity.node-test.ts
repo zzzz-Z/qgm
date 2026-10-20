@@ -210,7 +210,7 @@ describe('readTurnFromRoot：从最后一条回复读信封', () => {
 // ── [text-outside-fence-v1] 围栏外文本回收 ──
 
 describe('readTurnFromRoot: 围栏外文本回收 [text-outside-fence-v1]', () => {
-  /** 构造「信封在 <pre> 内、说明文本在 <pre> 外的文本节点」的 DOM 桩 */
+  /** 构造「信封在 <pre> 内、说明文本在围栏外的 <p> 里」的 DOM 桩 */
   function makeRootWithOutside(envelopeText: string, outsideText: string): unknown {
     const codeEl = { textContent: envelopeText }
     const pre = {
@@ -220,11 +220,16 @@ describe('readTurnFromRoot: 围栏外文本回收 [text-outside-fence-v1]', () =
       querySelector: (sel: string) => (sel === 'code' ? codeEl : null),
       childNodes: [{ nodeType: 3, nodeValue: envelopeText }],
     }
-    const textNode = { nodeType: 3, nodeValue: outsideText }
+    // [text-outside-fence-v2] 只认散文元素：围栏外文本必须包在 <p> 里才会被回收
+    const p = {
+      nodeType: 1,
+      tagName: 'P',
+      childNodes: [{ nodeType: 3, nodeValue: outsideText }],
+    }
     return {
       nodeType: 1,
       tagName: 'DIV',
-      childNodes: [textNode, pre],
+      childNodes: [p, pre],
       querySelectorAll: (sel: string) => (sel === 'pre' ? [pre] : []),
     }
   }
@@ -251,6 +256,37 @@ describe('readTurnFromRoot: 围栏外文本回收 [text-outside-fence-v1]', () =
 
   test('无围栏外文本时不做回收（行为不变）', () => {
     const got = oil.readTurnFromRoot(makeRoot([makePre(envelope({ v: 1, turn: 5, content: [FULL[0]!] }))]))
+    expect((got!.blocks as { id: string }[]).map(b => b.id)).toEqual(['say_1'])
+  })
+
+  // [text-outside-fence-v2] 站点代码块自带的 UI 文字（语言标签 span、复制/下载按钮）也在容器里、
+  //   也在 pre 外——但它们不是 AI 写的话，绝不能被回收成假 say 块（用户实测 2026-10-20 误报源）。
+  test('代码块 UI 文字（button 内 / 裸 span）不回收 [text-outside-fence-v2]', () => {
+    const env = envelope({ v: 1, turn: 9, content: [FULL[0]!] })
+    const codeEl = { textContent: env }
+    const pre = {
+      nodeType: 1,
+      tagName: 'PRE',
+      textContent: env,
+      querySelector: (sel: string) => (sel === 'code' ? codeEl : null),
+      childNodes: [{ nodeType: 3, nodeValue: env }],
+    }
+    const chrome = {
+      nodeType: 1,
+      tagName: 'DIV',
+      childNodes: [
+        { nodeType: 1, tagName: 'SPAN', childNodes: [{ nodeType: 3, nodeValue: 'json' }] },
+        { nodeType: 1, tagName: 'BUTTON', childNodes: [{ nodeType: 3, nodeValue: '复制' }] },
+        { nodeType: 1, tagName: 'BUTTON', childNodes: [{ nodeType: 3, nodeValue: '下载' }] },
+      ],
+    }
+    const root = {
+      nodeType: 1,
+      tagName: 'DIV',
+      childNodes: [chrome, pre],
+      querySelectorAll: (sel: string) => (sel === 'pre' ? [pre] : []),
+    }
+    const got = oil.readTurnFromRoot(root)
     expect((got!.blocks as { id: string }[]).map(b => b.id)).toEqual(['say_1'])
   })
 })

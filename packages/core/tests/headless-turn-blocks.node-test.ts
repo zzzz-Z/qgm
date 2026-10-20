@@ -90,8 +90,9 @@ function makeRootText(text: string): unknown {
   return { querySelectorAll: () => [], textContent: text }
 }
 
-/** [text-outside-fence-v1] 带 childNodes 的假 DOM：root 下既有围栏外文本节点、又有 PRE 信封，
- *   用于验证 outsideFenceText 能穿过 childNodes 把围栏外文本回收成 say 块。 */
+/** [text-outside-fence-v1] 带 childNodes 的假 DOM：root 下既有围栏外散文（<p>）、又有 PRE 信封，
+ *   用于验证 outsideFenceText 能穿过 childNodes 把围栏外文本回收成 say 块。
+ *   [text-outside-fence-v2] 只认散文元素：围栏外文本必须包在 <p> 里才会被回收。 */
 function makeRootWithOutside(outsideText: string, preText: string): unknown {
   const pre = {
     tagName: 'PRE',
@@ -103,7 +104,7 @@ function makeRootWithOutside(outsideText: string, preText: string): unknown {
     nodeType: 1,
     tagName: 'DIV',
     childNodes: [
-      { nodeType: 3, nodeValue: outsideText },
+      { nodeType: 1, tagName: 'P', childNodes: [{ nodeType: 3, nodeValue: outsideText }] },
       { nodeType: 1, tagName: 'PRE', childNodes: [], querySelector: pre.querySelector, textContent: preText },
     ],
     querySelectorAll: (sel: string) => (sel === 'pre' ? [pre] : []),

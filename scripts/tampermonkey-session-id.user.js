@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.41
+// @version      1.9.44
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
 // @match        https://chatglm.cn/*
@@ -1335,10 +1335,13 @@ function turnBlocksToFrames(turnId, raw) {
     return { blocks, end };
 }
 /**
- * 收集围栏外的纯文本（DOM 文本节点，跳过 `<pre>` / `<script>` / `<style>`）。
- * [WHY] AI 把说明写在 ```json 围栏之外时，parseTurn 只解析围栏内对象、对围栏外文本完全无视，
- *   导致这段文本被静默丢弃（用户实测：系统要求写在 say 里，AI 却写在围栏外）。
- *   本函数把这段文本回收成一个 say 块，让被丢弃的说明回到工作台时间线。
+ * 收集围栏外的**散文**文本（只认 `<p>/<li>/<h1>-<h6>/<blockquote>/<td>/<th>` 内的文本节点，
+ * 跳过 `<pre>` / `<script>` / `<style>`，并整棵剪掉 `button/a/svg` 与 `aria-hidden="true"` 子树）。
+ * [WHY 只认散文元素] 初版遍历容器下全部非 pre 文本节点，把 DeepSeek 代码块**自带 UI** 也当成了
+ *   围栏外文本——语言标签 `json`、复制/下载按钮文字都在容器里且不在 pre 内 ⇒ AI 明明一个字
+ *   没写也被「回收」成假 say 块（用户实测 2026-10-20，diag len=87 全是界面文字）。
+ *   markdown 正文只会渲染成 p/li/标题/引用/表格单元格 ⇒ 以元素类别划界即可精确区分
+ *   「AI 写的话」与「页面的界面文字」，不依赖任何站点特化选择器。
  * [CONSTRAINT] 只在信封已合法解析的前提下调用；无围栏的裸 JSON 回退分支不触发（避免把 JSON 自身算进 outside）。
  * [CONSTRAINT] 不读全局状态、不依赖任何模块 —— 与 parseTurn 同属「可独立序列化」的纯逻辑。
  */
@@ -1346,21 +1349,30 @@ function outsideFenceText(root) {
     if (!root || typeof root.childNodes === 'undefined')
         return '';
     let out = '';
-    const walk = (node) => {
+    const PROSE = { P: true, LI: true, H1: true, H2: true, H3: true, H4: true, H5: true, H6: true, BLOCKQUOTE: true, TD: true, TH: true };
+    const walk = (node, inProse) => {
         if (node.nodeType === 3) {
-            out += node.nodeValue || '';
+            if (inProse)
+                out += node.nodeValue || '';
             return;
         }
         if (node.nodeType === 1) {
             const tag = (node.tagName || '').toUpperCase();
             if (tag === 'PRE' || tag === 'SCRIPT' || tag === 'STYLE')
                 return;
+            // 按钮/链接/SVG 是界面操作件，其文字永远不是 AI 的围栏外正文
+            if (tag === 'BUTTON' || tag === 'A' || tag === 'SVG')
+                return;
+            // aria-hidden 文字是给读屏的装饰（图标替代文本等），不进采集
+            if (typeof node.getAttribute === 'function' && node.getAttribute('aria-hidden') === 'true')
+                return;
             const kids = node.childNodes;
+            const next = inProse || PROSE[tag] === true;
             for (let i = 0; i < kids.length; i++)
-                walk(kids[i]);
+                walk(kids[i], next);
         }
     };
-    walk(root);
+    walk(root, false);
     return out.replace(/\s+/g, ' ').trim();
 }
 /**
@@ -1468,6 +1480,26 @@ function emitTurn(turn) {
     }
     if (sent > 0)
         lastBodySig = bodySignature();
+    // [dedup-swallow-diag-v1] 信封读到了但**全部块被去重集合吃掉**（sent=0）⇒ 此前完全静默：
+    //   emitTurn 返回 true ⇒ dispatch 静默 return ⇒ 不发块、不报 turn-invalid、工作台空白、零日志。
+    //   实测成因（2026-10-20）：工作台复用同一 DeepSeek 标签页（同 sid hash），sessionStorage 去重集合
+    //   里存着早前会话的 `sid|turnId|blockId`；新对话 turn 重新从 1 编号且块 id 惯用 s1/c1 ⇒ 键碰撞 ⇒ 全吞。
+    //   [WHY 用正文签名门] MutationObserver 会让本函数对同一信封高频重扫，不带门会刷屏。
+    //   [CONSTRAINT] 只报判据不报正文；正文签名与 _invalidReportedSig 同构（静止时只报一次）。
+    if (sent === 0 && !dirty && frames.blocks.length > 0) {
+        const swallowSig = bodySignature();
+        if (swallowSig !== globalThis.__aiDedupDiagSig) {
+            ;
+            globalThis.__aiDedupDiagSig = swallowSig;
+            if (typeof _tmDiag === 'function') {
+                _tmDiag('dedup-swallow', {
+                    turnId: turn.turnId,
+                    frames: frames.blocks.length,
+                    note: '信封已读到但全部块命中去重集合（同 sid+turnId+blockId 曾投递过）。若这是新对话，请关掉 AI 标签页重开以清空 sessionStorage 去重集合。',
+                });
+            }
+        }
+    }
     // [turn-emit-dedup-persist-v1] 只有真新增了去重键才落盘：无新帧的重复扫描不该写存储。
     if (dirty) {
         persistKeySet(TURN_SEEN_STORE, seenTurnBlocks);
@@ -1664,12 +1696,21 @@ function classifyAndPost() {
             const turn = readTurnFromRoot(replyRoot);
             // [tm-diag-v1] 诊断读判据；`if (turn && emitTurn(turn)) return` 这一行是
             //   turn-emit-parity 守卫的字面量判据（emitTurn 返回值必须中断分流），**不要改写它**。
-            _tmDiag(turn ? 'turn-read' : 'turn-miss', {
-                turnId: turn ? turn.turnId : undefined,
-                blocks: turn ? turn.blocks.length : 0,
-                errors: turn ? (turn.errors || []).length : 0,
-                replyRootFound: !!replyRoot,
-            });
+            // [turn-read-diag-gate-v1] 诊断帧必须带正文签名门：读判据只依赖正文 ⇒ 同一正文必然同一判据，
+            //   而 800ms 空转轮询在正文静止时反复唤醒本函数，不带门就是每 800ms 重发一条一模一样的
+            //   turn-miss（用户实测 2026-10-20「一直推送停不下来」）——与 turn-invalid 当年踩的坑同病
+            //   （state.ts _invalidReportedSig 的教训）。正文一变门即重开，状态迁移仍逐次可见。
+            const readSig = bodySignature();
+            if (readSig !== globalThis.__aiTurnReadDiagSig) {
+                ;
+                globalThis.__aiTurnReadDiagSig = readSig;
+                _tmDiag(turn ? 'turn-read' : 'turn-miss', {
+                    turnId: turn ? turn.turnId : undefined,
+                    blocks: turn ? turn.blocks.length : 0,
+                    errors: turn ? (turn.errors || []).length : 0,
+                    replyRootFound: !!replyRoot,
+                });
+            }
             if (turn && emitTurn(turn))
                 return;
         }

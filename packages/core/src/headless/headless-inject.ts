@@ -918,24 +918,34 @@ export function detectReplyInPage(siteCfg = {}) {
   //   签名同理 —— 参数不加类型，靠文件级 @ts-nocheck。
   // [CHANGE-IMPACT] P2-b 起由下方「信封优先」分支调用；信封缺失时返回 null ⇒ 旧标记链路原样接管。
   /**
-   * 收集围栏外的纯文本（DOM 文本节点，跳过 `<pre>` / `<script>` / `<style>`）。
-   * [WHY] AI 把说明写在 ```json 围栏之外时，parseTurn 只解析围栏内对象、对围栏外文本完全无视，
-   *   导致这段文本被静默丢弃。本函数把它回收成一个 say 块，让被丢弃的说明回到工作台时间线。
+   * 收集围栏外的**散文**文本（只认 `<p>/<li>/<h1>-<h6>/<blockquote>/<td>/<th>` 内的文本节点，
+   * 跳过 `<pre>` / `<script>` / `<style>`，并整棵剪掉 `button/a/svg` 与 `aria-hidden="true"` 子树）。
+   * [WHY 只认散文元素] 初版遍历容器下全部非 pre 文本节点，把站点代码块**自带 UI** 也当成了
+   *   围栏外文本——语言标签、复制/下载按钮文字都在容器里且不在 pre 内 ⇒ AI 明明一个字
+   *   没写也被「回收」成假 say 块（用户实测 2026-10-20）。
+   *   markdown 正文只会渲染成 p/li/标题/引用/表格单元格 ⇒ 以元素类别划界即可精确区分
+   *   「AI 写的话」与「页面的界面文字」，不依赖任何站点特化选择器。
    * [parity] 与油猴 turn-emit.ts 的 outsideFenceText 逐字符同构（pure-parity 守卫对拍）。
    */
   function outsideFenceText(root) {
     if (!root || typeof root.childNodes === 'undefined') return ''
     let out = ''
-    const walk = (node) => {
-      if (node.nodeType === 3) { out += node.nodeValue || ''; return }
+    const PROSE = { P: true, LI: true, H1: true, H2: true, H3: true, H4: true, H5: true, H6: true, BLOCKQUOTE: true, TD: true, TH: true }
+    const walk = (node, inProse) => {
+      if (node.nodeType === 3) { if (inProse) out += node.nodeValue || ''; return }
       if (node.nodeType === 1) {
         const tag = (node.tagName || '').toUpperCase()
         if (tag === 'PRE' || tag === 'SCRIPT' || tag === 'STYLE') return
+        // 按钮/链接/SVG 是界面操作件，其文字永远不是 AI 的围栏外正文
+        if (tag === 'BUTTON' || tag === 'A' || tag === 'SVG') return
+        // aria-hidden 文字是给读屏的装饰（图标替代文本等），不进采集
+        if (typeof node.getAttribute === 'function' && node.getAttribute('aria-hidden') === 'true') return
         const kids = node.childNodes
-        for (let i = 0; i < kids.length; i++) walk(kids[i])
+        const next = inProse || PROSE[tag] === true
+        for (let i = 0; i < kids.length; i++) walk(kids[i], next)
       }
     }
-    walk(root)
+    walk(root, false)
     return out.replace(/\s+/g, ' ').trim()
   }
 

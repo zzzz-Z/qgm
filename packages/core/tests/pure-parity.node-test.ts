@@ -84,8 +84,9 @@ test('langFromText: 同一输入两侧同结果', () => {
 test('outsideFenceText: 同一输入两侧同结果', () => {
   function makeRootWithProseOutside(preText: string, outsideText: string): unknown {
     const pre = { nodeType: 1, tagName: 'PRE', textContent: preText, childNodes: [{ nodeType: 3, nodeValue: preText }] }
-    const text = { nodeType: 3, nodeValue: outsideText }
-    return { nodeType: 1, tagName: 'DIV', childNodes: [text, pre] }
+    // [text-outside-fence-v2] 只认散文元素：围栏外文本包在 <p> 里
+    const p = { nodeType: 1, tagName: 'P', childNodes: [{ nodeType: 3, nodeValue: outsideText }] }
+    return { nodeType: 1, tagName: 'DIV', childNodes: [p, pre] }
   }
   const inputs = [
     makeRootWithProseOutside('{"a":1}', '这是外面的说明'),

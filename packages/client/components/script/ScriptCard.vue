@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // [ui-p2c-render-probe-v1] V9 验收①：dev-only 渲染打点（生产 enabled() 早退）
-import { computed, nextTick, onMounted, onUpdated, ref, watch } from 'vue'
-import { probeRender } from '../../composables/ui/render-probe'
-import { ansiToHtml } from '../../utils/ansi-render'
-import { denoiseOutput, unfoldEscapedLog } from '../../utils/timeline-preview'
+import { computed, nextTick, onMounted, onUpdated, ref, watch } from 'vue';
+import { probeRender } from '../../composables/ui/render-probe';
+import { ansiToHtml } from '../../utils/ansi-render';
+import { denoiseOutput, unfoldEscapedLog } from '../../utils/timeline-preview';
 // [script-card-split-v1] 从 TerminalPane 拆出的脚本卡片子组件
 // [WHY] TerminalPane 行数超架构红线上限；卡片是最大块，可自持展开状态，优先独立
 // [CHANGE-IMPACT] TerminalPane 的 script 分支改为 <ScriptCard :card="card" />；样式随迁
@@ -223,10 +223,10 @@ function toggle(): void { expanded.value = !expanded.value }
 .script-card {
   position: relative;
   margin: 0 0 2px;
-  padding: 5px 0 5px 10px;
+  padding: 5px;
   border: 0;
   background: transparent;
-  border-radius: 8px;
+  border-radius: 5px;
   transition: background-color 0.14s ease;
 }
 /* [sc-drop-left-bar-v1] 移除左侧 2px 状态色条（用户指定：图标左侧竖线干扰视线）；
@@ -241,12 +241,10 @@ function toggle(): void { expanded.value = !expanded.value }
 /* [ui-codex-align-v1] 4px 网格：gap 6→8、margin 2→4；层级靠灰度不靠色块 */
 .script-card-head {
   display: flex;
-  /* [script-card-head-v2] 顶部对齐：图标/徽章/时间都挂在 desc 那一行上，纵向扫读更稳。 */
-  align-items: flex-start;
-  gap: 8px;
-  /* [card-info-converge-v1] 横向内边距 8 → 4：卡片本体已有 10px 左内边距，
-     再叠 8 会让 desc 起点离色条过远；行高 16 → 18 给 13px 主信息留呼吸。 */
-  padding: 3px 4px;
+  align-items: start;
+  gap: 5px;
+  padding: 0px 4px;
+  padding-left: 0;
   border-radius: 6px;
   font-size: var(--font-11);
   line-height: 18px;
@@ -256,9 +254,7 @@ function toggle(): void { expanded.value = !expanded.value }
   cursor: pointer;
   user-select: none;
 }
-.script-card-head.is-clickable:hover {
-  background: rgba(127, 127, 127, 0.06);
-}
+
 .script-card-head.is-clickable::after {
   content: '▸';
   margin-left: 4px;
@@ -317,8 +313,7 @@ function toggle(): void { expanded.value = !expanded.value }
   gap: 1px;
   min-width: 0;
   padding-left: 2px;
-  border-left: 2px solid var(--border-1, #30363d);
-  margin-top: 1px;
+  margin-top: 4px;
 }
 /* [script-card-head-v2] desc 现在是列容器的第一行，必须显式 block + width:100% + min-width:0，
    否则列容器下不会收缩，省略号（ellipsis）根本不会出现 —— 这是 flex 纵向布局的常见坑。 */
@@ -329,8 +324,8 @@ function toggle(): void { expanded.value = !expanded.value }
   /* [card-info-converge-v1] desc 是每张卡片唯一的视觉焦点：提亮到 text-1、
      字号 13px、字重 450；状态徽标与时间整体降到 11px 次级色，避免三者平权抢读。 */
   color: var(--text-1, #e6edf3);
-  font-size: 13px;
-  font-weight: 450;
+  font-size: 12px;
+  font-weight: 300;
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
@@ -479,9 +474,8 @@ function toggle(): void { expanded.value = !expanded.value }
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  /* [script-card-head-v2] 14px 图标在 17.6px 的 desc 行里光学居中（(17.6-14)/2 ≈ 1.8px） */
-  margin-top: 2px;
   color: var(--text-3, #8b949e);
+  padding-top: 4px;
 }
 .script-card-phase.phase-running {
   color: var(--primary, #58a6ff);
@@ -496,8 +490,8 @@ function toggle(): void { expanded.value = !expanded.value }
   color: var(--danger, #f85149);
 }
 .phase-icon {
-  width: 14px;
-  height: 14px;
+  width: 11px;
+  height: 11px;
   flex: 0 0 auto;
   display: block;
 }

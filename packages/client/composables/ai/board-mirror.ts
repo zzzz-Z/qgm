@@ -15,6 +15,19 @@ export interface BoardMirrorItem { id?: string, desc?: string, status?: string }
 /** [board-mirror-stale-v1] 连续多少轮「未完成集合指纹不变」才升级为警告（首轮不警告） */
 export const BOARD_STALE_ROUNDS = 3
 
+/**
+ * [board-register-hint-v1] 看板为空但本轮在跑脚本时的登记提醒。
+ * [WHY] 2026-10-20 实证（plus-ui 工作区）：不说提示词 AI 就不调 __AI__.tasks.*，
+ *   4 小时 161 次脚本执行 vs 3 条看板写入；说了立刻 start/complete 交替 8 连击全对账。
+ *   把「靠用户每轮提醒」变成「回传块自动提醒」，机制零改动。
+ */
+export const BOARD_REGISTER_HINT = [
+  '【任务看板 · 空】本轮在执行脚本，但看板当前没有未完成任务（可能尚未登记）。',
+  '请先 __AI__.tasks.push([\'可独立验证的步骤1\', \'步骤2\', ...]) 登记本批工作；',
+  '之后每步动手前 __AI__.tasks.start([id])、做完立刻 __AI__.tasks.complete([id])',
+  '（id 用 __AI__.tasks.list() 取；做不成用 __AI__.tasks.fail([id]) 收尾，不许沉默挂待办）。',
+].join('\n')
+
 const NL = String.fromCharCode(10)
 
 /** 清洗为可用条目：只要 pending / running，desc 为空即丢弃 */
@@ -77,13 +90,17 @@ export function boardStaleStreak(): number {
 
 /**
  * 拉取当前会话看板并渲染成回传块
- * [CONSTRAINT] sid 为空 / 请求失败 / 无未完成任务 ⇒ 空串，不抛、不阻断调用方
+ * [CONSTRAINT] sid 为空 / 请求失败 ⇒ 空串，不抛、不阻断调用方
+ * [board-register-hint-v1] opts.remindRegister：抓取成功但无未完成任务时，返回登记提醒
+ *   而非空串（调用方=脚本结果回传，本轮必然在跑脚本，正是该提醒的目标场景）。
  * @param sid 缺省取 effectiveSessionId（与任务面板同一分桶）
+ * @param opts.remindRegister 看板空时是否注入登记提醒
  */
-export async function fetchBoardMirror(sid?: string): Promise<string> {
+export async function fetchBoardMirror(sid?: string, opts: { remindRegister?: boolean } = {}): Promise<string> {
   const useSid = String(sid || effectiveSessionId.value || '').trim()
   if (!useSid) return ''
   let items: BoardMirrorItem[] = []
+  let fetched = false
   try {
     const r = await fetch(`/__ai/tasks?sid=${encodeURIComponent(useSid)}`, {
       headers: { accept: 'application/json' },
@@ -93,6 +110,7 @@ export async function fetchBoardMirror(sid?: string): Promise<string> {
     if (!r.ok) return ''
     const j = (await r.json()) as { items?: BoardMirrorItem[] }
     items = Array.isArray(j?.items) ? j.items : []
+    fetched = true
   } catch {
     return ''
   }
@@ -100,7 +118,8 @@ export async function fetchBoardMirror(sid?: string): Promise<string> {
   if (open.length === 0) {
     _fingerprint = ''
     _staleStreak = 0
-    return ''
+    // [board-register-hint-v1] 只在「确实抓到了空看板」时提醒；网络失败仍静默
+    return fetched && opts.remindRegister ? BOARD_REGISTER_HINT : ''
   }
   const fp = open.map(it => `${it.id}:${it.status}`).join('|')
   if (fp === _fingerprint) { _staleStreak += 1

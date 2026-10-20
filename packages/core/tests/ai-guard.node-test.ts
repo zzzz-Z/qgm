@@ -1,6 +1,6 @@
 // [ai-guard-fallback-v2] ai-guard 单测：原生 API 严格扫描、降级协议豁免、__AI__ API 速查幂等注入
 import { describe, expect, it } from 'vitest'
-import { injectAiJsdoc, scanNativeApis, scanNativeApisWithFallback, tokenize } from '../../../packages/core/src/post-run/ai-guard.js'
+import { injectAiJsdoc, scanNativeApis, scanNativeApisWithFallback, scanScriptHead, tokenize } from '../../../packages/core/src/post-run/ai-guard.js'
 
 const NL = String.fromCharCode(10)
 
@@ -135,5 +135,46 @@ describe('动态执行通道 (eval / Function)', () => {
 
   it('eval 含在字面量里时不触发字面量扫描', () => {
     expect(scanNativeApis('const s = "eval(\'fs.readFileSync\')"').hit).toBe(false)
+  })
+})
+
+// [script-head-contract-v1] 脚本头契约判定语义：@desc/@why 的形态边界
+// [WHY] 2026-10-20 实测 AI 写 `// 1. 提交` 这类普通编号注释就以为带了 desc，被 MISSING_DESC 拒后不明所以
+describe('scanScriptHead (脚本头契约)', () => {
+  const NL = String.fromCharCode(10)
+
+  it('注释行 @desc + @why 通过', () => {
+    const code = ['// @desc 提交子任务', '// @why 验证编排链路', '__AI__.log(1)'].join(NL)
+    expect(scanScriptHead(code)).toEqual({ ok: true })
+  })
+
+  it('node shebang 与契约注释共存通过', () => {
+    const code = ['#!/usr/bin/env node', '// @desc d', '// @why w'].join(NL)
+    expect(scanScriptHead(code).ok).toBe(true)
+  })
+
+  it('缺 @desc → MISSING_DESC', () => {
+    const code = ['// @why w', 'x()'].join(NL)
+    expect(scanScriptHead(code)).toEqual({ ok: false, reason: 'MISSING_DESC' })
+  })
+
+  it('缺 @why → MISSING_WHY', () => {
+    const code = ['// @desc d', 'x()'].join(NL)
+    expect(scanScriptHead(code)).toEqual({ ok: false, reason: 'MISSING_WHY' })
+  })
+
+  it('普通编号注释不算 desc（subagent 探针实况）', () => {
+    const code = ['// 1. 提交', 'const { task } = await submit()'].join(NL)
+    expect(scanScriptHead(code).reason).toBe('MISSING_DESC')
+  })
+
+  it('@desc 出现在行尾（非行首注释位）不算', () => {
+    const code = ['const x = 1 // @desc d', '// @why w'].join(NL)
+    expect(scanScriptHead(code).reason).toBe('MISSING_DESC')
+  })
+
+  it('bash shebang → ILLEGAL_SHEBANG', () => {
+    const code = ['#!/bin/sh', 'ls'].join(NL)
+    expect(scanScriptHead(code).reason).toContain('ILLEGAL_SHEBANG')
   })
 })

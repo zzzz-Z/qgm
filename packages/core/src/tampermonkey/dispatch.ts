@@ -192,12 +192,20 @@ function classifyAndPost(): void {
       const turn = readTurnFromRoot(replyRoot)
       // [tm-diag-v1] 诊断读判据；`if (turn && emitTurn(turn)) return` 这一行是
       //   turn-emit-parity 守卫的字面量判据（emitTurn 返回值必须中断分流），**不要改写它**。
-      _tmDiag(turn ? 'turn-read' : 'turn-miss', {
-        turnId: turn ? turn.turnId : undefined,
-        blocks: turn ? turn.blocks.length : 0,
-        errors: turn ? (turn.errors || []).length : 0,
-        replyRootFound: !!replyRoot,
-      })
+      // [turn-read-diag-gate-v1] 诊断帧必须带正文签名门：读判据只依赖正文 ⇒ 同一正文必然同一判据，
+      //   而 800ms 空转轮询在正文静止时反复唤醒本函数，不带门就是每 800ms 重发一条一模一样的
+      //   turn-miss（用户实测 2026-10-20「一直推送停不下来」）——与 turn-invalid 当年踩的坑同病
+      //   （state.ts _invalidReportedSig 的教训）。正文一变门即重开，状态迁移仍逐次可见。
+      const readSig = bodySignature()
+      if (readSig !== (globalThis as any).__aiTurnReadDiagSig) {
+        ;(globalThis as any).__aiTurnReadDiagSig = readSig
+        _tmDiag(turn ? 'turn-read' : 'turn-miss', {
+          turnId: turn ? turn.turnId : undefined,
+          blocks: turn ? turn.blocks.length : 0,
+          errors: turn ? (turn.errors || []).length : 0,
+          replyRootFound: !!replyRoot,
+        })
+      }
       if (turn && emitTurn(turn)) return
     }
 

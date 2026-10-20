@@ -121,9 +121,10 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
     appendClaimMismatch(p, r)
     appendRawOutputs(p, r)
     // [board-mirror-v1] 看板状态常驻上下文：把未完成任务（带 id）+ start/complete/fail 规则递给 AI
-    // [CONSTRAINT] 抓取失败 / 无未完成任务 ⇒ 空串，不追加任何行（与 lessons 同纪律）
+    // [board-register-hint-v1] 看板为空也提醒登记（2026-10-20 实证：不提醒 AI 就不调 tasks API）
+    // [CONSTRAINT] 抓取失败 ⇒ 空串，不追加任何行（与 lessons 同纪律）
     try {
-      const board = await fetchBoardMirror()
+      const board = await fetchBoardMirror(undefined, { remindRegister: true })
       if (board) { p.push(''); p.push(board) }
     } catch { /* 看板不可用时不影响结果回传 */ }
     p.push('')

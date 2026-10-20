@@ -5,6 +5,7 @@ import { test } from 'vitest'
 import assert from 'node:assert'
 import fs from 'node:fs'
 import {
+  BOARD_REGISTER_HINT,
   BOARD_STALE_ROUNDS,
   boardStaleStreak,
   fetchBoardMirror,
@@ -98,12 +99,45 @@ test('⑤ 反例：抓取失败 / sid 为空 ⇒ 空串，绝不阻断回传', a
   assert.equal(await fetchBoardMirror(''), '', 'sid 为空直接返回空串')
 })
 
-test('[P3d] ⑥ 注入点锚点：面板回传真的调用了看板注入', () => {
+test('[P3d] ⑥ 注入点锚点：面板回传真的调用了看板注入（含空看板登记提醒）', () => {
   // [loop-consolidation-P3d] 原「循环回传」分支断言随 auto-loop/loop-lessons-fill.ts 删除；
   //   留存路径的面板回传注入不变。
   const panel = read('packages/client/components/script/script-panel-actions.ts')
-  assert.ok(panel.includes('await fetchBoardMirror()'), '面板回传必须注入看板块')
+  assert.ok(panel.includes('await fetchBoardMirror('), '面板回传必须注入看板块')
+  assert.ok(panel.includes('remindRegister: true'), '面板回传必须开启空看板登记提醒（board-register-hint-v1）')
   assert.ok(panel.includes('from \'../../composables/ai/board-mirror\''), '面板回传须显式 import')
+})
+
+// [board-register-hint-v1] 看板空 + 本轮在跑脚本 ⇒ 注入登记提醒（2026-10-20 plus-ui 实证的根因修复）
+test('⑧ 登记提醒：抓到空看板且 remindRegister ⇒ 返回提示；默认关、抓取失败不提示', async () => {
+  resetBoardMirror()
+  const g = globalThis as unknown as { fetch?: unknown }
+  const orig = g.fetch
+  g.fetch = (async () => ({ ok: true, json: async () => ({ items: [] }) })) as unknown as typeof fetch
+  try {
+    const hint = await fetchBoardMirror('sid-hint', { remindRegister: true })
+    assert.ok(hint.includes('任务看板 · 空'), '空看板必须返回登记提醒')
+    assert.ok(hint.includes('__AI__.tasks.push('), '提醒必须教 push 登记')
+    assert.ok(hint.includes('__AI__.tasks.start([id])'), '提醒必须教 start')
+    assert.ok(hint.includes('__AI__.tasks.complete([id])'), '提醒必须教 complete')
+    assert.ok(hint.includes('__AI__.tasks.fail([id])'), '提醒必须教 fail 收尾')
+    assert.equal(hint, BOARD_REGISTER_HINT, '提示文本必须与导出常量逐字一致')
+    // 全部做完（items 有终态、无未完成）同样提醒登记下一批
+    const done = await fetchBoardMirror('sid-hint', { remindRegister: true })
+    assert.ok(done.includes('任务看板 · 空'), '全终态看板同样提醒（登记下一批）')
+    // 默认不开 ⇒ 维持空串（④ 的行为不变）
+    g.fetch = (async () => ({ ok: true, json: async () => ({ items: [] }) })) as unknown as typeof fetch
+    assert.equal(await fetchBoardMirror('sid-hint'), '', '不开 remindRegister 保持空串')
+    // 抓取失败 ⇒ 即使开了提醒也静默（绝不阻断回传）
+    g.fetch = (async () => { throw new Error('network down') }) as unknown as typeof fetch
+    assert.equal(await fetchBoardMirror('sid-hint', { remindRegister: true }), '', '网络失败不得提示')
+    // 非 ok 响应 ⇒ 同样静默
+    g.fetch = (async () => ({ ok: false, status: 500 })) as unknown as typeof fetch
+    assert.equal(await fetchBoardMirror('sid-hint', { remindRegister: true }), '', 'HTTP 非 2xx 不得提示')
+  } finally {
+    g.fetch = orig
+    resetBoardMirror()
+  }
 })
 
 test('⑦ 教学锚点：SYSTEM.md 必须写明 id 直传与失败必报', () => {

@@ -128,10 +128,14 @@ runHono.post('/run', async (c) => {
       //   采集侧白名单保留 bash（供自动循环 /exec），但 /run 只执行 node 脚本 ——
       //   不说明出路时，用户只会看到一串裸 reason，误以为「系统坏了」。
       // [CONSTRAINT] reason 在 HeadResult 里是可选的（非判别联合），取本地量避免 TS18048
+      // [head-desc-hint-v1] MISSING_DESC/MISSING_WHY 与 top-await-hint-v1 同理：裸 reason 不给出路时，
+      //   AI 只会换个写法再撞同一堵墙（2026-10-20 实测 subagent 探针连撞多次，head 全无 @desc/@why）。
       const reason = head.reason || '未知的脚本头契约违规'
       const hint = reason.startsWith('ILLEGAL_SHEBANG')
         ? '（/run 仅执行 node 脚本；bash 请改用自动循环或 `!` 命令行通道）'
-        : ''
+        : reason === 'MISSING_DESC' || reason === 'MISSING_WHY'
+          ? '（脚本头需带契约注释，两行缺一不可：`// @desc 一句话描述本脚本做什么` 和 `// @why 为什么此刻要跑`；普通编号注释如 `// 1. 提交` 不算）'
+          : ''
       const v = logReject(script, 'head-contract', { reason })
       return c.json({
         error: `脚本头契约违规：${reason}${hint}`,
