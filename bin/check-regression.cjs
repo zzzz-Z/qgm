@@ -127,6 +127,12 @@ if (cmd === 'check') {
   }
   console.log('  baseline sha:', base.sha, '@', new Date(base.ts).toISOString())
   console.log('  baseline tsc.errors:', base.tsc.errors, ' test.fails:', base.test.fails)
+  // [baseline-staleness-hint-v1] 基线落后过久时差值闸门会长期假红（既有漂移被算成新增），
+  //   失去分辨力。此处只提示不改退出码——重建基线属宿主侧决策。
+  try {
+    const ahead = Number(execFileSync('git', ['rev-list', '--count', `${base.sha}..HEAD`], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim())
+    if (Number.isFinite(ahead) && ahead > 50) console.log(`  ⚠ 基线已落后 ${ahead} 个提交，差值可能含既有漂移；建议宿主侧复核后重建`)
+  } catch { /* swallow: 非 git 环境不影响闸门 */ }
   console.log('')
   console.log('  跑 pnpm typecheck...')
   const t = runTypecheck()

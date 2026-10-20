@@ -252,7 +252,10 @@ export function sendRotateToImpl(sid: string, payload: RotatePayloadImpl): boole
   try {
     win.postMessage({ type: 'ai-runner:rotate', ...payload }, origin)
     return true
-  } catch { return false }
+  } catch (e) {
+    log.warn('[sendRotateToImpl] postMessage threw', { sid, detail: String((e as Error)?.message || e) })
+    return false
+  }
 }
 /** 向当前激活槽位发 rotate */
 export function sendRotateImpl(payload: RotatePayloadImpl, sid?: string): boolean {
@@ -274,7 +277,10 @@ export function sendNewSessionToImpl(sid: string, payload: NewSessionPayloadImpl
   try {
     win.postMessage({ type: 'ai-runner:new-session', ...payload }, origin)
     return true
-  } catch { return false }
+  } catch (e) {
+    log.warn('[sendNewSessionToImpl] postMessage threw', { sid, detail: String((e as Error)?.message || e) })
+    return false
+  }
 }
 /** 向当前激活槽位发 new-session */
 export function sendNewSessionImpl(payload: NewSessionPayloadImpl, sid?: string): boolean {
