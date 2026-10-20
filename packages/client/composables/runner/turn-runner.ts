@@ -222,7 +222,7 @@ export function formatTurnResults(turnId: number, results: TurnRunOutcome[]): st
     return `${summary}\n${fence}\n${body}\n${fence}`
   })
   return `${[head, ...lines].join('\n')
-  }\n\n⚠ 下一次回复必须是单个 json 围栏包住的 turn 信封（SYSTEM.md §1）：围栏外零字符，禁止裸文本/无围栏代码。`
+  }\n\n⚠ 下一次回复必须是单个 json 围栏包住的 turn 信封（SYSTEM.md §1）：围栏外零字符，禁止裸文本/无围栏代码。\n\n⚠ [api-recheck-v1] 调用不熟悉的 __AI__ API 前先 __AI__.grep('function xxx') 查签名；勿凭记忆写。`
 }
 
 /** 创建执行器实例 */

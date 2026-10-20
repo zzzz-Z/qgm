@@ -234,6 +234,33 @@
 
 > **子进程读真盘（overlay-blind-v1）**：`shell`/`exec` 失败时结果带 `hint` 字段指路 —— **先 `await __AI__.flush()` 落盘再验**，或直接用进程内校验（`syntaxCheck` / `lint`）。
 
+### §3.3 会话启动 API 摘要（必读）
+
+> **本段在整个会话中只出现一次**（随 SYSTEM.md 首问注入）。它回答「有哪些 API、哪个容易用错」，**不替代**完整签名——不确定时先查：
+> `__AI__.grep('function xxx')` 或 `readText('packages/core/src/helpers/<file>.cjs')`。
+> **禁止凭记忆写签名**：`syntaxCheck` 返对象不是布尔、`shell` 没有 `exit` 字段、`readText` 是同步没有 `.catch`、`patchFile` 是位置参数——每一条都曾导致返工。
+
+**基础**：`readText(p)` / `writeText(p,s)` / `readJSON(p)` / `exists(p)` / `readFiles(glob)` / `grep(pattern, opts?)` / `walk(dir, {ext?,skip?})` / `dump(file, from, to)` / `log` / `ok` / `warn` / `err` / `skip` / `exit(code, msg?)`
+
+**易错项（务必记住）**：
+
+- `patchFile(file, anchor, replacement, opts?)` —— **位置参数**；锚点失配**抛异常**，不返 `{ok:false}`
+- `replaceInFile(p, {oldString, newString})` —— **对象参数**；与 `patchFile` 形态相反，勿混用
+- `tryReadFile(p)` → `{ok, content?}`；`readState()` → 对象 —— 两者都**不是字符串**，勿 `.slice`
+- `readText(p)` —— **同步**返回字符串，**没有** `.catch`/`.then`
+- `syntaxCheck(code, filename)` → `{ok}` —— **对象不是布尔**；仅 CJS/JS，TS/ESM 返 `UNSUPPORTED_LANG`（能力边界非语法错）
+- `shell(cmd, opts?)` —— 返回 `{ok, stdout, stderr, code}`，**无 `exit` 字段**；字符串形态不做 shell 解析（元字符直接拒）
+- `flush()` —— **仅 overlay 沙箱内有效**；`writeText` 只进 overlay，子进程读真盘前须先 flush
+- 路径一律用 `getProjectRoot()` 拼，**禁止硬编码** `/Users/...` 绝对路径
+
+**高频新 API**（不在旧记忆里，需主动了解）：
+
+- `okJson(obj, {maxBytes?})` —— 结构化输出，自动处理循环引用与超长截断；勿手写 `ok(JSON.stringify(x))`
+- `probe(port, {path?,timeoutMs?})` —— 进程内 fetch 探活；**勿用 curl**（沙箱内会返 `000` 被误判成服务挂了）
+- `shellWait(id, {timeoutMs?})` —— 等后台任务到结束；勿手写轮询 sleep 循环
+- `testRun(files?, {timeoutMs?})` → `{passed, failed, failedFiles[]}` —— 勿从 stdout 截取文字判断
+- `git.status()` → `{branch, modified[], untracked[], staged[], clean}`；`git.recent(n)` → 提交列表 —— 勿手写 `git status --porcelain` 解析
+
 ## §4 架构红线（HCLC）
 
 - 承重：体积棘轮与 SSOT 同值守卫（ssot-parity）+ 单文件依赖上限守卫（hclc-guard）；实现文件见项目索引

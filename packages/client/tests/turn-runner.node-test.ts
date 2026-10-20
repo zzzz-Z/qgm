@@ -517,6 +517,9 @@ test('[turn-out-fence-v1] 围栏按内容最长连续反引号自适应加长', 
   assert.match(text, /exit=0\n````\n/, '开围栏必须是 4 反引号（内容含 3 连反引号时固定 3 会被闭合）')
   assert.match(text, /\nafter\n````/, '闭围栏须与开围栏同长')
   assert.match(text, /下一次回复必须是单个 json 围栏包住的 turn 信封/, '回灌末尾须带 json 围栏提醒（防止 AI 输出错格式触发循环暂停）')
+  // [api-recheck-v1] 回灌尾部须提醒「不确定的 API 先查」——跨会话无记忆 + 长对话遗忘，
+  //   这句是唯一每轮都在的 API 使用约束。
+  assert.match(text, /api-recheck-v1/, '回灌末尾须带「不确定 API 先查」提示')
 })
 
 test('turnRunKey：`turn|id` 与 runKey 同形', () => {
