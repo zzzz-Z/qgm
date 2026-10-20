@@ -21,6 +21,7 @@ const _util = require('./util.cjs')
 /** [helpers-shell-v1] 执行族（shell / exec / 后台任务）。 */
 const { createShellApi } = require('./shell.cjs')
 const probeApi = require('./probe.cjs')
+const gitApi = require('./git.cjs')
 
 /** [helpers-search-v1] 检索与读缓存（walk / grep / template / cache）。 */
 const { createSearchApi } = require('./search.cjs')
@@ -174,6 +175,12 @@ const __AI__ = {
   probe(port, opts) { return probeApi.probe(port, opts) },
   shellWait(id, opts) { return probeApi.shellWait(id, opts, shellApi.shellStatus) },
   testRun(files, opts) { return probeApi.testRun(files, opts, (c, o) => shellApi.shell(c, o)) },
+
+  /** git 族（helpers/git.cjs）：结构化仓库状态与提交历史。 */
+  git: {
+    status: opts => gitApi.status(opts, (c, o) => shellApi.shell(c, o)),
+    recent: n => gitApi.recent(n, (c, o) => shellApi.shell(c, o)),
+  },
 
   /** search 族（helpers/search.cjs）：检索 / 模板解析 / 读缓存。 */
   walk(dir, opts) { return searchApi.walk(dir, opts) },

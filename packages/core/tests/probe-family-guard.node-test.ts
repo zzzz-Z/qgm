@@ -3,10 +3,15 @@
 //   新原语若只写进 helpers 而不接进 index.cjs 或注入块，AI 根本看不到 = 白做。
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { describe, it } from 'vitest'
 
 const indexSrc = readFileSync(new URL('../src/helpers/index.cjs', import.meta.url), 'utf8')
 const guardSrc = readFileSync(new URL('../src/post-run/ai-guard.ts', import.meta.url), 'utf8')
+// [cjs-require-v1] .cjs 无类型声明（TS7016）；用 createRequire 加载并显式标注类型。
+type TestRunFn = (files?: string[], opts?: { timeoutMs?: number }, runFn?: (c: string[], o?: object) => Promise<{ ok: boolean, stdout?: string, stderr?: string }>) => Promise<{ ok: boolean, passed: number, failed: number, failedFiles: string[], rawTail: string }>
+const probeMod = createRequire(import.meta.url)('../src/helpers/probe.cjs') as { testRun: TestRunFn }
+const loadProbe = (): { testRun: TestRunFn } => probeMod
 
 const APIS = ['probe', 'shellWait', 'testRun']
 
@@ -35,7 +40,7 @@ describe('probe 族三原语', () => {
 
 describe('testRun 输出解析', () => {
   it('剥 ANSI 后能读到 passed（vitest 输出带颜色码）', async () => {
-    const { testRun } = await import('../src/helpers/probe.cjs')
+    const { testRun } = loadProbe()
     const fake = '\u001B[2m Tests \u001B[22m \u001B[1m\u001B[32m7 passed\u001B[39m'
     const r = await testRun(['x'], {}, async () => ({ ok: true, stdout: fake, stderr: '' }))
     assert.equal(r.passed, 7)
@@ -43,7 +48,7 @@ describe('testRun 输出解析', () => {
   })
 
   it('失败数与被通过数都能解析', async () => {
-    const { testRun } = await import('../src/helpers/probe.cjs')
+    const { testRun } = loadProbe()
     const fake = 'Tests 2 failed | 5 passed'
     const r = await testRun(['x'], {}, async () => ({ ok: false, stdout: fake, stderr: '' }))
     assert.equal(r.failed, 2)
@@ -51,9 +56,20 @@ describe('testRun 输出解析', () => {
   })
 
   it('失败文件路径被提取', async () => {
-    const { testRun } = await import('../src/helpers/probe.cjs')
+    const { testRun } = loadProbe()
     const fake = 'FAIL packages/a.test.ts\nFAIL packages/b.test.ts\nTests 2 failed | 0 passed'
     const r = await testRun(['x'], {}, async () => ({ ok: false, stdout: fake, stderr: '' }))
     assert.deepEqual(r.failedFiles, ['packages/a.test.ts', 'packages/b.test.ts'])
+  })
+})
+
+describe('git 族', () => {
+  it('git.status / git.recent 已在门面接线', () => {
+    assert.ok(indexSrc.includes('gitApi.status'), 'git.status 未接线')
+    assert.ok(indexSrc.includes('gitApi.recent'), 'git.recent 未接线')
+  })
+
+  it('git 族已进入注入教学层', () => {
+    assert.ok(guardSrc.includes('git.status'), 'git.status 未进注入层')
   })
 })
