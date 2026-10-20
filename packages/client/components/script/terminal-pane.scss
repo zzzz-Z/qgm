@@ -51,8 +51,9 @@
 /* [panel-dock-right-v1] 靠右固定：居中悬浮会遮挡消息流中心；右上角常驻更贴近工具面板语义 */
 .panel-host {
   position: absolute;
-  /* [terminal-shell-ui-v1] 顶部/右侧边距随外壳收紧同步下调，避免与首条消息压叠。 */
-  top: -40px;
+  /* [board-top-clip-v1] 原 top:-40px 让浮层越过 .flow-timeline（overflow:hidden）上沿，
+     提示条首行被裁掉。改回容器内 8px，浮层完整可见。 */
+  top: 8px;
   right: 8px;
   z-index: 9990;
   width: fit-content;
