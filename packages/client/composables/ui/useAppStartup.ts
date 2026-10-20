@@ -8,6 +8,7 @@
 // [CHANGE-IMPACT] App.vue 中 probeWorkspace / subscribeHeadlessReply /
 //                 reconnectAfterRefresh + onUnmounted 下沉到本模块。
 
+/** [turn-block-idempotent-v1] 时间线块帧幂等账本：sid|blockId → 已渲染。实时与重放共用。 */
 import type { Ref } from 'vue'
 import { nextTick, onUnmounted } from 'vue'
 import { promiseTimeout, useStorage } from '@vueuse/core'
@@ -29,6 +30,9 @@ import { useAiSite } from '../ai/useAiSite'
 import { log } from '../../utils/log'
 import { TOAST_LONG, TOAST_MEDIUM } from '../../utils/toast-durations'
 import { runHook } from '../ai/loop-hooks.js'
+
+const seenBlockKeys = new Set<string>()
+const BLOCK_KEY_MAX = 2000
 
 /** [post-done-gate-v3] 已触发终轮 hook 的 turnId（油猴通道），防重连重放重复提交 */
 const _turnEndHookFired = new Set<number>()
@@ -284,8 +288,21 @@ export function useAppStartup(deps: AppStartupDeps) {
       // [WHY 不复用 onReply] 块没有 kind 语义、也不参与 auto-loop；混进 reply 会让下游多一个必须特判的 shape。
       // [CONSTRAINT] 必须走 dispatchInbound 而不是直接 onSessionIdMessage：归组动作属于「分发器入参处」，
       //   放在这里（某一条生产通道内部）就会漏掉油猴的 window.postMessage 通道。
-      _offHeadlessBlock = transport.onBlock?.((block: unknown, sid: string) => {
-        const fake = { data: { type: 'ai-runner:block', block, sessionId: sid, site: 'headless' }, origin: 'ws://headless', source: null } as unknown as MessageEvent
+      // [turn-block-idempotent-v1] 时间线幂等：重放帧与实时帧共用同一账本，
+      //   否则断线重连时 replay-buffer 会把 ai:block 全量重放，同一条 say 被追加 N 次（刷屏）。
+      _offHeadlessBlock = transport.onBlock?.((block: unknown, sid: string, replayed?: boolean) => {
+        const b = block as { blockId?: string, id?: string, seq?: number }
+        const bid = (typeof b.blockId === 'string' && b.blockId) || (typeof b.id === 'string' && b.id) || (typeof b.seq === 'number' ? `seq:${b.seq}` : '')
+        const key = `${sid}|${bid}`
+        if (bid) {
+          if (seenBlockKeys.has(key)) return
+          seenBlockKeys.add(key)
+          if (seenBlockKeys.size > BLOCK_KEY_MAX) {
+            const oldest = seenBlockKeys.values().next().value
+            if (typeof oldest === 'string') seenBlockKeys.delete(oldest)
+          }
+        }
+        const fake = { data: { type: 'ai-runner:block', block, sessionId: sid, site: 'headless', replayed: replayed === true }, origin: 'ws://headless', source: null } as unknown as MessageEvent
         try { dispatchInbound(fake) } catch (error) { log.error('[headless-block] 处理失败:', error) }
       }) ?? null
       // [turn-collect-v1] 结束帧同桥：它是「本 turn 收口」的唯一信号，累积器据此提交执行。
