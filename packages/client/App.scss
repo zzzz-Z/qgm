@@ -68,8 +68,8 @@
 .main {
   flex: 1;
   min-height: 0;
-
   padding: 12px 14px;
+  padding-right: 0;
   overflow: hidden;
 }
 
@@ -164,7 +164,7 @@
   min-height: 0;
   display: flex;
   overflow: hidden;
-  border-radius: 15px;
+  border-radius: 0;
 }
 .layout-main {
   flex: 1;
@@ -608,7 +608,7 @@
 }
 
 .main {
-  padding: 8px 10px !important;
+  padding: 0 !important;
 }
 
 /* [userscript-update-v1] 有新版本时的角标：小圆点，绝对定位在按钮右上角 */
