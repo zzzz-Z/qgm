@@ -5,6 +5,12 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { buildWrapperCode } from '../../../packages/core/src/post-run/run-script-wrapper.js'
 
+// [return-echo-guard-v1] 行为级判据：真实执行 wrapper 产物，而非只断言源码含某字符串。
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 // AIRUNNER-BATCH11-4-WRAPPER-TEST
 const SAMPLE = '/tmp/x/script.cjs'
 
@@ -47,7 +53,8 @@ test('返回值包含 [script error] 标签', () => {
 test('返回值含 try / catch 结构', () => {
   const c = buildWrapperCode(SAMPLE)
   assert.ok(c.includes('try {'))
-  assert.ok(c.includes('catch(e)'))
+  // [return-echo-v1] catch 变量名改为 __e（避开与脚本内 e 的潜在冲突），断言放宽为匹配任意 catch 变量
+  assert.ok(/catch\s*\(\s*\w+\s*\)/.test(c))
 })
 
 test('相同入参产生相同输出（确定性）', () => {
@@ -62,4 +69,34 @@ test('返回值为字符串（非 undefined）', () => {
   const c = buildWrapperCode(SAMPLE)
   assert.equal(typeof c, 'string')
   assert.ok(c.length > 0)
+})
+
+function runWrapped(scriptBody: string): string {
+  const dir = mkdtempSync(join(tmpdir(), 'wrap-'))
+  const scriptPath = join(dir, 'probe.cjs')
+  writeFileSync(scriptPath, scriptBody)
+  const code = buildWrapperCode(scriptPath)
+  // [return-echo-guard-v1] 抛错走 stderr，观察面必须合并两路，否则断言假红
+  try {
+    return execFileSync(process.execPath, ['-e', code], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (e) {
+    const err = e as { stdout?: string, stderr?: string }
+    return String(err.stdout || '') + String(err.stderr || '')
+  }
+}
+
+test('无任何输出时，顶层 return 的字符串被写入 stdout', () => {
+  const out = runWrapped('return \'RETURN_ECHO_OK\'\n')
+  assert.ok(out.includes('RETURN_ECHO_OK'), `return 值必须被回灌，实际: ${out}`)
+})
+
+test('已有输出时不重复打印 return 值', () => {
+  const out = runWrapped('console.log(\'REAL\')\nreturn \'SHOULD_NOT_PRINT\'\n')
+  assert.ok(out.includes('REAL'))
+  assert.ok(!out.includes('SHOULD_NOT_PRINT'), `已输出时不得重复，实际: ${out}`)
+})
+
+test('脚本抛错时报错可见且不吞', () => {
+  const out = runWrapped('throw new Error(\'BOOM\')\n', { captureStderr: true })
+  assert.ok(out.includes('BOOM'), `异常必须可见，实际: ${out}`)
 })
