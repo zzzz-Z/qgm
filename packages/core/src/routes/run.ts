@@ -75,6 +75,7 @@ interface RunBody {
 export const runHono = new Hono()
 
 runHono.post('/run', async (c) => {
+  try { fs.appendFileSync(path.join(getRoot(), '.ai-runner/logs/run-trace.jsonl'), `${JSON.stringify({ ts: Date.now(), stage: 'enter' })}\n`) } catch {}
   const startedAt = Date.now()
   const pipeline = createPipeline()
   const body = (await c.req.json().catch(() => null)) as RunBody | null
@@ -226,6 +227,7 @@ runHono.post('/run', async (c) => {
           markRunning(pipeline, 'EXECUTE')
           // [script-timeout-relax-v1] 全量测试/构建耗时 >60s（selfcheck-l2 约 80s），
           //   原 60s 硬编码会 SIGTERM 腰斩长任务 → 假「超时失败」。放宽到 180s 留余量。
+          try { fs.appendFileSync(path.join(getRoot(), '.ai-runner/logs/run-trace.jsonl'), `${JSON.stringify({ ts: Date.now(), stage: 'exec-start' })}\n`) } catch {}
           const result = await runScript(scriptPath, SCRIPT_TIMEOUT_MS, ac.signal, overlayPath, toolLogPath, (s: string, data: string) => {
             writeFrame({ type: 'chunk', stream: s, data })
           }, sandbox, sessionId)
