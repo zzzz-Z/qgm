@@ -1283,7 +1283,7 @@ function bumpConvGenIfNewConversation(turnId, sid) {
     if (typeof turnId !== 'number')
         return;
     let bumped = false;
-    // 主判据：会话标识变化（与 turnId 编号方式无关）
+    // 主判据：会话标识变化（与 turnId 编号方式无关，可真正区分「换了对话」）
     if (sid) {
         const lastSid = loadConvLastSid();
         if (lastSid && lastSid !== sid) {
@@ -1295,7 +1295,7 @@ function bumpConvGenIfNewConversation(turnId, sid) {
         }
         catch { }
     }
-    // 兜底：拿不到 sid 时退回 turnId 回退判据
+    // 兜底：拿不到 sid 时退回 turnId 回退判据（历史行为）
     const maxTurn = loadConvMaxTurn();
     if (!bumped && maxTurn > 0 && turnId < maxTurn) {
         convGen += 1;
