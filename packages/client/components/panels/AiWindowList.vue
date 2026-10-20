@@ -241,7 +241,12 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
       >
         <span class="awl-dot" aria-hidden="true" />
         <div class="awl-meta">
-          <span class="awl-label">{{ w.label }}</span>
+          <span class="awl-title-row">
+            <svg class="awl-folder" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            </svg>
+            <span class="awl-label">{{ w.label }}</span>
+          </span>
         </div>
         <button
           v-tooltip="'在该工作区开新会话'"
@@ -512,6 +517,21 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 /* 非激活项降色阶：凸显激活项 */
 .awl-item:not(.active) .awl-label {
   color: var(--text-2);
+}
+/* [workspace-folder-icon-v1] 工作区名称前的文件夹图标：尺寸与状态点协调，颜色随标题走。 */
+.awl-title-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.awl-folder {
+  flex-shrink: 0;
+  color: var(--text-3);
+  transition: color 0.14s ease;
+}
+.awl-item.active .awl-folder {
+  color: var(--primary, #58a6ff);
 }
 /* [workspace-list-ui-v3] 激活项标题升为主色，与左侧激活条呼应。 */
 .awl-item.active .awl-label {
