@@ -130,6 +130,7 @@ const __AI__ = {
   /** output 族（helpers/output.cjs）：语义输出 / 退出协议 / 断言。 */
   log(...args) { return outputApi.log(...args) },
   ok(msg) { return outputApi.ok(msg) },
+  okJson(obj, opts) { return outputApi.okJson(obj, opts) },
   skip(msg) { return outputApi.skip(msg) },
   warn(msg) { return outputApi.warn(msg) },
   err(msg) { return outputApi.err(msg) },

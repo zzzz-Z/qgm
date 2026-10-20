@@ -119,6 +119,37 @@ function createOutputApi(deps) {
     exitNeedInput,
     exitNeedFiles,
     ok(msg) { console.log(_c.green('✓'), msg) },
+    /**
+     * [ok-json-v1] 结构化输出：等价 `ok(JSON.stringify(obj))`，但处理循环引用与超长截断。
+     * [WHY] 全量日志（16,348 脚本）中 1714 次（10.48%）手写 `ok(JSON.stringify(...))`；
+     *   拼接写法遇循环引用直接抛错、遇大对象把输出预算吃光（本会话多次被截断）。
+     * @param {unknown} obj - 任意可序列化值
+     * @param {{maxBytes?: number}} [opts] - maxBytes 默认 6000，超出截断并标注
+     * @returns {void}
+     */
+    okJson(obj, opts = {}) {
+      const maxBytes = opts.maxBytes || 6000
+      const seen = new WeakSet()
+      let text
+      try {
+        text = JSON.stringify(obj, (k, v) => {
+          if (v && typeof v === 'object') {
+            if (seen.has(v)) return '[circular]'
+            seen.add(v)
+          }
+          return v
+        }, 2)
+      } catch (e) {
+        text = `[unserializable] ${String((e && e.message) || e)}`
+      }
+      if (text === undefined) text = 'undefined'
+      const bytes = Buffer.byteLength(text, 'utf8')
+      if (bytes > maxBytes) {
+        const cut = text.slice(0, maxBytes)
+        text = `${cut}\n…[truncated: ${bytes} bytes, limit ${maxBytes}]`
+      }
+      console.log(_c.green('✓'), text)
+    },
     skip(msg) { console.log(_c.yellow('!'), msg) },
     warn(msg) { console.log(_c.yellow('⚠'), msg) },
     err(msg) { console.error(_c.red('✗'), msg) },

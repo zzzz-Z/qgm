@@ -61,6 +61,7 @@ const AI_JSDOC = [
   ' * 基础：readText(p) / writeText(p,s) / readJSON(p) / exists(p) / readFiles(glob)',
   ' *       grep(pattern, opts?) / walk(dir, {ext?,skip?}) / dump(file, from, to)',
   ' *       log / ok / warn / err / skip / exit(code, msg?)',
+  ' *       okJson(obj, {maxBytes?}) ← 结构化输出；勿手写 ok(JSON.stringify(x))（循环引用会抛错）',
   ' *       shell(cmd, opts?) ← 异步须 await；字符串不做 shell 解析',
   ' *       shellStatus(id) / shellWait(id, {timeoutMs?}) ← 后者内部轮询到结束，勿手写 sleep 循环',
   ' *       probe(port, {path?,timeoutMs?}) ← 进程内 fetch 探活，勿用 curl（沙箱内会返 000）',
