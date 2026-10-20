@@ -181,7 +181,7 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
       aria-label="新建工作区"
       @click="onNewWorkspaceDirect"
     >
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>
       <span class="awl-new-workspace-label">新建工作区</span>
     </button>
     <!-- [trae-shell-v1] 原 awl-head 已删：折叠按钮上移到顶部 awl-top-spacer 内 -->
@@ -338,33 +338,23 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 .awl-new-workspace {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  margin: 0 8px 12px;
-  padding: 8px 10px;
-  /* [left-rail-ui-v4] 虚描边升级为柔和实底：主入口要能被一眼看见，虚线在高密度左栏里过弱 */
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-  /* [workspace-list-ui-v3] 实心主色块改为描边态：左栏主体应是工作区列表，
-     按钮只作辅助入口，悬停才升为主色实心。 */
-  border: 1px dashed color-mix(in srgb, var(--primary) 45%, transparent);
-  border-radius: 8px;
+  justify-content: flex-end;
+  gap: 5px;
+  margin: 0 8px 10px;
+  padding: 4px 2px;
+  /* [left-rail-ui-v5] 通栏描边按钮 → 右对齐无边框文字入口：左栏主体是列表，按钮只作轻量入口 */
+  border: 0;
   background: transparent;
-  color: var(--primary);
+  color: var(--text-3);
   font-size: 12.5px;
   font-weight: 500;
   letter-spacing: 0.2px;
   cursor: pointer;
-  transition:
-    background 0.14s ease,
-    border-color 0.14s ease,
-    color 0.14s ease;
+  transition: color 0.14s ease;
   flex-shrink: 0;
 }
 .awl-new-workspace:hover {
-  border-color: var(--primary);
-  border-style: solid;
-  background: var(--primary);
-  color: #fff;
+  color: var(--primary);
 }
 .awl-new-workspace:focus-visible {
   outline: 2px solid var(--primary);
