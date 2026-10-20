@@ -71,6 +71,40 @@ function evictOldest(set: Set<string>): void {
 function turnBlockKey(sid: string, turnId: number, blockId: string): string {
   return `${sid}|${turnId}|${blockId}`
 }
+/** [conv-gen-isolation-v1] 会话代际：同 sid 下切新对话时 turnId 从 1 重编号，
+ *  旧去重键 sid|turnId|blockId 会碰撞吞块（实测整轮无响应，须重开标签页才恢复）。
+ *  [WHY] 检测 turnId 回退即轮转代际；gen 持久化，跨刷新去重不受影响。 */
+const CONV_GEN_STORE = 'aiRunner.convGen.v1'
+const CONV_MAXTURN_STORE = 'aiRunner.convMaxTurn.v1'
+function loadConvGen(): number {
+  try {
+    if (typeof sessionStorage === 'undefined') return 0
+    return Number(sessionStorage.getItem(CONV_GEN_STORE) || 0) || 0
+  }
+  catch { return 0 }
+}
+function loadConvMaxTurn(): number {
+  try {
+    if (typeof sessionStorage === 'undefined') return 0
+    return Number(sessionStorage.getItem(CONV_MAXTURN_STORE) || 0) || 0
+  }
+  catch { return 0 }
+}
+let convGen = loadConvGen()
+function bumpConvGenIfNewConversation(turnId: number): void {
+  if (typeof turnId !== 'number') return
+  const maxTurn = loadConvMaxTurn()
+  if (maxTurn > 0 && turnId < maxTurn) {
+    convGen += 1
+    try { sessionStorage.setItem(CONV_GEN_STORE, String(convGen)) }
+    catch {}
+  }
+  if (turnId > maxTurn) {
+    try { sessionStorage.setItem(CONV_MAXTURN_STORE, String(turnId)) }
+    catch {}
+  }
+}
+
 
 /**
  * 本轮结束后循环等什么。优先级 **script > ask > none**（与核心 deriveAwaiting 同构）。
@@ -255,11 +289,12 @@ function emitTurn(turn: any): boolean {
   const frames = turnBlocksToFrames(turn.turnId, turn.blocks)
   if (!frames.blocks.length) return false
   const sid = extractSidFromHash()
+  bumpConvGenIfNewConversation(turn.turnId)
   let sent = 0
   let dirty = false
   for (let i = 0; i < frames.blocks.length; i++) {
     const block = frames.blocks[i]
-    const key = turnBlockKey(sid, block.turnId, block.blockId)
+    const key = turnBlockKey(`${sid}|${convGen}`, block.turnId, block.blockId)
     if (seenTurnBlocks.has(key)) continue
     seenTurnBlocks.add(key)
     dirty = true
@@ -272,7 +307,7 @@ function emitTurn(turn: any): boolean {
     })
     sent++
   }
-  const endKey = `${sid}|${turn.turnId}`
+  const endKey = `${sid}|${convGen}|${turn.turnId}`
   if (!endedTurnIds.has(endKey)) {
     endedTurnIds.add(endKey)
     dirty = true

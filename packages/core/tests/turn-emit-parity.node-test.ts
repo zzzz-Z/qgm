@@ -395,7 +395,7 @@ test('片段清单含 turn-schema 与 turn-emit，且 turn-schema 在 turn-emit 
 test('[turn-emit-dedup-persist-v1] 去重键含 sid 且落 sessionStorage', () => {
   const src = read(SEGMENT)
   assert.match(src, /function turnBlockKey\(sid: string, turnId: number, blockId: string\)/, '块去重键必须带 sid：不同会话的 turnId 各自从 1 起算，会互相顶掉')
-  assert.match(src, /\$\{sid\}\|\$\{turn\.turnId\}/, '结束帧去重键也必须带 sid')
+  assert.match(src, /const endKey = `\$\{sid\}\|.*\$\{turn\.turnId\}`/, '结束帧去重键必须带 sid 与 turnId（可含会话代际）')
   assert.match(src, /loadKeySet\(/, '未从 sessionStorage 读回已推送集合：刷新后同一信封会被重推')
   assert.match(src, /sessionStorage\.setItem/, '去重集合未持久化：刷新后上一轮脚本会被重跑')
 })

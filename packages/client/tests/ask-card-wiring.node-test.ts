@@ -31,7 +31,7 @@ test('对话流：question 卡片从 TerminalPane 产出，由 RoundCard 渲染�
 
   const rc = read('packages/client/components/script/RoundCard.vue')
   assert.ok(rc.includes('card.type === \'question\''), 'RoundCard 应有 question 渲染分支')
-  assert.ok(rc.includes('resolveAsk('), 'RoundCard 提交应调用 resolveAsk')
+  assert.ok(rc.includes('answerAsk('), 'RoundCard 提交应调用 answerAsk（按卡片 askId 回填，resolveAsk 已废弃）')
 })
 
 test('弹窗已拆除：AskDialog 组件与挂载点都不复存在', () => {

@@ -475,7 +475,7 @@ function toggle(): void { expanded.value = !expanded.value }
   display: inline-flex;
   align-items: center;
   color: var(--text-3, #8b949e);
-  padding-top: 4px;
+  padding-top: 3px;
 }
 .script-card-phase.phase-running {
   color: var(--primary, #58a6ff);

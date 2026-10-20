@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.44
+// @version      1.9.46
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
 // @match        https://chatglm.cn/*
@@ -52,7 +52,7 @@ function hash32(s) {
     return (h >>> 0).toString(16).padStart(8, '0');
 }
 
-/* @turn-schema:5f70fe35f55c21c0 */
+/* @turn-schema:ecf2c9041ff4778f */
 // 由 scripts/sync-turn-schema.mjs 从 packages/core/src/reply/turn-schema.ts 生成，请勿手改。
 // @ts-nocheck
 // >>> BEGIN turn-schema
@@ -95,11 +95,17 @@ function findCandidates(text) {
         out.push(m.index + m[0].length - 1);
         m = re.exec(text);
     }
-    const trimmed = text.trim();
-    if (trimmed.charAt(0) === '{') {
-        const at = text.indexOf('{');
-        if (!out.includes(at))
-            out.push(at);
+    // [outside-text-tolerance-v2] 围栏外可能有说明文字（模型偶尔不守「围栏外零字符」）。
+    //   [WHY] 原实现只认「整段以 `{` 开头」，否则无候选 ⇒ TURN_NOT_JSON ⇒ 整轮丢弃。
+    //   [CONSTRAINT] 不能扫所有 `{`（v1 试过）：script.code 里的花括号会被当候选、配平出伪对象覆盖真信封。
+    //   只放宽**起始位置**：跳过前导文字，从首个「```json 围栏」或「行首 `{`」开始解析。
+    if (!out.length) {
+        const atLine = text.search(/(^|\n)[ \t]*\{/);
+        if (atLine >= 0) {
+            const at = text.indexOf('{', atLine);
+            if (at >= 0 && !out.includes(at))
+                out.push(at);
+        }
     }
     return out;
 }
@@ -1236,6 +1242,50 @@ function evictOldest(set) {
 function turnBlockKey(sid, turnId, blockId) {
     return `${sid}|${turnId}|${blockId}`;
 }
+/** [conv-gen-isolation-v1] 会话代际：同 sid 下切新对话时 turnId 从 1 重编号，
+ *  旧去重键 sid|turnId|blockId 会碰撞吞块（实测整轮无响应，须重开标签页才恢复）。
+ *  [WHY] 检测 turnId 回退即轮转代际；gen 持久化，跨刷新去重不受影响。 */
+const CONV_GEN_STORE = 'aiRunner.convGen.v1';
+const CONV_MAXTURN_STORE = 'aiRunner.convMaxTurn.v1';
+function loadConvGen() {
+    try {
+        if (typeof sessionStorage === 'undefined')
+            return 0;
+        return Number(sessionStorage.getItem(CONV_GEN_STORE) || 0) || 0;
+    }
+    catch {
+        return 0;
+    }
+}
+function loadConvMaxTurn() {
+    try {
+        if (typeof sessionStorage === 'undefined')
+            return 0;
+        return Number(sessionStorage.getItem(CONV_MAXTURN_STORE) || 0) || 0;
+    }
+    catch {
+        return 0;
+    }
+}
+let convGen = loadConvGen();
+function bumpConvGenIfNewConversation(turnId) {
+    if (typeof turnId !== 'number')
+        return;
+    const maxTurn = loadConvMaxTurn();
+    if (maxTurn > 0 && turnId < maxTurn) {
+        convGen += 1;
+        try {
+            sessionStorage.setItem(CONV_GEN_STORE, String(convGen));
+        }
+        catch { }
+    }
+    if (turnId > maxTurn) {
+        try {
+            sessionStorage.setItem(CONV_MAXTURN_STORE, String(turnId));
+        }
+        catch { }
+    }
+}
 /**
  * 本轮结束后循环等什么。优先级 **script > ask > none**（与核心 deriveAwaiting 同构）。
  * [WHY] 不让前端各自推导：三处推导必然在「既有 script 又有 ask」上分叉，
@@ -1446,11 +1496,12 @@ function emitTurn(turn) {
     if (!frames.blocks.length)
         return false;
     const sid = extractSidFromHash();
+    bumpConvGenIfNewConversation(turn.turnId);
     let sent = 0;
     let dirty = false;
     for (let i = 0; i < frames.blocks.length; i++) {
         const block = frames.blocks[i];
-        const key = turnBlockKey(sid, block.turnId, block.blockId);
+        const key = turnBlockKey(`${sid}|${convGen}`, block.turnId, block.blockId);
         if (seenTurnBlocks.has(key))
             continue;
         seenTurnBlocks.add(key);
@@ -1465,7 +1516,7 @@ function emitTurn(turn) {
         });
         sent++;
     }
-    const endKey = `${sid}|${turn.turnId}`;
+    const endKey = `${sid}|${convGen}|${turn.turnId}`;
     if (!endedTurnIds.has(endKey)) {
         endedTurnIds.add(endKey);
         dirty = true;

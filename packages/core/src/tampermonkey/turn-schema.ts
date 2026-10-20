@@ -1,4 +1,4 @@
-/* @turn-schema:5f70fe35f55c21c0 */
+/* @turn-schema:ecf2c9041ff4778f */
 // 由 scripts/sync-turn-schema.mjs 从 packages/core/src/reply/turn-schema.ts 生成，请勿手改。
 // @ts-nocheck
 
@@ -46,10 +46,16 @@ function findCandidates(text) {
     out.push(m.index + m[0].length - 1)
     m = re.exec(text)
   }
-  const trimmed = text.trim()
-  if (trimmed.charAt(0) === '{') {
-    const at = text.indexOf('{')
-    if (!out.includes(at)) out.push(at)
+  // [outside-text-tolerance-v2] 围栏外可能有说明文字（模型偶尔不守「围栏外零字符」）。
+  //   [WHY] 原实现只认「整段以 `{` 开头」，否则无候选 ⇒ TURN_NOT_JSON ⇒ 整轮丢弃。
+  //   [CONSTRAINT] 不能扫所有 `{`（v1 试过）：script.code 里的花括号会被当候选、配平出伪对象覆盖真信封。
+  //   只放宽**起始位置**：跳过前导文字，从首个「```json 围栏」或「行首 `{`」开始解析。
+  if (!out.length) {
+    const atLine = text.search(/(^|\n)[ \t]*\{/)
+    if (atLine >= 0) {
+      const at = text.indexOf('{', atLine)
+      if (at >= 0 && !out.includes(at)) out.push(at)
+    }
   }
   return out
 }

@@ -266,3 +266,20 @@ describe('turn-schema: 字符串内裸控制字符（模型常见坏输出）', 
     expect(r.blocks[1].code).toBe('const a = 1;\nconst b = a + 1;\nconsole.log(b)')
   })
 })
+
+describe('turn-schema: 围栏外说明文字（outside-text-tolerance-v2）', () => {
+  it('围栏前有说明文字仍能解析出信封', () => {
+    const raw = `先跑两路探针。\n\n${fence({ v: 1, turn: 3, content: [SAY] })}`
+    const r = parseTurn(raw)
+    expect(r.errors).toEqual([])
+    expect(r.blocks.map(b => b.id)).toEqual(['say_1'])
+    expect(r.turn).toBe(3)
+  })
+
+  it('说明文字里的花括号不被误选（只放宽起始位置，不扫所有 {）', () => {
+    const raw = `配置形如 { "a": 1 } 的说明。\n\n${fence({ v: 1, turn: 4, content: [SAY] })}`
+    const r = parseTurn(raw)
+    expect(r.errors).toEqual([])
+    expect(r.turn).toBe(4)
+  })
+})

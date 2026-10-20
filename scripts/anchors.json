@@ -238,7 +238,7 @@
     },
     {
       "file": "packages/core/src/headless/headless-inject.ts",
-      "contains": "marks.handoff < 0 && marks.text < 0"
+      "contains": "dedup._hitTurnMiss = (dedup._hitTurnMiss || 0) + 1"
     },
     {
       "file": "packages/client/utils/reply-mark.ts",

@@ -53,7 +53,7 @@ const askDraft = ref('')
 //   组字期间不更新 askDraft，compositionend 才同步最终文本。
 const _imeComposing = ref(false)
 
-const { askState, resolveAsk, restoreAsk, answerAsk } = useAsk()
+const { askState, restoreAsk, answerAsk } = useAsk()
 
 const collapsed = computed(() => props.card.truncated && !expanded.value)
 const html = computed(() => renderMarkdown(collapsed.value ? props.card.preview : props.card.text))

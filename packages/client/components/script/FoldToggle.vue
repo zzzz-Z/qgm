@@ -30,10 +30,10 @@ const emit = defineEmits<{ toggle: [] }>()
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin: 8px 0 0;
+  margin: 8px 0;
   padding: 3px 10px;
   border: 1px solid rgb(127 127 127 / 20%);
-  border-radius: 999px;
+  border-radius: 2px;
   background: transparent;
   color: var(--text-3, #8b949e);
   font-size: 11.5px;
