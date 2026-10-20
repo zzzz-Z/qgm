@@ -108,23 +108,6 @@ REPL 沙箱脚本想 `require('node:fs')` 必须先 `globalThis.require = requir
 用户 `console.*` / `process.stdout.write` 必须改道收进本帧 `logs`，协议行只走保存的原生 write；
 错误帧补 `id`；flush 提前到回帧之前。否则父进程 `JSON.parse("1")` 得到合法值被当帧投递 → 请求/响应永久错位。
 
-## 脚本内黑名单字面量曾被扫描器一视同仁拦截（A1 已解除，断词写法可退休）
-
-[STALE] 2026-10-05 A · `ai-guard.ts` 改为词法剥离字符串/模板/注释（`tokenize() → {code, literals}`）；活端点三分对照实测
-
-旧行为：整个脚本源码被纯文本扫描，**连你要写进文件的文档正文也算**。历史触发点（全为「待写入的目标文本」）：
-`visual.spec.ts` 的 `process.exit(0)`、`import.meta.env` 表达式、`patchFile` 的锚点/`find` 含 `fs.statSync`、
-`bin/selfcheck.cjs` 与测试文件的 `import path from 'node:path'`、会议文档里描述 `require("node:fs")` 的说明文字。
-旧规避一律是断词（`const F = 'f' + 's'`），**现已不必**。
-
-现状实测：字面量含 `path.join`/`fs.readFileSync` → 放行（200/ok=true）；脚本本体真调用 → 仍拦（`code:2`）；
-`eval("require('fs')")` → 由新增 `@eval` 通道拦（剥离字面量后必须补这条，否则净削弱）。
-
-[边界仍有效] `process.exit` 的旧规则是**裸提及不拦、带 `(` 才拦**；`child_process` / `fs.method` / `path.method` / `require(...)` 形状则出现即拦——判断「为什么被拦」时按此分档。
-[仍成立的一半] 目标文件内不得真用沙箱 `__AI__` API（`fullgate.ts` 首版误用 `__AI__.readJSON` 被 tsc 拦下）。
-[退出码对照] `run-script.ts:47/59` 对 `NATIVE_API_FORBIDDEN` 返 `code: 2` ⇒ 日志里 `exit=2` + `chg=0` + 耗时 ≈1s 且**无任何 `__AI__.err` 输出**，
-几乎必然是闸门而非脚本自身 `__AI__.exit(2)`（后者必留 `err` 文案）。SSOT 见 `packages/core/SYSTEM.md` 扫描器段。
-
 ## 判据放宽在一侧、契约收紧在另一侧 → 非法载荷到执行侧才炸
 
 [VERIFIED] 2026-10-04 A · `headless-inject.ts` / `tampermonkey-session-id.user.js` 的 `extractLatestScript` 白名单恒为 `js`/`bash`；行为探针 `.ai-runner/tmp/probe-extract-behavior.mjs` 实测三轮 poll 全 `null`，把豁免塞回即 `[null, script, null]`
@@ -133,19 +116,6 @@ REPL 沙箱脚本想 `require('node:fs')` 必须先 `globalThis.require = requir
 → ```python / ```json / 无语言标签的块照收 → `attach-ws.ts` 把 `null` 折算成 `'js'` → 前端按 cjs 交给 node → **必然语法错**。
 失败方式是**静默收下 + 到执行侧才报错**。规避：**放宽必须与收紧同批改**；语言判不出来的块一律丢弃。
 判据锁：`reply-mark-parity` 断言两端白名单字面量同构 + 无 `&& !declared` + 调用处不得传参；`anchors.json` 三条锚点钉住该语句。
-
-## shell 字符串命令的分词与引号语义（元字符静默失真已修）
-
-[STALE] 2026-10-05 A · `SHELL_METACHAR_UNSUPPORTED` 已落地并活端点实测；旧机制见 `helpers.cjs:405-414`
-
-旧行为：`String(cmd).trim().split(/\s+/)` 手工切片 + `shell:false`，**引号不做剥离**、原样进 argv。
-`npx vitest run "path"` → `No test files found`；`curl -H "k: v"` → header 值落空；
-`pnpm exec vitest run x 2>&1 || true` → `2>&1`/`||`/`true` 全成 vitest 的 filter 参数；
-`-d '{"id":"p1","code":"1+1"}'` → 单引号未剥 → 服务端 `JSON.parse` 失败报 `EMPTY_CODE`（**JSON 内含空白时才会真被切断**）。
-
-现状：含 `| > < ' " $ && || ;` 的字符串命令返回 `SHELL_METACHAR_UNSUPPORTED` + 用法提示，不再静默跑错。
-要 shell 语义请传数组 `['sh','-c', cmd]`，或 `__AI__.exec('sh', ['-c', cmd])`。
-[遗留配方仍有效] 写 JSON body 一律落文件 + `--data @file`；而 `--data @file` 受 overlay 语义约束（见首条）。
 
 ## env 传参须整条重建：`env -i HOME=… TMPDIR=/tmp PATH=… <cmd>`
 
@@ -364,22 +334,6 @@ ESM 测试文件里 `require.resolve` 的相对基准是**测试文件自身**�
 首次只用 `agent skills SKILL.md` 这类通用词，8 条结果全是语言无关方法论，Vue / Vite / Vitest / UnoCSS 零命中；
 改用 `<依赖名> SKILL.md` 后命中 `antfu/skills`，一次补齐全部栈技能。
 
-## 「工作台正常运行」≠「有 sid」；沙箱写桶 ≠ 面板读桶（缺口已修）
-
-[STALE] 2026-10-05 A · `App.vue` 已有 `hasSession` computed；守卫 `packages/client/tests/taskboard-sid-guard.node-test.ts`（sid 空 → 不 fetch / 不渲染）与 `ai-window-sid-wiring.node-test.ts`（`winSidOf` 命名空间统一）存在
-
-原缺口：`activeSessionId` 只在收到油猴 `ai-runner:session-id` 消息后才非空，沙箱侧 `AI_RUNNER_SESSION_ID`
-为空串时会写进顶层全局桶、而面板读 `?sid=` 桶 ⇒ 两端不通；`AiWindowList` 期望 `win_<modelId>` 但 `openSite` 传 `undefined`
-落到 `'default'` ⇒ 站点列表恒显示「未打开」；`v-if="effectiveSessionId"` 还会被测试里的 plain object mock 击穿
-（模板对 plain 对象不做 `$` unwrap）。修法：抽 `winSidOf` + 开窗路径显式传 sid + 模板改读 computed。
-
-## `DONE` 事件被 `useAiReplyHandlers` 拦下（架构缺口，已修）
-
-[STALE] 2026-10-05 A · `useAiReplyHandlers.ts` 现含 `onNonScriptReply({ kind: 'done' })` 转发
-
-原状：`done` 分支无条件 `killCurrent + return`，导致 `reply-handlers.ts` 的整个 done 分支
-（含 `runHook('BeforeDone')` + `finish()` 清空看板）从未在生产路径被调用——是死代码。
-
 ## HCLC「单文件 import ≤ 8」是硬约束，不是建议
 
 [VERIFIED] 2026-10-05 A · 守卫 `packages/core/tests/hclc-guard.node-test.ts:53`，`LIMIT = 8`，超阈值为阻断级
@@ -492,18 +446,6 @@ packages/client/dist 是仓库内 prod 的 SPA 根（`apps/standalone/src/server
 
 [VERIFIED] 2026-10-05 A · `git status --porcelain` 实测 `docs/defect-review*.md` 以 `??` 出现，而 `.ai-runner/**` 从不出现；`git check-ignore -v` 命中 `.gitignore:6`（re-include 修复后命中 `:17`）。
 [补正 2026-10-05] 同日决策把**知识库**纳入版本库（`.gitignore` 的 `[knowledge-base-in-repo-v1]`：`!.ai-runner/lessons.md` + `!.ai-runner/skills/**`）⇒ 上面「`.ai-runner/**` 从不出现」只对**运行态**（`state.json` / `logs/` / `runs/` / 备份 / `tmp/`）成立。判定「改 `.ai-runner/` 会不会影响 `git status` / changeCount」之前，先分清改的是知识库还是运行态。
-
-## 打包态 CLIENT_DIST_PKG 多一层 dist：真实 SPA 根是 packages/client/dist
-
-[STALE] 2026-10-05 A · 已修（`CLIENT_DIST_CANDIDATES` 三候选探测）：本轮哨兵实测打包实例读 `apps/standalone/dist/client`。「打包态 HERE 多一级 ⇒ 路径多一层 dist」的**机制**仍对，但「真实 SPA 根是 packages/client/dist」这一结论已不再成立 —— 保留机制、勿再据此推断现状。
-
-`apps/standalone/src/server.ts` 的 `CLIENT_DIST_PKG = path.join(HERE, '..', 'dist', 'client')` 只在源码态成立：源码态 `HERE = apps/standalone/src` ⇒ `apps/standalone/dist/client`（对）；**打包态** `HERE = apps/standalone/dist/_server` ⇒ `apps/standalone/dist/dist/client`（多一层 `dist`，不存在）⇒ **必然回退**到 `CLIENT_DIST_REPO = <ROOT>/packages/client/dist`。
-
-实测（哨兵文件判别，打包实例）：返回 `ROOT=packages/client/dist`；历史崩溃日志里的路径亦为 `packages/client/dist/assets/index-CvyCjQFZ.js.gz`。
-
-后果：`build-all` step 2.5 每次都把 SPA 同步进 `apps/standalone/dist/client`，但**运行时永远不读它** ⇒ 仓库常驻两份 SPA 产物；发布形态下若 cwd 不含 `packages/client`，`serveStatic` 会直接 `return false` ⇒ 包内 UI 拿不到。
-
-⇒ 凡是要推断「prod 实际读哪个 dist」，不要靠读代码，直接用哨兵文件实测。
 
 ## 验收运行实例必须先用哨兵文件判别它读哪个目录
 
@@ -804,11 +746,6 @@ packages/core/dist/post-run/lesson-extract.js   同为 3 行 / 4 次
 
 [VERIFIED]（2026-10-06 宿主侧实证：429 是应用**自建熔断器** `routes/reject-breaker.ts` 的产物，回执沿用 `MISSING_DESC` 文案；`reject.jsonl` 真实数据 + 本轮 P1-3 出站留痕通道佐证。原正文的 7 段同文重复「补充」已按「采集不去重」口径清理为 1 段。）
 脚本本身可能头部完整，429 是限流前置拦截，`MISSING_DESC` 只是回执模板的固定错误码。诊断时应先看 HTTP 状态码而非 `error` 字段。
-
-## `.vue` 单文件组件中 `<style scoped>` 不拆分时更容易触发 500 行红线
-
-[STALE]（2026-10-06 §4 阈值放宽：组件 500 → 1000 行，本条的约束前提已消失；拆分依据改为**职责边界**而非行数。）
-本组件 538 行（含样式），但样式与逻辑耦合较深，抽出独立 scss 收益不大。后续若继续增长应优先抽 composable。
 
 ## 后端 `slice(0, 200)` 是提交信息截断的隐性来源
 
@@ -1766,12 +1703,6 @@ UI 剥离类改动必须以真实站点 DOM 反推的文本为测试样本，不
 
 [同族并入 · 原条「站点代码块按钮文字污染围栏行：DeepSeek 的 `<pre>` 内含「`js` `复制` `下载`」按钮，`extractReplyMd` 的 `textContent` 把按钮文字一起抓进围栏行 ⇒ 真实形态是 `js复制下载``` `（````` 在行尾）。判据必须容错」]
 `FENCE_RE` 同时匹配行首与行尾。
-
-## `__AI__` 无 `exists` / `listDir`
-
-[STALE] 2026-10-09 helpers/index.cjs:108 已补 exists 转发；listDir 仍不存在（SYSTEM.md §3.2 / ai-guard JSDoc 一致）
-
-实际可用键只有 63 个，含 `tryReadFile` / `readFiles` / `walk`，无 `exists`。按 §3.2 速查表写代码前应先 `Object.keys(__AI__)` 实测一次。
 
 ## `syntaxCheck` 会把含 `<template>` 字面量的 .cjs 误判为 Vue SFC
 

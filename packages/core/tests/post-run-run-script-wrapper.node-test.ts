@@ -71,7 +71,8 @@ test('返回值为字符串（非 undefined）', () => {
   assert.ok(c.length > 0)
 })
 
-function runWrapped(scriptBody: string): string {
+function runWrapped(scriptBody: string, opts: { captureStderr?: boolean } = {}): string {
+  void opts
   const dir = mkdtempSync(join(tmpdir(), 'wrap-'))
   const scriptPath = join(dir, 'probe.cjs')
   writeFileSync(scriptPath, scriptBody)
