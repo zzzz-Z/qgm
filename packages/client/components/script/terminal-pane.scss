@@ -573,6 +573,40 @@
   border: 1px solid var(--border, #30363d);
   font-size: 13px;
   color: var(--text-1, #e6edf3);
+  /* [status-bar-emphasis-v1] 状态条要醒目：运行类状态用状态色浅底 + 3px 左边条，
+     并略微加重文字，让「回传中 / 运行中」在消息流里一眼可辨。 */
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease;
+}
+.status-bar-inline.kind-running,
+.status-bar-inline.kind-feedback,
+.status-bar-inline.kind-waiting,
+.status-bar-inline.kind-preparing,
+.status-bar-inline.kind-parsing,
+.status-bar-inline.kind-executing {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  border-left: 3px solid var(--primary);
+  color: var(--text);
+}
+.status-bar-inline.kind-paused,
+.status-bar-inline.kind-budget-limited {
+  background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
+  border-color: color-mix(in srgb, var(--warning, #f59e0b) 42%, transparent);
+  border-left: 3px solid var(--warning, #f59e0b);
+}
+.status-bar-inline.err {
+  background: color-mix(in srgb, var(--danger, #e53e3e) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger, #e53e3e) 42%, transparent);
+  border-left: 3px solid var(--danger, #e53e3e);
+}
+.status-bar-inline.ok {
+  background: color-mix(in srgb, var(--success, #22c55e) 12%, transparent);
+  border-color: color-mix(in srgb, var(--success, #22c55e) 42%, transparent);
+  border-left: 3px solid var(--success, #22c55e);
 }
 .status-bar-inline .status-dot {
   width: 8px;
