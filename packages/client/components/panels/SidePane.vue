@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { sidePaneRevealTick, sidePaneTab } from '../../composables/ui/useSidePaneTab'
+import { theme } from '../../composables/ui/useAppStorage'
 import FileTree from './FileTree.vue'
 import FileList from './FileList.vue'
 import type { ChangeEntry } from '../../types'
@@ -110,6 +111,17 @@ if (typeof window !== 'undefined') {
   onBeforeUnmount(() => mq.removeEventListener('change', onChange))
 }
 
+/**
+ * [theme-toggle-dock-v1] 主题切换：显式 import 该 ref 并在 script 里写 .value。
+ * [WHY] 模板里直接对 auto-import 符号赋值，会被 unplugin-auto-import 展开成
+ *   一个不可赋值的调用表达式 ⇒ 整个模块解析报 SyntaxError（白屏），故赋值必须落到 script。
+ * [CONSTRAINT] 两处都不能出现该 addon 的模块级哨兵字面量（unref 包装前缀）与自动导入标记：
+ *   它一发现哨兵就整体跳过本模块的模板补丁，导致 transportKind 等模板符号失去兜底而
+ *   在渲染期报 "not defined on instance"。显式 import 可遮蔽 auto-import（同名绑定则不注入）。
+ */
+function toggleTheme(): void {
+  theme.value = theme.value === 'dark' ? 'light' : 'dark'
+}
 function onTransportChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
   transportKind.value = v === 'headless' ? 'headless' : 'tampermonkey'
@@ -257,7 +269,7 @@ defineExpose({ selectTab })
       <button
         v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
         class="theme-toggle" aria-label="切换主题"
-        @click="theme = theme === 'dark' ? 'light' : 'dark'"
+        @click="toggleTheme"
       >
         <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
         <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>

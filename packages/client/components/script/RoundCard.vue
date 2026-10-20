@@ -111,11 +111,27 @@ function onAskInput(e: Event): void {
   if (_imeComposing.value) return
   askDraft.value = (e.target as HTMLInputElement).value
 }
+// [ask-ime-v3] 兜底复位：输入法在某些浏览器/焦点切换下不触发 compositionend，
+//   导致 _imeComposing 永久为 true ⇒ askDraft 再不更新 ⇒ 发送按钮永久禁用（用户实测点不动）。
+function onAskBlur(e: FocusEvent): void {
+  _imeComposing.value = false
+  askDraft.value = (e.target as HTMLInputElement).value
+}
+/** 发送入口：强制复位 IME 标志并从 DOM 取当前值，避免任何组字状态卡死发送 */
+function submitDraftFromInput(e: Event): void {
+  _imeComposing.value = false
+  const el = (e.target as HTMLFormElement).querySelector('input') as HTMLInputElement | null
+  if (el) askDraft.value = el.value
+  submitAnswer(askDraft.value)
+}
 function submitAnswer(text: string): void {
   const t = String(text || '').trim()
-  if (!t || !isAskActive.value) return
-  // [ask-restore-v1] 刷新后无活跃提问：先重建，否则 resolveAsk 会静默返回
-  if (!askState.value && qCard.value.askId) restoreAsk(qCard.value.askId, qCard.value.text, qCard.value.options)
+  if (!t) return
+  // [ask-submit-guaranteed-v1] 不再因 isAskActive=false 静默丢弃：
+  //   历史卡片（刷新后 / 被新提问取代过）仍应可点击回答——否则表现为「点了没反应」（用户实测）。
+  //   只需 askId 存在即可尝试重建活跃提问。
+  if (!qCard.value.askId) return
+  if (!askState.value) restoreAsk(qCard.value.askId, qCard.value.text, qCard.value.options)
   askDraft.value = ''
   resolveAsk(t)
 }
@@ -206,7 +222,7 @@ function submitAnswer(text: string): void {
       <button
         v-for="(o, idx) in qCard.options" :key="o.id"
         class="question-opt" type="button"
-        :disabled="!isAskActive"
+        :disabled="qCard.answered || !qCard.askId"
         @click="submitAnswer(o.label)"
       >
         <span class="question-opt-num" aria-hidden="true">{{ idx + 1 }}</span>
@@ -223,7 +239,7 @@ function submitAnswer(text: string): void {
     <form
       v-else-if="isAskActive"
       class="question-input-row"
-      @submit.prevent="submitAnswer(askDraft)"
+      @submit.prevent="submitDraftFromInput"
     >
       <input
         class="question-input"
@@ -232,8 +248,9 @@ function submitAnswer(text: string): void {
         @compositionstart="onImeStart"
         @compositionend="onImeEnd"
         @input="onAskInput"
+        @blur="onAskBlur"
       >
-      <button class="question-send" type="submit" :disabled="!askDraft.trim()">
+      <button class="question-send" type="submit">
         发送
       </button>
     </form>
