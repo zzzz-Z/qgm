@@ -89,6 +89,20 @@ const AI_JSDOC = [
   ' */',
 ].join('\n')
 
+/**
+ * [api-doc-emit-v1] 返回可直接打印的 API 速查纯文本（去掉 JSDoc 的 ` * ` 装饰）。
+ * [WHY] 注入进脚本文本 ≠ AI 看到：实测 AI 写脚本时读不到自己上一次的输出。
+ *   改为执行前打到 stdout，走回执通道，AI 必然看到——且与注入块共用同一份内容，不产生第二真相源。
+ * @returns {string} 纯文本速查（每行一条，无 JSDoc 前缀）
+ */
+export function emitApiDoc(): string {
+  const lines = AI_JSDOC.split('\n')
+  const body = lines.slice(1, -1)
+    .map(l => l.replace(/^\s*\*\s?/, ''))
+    .filter(l => l.trim() && !l.includes('完整 API（含参数/返回/异常）'))
+  return body.join('\n')
+}
+
 /** 词法剥离产物：可执行代码骨架 + 被剥离的字面量内容 */
 export interface Tokenized {
   /** 字面量/注释内容替换为空格（换行保留）后的代码骨架 */
