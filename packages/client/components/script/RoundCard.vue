@@ -144,10 +144,6 @@ function submitAnswer(text: string): void {
 
   <!-- text：AI 普通文本卡 -->
   <section v-else-if="card.type === 'text'" class="text-card">
-    <header class="text-card-head">
-      <span class="text-card-badge">AI</span>
-      <span class="script-card-time">{{ card.timeLabel }}</span>
-    </header>
     <FoldToggle
       v-if="card.truncated"
       :expanded="expanded"
