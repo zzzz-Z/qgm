@@ -22,10 +22,10 @@ describe('decideCorrection', () => {
     assert.equal(d.prompt, undefined)
   })
 
-  test('非循环态（人工会话）⇒ notify（不回灌，避免惊扰用户）', () => {
+  test('手动会话（loopActive=false）也回灌一次（[CHANGED] 取消仅循环态闸门）', () => {
     const d = decideCorrection({ code: 'TURN_NOT_JSON', loopActive: false, correctionCount: 0 })
-    assert.equal(d.action, 'notify')
-    assert.equal(d.exhausted, undefined)
+    assert.equal(d.action, 'reinject')
+    assert.ok(d.prompt && d.prompt.includes('信封'), '手动会话也应提示改用信封格式')
   })
 
   test('达上限 ⇒ notify + exhausted', () => {

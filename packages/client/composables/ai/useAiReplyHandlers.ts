@@ -394,9 +394,9 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
    *   由本函数决定是否向 AI 回灌一段纠正提示词（经既有 ai-runner:fill 通道，复用循环引擎，不另建旁路）。
    * [WHY 只回灌「信封彻底无效」] TEXT_OUTSIDE_FENCE 等已被 readTurnFromRoot 回收成 say 块的类别，
    *   回灌会重投已交付的 turn（含 script）→ 风险，故 decideCorrection 直接 skip 不在此处理。
-   * [CONSTRAINT] 防循环三道闸由 decideCorrection + 本函数配合：仅活跃循环态自动回灌、同 sid 连续上限、
-   *   正文签名去重（油猴侧 _invalidReportedSig）。
-   * [CONSTRAINT] 人工会话（loopActive=false）只通知不回灌，避免惊扰用户。
+   * [CONSTRAINT] 防循环两道闸由 decideCorrection + 本函数配合：同 sid 连续纠正上限（=1，严格回灌一次）、
+   *   正文签名去重（油猴侧 _invalidReportedSig）。[CHANGED 2026-10-21] 不再区分循环/手动：任何会话态下
+   *   信封彻底无效都回灌一次，达上限改通知；防循环由次数上限 + 签名去重兜底，不再依赖 loopActive 门控。
    */
   function handleTurnInvalidMsg(payload: MessageEvent['data'], e?: MessageEvent): void { if (e && !isFromActiveAiSite(e)) return
     const code = String(payload.code || '')

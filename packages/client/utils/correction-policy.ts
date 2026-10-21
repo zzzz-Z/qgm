@@ -9,12 +9,12 @@
 //   · TURN_TRUNCATED —— 流式截断：提示拆小串行重发。
 //   `TEXT_OUTSIDE_FENCE` 不在此回灌：它已被 readTurnFromRoot 回收成 say 块，无需重发，否则会重投已交付的 turn。
 //
-// [CONSTRAINT] 防循环三道闸（由调用方配合，本模块只给判据）：
-//   ① 仅活跃循环态（`loopActive`）才自动回灌；人工会话只通知不回灌，避免惊扰用户。
-//   ② 同 sid 连续纠正上限 MAX_CORRECTIONS，达上限改通知（让人工介入）。
-//   ③ 同正文签名只报一次（油猴侧 `_invalidReportedSig` 已去重；工作台再按 correctionCount 兜底）。
+// [CONSTRAINT] 防循环两道闸（由调用方配合，本模块只给判据）：
+//   [CHANGED 2026-10-21] 取消「仅活跃循环态才回灌」：手动会话里 AI 发无围栏回复也回灌一次（实测手动态整轮静默丢弃、零恢复）。
+//   ① 同 sid 连续纠正上限 MAX_CORRECTIONS（=1，严格「回灌一次」），达上限改通知（让人工介入）。
+//   ② 同正文签名只报一次（油猴侧 `_invalidReportedSig` 已去重；工作台再按 correctionCount 兜底）。
 
-export const MAX_CORRECTIONS = 3
+export const MAX_CORRECTIONS = 1
 
 export type CorrectionAction = 'reinject' | 'notify' | 'skip'
 
@@ -29,7 +29,7 @@ export interface CorrectionDecision {
 
 export interface CorrectionInput {
   code: string
-  /** 当前是否有活跃循环（autoTakeover.enabled） */
+  /** 当前是否有活跃循环（autoTakeover.enabled）；[CHANGED 2026-10-21] 不再用于门控回灌，保留以稳定调用点，防循环改由次数上限兜底 */
   loopActive: boolean
   /** 该 sid 已连续纠正次数（调用方维护） */
   correctionCount: number
@@ -46,8 +46,6 @@ export function decideCorrection(input: CorrectionInput): CorrectionDecision {
   if (!REINJECTABLE.has(input.code)) return { action: 'skip' }
   // 达上限：停止回灌，改通知人工介入。
   if (input.correctionCount >= max) return { action: 'notify', exhausted: true }
-  // 人工会话：不自动回灌（会惊扰用户），只通知。
-  if (!input.loopActive) return { action: 'notify' }
   const prompt = input.code === 'TURN_TRUNCATED'
     ? '上一条回复似乎被截断了。请把它拆成更小的步骤，每一步都用 ```json 围栏包住的 turn 信封回复，所有说明文字写进 content 里的 say 块，不要写在围栏外面。'
     : '你的上一条回复没有用 ```json 围栏包住的 turn 信封，已被按契约丢弃。请严格用信封格式回复，所有说明文字都写进 content[].say，不要写在围栏外面或作为裸文本。'
