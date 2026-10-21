@@ -563,7 +563,6 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
   /** 消息分发入口：按 data.type 路由到各 handler */
   function onSessionIdMessage(e: MessageEvent): void { const payload = e.data
     if (!payload) return
-    console.log(payload, '~~~~~~~~~')
 
     const t = String(payload.type || '')
     if (t === 'ai-runner:reply') { handleAiReply(payload, e); return }
