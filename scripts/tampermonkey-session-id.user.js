@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.50
+// @version      1.9.51
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
 // @match        https://chatglm.cn/*
@@ -1380,6 +1380,13 @@ function turnToFrame(turnId, blockId, seq, type, b) {
         }
         return { turnId, blockId, seq, type, question, options };
     }
+    if (type === 'done') {
+        const summary = typeof b.summary === 'string' ? b.summary : '';
+        if (!summary.trim())
+            return 'summary';
+        const commit = typeof b.commit === 'string' ? b.commit.trim() : '';
+        return { turnId, blockId, seq, type, summary, ...(commit ? { commit } : {}) };
+    }
     // script
     const lang = typeof b.lang === 'string' ? b.lang : '';
     const code = typeof b.code === 'string' ? b.code : '';
@@ -1408,7 +1415,7 @@ function turnBlocksToFrames(turnId, raw) {
         const b = list[i] || {};
         const id = typeof b.id === 'string' ? b.id : `#${i + 1}`;
         const type = typeof b.type === 'string' ? b.type : '';
-        if (type !== 'say' && type !== 'script' && type !== 'ask' && type !== 'handoff') {
+        if (type !== 'say' && type !== 'script' && type !== 'ask' && type !== 'handoff' && type !== 'done') {
             skipped.push(`${id}:type`);
             continue;
         }

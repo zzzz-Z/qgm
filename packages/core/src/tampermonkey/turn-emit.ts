@@ -176,6 +176,12 @@ function turnToFrame(turnId: number, blockId: string, seq: number, type: string,
     }
     return { turnId, blockId, seq, type, question, options }
   }
+  if (type === 'done') {
+    const summary = typeof b.summary === 'string' ? b.summary : ''
+    if (!summary.trim()) return 'summary'
+    const commit = typeof b.commit === 'string' ? b.commit.trim() : ''
+    return { turnId, blockId, seq, type, summary, ...(commit ? { commit } : {}) }
+  }
   // script
   const lang = typeof b.lang === 'string' ? b.lang : ''
   const code = typeof b.code === 'string' ? b.code : ''
@@ -201,7 +207,7 @@ function turnBlocksToFrames(turnId: number, raw: any[]): any {
     const b = list[i] || {}
     const id = typeof b.id === 'string' ? b.id : `#${i + 1}`
     const type = typeof b.type === 'string' ? b.type : ''
-    if (type !== 'say' && type !== 'script' && type !== 'ask' && type !== 'handoff') {
+    if (type !== 'say' && type !== 'script' && type !== 'ask' && type !== 'handoff' && type !== 'done') {
       skipped.push(`${id}:type`)
       continue
     }

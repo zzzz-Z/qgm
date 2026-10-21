@@ -125,7 +125,7 @@ export interface AiTurnEndDto {
  * [CONSTRAINT] 顺序即契约：这里是**唯一源**，客户端据此判断是否启用信封消费。
  *   新增块类型必须先加进这里，否则客户端会整轮忽略该类型的块。
  */
-export const AI_CAPS: readonly string[] = ['say', 'script', 'ask', 'handoff']
+export const AI_CAPS: readonly string[] = ['say', 'script', 'ask', 'handoff', 'done']
 
 /**
  * [hello-caps-v1] 服务端是否声明支持某类块。

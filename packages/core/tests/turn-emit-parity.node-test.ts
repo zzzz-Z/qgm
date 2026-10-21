@@ -78,11 +78,21 @@ const FULL: RawBlock[] = [
   { type: 'ask', id: 'q1', question: '要清理临时文件吗？', options: [{ id: 'a', label: '清理' }, { id: 'b', label: '跳过' }] },
 ]
 
+// [done-parity-v1] done 块必须进对拍语料：done 提升为 turn 信封一等块类型后，
+//   油猴 turn-emit.ts 的 allowlist 与 turnToFrame 一度漏掉 done（2026-10-21 总结帧不渲染的根因），
+//   而本文件语料不含 done ⇒ 对拍守卫恒绿、漂移无从暴露。补上后任一端漏 done 都会逐例红。
+const DONE_BLOCK: RawBlock = { type: 'done', id: 'done_1', summary: '本轮完成：修好总结帧', commit: 'fix(client): 总结帧不渲染' }
+const DONE_BLOCK_NO_COMMIT: RawBlock = { type: 'done', id: 'done_2', summary: '本轮完成：只总结不提交' }
+
 const CASES: { name: string, raw: RawBlock[] }[] = [
   { name: '四块齐全（say+2script+ask）', raw: FULL },
   { name: '只有 say', raw: [FULL[0]!] },
   { name: '只有 script', raw: [FULL[1]!] },
   { name: 'handoff', raw: [{ type: 'handoff', id: 'h1', summary: '上下文要满了' }] },
+  { name: 'done 带 commit', raw: [DONE_BLOCK] },
+  { name: 'done 不带 commit', raw: [DONE_BLOCK_NO_COMMIT] },
+  { name: 'done 空 summary（应进 skipped）', raw: [{ type: 'done', id: 'd3', summary: '   ' }] },
+  { name: 'done 与 say 混排（终轮总结）', raw: [FULL[0]!, DONE_BLOCK] },
   { name: 'ask 无 options', raw: [{ type: 'ask', id: 'q2', question: '继续？' }] },
   { name: 'ask option 缺 label', raw: [{ type: 'ask', id: 'q3', question: '选一个', options: [{ id: 'a' }, { id: 'b', label: 'B' }] }] },
   { name: 'script 缺 desc（应进 skipped）', raw: [{ type: 'script', id: 'c3', lang: 'js', desc: '', why: 'w', code: 'x' }] },
