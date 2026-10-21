@@ -23,23 +23,113 @@ export interface AskState {
 const ASK_KEY_PREFIX = 'askq-'
 let askSeq = 0
 
+// [ask-repeat-guard-v1] 同一条**未回答**的提问只渲染一张卡。
+// [WHY] 循环把脚本结果回灌后，模型常把上一轮没拿到答案的 ask 原样重发
+//   （重发时 turnId 递增 ⇒ `turn|blockId` 去重必然失效，每轮多一张卡 ⇒ 时间线刷屏）。
+// [CONSTRAINT] 按**内容签名**判重而非 turn|id：跨轮重发的正是不同 id 的同一问。
+// [CONSTRAINT] 回答 / 取消 / 切换工作区必须释放占位：占位不释放 ⇒ 提问不可见 ⇒ 不可回答。
+interface OpenAskSlot { askId: string, cardKey: string }
+/** 签名 → 槽位 */
+const openAskSlots = new Map<string, OpenAskSlot>()
+/** askId → 签名：answerAsk 手里只有 askId，据此回查该释放哪条槽位 */
+const slotSigByAskId = new Map<string, string>()
+/** askId → 真正渲染这张提问卡的事件的 updateKey（见 answerAsk） */
+const cardKeyByAskId = new Map<string, string>()
+
+/**
+ * 提问内容指纹：正文（空白折叠）+ 选项 id/label 序列。
+ * [WHY] 重发时 blockId 可能改写、turnId 一定变，只有内容本身稳定。
+ */
+export function askSignature(
+  question: string,
+  options: ReadonlyArray<{ id?: string, label?: string }> = [],
+): string {
+  const q = String(question || '').replace(/\s+/g, ' ').trim()
+  const opts = options.map(o => `${String(o?.id ?? '')}:${String(o?.label ?? '')}`).join('|')
+  return `${q}#${opts}`
+}
+
+/**
+ * 占位。返回 true ⇒ 首次出现（应渲染）；false ⇒ 屏上已有同一条未回答提问（调用方必须跳过渲染）。
+ * @param question 提问正文
+ * @param options 选项列表
+ * @param askId 卡片上的提问 id（块帧 ask 用 blockId；缺省即 askUser 自增序号）
+ * @param cardKey 渲染该提问的那条事件 updateKey（回答时按它回写已回答态）
+ */
+export function claimAskSlot(
+  question: string,
+  options: ReadonlyArray<{ id?: string, label?: string }> = [],
+  askId = '',
+  cardKey = '',
+): boolean {
+  const sig = askSignature(question, options)
+  if (openAskSlots.has(sig)) return false
+  const id = String(askId || '')
+  openAskSlots.set(sig, { askId: id, cardKey })
+  if (id) slotSigByAskId.set(id, sig)
+  if (id && cardKey) cardKeyByAskId.set(id, cardKey)
+  return true
+}
+
+/** 该 askId 的提问卡渲染在哪条事件上；未登记返回空串（调用方回落到 askq-<askId>） */
+export function askCardKeyOf(askId: string): string {
+  return cardKeyByAskId.get(String(askId || '')) || ''
+}
+
+/** 释放占位（已回答 / 已取消）；释放后同一内容的提问再出现时应重新渲染 */
+export function releaseAskSlot(askId: string): void {
+  const id = String(askId || '')
+  const sig = slotSigByAskId.get(id)
+  if (sig !== undefined) {
+    openAskSlots.delete(sig)
+    slotSigByAskId.delete(id)
+  }
+  cardKeyByAskId.delete(id)
+}
+
+/** 清空账本（切换工作区时事件流被清空，占位若留下会让提问永不再显示） */
+export function resetAskSlots(): void {
+  openAskSlots.clear()
+  slotSigByAskId.clear()
+  cardKeyByAskId.clear()
+}
+
+/** 当前未回答的提问条数（测试 / 探针） */
+export function openAskSlotCount(): number { return openAskSlots.size }
+
 const askState = ref<AskState | null>(null)
+
+/**
+ * [ask-single-card-v1] 调用方**已经渲染了**提问卡（turn 块帧的 ask 块）时传入，避免同一提问出两张卡。
+ * [WHY] 块帧自己会渲染一张提问卡；若 askUser 再发一张 ai:question，同一个问题在时间线上成对出现
+ *   （「ask 刷屏」的一半来源），且回答只能命中 `askq-<askId>` 那张 —— 块卡永远不转「已回答」。
+ */
+export interface AskRendered { askId: string, cardKey: string }
 
 /**
  * 在对话流里投递一张 AI 提问卡，并等待用户回答
  * [CONSTRAINT] 单例：已有提问时先以 null 主动 resolve 旧 Promise，避免调用方 await 挂死
  * @param payload parseAsk 的解析结果
+ * @param rendered [ask-single-card-v1] 外部已建卡 ⇒ 只绑 Promise，不再发第二张卡
  * @returns 用户提交的文本；提问被取代/取消返回 null
  */
-export function askUser(payload: AskPayload): Promise<string | null> {
+export function askUser(payload: AskPayload, rendered?: AskRendered): Promise<string | null> {
   return new Promise((resolve) => {
-    if (askState.value) askState.value.resolve(null)
-    const id = `a${++askSeq}`
+    if (askState.value) {
+      releaseAskSlot(askState.value.id)
+      askState.value.resolve(null)
+    }
+    const id = rendered?.askId || `a${++askSeq}`
     askState.value = {
       id,
       question: payload.question,
       options: payload.options,
       resolve,
+    }
+    // [ask-single-card-v1] 渲染权让给块帧：登记「卡在哪条事件上」后立即返回，不发第二张卡
+    if (rendered?.cardKey) {
+      if (rendered.askId) cardKeyByAskId.set(String(rendered.askId), rendered.cardKey)
+      return
     }
     emit('ai:question', summarize(payload.question), {
       updateKey: `${ASK_KEY_PREFIX}${id}`,
@@ -82,6 +172,8 @@ export function resolveAsk(answer: string | null): void {
   const s = askState.value
   if (!s) return
   askState.value = null
+  // [ask-repeat-guard-v1] 取消也算离场：占位留下会让同一提问永不再显示
+  releaseAskSlot(s.id)
   emit('ai:question', summarize(s.question), {
     updateKey: `${ASK_KEY_PREFIX}${s.id}`,
     payload: {
@@ -118,8 +210,12 @@ export function answerAsk(askId: string, answer: string): void {
   //   活跃提问 id 是 a1/a2 自增序号，卡片 askId 是 turn 块 id（如 q1），两者不等 ⇒
   //   原判据 s.id === id 恒假，Promise 永不 resolve，回答永远发不出去（用户实测点了没反应）。
   if (s) askState.value = null
+  // [ask-single-card-v1] 更新必须打在**真正渲染这张提问卡**的那条事件上：
+  //   块帧提问卡的 updateKey 是 `blk-<turn>-<blockId>`，`askq-<askId>` 匹配不到它 ⇒
+  //   原实现回答后该卡不转「已回答」，用户点了像没反应（2026-10-21 ask 刷屏同批现象）。
+  const cardKey = askCardKeyOf(id) || `${ASK_KEY_PREFIX}${id}`
   emit('ai:question', 'AI 提问', {
-    updateKey: `${ASK_KEY_PREFIX}${id}`,
+    updateKey: cardKey,
     payload: {
       answered: true,
       canceled: false,
@@ -127,6 +223,8 @@ export function answerAsk(askId: string, answer: string): void {
       answeredAt: Date.now(),
     },
   })
+  // [ask-repeat-guard-v1] 回答即释放占位：此后同一内容的提问若再来，必须能重新显示
+  releaseAskSlot(id)
   // [ask-answer-resolve-any-v1] 活跃提问 id（a1/a2）与卡片 askId（turn 块 id）不同套，
   //   按 id 相等判据恒假 ⇒ Promise 永不兑现、回答永不发送。用户回答了任一张卡都应 resolve。
   if (s) s.resolve(answer)

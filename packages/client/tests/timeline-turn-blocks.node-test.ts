@@ -60,6 +60,26 @@ describe('ai:block → 卡片：ask（选项来自块，不解析文本）', () 
   test('无问题又无选项 ⇒ 不建卡（空提问卡无法回答）', () => {
     expect(buildOneCard(blockEvent({ turnId: 1, blockId: 'q', type: 'ask', question: '', options: [] }))).toBeNull()
   })
+
+  // [ask-single-card-v1] 回答态必须**读 payload 顶层**：回答更新打在同一条事件的 updateKey 上，
+  //   合并后 answered/answer 与 block 同处 payload。写死 false ⇒ 卡片答完永远停在可点态。
+  test('已回答的提问卡：answered/answer 从事件顶层采信（不写死 false）', () => {
+    const card = buildOneCard({
+      id: 9,
+      kind: 'ai:block',
+      ts: 1_700_000_000_000,
+      payload: {
+        updateKey: 'blk-7-q1',
+        answered: true,
+        answer: '甲',
+        block: { turnId: 7, blockId: 'q1', seq: 1, type: 'ask', question: '选哪个？', options: [{ id: 'a', label: '甲' }] },
+      },
+    }) as QuestionItem
+    expect(card.type).toBe('question')
+    expect(card.key).toBe('blk-7-q1')
+    expect(card.answered, '回答更新打到这条事件后必须认').toBe(true)
+    expect(card.answer).toBe('甲')
+  })
 })
 
 describe('ai:block → 卡片：handoff 与 script', () => {

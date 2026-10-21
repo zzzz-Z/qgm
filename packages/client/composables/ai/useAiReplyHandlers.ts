@@ -19,7 +19,7 @@ import { resetRulesForSessionBoot, useAiWindow } from './useAiWindow'
 import { transportKind } from './useAiTransport'
 import { activeSessionId } from '../ui/useAppStorage'
 import { emit as emitBus } from '../ui/useEventStream'
-import { askUser } from '../ui/useAsk'
+import { askUser, claimAskSlot } from '../ui/useAsk'
 import { parseAsk } from '../../utils/ask-parser'
 import { scanReplyMarks } from '../../utils/reply-mark'
 import { log } from '../../utils/log'
@@ -337,7 +337,20 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
     if (type === 'ask') {
       const askBlock = block as { id?: string, question?: string, options?: { id: string, label: string }[] }
       if (askBlock.question && askBlock.options) {
-        void askUser({ question: askBlock.question, options: askBlock.options }).then((answer) => {
+        // [ask-single-card-v1] 渲染权归块帧：这一条块本身就会建提问卡，
+        //   因此 askUser 只绑 Promise（传入卡片的 askId 与 updateKey），不再另发一张同内容卡片。
+        //   [WHY] 两张 cards 正文相同、相邻出现，用户侧就是「ask 块刷屏」的一半来源。
+        const askId = String(askBlock.id || b.blockId || '')
+        const askCardKey = updateKey || (askId ? `askq-${askId}` : '')
+        // [ask-repeat-guard-v1] 同一条未回答提问跨轮重发 ⇒ 只渲染第一次。
+        //   [WHY] 有 script 块的 turn 会继续执行脚本、结果回灌，模型常把上一轮没拿到答案的
+        //   ask 原样重发（turnId 递增 ⇒ turn|blockId 去重无效），每多一轮就多一张卡。
+        //   [CONSTRAINT] 必须整段 return：连 askUser 一起跳过，否则还会多出一张 askq- 卡片。
+        if (!claimAskSlot(askBlock.question, askBlock.options, askId, askCardKey)) return
+        void askUser(
+          { question: askBlock.question, options: askBlock.options },
+          { askId, cardKey: askCardKey },
+        ).then((answer) => {
           if (answer === null) return
           try { emitBus('ai:ask', `回答：${String(answer).slice(0, 40)}`, { payload: { text: String(answer), role: 'user-answer' } }) } catch {}
           void aiWindow.copyAndFill(`【ASK 回答】${answer}`, { skipRules: true })

@@ -149,7 +149,8 @@ export function buildOneCard(ev: { id: number, kind: string, ts: number, payload
   // [CONSTRAINT] `say` 与 `handoff` 都渲染为文本卡：handoff 的载荷是交班摘要，
   //   用户需要读到它才能知道「为什么换会话了」，吞掉它等于把轮转变成静默行为。
   if (ev.kind === 'ai:block') {
-    const b = ((ev.payload || {}) as { block?: Record<string, unknown> }).block
+    const tp = (ev.payload || {}) as Record<string, unknown>
+    const b = (tp as { block?: Record<string, unknown> }).block
     if (!b) return null
     const blockId = String(b.blockId || '')
     const turnId = Number(b.turnId) || 0
@@ -166,14 +167,16 @@ export function buildOneCard(ev: { id: number, kind: string, ts: number, payload
       const pv = clampTextPreview(question, ASK_PREVIEW.lines, ASK_PREVIEW.chars)
       // [turn-ask-options-v1] options 直接来自块，**不再解析文本**（旧路径 parseAsk 猜选项）。
       //   askId 用块 id：回答事件按 askId 回填 answered/answer，与 ai:question 同一套匹配规则。
+      // [ask-single-card-v1] answered/answer 读**事件顶层**：回答更新打在这条事件的 updateKey 上，
+      //   合并后与 block 同处 payload；写死 false 会让块帧提问卡答完仍可点（原缺陷）。
       return {
         type: 'question',
         key: `blk-${turnId}-${blockId}`,
         timeLabel: hmsLabel(ev.ts),
         askId: blockId,
         options,
-        answered: false,
-        answer: '',
+        answered: tp.answered === true,
+        answer: String(tp.answer || ''),
         text: question,
         ...pv,
       }

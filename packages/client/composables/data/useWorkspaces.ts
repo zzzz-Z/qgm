@@ -79,6 +79,12 @@ async function applyRootChanged(): Promise<void> {
     const { clearEvents } = await import('../ui/useEventStream')
     clearEvents()
   } catch { /* 未就绪：忽略 */ }
+  // [ask-repeat-guard-v1] 提问占位必须与时间线同批失效：
+  //   清屏后若留下占位 ⇒ 同一提问再发时不渲染 ⇒ 问题连「看不见」都不剩，更谈不上回答。
+  try {
+    const { resetAskSlots } = await import('../ui/useAsk')
+    resetAskSlots()
+  } catch { /* 未就绪：忽略 */ }
   try {
     const { clearInbox } = await import('../runner/useScriptInbox')
     clearInbox()

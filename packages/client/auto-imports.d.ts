@@ -75,6 +75,8 @@ declare global {
   const appendCapped: typeof import('./composables/runner/live-output').appendCapped
   const applyToEditor: typeof import('./composables/runner/useScriptInbox').applyToEditor
   const archiveEvents: typeof import('./composables/ui/useEventStream').archiveEvents
+  const askCardKeyOf: typeof import('./composables/ui/useAsk').askCardKeyOf
+  const askSignature: typeof import('./composables/ui/useAsk').askSignature
   const askUser: typeof import('./composables/ui/useAsk').askUser
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
@@ -89,6 +91,7 @@ declare global {
   const buildOneCard: typeof import('./utils/timeline-build').buildOneCard
   const buildSkillsBlock: typeof import('./composables/ai/skill-registry').buildSkillsBlock
   const capFilesByBudget: typeof import('./utils/contextBuilder').capFilesByBudget
+  const claimAskSlot: typeof import('./composables/ui/useAsk').claimAskSlot
   const clampTextPreview: typeof import('./utils/timeline-preview').clampTextPreview
   const clearEvents: typeof import('./composables/ui/useEventStream').clearEvents
   const clearInbox: typeof import('./composables/runner/useScriptInbox').clearInbox
@@ -258,6 +261,7 @@ declare global {
   const onUpdated: typeof import('vue').onUpdated
   const onWatcherCleanup: typeof import('vue').onWatcherCleanup
   const openAiSession: typeof import('./composables/ai/useAiWindow').openAiSession
+  const openAskSlotCount: typeof import('./composables/ui/useAsk').openAskSlotCount
   const openSite: typeof import('./composables/ai/useAiWindow').openSite
   const parseAsk: typeof import('./utils/ask-parser').parseAsk
   const parseErrorLocations: typeof import('./utils/contextBuilder').parseErrorLocations
@@ -296,11 +300,13 @@ declare global {
   const refManualReset: typeof import('@vueuse/core').refManualReset
   const refThrottled: typeof import('@vueuse/core').refThrottled
   const refWithControl: typeof import('@vueuse/core').refWithControl
+  const releaseAskSlot: typeof import('./composables/ui/useAsk').releaseAskSlot
   const remoteGenerating: typeof import('./composables/ai/useAiWaiting').remoteGenerating
   const removeWindowBySid: typeof import('./composables/ai/useAiWindow').removeWindowBySid
   const removeWindowBySidImpl: typeof import('./composables/ai/useAiWindowTable').removeWindowBySidImpl
   const renderFileContent: typeof import('./composables/useFileContentHtml').renderFileContent
   const renderMarkdown: typeof import('./composables/useMarkdown').renderMarkdown
+  const resetAskSlots: typeof import('./composables/ui/useAsk').resetAskSlots
   const resetBoardMirror: typeof import('./composables/ai/board-mirror').resetBoardMirror
   const resetResumeCount: typeof import('./composables/ai/stop-resume').resetResumeCount
   const resetRulesForSessionBoot: typeof import('./composables/ai/useAiWindow').resetRulesForSessionBoot
@@ -687,7 +693,7 @@ declare global {
   export type { SessionEntry } from './composables/ui/useAppStorage'
   import('./composables/ui/useAppStorage')
   // @ts-ignore
-  export type { AskState } from './composables/ui/useAsk'
+  export type { AskState, AskRendered } from './composables/ui/useAsk'
   import('./composables/ui/useAsk')
   // @ts-ignore
   export type { EventKind, StreamEvent } from './composables/ui/useEventStream'
@@ -799,6 +805,8 @@ declare module 'vue' {
     readonly appendCapped: UnwrapRef<typeof import('./composables/runner/live-output')['appendCapped']>
     readonly applyToEditor: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['applyToEditor']>
     readonly archiveEvents: UnwrapRef<typeof import('./composables/ui/useEventStream')['archiveEvents']>
+    readonly askCardKeyOf: UnwrapRef<typeof import('./composables/ui/useAsk')['askCardKeyOf']>
+    readonly askSignature: UnwrapRef<typeof import('./composables/ui/useAsk')['askSignature']>
     readonly askUser: UnwrapRef<typeof import('./composables/ui/useAsk')['askUser']>
     readonly asyncComputed: UnwrapRef<typeof import('@vueuse/core')['asyncComputed']>
     readonly autoResetRef: UnwrapRef<typeof import('@vueuse/core')['autoResetRef']>
@@ -813,6 +821,7 @@ declare module 'vue' {
     readonly buildOneCard: UnwrapRef<typeof import('./utils/timeline-build')['buildOneCard']>
     readonly buildSkillsBlock: UnwrapRef<typeof import('./composables/ai/skill-registry')['buildSkillsBlock']>
     readonly capFilesByBudget: UnwrapRef<typeof import('./utils/contextBuilder')['capFilesByBudget']>
+    readonly claimAskSlot: UnwrapRef<typeof import('./composables/ui/useAsk')['claimAskSlot']>
     readonly clampTextPreview: UnwrapRef<typeof import('./utils/timeline-preview')['clampTextPreview']>
     readonly clearEvents: UnwrapRef<typeof import('./composables/ui/useEventStream')['clearEvents']>
     readonly clearInbox: UnwrapRef<typeof import('./composables/runner/useScriptInbox')['clearInbox']>
@@ -982,6 +991,7 @@ declare module 'vue' {
     readonly onUpdated: UnwrapRef<typeof import('vue')['onUpdated']>
     readonly onWatcherCleanup: UnwrapRef<typeof import('vue')['onWatcherCleanup']>
     readonly openAiSession: UnwrapRef<typeof import('./composables/ai/useAiWindow')['openAiSession']>
+    readonly openAskSlotCount: UnwrapRef<typeof import('./composables/ui/useAsk')['openAskSlotCount']>
     readonly openSite: UnwrapRef<typeof import('./composables/ai/useAiWindow')['openSite']>
     readonly parseAsk: UnwrapRef<typeof import('./utils/ask-parser')['parseAsk']>
     readonly parseErrorLocations: UnwrapRef<typeof import('./utils/contextBuilder')['parseErrorLocations']>
@@ -1020,11 +1030,13 @@ declare module 'vue' {
     readonly refManualReset: UnwrapRef<typeof import('@vueuse/core')['refManualReset']>
     readonly refThrottled: UnwrapRef<typeof import('@vueuse/core')['refThrottled']>
     readonly refWithControl: UnwrapRef<typeof import('@vueuse/core')['refWithControl']>
+    readonly releaseAskSlot: UnwrapRef<typeof import('./composables/ui/useAsk')['releaseAskSlot']>
     readonly remoteGenerating: UnwrapRef<typeof import('./composables/ai/useAiWaiting')['remoteGenerating']>
     readonly removeWindowBySid: UnwrapRef<typeof import('./composables/ai/useAiWindow')['removeWindowBySid']>
     readonly removeWindowBySidImpl: UnwrapRef<typeof import('./composables/ai/useAiWindowTable')['removeWindowBySidImpl']>
     readonly renderFileContent: UnwrapRef<typeof import('./composables/useFileContentHtml')['renderFileContent']>
     readonly renderMarkdown: UnwrapRef<typeof import('./composables/useMarkdown')['renderMarkdown']>
+    readonly resetAskSlots: UnwrapRef<typeof import('./composables/ui/useAsk')['resetAskSlots']>
     readonly resetBoardMirror: UnwrapRef<typeof import('./composables/ai/board-mirror')['resetBoardMirror']>
     readonly resetResumeCount: UnwrapRef<typeof import('./composables/ai/stop-resume')['resetResumeCount']>
     readonly resetRulesForSessionBoot: UnwrapRef<typeof import('./composables/ai/useAiWindow')['resetRulesForSessionBoot']>
