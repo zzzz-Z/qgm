@@ -179,7 +179,7 @@ export function useAppStartup(deps: AppStartupDeps) {
         //   写进 doneSummary 会覆盖用户真正该看到的执行摘要。
         // [diag-toast-local-v1] toast 是 useToast() 的返回值（模块级单例但需在作用域内解构），
         //   dispatchInbound 不在那个持有 toast 的函数体内，必须就地取一次。
-        log.warn(`[tm-diag] ${parts.join(' · ')}`, e)
+        // log.warn(`[tm-diag] ${parts.join(' · ')}`, e)
         // [tm-diag-dedup-v1] 同一「阶段 + note」只播报一次：油猴在 turn-miss / enter 阶段会高频重推，
         //   每条都弹 TOAST_LONG 会刷屏淹没真正的执行摘要。日志仍逐条保留。
         const diagKey = `${String(d.stage)}|${String(d.note ?? '')}`

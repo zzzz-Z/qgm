@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // [ui-p2c-render-probe-v1] V9 验收①：dev-only 渲染打点（生产 enabled() 早退）
-import { computed, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
-import { probeRender } from '../../composables/ui/render-probe'
-import { useAsk } from '../../composables/ui/useAsk'
-import { renderMarkdown } from '../../composables/useMarkdown'
+import { computed, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue';
+import { probeRender } from '../../composables/ui/render-probe';
+import { useAsk } from '../../composables/ui/useAsk';
+import { renderMarkdown } from '../../composables/useMarkdown';
 // [round-card-v1] 从 TerminalPane 抽出：done / text / ask / question 四类非脚本卡片
 // [WHY] TerminalPane 超 HCLC 500 红线；四类卡片共用 text-card 布局
 // [CHANGE-IMPACT] 折叠机制已整体下线（见 [no-fold-full-text-v1]）：

@@ -183,6 +183,7 @@ let _innerRo: ResizeObserver | null = null
  * [CONSTRAINT] 读写都包 try/catch：隐私模式下 localStorage 可能抛错，此时退化为「每次都显示」。
  */
 const GUIDE_KEY = '__ai_empty_guide_seen'
+const type = ['ask', 'question', 'text', 'done'] as const
 
 /** 列表 */
 const chatListRef = ref<HTMLElement | null>(null)
@@ -594,7 +595,7 @@ function reopenGuide(): void {
               @preview="(p) => emit('preview', p)"
             />
             <RoundCard
-              v-else-if="card.type === 'ask' || card.type === 'question' || (card.text || card.preview || '').trim()"
+              v-else-if="type.includes(card.type) && (card.text || card.preview || '').trim()"
               :key="card.key || n"
               :card="card"
             />
