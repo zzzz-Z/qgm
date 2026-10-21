@@ -208,6 +208,8 @@ const hasStaleEvents = computed(() => busEvents.value.some(e => (e.payload as Re
 const timelineItems = computed(() => {
   const out: Array<ScriptItem | TextItem | DoneItem | AskItem | QuestionItem> = []
   for (const ev of busEvents.value) {
+    console.log(ev)
+
     // [ask-card-v1] AI 提问卡：ASK 解析结果，渲染为对话流内可点选/可打字的卡片（替代旧弹窗）
     // [CONSTRAINT] 正文与选项皆空才跳过；只要有一项就渲染（纯选项问题也合法）
     // [CHANGE-IMPACT] 依赖 useAsk.askUser emit 的 payload 契约（askId/question/options/answered/answer）

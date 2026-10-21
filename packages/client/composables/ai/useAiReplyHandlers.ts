@@ -381,7 +381,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
       }
     }
 
-    try { emitBus('ai:block', titles[type] || 'AI 块', { payload: { block }, updateKey }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
+    try { emitBus('ai:done', titles[type] || 'AI 块', { payload: { block }, updateKey }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
   }
 
   /**
