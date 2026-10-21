@@ -136,6 +136,21 @@ test('G10-b §1.5 列的每个错误码都必须由解析器真实发出（防�
   // BLOCK_DUP_ID
   probe(fence({ v: 1, turn: 1, content: [{ type: 'say', id: 's1', text: 'a' }, { type: 'say', id: 's1', text: 'b' }] }))
   probe('```json\n{ "v": 1, "turn": 1, "content": [') // TURN_TRUNCATED
+  // BLOCK_INVALID_FIELD：done 块 commit 格式非法
+  probe(fence({ v: 1, turn: 1, content: [{ type: 'done', id: 'd1', summary: 'x', commit: '不是 conventional' }] }))
   const missing = codes.filter(c => !emitted.has(c))
   assert.deepEqual(missing, [], `文档声明了但解析器从不发出的错误码：${missing.join(', ')}`)
+})
+
+test('G10-c §1.5 反向守卫：代码产出的每个错误码都必须在文档登记（防文档漏登）', () => {
+  // [WHY] G10-b 只守「文档 → 代码」单向；反向漂移（代码加新码但文档不写）静默发生。
+  //   实测：BLOCK_INVALID_FIELD 在 done 块改造时新增，文档漏登，G10-b 一直绿。
+  const src = fs.readFileSync(path.join(process.cwd(), 'packages/core/src/reply/turn-schema.ts'), 'utf8')
+  const found = new Set<string>()
+  for (const m of src.matchAll(/code:\s*['"]([A-Z][A-Z_]+)['"]/g)) found.add(m[1])
+  assert.ok(found.size >= 7, `只抽到 ${found.size} 个错误码：${[...found].join(',')}`)
+  const sec15 = slice('### §1.5 错误码（回灌自纠）', '### §1.6 ')
+  const documented = new Set([...sec15.matchAll(/`([A-Z][A-Z_]+)`/g)].map(m => m[1]))
+  const undocumented = [...found].filter(c => !documented.has(c))
+  assert.deepEqual(undocumented, [], `代码产出但文档未登记的错误码：${undocumented.join(', ')}（§1.5 需补行）`)
 })

@@ -94,20 +94,20 @@
 
 ### §1.3 派生规则（无状态，只看块列表）
 
-| 行为           | 判据                                                                             |
-| -------------- | -------------------------------------------------------------------------------- |
-| 渲染文本       | `say` 块，**按数组顺序**                                                         |
-| 执行后回灌     | 有 `script` ⇒ 执行完回灌结果，开下一 turn                                        |
-| 停循环等用户   | 有 `ask`                                                                         |
-| 本 turn 即总结 | 无 `script` 且无 `ask` ⇒ `end.mode === 'summary'`（末块 `say` 是正文，不是标记） |
-| 轮转会话       | 有 `handoff`（与上表正交）                                                       |
+| 行为           | 判据                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------ |
+| 渲染文本       | `say` 块，**按数组顺序**                                                                   |
+| 执行后回灌     | 有 `script` ⇒ 执行完回灌结果，开下一 turn                                                  |
+| 停循环等用户   | 有 `ask`                                                                                   |
+| 本 turn 即总结 | 无 `script` 且无 `ask` ⇒ `end.mode === 'summary'`（末块 `say` 或 `done` 的正文，不是标记） |
+| 轮转会话       | 有 `handoff`（与上表正交）                                                                 |
 
 优先级 `script` > `ask`：两者同在时**先执行脚本**，结果回灌后再按新 turn 判定。
 
 > **[turn-mode-v1] 判定是显式字段，不是消费方的各自推断**：结束帧 `end.mode ∈ {summary,results,user}` 由 `deriveTurnMode()` 统一产出（核心 `turn-frames.ts` 与客户端 `turn-collect.ts` 两份同构实现，改一处必须同步另一处）。消费方**直接读 `mode`**，不要再各自重写「无 script 且无 ask ⇒ 总结」这条规则。
 > **[CONSTRAINT] 向后兼容**：`mode` 为可选字段，旧服务端不传时消费方须按 `awaiting` 降级推断（`awaiting==='none'` ⇒ `summary`），不得当作错误。`say` 块始终只是内容块，不承载任何轮次语义。
 
-> **turn 总结 ≠ 任务 DONE**：本表只判定「本 turn 是否总结」（`end.mode === 'summary'`，其末块 `say` 是总结正文），**不判定任务是否结束**。任务级 DONE 是宿主侧**事件**（`retained-done-gate v1` / `post-done-gate v1`，见项目索引「宿主机制实现索引」），与块列表无派生关系——「无 script 且无 ask」只意味着本轮是总结轮，不意味着循环终止或任务收尾。
+> **turn 总结 ≠ 任务 DONE**：本表只判定「本 turn 是否总结」（`end.mode === 'summary'`，其末块 `say` 或 `done` 块是总结正文），**不判定任务是否结束**。任务级 DONE 是宿主侧**事件**（`retained-done-gate v1` / `post-done-gate v1`，见项目索引「宿主机制实现索引」），与块列表无派生关系——「无 script 且无 ask」只意味着本轮是总结轮，不意味着循环终止或任务收尾。
 
 ### §1.4 字段校验
 
@@ -130,15 +130,16 @@
 
 ### §1.5 错误码（回灌自纠）
 
-| code                  | 含义                                       | 修法                           |
-| --------------------- | ------------------------------------------ | ------------------------------ |
-| `TURN_NOT_JSON`       | 围栏内不是合法 JSON                        | 检查转义与括号配平             |
-| `TURN_NO_CONTENT`     | 缺 `content` 或为空数组                    | 至少给一个块                   |
-| `BLOCK_UNKNOWN_TYPE`  | `type` 不在 `say`/`script`/`ask`/`handoff` | 改名或删块                     |
-| `BLOCK_MISSING_FIELD` | 缺必填字段（带 `block` + `field` 定位）    | 按定位补字段                   |
-| `BLOCK_BAD_LANG`      | `lang` 不在 `js`/`cjs`（`bash` 已下线）    | 改 js，shell 走 `__AI__.shell` |
-| `BLOCK_DUP_ID`        | 同 turn 内 `id` 重复且内容不同             | 改 id 或删重复块               |
-| `TURN_TRUNCATED`      | 未闭合且超静默窗上限                       | 拆小串行，勿重发同长度         |
+| code                  | 含义                                               | 修法                           |
+| --------------------- | -------------------------------------------------- | ------------------------------ |
+| `TURN_NOT_JSON`       | 围栏内不是合法 JSON                                | 检查转义与括号配平             |
+| `TURN_NO_CONTENT`     | 缺 `content` 或为空数组                            | 至少给一个块                   |
+| `BLOCK_UNKNOWN_TYPE`  | `type` 不在 `say`/`script`/`ask`/`handoff`/`done`  | 改名或删块                     |
+| `BLOCK_MISSING_FIELD` | 缺必填字段（带 `block` + `field` 定位）            | 按定位补字段                   |
+| `BLOCK_BAD_LANG`      | `lang` 不在 `js`/`cjs`（`bash` 已下线）            | 改 js，shell 走 `__AI__.shell` |
+| `BLOCK_INVALID_FIELD` | 字段值格式非法（如 `done` 块的 `commit` 不合常规） | 按格式规则修正字段值           |
+| `BLOCK_DUP_ID`        | 同 turn 内 `id` 重复且内容不同                     | 改 id 或删重复块               |
+| `TURN_TRUNCATED`      | 未闭合且超静默窗上限                               | 拆小串行，勿重发同长度         |
 
 ### §1.6 执行纪律（信封态通用）
 
@@ -476,6 +477,11 @@ COMMIT: <type>(<scope>): <subject>
 | cross-host-fallback-v1           | 跨机时钟退化路径：到达序配对（时钟异常时启用）                | 项目索引  |
 | tmp-reaper-v1                    | .ai-runner/tmp 过期产物按 mtime 清理（/run 入口触发）         | §9        |
 | run-refs-bounded-v1              | runIds/sendTimestamps 有界，防跨会话无界累积                  | §10       |
+| turn-done-block-v1               | done 块：终轮总结用，summary 正文 + commit 独立字段           | §1.4      |
+| turn-mode-v1                     | 本轮性质显式字段：summary/results/user，消费方直接读不重推    | §1.3      |
+| ask-abuse-rate-v1                | ask 滥用量化观测（4 问不过却仍发 ask 的比率）                 | §1.6      |
+| board-hit-rate-v1                | 看板登记量化观测（复杂任务是否先登记清单）                    | §2        |
+| commit-subject-v1                | DONE 播报首行 COMMIT: 行 → conventional commit 标题           | §12       |
 
 ---
 
