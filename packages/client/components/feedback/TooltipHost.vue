@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/vue';
+import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/vue'
 
 defineOptions({ name: 'TooltipHost' })
 

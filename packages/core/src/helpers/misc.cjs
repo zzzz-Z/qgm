@@ -72,7 +72,7 @@ function createMiscApi(deps) {
     const isVueFile = /\.vue$/i.test(String(filename || ''))
     const isSfcSource = /^\s*<(?:script|template|style)[\s>]/.test(s)
     if (isVueFile || isSfcSource) {
-      return { ok: false, code: 'UNSUPPORTED_LANG', error: 'syntaxCheck 不支持 .vue SFC；请改用 __AI__.typeCheck', hint: '对 .vue 请用 __AI__.lint([file]) 或 __AI__.typeCheck()' }
+      return { ok: false, code: 'UNSUPPORTED_LANG', capability: true, error: 'syntaxCheck 不支持 .vue SFC；请改用 __AI__.typeCheck', hint: '对 .vue 请用 __AI__.lint([file]) 或 __AI__.typeCheck()' }
     }
     const TS_EXT_RE = /\.(?:ts|tsx|mts|cts|mjs)$/i
     const ESM_ERR_RE = /Cannot use import statement outside a module|Unexpected token '?export'?|Cannot use '?import\.meta'?/
@@ -80,6 +80,7 @@ function createMiscApi(deps) {
       return {
         ok: false,
         code: 'UNSUPPORTED_LANG',
+        capability: true,
         error: `syntaxCheck 仅校验 CJS/JS 语法（vm.Script），${String(filename)} 不在支持范围内`,
         hint: '对 .ts/.tsx/.mjs 请用 __AI__.lint([file])（项目内 eslint）或 __AI__.typeCheck()（tsc/vue-tsc）',
       }

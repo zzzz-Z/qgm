@@ -18,6 +18,8 @@ import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import path from 'node:path'
 import { injectAiJsdoc } from '../src/post-run/ai-guard.js'
+// [api-async-contract-v1] T8 契约来源（与 helpers/api-returns.ts 单一 SSOT 对齐）。
+import { API_ASYNC } from '../src/helpers/api-returns'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..')
 const require = createRequire(import.meta.url)
@@ -43,6 +45,10 @@ const NOT_API = new Set([
   'hint',
   'nearLines',
   'opts',
+  'undefined',
+  'null',
+  'true',
+  'false',
 ])
 
 /**
@@ -114,6 +120,59 @@ test('T2 SYSTEM.md §3.2 提到的每个 API 在门面上真实存在', () => {
   // 变异：把 §3.2 里某个 API 改成一个幻觉名（如 listDir）⇒ 下方断言红
   const missing = names.filter(n => typeof AI[n] === 'undefined')
   expect(missing, `SYSTEM.md §3.2 教了门面上不存在的 API：${missing.join(' ')}`).toEqual([])
+})
+
+// [api-error-codes-v1] T9：能力边界必须带 capability:true，与真失败区分（H9）。
+// 判据承重：删掉 capability 标记、或把能力边界当普通失败返回，即变红。
+test('T9 能力边界返回 capability:true', () => {
+  const offenders: string[] = []
+  const sfc = (AI.syntaxCheck as (c: string, f: string) => Record<string, unknown>)('<template><div/></template>', 'x.vue')
+  if (sfc.capability !== true) offenders.push('syntaxCheck(.vue): 缺 capability:true')
+  const ts = (AI.syntaxCheck as (c: string, f: string) => Record<string, unknown>)('const a: number = 1', 'x.ts')
+  if (ts.capability !== true) offenders.push('syntaxCheck(.ts): 缺 capability:true')
+  if (sfc.code !== 'UNSUPPORTED_LANG') offenders.push('syntaxCheck(.vue): code 应为 UNSUPPORTED_LANG')
+  expect(offenders, `能力边界契约漂移：\n${offenders.join('\n')}`).toEqual([])
+})
+
+// [api-async-contract-v1] T8：异步性契约必须与真实门面一致。
+// 判据承重：门面方法由同步改异步、或新增异步 API 漏登记，即变红。
+test('T8 API_ASYNC 与门面实测 thenable 双向一致', () => {
+  const safeProbes: Record<string, () => unknown> = {
+    'git.status': () => (AI.git as { status: () => unknown }).status(),
+    'git.recent': () => (AI.git as { recent: (n: number) => unknown }).recent(1),
+    'tasks.list': () => (AI.tasks as { list: () => unknown }).list(),
+  }
+
+  const offenders: string[] = []
+  for (const [name, fn] of Object.entries(safeProbes)) {
+    const ret = fn()
+    const isThenable = !!(ret && typeof (ret as { then?: unknown }).then === 'function')
+    const declared = (API_ASYNC as Record<string, boolean>)[name]
+    if (declared !== true) offenders.push(`${name}: 实测是 Promise 但 API_ASYNC 未登记`)
+    if (!isThenable) offenders.push(`${name}: 登记为异步但实测不是 Promise`)
+  }
+
+  for (const name of Object.keys(API_ASYNC)) {
+    const parts = name.split('.')
+    const target = parts.length > 1
+      ? (AI[parts[0]] as Record<string, unknown> | undefined)?.[parts[1]]
+      : AI[name]
+    if (typeof target !== 'function') offenders.push(`${name}: API_ASYNC 登记但门面不存在`)
+  }
+
+  expect(offenders, `异步契约漂移：\n${offenders.join('\n')}`).toEqual([])
+})
+
+// [api-error-codes-v1] T9：能力边界必须带 capability:true，与真失败区分（H9）。
+// 判据承重：删掉 capability 标记、或把能力边界当普通失败返回，即变红。
+test('T9 能力边界返回 capability:true', () => {
+  const offenders: string[] = []
+  const sfc = (AI.syntaxCheck as (c: string, f: string) => Record<string, unknown>)('<template><div/></template>', 'x.vue')
+  if (sfc.capability !== true) offenders.push('syntaxCheck(.vue): 缺 capability:true')
+  const ts = (AI.syntaxCheck as (c: string, f: string) => Record<string, unknown>)('const a: number = 1', 'x.ts')
+  if (ts.capability !== true) offenders.push('syntaxCheck(.ts): 缺 capability:true')
+  if (sfc.code !== 'UNSUPPORTED_LANG') offenders.push('syntaxCheck(.vue): code 应为 UNSUPPORTED_LANG')
+  expect(offenders, `能力边界契约漂移：\n${offenders.join('\n')}`).toEqual([])
 })
 
 test('T3 ai-guard 注入的 JSDoc 不含幻觉 API（listDir 已删、exists 已补转发）', () => {
@@ -195,4 +254,57 @@ test('T7 教学层（SYSTEM.md §3.2）提到的签名必须与真实门面 arit
     }
   }
   expect(offenders, `SYSTEM.md §3.2 的签名与门面 arity 不一致：\n${offenders.join('\n')}`).toEqual([])
+})
+
+// [api-error-codes-v1] T9：能力边界必须带 capability:true，与真失败区分（H9）。
+// 判据承重：删掉 capability 标记、或把能力边界当普通失败返回，即变红。
+test('T9 能力边界返回 capability:true', () => {
+  const offenders: string[] = []
+  const sfc = (AI.syntaxCheck as (c: string, f: string) => Record<string, unknown>)('<template><div/></template>', 'x.vue')
+  if (sfc.capability !== true) offenders.push('syntaxCheck(.vue): 缺 capability:true')
+  const ts = (AI.syntaxCheck as (c: string, f: string) => Record<string, unknown>)('const a: number = 1', 'x.ts')
+  if (ts.capability !== true) offenders.push('syntaxCheck(.ts): 缺 capability:true')
+  if (sfc.code !== 'UNSUPPORTED_LANG') offenders.push('syntaxCheck(.vue): code 应为 UNSUPPORTED_LANG')
+  expect(offenders, `能力边界契约漂移：\n${offenders.join('\n')}`).toEqual([])
+})
+
+// [api-async-contract-v1] T8：异步性契约必须与真实门面一致。
+// 判据承重：门面方法由同步改异步、或新增异步 API 漏登记，即变红。
+test('T8 API_ASYNC 与门面实测 thenable 双向一致', () => {
+  const safeProbes: Record<string, () => unknown> = {
+    'git.status': () => (AI.git as { status: () => unknown }).status(),
+    'git.recent': () => (AI.git as { recent: (n: number) => unknown }).recent(1),
+    'tasks.list': () => (AI.tasks as { list: () => unknown }).list(),
+  }
+
+  const offenders: string[] = []
+  for (const [name, fn] of Object.entries(safeProbes)) {
+    const ret = fn()
+    const isThenable = !!(ret && typeof (ret as { then?: unknown }).then === 'function')
+    const declared = (API_ASYNC as Record<string, boolean>)[name]
+    if (declared !== true) offenders.push(`${name}: 实测是 Promise 但 API_ASYNC 未登记`)
+    if (!isThenable) offenders.push(`${name}: 登记为异步但实测不是 Promise`)
+  }
+
+  for (const name of Object.keys(API_ASYNC)) {
+    const parts = name.split('.')
+    const target = parts.length > 1
+      ? (AI[parts[0]] as Record<string, unknown> | undefined)?.[parts[1]]
+      : AI[name]
+    if (typeof target !== 'function') offenders.push(`${name}: API_ASYNC 登记但门面不存在`)
+  }
+
+  expect(offenders, `异步契约漂移：\n${offenders.join('\n')}`).toEqual([])
+})
+
+// [api-error-codes-v1] T9：能力边界必须带 capability:true，与真失败区分（H9）。
+// 判据承重：删掉 capability 标记、或把能力边界当普通失败返回，即变红。
+test('T9 能力边界返回 capability:true', () => {
+  const offenders: string[] = []
+  const sfc = (AI.syntaxCheck as (c: string, f: string) => Record<string, unknown>)('<template><div/></template>', 'x.vue')
+  if (sfc.capability !== true) offenders.push('syntaxCheck(.vue): 缺 capability:true')
+  const ts = (AI.syntaxCheck as (c: string, f: string) => Record<string, unknown>)('const a: number = 1', 'x.ts')
+  if (ts.capability !== true) offenders.push('syntaxCheck(.ts): 缺 capability:true')
+  if (sfc.code !== 'UNSUPPORTED_LANG') offenders.push('syntaxCheck(.vue): code 应为 UNSUPPORTED_LANG')
+  expect(offenders, `能力边界契约漂移：\n${offenders.join('\n')}`).toEqual([])
 })

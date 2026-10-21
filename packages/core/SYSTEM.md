@@ -251,6 +251,7 @@
 - `syntaxCheck(code, filename)` → `{ok}` —— **对象不是布尔**；仅 CJS/JS，TS/ESM 返 `UNSUPPORTED_LANG`（能力边界非语法错）
 - `shell(cmd, opts?)` —— 返回 `{ok, stdout, stderr, code}`，**无 `exit` 字段**；字符串形态不做 shell 解析（元字符直接拒）
 - `flush()` —— **仅 overlay 沙箱内有效**；`writeText` 只进 overlay，子进程读真盘前须先 flush
+- **异步族必须 `await`**（`API_ASYNC` 契约，T8 守卫）：`git.*` / `shell` / `exec` / `grep` / `walk` / `readFiles` / `probe` / `testRun` / `topFreq` / `lint` / `typeCheck` / `findDefinition` / `findReferences` / `affectedTests` / `reflect` / `lessons.*` / `session.*` / `subagent.*` / `browser.run` / `tasks.*`。**漏 `await` 不报错**，只静默得到 `undefined` 或 `{}`——门面用箭头函数包 async，`constructor.name` 与同步方法完全同形，无法从形态区分
 - 路径一律用 `getProjectRoot()` 拼，**禁止硬编码** `/Users/...` 绝对路径
 
 **高频新 API**（不在旧记忆里，需主动了解）：

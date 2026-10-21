@@ -145,8 +145,20 @@ function createOutputApi(deps) {
       if (text === undefined) text = 'undefined'
       const bytes = Buffer.byteLength(text, 'utf8')
       if (bytes > maxBytes) {
-        const cut = text.slice(0, maxBytes)
-        text = `${cut}\n…[truncated: ${bytes} bytes, limit ${maxBytes}]`
+        // [okjson-truncation-signal-v1] 截断必须可编程判定：
+        // 硬 slice 会让 JSON 结构断裂（调用方解析失败或误以为完整），
+        // 故输出合法的「截断信封」，保留 __truncated / __bytes / __limit / preview 四字段。
+        const previewBytes = Math.max(64, maxBytes - 256)
+        const envelope = {
+          __truncated: true,
+          __bytes: bytes,
+          __limit: maxBytes,
+          preview: text.slice(0, previewBytes),
+          note: `…[truncated: ${bytes} bytes, limit ${maxBytes}]`,
+        }
+        let envText
+        try { envText = JSON.stringify(envelope, null, 2) } catch (e) { envText = JSON.stringify({ __truncated: true, __bytes: bytes, __limit: maxBytes }) }
+        text = envText
       }
       console.log(_c.green('✓'), text)
     },

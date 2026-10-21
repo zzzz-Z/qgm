@@ -207,5 +207,9 @@ test('空内容的 done / text 卡片不得渲染（RoundCard 内部 + TerminalP
   assert.ok(rc.includes('card.type === \'text\' && (card.text || card.preview).trim()'), 'RoundCard.vue text 分支缺少空内容守卫')
 
   const pane = read('packages/client/components/script/TerminalPane.vue')
-  assert.match(pane, /v-else-if="card.type === 'ask' || card.type === 'question' || (card.text || card.preview || '').trim()"/, 'TerminalPane.vue 的 RoundCard 渲染缺少空值防御')
+  assert.ok(
+    pane.includes('card.type === \'ask\' || card.type === \'question\'')
+    && pane.includes('(card.text || card.preview || \'\').trim()'),
+    'TerminalPane.vue 的 RoundCard 渲染缺少空值防御',
+  )
 })

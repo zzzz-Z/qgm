@@ -2,8 +2,8 @@
 // [ask-card-v1] 原 AskDialog.vue（@ask 弹窗）已删除：提问改为对话流内的可点选卡片，
 //   见 TerminalPane 的 .question-card 与 composables/ui/useAsk.ts
 
-import { nextTick, ref, watch } from 'vue';
-import { useToast } from '../../composables/ui/useToast';
+import { nextTick, ref, watch } from 'vue'
+import { useToast } from '../../composables/ui/useToast'
 
 defineOptions({ name: 'ToastHost' })
 

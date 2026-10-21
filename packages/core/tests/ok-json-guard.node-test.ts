@@ -39,5 +39,8 @@ describe('okJson', () => {
     const big = { s: 'x'.repeat(2000) }
     const out = capture(() => api.okJson(big, { maxBytes: 100 }))
     assert.ok(out.includes('[truncated'), `超长必须截断标注，实际长度 ${out.length}`)
+    // [okjson-truncation-signal-v1] 除人类可读标注外，还须可编程判定
+    assert.ok(out.includes('__truncated'), '截断必须带 __truncated 字段供程序判断')
+    assert.ok(out.includes('__limit'), '截断必须带 __limit 字段')
   })
 })
