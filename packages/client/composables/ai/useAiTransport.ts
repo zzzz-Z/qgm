@@ -131,6 +131,9 @@ export function createTampermonkeyTransport(): AiTransport {
       const raw = payload !== undefined ? payload : d
       for (const cb of replyCbs) cb(raw, sid)
     }
+    // [turn-block-frame-v1-tm] 油猴侧块帧分发：此前只声明 blockCbs 却从不调用，
+    //   导致 done 等块帧到达前端后被静默丢弃（实测 2026-10-21）。
+    else if (t === 'ai-runner:block') { for (const cb of blockCbs) { try { cb((d as { block?: unknown }).block, sid) } catch { /* swallow: 单订阅者异常不阻断其他 */ } } }
     else if (t === 'ai-runner:summary') { for (const cb of summaryCbs) cb(String((d as { text?: string }).text || ''), sid, Boolean((d as { degraded?: boolean }).degraded)) }
     else if (t === 'ai-runner:new-session-created') { for (const cb of newSidCbs) cb(String((d as { url?: string }).url || ''), String((d as { id?: string }).id || '')) }
   }
