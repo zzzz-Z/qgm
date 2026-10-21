@@ -597,22 +597,6 @@ function reopenGuide(): void {
             />
           </template>
 
-          <!-- [status-bar-inline-v2] 阶段条只保留 AI 阶段：waiting=「AI 思考中 / AI 仍在处理」、
-               feedback=「回传中」（文案与秒表来自 useAiPhaseClock 单例）。
-               成功/失败、轮数、token 估算已整体移除（用户 2026-10-21：其他都删掉只留 AI 思考中——
-               执行成败由脚本卡片自身 phase/exit 呈现，轮数与上下文估算属噪音）。
-               sticky 贴底：消息再长也钉在可视区下缘，不再被顶出视野（用户实测被遮挡）。 -->
-          <div
-            v-if="runtimeKind === 'waiting' || runtimeKind === 'feedback'"
-            class="status-bar-inline"
-            :class="`kind-${runtimeKind}`"
-            aria-live="polite"
-          >
-            <span class="status-dot" aria-hidden="true" />
-            <span class="status-text">{{ waitText }}</span>
-            <span v-if="waitElapsed > 0" class="status-sep">·</span>
-            <span v-if="waitElapsed > 0" class="status-elapsed">{{ waitElapsed }}s</span>
-          </div>
           <!-- 空态：无卡片 / 无输出 / 无总结 -->
           <div v-if="!running && !liveStdout && !liveStderr && timelineItems.length === 0" class="tree-empty">
             <!-- [ui-empty-guide-v2] 引导记忆化：首访展示完整三步，之后只留一行。
@@ -668,6 +652,20 @@ function reopenGuide(): void {
             </template>
           </div>
         </div>
+      </div>
+      <!-- [status-bar-inline-v3] 阶段条脱离文档流：absolute 浮于 flow-timeline 底部而不占 flow 空间。
+           waiting=「AI 思考中 / AI 仍在处理」、feedback=「回传中」（文案与秒表来自 useAiPhaseClock）。
+           成功/失败、轮数、token 估算已整体移除。absolute 让状态条出现/消失或新消息到达都不再撑动 DOM。 -->
+      <div
+        v-if="runtimeKind === 'waiting' || runtimeKind === 'feedback'"
+        class="status-bar-inline"
+        :class="`kind-${runtimeKind}`"
+        aria-live="polite"
+      >
+        <span class="status-dot" aria-hidden="true" />
+        <span class="status-text">{{ waitText }}</span>
+        <span v-if="waitElapsed > 0" class="status-sep">·</span>
+        <span v-if="waitElapsed > 0" class="status-elapsed">{{ waitElapsed }}s</span>
       </div>
     </div>
   </section>

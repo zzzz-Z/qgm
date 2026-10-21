@@ -35,7 +35,6 @@
   margin: 0 auto;
   padding: 0;
   min-height: 0;
-  padding-bottom: 50px;
   max-height: none;
   background: transparent;
   flex: 1 1 0;
@@ -88,10 +87,10 @@
      窄屏不再出现「外壳 16 + 内层 24」的二次挤压。 */
   max-width: 900px;
   margin: 0 auto;
-  padding: 16px 20px 24px;
+  padding: 16px 20px 56px;
   gap: 6px;
   @media (max-width: 900px) {
-    padding: 14px 8px 20px;
+    padding: 14px 8px 48px;
   }
   text-align: left;
   background: transparent;
@@ -562,17 +561,19 @@
 // [md-table-shared-v1] 表格（横向滚动壳 + 不逐字断行）由共享 mixin 提供
 @include mdtable.md-table('.done-summary-body');
 
-/* [status-bar-inline-v2] 阶段条：sticky 钉在 chat-list 可视区下缘——消息再长也不再被顶出视野
-   （用户实测「跑到最下面被遮挡」）。背景一律不透明（tint 与 var(--bg) 混合），
-   贴底悬浮时下层卡片不会透出来；顶缘投影提供与滚动内容的分层。 */
+/* [status-bar-inline-v3] 阶段条：absolute 浮于 flow-timeline 底部，脱离文档流——不占 chat-list 的 flow 空间，
+   因此状态条出现/消失或新消息到达都不会撑动下方 DOM（用户反馈「页面一有新内容就上下晃」）。
+   背景一律不透明（tint 与 var(--bg) 混合），贴底悬浮时下层卡片不会透出来；顶缘投影提供与滚动内容的分层。
+   flow-timeline 须为 position:relative 作包含块（已有）。 */
 .status-bar-inline {
-  position: sticky;
+  position: absolute;
+  left: 20px;
+  right: 20px;
   bottom: 0;
   z-index: 5;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 8px 12px 12px;
   padding: 10px 14px;
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-2, #8b949e) 12%, var(--bg, #0d1117));
@@ -664,6 +665,12 @@
 .status-bar-inline .status-elapsed {
   color: var(--text-2, #c9d1d9);
   font-variant-numeric: tabular-nums;
+}
+@media (max-width: 900px) {
+  .status-bar-inline {
+    left: 8px;
+    right: 8px;
+  }
 }
 /* [status-bar-inline-v2] .status-spacer / .status-meta 已删：轮数与 token 估算不再上屏。 */
 @keyframes status-pulse {
