@@ -525,7 +525,7 @@ export function detectReplyInPage(siteCfg = {}) {
   // [CONSTRAINT] 生成源是 packages/core/src/reply/turn-schema.ts；重建命令 pnpm turn-schema:sync。
   // [CHANGE-IMPACT] 接线在 P2：扫**全部** pre > code、信封优先、标记回落、且不得继承 stoppedThisRound 抑制。
   /* eslint-disable unused-imports/no-unused-vars, ts/no-unused-vars -- 生成段：符号是否被调用取决于接线进度 */
-  /* @turn-schema:ecf2c9041ff4778f */
+  /* @turn-schema:8ce160d15ffe92ec */
   // >>> BEGIN turn-schema
   // [turn-schema-v1] turn 信封契约的**唯一源**。
   //
@@ -550,7 +550,7 @@ export function detectReplyInPage(siteCfg = {}) {
   const TURN_SCHEMA_VERSION = 1
 
   /** 已实现的块类型（注册表）。新增工具类型 = 往这里加一项 + 在 validateBlock 加一个分支 */
-  const TURN_BLOCK_TYPES = ['say', 'script', 'ask', 'handoff']
+  const TURN_BLOCK_TYPES = ['say', 'script', 'ask', 'handoff', 'done']
 
   /** script 块可接受的 lang（白名单，不做别名归一：别名会让「写错」变成「猜对了」） */
   const TURN_SCRIPT_LANGS = ['js', 'cjs']
@@ -705,6 +705,17 @@ export function detectReplyInPage(siteCfg = {}) {
         options.push({ id: oid, label })
       }
       return { block: { type: 'ask', id: rawId || (`ask_${index + 1}`), question, options }, errors }
+    }
+
+    if (type === 'done') {
+      const summary = typeof raw.summary === 'string' ? raw.summary : ''
+      const commit = typeof raw.commit === 'string' ? raw.commit.trim() : ''
+      if (!rawId) errors.push({ code: 'BLOCK_MISSING_FIELD', block: at, field: 'id' })
+      if (!summary.trim()) errors.push({ code: 'BLOCK_MISSING_FIELD', block: rawId || at, field: 'summary' })
+      if (commit && !/^(feat|fix|chore|refactor|docs|test|perf)(\([^)]+\))?: .{1,72}$/.test(commit)) {
+        errors.push({ code: 'BLOCK_INVALID_FIELD', block: rawId || at, field: 'commit', detail: commit.slice(0, 80) })
+      }
+      return { block: { type: 'done', id: rawId || (`done_${index + 1}`), summary, ...(commit ? { commit } : {}) }, errors }
     }
 
     // type === 'script'

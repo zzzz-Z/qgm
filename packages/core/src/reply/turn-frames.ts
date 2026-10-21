@@ -23,6 +23,7 @@ export interface RawBlock {
   question?: string
   options?: readonly { id?: string, label?: string }[]
   summary?: string
+  commit?: string
 }
 
 /** 映射结果：帧数组 + 结束帧（两者一起发，故一起返回） */
@@ -107,7 +108,7 @@ export function blocksToFrames(turnId: number, raw: readonly RawBlock[]): TurnFr
 }
 
 function isBlockType(t: string): t is AiBlockType {
-  return t === 'say' || t === 'script' || t === 'ask' || t === 'handoff'
+  return t === 'say' || t === 'script' || t === 'ask' || t === 'handoff' || t === 'done'
 }
 
 /**
@@ -155,6 +156,12 @@ function toFrame(turnId: number, blockId: string, seq: number, type: AiBlockType
       options.push({ id: oid, label })
     }
     return { turnId, blockId, seq, type, question, options }
+  }
+  if (type === 'done') {
+    const summary = typeof b.summary === 'string' ? b.summary : ''
+    if (!summary.trim()) return 'summary'
+    const commit = typeof b.commit === 'string' ? b.commit.trim() : ''
+    return { turnId, blockId, seq, type, summary, ...(commit ? { commit } : {}) } as AiBlockDto
   }
   // script
   const lang = typeof b.lang === 'string' ? b.lang : ''

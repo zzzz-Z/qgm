@@ -163,6 +163,16 @@ export function buildOneCard(ev: { id: number, kind: string, ts: number, payload
       const pv = clampTextPreview(text, TEXT_PREVIEW.lines, TEXT_PREVIEW.chars)
       return { type: 'text', key: `blk-${turnId}-${blockId}`, timeLabel: hmsLabel(ev.ts), text, ...pv }
     }
+    if (b.type === 'done') {
+      // [turn-done-block-v1] 总结块建 done 卡片：summary 是正文，commit（可选）附到末尾
+      // [WHY 附到 text] post-done.cjs 从 DONE 播报正文抽 COMMIT 行；不附则 commit 链路断
+      const summary = String(b.summary || '').trim()
+      if (!summary) return null
+      const commit = String(b.commit || '').trim()
+      const text = commit ? `${summary}\n\nCOMMIT: ${commit}` : summary
+      const pv = clampTextPreview(text, DONE_PREVIEW.lines, DONE_PREVIEW.chars)
+      return { type: 'done', key: `blk-${turnId}-${blockId}`, timeLabel: hmsLabel(ev.ts), text, ...pv }
+    }
     if (b.type === 'ask') {
       const question = String(b.question || '').trim()
       const options = normalizeAskOptions(b.options)

@@ -1,4 +1,4 @@
-/* @turn-schema:ecf2c9041ff4778f */
+/* @turn-schema:8ce160d15ffe92ec */
 // 由 scripts/sync-turn-schema.mjs 从 packages/core/src/reply/turn-schema.ts 生成，请勿手改。
 /* eslint-disable ts/ban-ts-comment -- 纯 JS 源，由 scripts/sync-turn-schema.mjs 生成 */
 // @ts-nocheck
@@ -27,7 +27,7 @@
 export const TURN_SCHEMA_VERSION = 1
 
 /** 已实现的块类型（注册表）。新增工具类型 = 往这里加一项 + 在 validateBlock 加一个分支 */
-export const TURN_BLOCK_TYPES = ['say', 'script', 'ask', 'handoff']
+export const TURN_BLOCK_TYPES = ['say', 'script', 'ask', 'handoff', 'done']
 
 /** script 块可接受的 lang（白名单，不做别名归一：别名会让「写错」变成「猜对了」） */
 export const TURN_SCRIPT_LANGS = ['js', 'cjs']
@@ -182,6 +182,17 @@ function validateBlock(raw, index) {
       options.push({ id: oid, label })
     }
     return { block: { type: 'ask', id: rawId || (`ask_${index + 1}`), question, options }, errors }
+  }
+
+  if (type === 'done') {
+    const summary = typeof raw.summary === 'string' ? raw.summary : ''
+    const commit = typeof raw.commit === 'string' ? raw.commit.trim() : ''
+    if (!rawId) errors.push({ code: 'BLOCK_MISSING_FIELD', block: at, field: 'id' })
+    if (!summary.trim()) errors.push({ code: 'BLOCK_MISSING_FIELD', block: rawId || at, field: 'summary' })
+    if (commit && !/^(feat|fix|chore|refactor|docs|test|perf)(\([^)]+\))?: .{1,72}$/.test(commit)) {
+      errors.push({ code: 'BLOCK_INVALID_FIELD', block: rawId || at, field: 'commit', detail: commit.slice(0, 80) })
+    }
+    return { block: { type: 'done', id: rawId || (`done_${index + 1}`), summary, ...(commit ? { commit } : {}) }, errors }
   }
 
   // type === 'script'

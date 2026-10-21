@@ -56,7 +56,7 @@ export interface NeedFilesPayloadDto {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** 块类型：与 packages/core/src/reply/turn-schema.ts 的 TURN_BLOCK_TYPES 同源 */
-export type AiBlockType = 'say' | 'script' | 'ask' | 'handoff'
+export type AiBlockType = 'say' | 'script' | 'ask' | 'handoff' | 'done'
 
 /**
  * 一个块。字段按 `type` 收窄（wire 上是 JSON，故用扁平可空字段而非判别联合）。
@@ -85,8 +85,10 @@ export interface AiBlockDto {
   question?: string
   /** ask：选项（直接来自块，前端不再解析文本） */
   options?: DecisionOptionDto[]
-  /** handoff：交班摘要 */
+  /** handoff：交班摘要；done：总结正文 */
   summary?: string
+  /** done：可选的 conventional commit 标题（供 post-done-gate 直接用作提交信息） */
+  commit?: string
 }
 
 /**

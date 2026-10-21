@@ -358,6 +358,28 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
       }
     }
 
+    // [turn-done-block-v1] done 块：触发 DONE 收尾副作用（与 handleAiReply 的 kind==='done' 同源）
+    // [WHY 不 emit ai:done] buildOneCard 已为 done 块建卡；再 emit 会双卡
+    // [WHY 在此而非 handleTurnEndMsg] turn-end 只做收尾信号（setRemoteGenerating / emit ai:turn-end），
+    //   不含 post-done hook / 看板清桶 / lessons 采集；那些副作用只在 DONE 标记路径里。
+    if (type === 'done') {
+      const db = block as { summary?: string, commit?: string }
+      const summary = String(db.summary || '').trim()
+      const commit = String(db.commit || '').trim()
+      if (summary) {
+        const doneText = commit ? `${summary}\n\nCOMMIT: ${commit}` : summary
+        const doneSummary = doneText.split(/\r?\n/).filter(l => l.trim()).slice(0, 5).join(' / ').slice(0, 200)
+        const doneSid = String(activeSessionId.value || '')
+        void runHook('BeforeDoneFinal', { loopId: '', round: 0, startCommit: '', reason: 'done-block', doneSummary })
+          .then((gate) => { if (gate.action === 'reject') notifySelfcheckReject(gate.reason) })
+          .catch(() => { /* runHook fail-open */ })
+        if (doneSid) {
+          void fetch('/__ai/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'set', sid: doneSid, todo: [], done: [], clear: 'finish' }) }).catch(() => {})
+        }
+        void fetch('/__ai/lessons', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: doneText }) }).catch(() => {})
+      }
+    }
+
     try { emitBus('ai:block', titles[type] || 'AI 块', { payload: { block }, updateKey }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
   }
 

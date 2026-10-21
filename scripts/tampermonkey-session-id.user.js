@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AI Runner · 会话 ID + 用量估算 + 回复回传 + fill 接收
 // @namespace    ai-runner
-// @version      1.9.48
+// @version      1.9.49
 // @description  回传会话 ID/用量/AI 回复到工作台；[fragment-guard-v1]
 // @match        https://chat.deepseek.com/*
 // @match        https://chatglm.cn/*
@@ -52,7 +52,7 @@ function hash32(s) {
     return (h >>> 0).toString(16).padStart(8, '0');
 }
 
-/* @turn-schema:ecf2c9041ff4778f */
+/* @turn-schema:8ce160d15ffe92ec */
 // 由 scripts/sync-turn-schema.mjs 从 packages/core/src/reply/turn-schema.ts 生成，请勿手改。
 // @ts-nocheck
 // >>> BEGIN turn-schema
@@ -77,7 +77,7 @@ function hash32(s) {
 /** 契约版本（写进 `v` 字段；缺省按 1 处理） */
 const TURN_SCHEMA_VERSION = 1;
 /** 已实现的块类型（注册表）。新增工具类型 = 往这里加一项 + 在 validateBlock 加一个分支 */
-const TURN_BLOCK_TYPES = ['say', 'script', 'ask', 'handoff'];
+const TURN_BLOCK_TYPES = ['say', 'script', 'ask', 'handoff', 'done'];
 /** script 块可接受的 lang（白名单，不做别名归一：别名会让「写错」变成「猜对了」） */
 const TURN_SCRIPT_LANGS = ['js', 'cjs'];
 /**
@@ -258,6 +258,18 @@ function validateBlock(raw, index) {
             options.push({ id: oid, label });
         }
         return { block: { type: 'ask', id: rawId || (`ask_${index + 1}`), question, options }, errors };
+    }
+    if (type === 'done') {
+        const summary = typeof raw.summary === 'string' ? raw.summary : '';
+        const commit = typeof raw.commit === 'string' ? raw.commit.trim() : '';
+        if (!rawId)
+            errors.push({ code: 'BLOCK_MISSING_FIELD', block: at, field: 'id' });
+        if (!summary.trim())
+            errors.push({ code: 'BLOCK_MISSING_FIELD', block: rawId || at, field: 'summary' });
+        if (commit && !/^(feat|fix|chore|refactor|docs|test|perf)(\([^)]+\))?: .{1,72}$/.test(commit)) {
+            errors.push({ code: 'BLOCK_INVALID_FIELD', block: rawId || at, field: 'commit', detail: commit.slice(0, 80) });
+        }
+        return { block: { type: 'done', id: rawId || (`done_${index + 1}`), summary, ...(commit ? { commit } : {}) }, errors };
     }
     // type === 'script'
     const lang = typeof raw.lang === 'string' ? raw.lang.trim().toLowerCase() : '';

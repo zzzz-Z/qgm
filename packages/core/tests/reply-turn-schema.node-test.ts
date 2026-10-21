@@ -23,6 +23,7 @@ interface TurnBlock {
   text?: string
   summary?: string
   question?: string
+  commit?: string
   options?: { id: string, label: string }[]
   lang?: string
   desc?: string
@@ -175,8 +176,21 @@ describe('turn-schema: 大载荷', () => {
 })
 
 describe('turn-schema: 契约边界', () => {
-  it('首版只注册四类块', () => {
-    expect(TURN_BLOCK_TYPES).toEqual(['say', 'script', 'ask', 'handoff'])
+  it('注册五类块（含 done）', () => {
+    expect(TURN_BLOCK_TYPES).toEqual(['say', 'script', 'ask', 'handoff', 'done'])
+  })
+
+  it('done 块：summary 必填，commit 可选且须合 conventional commit 格式', () => {
+    const base = { v: 1, turn: 1, content: [{ type: 'done', id: 'd1', summary: '改完了' }] }
+    const r1 = parseTurn(fence(base))
+    expect(r1.blocks.length).toBe(1)
+    expect(r1.blocks[0].type).toBe('done')
+    expect(r1.blocks[0].summary).toBe('改完了')
+    expect(r1.blocks[0].commit).toBeUndefined()
+    const r2 = parseTurn(fence({ v: 1, turn: 1, content: [{ type: 'done', id: 'd1', summary: '改完了', commit: 'fix(ui): 收口状态条' }] }))
+    expect(r2.blocks[0].commit).toBe('fix(ui): 收口状态条')
+    const bad = parseTurn(fence({ v: 1, turn: 1, content: [{ type: 'done', id: 'd1', summary: '改完了', commit: '不是 conventional' }] }))
+    expect(bad.errors.some(e => e.code === 'BLOCK_INVALID_FIELD' && e.field === 'commit')).toBe(true)
   })
 
   it('schema 源文件不得出现 lane（不支持的能力不得声明）', () => {

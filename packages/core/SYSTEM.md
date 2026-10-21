@@ -117,6 +117,14 @@
 | `script`  | `id` `lang` `desc` `why` `code` | `id` turn 内唯一；`lang ∈ {js,cjs}`；`desc`/`why` ≤200 字符；`code` 非空 |
 | `ask`     | `id` `question`                 | `options` 可空；`options[].label` 非空                                   |
 | `handoff` | `id` `summary`                  | `summary` 非空                                                           |
+| `done`    | `id` `summary`                  | `summary` 非空；`commit?` 若给须为 `<type>(<scope>): <subject>`（≤72）   |
+
+**`done` 块的语义与约束**（`turn-done-block-v1`）：本 turn 是**终轮总结**时用它替代 `say` 收尾。
+
+- `summary` 是交付正文（用户看到的总结卡）；`commit` 是可选的 conventional commit 标题，供 `post-done-gate` 直接用作提交信息，避免降级成对话体。
+- 有 `done` 块时宿主**不再**从文本里的 `DONE` 标记二次发 `ai:done`（互斥，防双卡）。
+- `commit` 缺省时降级回「从 `summary` 前 5 行抽 `COMMIT:` 行」的老路径。
+- 中间过程轮（还有 `script` / `ask`）**不要**用 `done`，用 `say` 说明。
 
 **`say` 也必须显式写 `id`**：流式下信封前部可能插入新块，自动 id 按下标生成会让同一条 say 从 `say_1` 漂成 `say_2` ⇒ 按 `turn|id` 去重会把同一条当新块再推一次（R7）。显式 id 让去重稳定；`script`/`ask` 的执行账本本来就只认显式 id。
 
