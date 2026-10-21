@@ -265,5 +265,45 @@ test('[stale-run-abort-v2] 第二次 run() 必须 abort 上一轮悬挂的 fetch
   }
 })
 
+// [stop-kill-bg-v1] stop() 必须终止在跑的后台任务（POST /__ai/shell-kill），不能只停前端轮询。
+// [WHY] 用户实测「停止按钮不终止后台进程」：`shell(cmd,{background:true})` 起的进程在服务端
+//   照跑（跨轮存活），其输出还会在新一轮 run 开头被重新注入 liveStdout。
+//   判据承重：删掉 stop() 里的 killPendingBgTasks ⇒ 本用例必红（killCalls 为空）。
+test('[stop-kill-bg-v1] stop() 对在跑后台任务发 /__ai/shell-kill', async () => {
+  const r = mod.useRunner()
+  const savedFetch = globalThis.fetch
+  const killCalls: string[] = []
+  try {
+    globalThis.fetch = (async (url: unknown, init?: { body?: string }) => {
+      const u = String(url)
+      if (u.includes('/__ai/shell-kill')) {
+        killCalls.push(String((JSON.parse(init?.body || '{}') as { id?: string }).id || ''))
+        return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      }
+      if (u.includes('/__ai/shell-log')) {
+        return new Response(JSON.stringify({ ok: true, text: '', next: 0, done: false }), { status: 200 })
+      }
+      // /__ai/run：NDJSON 流——推一条 BG_ID chunk（起后台轮询）+ summary（收口本轮）
+      const enc = new TextEncoder()
+      const line = (o: unknown): Uint8Array => enc.encode(`${JSON.stringify(o)}\n`)
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(line({ type: 'chunk', stream: 'stdout', data: 'BG_ID=sh-stopkill\n' }))
+          c.enqueue(line({ type: 'summary', runId: '1-x', code: 0, ok: true, stdoutTail: '', stderrTail: '', changes: [] }))
+          c.close()
+        },
+      })
+      return new Response(stream, { status: 200 })
+    }) as unknown as typeof fetch
+    r.script.value = 'const k = 1'
+    await r.run()
+    assert.ok(r.bgLogs.value['sh-stopkill'] !== undefined || r.liveStdout.value.includes('BG_ID=sh-stopkill'), '前置：BG watcher 应已因 BG_ID chunk 起来')
+    r.stop()
+    assert.deepEqual(killCalls, ['sh-stopkill'], 'stop() 未终止后台任务：进程在服务端照跑（停止按钮不终止后台进程）')
+  } finally {
+    globalThis.fetch = savedFetch
+  }
+})
+
 // 恢复 fetch（进程退出前）
 process.on('beforeExit', () => { globalThis.fetch = origFetch })

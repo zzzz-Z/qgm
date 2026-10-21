@@ -36,7 +36,8 @@ vi.mock('../composables/ai/useRuntime', () => ({
     enterExecuting: () => { rt.state.value.kind = 'executing' },
     enterFeedback: () => { rt.state.value.kind = 'feedback' },
     enterWaiting: () => { rt.state.value.kind = 'waiting' },
-    settleIdle: () => { rt.state.value.kind = 'idle' },
+    // 与真实 useRuntime.settleIdle 同语义：不得覆写用户显式置的 stopped / paused / interrupted
+    settleIdle: () => { if (!['paused', 'stopped', 'interrupted'].includes(rt.state.value.kind)) rt.state.value.kind = 'idle' },
     stop: () => { rt.state.value.kind = 'stopped' },
     reset: () => { rt.state.value.kind = 'idle' },
   }),
@@ -282,4 +283,31 @@ test('看板抓取失败 ⇒ turn 回灌原样送达（结果通道不被看板�
     setTurnFillSink(null)
     resetBoardMirror()
   }
+})
+
+// [stop-no-feedback-v1] 执行中点停止：turn 收口后不得把结果回灌给 AI。
+// [WHY] 用户实测「停止后仍把结果回灌」：pauseAll 只 abort 当前 fetch、从不知会 turn 管线 ⇒
+//   aborted 结果照常 formatTurnResults + fill。判据承重：删掉 submitTurn 的 abortedTurns
+//   短路或 pauseAll 的 abortAllTurns 接线 ⇒ 本用例必红（fills 非空）。
+test('[stop-no-feedback-v1] 执行中 abortAllTurns ⇒ 收口后不回灌（sink 零文本）', async () => {
+  h.scripted.push(ok('partial'))
+  const fills: string[] = []
+  setTurnFillSink((t) => { fills.push(t) })
+  const p = submitTurn(50, blocks(2))
+  abortAllTurns()
+  await p
+  assert.deepEqual(fills, [], '点停止后 turn 收口仍回灌 = 用户以为已停、结果还发给 AI')
+  assert.equal(rt.state.value.kind, 'stopped', '停止后运行态保持 stopped（settleIdle 不得覆写）')
+})
+
+// [stop-no-feedback-v1] 停止按钮接线锚点：pauseAll 必须调 abortAllTurns + cancelDeliver。
+// [WHY] 行为用例只守 useTurnRunner 侧的短路；若 ScriptPanel 的停止入口漏接 abortAllTurns，
+//   管线根本收不到取消信号，短路判据永远不触发。这里对 pauseAll 源码锚两条调用。
+test('[stop-no-feedback-v1] 停止按钮接线：pauseAll 调 abortAllTurns + cancelDeliver（源码锚点）', () => {
+  const src = readFileSync(new URL('../components/script/script-panel-actions.ts', import.meta.url), 'utf8')
+  const at = src.indexOf('async function pauseAll')
+  assert.ok(at > 0, 'pauseAll 应存在于 script-panel-actions.ts')
+  const body = src.slice(at)
+  assert.match(body, /abortAllTurns\(\)/, 'pauseAll 未中止 turn 管线：停止后剩余块继续起进程、结果照发 AI')
+  assert.match(body, /cancelDeliver\(\)/, 'pauseAll 未撤回传合并窗：3s 窗内结果到点仍会发给 AI')
 })
