@@ -17,7 +17,7 @@ import { useAiWaiting } from './useAiWaiting'
 
 import { resetRulesForSessionBoot, useAiWindow } from './useAiWindow'
 import { transportKind } from './useAiTransport'
-import { activeSessionId } from '../ui/useAppStorage'
+import { activeSessionId, loadHistoryBySite, saveHistoryBySite } from '../ui/useAppStorage'
 import { emit as emitBus } from '../ui/useEventStream'
 import { askUser, claimAskSlot } from '../ui/useAsk'
 import { parseAsk } from '../../utils/ask-parser'
@@ -563,6 +563,8 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
   /** 消息分发入口：按 data.type 路由到各 handler */
   function onSessionIdMessage(e: MessageEvent): void { const payload = e.data
     if (!payload) return
+    console.log(payload, '~~~~~~~~~')
+
     const t = String(payload.type || '')
     if (t === 'ai-runner:reply') { handleAiReply(payload, e); return }
     // [legacy-script-removed-v1] ai-runner:script 旧通道已删：油猴已改发 ai-runner:reply。
@@ -595,5 +597,14 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
     if (t === 'ai-runner:session-id' && payload.id) handleSessionIdUpdate(payload)
   }
 
-  return { onSessionIdMessage, handleAiReply, handleTurnInvalidMsg, handleSummaryMsg, handleNewSessionCreated, handleUrlUpdated, handleSessionIdUpdate, isFromActiveAiSite }
+  return {
+    onSessionIdMessage,
+    handleAiReply,
+    handleTurnInvalidMsg,
+    handleSummaryMsg,
+    handleNewSessionCreated,
+    handleUrlUpdated,
+    handleSessionIdUpdate,
+    isFromActiveAiSite
+  }
 }
