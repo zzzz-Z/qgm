@@ -20,6 +20,8 @@ import { stripScriptBlocks } from '../../utils/strip-script-blocks'
 import { ASK_PREVIEW, buildOneCard, DONE_PREVIEW, TAIL_KEEP_LINES, TAIL_MAX_CHARS, TEXT_PREVIEW } from '../../utils/timeline-build'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRuntime } from '../../composables/ai/useRuntime'
+// [phase-clock-v1] AI 阶段文案与秒表（模块级单例）：AI 思考中 / AI 仍在处理 / 回传中
+import { useAiPhaseClock } from '../../composables/ai/useAiPhaseClock'
 import { useToast } from '../../composables/ui/useToast'
 import { TOAST_MEDIUM, TOAST_SHORT } from '../../utils/toast-durations'
 import { useEventBus } from '../../composables/ui/event-stream'
@@ -127,7 +129,10 @@ const props = defineProps<{
   liveStdout: string
   liveStderr: string
   doneSummary?: string
-  // [status-bar-move-v1] 顶部阶段条迁到时间线底部：状态由 ScriptPanel 传入
+  // [status-bar-move-v1] 顶部阶段条迁到时间线底部：状态由 ScriptPanel 传入。
+  // [status-bar-inline-v2] 阶段条只渲染 AI 阶段（runtimeKind + useAiPhaseClock 的「AI 思考中」）；
+  //   statusText/statusClass/statusElapsed/runCount/tokenLabel 已不上屏，prop 接线保留以维持
+  //   script-panel-guards 的「ScriptPanel→TerminalPane 状态链」判据（后续裁剪须同步改守卫）。
   statusText?: string
   statusClass?: string
   statusKind?: string
@@ -187,12 +192,13 @@ const guideSeen = ref(readGuideSeen())
 
 const { toast } = useToast()
 const { events: busEvents } = useEventBus()
-// [runtime-kind-ssot-v1] 等待态读单一真相源：waiting / feedback
+// [runtime-kind-ssot-v1] 阶段条判据读单一真相源：waiting / feedback
 const { state: runtimeState } = useRuntime()
+// [phase-clock-v1] 阶段文案与秒表来自 useAiPhaseClock（模块级单例），
+//   本组件不再自持计时器；「AI 思考中」由此上屏。
+const { waitText, waitElapsed } = useAiPhaseClock()
 
-// [phase-clock-v1] 等待计时与文案上提到 useAiPhaseClock（模块级单例）：
-//   顶部阶段条与这里读同一份，来源唯一；本组件不再自持计时器。
-
+const runtimeKind = computed(() => String(runtimeState.value.kind))
 /** [event-archive-v1] 时间线里是否存在刷新前归档的事件（stale:true） */
 const hasStaleEvents = computed(() => busEvents.value.some(e => (e.payload as Record<string, unknown> | undefined)?.stale === true))
 const timelineItems = computed(() => {
@@ -591,21 +597,21 @@ function reopenGuide(): void {
             />
           </template>
 
-          <!-- [status-bar-inline-v1] 阶段条：作为消息流最后一条。
-               无脚本运行时占位显示当前状态；脚本运行中由 ScriptCard 取代（v-if="!running"）。 -->
+          <!-- [status-bar-inline-v2] 阶段条只保留 AI 阶段：waiting=「AI 思考中 / AI 仍在处理」、
+               feedback=「回传中」（文案与秒表来自 useAiPhaseClock 单例）。
+               成功/失败、轮数、token 估算已整体移除（用户 2026-10-21：其他都删掉只留 AI 思考中——
+               执行成败由脚本卡片自身 phase/exit 呈现，轮数与上下文估算属噪音）。
+               sticky 贴底：消息再长也钉在可视区下缘，不再被顶出视野（用户实测被遮挡）。 -->
           <div
-            v-if="!running && (statusText || statusElapsed || statusKind === 'waiting' || statusKind === 'feedback')"
+            v-if="runtimeKind === 'waiting' || runtimeKind === 'feedback'"
             class="status-bar-inline"
-            :class="[statusClass, `kind-${statusKind}`]"
+            :class="`kind-${runtimeKind}`"
             aria-live="polite"
           >
             <span class="status-dot" aria-hidden="true" />
-            <span class="status-text">{{ statusText }}</span>
-            <span v-if="statusElapsed" class="status-sep">·</span>
-            <span v-if="statusElapsed" class="status-elapsed">脚本 {{ statusElapsed }}</span>
-            <span class="status-spacer" />
-            <span v-if="runCount && runCount > 0" class="status-meta">{{ runCount }} 轮</span>
-            <span v-if="tokenLabel" class="status-meta">~{{ tokenLabel }}</span>
+            <span class="status-text">{{ waitText }}</span>
+            <span v-if="waitElapsed > 0" class="status-sep">·</span>
+            <span v-if="waitElapsed > 0" class="status-elapsed">{{ waitElapsed }}s</span>
           </div>
           <!-- 空态：无卡片 / 无输出 / 无总结 -->
           <div v-if="!running && !liveStdout && !liveStderr && timelineItems.length === 0" class="tree-empty">
