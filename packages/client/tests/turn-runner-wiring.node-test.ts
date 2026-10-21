@@ -4,6 +4,7 @@
 //   忘了 try/finally 就 turnRunning 永远为 true、每块 fill 一次就等于没做合并。
 //   这些都能在 node 里真跑出来 —— 把 useRunner 换成假 runner 即可，不需要造宿主。
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { beforeEach, test, vi } from 'vitest'
 // vi.mock 会被 hoist 到所有 import 之前，故静态 import 一样拿到假 useRunner
 import {

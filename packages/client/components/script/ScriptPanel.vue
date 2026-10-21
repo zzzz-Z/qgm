@@ -149,6 +149,10 @@ const statusClass = computed(() => {
  * [WHY] 由 exec-flow 的 feedbackMerge 经 onFeedbackPending 回调驱动（feedback-merge 刻意零 vue 依赖）。
  */
 const feedbackPending = ref(false)
+// [stop-no-feedback-v1] 合并窗撤销句柄：createExecFlow 装配后回填（pauseAll 经 deps 调用）。
+//   用可变句柄而非直接引用 feedbackMerge：本组件里 useScriptPanelActions 先于 createExecFlow
+//   装配，工厂入参处直接引用 const 会命中 TDZ。
+let cancelFeedbackMerge: () => void = () => {}
 
 /** 当前时间戳（用于刷新相对时间显示） */
 
@@ -276,6 +280,8 @@ const {
   aiWaiting,
   delivering,
   buildPromptWithAttachments,
+  // [stop-no-feedback-v1] 停止时撤回传合并窗（窗内未出站结果随停止丢弃）
+  cancelDeliver: () => cancelFeedbackMerge(),
 })
 
 const { copyOutput, feedbackMerge } = createExecFlow({
@@ -294,6 +300,8 @@ const { copyOutput, feedbackMerge } = createExecFlow({
   // [deliver-window-v1] 回传窗开关 → 面板的 delivering 状态
   onFeedbackPending: (v) => { feedbackPending.value = v },
 })
+// [stop-no-feedback-v1] 回填撤销句柄：pauseAll 点停止时撤窗（见上方 cancelFeedbackMerge 注释）
+cancelFeedbackMerge = () => { feedbackMerge.cancel() }
 // [auto-feedback-merge-v1] 组件卸载时撤合并窗：缓冲里的未发结果随面板销毁丢弃，
 //   防止卸载后迟到出站（flush 的 isActive 守卫只挡循环接管，挡不了组件已销毁）。
 

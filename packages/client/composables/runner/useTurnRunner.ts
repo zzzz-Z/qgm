@@ -148,6 +148,15 @@ export async function submitTurn(
   activeTurnId.value = turnId
   try {
     const results = await ensureRunner().submit(turnId, list)
+    // [stop-no-feedback-v1] 被取消的 turn 一律不回灌：abortTurn / abortAllTurns 已把该 turn 记入
+    //   abortedTurns——此时结果要么是「已取消」残值、要么是停止前无从解释的半截产物，
+    //   回灌即「点停止后仍把结果发给 AI」（用户实测缺陷）。
+    //   sink 的 ctx.stillValid() 是静默窗后的第二道闸；这里在收口处直接短路：
+    //   连 3s 静默窗、看板抓取与 feedback 运行态都不进。重放帧对同 turn 的再进入同样被挡。
+    if (abortedTurns.has(turnId)) {
+      rt.settleIdle()
+      return results
+    }
     const text = formatTurnResults(turnId, results)
     // [board-mirror-turn-v1] turn 回灌末尾附看板块（未完成清单 / 空板登记提醒）。
     // [WHY] board-mirror 原只接在旧面板回传（script-panel-actions.buildAiPrompt）上，turn 管线

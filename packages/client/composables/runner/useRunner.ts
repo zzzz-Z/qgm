@@ -197,6 +197,27 @@ function stopBgWatchers(): void {
   bgWatchers.clear()
 }
 
+/**
+ * [stop-kill-bg-v1] 终止全部在跑的后台任务：POST /__ai/shell-kill（服务端 SIGTERM 进程组）。
+ * [WHY] 停止按钮文案是「停止后台脚本」，但原 stop() 只停前端日志轮询、abort 前台 fetch——
+ *   `shell(cmd,{background:true})` 起的进程在服务端照跑（跨轮存活），其累积输出还会在下一轮
+ *   run 开头被重新注入 liveStdout（pendingBg 逻辑），形成「停止了还在跑还在刷」。
+ * [CONSTRAINT] 入参 id 与 /__ai/shell-kill 的白名单正则同形（sh-*，见 shell-log.ts）；
+ *   kill 失败静默（进程可能已自行收口），不阻断停止主链路；记账进 bgDone：
+ *   ① 停掉轮询 ② 新一轮 run 不再把它的输出当作「未完成任务」重新注入。
+ */
+function killPendingBgTasks(): void {
+  for (const id of [...bgWatchers.keys()]) {
+    bgWatchers.delete(id)
+    bgDone.add(id)
+    void fetch('/__ai/shell-kill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    }).catch(() => { /* kill 失败不阻断停止主链路 */ })
+  }
+}
+
 /** 冒烟测试开关；持久化到 sessionStorage */
 const smokeEnabled = useSessionStorage<boolean>(STORAGE_KEY_SMOKE, true)
 /** 基线 runId（用于对比 diff）；持久化到 sessionStorage */
@@ -270,6 +291,8 @@ function stop() {
   //   [CONSTRAINT] stop 只负责 abort；连续两次 run 的竞争由新 run 的 ++activeRunToken 隔离。
   // [run-queue-v1] 清空排队项：stop 语义是「立即停下」，不得在 finally 里继续 dequeue 执行。
   runQueue.clear()
+  // [stop-kill-bg-v1] 「停止后台脚本」的兑现：在跑的后台任务一并 SIGTERM 并停掉日志轮询。
+  killPendingBgTasks()
   if (abortController) {
     abortController.abort()
     abortController = null

@@ -14,6 +14,8 @@ import { useAiWaiting } from '../../composables/ai/useAiWaiting'
 // [runtime-kind-ssot-v1] 运行态单一真相源：用户点停止时置 stopped
 import { useRuntime } from '../../composables/ai/useRuntime'
 import { useRunner } from '../../composables/runner/useRunner'
+// [stop-no-feedback-v1] 停止按钮必须一并中止 turn 管线：在飞块记 aborted、后续块不再起进程、收口后不回灌
+import { abortAllTurns } from '../../composables/runner/useTurnRunner'
 import { parseErrorLocations } from '../../utils/context-error-locations'
 import {
   appendBaselineChanges,
@@ -59,6 +61,13 @@ export interface ScriptPanelActionsDeps {
   run: (opts?: { script?: string, runKey?: string, autoFeedback?: boolean }) => void
   startAiWaiting: () => void
   buildPromptWithAttachments: (scriptText: string, files: AttachedFile[]) => Promise<string>
+  /**
+   * [stop-no-feedback-v1] 撤非循环回传合并窗（exec-flow 的 feedbackMerge.cancel）。
+   * [WHY] 3s 合并窗内点停止：窗内已入队的结果若不撤，到点仍会 copyAndFill 发给 AI——
+   *   正是「停止后还把结果回灌」的第二条泄漏通道。闭包注入而非静态 import：
+   *   ScriptPanel 里 useScriptPanelActions 先于 createExecFlow 装配，直接引用会 TDZ。
+   */
+  cancelDeliver: () => void
 }
 
 /** 组装运行相关逻辑簇 */
@@ -80,6 +89,7 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
     run,
     startAiWaiting,
     buildPromptWithAttachments,
+    cancelDeliver,
   } = deps
   const { toast } = useToast()
   const { enable: enableAutoTakeover, disable: disableAutoTakeover, cancelAutoRun } = useAutoTakeover()
@@ -238,6 +248,12 @@ export function useScriptPanelActions(deps: ScriptPanelActionsDeps) {
       const _phase = `running=${running.value} aiWaiting=${aiWaiting.value} delivering=${delivering.value}`
       let _sent = 'n/a'
       try { _sent = String(sendStop()) } catch (e) { _sent = `throw:${String(e).slice(0, 40)}` }
+      // [stop-no-feedback-v1] 停止必须同时断掉两条「迟到的回灌」通道（先于其它复位执行）：
+      //   ① turn 管线：在飞块记 aborted（不再起新进程）、收口后短路回灌（useTurnRunner 的
+      //      abortedTurns 判据）——原实现漏掉它 ⇒ 停止后剩余块继续起进程、结果照发 AI（用户实测）；
+      //   ② 非循环合并窗：3s 窗内已入队的结果随停止丢弃。
+      abortAllTurns()
+      cancelDeliver()
       stop()
       clearSoftPause()
       stopWaiting()
