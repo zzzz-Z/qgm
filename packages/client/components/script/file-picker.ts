@@ -1,6 +1,9 @@
 // [file-picker-v2] 从 ScriptEditor.vue 抽出的 @ 选择器逻辑：文件 + 技能双源。
 // [WHY] ScriptEditor.vue 超 §4 组件 500 行限制；picker 逻辑自成体系。
 //   v2 加入技能源：`@skill/<name>` 让用户按名检索 .ai-runner/skills 下全部已装技能。
+// [picker-full-path-v1] v3：搜索从「只按文件名」升级为「文件名 + 完整路径」双通道，
+//   支持 `components/script`（目录前缀）、`script/round`（段边界）、`client round`（多词 AND）。
+//   详见 scorePath / scoreOne / scoreItem 的注释与 tests/file-picker-score.node-test.ts。
 // [CONSTRAINT] cmView 由调用方 getter 注入；本模块无 CM 编译期依赖。
 //   技能插入 `@skill/<name> `，与文件路径 `@<path>` 在字形上可区分（仓库根无 skill/ 目录），
 //   且命中既有 `@[\\w./-]+` 芯片正则 ⇒ 无需改 CM 装饰插件。
@@ -23,10 +26,29 @@ export interface PickerItem {
   value: string
   /** 列表主展示文本 */
   label: string
-  /** 次展示文本（技能用 description 摘要，文件留空） */
+  /** 次展示文本（技能用 description 摘要，文件为完整目录） */
   hint: string
+  /**
+   * [picker-dir-left-ellipsis-v1] 行内展示的目录（只保留尾部若干段）。
+   * [WHY] 目录与文件名的差异几乎都在尾部（`…/components/script` vs `…/scripts`），
+   *   从右侧截断恰好切掉有用信息；CSS 的 `direction: rtl` 能把省略号挪到左边，
+   *   但会切在词中间（实测显示成 `…ckages/client/...`），所以在数据层按「段」截。
+   */
+  dirTail: string
   /** 悬停 tooltip（原生 title 属性） */
   title: string
+}
+
+/**
+ * [picker-dir-left-ellipsis-v1] 目录只保留尾部 maxSegs 段，前面用 `…/` 提示省略。
+ * [CONSTRAINT] 纯函数；段数不超过 maxSegs 时原样返回（不做无谓改动）。
+ * @param dir 完整目录（不含文件名、无尾斜杠）
+ * @param maxSegs 保留的尾段数
+ */
+export function dirTail(dir: string, maxSegs = 3): string {
+  const segs = String(dir || '').split('/').filter(Boolean)
+  if (segs.length <= maxSegs) return dir
+  return `…/${segs.slice(-maxSegs).join('/')}`
 }
 
 /**
@@ -88,17 +110,84 @@ export function useFilePicker(deps: UseFilePickerDeps) {
   const pickerStyle = computed(() => ({ left: `${pickerX.value}px`, top: `${pickerY.value}px` }))
 
   /**
-   * [picker-title-fallback-v1] title 只做兜底，不与 label 同权。
-   * [WHY] title 是完整路径，若用 `Math.max(scoreMatch(label), scoreMatch(title))`，
-   *   输入 `packages` 时所有文件的路径段首都命中 ⇒ 全部得 80 分，排序完全失效。
-   * [CONSTRAINT] label（文件名/技能名）命中时以它的分数为准；仅当 label 完全不匹配
-   *   才退回 title 的匹配，且分数打 6 折——「路径里有」弱于「文件名里有」。
+   * [picker-full-path-v1] 路径评分：把「完整相对路径」当第一等 Citizen 来打分。
+   * [WHY] 原实现（picker-title-fallback-v1）只在文件名不匹配时才用路径兜底，且分数打 6 折
+   *   —— 用户输入 `components/script` 或 `client/utils` 这类**路径片段**时，
+   *   命中项只有 ~48 分，被同一查询下成百条的「文件名命中（90 分）」压在 200 条截断线之外，
+   *   体感就是「只能按文件名搜」。用户 2026-10-21 明确要求「可以支持全路径搜索」。
+   * [CONSTRAINT] 分层必须与文件名分层交错成一棵**全局有序**的树（见 scoreOne）：
+   *   文件名 100/95/90 ≥ 路径"整条相等/目录前缀/路径开头/段边界" 96/94/88 ≥ 文件名段首 80。
+   *   单字符查询（q.length < 2）不启用「任意位置子串」档：否则输入 `s` 会把所有路径含 s 的
+   *   文件全打成 72 分，纯噪音，与既有「段首匹配」语义冲突。
+   * @param path 条目完整相对路径（已小写化由本函数负责）
+   * @param q 查询词（已小写化、已 trim）
+   * @returns 评分；0 表示路径上不匹配
+   */
+  function scorePath(path: string, q: string): number {
+    const p = path.toLowerCase()
+    if (p === q) return 100
+    // 输入的就是某文件路径 → 与文件名完全相等同级
+    if (p.endsWith(`/${q}`)) return 96
+    // 输入是目录前缀（或路径开头）：components/script 命中其下全部文件
+    if (p.startsWith(q)) return 94
+    // 从某个段边界开始：script/round → .../script/round-card.vue
+    if (p.includes(`/${q}`)) return 88
+    // 任意位置子串（含跨段碎片，如 `nts/scri`）；单字符过泛，不启用
+    if (q.length >= 2 && p.includes(q)) return 72
+    return 0
+  }
+
+  /**
+   * [picker-full-path-v1] 单 token 评分：文件名命中优先，其次路径命中，最后回落文件名弱命中。
+   * [WHY] 顺序即优先级：`round` 时 `RoundCard.vue`（90）必须排在 `.../round/x.ts`（88）之前，
+   *   而 `.../script/x.vue`（88）必须排在「中段子串 50」之前。
+   * [picker-path-min-len-v1] 路径通道要求 q.length ≥ 2。
+   *   [WHY] 单字符路径命中毫无选择性且会压过文件名命中：活动工作区里输入 `s`，
+   *   所有 `src/` `static/` 下的文件都拿「路径开头 94」，把 `scroll-to.ts`（文件名前缀 90）
+   *   挤到后面 —— 实测（2026-10-21 活实例）前 6 条全是 `401.gif` / `add3dBuildings.ts` 这类
+   *   毫无关联的文件。单字符按名搜是既有体感，不该被路径通道改写。
+   * [CONSTRAINT] 只对文件做路径评分：技能的 title 是「名字 · 描述\n路径」，
+   *   拿去做路径匹配会把描述里的词也当路径命中，语义混乱。
+   */
+  function scoreOne(it: PickerItem, q: string): number {
+    const byLabel = scoreMatch(it.label, q)
+    if (byLabel >= 80) return byLabel
+    if (it.kind === 'file' && q.length >= 2) {
+      const byPath = scorePath(it.title, q)
+      if (byPath > 0) return byPath
+    }
+    if (it.kind === 'skill') {
+      // [picker-skill-value-v1] 技能插入值是 `skill/<name>`，用户会照着占位符敲 `skill/` 收窄技能列表。
+      //   [WHY] 名字里既没有 `skill/`，`.ai-runner/skills/<name>/SKILL.md` 里也没有连续 `skill/`
+      //   （是 `skills/`）⇒ 只查 label / title 时输入 `skill/` 恒为「无匹配」，把一个 UI 明示的前缀
+      //   变成死路。这里把 value 也纳入匹配；`skill/demo` 这种整值查询直接 100 分。
+      //   [注意] 实测这是**既有**缺陷（改造前的 6 折兜底同样命中不了），不是本轮引入的回归。
+      const byValue = scoreMatch(it.value, q)
+      if (byValue >= 80) return byValue
+      const byTitle = scoreMatch(it.title, q)
+      if (byTitle > 0) return Math.floor(byTitle * 0.6)
+      return byValue
+    }
+    return byLabel
+  }
+
+  /**
+   * 条目总分。
+   * [multi-token] 含空格的查询按空格拆词、**全部命中才算命中**（AND），取各词最低分作总分
+   *   —— 上限压到 99，保证「多词凑中」不会越过单词精确命中。
+   * [WHY] 用户常写 `client round` / `script picker` 这类「目录 + 文件名」组合，
+   *   旧实现按整串子串匹配，空格一出现就 0 命中。
    */
   function scoreItem(it: PickerItem, q: string): number {
-    const byLabel = scoreMatch(it.label, q)
-    if (byLabel > 0) return byLabel
-    const byTitle = scoreMatch(it.title, q)
-    return byTitle > 0 ? Math.floor(byTitle * 0.6) : 0
+    const tokens = q.split(/\s+/).filter(Boolean)
+    if (tokens.length <= 1) return scoreOne(it, q)
+    let min = Number.POSITIVE_INFINITY
+    for (const t of tokens) {
+      const s = scoreOne(it, t)
+      if (!s) return 0
+      if (s < min) min = s
+    }
+    return Math.min(99, min)
   }
 
   /** [picker-total-v1] 过滤后的完整命中数（未截断）；供 UI 提示「还有更多」 */
@@ -115,11 +204,13 @@ export function useFilePicker(deps: UseFilePickerDeps) {
       // [picker-file-split-label-v1] label 只放文件名，目录放 hint：
       //   深层路径整串当 label 会撑爆列表宽度，且文件名被挤到右边看不见。
       const slash = p.lastIndexOf('/')
+      const dir = slash >= 0 ? p.slice(0, slash) : ''
       return {
         kind: 'file' as const,
         value: p,
         label: slash >= 0 ? p.slice(slash + 1) : p,
-        hint: slash >= 0 ? p.slice(0, slash) : '',
+        hint: dir,
+        dirTail: dirTail(dir),
         title: p,
       }
     })
@@ -176,6 +267,8 @@ export function useFilePicker(deps: UseFilePickerDeps) {
           // [picker-skill-label-v1] 与文件项对齐：label 只放技能名，路径进 hint 前缀
           label: s.name,
           hint: `技能 · ${desc.slice(0, 110)}`,
+          // 技能行不展示目录（按路径搜是文件专属），title 里仍有完整路径
+          dirTail: '',
           title: `${s.name}${desc ? ` · ${desc}` : ''}\n${rel}`,
         }
       })

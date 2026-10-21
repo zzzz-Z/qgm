@@ -284,6 +284,22 @@ html[data-theme='dark'] .editor.card {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* [picker-full-path-v1] 按路径搜（查询含 `/`）时补的目录后缀：
+   最宽占一半、单行省略，且 flex-shrink 优先于文件名 —— 挤压时先缩目录，不缩文件名。
+   [picker-dir-left-ellipsis-v1] 只显示尾部段（`…/components/script`，见 dirTail）：
+   目录间的差异都在尾部，右侧硬截断会把它切掉；按段截比 `direction: rtl` 干净
+   （后者会切在词中间，实测显示成 `…ckages/client/...`）。 */
+.fp-item-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 52%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-11, 11px);
+  color: var(--text-3);
+  opacity: 0.75;
+}
 .fp-item:hover,
 .fp-item.active {
   background: var(--primary-bg);

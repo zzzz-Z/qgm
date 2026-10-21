@@ -403,7 +403,11 @@ defineExpose({ insertText })
               <span class="fp-item-kind" :aria-label="it.kind === 'skill' ? '技能' : '文件'" :class="`fp-kind-${it.kind}`">{{ it.kind === 'skill' ? '技' : '文' }}</span>
               <span class="fp-item-label">{{ it.label }}</span>
               <!-- [picker-no-inline-hint-v1] 行内不显示详情：hint 常驻会挤掉文件名，
-                   路径/描述已在 title 里，hover 可见即可 -->
+                   路径/描述已在 title 里，hover 可见即可。
+                   [picker-full-path-v1] 例外：查询里带 `/`（用户在按路径搜）时，文件行尾补一个
+                   弱化的目录后缀 —— 否则 `components/script` 这类查询的结果全是同名文件，
+                   看不出命中的是哪一条。只在按路径搜时出现，普通按名搜的行布局零变化。 -->
+              <span v-if="it.kind === 'file' && pickerQuery.includes('/')" class="fp-item-dir">{{ it.dirTail }}</span>
             </div>
             <!-- [picker-total-hint-v1] 结果被截断时必须可见：否则用户以为「只匹配到这些」 -->
             <div v-if="pickerTotal > pickerFiltered.length" class="fp-more">
