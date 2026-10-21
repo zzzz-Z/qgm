@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { TOAST_LONG, TOAST_MEDIUM, TOAST_SHORT_MEDIUM } from '../../utils/toast-durations'
+import { TOAST_LONG, TOAST_LONGEST, TOAST_MEDIUM, TOAST_SHORT_MEDIUM } from '../../utils/toast-durations'
+// [theme-toggle-dock-v1] 主题开关显式 import：模板里对 auto-import 符号赋值会被展开成不可赋值的调用表达式
+//   （整个模块 SyntaxError → 白屏），故赋值一律落在 script 的 toggleTheme 里。
+import { theme } from '../../composables/ui/useAppStorage'
+// [left-tools-v1] 底部工具条依赖的符号**显式 import**（不靠 auto-import）：
+//   SFC 单测用 @vitejs/plugin-vue 编译、不经 unplugin-auto-import ⇒ 靠 auto-import 的符号在挂载测试里
+//   直接 ReferenceError（aiwin-collapse 实测）。显式绑定对构建与测试都成立，且同名会遮蔽 auto-import。
+import { updateUserscript, useUserscriptUpdateWatcher } from '../../composables/ui/useUserscriptUpdate'
+import { getTransport, transportKind } from '../../composables/ai/useAiTransport'
+import { getActiveWinSid } from '../../composables/ai/useAiWindow'
+import { log } from '../../utils/log'
 import { aiWindowListCollapsed, aiWindowListCollapsed as collapsed } from '../../composables/ui/useAiWindowListCollapse'
 import { useToast } from '../../composables/ui/useToast'
 import { useWorkspaces } from '../../composables/data/useWorkspaces'
@@ -22,6 +32,9 @@ const { workspaces, activeId, loading, load, activate, register, remove, pickPat
 // [site-select-row-removed-v1] setSession 原本只服务行内站点下拉（onSiteChange），下拉移除后改为不取用
 // [multi-site-matrix-v1] 站点矩阵数据面（窗口状态 + 站点映射经中间层，解耦窗口表）
 const matrix = useSiteMatrix()
+// [left-tools-v1] 底部工具条（主题 / 传输链路 / 更新油猴脚本）从 SidePane 迁入本组件。
+//   状态与副作用逐字沿用原实现，避免迁家时改变行为。
+const userscriptBadge = useUserscriptUpdateWatcher()
 
 const items = computed(() => workspaces.value.map((w) => {
   return {
@@ -148,30 +161,52 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
     toast('打开新会话失败，请检查站点窗口是否就绪', 'error', TOAST_MEDIUM)
   }
 }
+function toggleTheme(): void {
+  theme.value = theme.value === 'dark' ? 'light' : 'dark'
+}
+function onTransportChange(e: Event) {
+  const v = (e.target as HTMLSelectElement).value
+  transportKind.value = v === 'headless' ? 'headless' : 'tampermonkey'
+  window.location.reload()
+}
+function onLoginGui() {
+  try {
+    const t = getTransport()
+    const sid = getActiveWinSid()
+    const ok = t.sendLoginGui?.(sid)
+    if (!ok) {
+      toast('当前通道不支持引导登录', 'warn', TOAST_MEDIUM)
+      return
+    }
+    toast('已打开有头窗口，请登录 DeepSeek 后关闭该窗口', 'info', TOAST_LONGEST)
+  } catch (e) {
+    log.error('[headless-login-gui] 触发失败:', e)
+  }
+}
+function onUpdateUserscript() {
+  void updateUserscript().then(() => userscriptBadge.markSeen())
+}
 </script>
 
 <template>
   <aside class="ai-window-list" :class="{ 'is-collapsed': collapsed }" aria-label="工作区列表">
-    <div class="awl-top-spacer" aria-hidden="true">
-      <div v-if="!aiWindowListCollapsed" class="title">
-        <span class="logo" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 2L4.5 13.5h6l-1 8.5L18.5 10.5h-6l1-8.5z" fill="url(#ai-runner-grad)" stroke="#4d8bff" stroke-width="1.2" stroke-linejoin="round" /><defs><linearGradient id="ai-runner-grad" x1="4" y1="2" x2="19" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#6b83ff" /><stop offset="100%" stop-color="#4d6bfe" /></linearGradient></defs></svg></span>
-        <h1>QGM</h1>
-      </div>
+    <!-- [brand-toggle-v1] 顶部品牌行：闪电图标本身就是折叠/展开开关（用户要求删掉右上角的 ◧ 按钮，
+         把功能挪到闪电上）。因此顶栏不能再 aria-hidden——那会把开关从无障碍树里摘掉。
+         折叠态下 QGM 文字隐藏、只剩居中的闪电，点它展开。 -->
+    <div class="awl-top-spacer">
       <button
         v-tooltip="aiWindowListCollapsed ? '展开左栏' : '收起左栏'"
-        class="hdr-collapse-btn"
+        class="logo-btn"
         type="button"
         :aria-label="aiWindowListCollapsed ? '展开左栏' : '收起左栏'"
         :aria-expanded="!aiWindowListCollapsed"
         @click="aiWindowListCollapsed = !aiWindowListCollapsed"
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3" y="4" width="18" height="16" rx="3" ry="3" />
-          <line x1="9" y1="4" x2="9" y2="20" />
-          <polyline v-if="aiWindowListCollapsed" points="14 9 17 12 14 15" />
-          <polyline v-else points="17 9 14 12 17 15" />
-        </svg>
+        <span class="logo" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 2L4.5 13.5h6l-1 8.5L18.5 10.5h-6l1-8.5z" fill="url(#ai-runner-grad)" stroke="#4d8bff" stroke-width="1.2" stroke-linejoin="round" /><defs><linearGradient id="ai-runner-grad" x1="4" y1="2" x2="19" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#6b83ff" /><stop offset="100%" stop-color="#4d6bfe" /></linearGradient></defs></svg></span>
       </button>
+      <h1 v-if="!aiWindowListCollapsed" class="brand-name">
+        QGM
+      </h1>
     </div>
     <button
       v-if="!adding"
@@ -184,7 +219,7 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /><line x1="12" y1="8" x2="12" y2="15" /><line x1="8.5" y1="11.5" x2="15.5" y2="11.5" /></svg>
       <span class="awl-new-workspace-label">新建工作区</span>
     </button>
-    <!-- [trae-shell-v1] 原 awl-head 已删：折叠按钮上移到顶部 awl-top-spacer 内 -->
+    <!-- [trae-shell-v1] 原 awl-head 已删：[brand-toggle-v1] 折叠入口现由顶部闪电图标承担（独立 ◧ 按钮已移除） -->
     <!-- [trae-modal-pick-v1-template] 原内联 awl-add-row 整块已迁至模态弹窗（Teleport 到 body） -->
     <Teleport to="body">
       <div
@@ -239,12 +274,14 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
         :title="collapsed ? w.label : w.root"
         @click="onClick(w)"
       >
-        <span class="awl-dot" aria-hidden="true" />
+        <!-- [workspace-folder-lead-v1] 原左侧 7px 状态圆点已删（用户要求「去掉圆点，换一个文件夹图标，稍微大一点」）：
+             文件夹图标顶到行首并放大到 14px（原在标题行内是 11px）。激活态仍靠颜色区分
+             （.awl-item.active .awl-folder → primary），只是不再用圆点。 -->
+        <svg class="awl-folder" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+        </svg>
         <div class="awl-meta">
           <span class="awl-title-row">
-            <svg class="awl-folder" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-            </svg>
             <span class="awl-label">{{ w.label }}</span>
           </span>
         </div>
@@ -271,23 +308,94 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
         尚无注册工作区，点击 + 添加
       </li>
     </ul>
+    <!-- [left-tools-v1] 主题 / 传输链路 / 更新油猴脚本：原在右侧面板 SidePane 底部（用户视作「右下角」），
+         按要求挪到左栏底部 = 全局左下角。折叠成 48px 图标条时纵向排列并隐藏文字型下拉（沿用 SidePane 旧范式：
+         下拉里有「油猴/无头」两个中文选项，48px 放不下，展开后即可切）。 -->
+    <div class="awl-tools" :class="{ 'is-collapsed': collapsed }">
+      <button
+        v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
+        class="theme-toggle" aria-label="切换主题"
+        @click="toggleTheme"
+      >
+        <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
+        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
+      </button>
+      <div class="transport-switch" role="group" aria-label="AI 传输链路（切换后自动刷新）" title="AI 传输链路（切换后自动刷新）">
+        <select
+          class="transport-select"
+          :value="transportKind"
+          aria-label="AI 传输链路"
+          @change="onTransportChange"
+        >
+          <option value="tampermonkey">
+            油猴
+          </option>
+          <option value="headless">
+            无头
+          </option>
+        </select>
+        <template v-if="transportKind === 'headless'">
+          <span class="transport-sep" aria-hidden="true" />
+          <button
+            v-tooltip="'引导登录：打开有头窗口，登录后关窗即可（登录态落盘复用）'"
+            aria-label="引导登录"
+            class="login-gui-toggle"
+            @click="onLoginGui"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
+          </button>
+        </template>
+        <span class="transport-sep" aria-hidden="true" />
+        <button
+          v-tooltip="'安装 / 更新油猴脚本（打开本地分发端点，Tampermonkey 会弹出安装或更新确认）'"
+          :aria-label="userscriptBadge.hasUpdate.value ? '油猴脚本有新版本，点击更新' : '更新油猴脚本'"
+          class="userscript-toggle"
+          :class="{ 'has-update': userscriptBadge.hasUpdate.value }"
+          @click="onUpdateUserscript"
+        >
+          <span v-if="userscriptBadge.hasUpdate.value" class="userscript-dot" aria-hidden="true" />
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
+        </button>
+      </div>
+    </div>
   </aside>
 </template>
 
 <style scoped lang="scss">
-.title {
-  display: flex;
+/* [brand-toggle-v1] 闪电图标 = 折叠/展开开关：外观仍是品牌位，命中区按按钮做（26×26 ≥ 22px 可点） */
+.logo-btn {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  /* 图标 20px 居中 ⇒ 起点 +3px；负 margin 抵掉，视觉左缘仍与 .awl-item 文字对齐 */
+  margin-left: -3px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.logo-btn:hover {
+  background: rgb(255 255 255 / 6%);
+}
+.logo-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 .logo {
+  display: inline-flex;
   font-size: 18px;
 }
-.title h1 {
+.brand-name {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.2px;
+  white-space: nowrap;
 }
 .env {
   padding: 2px 8px;
@@ -334,10 +442,20 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 .awl-top-spacer {
   flex: 0 0 48px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding-left: 20px;
+  justify-content: flex-start;
+  gap: 10px;
+  /* 左缘与 .awl-item 文字对齐（容器 8 + 条目 12 = 20px）；右侧留 8px 不贴边 */
+  padding: 0 8px 0 20px;
   min-height: 48px;
+}
+/* [brand-toggle-v1] 折叠态（48px 图标条）：只留闪电并居中，它同时是展开按钮 */
+.ai-window-list.is-collapsed .awl-top-spacer {
+  justify-content: center;
+  padding: 0;
+}
+.ai-window-list.is-collapsed .logo-btn {
+  margin-left: 0;
 }
 
 .awl-new-workspace {
@@ -366,25 +484,6 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 .awl-new-workspace:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
-}
-
-.hdr-collapse-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-3);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.hdr-collapse-btn:hover {
-  color: var(--text);
-  background: rgb(255 255 255 / 6%);
 }
 
 .awl-add {
@@ -518,11 +617,11 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 .awl-item:not(.active) .awl-label {
   color: var(--text-2);
 }
-/* [workspace-folder-icon-v1] 工作区名称前的文件夹图标：尺寸与状态点协调，颜色随标题走。 */
+/* [workspace-folder-lead-v1] 文件夹图标升为行首标识（原 11px 小图标 + 7px 圆点两件套 → 单一个 14px 图标）。
+   [active-as-hover-v1] 图标不再单独上蓝色（那是「选中态三件套」的一部分，用户要求撤掉）。 */
 .awl-title-row {
   display: flex;
   align-items: center;
-  gap: 5px;
   min-width: 0;
 }
 .awl-folder {
@@ -530,48 +629,18 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
   color: var(--text-3);
   transition: color 0.14s ease;
 }
-.awl-item.active .awl-folder {
-  color: var(--primary, #58a6ff);
+/* [active-as-hover-v1] 选中态 = 悬停那一层灰：蓝色底 / 蓝色内描边 / 左缘蓝色竖条全撤
+   （用户：选中可以和悬停搞成一样的灰色，不要蓝色边和底）。
+   唯一保留的非蓝差异是标签加粗一档，否则列表里完全看不出哪项是当前工作区。 */
+.awl-item.active {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
-/* [workspace-list-ui-v3] 激活项标题升为主色，与左侧激活条呼应。 */
 .awl-item.active .awl-label {
-  color: var(--primary, #58a6ff);
   font-weight: 600;
 }
-.awl-item.active {
-  /* [ui-color-token-v1] 硬编码 primary → 语义变量 */
-  background: var(--primary-bg);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 30%, transparent);
-}
-/* [workspace-list-ui-v3] 激活条由浮空 2px 改为贴左内缘 3px 实心条，
-   与卡片圆角贴合，选中感更明确。 */
-.awl-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: 0 2px 2px 0;
-  background: var(--primary, #58a6ff);
-}
 
-.awl-dot {
-  /* [workspace-list-ui-v3] 状态点兼作色标：未激活为中性灰，激活为主色。
-     尺寸由 8px 收到 7px，配合压缩后的行高不显臃肿。 */
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: rgba(127, 127, 127, 0.3);
-  flex-shrink: 0;
-  transition:
-    background 0.14s ease,
-    box-shadow 0.14s ease;
-}
-.awl-item.active .awl-dot {
-  background: var(--primary, #58a6ff);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--primary) 60%, transparent);
-}
+/* [workspace-folder-lead-v1] `.awl-dot` 规则已删：状态点被行首 14px 文件夹图标取代，
+   [active-as-hover-v1] 选中色也不再走 primary（见上），删除而不是 display:none——不留给后人复活的机会。 */
 
 .awl-meta {
   flex: 1;
@@ -777,5 +846,104 @@ async function onOpenNewWindow(item: { id: string, label: string }): Promise<voi
 .awl-modal-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* ── 底部工具条（[left-tools-v1] 自 SidePane 迁入：主题 / 传输链路 / 更新油猴脚本） ───────────
+   margin-top:auto 让它在列表被隐藏（折叠态）时仍贴底；展开态由 .awl-list 的 flex:1 把它推下去。 */
+.awl-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-top: auto;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+/* 折叠态（48px 图标条）：纵向排列；文字型下拉放不下 ⇒ 隐藏（展开后即可切，与 SidePane 旧范式一致） */
+.awl-tools.is-collapsed {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+}
+.awl-tools.is-collapsed .transport-switch {
+  margin: 0;
+}
+.awl-tools.is-collapsed .transport-select {
+  display: none;
+}
+.awl-tools .theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.awl-tools .theme-toggle:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.awl-tools .transport-switch {
+  display: inline-flex;
+  align-items: stretch;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  overflow: hidden;
+  min-width: 0;
+}
+.awl-tools .transport-select {
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11.5px;
+  padding: 0 4px;
+  cursor: pointer;
+  min-width: 0;
+}
+.awl-tools .transport-sep {
+  flex: 0 0 1px;
+  align-self: stretch;
+  width: 1px;
+  background: var(--border);
+}
+.awl-tools .login-gui-toggle,
+.awl-tools .userscript-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.awl-tools .login-gui-toggle:hover,
+.awl-tools .userscript-toggle:hover {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+.awl-tools .userscript-toggle {
+  position: relative;
+}
+.awl-tools .userscript-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
 }
 </style>

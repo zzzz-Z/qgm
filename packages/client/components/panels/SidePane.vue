@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { sidePaneRevealTick, sidePaneTab } from '../../composables/ui/useSidePaneTab'
-import { theme } from '../../composables/ui/useAppStorage'
 import FileTree from './FileTree.vue'
 import FileList from './FileList.vue'
 import type { ChangeEntry } from '../../types'
@@ -64,9 +63,8 @@ const terminalLoaded = shallowRef(false)
 const videoLoaded = shallowRef(false)
 const isNarrow = ref(typeof window !== 'undefined' && window.matchMedia(NARROW_QUERY).matches)
 
-// [hdr-group-dock-sidepane-v1] 从 App.vue 迁入：主题 / 传输链路 / 更新油猴脚本。
-//   原先以 position:fixed 浮在窗口角落，现真正落进右侧面板底部。
-const userscriptBadge = useUserscriptUpdateWatcher()
+// [left-tools-v1] 原 [hdr-group-dock-sidepane-v1] 在此挂 userscriptBadge / theme：
+//   工具条已整体迁到左栏底部（AiWindowList 的 .awl-tools），本组件不再消费这两个状态。
 // 折叠 + tab 选择持久化（PLAN 5.4）
 const fold = useFoldState('default', 'side-pane')
 
@@ -112,38 +110,10 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * [theme-toggle-dock-v1] 主题切换：显式 import 该 ref 并在 script 里写 .value。
- * [WHY] 模板里直接对 auto-import 符号赋值，会被 unplugin-auto-import 展开成
- *   一个不可赋值的调用表达式 ⇒ 整个模块解析报 SyntaxError（白屏），故赋值必须落到 script。
- * [CONSTRAINT] 两处都不能出现该 addon 的模块级哨兵字面量（unref 包装前缀）与自动导入标记：
- *   它一发现哨兵就整体跳过本模块的模板补丁，导致 transportKind 等模板符号失去兜底而
- *   在渲染期报 "not defined on instance"。显式 import 可遮蔽 auto-import（同名绑定则不注入）。
+ * [left-tools-v1] 原 `toggleTheme` / `onTransportChange` / `onLoginGui` / `onUpdateUserscript`
+ * 与 `userscriptBadge` 已随工具条迁往 AiWindowList（主题 / 传输链路 / 更新油猴脚本 ⇒ 左下角）。
+ * [WHY 必须删干净] 留着就成了「无模板引用的死 handler」，会让守卫误以为本面板仍是那组控件的宿主。
  */
-function toggleTheme(): void {
-  theme.value = theme.value === 'dark' ? 'light' : 'dark'
-}
-function onTransportChange(e: Event) {
-  const v = (e.target as HTMLSelectElement).value
-  transportKind.value = v === 'headless' ? 'headless' : 'tampermonkey'
-  window.location.reload()
-}
-function onLoginGui() {
-  try {
-    const t = getTransport()
-    const sid = getActiveWinSid()
-    const ok = t.sendLoginGui?.(sid)
-    if (!ok) {
-      toast('当前通道不支持引导登录', 'warn', TOAST_MEDIUM)
-      return
-    }
-    toast('已打开有头窗口，请登录 DeepSeek 后关闭该窗口', 'info', TOAST_LONGEST)
-  } catch (e) {
-    log.error('[headless-login-gui] 触发失败:', e)
-  }
-}
-function onUpdateUserscript() {
-  void updateUserscript().then(() => userscriptBadge.markSeen())
-}
 function selectTab(tab: (typeof sideTab)['value']): void {
   sideTab.value = tab
   sidePaneTab.value = tab
@@ -264,54 +234,8 @@ defineExpose({ selectTab })
     <div v-show="sideTab === 'video'" class="side-video flex flex-col flex-1 min-h-0 overflow-y-auto">
       <VideoGenerationPanel v-if="videoLoaded" />
     </div>
-    <!-- [hdr-group-dock-sidepane-v1] 主题 / 传输链路 / 更新油猴脚本：从 App.vue 顶部迁入面板底部 -->
-    <div class="side-tools" :class="{ 'is-collapsed': collapsed }">
-      <button
-        v-tooltip="theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
-        class="theme-toggle" aria-label="切换主题"
-        @click="toggleTheme"
-      >
-        <svg v-if="theme === 'dark'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="6.34" y2="6.34" /><line x1="17.66" y1="17.66" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="4" y2="12" /><line x1="20" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="6.34" y2="17.66" /><line x1="17.66" y1="6.34" x2="19.07" y2="4.93" /></svg>
-        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
-      </button>
-      <div class="transport-switch" role="group" aria-label="AI 传输链路（切换后自动刷新）" title="AI 传输链路（切换后自动刷新）">
-        <select
-          class="transport-select"
-          :value="transportKind"
-          aria-label="AI 传输链路"
-          @change="onTransportChange"
-        >
-          <option value="tampermonkey">
-            油猴
-          </option>
-          <option value="headless">
-            无头
-          </option>
-        </select>
-        <template v-if="transportKind === 'headless'">
-          <span class="transport-sep" aria-hidden="true" />
-          <button
-            v-tooltip="'引导登录：打开有头窗口，登录后关窗即可（登录态落盘复用）'"
-            aria-label="引导登录"
-            class="login-gui-toggle"
-            @click="onLoginGui"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
-          </button>
-        </template>
-        <span class="transport-sep" aria-hidden="true" />
-        <button
-          v-tooltip="'安装 / 更新油猴脚本（打开本地分发端点，Tampermonkey 会弹出安装或更新确认）'"
-          :aria-label="userscriptBadge.hasUpdate.value ? '油猴脚本有新版本，点击更新' : '更新油猴脚本'"
-          class="userscript-toggle"
-          :class="{ 'has-update': userscriptBadge.hasUpdate.value }"
-          @click="onUpdateUserscript"
-        >
-          <span v-if="userscriptBadge.hasUpdate.value" class="userscript-dot" aria-hidden="true" />
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>
-        </button>
-      </div>
-    </div>
+    <!-- [left-tools-v1] 原「主题 / 传输链路 / 更新油猴脚本」工具条已整体迁到左栏底部（AiWindowList 的 .awl-tools）：
+         用户要求从右下角换到左下角。此处不留占位，面板底部直接以内容收尾。 -->
   </aside>
 </template>
 
@@ -453,100 +377,6 @@ defineExpose({ selectTab })
   animation: spin 0.7s linear infinite;
 }
 
-/* [hdr-group-dock-sidepane-v1] 面板底部工具条：主题 / 传输链路 / 更新油猴脚本。
-   从 App.vue 的 fixed 浮层改为面板内常驻一行；折叠态只留图标（宽 40px）。 */
-.side-tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  padding: 8px 10px;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-}
-.side-tools.is-collapsed {
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 4px;
-}
-.side-tools.is-collapsed .transport-switch {
-  margin: 0;
-}
-.side-tools.is-collapsed .transport-select {
-  display: none;
-}
-.side-tools .theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-3);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.side-tools .theme-toggle:hover {
-  color: var(--text);
-  background: var(--surface-2);
-}
-.side-tools .transport-switch {
-  display: inline-flex;
-  align-items: stretch;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-2);
-  overflow: hidden;
-  min-width: 0;
-}
-.side-tools .transport-select {
-  border: 0;
-  background: transparent;
-  color: var(--text-2);
-  font-size: 11.5px;
-  padding: 0 4px;
-  cursor: pointer;
-  min-width: 0;
-}
-.side-tools .transport-sep {
-  flex: 0 0 1px;
-  align-self: stretch;
-  width: 1px;
-  background: var(--border);
-}
-.side-tools .login-gui-toggle,
-.side-tools .userscript-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-3);
-  cursor: pointer;
-}
-.side-tools .login-gui-toggle:hover,
-.side-tools .userscript-toggle:hover {
-  background: var(--primary-bg);
-  color: var(--primary);
-}
-.side-tools .userscript-toggle {
-  position: relative;
-}
-.side-tools .userscript-dot {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--primary);
-}
+/* [left-tools-v1] `.side-tools` 样式块已随工具条迁往 AiWindowList 的 `.awl-tools`
+   （用户要求把这组控件从右下角挪到左下角）；本文件不再有该 DOM，样式一并删除。 */
 </style>

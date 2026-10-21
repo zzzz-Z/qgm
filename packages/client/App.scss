@@ -23,26 +23,8 @@
   background: var(--surface);
 }
 
-/* [trae-shell-v1] header 左栏折叠按钮 */
-.hdr-collapse-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-6);
-  background: transparent;
-  color: var(--text-3);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.hdr-collapse-btn:hover {
-  color: var(--text);
-  background: var(--surface-2);
-  border-color: var(--border);
-}
+/* [brand-toggle-v1] 原 .hdr-collapse-btn（header 折叠按钮）已删：
+   折叠入口挪到左栏顶部的闪电图标（AiWindowList 的 .logo-btn），这里不再有宿主元素。 */
 
 .hdr {
   flex-shrink: 0;

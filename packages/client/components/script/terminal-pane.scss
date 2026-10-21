@@ -87,10 +87,12 @@
      窄屏不再出现「外壳 16 + 内层 24」的二次挤压。 */
   max-width: 900px;
   margin: 0 auto;
-  padding: 16px 20px 56px;
+  /* [status-bar-reserve-v4] 底部 56/48 → 12/10：原留白是为 v3 的绝对定位阶段条让位（浮层盖在 padding 上），
+     现在槽位在流内占位，再留 56px 会变成双份空白。 */
+  padding: 16px 20px 12px;
   gap: 6px;
   @media (max-width: 900px) {
-    padding: 14px 8px 48px;
+    padding: 14px 8px 10px;
   }
   text-align: left;
   background: transparent;
@@ -561,27 +563,39 @@
 // [md-table-shared-v1] 表格（横向滚动壳 + 不逐字断行）由共享 mixin 提供
 @include mdtable.md-table('.done-summary-body');
 
-/* [status-bar-inline-v3] 阶段条：absolute 浮于 flow-timeline 底部，脱离文档流——不占 chat-list 的 flow 空间，
-   因此状态条出现/消失或新消息到达都不会撑动下方 DOM（用户反馈「页面一有新内容就上下晃」）。
-   背景一律不透明（tint 与 var(--bg) 混合），贴底悬浮时下层卡片不会透出来；顶缘投影提供与滚动内容的分层。
-   flow-timeline 须为 position:relative 作包含块（已有）。 */
+/* [status-bar-reserve-v4] 阶段条槽位：常驻 flow、高度恒定（空闲时也占位）。
+   [WHY] v3 用 absolute 贴底浮层，省了空间但会盖住正好滚到该高度的正文（用户截图反馈「不要遮挡下面」）；
+   改成在流内预留一条固定高度的带，消息区物理上不含该带 ⇒ 正文永不被遮挡。
+   [CONSTRAINT] 高度必须恒定且不随状态条出现/消失变化，否则回到 v3 之前的「新内容一到就上下晃」。
+   空闲时槽位 pointer-events:none，不拦截滚轮与点击。 */
+.status-slot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 46px;
+  padding: 0 24px 8px;
+  pointer-events: none;
+}
+
+/* [status-bar-inline-v3]「AI 思考中 / AI 仍在处理 / 回传中」阶段条。
+   v4 起不再浮层：宽度交给槽位、背景改为不透明（下层不再有内容透出来，无需 blur 与半透明）。 */
 .status-bar-inline {
-  position: absolute;
-  left: 24px;
-  right: 24px;
-  bottom: 12px;
+  flex: 1 1 auto;
+  width: 100%;
+  box-sizing: border-box;
   z-index: 5;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--bg, #0d1117) 88%, transparent);
-  backdrop-filter: blur(6px);
+  background: var(--bg, #0d1117);
   border: 1px solid color-mix(in srgb, var(--border, #30363d) 70%, transparent);
   font-size: 13px;
   color: var(--text-1, #e6edf3);
   font-weight: 500;
+  pointer-events: auto;
   transition:
     background-color 0.18s ease,
     border-color 0.18s ease;
@@ -660,9 +674,8 @@
   font-variant-numeric: tabular-nums;
 }
 @media (max-width: 900px) {
-  .status-bar-inline {
-    left: 8px;
-    right: 8px;
+  .status-slot {
+    padding: 0 8px 8px;
   }
 }
 /* [status-bar-inline-v2] .status-spacer / .status-meta 已删：轮数与 token 估算不再上屏。 */

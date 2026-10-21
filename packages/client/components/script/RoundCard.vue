@@ -149,32 +149,21 @@ function submitAnswer(text: string): void {
     <div class="done-summary-head">
       任务完成 · 总结
     </div>
+
+    <div class="done-summary-body" v-html="html" />
     <FoldToggle
       v-if="card.truncated"
       :expanded="expanded"
       :hidden-lines="card.hiddenLines"
       @toggle="toggle"
     />
-    <div class="done-summary-body" v-html="html" />
-    <!-- <FoldToggle
-      v-if="card.truncated && expanded"
-      :expanded="expanded"
-      :hidden-lines="card.hiddenLines"
-      @toggle="toggle"
-    /> -->
   </section>
 
   <!-- text：AI 普通文本卡 -->
   <section v-else-if="card.type === 'text' && (card.text || card.preview).trim() !== 'json复制下载'" class="text-card">
-    <FoldToggle
-      v-if="card.truncated"
-      :expanded="expanded"
-      :hidden-lines="card.hiddenLines"
-      @toggle="toggle"
-    />
     <div class="done-summary-body" v-html="html" />
     <FoldToggle
-      v-if="card.truncated && expanded"
+      v-if="card.truncated"
       :expanded="expanded"
       :hidden-lines="card.hiddenLines"
       @toggle="toggle"
@@ -186,19 +175,13 @@ function submitAnswer(text: string): void {
     v-else-if="card.type === 'ask'"
     class="text-card is-bubble"
   >
-    <header class="text-card-head">
+    <!-- <header class="text-card-head">
       <span class="text-card-badge" :class="card.role === 'user-answer' ? 'answer-badge' : 'ask-badge'">你</span>
       <span class="script-card-time">{{ card.timeLabel }}</span>
-    </header>
-    <FoldToggle
-      v-if="card.truncated"
-      :expanded="expanded"
-      :hidden-lines="card.hiddenLines"
-      @toggle="toggle"
-    />
+    </header> -->
     <div class="done-summary-body" v-html="html" />
     <FoldToggle
-      v-if="card.truncated && expanded"
+      v-if="card.truncated"
       :expanded="expanded"
       :hidden-lines="card.hiddenLines"
       @toggle="toggle"

@@ -653,19 +653,23 @@ function reopenGuide(): void {
           </div>
         </div>
       </div>
-      <!-- [status-bar-inline-v3] 阶段条脱离文档流：absolute 浮于 flow-timeline 底部而不占 flow 空间。
+      <!-- [status-bar-reserve-v4] 阶段条改为「常驻槽位」：v3 的 absolute 浮层贴底时会盖住正好滚到该高度的
+           消息正文（用户截图反馈「不要遮挡下面」）。槽位恒在 flow 中且高度恒定 ⇒ 既保留 v3 的「出现/消失
+           不撑动 DOM、新消息到达不上下晃」，又保证正文物理上不与该带重叠。
            waiting=「AI 思考中 / AI 仍在处理」、feedback=「回传中」（文案与秒表来自 useAiPhaseClock）。
-           成功/失败、轮数、token 估算已整体移除。absolute 让状态条出现/消失或新消息到达都不再撑动 DOM。 -->
-      <div
-        v-if="runtimeKind === 'waiting' || runtimeKind === 'feedback'"
-        class="status-bar-inline"
-        :class="`kind-${runtimeKind}`"
-        aria-live="polite"
-      >
-        <span class="status-dot" aria-hidden="true" />
-        <span class="status-text">{{ waitText }}</span>
-        <span v-if="waitElapsed > 0" class="status-sep">·</span>
-        <span v-if="waitElapsed > 0" class="status-elapsed">{{ waitElapsed }}s</span>
+           成功/失败、轮数、token 估算已整体移除。 -->
+      <div class="status-slot">
+        <div
+          v-if="runtimeKind === 'waiting' || runtimeKind === 'feedback'"
+          class="status-bar-inline"
+          :class="`kind-${runtimeKind}`"
+          aria-live="polite"
+        >
+          <span class="status-dot" aria-hidden="true" />
+          <span class="status-text">{{ waitText }}</span>
+          <span v-if="waitElapsed > 0" class="status-sep">·</span>
+          <span v-if="waitElapsed > 0" class="status-elapsed">{{ waitElapsed }}s</span>
+        </div>
       </div>
     </div>
   </section>
