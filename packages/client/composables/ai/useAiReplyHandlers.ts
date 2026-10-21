@@ -367,16 +367,17 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
       const summary = String(db.summary || '').trim()
       const commit = String(db.commit || '').trim()
       if (summary) {
-        const doneText = commit ? `${summary}\n\nCOMMIT: ${commit}` : summary
-        const doneSummary = doneText.split(/\r?\n/).filter(l => l.trim()).slice(0, 5).join(' / ').slice(0, 200)
+        // [turn-done-block-v1] doneSummary 只含总结正文；commit 走独立字段 doneCommit ——
+        //   post-done 优先用结构化 commit，回退时才从正文抽 COMMIT: 行（旧路径）。
+        const doneSummary = summary.split(/\r?\n/).filter(l => l.trim()).slice(0, 5).join(' / ').slice(0, 200)
         const doneSid = String(activeSessionId.value || '')
-        void runHook('BeforeDoneFinal', { loopId: '', round: 0, startCommit: '', reason: 'done-block', doneSummary })
+        void runHook('BeforeDoneFinal', { loopId: '', round: 0, startCommit: '', reason: 'done-block', doneSummary, ...(commit ? { doneCommit: commit } : {}) })
           .then((gate) => { if (gate.action === 'reject') notifySelfcheckReject(gate.reason) })
           .catch(() => { /* runHook fail-open */ })
         if (doneSid) {
           void fetch('/__ai/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'set', sid: doneSid, todo: [], done: [], clear: 'finish' }) }).catch(() => {})
         }
-        void fetch('/__ai/lessons', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: doneText }) }).catch(() => {})
+        void fetch('/__ai/lessons', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: summary }) }).catch(() => {})
       }
     }
 

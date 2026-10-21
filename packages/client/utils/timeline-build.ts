@@ -164,14 +164,14 @@ export function buildOneCard(ev: { id: number, kind: string, ts: number, payload
       return { type: 'text', key: `blk-${turnId}-${blockId}`, timeLabel: hmsLabel(ev.ts), text, ...pv }
     }
     if (b.type === 'done') {
-      // [turn-done-block-v1] 总结块建 done 卡片：summary 是正文，commit（可选）附到末尾
-      // [WHY 附到 text] post-done.cjs 从 DONE 播报正文抽 COMMIT 行；不附则 commit 链路断
+      // [turn-done-block-v1] 总结块建 done 卡片：summary 是正文，commit 走独立字段
+      // [WHY 不拼进 text] commit 是机器信息（供 post-done 生成提交标题），不该出现在用户看的总结卡里。
+      //   链路：done 块 → handleBlockMsg 把 commit 随 runHook 载荷传给 post-done，与卡片渲染解耦。
       const summary = String(b.summary || '').trim()
       if (!summary) return null
       const commit = String(b.commit || '').trim()
-      const text = commit ? `${summary}\n\nCOMMIT: ${commit}` : summary
-      const pv = clampTextPreview(text, DONE_PREVIEW.lines, DONE_PREVIEW.chars)
-      return { type: 'done', key: `blk-${turnId}-${blockId}`, timeLabel: hmsLabel(ev.ts), text, ...pv }
+      const pv = clampTextPreview(summary, DONE_PREVIEW.lines, DONE_PREVIEW.chars)
+      return { type: 'done', key: `blk-${turnId}-${blockId}`, timeLabel: hmsLabel(ev.ts), text: summary, ...(commit ? { commit } : {}), ...pv }
     }
     if (b.type === 'ask') {
       const question = String(b.question || '').trim()

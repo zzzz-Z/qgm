@@ -21,10 +21,14 @@ const LOG = path.join(ROOT, '.ai-runner', 'post-done.log')
 //   ② 缺失或 type 非法 ⇒ 降级为既有的「chore(done): 摘要首段」。
 //   原文里的双引号由 git 的数组参数通道兜住（execFileSync，不经 shell），此处不预转义。
 let doneSummary = ''
+// [turn-done-block-v1] done 块的结构化 commit 字段：已通过 schema 的 conventional commit 校验，
+//   直接当标题用，不必再 parse。缺失时才回退到「从 doneSummary 抽 COMMIT: 行」的旧路径。
+let doneCommit = ''
 try {
   const raw = fs.readFileSync(0, 'utf8')
   const j = JSON.parse(raw)
   doneSummary = String((j && j.payload && j.payload.doneSummary) || '')
+  doneCommit = String((j && j.payload && j.payload.doneCommit) || '').trim()
 } catch { /* 无 stdin / 非法 JSON：回退时间戳 msg */ }
 
 function log(msg) {
@@ -50,7 +54,10 @@ if (status.trim()) {
   // [CONSTRAINT] 降级路径（source==='fallback'）要落日志：它意味着 AI 没按 §12 契约写 COMMIT: 行，
   //   是「契约未生效」的可观测信号，不是静默正常。
   let subject = `chore(auto): DONE checkpoint ${ts}`
-  if (doneSummary) {
+  if (doneCommit) {
+    // 结构化字段优先：schema 已校验过格式，直接采用
+    subject = doneCommit.slice(0, 200)
+  } else if (doneSummary) {
     const parsed = parseCommitSubject(doneSummary)
     subject = parsed.subject
     if (parsed.source === 'fallback') log(`commit subject 走降级路径（DONE 播报无合法 COMMIT: 行）`)
