@@ -371,6 +371,8 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
         //   post-done 优先用结构化 commit，回退时才从正文抽 COMMIT: 行（旧路径）。
         const doneSummary = summary.split(/\r?\n/).filter(l => l.trim()).slice(0, 5).join(' / ').slice(0, 200)
         const doneSid = String(activeSessionId.value || '')
+        try { emitBus('ai:done', titles[type] || 'AI 块', { payload: { block }, updateKey }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
+
         void runHook('BeforeDoneFinal', { loopId: '', round: 0, startCommit: '', reason: 'done-block', doneSummary, ...(commit ? { doneCommit: commit } : {}) })
           .then((gate) => { if (gate.action === 'reject') notifySelfcheckReject(gate.reason) })
           .catch(() => { /* runHook fail-open */ })
@@ -381,7 +383,7 @@ export function useAiReplyHandlers(deps: AiReplyHandlersDeps) { const { sessionH
       }
     }
 
-    try { emitBus('ai:done', titles[type] || 'AI 块', { payload: { block }, updateKey }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
+    try { emitBus('ai:block', titles[type] || 'AI 块', { payload: { block }, updateKey }) } catch { /* swallow: 事件流失败不阻断主链路 */ }
   }
 
   /**
