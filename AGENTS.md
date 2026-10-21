@@ -89,7 +89,7 @@ docs/              USAGE.md / DOCS-INDEX.md / DESIGN.md
 - §4 架构红线：`packages/core/tests/module-size-ratchet.node-test.ts` + `packages/core/tests/hclc-guard.node-test.ts`
 - §8 重试预算：`packages/core/tests/system-contract.node-test.ts`（G3）
 - §9 跨文件级联：`packages/core/tests/tmp-reaper.node-test.ts`
-- §12 提交前自复检：`packages/core/tests/system-contract.node-test.ts`（G2）
+- §12 提交前自复检：`packages/core/tests/system-contract.node-test.ts`（G2）+ `packages/core/tests/commit-subject-guard.node-test.ts`（`commit-subject-v1`：DONE 播报 → conventional commit 标题；算法唯一源 `scripts/lib/commit-subject.cjs`，入口 `bin/post-done.cjs` 只做 IO）
 - §14 功能回归：`packages/core/tests/ssot-boundary-guard.node-test.ts`（G3）
 - §15 视觉回归：`packages/core/tests/ssot-boundary-guard.node-test.ts`（G3）+ `packages/client/tests/visual-spec-guard.node-test.ts`
 - §16 知识库：`packages/core/tests/ssot-boundary-guard.node-test.ts`（G3）

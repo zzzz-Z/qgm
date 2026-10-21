@@ -14,7 +14,10 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const CLIENT = path.join(ROOT, 'packages', 'client')
 const SPEC = path.join(CLIENT, 'e2e', 'visual.spec.ts')
-const SNAP_DIR = path.join(CLIENT, 'e2e', 'visual.spec.ts-snapshots')
+// [snapshot-platform-dir-v1] 基线按 process.platform 分目录（darwin/ linux/ …）：
+//   各平台一套完整基线，都要过「12 张 + 互不相同」，否则某平台退化会无人察觉
+//   （CI 跑 ubuntu，若只守 darwin 则等于没守）。
+const SNAP_ROOT = path.join(CLIENT, 'e2e', 'visual.spec.ts-snapshots')
 const SPEC_SRC = fs.readFileSync(SPEC, 'utf8')
 
 /** 扫描客户端源码时必须跳过的目录（含 spec 自身所在目录，否则判据恒真） */
@@ -198,22 +201,40 @@ test('滚动容器清单与源码双向对齐（防清单锈蚀）', () => {
   }
 })
 
-test('视觉基线：12 张、且逐张互不相同（防基线退化）', () => {
-  assert.ok(fs.existsSync(SNAP_DIR), `基线目录不存在：${SNAP_DIR}（先跑 pnpm test:e2e --update-snapshots）`)
-  const pngs = fs.readdirSync(SNAP_DIR).filter(n => n.endsWith('.png')).sort()
-  assert.equal(pngs.length, 12, `基线数量应为 12（6 视图 × 2 主题），实际 ${pngs.length}：${pngs.join(', ')}`)
-  const byHash = new Map<string, string[]>()
-  for (const n of pngs) {
-    const h = crypto.createHash('sha256').update(fs.readFileSync(path.join(SNAP_DIR, n))).digest('hex').slice(0, 16)
-    const list = byHash.get(h) ?? []
-    list.push(n)
-    byHash.set(h, list)
-  }
-  const dup = [...byHash.values()].filter(v => v.length > 1)
-  const detail = dup.map(g => `  ${g.join(' ≡ ')}`).join('\n')
-  assert.equal(
-    dup.length,
-    0,
-    `基线退化：有 ${dup.length} 组逐像素相同的截图 ⇒ 说明主题没生效或两个「视图」其实是同一个状态。\n${detail}`,
+test('视觉基线：每个平台目录 12 张、且逐张互不相同（防基线退化）', () => {
+  assert.ok(fs.existsSync(SNAP_ROOT), `基线根目录不存在：${SNAP_ROOT}（先跑 pnpm test:e2e --update-snapshots）`)
+  const dirs = fs.readdirSync(SNAP_ROOT, { withFileTypes: true })
+    .filter(e => e.isDirectory())
+    .map(e => e.name)
+    .sort()
+  // [防回退] 若有人把基线搬回根目录（取消分平台），dirs 为空；没有这条断言本测试会静默通过
+  assert.ok(
+    dirs.length >= 1,
+    `基线根目录下没有任何平台子目录（${SNAP_ROOT}）：基线须落在 <snapshots>/<platform>/，`
+    + `先跑 pnpm test:e2e --update-snapshots`,
   )
+
+  for (const dir of dirs) {
+    const snapDir = path.join(SNAP_ROOT, dir)
+    const pngs = fs.readdirSync(snapDir).filter(n => n.endsWith('.png')).sort()
+    assert.equal(
+      pngs.length,
+      12,
+      `[${dir}] 基线数量应为 12（6 视图 × 2 主题），实际 ${pngs.length}：${pngs.join(', ')}`,
+    )
+    const byHash = new Map<string, string[]>()
+    for (const n of pngs) {
+      const h = crypto.createHash('sha256').update(fs.readFileSync(path.join(snapDir, n))).digest('hex').slice(0, 16)
+      const list = byHash.get(h) ?? []
+      list.push(n)
+      byHash.set(h, list)
+    }
+    const dup = [...byHash.values()].filter(v => v.length > 1)
+    const detail = dup.map(g => `  ${g.join(' ≡ ')}`).join('\n')
+    assert.equal(
+      dup.length,
+      0,
+      `[${dir}] 基线退化：有 ${dup.length} 组逐像素相同的截图 ⇒ 说明主题没生效或两个「视图」其实是同一个状态。\n${detail}`,
+    )
+  }
 })

@@ -40,5 +40,15 @@ export default defineConfig({
     globals: false,
     isolate: true,
     maxWorkers: MAX_WORKERS,
+    // [test-timeout-host-v1] 全局超时由 vitest 默认 5s 放宽到 30s（含 hook / teardown）。
+    // [WHY] 宿主 Bash 工具的 NODE_OPTIONS 挂着 fs 垫片（broker IPC），实测同一批测试文件
+    //   带垫片 69.3s vs 剥垫片 1.84s —— 37 倍。5s 默认超时在该环境下是**误报源**：
+    //   表现为「全量跑一片 timeout、空闲复跑即绿」，极易被误判成回归（历史上有过此类误判）。
+    // [CONSTRAINT] 首选解法是**剥掉垫片再跑**（env -i 或 unset NODE_OPTIONS）；本项只是兜底，
+    //   不是把「慢」合法化：正常用例是 100ms 量级，30s 依然能抓住挂死，只是不再误伤慢机器。
+    // [CHANGE-IMPACT] 显式设了 timeout 的用例不受影响（如 selfcheck-l2 G17 的 60s 仍为 60s）。
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
+    teardownTimeout: 30_000,
   },
 })

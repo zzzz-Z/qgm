@@ -8,23 +8,23 @@
 const { execSync, execFileSync, spawn } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
+// [commit-subject-v1] 标题解析抽到 scripts/lib：入口只做 IO，守卫 import 同一套算法
+const { parseCommitSubject } = require('../scripts/lib/commit-subject.cjs')
 
 const ROOT = process.cwd()
 const LOG = path.join(ROOT, '.ai-runner', 'post-done.log')
 
 // [post-done-gate-v1] hook 经 stdin 传 {event, payload}；payload.doneSummary 是 DONE 摘要前 5 行。
 // [WHY] commit msg 只写时间戳对 git log 无信息量；摘要让每次 checkpoint 自解释。
-// [CONSTRAINT] 摘要可能含多行/特殊字符 → 只取首行、截断、转义双引号。
+// [commit-subject-v1] 这里**只保留原文**，标题交给 parseCommitSubject 全权决定：
+//   ① DONE 播报首行写了 `COMMIT: <type>(<scope>): <subject>` ⇒ 用它（conventional commit）；
+//   ② 缺失或 type 非法 ⇒ 降级为既有的「chore(done): 摘要首段」。
+//   原文里的双引号由 git 的数组参数通道兜住（execFileSync，不经 shell），此处不预转义。
 let doneSummary = ''
 try {
   const raw = fs.readFileSync(0, 'utf8')
   const j = JSON.parse(raw)
-  const s = String((j && j.payload && j.payload.doneSummary) || '')
-  // [post-done-gate-v1] 客户端用 ' / ' 拼多行；剥离 markdown 标题前缀，取首个有意义片段
-  const segs = s.split(' / ').map(x => x.trim()).filter(x => x.length > 0)
-  // [post-done-gate-v1] 优先取非标题片段（"## 结论" 剥 # 后只剩 "结论"，对 git log 无信息量）
-  const first = segs.find(x => !x.startsWith('#')) || (segs[0] || '').replace(/^#+\s*/, '')
-  doneSummary = first.replace(/"/g, '\'').slice(0, 120)
+  doneSummary = String((j && j.payload && j.payload.doneSummary) || '')
 } catch { /* 无 stdin / 非法 JSON：回退时间戳 msg */ }
 
 function log(msg) {
@@ -46,8 +46,15 @@ if (status === null) process.exit(0)
 if (status.trim()) {
   run('git add -A')
   const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
-  // [post-done-gate-v1] 有 DONE 摘要则用它作 subject（可读）；无则回退时间戳。
-  const subject = doneSummary ? `chore(done): ${doneSummary}` : `chore(auto): DONE checkpoint ${ts}`
+  // [commit-subject-v1] 有 DONE 摘要则解析成 conventional commit 标题；无则回退时间戳。
+  // [CONSTRAINT] 降级路径（source==='fallback'）要落日志：它意味着 AI 没按 §12 契约写 COMMIT: 行，
+  //   是「契约未生效」的可观测信号，不是静默正常。
+  let subject = `chore(auto): DONE checkpoint ${ts}`
+  if (doneSummary) {
+    const parsed = parseCommitSubject(doneSummary)
+    subject = parsed.subject
+    if (parsed.source === 'fallback') log(`commit subject 走降级路径（DONE 播报无合法 COMMIT: 行）`)
+  }
   // [post-done-gate-v1] 数组参数走 execFileSync：subject 里的反引号/引号不被 shell 解析
   //   （原 execSync(git commit -m "...") 遇反引号触发 command substitution → exit 2 → 从未产生 commit）
   let c = null

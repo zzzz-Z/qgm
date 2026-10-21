@@ -1,4 +1,14 @@
 import { defineConfig, devices } from '@playwright/test'
+import process from 'node:process'
+
+// [snapshot-platform-dir-v1] 视觉基线按 process.platform 分目录存放。
+// [WHY] [snapshot-no-platform-v1] 只去掉了文件名里的平台段（*-chromium-darwin.png → *-chromium.png），
+//   解决了「快照名不匹配」的误导，却没解决「跨平台基线不通用」：Linux 的字体与抗锯齿与 macOS 不同，
+//   同一份基线在 ubuntu runner 上必然像素不一致。此前 CI 因此完全不跑 e2e（见 ci.yml 注释），
+//   视觉回归只剩本地口头承诺。分目录后各平台各自维护基线，e2e 才可能在 CI 上跑起来。
+// [CHANGE-IMPACT] 既有基线需迁到 <snapshots>/<platform>/ 下（darwin 一次 git mv，见 e2e.yml 说明）；
+//   新平台首次运行需先 --update-snapshots 生成并提交该平台基线，否则 CI=true 下会判缺失而失败。
+const SNAP_PLATFORM = process.platform
 
 export default defineConfig({
   testDir: './e2e',
@@ -20,8 +30,8 @@ export default defineConfig({
   // [CHANGE-IMPACT] 既有基线的文件名需从 *-chromium-darwin.png 改为 *-chromium.png
   //   （用 --update-snapshots 重建即可，见 visual.spec.ts 头注释）。
   // [CONSTRAINT] 去掉平台段不等于「跨平台基线通用」：Linux 的字体/抗锯齿与 macOS 不同，
-  //   真要在多平台跑视觉用例，须为各平台单独提交基线（或另设 snapshotDir）。
-  snapshotPathTemplate: '{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}{-projectName}{ext}',
+  //   真要在多平台跑视觉用例，须为各平台单独提交基线 —— 由下方 SNAP_PLATFORM 分目录兑现。
+  snapshotPathTemplate: `{snapshotDir}/{testFileDir}/{testFileName}-snapshots/${SNAP_PLATFORM}/{arg}{-projectName}{ext}`,
   use: {
     baseURL: 'http://localhost:5274/__ai/',
     trace: 'retain-on-failure',
@@ -42,6 +52,9 @@ export default defineConfig({
     //   后端由具体 spec 的 beforeAll 独立拉起，webServer 探活不应依赖代理后端是否就绪
     url: 'http://localhost:5274/',
     reuseExistingServer: true,
-    timeout: 120_000,
+    // [e2e-webserver-timeout-v1] 120s → 180s：CI 上是干净检出，pnpm install 后 vite 首次
+    //   冷启动要做依赖预构建（optimizeDeps），本地因 reuseExistingServer 长期走不到这条分支，
+    //   故 120s 在本地从未暴露。上限仍须小于全局 timeout（180s）的 spec 预算口径。
+    timeout: 180_000,
   },
 })

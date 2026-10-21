@@ -1,0 +1,85 @@
+# [e2e-ci-v1] 让 e2e / 视觉回归从「宿主侧口头承诺」变成**可执行命令**。
+# [WHY] ci.yml 刻意不跑 e2e，理由是视觉基线平台相关（Linux 字体/抗锯齿 ≠ macOS），
+#   在 ubuntu runner 上必然与 darwin 基线不符 —— 这个理由成立，但**正确的结论是分平台基线**，
+#   不是永久放弃：ci.yml 头注释自己记过「视觉基线自身退化成 dark ≡ light、01 ≡ 02
+#   （10 张图只有 4 个唯一哈希）」这类问题，只有真跑才抓得到，单测守的是「规则写没写对」
+#   而不是「图有没有退化」。
+# [CONSTRAINT] playwright.config.ts 的 [snapshot-platform-dir-v1] 已把基线按
+#   process.platform 分目录 ⇒ 本 workflow 在 ubuntu 上跑，产物落 linux/ 子目录，
+#   与已提交的 darwin/ 基线与而不同、互不干扰。
+# [CONSTRAINT] **首次运行必然失败**：CI=true 时 Playwright 对缺失基线判失败
+#   （本地则会顺手创建并「通过」，这正是本地跑永远发现不了的原因）。
+#   故提供 update_baselines 开关：跑 --update-snapshots 并把 linux/ 基线作为 artifact 上传，
+#   人工下载提交后，后续的定时运行才具备判别力。
+#
+# 首次启用流程：Actions → e2e → Run workflow → 勾 update_baselines →
+#   下载 linux-visual-baselines 产物 → 放进 packages/client/e2e/visual.spec.ts-snapshots/linux/ → 提交。
+name: e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      update_baselines:
+        description: 重建 Linux 视觉基线（产物需下载后提交）
+        type: boolean
+        default: false
+  schedule:
+    # 北京时间每周一 11:00（UTC 03:00）。基线未就绪期间会红 —— 那正是「该生成 linux 基线了」的提醒
+    - cron: '0 3 * * 1'
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # [ci-pnpm-version] 与 ci.yml 保持一致（`pnpm -v` = 11.8.0）
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      # [WHY] headless-ws.spec.ts 的 beforeAll 会等 air-server 冷启动，源码比 dist 新时
+      #   它会先跑一次全量构建 ⇒ 在 hook 预算内做构建容易顶到 180s 上限。这里先构建好。
+      - name: 构建
+        run: pnpm build
+
+      - name: 安装 Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: 跑 e2e
+        run: |
+          if [ "${{ inputs.update_baselines }}" = "true" ]; then
+            echo "::notice::update 模式：重建 Linux 视觉基线，产物见 linux-visual-baselines"
+            pnpm exec playwright test --config packages/client/playwright.config.ts --update-snapshots
+          else
+            pnpm exec playwright test --config packages/client/playwright.config.ts
+          fi
+
+      - name: 上传 Linux 视觉基线
+        if: always() && inputs.update_baselines
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-visual-baselines
+          path: packages/client/e2e/**/*-snapshots/linux/
+          if-no-files-found: ignore
+
+      - name: 上传 Playwright 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: packages/client/e2e/playwright-report/
+          if-no-files-found: ignore

@@ -24,6 +24,11 @@
     "build": "tsc -p ../../tsconfig.json && node ./scripts/copy-runtime.cjs",
     "tsc": "tsc -p ../../tsconfig.json --noEmit"
   },
+  "dependencies": {
+    "hono": "^4.13.8",
+    "typescript": "^5.9.3",
+    "ws": "^8.21.3"
+  },
   "optionalDependencies": {
     "playwright": "^1.63.0"
   },

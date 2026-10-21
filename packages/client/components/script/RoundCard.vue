@@ -156,12 +156,12 @@ function submitAnswer(text: string): void {
       @toggle="toggle"
     />
     <div class="done-summary-body" v-html="html" />
-    <FoldToggle
+    <!-- <FoldToggle
       v-if="card.truncated && expanded"
       :expanded="expanded"
       :hidden-lines="card.hiddenLines"
       @toggle="toggle"
-    />
+    /> -->
   </section>
 
   <!-- text：AI 普通文本卡 -->

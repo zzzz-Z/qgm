@@ -6,9 +6,13 @@
 #     dev server（reuseExistingServer）而从未真正走启动分支；
 #   - 视觉基线自身退化成 dark ≡ light、01 ≡ 02（10 张图只有 4 个唯一哈希），而 e2e 不在 verify 里。
 # [CONSTRAINT] 这里**不跑 e2e**：视觉基线是平台相关的（Linux 的字体与抗锯齿与 macOS 不同），
-#   在 ubuntu runner 上跑必然与 darwin 基线不符。e2e 仍属本地闸门（pnpm run-all）；
-#   而它最容易静默失效的两处 —— 遮罩选择器锈蚀、基线退化 —— 已由单测
-#   packages/client/tests/visual-spec-guard.node-test.ts 守住，CI 能覆盖。
+#   在 ubuntu runner 上跑必然与 darwin 基线不符。
+#   [e2e-ci-v1] 该限制已由 **.github/workflows/e2e.yml** 化解：基线按 process.platform 分目录
+#   （playwright.config.ts 的 [snapshot-platform-dir-v1]，各平台各存一套互不干扰），
+#   e2e 改在那条 workflow（手动 dispatch + 每周定时）的 ubuntu runner 上跑。
+#   每次 DONE 都跑的闸门仍只到本文件为止 —— e2e 分钟级，太重；它最容易静默失效的两处
+#   —— 遮罩选择器锈蚀、基线退化 —— 已由单测 packages/client/tests/visual-spec-guard.node-test.ts
+#   守住，两个 workflow 都能覆盖。
 # [CONSTRAINT] test:unit **不再传 --exclude**。2026-10-05 决策：知识库纳入版本库
 #   （`.ai-runner/skills/**` + `.ai-runner/lessons.md`，见 .gitignore 的 [knowledge-base-in-repo-v1]）。
 #   依据是实测：干净检出下 pnpm test:unit 曾有 8 个用例红，其中 7 个纯粹因为这两个知识库缺失
