@@ -1,13 +1,16 @@
 // [component-binding-guard-v1] 模板组件「用了但没绑定」守卫：扫描 client 全部 SFC 的 <template>，
 // 逐个核对 PascalCase 组件名是否在文件内有绑定（import / const / function / defineOptions.name / 文件名同名）。
 // [WHY] 2026-10-09 用户报「TEXT 回答内容被截断 没有显示全」：TextCard 只渲染 12 行预览
-//   （TEXT_PREVIEW = { lines: 12, chars: 800 }），而唯一的展开入口 <FoldToggle> 在
+//   （TEXT_PREVIEW = { lines: 12, chars: 800 }），而唯一的展开入口（当时的 FoldToggle）在
 //   RoundCard.vue 里**没有任何 import**。本项目没有 unplugin-vue-components、main.ts 也没有
 //   app.component() 全局注册（auto-import 只管 composables/utils，不管 components），
 //   于是 Vue 把它当未知元素：不报错、不渲染 ⇒ 超阈值卡片永远只有预览、无法展开，静默可见性缺陷。
 // [WHY-DETECTOR-NOT-VACUOUS] 这类缺陷的判据必须自己先被证明「抓得住」：T2/T3 用合成 SFC 做正反例，
-//   确保扫描器不是恒绿。T4 直接钉死本次回归对象（RoundCard 必须 import FoldToggle），
-//   即便将来扫描器被人为放宽，这一条仍会变红。
+//   确保扫描器不是恒绿。T4 直接钉死本次回归对象，即便将来扫描器被人为放宽，这一条仍会变红。
+// [no-fold-full-text-v1] 折叠入口已整体下线（用户 2026-10-21：「删除展开全部 默认就全部展示」），
+//   FoldToggle.vue 已删除 ⇒ T4 的靶子随之换向：从「必须 import 折叠入口」改成「不得再出现折叠入口，
+//   且卡片必须恒渲染 card.text 全文」。这条同样承重：谁把折叠机制加回来、或让 RoundCard
+//   退回渲染 card.preview，T4 立刻变红。
 // [CONSTRAINT] 扫描必须排除 e2e/ 与 tests/：测试自身会写 `<FoldToggle>` 之类的合成样例，否则判据恒假。
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
@@ -144,14 +147,41 @@ test('T3: 合成「已导入」的 SFC 不得报出（排除假阳性）', () =>
   assert.deepEqual(findUnboundComponents('components/Fake.vue', src), ['SidePane'])
 })
 
-test('T4: 回归钉死 —— RoundCard.vue 必须显式 import FoldToggle（折叠入口）', () => {
-  const src = fs.readFileSync(path.join(CLIENT, 'components', 'script', 'RoundCard.vue'), 'utf8')
+/**
+ * 剥掉注释后的源码
+ * [WHY] 本轮的判据是「不得出现某个字面量」，而解释性注释里必然引用这些字面量
+ *   （`card.preview`、`<FoldToggle>`、`collapsed`）。不剥注释 ⇒ 判据被自己的说明文字命中，
+ *   表现为「改对了却恒红」。
+ * [CONSTRAINT] 只剥块注释、HTML 注释与**行首** `//` 行；不碰行内 `//`（会误伤 URL 与正则）。
+ */
+function stripComments(source: string): string {
+  return source
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter(l => !/^\s*\/\//.test(l))
+    .join('\n')
+}
+
+test('T4: 回归钉死 —— RoundCard.vue 不得再有折叠入口，且必须恒渲染 card.text 全文', () => {
+  const raw = fs.readFileSync(path.join(CLIENT, 'components', 'script', 'RoundCard.vue'), 'utf8')
+  const src = stripComments(raw)
+  const tpl = extractTemplate(src)
+
   assert.ok(
-    /^\s*import\s+FoldToggle\s+from\s+['"]\.\/FoldToggle\.vue['"]/m.test(src),
-    'RoundCard.vue 缺少 FoldToggle 的显式 import：四类卡片的「展开全部」入口会静默消失',
+    !/<FoldToggle\b/.test(tpl) && !/from\s+['"]\.\/FoldToggle\.vue['"]/.test(src),
+    'RoundCard.vue 又引入了 FoldToggle：「展开全部 · 还有 N 行」入口应已随 [no-fold-full-text-v1] 下线',
   )
   assert.ok(
-    (extractTemplate(src).match(/<FoldToggle/g) || []).length > 0,
-    'RoundCard.vue 模板已不再使用 FoldToggle —— 若确为重构，请同步修订本判据',
+    !fs.existsSync(path.join(CLIENT, 'components', 'script', 'FoldToggle.vue')),
+    'FoldToggle.vue 应已删除 —— 若确需恢复折叠，请连同本判据一起重写',
+  )
+  assert.ok(
+    /const html = computed\(\(\) => renderMarkdown\(props\.card\.text\)\)/.test(src),
+    'html 必须恒由 card.text 渲染：退回 collapsed ? preview : text 即等于又把正文截断',
+  )
+  assert.ok(
+    !/props\.card\.preview\s*:/.test(src) && !/\bcollapsed\b/.test(src) && !/\bexpanded\b/.test(src),
+    '折叠态变量（expanded / collapsed / preview 分支）应已从脚本段移除',
   )
 })

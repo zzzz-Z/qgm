@@ -2,20 +2,18 @@
 // [ui-p2c-render-probe-v1] V9 验收①：dev-only 渲染打点（生产 enabled() 早退）
 import { computed, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
 import { probeRender } from '../../composables/ui/render-probe'
-// [fold-toggle-import-v1] 折叠入口必须显式 import。
-// [WHY] 本项目**没有** unplugin-vue-components（vite.config.ts 只装 unplugin-auto-import，
-//   且 auto-import 的 dirs 是 composables/utils、不含 components），main.ts 也无 app.component() 全局注册
-//   ⇒ 模板里的 PascalCase 组件只有显式 import 才解析得到。缺失时 Vue 把它当未知元素：不报错、不渲染，
-//   而 text/done/ask/question 四类卡片的「展开全部 · 还有 N 行」入口**静默消失** ——
-//   超阈值内容只剩 12 行预览（TEXT_PREVIEW）且无法展开（2026-10-09 用户截图「回答被截断」根因）。
-// [CONSTRAINT] 由 tests/component-binding-guard.node-test.ts 守卫：删掉本行即变红。
-import FoldToggle from './FoldToggle.vue'
 import { useAsk } from '../../composables/ui/useAsk'
 import { renderMarkdown } from '../../composables/useMarkdown'
 // [round-card-v1] 从 TerminalPane 抽出：done / text / ask / question 四类非脚本卡片
 // [WHY] TerminalPane 超 HCLC 500 红线；四类卡片共用 text-card 布局
-// [CHANGE-IMPACT] expanded 态下沉到卡片内（不再用父级 expandedCards 集合）
+// [CHANGE-IMPACT] 折叠机制已整体下线（见 [no-fold-full-text-v1]）：
+//   卡片不再持有展开态，也不再有父级 expandedCards 集合 —— 四类卡片恒渲染 card.text 全文。
 
+// [no-fold-full-text-v1] preview / truncated / hiddenLines 是折叠时代的产物：
+//   上游（timeline-build.ts / TerminalPane.vue）仍在算并下发，但**不再驱动任何渲染**：
+//   卡片恒渲染 card.text 全文。字段保留只为两件事：
+//   ① 空内容守卫 `(card.text || card.preview).trim()` 的兼容形态（见 script-card-layout 守卫）；
+//   ② 避免为摘除几个只读字段去改 4 个调用点（上游 clampTextPreview 早已是纯函数，无副作用）。
 interface PreviewFields {
   text: string
   preview: string
@@ -39,14 +37,15 @@ type RoundCardData = DoneCard | TextCard | AskCard | QuestionCard
 
 const props = defineProps<{ card: RoundCardData }>()
 
-// [ask-full-v1] 提问类卡片（AI 的 ASK 卡 / 用户提问卡）默认展开全文，对标宿主智能体的提问呈现：
-//   提问与上下文必须完整可读才能回答/决策；原 [timeline-denoise-v1] 的预览+折叠保留为
-//   手动「收起」（文字墙风险交还给用户自控），阈值计算不动（truncated/hiddenLines 仍驱动 toggle）。
-// [CONSTRAINT] 仅改默认值：truncated=false 时 toggle 不渲染，expanded 取值无副作用；
-//   卡片 key 含事件 id ⇒ 同一实例的 card.type 不会变化，setup 期读一次安全。
-const expanded = ref(
-  (props.card.type === 'question' || props.card.type === 'ask') && props.card.truncated,
-)
+// [no-fold-full-text-v1] 折叠入口下线，卡片恒渲染全文。
+// [WHY] 用户实测诉求（2026-10-21）：「删除展开全部 默认就全部展示」——「展开全部 · 还有 N 行」
+//   这个二级交互是纯摩擦：要读完整内容得先点一次，且折叠态下还可能误以为内容就这么多。
+//   中间过程的可扫读性由别的机制承担（脚本卡的尾部折叠 tailTextPreview、分段卡 RoundDivider），
+//   文本卡本身就该一次给全。
+// [CHANGE-IMPACT] expanded / collapsed / toggle() 一并删除；不再 import FoldToggle（组件已删）。
+//   html 恒取 card.text —— 之前 collapsed 期取 card.preview 的分支是内容缺口的唯一来源。
+// [CONSTRAINT] 由 tests/component-binding-guard.node-test.ts T4 与 tests/ask-card-wiring.node-test.ts
+//   「卡片默认全量渲染」两条守卫：模板里再出现 <FoldToggle> / card.preview 渲染即变红。
 const askDraft = ref('')
 // [ask-ime-v1] 中文输入法组字保护：
 //   [WHY] IME 组字期间 @input 会触发但值是拼音，此时若点「发送」会发出拼音而非汉字。
@@ -55,8 +54,8 @@ const _imeComposing = ref(false)
 
 const { askState, restoreAsk, answerAsk } = useAsk()
 
-const collapsed = computed(() => props.card.truncated && !expanded.value)
-const html = computed(() => renderMarkdown(collapsed.value ? props.card.preview : props.card.text))
+// [no-fold-full-text-v1] 恒渲染全文：不再有 collapsed ? preview : text 的分支
+const html = computed(() => renderMarkdown(props.card.text))
 const qCard = computed(() => props.card as QuestionCard)
 const isQuestion = computed(() => props.card.type === 'question')
 const isAskActive = computed(() => {
@@ -101,7 +100,6 @@ function onKeydown(e: KeyboardEvent): void {
   e.preventDefault()
   submitAnswer(qCard.value.options[n - 1].label)
 }
-function toggle(): void { expanded.value = !expanded.value }
 function onImeStart(): void { _imeComposing.value = true }
 function onImeEnd(e: CompositionEvent): void {
   _imeComposing.value = false
@@ -151,23 +149,11 @@ function submitAnswer(text: string): void {
     </div>
 
     <div class="done-summary-body" v-html="html" />
-    <FoldToggle
-      v-if="card.truncated"
-      :expanded="expanded"
-      :hidden-lines="card.hiddenLines"
-      @toggle="toggle"
-    />
   </section>
 
   <!-- text：AI 普通文本卡 -->
   <section v-else-if="card.type === 'text' && (card.text || card.preview).trim() !== 'json复制下载'" class="text-card">
     <div class="done-summary-body" v-html="html" />
-    <FoldToggle
-      v-if="card.truncated"
-      :expanded="expanded"
-      :hidden-lines="card.hiddenLines"
-      @toggle="toggle"
-    />
   </section>
 
   <!-- ask：用户提问 / 回答卡 -->
@@ -180,12 +166,6 @@ function submitAnswer(text: string): void {
       <span class="script-card-time">{{ card.timeLabel }}</span>
     </header> -->
     <div class="done-summary-body" v-html="html" />
-    <FoldToggle
-      v-if="card.truncated"
-      :expanded="expanded"
-      :hidden-lines="card.hiddenLines"
-      @toggle="toggle"
-    />
   </section>
 
   <!-- question：AI 提问卡（可点选 / 可打字） -->
@@ -200,12 +180,6 @@ function submitAnswer(text: string): void {
       <span v-if="qCard.answered" class="question-state">已回答</span>
       <span v-else-if="!isAskActive" class="question-state is-stale">已失效</span>
     </header>
-    <FoldToggle
-      v-if="card.truncated"
-      :expanded="expanded"
-      :hidden-lines="card.hiddenLines"
-      @toggle="toggle"
-    />
     <div v-if="card.text" class="done-summary-body" v-html="html" />
     <div v-if="qCard.options.length" class="question-options">
       <button
@@ -246,12 +220,6 @@ function submitAnswer(text: string): void {
     <div v-else class="question-stale">
       此提问已失效（已被新的提问取代，或页面已刷新）
     </div>
-    <FoldToggle
-      v-if="card.truncated && expanded"
-      :expanded="expanded"
-      :hidden-lines="card.hiddenLines"
-      @toggle="toggle"
-    />
   </section>
 </template>
 

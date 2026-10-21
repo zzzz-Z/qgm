@@ -8,6 +8,9 @@
 //   （已显式导入的符号插件不会重复注入），代价是两行，收益是「这个模块终于可被断言」。
 import { clampTextPreview, denoiseLog, tailTextPreview, unfoldEscapedLog } from './timeline-preview.js'
 
+// [no-fold-full-text-v1] 折叠入口已下线（用户 2026-10-21：「删除展开全部 默认就全部展示」）：
+//   preview / truncated / hiddenLines 仍在此计算（纯函数、调用点未动），但卡片只渲染 text。
+//   保留字段是为不动调用点对象字面量形状；语义上是历史字段，不代表还有折叠 UI。
 export interface PreviewFields {
   text: string
   preview: string

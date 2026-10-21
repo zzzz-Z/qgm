@@ -53,13 +53,29 @@ test('样式：提问卡样式已就位', () => {
   assert.ok(scss.includes('.question-input'), '缺 .question-input')
 })
 
-// [ask-full-v1] 提问类卡片默认展开全文（对标宿主智能体的提问呈现）：
-//   折叠态只给 6 行 / 400 字符预览会导致「二、现状」类长方案被拦腰截断，用户无法在卡内读完再决策。
-//   预览+折叠机制保留，但提问类（question / ask）初始态改为展开；text / done 中间过程卡不受影响。
-test('提问类卡片默认展开全文：expanded 初始值 = 提问类型 && truncated', () => {
+// [no-fold-full-text-v1] 折叠入口下线后，四类卡片（done / text / ask / question）一律默认全量展示。
+//   历史：[ask-full-v1] 曾把 question / ask 的 expanded 初始化为 true，text / done 仍需手点；
+//   2026-10-21 用户「删除展开全部 默认就全部展示」⇒ 连入口本身一并删除。
+// [判据承重] 把 expanded / collapsed 任一项加回、或让 html 重新出现 preview 分支 ⇒ 本用例必红。
+test('卡片默认全量展示：RoundCard 无折叠态，html 恒由 card.text 渲染', () => {
   const rc = read('packages/client/components/script/RoundCard.vue')
+  // 剥注释后再断言：注释里必然引用被禁的字面量
+  const bare = rc
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter(l => !/^\s*\/\//.test(l))
+    .join('\n')
   assert.ok(
-    /const expanded = ref\(\s*\(props\.card\.type === 'question' \|\| props\.card\.type === 'ask'\)\s*&& props\.card\.truncated,?\s*\)/.test(rc),
-    'RoundCard 的 expanded 应初始化为「(question || ask) && truncated」——摘掉任一类型或改回 ref(false) 即红',
+    /const html = computed\(\(\) => renderMarkdown\(props\.card\.text\)\)/.test(bare),
+    'html 应恒取 card.text —— 折叠态分支会让正文只剩预览',
+  )
+  assert.ok(
+    !/\bexpanded\b|\bcollapsed\b/.test(bare),
+    'RoundCard 不应再持有展开态（expanded / collapsed）—— 「默认就全部展示」的前提是没有折叠',
+  )
+  assert.ok(
+    !/<FoldToggle\b/.test(bare) && !/class="fold-toggle"/.test(bare),
+    '模板里不应再有「展开全部 · 还有 N 行」入口',
   )
 })

@@ -31,14 +31,17 @@ import { useEventBus } from '../../composables/ui/event-stream'
 
 // [timeline-denoise-v1] 长文本卡片共用的「预览 + 折叠」字段
 // [WHY] text / ask / done 三类卡片都要"超长才折叠"，字段同构可复用同一套折叠逻辑与样式
+// [no-fold-full-text-v1] 折叠入口已下线（用户 2026-10-21：「删除展开全部 默认就全部展示」）：
+//   本结构仍在算 preview/truncated（纯函数、无副作用），但 RoundCard 只读 text ——
+//   保留字段是为了不动 4 个调用点的对象字面量形状，语义上它们已是「历史字段」。
 interface PreviewFields {
-  /** 原文全文；展开后渲染 */
+  /** 原文全文；卡片的唯一渲染源 */
   text: string
-  /** 截断后的预览；折叠态渲染（未超阈值时等于全文） */
+  /** 历史字段：折叠时代的截断预览，现已不参与渲染 */
   preview: string
-  /** 是否超过阈值 —— 决定是否出现「展开全部」入口 */
+  /** 历史字段：是否超阈值（曾决定是否出现「展开全部」入口，入口已删） */
   truncated: boolean
-  /** 被折叠掉的整行数，用于「还有 N 行」文案 */
+  /** 历史字段：被折叠掉的整行数 */
   hiddenLines: number
   /** 归一化后的原文总行数 */
   totalLines: number
